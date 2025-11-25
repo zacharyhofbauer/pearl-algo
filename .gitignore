@@ -1,20 +1,19 @@
-# Virtual environments and caches
-.venv/
+# Python
 __pycache__/
-.pytest_cache/
+*.py[cod]
+.venv/
 
-# Environment files
-.env
+# Data and outputs
+data/
+logs/
 
-# Build artifacts
-*.egg-info/
-dist/
-build/
+# IB/IBC artifacts (not for VCS)
+Jts/
+ibc/
+ibgateway-latest-standalone-linux-x64.sh
 
-# Local data and binaries
-*.so
-data/**/*.csv
-
-# Editor/OS metadata
+# Editors/OS
 .DS_Store
-Thumbs.db
+.idea/
+.vscode/
+*.swp

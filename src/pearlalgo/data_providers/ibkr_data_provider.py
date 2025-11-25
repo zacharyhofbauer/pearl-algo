@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from ib_insync import IB, Contract, Future, Stock
+from ib_insync import IB, Contract
 
+from pearlalgo.brokers.contracts import build_contract
 from pearlalgo.config.settings import Settings, get_settings
 from pearlalgo.data_providers.base import DataProvider
 
@@ -17,15 +18,6 @@ class IBKRConnection:
     host: str
     port: int
     client_id: int
-
-
-def _build_contract(symbol: str, sec_type: str, exchange: str | None = None, currency: str = "USD") -> Contract:
-    """
-    Construct a simple stock/future contract. Futures use symbol-only (front) by default.
-    """
-    if sec_type.upper() == "STK":
-        return Stock(symbol=symbol, exchange=exchange or "SMART", currency=currency)
-    return Future(symbol=symbol, exchange=exchange or "CME", currency=currency)
 
 
 class IBKRDataProvider(DataProvider):
@@ -78,7 +70,7 @@ class IBKRDataProvider(DataProvider):
         """
         ib = self._connect()
         try:
-            contract = _build_contract(symbol, sec_type=sec_type, exchange=exchange)
+            contract = build_contract(symbol, sec_type=sec_type, exchange=exchange)
             bars = ib.reqHistoricalData(
                 contract,
                 endDateTime=end or "",

@@ -10,6 +10,8 @@ from pearlalgo.brokers.base import Broker, BrokerConfig
 from pearlalgo.config.settings import Settings, get_settings
 from pearlalgo.core.events import FillEvent, OrderEvent
 from pearlalgo.core.portfolio import Portfolio
+from pearlalgo.risk.limits import RiskGuard, RiskLimits
+from pearlalgo.brokers.contracts import build_contract
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +35,14 @@ class IBKRBroker(Broker):
         portfolio: Portfolio,
         settings: Settings | None = None,
         config: BrokerConfig | None = None,
+        risk_guard: RiskGuard | None = None,
     ):
         super().__init__(portfolio, config)
         self.settings = settings or get_settings()
         self._ib = IB()
         self._dry_run_counter = 0
+        # Minimal guard; extend with PnL tracking and live position checks.
+        self.risk_guard = risk_guard or RiskGuard(RiskLimits())
 
     # --- Connection helpers -------------------------------------------------
     def _connect(self) -> IB:
@@ -54,6 +59,13 @@ class IBKRBroker(Broker):
         sec_type = (order.metadata or {}).get("sec_type") if order.metadata else None
         exchange = (order.metadata or {}).get("exchange") if order.metadata else None
         sec_type = sec_type or "STK"
+        last_price = (order.metadata or {}).get("last_price") if order.metadata else None
+
+        # Risk guard check before routing.
+        try:
+            self.risk_guard.check_order(order, last_price=last_price)
+        except Exception as exc:
+            raise RuntimeError(f"Order blocked by risk guard: {exc}") from exc
 
         if not self._live_enabled():
             self._dry_run_counter += 1
@@ -70,7 +82,7 @@ class IBKRBroker(Broker):
             return order_id
 
         ib = self._connect()
-        contract = _contract(order.symbol, sec_type=sec_type, exchange=exchange)
+        contract = build_contract(order.symbol, sec_type=sec_type, exchange=exchange)
         ib_order = self._build_order(order)
         trade = ib.placeOrder(contract, ib_order)
         return str(trade.order.orderId)
