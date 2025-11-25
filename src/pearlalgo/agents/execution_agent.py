@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Iterable, Optional
-
 import pandas as pd
 
 from pearlalgo.brokers.base import Broker

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from ib_insync import IB, Contract
+from ib_insync import IB
 
 from pearlalgo.brokers.contracts import build_contract
 from pearlalgo.config.settings import Settings, get_settings
