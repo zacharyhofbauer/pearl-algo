@@ -14,6 +14,7 @@ Requires-Dist: backtesting>=0.3.3
 Requires-Dist: python-dotenv>=1.0
 Requires-Dist: rich>=13.7
 Requires-Dist: ib-insync>=0.9.86
+Requires-Dist: scipy>=1.12
 Provides-Extra: backtrader
 Requires-Dist: backtrader>=1.9.78.123; extra == "backtrader"
 Provides-Extra: dev
@@ -30,6 +31,7 @@ US equities/options/futures research and backtesting scaffold inspired by Moon D
 - Backtesting through backtesting.py (optional backtrader extra)
 - Typed config with Pydantic; structured logging with Rich
 - Safe-by-default posture: backtest/paper as defaults; live trading is opt-in and guarded
+- IBKR integration: see `README_IBKR.md` for headless Gateway + ib_insync usage.
 
 ## Setup
 ```bash
@@ -93,9 +95,12 @@ python -m pearlalgo.cli scan --symbols ES NQ --strategy es_breakout
   - `PEARLALGO_BROKER_API_KEY`, `PEARLALGO_BROKER_API_SECRET`, `PEARLALGO_BROKER_BASE_URL`
   - `PEARLALGO_DATA_API_KEY` if your data provider needs it
   - `PEARLALGO_PROFILE` (backtest | paper | live)
+ - IBKR integration: see `README_IBKR.md` for headless Gateway + ib_insync usage.
 
 ## Testing
 ```bash
 pip install -e .[dev]
 pytest
 ```
+
+See `docs/TESTING.md` for CI and lint details. Ops runbook in `docs/OPS.md`.
