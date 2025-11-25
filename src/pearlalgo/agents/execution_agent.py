@@ -7,6 +7,7 @@ import pandas as pd
 
 from pearlalgo.brokers.base import Broker
 from pearlalgo.core.events import OrderEvent
+from pearlalgo.risk.limits import RiskGuard, RiskLimits
 
 
 class ExecutionAgent:
@@ -15,10 +16,17 @@ class ExecutionAgent:
     Backtest/paper are default; live trading must be explicitly selected upstream.
     """
 
-    def __init__(self, broker: Broker, symbol: str, profile: str = "backtest"):
+    def __init__(
+        self,
+        broker: Broker,
+        symbol: str,
+        profile: str = "backtest",
+        risk_guard: RiskGuard | None = None,
+    ):
         self.broker = broker
         self.symbol = symbol
         self.profile = profile
+        self.risk_guard = risk_guard or RiskGuard(RiskLimits())
 
     def _orders_from_signals(self, signals: pd.DataFrame) -> Iterable[OrderEvent]:
         for ts, row in signals.iterrows():
@@ -44,6 +52,8 @@ class ExecutionAgent:
             print(f"ExecutionAgent running in profile '{self.profile}'; live trading disabled.")
         order_ids: list[str] = []
         for order in self._orders_from_signals(signals):
+            # Risk guard pre-check; broker may also enforce downstream.
+            self.risk_guard.check_order(order, last_price=order.limit_price)
             order_id = self.broker.submit_order(order)
             order_ids.append(order_id)
         return order_ids
