@@ -23,12 +23,31 @@ PEARLALGO_ALLOW_LIVE_TRADING=false
 - Live trading requires both `PEARLALGO_PROFILE=live` **and** `PEARLALGO_ALLOW_LIVE_TRADING=true`; otherwise the IB broker logs what it would do and skips sending orders.
 
 ## systemd (headless Gateway)
-1) Copy the unit (requires sudo):
+### Recommended: IBC-based unit (auto-login)
+1) Create a private IBC config (do not commit):
 ```bash
-sudo cp scripts/ibgateway.service.example /etc/systemd/system/ibgateway.service
+cp scripts/ibc_config.sample.ini ~/ibc/config-auto.ini
+# edit ~/ibc/config-auto.ini and fill IbLoginId / IbPassword / TradingMode
+```
+2) (Optional) create `/etc/default/ibgateway-ibc` to override paths/mode:
+```
+IBC_INI=/home/pearlalgo/ibc/config-auto.ini
+TRADING_MODE=paper   # or live
+```
+3) Install the IBC unit:
+```bash
+sudo cp scripts/ibgateway-ibc.service.example /etc/systemd/system/ibgateway.service
 sudo systemctl daemon-reload
-sudo systemctl enable ibgateway.service
-sudo systemctl start ibgateway.service
+sudo systemctl enable --now ibgateway.service
+```
+
+### Legacy: direct Gateway unit
+If you prefer to start the gateway directly (no IBC auto-login), use:
+ ```bash
+ sudo cp scripts/ibgateway.service.example /etc/systemd/system/ibgateway.service
+ sudo systemctl daemon-reload
+ sudo systemctl enable ibgateway.service
+ sudo systemctl start ibgateway.service
 ```
 2) Check status/logs:
 ```bash

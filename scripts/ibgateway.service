@@ -1,3 +1,4 @@
+# Legacy standalone launcher (without IBC). Prefer ibgateway-ibc.service.example for auto-login.
 # Copy to /etc/systemd/system/ibgateway.service (requires sudo) then:
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable ibgateway.service

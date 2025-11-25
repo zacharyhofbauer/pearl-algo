@@ -1,0 +1,33 @@
+# Copy to /etc/systemd/system/ibgateway.service (sudo required), then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ibgateway.service
+#
+# Required:
+# - xvfb installed (sudo apt-get install -y xvfb)
+# - IBC extracted at /home/pearlalgo/ibc
+# - A private config at /home/pearlalgo/ibc/config-auto.ini (or set IBC_INI)
+#
+# Optionally create /etc/default/ibgateway-ibc with:
+#   IBC_INI=/home/pearlalgo/ibc/config-auto.ini
+#   TRADING_MODE=paper   # or live
+
+[Unit]
+Description=IB Gateway (headless) via IBC
+After=network.target
+
+[Service]
+Type=simple
+User=pearlalgo
+WorkingDirectory=/home/pearlalgo/ibc
+EnvironmentFile=-/etc/default/ibgateway-ibc
+# Default config path; override in /etc/default/ibgateway-ibc
+Environment=IBC_INI=/home/pearlalgo/ibc/config-auto.ini
+Environment=TRADING_MODE=paper
+ExecStart=/usr/bin/xvfb-run -a /home/pearlalgo/ibc/gatewaystart.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
