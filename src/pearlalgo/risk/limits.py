@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict
 
-from pearlalgo.core.events import OrderEvent
+from pearlalgo.core.events import OrderEvent, FillEvent
+from pearlalgo.risk.pnl import DailyPnLTracker
 
 
 @dataclass
@@ -15,13 +16,16 @@ class RiskLimits:
 
 class RiskGuard:
     """
-    Lightweight risk guard to block obviously dangerous orders.
-    Extend with PnL tracking and intraday reset logic.
+    Lightweight risk guard to block dangerous orders.
+    Extend with live position lookups and intraday reset logic.
     """
 
-    def __init__(self, limits: RiskLimits):
+    def __init__(self, limits: RiskLimits, pnl_tracker: DailyPnLTracker | None = None):
         self.limits = limits
-        self.daily_pnl: float = 0.0  # wire to real PnL tracker in live mode
+        self.pnl_tracker = pnl_tracker or DailyPnLTracker()
+
+    def record_fill(self, fill: FillEvent) -> None:
+        self.pnl_tracker.record_fill(fill)
 
     def check_order(self, order: OrderEvent, last_price: float | None = None) -> None:
         if self.limits.max_order_notional and last_price is not None:
@@ -30,12 +34,12 @@ class RiskGuard:
                 raise RuntimeError(f"Order exceeds notional limit: {notional} > {self.limits.max_order_notional}")
 
         if self.limits.max_symbol_position and order.symbol in self.limits.max_symbol_position:
-            # This guard should compare against live positions; placeholder uses quantity requested.
+            # Placeholder: ideally compare against live positions + this order.
             if abs(order.quantity) > self.limits.max_symbol_position[order.symbol]:
                 raise RuntimeError(
                     f"Order exceeds position limit for {order.symbol}: {order.quantity} > "
                     f"{self.limits.max_symbol_position[order.symbol]}"
                 )
 
-        if self.limits.max_daily_loss is not None and self.daily_pnl < -abs(self.limits.max_daily_loss):
+        if self.pnl_tracker.daily_loss_breached(self.limits.max_daily_loss):
             raise RuntimeError("Daily loss limit breached; blocking orders.")

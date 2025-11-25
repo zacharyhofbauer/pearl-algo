@@ -26,6 +26,7 @@
    - Systemd logging to files; cron/runner scripts; kill-switch; daily reset logic.
    - Metrics/log aggregation (Prometheus/Grafana or ELK).
    - Alerting on disconnects, failed auth, and risk breach.
+   - Repo hygiene: ignore data/logs/ib artifacts; keep private configs out of git.
 
 ## Risks/warnings
 - IBKR single-session rule: avoid concurrent logins.

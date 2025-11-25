@@ -114,16 +114,16 @@ class IBKRBroker(Broker):
             ts = exec_report.time.replace(tzinfo=None) if hasattr(exec_report.time, "replace") else datetime.utcnow()
             if since and ts < since:
                 continue
-            fills.append(
-                FillEvent(
-                    timestamp=ts,
-                    symbol=exec_report.contract.symbol,
-                    side=exec_report.side,
-                    quantity=exec_report.shares,
-                    price=exec_report.price,
-                    commission=getattr(commission, "commission", 0.0),
-                )
+            fe = FillEvent(
+                timestamp=ts,
+                symbol=exec_report.contract.symbol,
+                side=exec_report.side,
+                quantity=exec_report.shares,
+                price=exec_report.price,
+                commission=getattr(commission, "commission", 0.0),
             )
+            fills.append(fe)
+            self.risk_guard.record_fill(fe)
         return fills
 
     def cancel_order(self, order_id: str) -> None:
