@@ -1,0 +1,16 @@
+pandas>=2.2
+numpy>=2.0
+pydantic>=2.8
+pydantic-settings>=2.6
+pandas-ta>=0.4.70
+backtesting>=0.3.3
+python-dotenv>=1.0
+rich>=13.7
+ib-insync>=0.9.86
+
+[backtrader]
+backtrader>=1.9.78.123
+
+[dev]
+pytest>=8.3
+ruff>=0.6
