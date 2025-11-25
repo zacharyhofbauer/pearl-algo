@@ -79,3 +79,5 @@ python -m pearlalgo.cli scan --symbols ES NQ --strategy es_breakout
 pip install -e .[dev]
 pytest
 ```
+
+See `docs/TESTING.md` for CI and lint details. Ops runbook in `docs/OPS.md`.
