@@ -21,9 +21,10 @@ User=pearlalgo
 WorkingDirectory=/home/pearlalgo/ibc
 EnvironmentFile=-/etc/default/ibgateway-ibc
 # Default config path; override in /etc/default/ibgateway-ibc
+Environment=IBC_PATH=/home/pearlalgo/ibc
 Environment=IBC_INI=/home/pearlalgo/ibc/config-auto.ini
 Environment=TRADING_MODE=paper
-ExecStart=/usr/bin/xvfb-run -a /home/pearlalgo/ibc/gatewaystart.sh
+ExecStart=/usr/bin/xvfb-run -a /home/pearlalgo/ibc/gatewaystart.sh -inline
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
