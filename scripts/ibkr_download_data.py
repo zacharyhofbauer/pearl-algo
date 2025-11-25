@@ -9,7 +9,7 @@ from typing import Literal
 
 import pandas as pd
 from dotenv import load_dotenv
-from ib_insync import IB, Future, Stock
+from ib_insync import IB, Future, Stock, ContFuture
 
 from pearlalgo.config.settings import get_settings
 from pearlalgo.utils.logging import setup_logging
@@ -20,18 +20,22 @@ logger = logging.getLogger(__name__)
 # Default download targets; can be overridden with CLI flags later if needed.
 DEFAULT_TASKS = [
     ("SPY", "STK", "1 D", "5 mins", Path("data/equities/SPY_ib_5m.csv")),
-    ("ES", "FUT", "1 D", "15 mins", Path("data/futures/ES_ib_15m.csv")),
+    ("ES", "FUT_CONT", "1 D", "15 mins", Path("data/futures/ES_ib_15m.csv")),
 ]
 
 
-def make_contract(symbol: str, sec_type: SecurityType, exchange: str | None = None):
+def make_contract(symbol: str, sec_type: str, exchange: str | None = None):
     """
     Build an IBKR contract for stocks or futures.
     - Stocks default to SMART / USD
     - Futures default to CME / USD and require a continuous-like symbol (e.g., ES, NQ).
     """
-    if sec_type == "STK":
+    if sec_type.upper() == "STK":
         return Stock(symbol=symbol, exchange=exchange or "SMART", currency="USD")
+    if sec_type.upper() == "FUT_CONT":
+        # Continuous front-month future; IB rolls it automatically.
+        return ContFuture(symbol=symbol, exchange=exchange or "CME")
+    # Explicit future requires an expiry (set via symbol like ES-202503 or metadata)
     return Future(symbol=symbol, exchange=exchange or "CME", currency="USD")
 
 
