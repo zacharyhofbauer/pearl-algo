@@ -71,6 +71,7 @@ python -m pearlalgo.cli scan --symbols ES NQ --strategy es_breakout
   - `PEARLALGO_BROKER_API_KEY`, `PEARLALGO_BROKER_API_SECRET`, `PEARLALGO_BROKER_BASE_URL`
   - `PEARLALGO_DATA_API_KEY` if your data provider needs it
   - `PEARLALGO_PROFILE` (backtest | paper | live)
+- IBKR integration: see `README_IBKR.md` for headless Gateway + ib_insync usage.
 
 ## Testing
 ```bash

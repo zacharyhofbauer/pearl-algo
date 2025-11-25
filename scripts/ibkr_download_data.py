@@ -1,24 +1,33 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import time
 from pathlib import Path
 from typing import Literal
 
 import pandas as pd
+from dotenv import load_dotenv
 from ib_insync import IB, Future, Stock
 
 from pearlalgo.config.settings import get_settings
 from pearlalgo.utils.logging import setup_logging
 
 SecurityType = Literal["STK", "FUT"]
+logger = logging.getLogger(__name__)
+
+# Default download targets; can be overridden with CLI flags later if needed.
+DEFAULT_TASKS = [
+    ("SPY", "STK", "1 D", "5 mins", Path("data/equities/SPY_ib_5m.csv")),
+    ("ES", "FUT", "1 D", "15 mins", Path("data/futures/ES_ib_15m.csv")),
+]
 
 
 def make_contract(symbol: str, sec_type: SecurityType, exchange: str | None = None):
     """
     Build an IBKR contract for stocks or futures.
-    - Stocks default to SMART/ USD
+    - Stocks default to SMART / USD
     - Futures default to CME / USD and require a continuous-like symbol (e.g., ES, NQ).
     """
     if sec_type == "STK":
@@ -37,15 +46,19 @@ def download_symbol(
 ) -> None:
     """Download historical bars and save to CSV."""
     contract = make_contract(symbol, sec_type)
-    bars = ib.reqHistoricalData(
-        contract,
-        endDateTime="",
-        durationStr=duration,
-        barSizeSetting=bar_size,
-        whatToShow=what_to_show,
-        useRTH=False,
-        formatDate=1,
-    )
+    try:
+        bars = ib.reqHistoricalData(
+            contract,
+            endDateTime="",
+            durationStr=duration,
+            barSizeSetting=bar_size,
+            whatToShow=what_to_show,
+            useRTH=False,
+            formatDate=1,
+        )
+    except Exception as exc:  # pragma: no cover - requires IB
+        raise RuntimeError(f"IBKR request failed for {symbol}: {exc}") from exc
+
     if not bars:
         raise RuntimeError(f"No data returned for {symbol} ({sec_type})")
 
@@ -57,20 +70,23 @@ def download_symbol(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path)
-    print(f"[OK] Saved {symbol} ({sec_type}) {len(df)} rows -> {output_path}")
+    logger.info("[OK] Saved %s (%s) %s rows -> %s", symbol, sec_type, len(df), output_path)
 
 
 def run_download(host: str, port: int, client_id: int) -> None:
     ib = IB()
-    print(f"Connecting to IBKR Gateway {host}:{port} (clientId={client_id}) ...")
-    ib.connect(host, port, clientId=client_id)
+    logger.info("Connecting to IBKR Gateway %s:%s (clientId=%s) ...", host, port, client_id)
     try:
-        # Adjust symbols/durations as needed
-        tasks = [
-            ("SPY", "STK", "1 D", "5 mins", Path("data/equities/SPY_ib_5m.csv")),
-            ("ES", "FUT", "1 D", "5 mins", Path("data/futures/ES_ib_5m.csv")),
-        ]
-        for symbol, sec_type, duration, bar_size, out_path in tasks:
+        ib.connect(host, port, clientId=client_id)
+    except Exception as exc:  # pragma: no cover - requires IB
+        raise SystemExit(
+            f"Failed to connect to IBKR at {host}:{port} (clientId={client_id}). "
+            "Ensure IB Gateway is running and API is enabled. "
+            f"Error: {exc}"
+        )
+
+    try:
+        for symbol, sec_type, duration, bar_size, out_path in DEFAULT_TASKS:
             try:
                 download_symbol(
                     ib,
@@ -81,11 +97,11 @@ def run_download(host: str, port: int, client_id: int) -> None:
                     output_path=out_path,
                 )
             except Exception as exc:
-                print(f"[ERR] {symbol} ({sec_type}) failed: {exc}")
-            time.sleep(1)  # pacing guard
+                logger.error("[ERR] %s (%s) failed: %s", symbol, sec_type, exc)
+            time.sleep(1)  # pacing guard to avoid IBKR rate limits
     finally:
         ib.disconnect()
-        print("Disconnected from IBKR.")
+        logger.info("Disconnected from IBKR.")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -97,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv()
     setup_logging()
     settings = get_settings()
     parser = build_parser()

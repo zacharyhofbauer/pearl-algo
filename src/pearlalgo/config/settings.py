@@ -39,8 +39,10 @@ class Settings(BaseSettings):
     broker_base_url: str | None = None
     ib_enable: bool = False
     ib_host: str = "127.0.0.1"
-    ib_port: int = 7497
+    # Default to IB Gateway paper port; TWS default is 7497.
+    ib_port: int = 4002
     ib_client_id: int = 1
+    allow_live_trading: bool = False
     log_level: str = "INFO"
 
     class Config:
