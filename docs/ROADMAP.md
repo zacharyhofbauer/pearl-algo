@@ -24,6 +24,8 @@
    - Journaling (trades/fills), metrics export (Prometheus), dashboards.
 7) Production hardening
    - Systemd logging to files; cron/runner scripts; kill-switch; daily reset logic.
+   - Metrics/log aggregation (Prometheus/Grafana or ELK).
+   - Alerting on disconnects, failed auth, and risk breach.
 
 ## Risks/warnings
 - IBKR single-session rule: avoid concurrent logins.

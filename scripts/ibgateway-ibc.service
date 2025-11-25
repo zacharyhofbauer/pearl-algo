@@ -27,8 +27,9 @@ Environment=TRADING_MODE=paper
 ExecStart=/usr/bin/xvfb-run -a /home/pearlalgo/ibc/gatewaystart.sh -inline
 Restart=on-failure
 RestartSec=10
-StandardOutput=journal
-StandardError=journal
+# Append logs to a file for easier tailing; adjust path if desired.
+StandardOutput=append:/home/pearlalgo/ibgateway.out.log
+StandardError=append:/home/pearlalgo/ibgateway.err.log
 
 [Install]
 WantedBy=multi-user.target
