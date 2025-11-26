@@ -21,8 +21,8 @@ from scripts import daily_report, run_daily_signals  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run signals then generate the daily report.")
-    parser.add_argument("--strategy", choices=["ma_cross"], default="ma_cross")
+    parser = argparse.ArgumentParser(description="Run futures signals then generate the daily report.")
+    parser.add_argument("--strategy", choices=["ma_cross", "sr"], default="ma_cross")
     parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "GC"], help="Symbols to process")
     parser.add_argument(
         "--sec-types",
