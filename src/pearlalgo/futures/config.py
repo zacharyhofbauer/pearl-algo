@@ -22,30 +22,42 @@ CONFIG_PATHS = [
 class PropProfile:
     """
     Prop-style account constraints and per-symbol limits.
+
+    Override via config/prop_profile.{yaml,json} or pass a path to load_profile().
     """
 
     name: str = "default"
     starting_balance: float = 50000.0
     daily_loss_limit: float = 2500.0
     target_profit: float = 5000.0
+    risk_taper_threshold: float = 0.3  # fraction of loss limit remaining where sizing tapers
     max_contracts_by_symbol: dict[str, int] = field(
         default_factory=lambda: {"ES": 2, "NQ": 2, "GC": 1}
     )
     tick_values_by_symbol: dict[str, float] = field(
-        default_factory=lambda: {"ES": 50.0, "NQ": 20.0, "GC": 100.0}
+        # Dollar per minimum tick move; tune per broker spec if needed.
+        default_factory=lambda: {"ES": 12.5, "NQ": 20.0, "GC": 10.0}
     )
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "PropProfile":
-        merged = {
-            "name": data.get("name", "default"),
-            "starting_balance": float(data.get("starting_balance", 50000.0)),
-            "daily_loss_limit": float(data.get("daily_loss_limit", 2500.0)),
-            "target_profit": float(data.get("target_profit", 5000.0)),
-            "max_contracts_by_symbol": data.get("max_contracts_by_symbol", {}) or {},
-            "tick_values_by_symbol": data.get("tick_values_by_symbol", {}) or {},
-        }
-        return cls(**merged)
+        merged = {**DEFAULT_PROP_PROFILE.__dict__, **(data or {})}
+        return cls(
+            name=merged.get("name", "default"),
+            starting_balance=float(merged.get("starting_balance", DEFAULT_PROP_PROFILE.starting_balance)),
+            daily_loss_limit=float(merged.get("daily_loss_limit", DEFAULT_PROP_PROFILE.daily_loss_limit)),
+            target_profit=float(merged.get("target_profit", DEFAULT_PROP_PROFILE.target_profit)),
+            risk_taper_threshold=float(
+                merged.get("risk_taper_threshold", DEFAULT_PROP_PROFILE.risk_taper_threshold)
+            ),
+            max_contracts_by_symbol=merged.get("max_contracts_by_symbol", DEFAULT_PROP_PROFILE.max_contracts_by_symbol)
+            or {},
+            tick_values_by_symbol=merged.get("tick_values_by_symbol", DEFAULT_PROP_PROFILE.tick_values_by_symbol)
+            or {},
+        )
+
+
+DEFAULT_PROP_PROFILE = PropProfile()
 
 
 def _load_config_file(path: Path) -> dict[str, Any]:
@@ -62,7 +74,7 @@ def _load_config_file(path: Path) -> dict[str, Any]:
 
 def load_profile(config_path: str | Path | None = None) -> PropProfile:
     """
-    Load a PropProfile from YAML/JSON if present; fallback to defaults.
+    Load a PropProfile from YAML/JSON if present; fallback to DEFAULT_PROP_PROFILE.
     """
     if config_path:
         data = _load_config_file(Path(config_path))
@@ -73,4 +85,4 @@ def load_profile(config_path: str | Path | None = None) -> PropProfile:
         data = _load_config_file(candidate)
         if data:
             return PropProfile.from_mapping(data)
-    return PropProfile()
+    return DEFAULT_PROP_PROFILE

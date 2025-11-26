@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 
 from ib_insync import IB
 
-from pearlalgo.futures.contracts import available_symbols, build_future
+from pearlalgo.futures.contracts import available_symbols, fut_contract
 
 
 def _parse_expiry(expiry: str) -> datetime | None:
@@ -60,7 +60,7 @@ def _choose_upcoming_expiry(details) -> str | None:
 
 
 def _request_and_report(ib: IB, symbol: str, *, expiry: str | None = None, label: str = "") -> None:
-    contract = build_future(symbol, expiry=expiry)
+    contract = fut_contract(symbol, expiry=expiry)
     try:
         cds = ib.reqContractDetails(contract)
         if not cds:
@@ -75,7 +75,7 @@ def _request_and_report(ib: IB, symbol: str, *, expiry: str | None = None, label
 
 def inspect_symbol(ib: IB, symbol: str) -> None:
     print(f"\n=== {symbol} discovery ===")
-    base_contract = build_future(symbol)
+    base_contract = fut_contract(symbol)
     try:
         details = ib.reqContractDetails(base_contract)
     except Exception as exc:  # pragma: no cover - requires live IB

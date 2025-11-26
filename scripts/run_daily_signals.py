@@ -15,7 +15,7 @@ import pandas as pd
 
 from pearlalgo.data.loaders import load_csv
 from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
-from pearlalgo.futures.performance import PerformanceRow, log_decision
+from pearlalgo.futures.performance import PerformanceRow, log_performance_row
 from pearlalgo.futures.signals import generate_signal
 
 
@@ -47,7 +47,7 @@ def get_data(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run daily signals and write to CSV.")
+    parser = argparse.ArgumentParser(description="Run daily futures signals and write to CSV + performance log.")
     parser.add_argument("--strategy", choices=["ma_cross"], default="ma_cross")
     parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "GC"])
     parser.add_argument("--sec-types", nargs="+", default=["FUT", "FUT", "FUT"])
@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             if df.empty:
                 continue
-            signal = generate_signal(symbol, df, strategy_name=args.strategy, fast=10, slow=20)
+            signal = generate_signal(symbol, df, strategy_name=args.strategy, fast=20, slow=50)
             side = signal["side"]
             price = float(df["Close"].iloc[-1])
             direction = "BUY" if side == "long" else "SELL" if side == "short" else "FLAT"
@@ -100,19 +100,21 @@ def main(argv: list[str] | None = None) -> int:
                     "size_hint": 1,
                 }
             )
-            log_decision(
+            log_performance_row(
                 PerformanceRow(
                     timestamp=datetime.now(timezone.utc),
                     symbol=symbol,
                     sec_type=sec_type,
                     strategy_name=signal["strategy_name"],
-                    signal=side,
-                    proposed_size=1,
-                    executed_size=0,
+                    side=side,
+                    requested_size=1,
+                    filled_size=0,
                     entry_price=price,
+                    realized_pnl=None,
+                    unrealized_pnl=None,
                     fast_ma=signal.get("fast_ma"),
                     slow_ma=signal.get("slow_ma"),
-                    risk_state="SAFE" if side != "flat" else "NEUTRAL",
+                    risk_status="SAFE" if side != "flat" else "NEUTRAL",
                     notes="daily signal",
                 )
             )

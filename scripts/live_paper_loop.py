@@ -20,7 +20,7 @@ from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.data.loaders import load_csv
 from pearlalgo.data_providers.ibkr_data_provider import IBKRConnection, IBKRDataProvider
 from pearlalgo.futures.config import load_profile
-from pearlalgo.futures.performance import PerformanceRow, log_decision
+from pearlalgo.futures.performance import PerformanceRow, log_performance_row
 from pearlalgo.futures.risk import compute_position_size, compute_risk_state
 from pearlalgo.futures.signals import generate_signal
 from pearlalgo.risk.limits import RiskGuard, RiskLimits
@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
                     if df.empty:
                         print(f"[{ts}] {sym} {sec_type} no data")
                         continue
-                    signal = generate_signal(sym, df, strategy_name=args.strategy, fast=10, slow=20)
+                    signal = generate_signal(sym, df, strategy_name=args.strategy, fast=20, slow=50)
                     side = signal["side"]
                     if side == "flat":
                         print(f"[{ts}] {sym} {sec_type} {args.strategy}: FLAT")
@@ -188,11 +188,11 @@ def main(argv: list[str] | None = None) -> int:
                     realized_pnl, unrealized_pnl = portfolio_pnls(portfolio, marks)
                     risk_state = compute_risk_state(
                         profile,
-                        day_starting_equity=profile.starting_balance,
+                        day_start_equity=profile.starting_balance,
                         realized_pnl=realized_pnl,
                         unrealized_pnl=unrealized_pnl,
                     )
-                    size = compute_position_size(sym, risk_state, profile, price=price, side=side)
+                    size = compute_position_size(sym, side, profile, risk_state, price=price)
                     if size == 0:
                         print(f"[{ts}] {sym} {sec_type} {args.strategy}: blocked by risk state {risk_state.status}")
                         continue
@@ -226,22 +226,21 @@ def main(argv: list[str] | None = None) -> int:
 
                     # Recompute PnL after potential fills and log decision/trade.
                     realized_pnl_after, unrealized_pnl_after = portfolio_pnls(portfolio, {sym: price})
-                    log_decision(
+                    log_performance_row(
                         PerformanceRow(
                             timestamp=datetime.now(timezone.utc),
                             symbol=sym,
                             sec_type=sec_type,
                             strategy_name=signal["strategy_name"],
-                            signal=side,
-                            proposed_size=size,
-                            executed_size=abs(size) if args.mode == "ibkr-paper" else 0,
+                            side=side,
+                            requested_size=size,
+                            filled_size=size if args.mode == "ibkr-paper" else 0,
                             entry_price=price,
                             realized_pnl=realized_pnl_after,
                             unrealized_pnl=unrealized_pnl_after,
                             fast_ma=signal.get("fast_ma"),
                             slow_ma=signal.get("slow_ma"),
-                            atr=atr_val,
-                            risk_state=risk_label,
+                            risk_status=risk_label,
                             notes="live_paper_loop",
                         )
                     )
