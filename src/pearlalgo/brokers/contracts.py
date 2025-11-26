@@ -36,21 +36,37 @@ def parse_ib_expiry(expiry: str) -> datetime | None:
     return None
 
 
-def _exchange_candidates(exchange: str | None) -> list[str]:
+def _default_exchange_for_symbol(symbol: str | None) -> str:
+    """
+    Map common CME-family roots to their primary venue to avoid sec-def 200s.
+    YM/ZB/ZN/ZF/ZT are CBOT; CL/NG are NYMEX; GC/SI/HG are COMEX.
+    """
+    sym = (symbol or "").upper()
+    cbot = {"YM", "ZB", "ZN", "ZF", "ZT", "ZC", "ZW", "ZS"}
+    nymex = {"CL", "NG", "RB", "HO", "B0"}
+    comex = {"GC", "SI", "HG", "PA", "PL"}
+    if sym in cbot:
+        return "CBOT"
+    if sym in nymex:
+        return "NYMEX"
+    if sym in comex:
+        return "COMEX"
+    return "CME"
+
+
+def _exchange_candidates(symbol: str | None, exchange: str | None) -> list[str]:
     """
     Return a deduped list of exchanges to try for CME-family futures.
 
-    CME/Globex can behave differently per account; prioritise CME to avoid
-    spurious 200 errors when GLOBEX is refused. Include CBOT/NYMEX/COMEX/ECBOT
-    so symbols like YM/CL/GC still resolve via the same code path.
+    Prioritise the symbol's home venue (e.g., YM -> CBOT) to avoid repeated
+    200s when CME/GLOBEX do not host that contract.
     """
     exchange = exchange.upper() if exchange else None
     base_order = ["CME", "GLOBEX", "CBOT", "NYMEX", "COMEX", "ECBOT"]
-    exchanges: list[str] = []
+    preferred = _default_exchange_for_symbol(symbol)
+    exchanges: list[str] = [preferred]
     if exchange:
-        exchanges.append(exchange)
-        if exchange == "GLOBEX":
-            exchanges.insert(0, "CME")
+        exchanges.insert(0, exchange)
     exchanges.extend(base_order)
     seen: set[str] = set()
     return [ex for ex in exchanges if not (ex in seen or seen.add(ex))]
@@ -87,7 +103,7 @@ def discover_future_contracts(
     """
     details: list[ContractDetails] = []
     seen: set[int] = set()
-    for exch in _exchange_candidates(exchange):
+    for exch in _exchange_candidates(symbol, exchange):
         try:
             res = ib.reqContractDetails(Future(symbol=symbol, exchange=exch, currency=currency))
         except Exception as exc:  # pragma: no cover - requires live IB
@@ -205,12 +221,12 @@ def future(
     local_symbol: str | None = None,
     trading_class: str | None = None,
 ) -> Future:
-    # IB routes CME futures on CME for many accounts; set routing accordingly. If using only a local symbol,
+    # Route to the symbol's home venue (e.g., YM -> CBOT, CL -> NYMEX). If using only a local symbol,
     # leave tradingClass unset so IBKR can match the contract.
     tc = trading_class or symbol if local_symbol is None else None
     return Future(
         symbol=symbol,
-        exchange=exchange or "CME",
+        exchange=exchange or _default_exchange_for_symbol(symbol),
         currency=currency,
         lastTradeDateOrContractMonth=expiry,
         localSymbol=local_symbol,
@@ -219,8 +235,8 @@ def future(
 
 
 def continuous_future(symbol: str, exchange: str | None = None) -> ContFuture:
-    # IB may require CME for routing continuous CME futures.
-    return ContFuture(symbol=symbol, exchange=exchange or "CME")
+    # IB may require the symbol's home venue for routing continuous CME futures.
+    return ContFuture(symbol=symbol, exchange=exchange or _default_exchange_for_symbol(symbol))
 
 
 def build_contract(
