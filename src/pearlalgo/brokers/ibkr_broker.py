@@ -126,7 +126,7 @@ class IBKRBroker(Broker):
             reqs = []
             if local_symbol:
                 reqs.append(
-                    Future(localSymbol=local_symbol, exchange=exch, tradingClass=trading_class or symbol, currency="USD")
+                    Future(localSymbol=local_symbol, exchange=exch, tradingClass=trading_class or None, currency="USD")
                 )
             if expiry or trading_class:
                 reqs.append(
@@ -135,7 +135,7 @@ class IBKRBroker(Broker):
                         exchange=exch,
                         currency="USD",
                         lastTradeDateOrContractMonth=expiry,
-                        tradingClass=trading_class or symbol,
+                        tradingClass=trading_class or None,
                     )
                 )
             reqs.append(ContFuture(symbol=symbol, exchange=exch))

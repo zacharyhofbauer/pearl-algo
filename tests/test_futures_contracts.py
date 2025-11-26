@@ -25,7 +25,8 @@ def test_build_contract_fields():
     assert contract.exchange == "GLOBEX"
     assert contract.lastTradeDateOrContractMonth == "202412"
     assert contract.localSymbol == "ESZ4"
-    assert getattr(contract, "tradingClass") == "ES"
+    # When localSymbol is provided, tradingClass may be left unset so IBKR can resolve it.
+    assert getattr(contract, "tradingClass") is None
 
 
 def test_fetch_data_accepts_trading_class():

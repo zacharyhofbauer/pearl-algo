@@ -16,8 +16,9 @@ def future(
     local_symbol: str | None = None,
     trading_class: str | None = None,
 ) -> Future:
-    # IB routes CME futures on GLOBEX; set the routing accordingly.
-    tc = trading_class or symbol
+    # IB routes CME futures on GLOBEX; set the routing accordingly. If using only a local symbol,
+    # leave tradingClass unset so IBKR can match the contract.
+    tc = trading_class or symbol if local_symbol is None else None
     return Future(
         symbol=symbol,
         exchange=exchange or "GLOBEX",

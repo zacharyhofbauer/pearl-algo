@@ -148,7 +148,7 @@ class IBKRDataProvider(DataProvider):
                     Future(
                         localSymbol=local_symbol,
                         exchange=exch,
-                        tradingClass=trading_class or symbol,
+                        tradingClass=trading_class or None,
                         currency="USD",
                     )
                 )
@@ -159,7 +159,7 @@ class IBKRDataProvider(DataProvider):
                         exchange=exch,
                         currency="USD",
                         lastTradeDateOrContractMonth=expiry,
-                        tradingClass=trading_class or symbol,
+                        tradingClass=trading_class or None,
                     )
                 )
             reqs.append(ContFuture(symbol=symbol, exchange=exch))
