@@ -111,10 +111,18 @@ class IBKRBroker(Broker):
         *,
         expiry: str | None = None,
         local_symbol: str | None = None,
+        trading_class: str | None = None,
     ):
         stype = sec_type.upper()
         if stype.startswith("FUT") and (expiry or local_symbol):
-            return build_contract(symbol, sec_type="FUT", exchange=exchange, expiry=expiry, local_symbol=local_symbol)
+            return build_contract(
+                symbol,
+                sec_type="FUT",
+                exchange=exchange,
+                expiry=expiry,
+                local_symbol=local_symbol,
+                trading_class=trading_class or symbol,
+            )
         if stype.startswith("FUT_CONT"):
             return self._resolve_front_future(ib, symbol, exchange)
         return build_contract(symbol, sec_type=sec_type, exchange=exchange)
@@ -158,6 +166,7 @@ class IBKRBroker(Broker):
             exchange=exchange or metadata.get("exchange"),
             expiry=metadata.get("expiry"),
             local_symbol=metadata.get("local_symbol"),
+            trading_class=metadata.get("trading_class"),
         )
         ib_order = self._build_order(order)
         trade = ib.placeOrder(contract, ib_order)

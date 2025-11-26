@@ -127,6 +127,7 @@ class IBKRDataProvider(DataProvider):
         exchange: str | None = None,
         expiry: str | None = None,
         local_symbol: str | None = None,
+        trading_class: str | None = None,
         duration: str = "2 D",
         bar_size: str = "5 mins",
         what_to_show: str = "TRADES",
@@ -144,6 +145,7 @@ class IBKRDataProvider(DataProvider):
                     exchange=exchange,
                     expiry=expiry,
                     local_symbol=local_symbol,
+                    trading_class=trading_class or symbol,
                 )
             else:
                 contract = build_contract(symbol, sec_type=sec_type, exchange=exchange)

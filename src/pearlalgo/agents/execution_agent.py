@@ -36,6 +36,7 @@ class ExecutionAgent:
             sec_type = row.get("sec_type") or "STK"
             expiry = row.get("expiry")
             local_symbol = row.get("local_symbol")
+            trading_class = row.get("trading_class")
             price = float(row.get("Close", row.get("close", row.get("price", 0.0))))
             # Futures do not allow fractional contracts; round up to at least 1
             if str(sec_type).upper().startswith("FUT") and qty < 1:
@@ -53,6 +54,7 @@ class ExecutionAgent:
                     "last_price": price,
                     "expiry": expiry,
                     "local_symbol": local_symbol,
+                    "trading_class": trading_class,
                 },
             )
 

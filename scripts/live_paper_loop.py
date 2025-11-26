@@ -66,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ib-client-id", type=int, default=None, help="IB clientId override (default from settings)")
     parser.add_argument("--expiries", nargs="*", help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols")
     parser.add_argument("--local-symbols", nargs="*", help="Optional IBKR local symbols matching symbols")
+    parser.add_argument("--trading-classes", nargs="*", help="Optional trading classes matching symbols (defaults to symbol)")
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -103,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     strat = select_strategy(args.strategy)
     expiries = args.expiries or []
     local_symbols = args.local_symbols or []
+    trading_classes = args.trading_classes or []
 
     print(
         "IBKR connections -> data clientId=%s, orders clientId=%s, host=%s, port=%s"
@@ -116,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
                 path = Path(data_paths[idx]) if args.source == "csv" and idx < len(data_paths) else None
                 expiry = expiries[idx] if idx < len(expiries) else None
                 local_symbol = local_symbols[idx] if idx < len(local_symbols) else None
+                trading_class = trading_classes[idx] if idx < len(trading_classes) else sym
                 ts = datetime.now(timezone.utc).isoformat()
                 try:
                     df = fetch_data(
@@ -126,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
                         path,
                         expiry=expiry,
                         local_symbol=local_symbol,
+                        trading_class=trading_class,
                     )
                     sigs = strat.run(df)
                     latest = sigs.iloc[-1] if not sigs.empty else None
@@ -175,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
                     sig_df["sec_type"] = sec_type
                     sig_df["expiry"] = expiry
                     sig_df["local_symbol"] = local_symbol
+                    sig_df["trading_class"] = trading_class
                     # Snapshot/telemetry
                     snapshot_dir = Path("state_cache")
                     snapshot_dir.mkdir(parents=True, exist_ok=True)

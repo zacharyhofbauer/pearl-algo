@@ -19,6 +19,7 @@ def get_data(
     *,
     expiry: str | None = None,
     local_symbol: str | None = None,
+    trading_class: str | None = None,
 ) -> pd.DataFrame:
     if source == "csv":
         if not path:
@@ -33,6 +34,7 @@ def get_data(
         bar_size="15 mins",
         expiry=expiry,
         local_symbol=local_symbol,
+        trading_class=trading_class or symbol,
     )
     return df
 
@@ -57,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--outdir", default="signals")
     parser.add_argument("--expiries", nargs="*", help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols")
     parser.add_argument("--local-symbols", nargs="*", help="Optional IBKR local symbols matching symbols")
+    parser.add_argument("--trading-classes", nargs="*", help="Optional trading classes matching symbols (defaults to symbol)")
     args = parser.parse_args(argv)
 
     outdir = Path(args.outdir)
@@ -68,10 +71,12 @@ def main(argv: list[str] | None = None) -> int:
     data_paths = args.data_paths or []
     expiries = args.expiries or []
     local_symbols = args.local_symbols or []
+    trading_classes = args.trading_classes or []
     for idx, symbol in enumerate(args.symbols):
         sec_type = args.sec_types[idx] if idx < len(args.sec_types) else "STK"
         expiry = expiries[idx] if idx < len(expiries) else None
         local_symbol = local_symbols[idx] if idx < len(local_symbols) else None
+        trading_class = trading_classes[idx] if idx < len(trading_classes) else symbol
         path = Path(data_paths[idx]) if args.source == "csv" and idx < len(data_paths) else None
         try:
             df = get_data(
@@ -81,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
                 path=path,
                 expiry=expiry,
                 local_symbol=local_symbol,
+                trading_class=trading_class,
             )
             sigs = run_strategy(args.strategy, df)
             if sigs.empty:
