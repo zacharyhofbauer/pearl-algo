@@ -33,7 +33,11 @@ class ExecutionAgent:
                 continue
             side = "BUY" if float(signal_val) > 0 else "SELL"
             qty = abs(float(row.get("size", 1)))
+            sec_type = row.get("sec_type") or "STK"
             price = float(row.get("Close", row.get("close", row.get("price", 0.0))))
+            # Futures do not allow fractional contracts; round up to at least 1
+            if str(sec_type).upper().startswith("FUT") and qty < 1:
+                qty = 1
             yield OrderEvent(
                 timestamp=ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts,
                 symbol=self.symbol,
@@ -41,7 +45,7 @@ class ExecutionAgent:
                 quantity=qty,
                 order_type="MKT",
                 limit_price=price,
-                metadata={"profile": self.profile},
+                metadata={"profile": self.profile, "sec_type": sec_type, "last_price": price},
             )
 
     def execute(self, signals: pd.DataFrame) -> list[str]:

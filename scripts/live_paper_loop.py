@@ -121,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
                     sig_df.index = [df.index[-1]]
                     sig_df["entry"] = 1 if direction == "BUY" else -1
                     sig_df["size"] = size
+                    sig_df["sec_type"] = sec_type
                     # Snapshot/telemetry
                     snapshot_dir = Path("state_cache")
                     snapshot_dir.mkdir(parents=True, exist_ok=True)
