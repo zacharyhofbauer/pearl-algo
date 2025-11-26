@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     # Default to IB Gateway paper port; TWS default is 7497.
     ib_port: int = 4002
     ib_client_id: int = 1
+    # Optional separate client id for market data to avoid clashes with brokers/orders.
+    ib_data_client_id: int | None = None
     allow_live_trading: bool = False
     log_level: str = "INFO"
 

@@ -30,7 +30,7 @@ class IBDataProvider(DataProvider):
         self.client_id = client_id or settings.ib_client_id
 
     def _contract(self, symbol: str, sec_type: str = "FUT", exchange: str | None = None):
-        exch = exchange or ("CME" if sec_type == "FUT" else "SMART")
+        exch = exchange or ("GLOBEX" if sec_type == "FUT" else "SMART")
         if sec_type.upper() == "FUT":
             return Future(symbol=symbol, exchange=exch, currency="USD")
         return Stock(symbol=symbol, exchange=exch, currency="USD")

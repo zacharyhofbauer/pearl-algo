@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import calendar
 import logging
 from datetime import datetime
 from typing import Dict, Iterable
 
-from ib_insync import IB, Future, LimitOrder, MarketOrder, Stock, StopLimitOrder, StopOrder
+from ib_insync import IB, ContFuture, Future, LimitOrder, MarketOrder, Stock, StopLimitOrder, StopOrder
 
 from pearlalgo.brokers.base import Broker, BrokerConfig
 from pearlalgo.config.settings import Settings, get_settings
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def _contract(symbol: str, sec_type: str = "STK", exchange: str | None = None):
-    exch = exchange or ("CME" if sec_type.upper() == "FUT" else "SMART")
+    exch = exchange or ("GLOBEX" if sec_type.upper() == "FUT" else "SMART")
     if sec_type.upper() == "FUT":
         return Future(symbol=symbol, exchange=exch, currency="USD")
     return Stock(symbol=symbol, exchange=exch, currency="USD")
@@ -51,6 +52,62 @@ class IBKRBroker(Broker):
         self._ib.connect(self.settings.ib_host, int(self.settings.ib_port), clientId=int(self.settings.ib_client_id))
         return self._ib
 
+    @staticmethod
+    def _parse_ib_expiry(expiry: str) -> datetime | None:
+        clean = expiry.replace("-", "")
+        if len(clean) == 6:
+            try:
+                year, month = int(clean[:4]), int(clean[4:6])
+                last_day = calendar.monthrange(year, month)[1]
+                return datetime(year, month, last_day)
+            except ValueError:
+                return None
+        for fmt in ("%Y%m%d",):
+            try:
+                return datetime.strptime(clean, fmt)
+            except ValueError:
+                continue
+        return None
+
+    def _resolve_front_future(self, ib: IB, symbol: str, exchange: str | None = None) -> Future:
+        exch = exchange or "GLOBEX"
+        candidates = []
+        now = datetime.utcnow()
+
+        try:
+            details = ib.reqContractDetails(ContFuture(symbol=symbol, exchange=exch))
+            if not details:
+                details = ib.reqContractDetails(Future(symbol=symbol, exchange=exch, currency="USD"))
+        except Exception as exc:
+            logger.warning("IBKR contract lookup failed for %s on %s: %s", symbol, exch, exc)
+            details = []
+
+        for det in details or []:
+            expiry = det.contract.lastTradeDateOrContractMonth or ""
+            expiry_dt = self._parse_ib_expiry(expiry)
+            if not expiry_dt or expiry_dt <= now:
+                continue
+            candidates.append((expiry_dt, det.contract))
+
+        if not candidates:
+            logger.warning("No valid front-month contract found for %s on %s; using fallback future", symbol, exch)
+            return Future(symbol=symbol, exchange=exch, currency="USD")
+
+        front_contract = sorted(candidates, key=lambda item: item[0])[0][1]
+        try:
+            qualified = ib.qualifyContracts(front_contract)
+            if qualified:
+                front_contract = qualified[0]
+        except Exception as exc:
+            logger.warning("Qualification failed for %s on %s: %s", symbol, exch, exc)
+        return front_contract
+
+    def _resolve_contract(self, ib: IB, symbol: str, sec_type: str, exchange: str | None = None):
+        stype = sec_type.upper()
+        if stype.startswith("FUT_CONT"):
+            return self._resolve_front_future(ib, symbol, exchange)
+        return build_contract(symbol, sec_type=sec_type, exchange=exchange)
+
     def _live_enabled(self) -> bool:
         return bool(self.settings.allow_live_trading) and self.settings.profile == "live"
 
@@ -82,7 +139,7 @@ class IBKRBroker(Broker):
             return order_id
 
         ib = self._connect()
-        contract = build_contract(order.symbol, sec_type=sec_type, exchange=exchange)
+        contract = self._resolve_contract(ib, order.symbol, sec_type=sec_type, exchange=exchange)
         ib_order = self._build_order(order)
         trade = ib.placeOrder(contract, ib_order)
         return str(trade.order.orderId)

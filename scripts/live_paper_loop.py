@@ -11,7 +11,7 @@ from pearlalgo.brokers.ibkr_broker import IBKRBroker
 from pearlalgo.config.settings import Settings, get_settings
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.data.loaders import load_csv
-from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+from pearlalgo.data_providers.ibkr_data_provider import IBKRConnection, IBKRDataProvider
 from pearlalgo.risk.limits import RiskGuard, RiskLimits
 from pearlalgo.risk.pnl import DailyPnLTracker
 from pearlalgo.strategies.daily import MovingAverageCross, Breakout
@@ -19,12 +19,17 @@ from pearlalgo.utils.brain_log import brain_log
 from pearlalgo.utils.journal import append_trade
 
 
-def fetch_data(symbol: str, sec_type: str, source: str, data_path: Path | None = None):
+def fetch_data(
+    provider: IBKRDataProvider,
+    symbol: str,
+    sec_type: str,
+    source: str,
+    data_path: Path | None = None,
+):
     if source == "csv":
         if not data_path:
             raise ValueError("CSV source requires --data-path")
         return load_csv(data_path)
-    provider = IBKRDataProvider()
     # 2 days of 15m bars for a simple intraday view
     return provider.fetch_historical(symbol, sec_type=sec_type, duration="2 D", bar_size="15 mins")
 
@@ -52,12 +57,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings = get_settings()
+    ib_data_client_id = (
+        settings.ib_data_client_id
+        if settings.ib_data_client_id is not None
+        else args.ib_client_id + 1
+        if args.ib_client_id is not None
+        else settings.ib_client_id + 1
+    )
     ib_settings = Settings(
         allow_live_trading=True,  # needed for IBKRBroker to route
         profile="live",  # IBKRBroker checks this; still use paper Gateway (port 4002)
         ib_host=args.ib_host or settings.ib_host,
         ib_port=args.ib_port or settings.ib_port,
         ib_client_id=args.ib_client_id or settings.ib_client_id,
+        ib_data_client_id=ib_data_client_id,
+    )
+    data_connection = IBKRConnection(
+        host=ib_settings.ib_host,
+        port=int(ib_settings.ib_port),
+        client_id=int(ib_settings.ib_data_client_id or ib_data_client_id),
     )
 
     portfolio = Portfolio(cash=100000)
@@ -67,9 +85,15 @@ def main(argv: list[str] | None = None) -> int:
     risk_guard = RiskGuard(risk_limits, pnl_tracker=DailyPnLTracker())
     broker = IBKRBroker(portfolio, settings=ib_settings, risk_guard=risk_guard)
     exec_agent = ExecutionAgent(broker, symbol="N/A", profile="live", risk_guard=risk_guard)
+    provider = IBKRDataProvider(settings=ib_settings, connection=data_connection)
 
     data_paths = args.data_paths or []
     strat = select_strategy(args.strategy)
+
+    print(
+        "IBKR connections -> data clientId=%s, orders clientId=%s, host=%s, port=%s"
+        % (data_connection.client_id, ib_settings.ib_client_id, ib_settings.ib_host, ib_settings.ib_port)
+    )
 
     try:
         while True:
@@ -78,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
                 path = Path(data_paths[idx]) if args.source == "csv" and idx < len(data_paths) else None
                 ts = datetime.now(timezone.utc).isoformat()
                 try:
-                    df = fetch_data(sym, sec_type, args.source, path)
+                    df = fetch_data(provider, sym, sec_type, args.source, path)
                     sigs = strat.run(df)
                     latest = sigs.iloc[-1] if not sigs.empty else None
                     if latest is None:

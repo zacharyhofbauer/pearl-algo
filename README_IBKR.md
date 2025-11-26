@@ -69,7 +69,7 @@ Outputs:
 ## Python integration
 - Data provider: `pearlalgo.data_providers.ibkr_data_provider.IBKRDataProvider`
 - Broker: `pearlalgo.brokers.ibkr_broker.IBKRBroker`
-- Both read host/port/clientId and live-safety flags from settings/.env.
+- Both read host/port/clientId and live-safety flags from settings/.env. Market-data connections default to `PEARLALGO_IB_CLIENT_ID + 1`; override with `PEARLALGO_IB_DATA_CLIENT_ID` if you need a specific value.
 
 ## Profile switching
 - Backtest (default): safest, no external connections.

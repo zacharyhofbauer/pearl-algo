@@ -8,7 +8,8 @@ def stock(symbol: str, exchange: str | None = None, currency: str = "USD") -> St
 
 
 def future(symbol: str, exchange: str | None = None, currency: str = "USD") -> Future:
-    return Future(symbol=symbol, exchange=exchange or "CME", currency=currency)
+    # IB routes CME futures on GLOBEX for ES/NQ.
+    return Future(symbol=symbol, exchange=exchange or "GLOBEX", currency=currency)
 
 
 def continuous_future(symbol: str, exchange: str | None = None) -> ContFuture:
