@@ -16,17 +16,32 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timezone
-from typing import Iterable
 
 from ib_insync import IB
 
-from pearlalgo.brokers.contracts import discover_future_contracts, parse_ib_expiry, resolve_future_contract
+from pearlalgo.futures.contracts import available_symbols, build_future
+
+
+def _parse_expiry(expiry: str) -> datetime | None:
+    clean = (expiry or "").replace("-", "")
+    if len(clean) == 6:
+        year, month = int(clean[:4]), int(clean[4:6])
+        # Use last day of month to approximate expiry boundary
+        if month < 1 or month > 12:
+            return None
+        return datetime(year, month, 1, tzinfo=timezone.utc)
+    if len(clean) == 8:
+        try:
+            return datetime.strptime(clean, "%Y%m%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
 
 
 def _format_contract(det) -> str:
     c = det.contract
     expiry = c.lastTradeDateOrContractMonth or "-"
-    expiry_dt = parse_ib_expiry(expiry)
+    expiry_dt = _parse_expiry(expiry)
     expiry_fmt = expiry_dt.date().isoformat() if expiry_dt else expiry
     return (
         f"{c.symbol} localSymbol={c.localSymbol} expiry={expiry} ({expiry_fmt}) "
@@ -38,17 +53,14 @@ def _choose_upcoming_expiry(details) -> str | None:
     now = datetime.now(timezone.utc)
     for det in details:
         exp = det.contract.lastTradeDateOrContractMonth or ""
-        exp_dt = parse_ib_expiry(exp)
+        exp_dt = _parse_expiry(exp)
         if exp_dt and exp_dt > now:
             return exp
     return None
 
 
 def _request_and_report(ib: IB, symbol: str, *, expiry: str | None = None, label: str = "") -> None:
-    contract = resolve_future_contract(ib, symbol, exchange=None, target_expiry=expiry)
-    if not contract:
-        print(f"✗ {symbol} {label or 'front'} -> no matching contract found")
-        return
+    contract = build_future(symbol, expiry=expiry)
     try:
         cds = ib.reqContractDetails(contract)
         if not cds:
@@ -63,7 +75,12 @@ def _request_and_report(ib: IB, symbol: str, *, expiry: str | None = None, label
 
 def inspect_symbol(ib: IB, symbol: str) -> None:
     print(f"\n=== {symbol} discovery ===")
-    details = discover_future_contracts(ib, symbol, exchange=None)
+    base_contract = build_future(symbol)
+    try:
+        details = ib.reqContractDetails(base_contract)
+    except Exception as exc:  # pragma: no cover - requires live IB
+        print(f"✗ {symbol} request failed: {exc}")
+        return
     if not details:
         print(f"✗ No futures discovered for {symbol} on GLOBEX/CME")
         return
@@ -89,8 +106,7 @@ def main() -> int:
     try:
         ib.connect("127.0.0.1", 4002, clientId=999)
         print("Connected to IBKR\n")
-
-        for sym in ("ES", "NQ", "YM", "RTY"):
+        for sym in available_symbols():
             inspect_symbol(ib, sym)
     finally:
         ib.disconnect()

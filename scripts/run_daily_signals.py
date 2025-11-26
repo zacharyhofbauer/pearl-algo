@@ -85,19 +85,36 @@ def main(argv: list[str] | None = None) -> int:
                 local_symbol=local_symbol,
                 trading_class=trading_class,
             )
-            sigs = run_strategy(args.strategy, df)
-            if sigs.empty:
+            if df.empty:
                 continue
-            latest = sigs.iloc[-1]
-            direction = "BUY" if latest.get("entry", 0) > 0 else "SELL" if latest.get("entry", 0) < 0 else "FLAT"
+            signal = generate_signal(symbol, df, strategy_name=args.strategy, fast=10, slow=20)
+            side = signal["side"]
+            price = float(df["Close"].iloc[-1])
+            direction = "BUY" if side == "long" else "SELL" if side == "short" else "FLAT"
             rows.append(
                 {
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "symbol": symbol,
                     "instrument_type": sec_type,
                     "direction": direction,
-                    "size_hint": latest.get("size", 1),
+                    "size_hint": 1,
                 }
+            )
+            log_decision(
+                PerformanceRow(
+                    timestamp=datetime.now(timezone.utc),
+                    symbol=symbol,
+                    sec_type=sec_type,
+                    strategy_name=signal["strategy_name"],
+                    signal=side,
+                    proposed_size=1,
+                    executed_size=0,
+                    entry_price=price,
+                    fast_ma=signal.get("fast_ma"),
+                    slow_ma=signal.get("slow_ma"),
+                    risk_state="SAFE" if side != "flat" else "NEUTRAL",
+                    notes="daily signal",
+                )
             )
         except Exception as exc:
             print(f"[WARN] Failed to build signal for {symbol} ({sec_type}): {exc}")
