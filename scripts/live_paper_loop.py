@@ -28,6 +28,7 @@ def fetch_data(
     *,
     expiry: str | None = None,
     local_symbol: str | None = None,
+    trading_class: str | None = None,
 ):
     if source == "csv":
         if not data_path:
@@ -41,6 +42,7 @@ def fetch_data(
         bar_size="15 mins",
         expiry=expiry,
         local_symbol=local_symbol,
+        trading_class=trading_class or symbol,
     )
 
 

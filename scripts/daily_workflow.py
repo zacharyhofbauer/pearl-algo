@@ -39,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--date", help="Report date YYYYMMDD; defaults to today", default=None)
     parser.add_argument("--expiries", nargs="*", help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols")
     parser.add_argument("--local-symbols", nargs="*", help="Optional IBKR local symbols matching symbols")
+    parser.add_argument("--trading-classes", nargs="*", help="Optional trading classes matching symbols (defaults to symbol)")
     parser.add_argument("--ib-host", help="IBKR host override (e.g., 127.0.0.1)")
     parser.add_argument("--ib-port", type=int, help="IBKR port override (e.g., 4002)")
     parser.add_argument("--ib-client-id", type=int, help="IBKR clientId override for orders")
@@ -76,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
         sig_args += ["--expiries", *args.expiries]
     if args.local_symbols:
         sig_args += ["--local-symbols", *args.local_symbols]
+    if args.trading_classes:
+        sig_args += ["--trading-classes", *args.trading_classes]
 
     sig_status = run_daily_signals.main(sig_args)
     if sig_status != 0:
