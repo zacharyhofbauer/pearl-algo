@@ -71,6 +71,10 @@ class IBKRDataProvider(DataProvider):
         ib = self._connect()
         try:
             contract = build_contract(symbol, sec_type=sec_type, exchange=exchange)
+            # Qualify to ensure conId is resolved (important for futures/continuous).
+            qualified = ib.qualifyContracts(contract)
+            if qualified:
+                contract = qualified[0]
             bars = ib.reqHistoricalData(
                 contract,
                 endDateTime=end or "",
