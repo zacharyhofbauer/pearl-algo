@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Callable
+from typing import Iterable, List
 
 import pandas as pd
 

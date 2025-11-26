@@ -9,7 +9,6 @@ import pandas as pd
 from pearlalgo.strategies.daily import MovingAverageCross, Breakout
 from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
 from pearlalgo.data.loaders import load_csv
-from pearlalgo.config.settings import get_settings
 
 
 def get_data(symbol: str, sec_type: str, source: str, path: Path | None = None) -> pd.DataFrame:
@@ -43,7 +42,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--outdir", default="signals")
     args = parser.parse_args(argv)
 
-    settings = get_settings()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     today = datetime.utcnow().strftime("%Y%m%d")

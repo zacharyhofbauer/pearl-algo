@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+from typing import Iterable
 
 from pearlalgo.brokers.base import Broker
 from pearlalgo.core.events import OrderEvent
