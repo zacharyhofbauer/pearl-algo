@@ -102,6 +102,49 @@ class IBKRBroker(Broker):
             logger.warning("Qualification failed for %s on %s: %s", symbol, exch, exc)
         return front_contract
 
+    def _resolve_specific_future(
+        self,
+        ib: IB,
+        symbol: str,
+        *,
+        exchange: str | None = None,
+        expiry: str | None = None,
+        local_symbol: str | None = None,
+        trading_class: str | None = None,
+    ) -> Future | None:
+        exch = exchange or "GLOBEX"
+        try:
+            details = ib.reqContractDetails(ContFuture(symbol=symbol, exchange=exch))
+        except Exception as exc:
+            logger.warning("ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc)
+            details = []
+
+        candidates = []
+        now = datetime.utcnow()
+        for det in details or []:
+            c = det.contract
+            if local_symbol and c.localSymbol != local_symbol:
+                continue
+            if trading_class and getattr(c, "tradingClass", None) not in {trading_class, symbol}:
+                continue
+            exp_str = c.lastTradeDateOrContractMonth or ""
+            if expiry and exp_str and not exp_str.startswith(expiry):
+                continue
+            exp_dt = self._parse_ib_expiry(exp_str) or now
+            candidates.append((exp_dt, c))
+
+        if not candidates:
+            return None
+
+        contract = sorted(candidates, key=lambda item: item[0])[0][1]
+        try:
+            qualified = ib.qualifyContracts(contract)
+            if qualified:
+                contract = qualified[0]
+        except Exception as exc:
+            logger.warning("Qualification failed for %s on %s: %s", symbol, exch, exc)
+        return contract
+
     def _resolve_contract(
         self,
         ib: IB,
@@ -115,6 +158,17 @@ class IBKRBroker(Broker):
     ):
         stype = sec_type.upper()
         if stype.startswith("FUT") and (expiry or local_symbol):
+            # Try resolving from contract details to avoid sec-def errors.
+            contract = self._resolve_specific_future(
+                ib,
+                symbol,
+                exchange=exchange,
+                expiry=expiry,
+                local_symbol=local_symbol,
+                trading_class=trading_class or symbol,
+            )
+            if contract:
+                return contract
             return build_contract(
                 symbol,
                 sec_type="FUT",
