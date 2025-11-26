@@ -125,6 +125,8 @@ class IBKRDataProvider(DataProvider):
         *,
         sec_type: str = "FUT",
         exchange: str | None = None,
+        expiry: str | None = None,
+        local_symbol: str | None = None,
         duration: str = "2 D",
         bar_size: str = "5 mins",
         what_to_show: str = "TRADES",
@@ -135,8 +137,17 @@ class IBKRDataProvider(DataProvider):
         """
         ib = self._connect()
         try:
-            contract = build_contract(symbol, sec_type=sec_type, exchange=exchange)
-            if sec_type.upper().startswith("FUT_CONT"):
+            if sec_type.upper().startswith("FUT") and (expiry or local_symbol):
+                contract = build_contract(
+                    symbol,
+                    sec_type="FUT",
+                    exchange=exchange,
+                    expiry=expiry,
+                    local_symbol=local_symbol,
+                )
+            else:
+                contract = build_contract(symbol, sec_type=sec_type, exchange=exchange)
+            if sec_type.upper().startswith("FUT_CONT") and not (expiry or local_symbol):
                 contract = self._resolve_front_future(ib, symbol, exchange)
             # Qualify to ensure conId is resolved (important for futures/continuous).
             if not getattr(contract, "conId", 0):

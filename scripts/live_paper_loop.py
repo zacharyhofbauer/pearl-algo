@@ -25,13 +25,23 @@ def fetch_data(
     sec_type: str,
     source: str,
     data_path: Path | None = None,
+    *,
+    expiry: str | None = None,
+    local_symbol: str | None = None,
 ):
     if source == "csv":
         if not data_path:
             raise ValueError("CSV source requires --data-path")
         return load_csv(data_path)
     # 2 days of 15m bars for a simple intraday view
-    return provider.fetch_historical(symbol, sec_type=sec_type, duration="2 D", bar_size="15 mins")
+    return provider.fetch_historical(
+        symbol,
+        sec_type=sec_type,
+        duration="2 D",
+        bar_size="15 mins",
+        expiry=expiry,
+        local_symbol=local_symbol,
+    )
 
 
 def select_strategy(name: str):
@@ -54,6 +64,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ib-host", default=None, help="IB host override (default from settings)")
     parser.add_argument("--ib-port", type=int, default=None, help="IB port override (default from settings)")
     parser.add_argument("--ib-client-id", type=int, default=None, help="IB clientId override (default from settings)")
+    parser.add_argument("--expiries", nargs="*", help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols")
+    parser.add_argument("--local-symbols", nargs="*", help="Optional IBKR local symbols matching symbols")
     args = parser.parse_args(argv)
 
     settings = get_settings()
@@ -89,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
 
     data_paths = args.data_paths or []
     strat = select_strategy(args.strategy)
+    expiries = args.expiries or []
+    local_symbols = args.local_symbols or []
 
     print(
         "IBKR connections -> data clientId=%s, orders clientId=%s, host=%s, port=%s"
@@ -100,9 +114,19 @@ def main(argv: list[str] | None = None) -> int:
             for idx, sym in enumerate(args.symbols):
                 sec_type = args.sec_types[idx] if idx < len(args.sec_types) else "STK"
                 path = Path(data_paths[idx]) if args.source == "csv" and idx < len(data_paths) else None
+                expiry = expiries[idx] if idx < len(expiries) else None
+                local_symbol = local_symbols[idx] if idx < len(local_symbols) else None
                 ts = datetime.now(timezone.utc).isoformat()
                 try:
-                    df = fetch_data(provider, sym, sec_type, args.source, path)
+                    df = fetch_data(
+                        provider,
+                        sym,
+                        sec_type,
+                        args.source,
+                        path,
+                        expiry=expiry,
+                        local_symbol=local_symbol,
+                    )
                     sigs = strat.run(df)
                     latest = sigs.iloc[-1] if not sigs.empty else None
                     if latest is None:
@@ -149,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
                     sig_df["entry"] = 1 if direction == "BUY" else -1
                     sig_df["size"] = size
                     sig_df["sec_type"] = sec_type
+                    sig_df["expiry"] = expiry
+                    sig_df["local_symbol"] = local_symbol
                     # Snapshot/telemetry
                     snapshot_dir = Path("state_cache")
                     snapshot_dir.mkdir(parents=True, exist_ok=True)

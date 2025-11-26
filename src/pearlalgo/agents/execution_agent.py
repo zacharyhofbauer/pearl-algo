@@ -34,6 +34,8 @@ class ExecutionAgent:
             side = "BUY" if float(signal_val) > 0 else "SELL"
             qty = abs(float(row.get("size", 1)))
             sec_type = row.get("sec_type") or "STK"
+            expiry = row.get("expiry")
+            local_symbol = row.get("local_symbol")
             price = float(row.get("Close", row.get("close", row.get("price", 0.0))))
             # Futures do not allow fractional contracts; round up to at least 1
             if str(sec_type).upper().startswith("FUT") and qty < 1:
@@ -45,7 +47,13 @@ class ExecutionAgent:
                 quantity=qty,
                 order_type="MKT",
                 limit_price=price,
-                metadata={"profile": self.profile, "sec_type": sec_type, "last_price": price},
+                metadata={
+                    "profile": self.profile,
+                    "sec_type": sec_type,
+                    "last_price": price,
+                    "expiry": expiry,
+                    "local_symbol": local_symbol,
+                },
             )
 
     def execute(self, signals: pd.DataFrame) -> list[str]:

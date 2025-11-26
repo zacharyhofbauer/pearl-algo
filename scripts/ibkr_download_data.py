@@ -18,9 +18,10 @@ SecurityType = Literal["STK", "FUT"]
 logger = logging.getLogger(__name__)
 
 # Default download targets; can be overridden with CLI flags later if needed.
+# Default tasks; override with CLI to control expiries/local symbols.
 DEFAULT_TASKS = [
-    ("SPY", "STK", "1 D", "5 mins", Path("data/equities/SPY_ib_5m.csv")),
-    ("ES", "FUT_CONT", "1 D", "15 mins", Path("data/futures/ES_ib_15m.csv")),
+    ("SPY", "STK", "1 D", "5 mins", Path("data/equities/SPY_ib_5m.csv"), None, None),
+    ("ES", "FUT_CONT", "1 D", "15 mins", Path("data/futures/ES_ib_15m.csv"), None, None),
 ]
 
 
@@ -47,9 +48,19 @@ def download_symbol(
     bar_size: str,
     output_path: Path,
     what_to_show: str = "TRADES",
+    expiry: str | None = None,
+    local_symbol: str | None = None,
 ) -> None:
     """Download historical bars and save to CSV."""
-    contract = make_contract(symbol, sec_type)
+    contract = make_contract(symbol, sec_type, exchange=None)
+    if sec_type.upper().startswith("FUT") and (expiry or local_symbol):
+        contract = Future(
+            symbol=symbol,
+            exchange=contract.exchange,
+            currency="USD",
+            lastTradeDateOrContractMonth=expiry,
+            localSymbol=local_symbol,
+        )
     try:
         bars = ib.reqHistoricalData(
             contract,
@@ -77,7 +88,16 @@ def download_symbol(
     logger.info("[OK] Saved %s (%s) %s rows -> %s", symbol, sec_type, len(df), output_path)
 
 
-def run_download(host: str, port: int, client_id: int) -> None:
+def run_download(
+    host: str,
+    port: int,
+    client_id: int,
+    *,
+    symbols: list[str] | None = None,
+    sec_types: list[str] | None = None,
+    expiries: list[str] | None = None,
+    local_symbols: list[str] | None = None,
+) -> None:
     ib = IB()
     logger.info("Connecting to IBKR Gateway %s:%s (clientId=%s) ...", host, port, client_id)
     try:
@@ -90,15 +110,32 @@ def run_download(host: str, port: int, client_id: int) -> None:
         )
 
     try:
-        for symbol, sec_type, duration, bar_size, out_path in DEFAULT_TASKS:
+        tasks = list(DEFAULT_TASKS)
+        if symbols and sec_types:
+            exp_list = expiries or []
+            loc_list = local_symbols or []
+            tasks = []
+            for idx, symbol in enumerate(symbols):
+                stype = sec_types[idx] if idx < len(sec_types) else "STK"
+                exp = exp_list[idx] if idx < len(exp_list) else None
+                loc = loc_list[idx] if idx < len(loc_list) else None
+                # default duration/bar_size if user overrides tasks
+                tasks.append((symbol, stype, "1 D", "15 mins", Path(f"data/{symbol}_{stype.lower()}.csv"), exp, loc))
+
+        for task in tasks:
+            symbol, sec_type, duration, bar_size, out_path, *rest = task
+            exp = rest[0] if rest else None
+            loc = rest[1] if len(rest) > 1 else None
             try:
                 download_symbol(
                     ib,
-                    symbol=symbol,
+                    symbol=symbol,  # type: ignore[arg-type]
                     sec_type=sec_type,  # type: ignore[arg-type]
                     duration=duration,
                     bar_size=bar_size,
                     output_path=out_path,
+                    expiry=exp,
+                    local_symbol=loc,
                 )
             except Exception as exc:
                 logger.error("[ERR] %s (%s) failed: %s", symbol, sec_type, exc)
@@ -113,6 +150,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default=None, help="IBKR host (default from settings or 127.0.0.1)")
     parser.add_argument("--port", type=int, default=None, help="IBKR port (default from settings or 4002)")
     parser.add_argument("--client-id", type=int, default=None, help="IBKR clientId (default from settings or 1)")
+    parser.add_argument("--symbols", nargs="*", help="Override default symbols")
+    parser.add_argument("--sec-types", nargs="*", help="Override default security types")
+    parser.add_argument("--expiries", nargs="*", help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols")
+    parser.add_argument("--local-symbols", nargs="*", help="Optional IBKR local symbols matching symbols")
     return parser
 
 
@@ -128,7 +169,15 @@ def main(argv: list[str] | None = None) -> int:
     client_id = args.client_id or settings.ib_client_id or 1
 
     # Safety: this script only fetches data; no orders are placed.
-    run_download(host=host, port=int(port), client_id=int(client_id))
+    run_download(
+        host=host,
+        port=int(port),
+        client_id=int(client_id),
+        symbols=args.symbols,
+        sec_types=args.sec_types,
+        expiries=args.expiries,
+        local_symbols=args.local_symbols,
+    )
     return 0
 
 

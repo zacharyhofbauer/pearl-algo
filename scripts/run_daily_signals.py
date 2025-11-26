@@ -11,14 +11,29 @@ from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
 from pearlalgo.data.loaders import load_csv
 
 
-def get_data(symbol: str, sec_type: str, source: str, path: Path | None = None) -> pd.DataFrame:
+def get_data(
+    symbol: str,
+    sec_type: str,
+    source: str,
+    path: Path | None = None,
+    *,
+    expiry: str | None = None,
+    local_symbol: str | None = None,
+) -> pd.DataFrame:
     if source == "csv":
         if not path:
             raise ValueError("CSV source requires --data-path")
         return load_csv(path)
     # default: IBKR historical fetch
     provider = IBKRDataProvider()
-    df = provider.fetch_historical(symbol, sec_type=sec_type, duration="2 D", bar_size="15 mins")
+    df = provider.fetch_historical(
+        symbol,
+        sec_type=sec_type,
+        duration="2 D",
+        bar_size="15 mins",
+        expiry=expiry,
+        local_symbol=local_symbol,
+    )
     return df
 
 
@@ -40,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", choices=["ibkr", "csv"], default="ibkr")
     parser.add_argument("--data-paths", nargs="*", help="CSV paths matching symbols order when source=csv")
     parser.add_argument("--outdir", default="signals")
+    parser.add_argument("--expiries", nargs="*", help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols")
+    parser.add_argument("--local-symbols", nargs="*", help="Optional IBKR local symbols matching symbols")
     args = parser.parse_args(argv)
 
     outdir = Path(args.outdir)
@@ -49,11 +66,22 @@ def main(argv: list[str] | None = None) -> int:
 
     rows = []
     data_paths = args.data_paths or []
+    expiries = args.expiries or []
+    local_symbols = args.local_symbols or []
     for idx, symbol in enumerate(args.symbols):
         sec_type = args.sec_types[idx] if idx < len(args.sec_types) else "STK"
+        expiry = expiries[idx] if idx < len(expiries) else None
+        local_symbol = local_symbols[idx] if idx < len(local_symbols) else None
         path = Path(data_paths[idx]) if args.source == "csv" and idx < len(data_paths) else None
         try:
-            df = get_data(symbol, sec_type, source=args.source, path=path)
+            df = get_data(
+                symbol,
+                sec_type,
+                source=args.source,
+                path=path,
+                expiry=expiry,
+                local_symbol=local_symbol,
+            )
             sigs = run_strategy(args.strategy, df)
             if sigs.empty:
                 continue
