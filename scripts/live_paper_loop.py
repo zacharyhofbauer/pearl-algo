@@ -46,15 +46,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tiny-size", type=float, default=0.1, help="Position size to send (paper)")
     parser.add_argument("--max-daily-loss", type=float, default=None, help="Block orders if PnL below -X")
     parser.add_argument("--max-open-per-asset", type=int, default=None, help="Max open positions per asset class (placeholder)")
+    parser.add_argument("--ib-host", default=None, help="IB host override (default from settings)")
+    parser.add_argument("--ib-port", type=int, default=None, help="IB port override (default from settings)")
+    parser.add_argument("--ib-client-id", type=int, default=None, help="IB clientId override (default from settings)")
     args = parser.parse_args(argv)
 
     settings = get_settings()
     ib_settings = Settings(
         allow_live_trading=True,  # needed for IBKRBroker to route
         profile="live",  # IBKRBroker checks this; still use paper Gateway (port 4002)
-        ib_host=settings.ib_host,
-        ib_port=settings.ib_port,
-        ib_client_id=settings.ib_client_id,
+        ib_host=args.ib_host or settings.ib_host,
+        ib_port=args.ib_port or settings.ib_port,
+        ib_client_id=args.ib_client_id or settings.ib_client_id,
     )
 
     portfolio = Portfolio(cash=100000)

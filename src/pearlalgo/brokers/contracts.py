@@ -12,7 +12,8 @@ def future(symbol: str, exchange: str | None = None, currency: str = "USD") -> F
 
 
 def continuous_future(symbol: str, exchange: str | None = None) -> ContFuture:
-    return ContFuture(symbol=symbol, exchange=exchange or "CME")
+    # IB uses "GLOBEX" for CME continuous futures routing.
+    return ContFuture(symbol=symbol, exchange=exchange or "GLOBEX")
 
 
 def build_contract(symbol: str, sec_type: str, exchange: str | None = None, currency: str = "USD") -> Contract:
