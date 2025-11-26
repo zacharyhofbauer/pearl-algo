@@ -11,9 +11,15 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import List
 
-from scripts import daily_report, run_daily_signals
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts import daily_report, run_daily_signals  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
