@@ -112,45 +112,58 @@ class IBKRBroker(Broker):
         local_symbol: str | None = None,
         trading_class: str | None = None,
     ) -> Future | None:
-        exch = exchange or "GLOBEX"
-        reqs = []
-        if local_symbol:
-            reqs.append(Future(localSymbol=local_symbol, exchange=exch, tradingClass=trading_class or symbol, currency="USD"))
-        if expiry or trading_class:
-            reqs.append(
-                Future(
-                    symbol=symbol,
-                    exchange=exch,
-                    currency="USD",
-                    lastTradeDateOrContractMonth=expiry,
-                    tradingClass=trading_class or symbol,
-                )
-            )
-        reqs.append(ContFuture(symbol=symbol, exchange=exch))
-
-        details = []
-        for req in reqs:
-            try:
-                details = ib.reqContractDetails(req)
-            except Exception as exc:
-                logger.warning("ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc)
-                continue
-            if details:
-                break
+        exchanges = []
+        if exchange:
+            exchanges.append(exchange)
+        exchanges.extend(["CME", "GLOBEX"])
+        seen: set[str] = set()
+        exchanges = [ex for ex in exchanges if not (ex in seen or seen.add(ex))]
 
         candidates = []
         now = datetime.utcnow()
-        for det in details or []:
-            c = det.contract
-            if local_symbol and c.localSymbol != local_symbol:
-                continue
-            if trading_class and getattr(c, "tradingClass", None) not in {trading_class, symbol}:
-                continue
-            exp_str = c.lastTradeDateOrContractMonth or ""
-            if expiry and exp_str and not exp_str.startswith(expiry):
-                continue
-            exp_dt = self._parse_ib_expiry(exp_str) or now
-            candidates.append((exp_dt, c))
+
+        for exch in exchanges:
+            reqs = []
+            if local_symbol:
+                reqs.append(
+                    Future(localSymbol=local_symbol, exchange=exch, tradingClass=trading_class or symbol, currency="USD")
+                )
+            if expiry or trading_class:
+                reqs.append(
+                    Future(
+                        symbol=symbol,
+                        exchange=exch,
+                        currency="USD",
+                        lastTradeDateOrContractMonth=expiry,
+                        tradingClass=trading_class or symbol,
+                    )
+                )
+            reqs.append(ContFuture(symbol=symbol, exchange=exch))
+
+            details = []
+            for req in reqs:
+                try:
+                    details = ib.reqContractDetails(req)
+                except Exception as exc:
+                    logger.warning("ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc)
+                    continue
+                if details:
+                    break
+
+            for det in details or []:
+                c = det.contract
+                if local_symbol and c.localSymbol != local_symbol:
+                    continue
+                if trading_class and getattr(c, "tradingClass", None) not in {trading_class, symbol}:
+                    continue
+                exp_str = c.lastTradeDateOrContractMonth or ""
+                if expiry and exp_str and not exp_str.startswith(expiry):
+                    continue
+                exp_dt = self._parse_ib_expiry(exp_str) or now
+                candidates.append((exp_dt, c))
+
+            if candidates:
+                break
 
         if not candidates:
             logger.warning(
@@ -159,7 +172,7 @@ class IBKRBroker(Broker):
                 expiry,
                 local_symbol,
                 trading_class,
-                exch,
+                "/".join(exchanges),
             )
             return None
 
@@ -169,7 +182,7 @@ class IBKRBroker(Broker):
             if qualified:
                 contract = qualified[0]
         except Exception as exc:
-            logger.warning("Qualification failed for %s on %s: %s", symbol, exch, exc)
+            logger.warning("Qualification failed for %s on %s: %s", symbol, contract.exchange, exc)
         return contract
 
     def _resolve_contract(
