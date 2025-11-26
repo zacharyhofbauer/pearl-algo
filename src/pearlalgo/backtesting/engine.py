@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List
+from typing import Iterable, List, Callable
 
 import pandas as pd
 
 from pearlalgo.core.events import OrderEvent, FillEvent
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.brokers.dummy_backtest import DummyBacktestBroker
+from pearlalgo.strategies.base import BaseStrategy
 
 
 @dataclass
@@ -49,3 +50,7 @@ class SimpleBacktestEngine:
                 )
             )
         return self.run(orders)
+
+    def run_strategy(self, strategy: BaseStrategy, data: pd.DataFrame, symbol: str) -> BacktestResult:
+        signals = strategy.run(data)
+        return self.run_signals(signals, symbol)

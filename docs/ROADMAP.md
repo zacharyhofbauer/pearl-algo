@@ -15,6 +15,7 @@
 3) Strategies
    - Implement baseline: ES/NQ breakout; short-premium defined-risk spreads; simple mean-revert.
    - Add contract builders for options (chains, greeks).
+   - Daily signals loop: backtest CLI + signals writer + live (paper) consumer.
 4) Backtest parity
    - Ensure backtest/live share contract builders and risk checks.
    - Add slippage/fee models; walk-forward tests.
