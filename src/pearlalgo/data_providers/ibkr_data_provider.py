@@ -64,7 +64,7 @@ class IBKRDataProvider(DataProvider):
         """
         Resolve the nearest-dated future for a symbol. Falls back to simple Future if lookup fails.
         """
-        exch = exchange or "GLOBEX"
+        exch = exchange or "CME"
         contract = resolve_future_contract(ib, symbol, exchange=exch)
         if contract:
             return contract

@@ -22,7 +22,7 @@ def test_build_contract_fields():
         local_symbol="ESZ4",
         trading_class="ES",
     )
-    assert contract.exchange == "GLOBEX"
+    assert contract.exchange == "CME"
     assert contract.lastTradeDateOrContractMonth == "202412"
     assert contract.localSymbol == "ESZ4"
     # When localSymbol is provided, tradingClass may be left unset so IBKR can resolve it.

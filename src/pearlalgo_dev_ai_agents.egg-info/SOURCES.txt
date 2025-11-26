@@ -10,6 +10,7 @@ src/pearlalgo/agents/risk_agent.py
 src/pearlalgo/agents/strategy_agent.py
 src/pearlalgo/agents/strategy_loader.py
 src/pearlalgo/backtesting/__init__.py
+src/pearlalgo/backtesting/cli.py
 src/pearlalgo/backtesting/engine.py
 src/pearlalgo/brokers/__init__.py
 src/pearlalgo/brokers/base.py
@@ -43,9 +44,12 @@ src/pearlalgo/risk/pnl.py
 src/pearlalgo/risk/sizing.py
 src/pearlalgo/strategies/__init__.py
 src/pearlalgo/strategies/base.py
+src/pearlalgo/strategies/daily.py
 src/pearlalgo/strategies/examples.py
 src/pearlalgo/utils/__init__.py
+src/pearlalgo/utils/brain_log.py
 src/pearlalgo/utils/dates.py
+src/pearlalgo/utils/journal.py
 src/pearlalgo/utils/logging.py
 src/pearlalgo_dev_ai_agents.egg-info/PKG-INFO
 src/pearlalgo_dev_ai_agents.egg-info/SOURCES.txt
@@ -54,6 +58,7 @@ src/pearlalgo_dev_ai_agents.egg-info/requires.txt
 src/pearlalgo_dev_ai_agents.egg-info/top_level.txt
 tests/test_agents_integration.py
 tests/test_backtest_agent.py
+tests/test_futures_contracts.py
 tests/test_loaders.py
 tests/test_options_utils.py
 tests/test_providers_and_broker.py

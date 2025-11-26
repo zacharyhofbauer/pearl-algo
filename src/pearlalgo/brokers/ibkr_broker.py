@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def _contract(symbol: str, sec_type: str = "STK", exchange: str | None = None):
-    exch = exchange or ("GLOBEX" if sec_type.upper() == "FUT" else "SMART")
+    exch = exchange or ("CME" if sec_type.upper() == "FUT" else "SMART")
     if sec_type.upper() == "FUT":
         return Future(symbol=symbol, exchange=exch, currency="USD")
     return Stock(symbol=symbol, exchange=exch, currency="USD")
@@ -52,7 +52,7 @@ class IBKRBroker(Broker):
         return self._ib
 
     def _resolve_front_future(self, ib: IB, symbol: str, exchange: str | None = None) -> Future:
-        exch = exchange or "GLOBEX"
+        exch = exchange or "CME"
         contract = resolve_future_contract(ib, symbol, exchange=exch)
         if contract:
             return contract

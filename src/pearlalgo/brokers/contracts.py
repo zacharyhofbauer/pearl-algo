@@ -37,11 +37,21 @@ def parse_ib_expiry(expiry: str) -> datetime | None:
 
 
 def _exchange_candidates(exchange: str | None) -> list[str]:
-    """Return a deduped list of exchanges to try for CME/Globex futures."""
+    """
+    Return a deduped list of exchanges to try for CME-family futures.
+
+    CME/Globex can behave differently per account; prioritise CME to avoid
+    spurious 200 errors when GLOBEX is refused. Include CBOT/NYMEX/COMEX/ECBOT
+    so symbols like YM/CL/GC still resolve via the same code path.
+    """
+    exchange = exchange.upper() if exchange else None
+    base_order = ["CME", "GLOBEX", "CBOT", "NYMEX", "COMEX", "ECBOT"]
     exchanges: list[str] = []
     if exchange:
         exchanges.append(exchange)
-    exchanges.extend(["GLOBEX", "CME"])
+        if exchange == "GLOBEX":
+            exchanges.insert(0, "CME")
+    exchanges.extend(base_order)
     seen: set[str] = set()
     return [ex for ex in exchanges if not (ex in seen or seen.add(ex))]
 
@@ -195,12 +205,12 @@ def future(
     local_symbol: str | None = None,
     trading_class: str | None = None,
 ) -> Future:
-    # IB routes CME futures on GLOBEX; set the routing accordingly. If using only a local symbol,
+    # IB routes CME futures on CME for many accounts; set routing accordingly. If using only a local symbol,
     # leave tradingClass unset so IBKR can match the contract.
     tc = trading_class or symbol if local_symbol is None else None
     return Future(
         symbol=symbol,
-        exchange=exchange or "GLOBEX",
+        exchange=exchange or "CME",
         currency=currency,
         lastTradeDateOrContractMonth=expiry,
         localSymbol=local_symbol,
@@ -209,8 +219,8 @@ def future(
 
 
 def continuous_future(symbol: str, exchange: str | None = None) -> ContFuture:
-    # IB uses "GLOBEX" for CME continuous futures routing.
-    return ContFuture(symbol=symbol, exchange=exchange or "GLOBEX")
+    # IB may require CME for routing continuous CME futures.
+    return ContFuture(symbol=symbol, exchange=exchange or "CME")
 
 
 def build_contract(

@@ -45,7 +45,7 @@ def _choose_upcoming_expiry(details) -> str | None:
 
 
 def _request_and_report(ib: IB, symbol: str, *, expiry: str | None = None, label: str = "") -> None:
-    contract = resolve_future_contract(ib, symbol, exchange="GLOBEX", target_expiry=expiry)
+    contract = resolve_future_contract(ib, symbol, exchange=None, target_expiry=expiry)
     if not contract:
         print(f"✗ {symbol} {label or 'front'} -> no matching contract found")
         return
@@ -63,7 +63,7 @@ def _request_and_report(ib: IB, symbol: str, *, expiry: str | None = None, label
 
 def inspect_symbol(ib: IB, symbol: str) -> None:
     print(f"\n=== {symbol} discovery ===")
-    details = discover_future_contracts(ib, symbol, exchange="GLOBEX")
+    details = discover_future_contracts(ib, symbol, exchange=None)
     if not details:
         print(f"✗ No futures discovered for {symbol} on GLOBEX/CME")
         return
