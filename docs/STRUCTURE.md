@@ -34,3 +34,4 @@ docs/
 Notes:
 - IBKR systemd/service helpers stay under `scripts/` (ibgateway.service, ibgateway-ibc.service, ibc_config.ini, ibgateway_logs.sh, ibgateway_status.sh).
 - Legacy moon-era agents/backtesting/live CLI are archived under `legacy/` for reference; futures workflows use the scripts above.
+- Legacy tests are skipped by default via `pytest.ini` (norecursedirs=legacy); run them manually if you need to resurrect moon-era functionality.
