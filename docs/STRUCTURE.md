@@ -7,12 +7,15 @@ src/pearlalgo/
     contracts.py      # ES/NQ/GC (+ micros) IBKR contract builders
     signals.py        # MA-cross signal helper
     risk.py           # Prop-style risk state + position sizing
-    performance.py    # Structured decision/trade logging
+  performance.py    # Structured decision/trade logging
   data_providers/     # IBKR + CSV providers
   brokers/            # IBKR broker + contract utilities
   config/             # env/settings
-  strategies/         # legacy strategy examples (being phased out)
-  agents/, backtesting/, live/ # legacy moon-era scaffolding (kept for now)
+legacy/src/pearlalgo/
+  backtesting/        # archived moon-era backtest engine
+  live/               # archived live runner scaffolding
+  cli.py              # archived moon-era CLI
+  agents/             # archived agents (backtest/research/strategy loader)
 scripts/
   run_daily_signals.py   # daily signal generation + logging (futures)
   daily_workflow.py      # wrapper to run signals then report
@@ -23,10 +26,11 @@ scripts/
   test_contracts.py      # IBKR contract discovery sanity check
 legacy/
   dashboard.py, live_loop.py, live_from_signals.py, tail_brain.py  # archived scripts
+  tests/                     # archived moon-era tests
 tests/
 docs/
 ```
 
 Notes:
 - IBKR systemd/service helpers stay under `scripts/` (ibgateway.service, ibgateway-ibc.service, ibc_config.ini, ibgateway_logs.sh, ibgateway_status.sh).
-- Legacy moon-era agents/backtesting remain but are candidates for removal once the futures core fully replaces them.
+- Legacy moon-era agents/backtesting/live CLI are archived under `legacy/` for reference; futures workflows use the scripts above.

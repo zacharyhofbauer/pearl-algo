@@ -45,17 +45,22 @@ Scan multiple symbols (expects CSVs named by symbol under data_dir):
 python -m pearlalgo.cli scan --symbols ES NQ --strategy es_breakout
 ```
 
+## Futures core entrypoints
+- `python scripts/run_daily_signals.py` — fetch ES/NQ/GC (IBKR or CSV), run MA-cross, and log decisions to `data/performance/futures_decisions.csv`.
+- `python scripts/live_paper_loop.py --mode ibkr-paper` — paper loop: fetch data, generate signals, size via prop profile, route tiny orders via IBKR paper or dummy broker.
+- `python scripts/risk_monitor.py --max-daily-loss 2500` — monitor performance/journal PnL and write `RISK_HALT` when breached.
+- `python scripts/daily_workflow.py` — wrapper: run signals then build the markdown daily report.
+- `python scripts/daily_report.py` — generate markdown report from signals + performance log.
+
+Legacy (moon-era) CLI/backtesting: archived under `legacy/src/pearlalgo/` with the original CLI (`legacy/src/pearlalgo/cli.py`), agents, backtesting, and live scaffolding preserved for reference.
+
 
 ## Structure
-- `src/pearlalgo/config`: settings, symbol metadata
-- `src/pearlalgo/data`: loaders, cleaning, feature scaffolds
-- `src/pearlalgo/data_providers`: provider interfaces (local CSV, REST stubs)
-- `src/pearlalgo/brokers`: broker interfaces (dummy backtest, REST stub)
-- `src/pearlalgo/core`: events and portfolio tracking
-- `src/pearlalgo/strategies`: base + examples
-- `src/pearlalgo/agents`: backtest, research, risk, strategy, execution
-- `src/pearlalgo/models`: signal/order types
-- `src/pearlalgo/utils`: logging, calendars
+- `src/pearlalgo/futures`: futures-focused config, contracts, signals, risk, and performance logging
+- `src/pearlalgo/data_providers`: IBKR + CSV providers
+- `src/pearlalgo/brokers`: IBKR broker + contract helpers
+- `src/pearlalgo/config`: env/settings
+- `legacy/`: archived moon-era agents/backtesting/live CLI + unused scripts/tests (kept for reference)
 
 ## Roadmap (live trading)
 1. Add Interactive Brokers adapter via `ib_insync` (connection mgmt, contract builders for ES/NQ/GC/ZN/CL, order routing).
