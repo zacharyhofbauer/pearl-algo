@@ -10,8 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from pearlalgo.brokers.contracts import build_contract
-from scripts.live_paper_loop import fetch_data
+from pearlalgo.brokers.contracts import build_contract  # noqa: E402
+from scripts.live_paper_loop import fetch_data  # noqa: E402
 
 
 def test_build_contract_fields():
