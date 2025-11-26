@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 import sys
 from typing import List
 
@@ -38,8 +39,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--date", help="Report date YYYYMMDD; defaults to today", default=None)
     parser.add_argument("--expiries", nargs="*", help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols")
     parser.add_argument("--local-symbols", nargs="*", help="Optional IBKR local symbols matching symbols")
+    parser.add_argument("--ib-host", help="IBKR host override (e.g., 127.0.0.1)")
+    parser.add_argument("--ib-port", type=int, help="IBKR port override (e.g., 4002)")
+    parser.add_argument("--ib-client-id", type=int, help="IBKR clientId override for orders")
+    parser.add_argument("--ib-data-client-id", type=int, help="IBKR clientId override for data")
     parser.add_argument("--skip-report", action="store_true", help="Only run signals, skip report generation")
     args = parser.parse_args(argv)
+
+    # Propagate IB overrides via env so downstream scripts pick them up.
+    if args.ib_host:
+        os.environ["PEARLALGO_IB_HOST"] = args.ib_host
+    if args.ib_port:
+        os.environ["PEARLALGO_IB_PORT"] = str(args.ib_port)
+    if args.ib_client_id:
+        os.environ["PEARLALGO_IB_CLIENT_ID"] = str(args.ib_client_id)
+    if args.ib_data_client_id:
+        os.environ["PEARLALGO_IB_DATA_CLIENT_ID"] = str(args.ib_data_client_id)
 
     # Build args for run_daily_signals
     sig_args: List[str] = [
