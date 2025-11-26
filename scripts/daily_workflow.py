@@ -37,6 +37,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expiries", nargs="*", help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols")
     parser.add_argument("--local-symbols", nargs="*", help="Optional IBKR local symbols matching symbols")
     parser.add_argument("--trading-classes", nargs="*", help="Optional trading classes matching symbols (defaults to symbol)")
+    parser.add_argument(
+        "--performance-path",
+        default="data/performance/futures_decisions.csv",
+        help="Path to performance log for daily report.",
+    )
     parser.add_argument("--ib-host", help="IBKR host override (e.g., 127.0.0.1)")
     parser.add_argument("--ib-port", type=int, help="IBKR port override (e.g., 4002)")
     parser.add_argument("--ib-client-id", type=int, help="IBKR clientId override for orders")
@@ -92,9 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     if not signals_path.exists():
         print(f"[WARN] Expected signals file not found: {signals_path}; report may be empty")
 
-    rep_args: List[str] = []
+    rep_args: List[str] = ["--performance-path", args.performance_path]
     if args.date:
-        rep_args = ["--date", args.date]
+        rep_args += ["--date", args.date]
 
     rep_status = daily_report.main(rep_args)
     if rep_status != 0:

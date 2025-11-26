@@ -24,6 +24,7 @@ from pearlalgo.futures.performance import PerformanceRow, log_decision
 from pearlalgo.futures.risk import compute_position_size, compute_risk_state
 from pearlalgo.futures.signals import generate_signal
 from pearlalgo.risk.limits import RiskGuard, RiskLimits
+from pearlalgo.core.events import FillEvent
 
 
 def fetch_data(
@@ -79,6 +80,12 @@ def portfolio_pnls(portfolio: Portfolio, marks: dict[str, float]) -> tuple[float
             price = marks.get(sym, pos.avg_price)
             unrealized += pos.size * (price - pos.avg_price)
     return realized, unrealized
+
+
+def apply_fills(portfolio: Portfolio, fills: list[FillEvent]) -> None:
+    """Apply broker fills to the portfolio."""
+    for fill in fills:
+        portfolio.update_with_fill(fill)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -195,26 +202,6 @@ def main(argv: list[str] | None = None) -> int:
                         f"risk={risk_label} price={price}"
                     )
 
-                    log_decision(
-                        PerformanceRow(
-                            timestamp=datetime.now(timezone.utc),
-                            symbol=sym,
-                            sec_type=sec_type,
-                            strategy_name=signal["strategy_name"],
-                            signal=side,
-                            proposed_size=size,
-                            executed_size=abs(size) if args.mode == "ibkr-paper" else 0,
-                            entry_price=price,
-                            realized_pnl=realized_pnl,
-                            unrealized_pnl=unrealized_pnl,
-                            fast_ma=signal.get("fast_ma"),
-                            slow_ma=signal.get("slow_ma"),
-                            atr=atr_val,
-                            risk_state=risk_label,
-                            notes="live_paper_loop",
-                        )
-                    )
-
                     sig_df = pd.DataFrame(
                         {
                             "entry": [1 if side == "long" else -1],
@@ -229,6 +216,32 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     exec_agent.symbol = sym
                     exec_agent.execute(sig_df)
+                    # Apply any available fills from the broker (IBKR or dummy).
+                    fills = list(broker.fetch_fills())
+                    if fills:
+                        apply_fills(portfolio, fills)
+
+                    # Recompute PnL after potential fills and log decision/trade.
+                    realized_pnl_after, unrealized_pnl_after = portfolio_pnls(portfolio, {sym: price})
+                    log_decision(
+                        PerformanceRow(
+                            timestamp=datetime.now(timezone.utc),
+                            symbol=sym,
+                            sec_type=sec_type,
+                            strategy_name=signal["strategy_name"],
+                            signal=side,
+                            proposed_size=size,
+                            executed_size=abs(size) if args.mode == "ibkr-paper" else 0,
+                            entry_price=price,
+                            realized_pnl=realized_pnl_after,
+                            unrealized_pnl=unrealized_pnl_after,
+                            fast_ma=signal.get("fast_ma"),
+                            slow_ma=signal.get("slow_ma"),
+                            atr=atr_val,
+                            risk_state=risk_label,
+                            notes="live_paper_loop",
+                        )
+                    )
                 except Exception as exc:
                     print(f"[{ts}] WARN {sym} failed: {exc}")
             time.sleep(args.interval)
