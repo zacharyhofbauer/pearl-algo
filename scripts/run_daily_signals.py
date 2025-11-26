@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    today = datetime.utcnow().strftime("%Y%m%d")
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
     outfile = outdir / f"{today}_signals.csv"
 
     rows = []
@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             direction = "BUY" if latest.get("entry", 0) > 0 else "SELL" if latest.get("entry", 0) < 0 else "FLAT"
             rows.append(
                 {
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "symbol": symbol,
                     "instrument_type": sec_type,
                     "direction": direction,

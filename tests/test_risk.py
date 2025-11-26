@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -24,7 +24,8 @@ def test_sizing_vol_basic():
 def test_pnl_tracker_daily_loss():
     tracker = DailyPnLTracker()
     # Simulate a loss: buy then sell lower
-    tracker.record_fill(FillEvent(timestamp=datetime.utcnow(), symbol="ES", side="BUY", quantity=1, price=100))
-    tracker.record_fill(FillEvent(timestamp=datetime.utcnow(), symbol="ES", side="SELL", quantity=1, price=90))
+    now = datetime.now(timezone.utc)
+    tracker.record_fill(FillEvent(timestamp=now, symbol="ES", side="BUY", quantity=1, price=100))
+    tracker.record_fill(FillEvent(timestamp=now, symbol="ES", side="SELL", quantity=1, price=90))
     assert tracker.realized_today() == -10
     assert tracker.daily_loss_breached(5) is True

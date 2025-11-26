@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Dict
 
 from pearlalgo.core.events import FillEvent
@@ -19,11 +19,11 @@ class DailyPnLTracker:
         # Realized cash change: sell adds, buy subtracts.
         side_mult = 1.0 if fill.side.upper() == "SELL" else -1.0
         pnl = side_mult * fill.quantity * fill.price - fill.commission
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         self.realized_daily[today] = self.realized_daily.get(today, 0.0) + pnl
 
     def realized_today(self) -> float:
-        return self.realized_daily.get(datetime.utcnow().date(), 0.0)
+        return self.realized_daily.get(datetime.now(timezone.utc).date(), 0.0)
 
     def daily_loss_breached(self, max_daily_loss: float | None) -> bool:
         if max_daily_loss is None:
