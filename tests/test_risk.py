@@ -11,7 +11,7 @@ from pearlalgo.core.events import FillEvent
 
 def test_risk_guard_notional_limit_blocks():
     guard = RiskGuard(RiskLimits(max_order_notional=1000))
-    order = OrderEvent(timestamp=datetime.utcnow(), symbol="ES", side="BUY", quantity=10, order_type="MKT")
+    order = OrderEvent(timestamp=datetime.now(timezone.utc), symbol="ES", side="BUY", quantity=10, order_type="MKT")
     with pytest.raises(RuntimeError):
         guard.check_order(order, last_price=150)
 
