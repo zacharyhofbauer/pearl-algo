@@ -188,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
                             proposed_size=size,
                             executed_size=abs(size) if args.mode == "ibkr-paper" else 0,
                             entry_price=price,
+                            realized_pnl=0.0,
+                            unrealized_pnl=0.0,
                             fast_ma=signal.get("fast_ma"),
                             slow_ma=signal.get("slow_ma"),
                             atr=atr_val,
