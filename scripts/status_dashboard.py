@@ -10,7 +10,7 @@ ASCII status dashboard for PearlAlgo IBKR futures setup.
 """
 
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -27,7 +27,7 @@ def gateway_status() -> str:
 
 
 def gateway_log_tail(lines: int = 10) -> str:
-    return run_cmd(["journalctl", "-u", "ibgateway.service", "-n", str(lines), "--no-pager"])
+    return run_cmd(["journalctl", "-q", "-u", "ibgateway.service", "-n", str(lines), "--no-pager"])
 
 
 def latest_file(pattern: str) -> str:
@@ -51,7 +51,7 @@ def performance_summary(path: Path) -> str:
 
 def main() -> int:
     print("========= PearlAlgo Status Dashboard =========")
-    print(f"Timestamp (UTC): {datetime.utcnow().isoformat()}Z")
+    print(f"Timestamp (UTC): {datetime.now(timezone.utc).isoformat()}")
     print("----------------------------------------------")
     print(f"IB Gateway status: {gateway_status()}")
     print("----------------------------------------------")
