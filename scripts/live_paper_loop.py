@@ -152,6 +152,8 @@ def main(argv: list[str] | None = None) -> int:
         % (data_connection.client_id, ib_settings.ib_client_id, ib_settings.ib_host, ib_settings.ib_port)
     )
 
+    last_fill_ts: datetime | None = None
+
     try:
         while True:
             for idx, sym in enumerate(args.symbols):
@@ -217,9 +219,10 @@ def main(argv: list[str] | None = None) -> int:
                     exec_agent.symbol = sym
                     exec_agent.execute(sig_df)
                     # Apply any available fills from the broker (IBKR or dummy).
-                    fills = list(broker.fetch_fills())
+                    fills = list(broker.fetch_fills(since=last_fill_ts))
                     if fills:
                         apply_fills(portfolio, fills)
+                        last_fill_ts = max((f.timestamp for f in fills), default=last_fill_ts)
 
                     # Recompute PnL after potential fills and log decision/trade.
                     realized_pnl_after, unrealized_pnl_after = portfolio_pnls(portfolio, {sym: price})
