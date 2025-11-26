@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 """
-One-stop daily runner: build signals then generate the daily report.
-
-This wraps `run_daily_signals.py` and `daily_report.py` so you don't have to
-call multiple scripts manually. Futures can be specified with expiries or
-local symbols to avoid IBKR sec-def errors.
+One-stop daily runner for the futures core: build signals, then generate the daily report.
+Wraps `run_daily_signals.py` (futures-focused MA cross + logging) and `daily_report.py`.
 """
 from __future__ import annotations
 
@@ -25,12 +22,12 @@ from scripts import daily_report, run_daily_signals  # noqa: E402
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run signals then generate the daily report.")
-    parser.add_argument("--strategy", choices=["ma_cross", "breakout"], default="ma_cross")
-    parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "SPY", "QQQ"], help="Symbols to process")
+    parser.add_argument("--strategy", choices=["ma_cross"], default="ma_cross")
+    parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "GC"], help="Symbols to process")
     parser.add_argument(
         "--sec-types",
         nargs="+",
-        default=["FUT", "FUT", "STK", "STK"],
+        default=["FUT", "FUT", "FUT"],
         help="Security types matching symbols (use FUT with expiries/local symbols to avoid sec-def errors)",
     )
     parser.add_argument("--source", choices=["ibkr", "csv"], default="ibkr")
