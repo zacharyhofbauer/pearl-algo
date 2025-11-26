@@ -10,6 +10,17 @@ def main():
         ib.connect('127.0.0.1', 4002, clientId=999)
         print("Connected to IBKR\n")
         
+        # First, explore what ES contracts are available using reqMatchingSymbols
+        print("Exploring available ES contracts:")
+        try:
+            results = ib.reqMatchingSymbols('ES')
+            for res in results:
+                print(res)
+        except Exception as e:
+            print(f"✗ reqMatchingSymbols failed: {e}")
+        
+        print("\n" + "="*50 + "\n")
+        
         # Test different contract formats for ES
         print("Testing ES contract formats:")
         
@@ -43,6 +54,14 @@ def main():
         
         # Test NQ
         print("Testing NQ contract formats:")
+        try:
+            nq_results = ib.reqMatchingSymbols('NQ')
+            print("Available NQ contracts:")
+            for res in nq_results:
+                print(res)
+        except Exception as e:
+            print(f"✗ reqMatchingSymbols NQ failed: {e}")
+
         try:
             nq_test = Future('NQ', '202412', 'GLOBEX')
             details = ib.reqContractDetails(nq_test)
