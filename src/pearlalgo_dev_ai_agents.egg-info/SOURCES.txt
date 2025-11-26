@@ -35,10 +35,12 @@ src/pearlalgo/data_providers/ibkr_data_provider.py
 src/pearlalgo/data_providers/local_csv_provider.py
 src/pearlalgo/live/__init__.py
 src/pearlalgo/live/runner.py
+src/pearlalgo/live/futures_env.py
 src/pearlalgo/models/__init__.py
 src/pearlalgo/models/orders.py
 src/pearlalgo/models/signals.py
 src/pearlalgo/risk/__init__.py
+src/pearlalgo/risk/agent.py
 src/pearlalgo/risk/limits.py
 src/pearlalgo/risk/pnl.py
 src/pearlalgo/risk/sizing.py
