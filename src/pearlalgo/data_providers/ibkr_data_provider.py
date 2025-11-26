@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from ib_insync import IB
+from ib_insync import IB, Future
 
 from pearlalgo.brokers.contracts import build_contract
 from pearlalgo.config.settings import Settings, get_settings
@@ -51,6 +51,20 @@ class IBKRDataProvider(DataProvider):
             ) from exc
         return ib
 
+    def _resolve_front_future(self, ib: IB, symbol: str, exchange: str | None = None) -> Future:
+        """
+        Resolve the nearest-dated future for a symbol. Falls back to simple Future if lookup fails.
+        """
+        exch = exchange or "GLOBEX"
+        try:
+            details = ib.reqContractDetails(Future(symbol=symbol, exchange=exch, currency="USD"))
+            if details:
+                details = sorted(details, key=lambda d: d.contract.lastTradeDateOrContractMonth or "99999999")
+                return details[0].contract
+        except Exception:
+            pass
+        return Future(symbol=symbol, exchange=exch, currency="USD")
+
     def fetch_historical(  # type: ignore[override]
         self,
         symbol: str,
@@ -71,6 +85,8 @@ class IBKRDataProvider(DataProvider):
         ib = self._connect()
         try:
             contract = build_contract(symbol, sec_type=sec_type, exchange=exchange)
+            if sec_type.upper().startswith("FUT_CONT"):
+                contract = self._resolve_front_future(ib, symbol, exchange)
             # Qualify to ensure conId is resolved (important for futures/continuous).
             qualified = ib.qualifyContracts(contract)
             if qualified:
