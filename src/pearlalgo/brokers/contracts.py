@@ -16,11 +16,11 @@ def future(
     local_symbol: str | None = None,
     trading_class: str | None = None,
 ) -> Future:
-    # IB routes CME futures on GLOBEX for ES/NQ.
+    # Use CME as the routing exchange for dated futures; GLOBEX is implied.
     tc = trading_class or symbol
     return Future(
         symbol=symbol,
-        exchange=exchange or "GLOBEX",
+        exchange=exchange or "CME",
         currency=currency,
         lastTradeDateOrContractMonth=expiry,
         localSymbol=local_symbol,

@@ -118,7 +118,7 @@ class IBKRBroker(Broker):
             return build_contract(
                 symbol,
                 sec_type="FUT",
-                exchange=exchange,
+                exchange=exchange or "CME",
                 expiry=expiry,
                 local_symbol=local_symbol,
                 trading_class=trading_class or symbol,
