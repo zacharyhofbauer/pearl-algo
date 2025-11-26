@@ -1,30 +1,32 @@
-# Target Project Structure
+# Current Structure (futures-first)
 
 ```
-pearlalgo/
-  core/          # events, portfolio, common models
-  data/
-    providers/   # ibkr, csv, rest
-    pipelines.py
-    loaders.py
-  brokers/       # ibkr, prop, backtest, contracts
-  strategies/    # base + concrete
-  agents/        # execution, backtest, research, risk
-  backtesting/   # engines, slippage/fee models
-  live/          # live orchestrators, health checks
-  risk/          # limits, sizing, pnl tracking
-  config/        # settings, symbols, profiles
-  utils/         # logging, dates, misc
+src/pearlalgo/
+  futures/
+    config.py         # Prop profile defaults + optional yaml/json loader
+    contracts.py      # ES/NQ/GC (+ micros) IBKR contract builders
+    signals.py        # MA-cross signal helper
+    risk.py           # Prop-style risk state + position sizing
+    performance.py    # Structured decision/trade logging
+  data_providers/     # IBKR + CSV providers
+  brokers/            # IBKR broker + contract utilities
+  config/             # env/settings
+  strategies/         # legacy strategy examples (being phased out)
+  agents/, backtesting/, live/ # legacy moon-era scaffolding (kept for now)
 scripts/
-  ibgateway/     # systemd templates, status, ops
-  data/          # downloaders
+  run_daily_signals.py   # daily signal generation + logging (futures)
+  daily_workflow.py      # wrapper to run signals then report
+  daily_report.py        # markdown report from signals/trades
+  live_paper_loop.py     # paper loop using futures core + prop profile
+  ibkr_download_data.py  # historical data fetch (IBKR)
+  risk_monitor.py        # simple halt file watcher
+  test_contracts.py      # IBKR contract discovery sanity check
+legacy/
+  dashboard.py, live_loop.py, live_from_signals.py, tail_brain.py  # archived scripts
 tests/
 docs/
 ```
 
-## Current gaps
-- No dedicated backtesting or live orchestration modules.
-- Risk is minimal; add PnL tracking, daily loss stops, and sizing integration.
-- Broker adapters: IBKR present; prop-firm adapter is stub only.
-- Options/futures utilities: missing greeks, chains, roll logic.
-- Monitoring/metrics: missing Prometheus/log aggregation.
+Notes:
+- IBKR systemd/service helpers stay under `scripts/` (ibgateway.service, ibgateway-ibc.service, ibc_config.ini, ibgateway_logs.sh, ibgateway_status.sh).
+- Legacy moon-era agents/backtesting remain but are candidates for removal once the futures core fully replaces them.

@@ -10,23 +10,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from pearlalgo.brokers.contracts import build_contract  # noqa: E402
+from pearlalgo.futures.contracts import build_future  # noqa: E402
 from scripts.live_paper_loop import fetch_data  # noqa: E402
 
 
 def test_build_contract_fields():
-    contract = build_contract(
-        "ES",
-        sec_type="FUT",
-        expiry="202412",
-        local_symbol="ESZ4",
-        trading_class="ES",
-    )
+    contract = build_future("ES", expiry="202412", local_symbol="ESZ4")
     assert contract.exchange == "CME"
     assert contract.lastTradeDateOrContractMonth == "202412"
     assert contract.localSymbol == "ESZ4"
-    # When localSymbol is provided, tradingClass may be left unset so IBKR can resolve it.
-    assert getattr(contract, "tradingClass") is None
+    assert contract.tradingClass == "ES"
 
 
 def test_fetch_data_accepts_trading_class():
