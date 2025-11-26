@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from pydantic import Field, ValidationError
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Self
 
 
@@ -29,6 +29,8 @@ def _load_config_file(path: str | Path | None) -> Dict[str, Any]:
 class Settings(BaseSettings):
     """Centralized settings loaded from env plus optional config file."""
 
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="PEARLALGO_", extra="ignore")
+
     profile: str = Field(default="backtest")
     data_dir: str = Field(default="data")
     data_api_key: str | None = None
@@ -46,11 +48,6 @@ class Settings(BaseSettings):
     ib_data_client_id: int | None = None
     allow_live_trading: bool = False
     log_level: str = "INFO"
-
-    class Config:
-        env_file = ".env"
-        env_prefix = "PEARLALGO_"
-        extra = "ignore"
 
     @classmethod
     def from_profile(cls: type[Self], profile: str | None = None, config_file: str | Path | None = None) -> Self:

@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+src/pearlalgo_dev_ai_agents.egg-info/
 
 # Data and outputs
 data/

@@ -66,6 +66,21 @@ def compute_atr(df: pd.DataFrame, window: int = 14) -> float | None:
     return float(atr_val) if not pd.isna(atr_val) else None
 
 
+def portfolio_pnls(portfolio: Portfolio, marks: dict[str, float]) -> tuple[float, float]:
+    """
+    Compute aggregate realized/unrealized PnL from the portfolio given mark prices.
+    Realized comes from Position.realized_pnl; unrealized marks open positions.
+    """
+    realized = 0.0
+    unrealized = 0.0
+    for sym, pos in portfolio.positions.items():
+        realized += pos.realized_pnl
+        if pos.size != 0:
+            price = marks.get(sym, pos.avg_price)
+            unrealized += pos.size * (price - pos.avg_price)
+    return realized, unrealized
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Paper loop: fetch data, generate signals, size with prop profile, send tiny orders."
@@ -160,11 +175,13 @@ def main(argv: list[str] | None = None) -> int:
                         continue
 
                     price = float(df["Close"].iloc[-1])
+                    marks = {sym: price}
+                    realized_pnl, unrealized_pnl = portfolio_pnls(portfolio, marks)
                     risk_state = compute_risk_state(
                         profile,
                         day_starting_equity=profile.starting_balance,
-                        realized_pnl=0.0,
-                        unrealized_pnl=0.0,
+                        realized_pnl=realized_pnl,
+                        unrealized_pnl=unrealized_pnl,
                     )
                     size = compute_position_size(sym, risk_state, profile, price=price, side=side)
                     if size == 0:
@@ -188,8 +205,8 @@ def main(argv: list[str] | None = None) -> int:
                             proposed_size=size,
                             executed_size=abs(size) if args.mode == "ibkr-paper" else 0,
                             entry_price=price,
-                            realized_pnl=0.0,
-                            unrealized_pnl=0.0,
+                            realized_pnl=realized_pnl,
+                            unrealized_pnl=unrealized_pnl,
                             fast_ma=signal.get("fast_ma"),
                             slow_ma=signal.get("slow_ma"),
                             atr=atr_val,
