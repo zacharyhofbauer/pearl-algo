@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import calendar
 import logging
 from datetime import datetime
 from typing import Dict, Iterable
 
-from ib_insync import IB, ContFuture, Future, LimitOrder, MarketOrder, Stock, StopLimitOrder, StopOrder
+from ib_insync import IB, Future, LimitOrder, MarketOrder, Stock, StopLimitOrder, StopOrder
 
 from pearlalgo.brokers.base import Broker, BrokerConfig
+from pearlalgo.brokers.contracts import build_contract, resolve_future_contract
 from pearlalgo.config.settings import Settings, get_settings
 from pearlalgo.core.events import FillEvent, OrderEvent
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.risk.limits import RiskGuard, RiskLimits
-from pearlalgo.brokers.contracts import build_contract
 
 logger = logging.getLogger(__name__)
 
@@ -52,55 +51,13 @@ class IBKRBroker(Broker):
         self._ib.connect(self.settings.ib_host, int(self.settings.ib_port), clientId=int(self.settings.ib_client_id))
         return self._ib
 
-    @staticmethod
-    def _parse_ib_expiry(expiry: str) -> datetime | None:
-        clean = expiry.replace("-", "")
-        if len(clean) == 6:
-            try:
-                year, month = int(clean[:4]), int(clean[4:6])
-                last_day = calendar.monthrange(year, month)[1]
-                return datetime(year, month, last_day)
-            except ValueError:
-                return None
-        for fmt in ("%Y%m%d",):
-            try:
-                return datetime.strptime(clean, fmt)
-            except ValueError:
-                continue
-        return None
-
     def _resolve_front_future(self, ib: IB, symbol: str, exchange: str | None = None) -> Future:
         exch = exchange or "GLOBEX"
-        candidates = []
-        now = datetime.utcnow()
-
-        try:
-            details = ib.reqContractDetails(ContFuture(symbol=symbol, exchange=exch))
-            if not details:
-                details = ib.reqContractDetails(Future(symbol=symbol, exchange=exch, currency="USD"))
-        except Exception as exc:
-            logger.warning("IBKR contract lookup failed for %s on %s: %s", symbol, exch, exc)
-            details = []
-
-        for det in details or []:
-            expiry = det.contract.lastTradeDateOrContractMonth or ""
-            expiry_dt = self._parse_ib_expiry(expiry)
-            if not expiry_dt or expiry_dt <= now:
-                continue
-            candidates.append((expiry_dt, det.contract))
-
-        if not candidates:
-            logger.warning("No valid front-month contract found for %s on %s; using fallback future", symbol, exch)
-            return Future(symbol=symbol, exchange=exch, currency="USD")
-
-        front_contract = sorted(candidates, key=lambda item: item[0])[0][1]
-        try:
-            qualified = ib.qualifyContracts(front_contract)
-            if qualified:
-                front_contract = qualified[0]
-        except Exception as exc:
-            logger.warning("Qualification failed for %s on %s: %s", symbol, exch, exc)
-        return front_contract
+        contract = resolve_future_contract(ib, symbol, exchange=exch)
+        if contract:
+            return contract
+        logger.warning("No valid front-month contract found for %s on %s; using fallback future", symbol, exch)
+        return Future(symbol=symbol, exchange=exch, currency="USD")
 
     def _resolve_specific_future(
         self,
@@ -112,77 +69,23 @@ class IBKRBroker(Broker):
         local_symbol: str | None = None,
         trading_class: str | None = None,
     ) -> Future | None:
-        exchanges = []
-        if exchange:
-            exchanges.append(exchange)
-        exchanges.extend(["CME", "GLOBEX"])
-        seen: set[str] = set()
-        exchanges = [ex for ex in exchanges if not (ex in seen or seen.add(ex))]
-
-        candidates = []
-        now = datetime.utcnow()
-
-        for exch in exchanges:
-            reqs = []
-            if local_symbol:
-                reqs.append(
-                    Future(localSymbol=local_symbol, exchange=exch, tradingClass=trading_class or None, currency="USD")
-                )
-            if expiry or trading_class:
-                reqs.append(
-                    Future(
-                        symbol=symbol,
-                        exchange=exch,
-                        currency="USD",
-                        lastTradeDateOrContractMonth=expiry,
-                        tradingClass=trading_class or None,
-                    )
-                )
-            reqs.append(ContFuture(symbol=symbol, exchange=exch))
-
-            details = []
-            for req in reqs:
-                try:
-                    details = ib.reqContractDetails(req)
-                except Exception as exc:
-                    logger.warning("ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc)
-                    continue
-                if details:
-                    break
-
-            for det in details or []:
-                c = det.contract
-                if local_symbol and c.localSymbol != local_symbol:
-                    continue
-                if trading_class and getattr(c, "tradingClass", None) not in {trading_class, symbol}:
-                    continue
-                exp_str = c.lastTradeDateOrContractMonth or ""
-                if expiry and exp_str and not exp_str.startswith(expiry):
-                    continue
-                exp_dt = self._parse_ib_expiry(exp_str) or now
-                candidates.append((exp_dt, c))
-
-            if candidates:
-                break
-
-        if not candidates:
+        contract = resolve_future_contract(
+            ib,
+            symbol,
+            exchange=exchange,
+            target_expiry=expiry,
+            local_symbol=local_symbol,
+            trading_class=trading_class,
+        )
+        if not contract:
             logger.warning(
                 "No matching contract for %s expiry=%s local=%s tc=%s on %s",
                 symbol,
                 expiry,
                 local_symbol,
                 trading_class,
-                "/".join(exchanges),
+                exchange or "GLOBEX/CME",
             )
-            return None
-
-        contract = sorted(candidates, key=lambda item: item[0])[0][1]
-        try:
-            qualified = ib.qualifyContracts(contract)
-            if qualified:
-                contract = qualified[0]
-        except Exception as exc:
-            logger.warning("Qualification failed for %s on %s: %s", symbol, contract.exchange, exc)
         return contract
 
     def _resolve_contract(
@@ -211,7 +114,7 @@ class IBKRBroker(Broker):
                 return contract
             logger.warning("Falling back to front future for %s after explicit lookup failed", symbol)
             return self._resolve_front_future(ib, symbol, exchange)
-        if stype.startswith("FUT_CONT"):
+        if stype.startswith("FUT"):
             return self._resolve_front_future(ib, symbol, exchange)
         return build_contract(symbol, sec_type=sec_type, exchange=exchange)
 

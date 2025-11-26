@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import calendar
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -8,9 +7,9 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from ib_insync import IB, ContFuture, Future
+from ib_insync import IB, Future
 
-from pearlalgo.brokers.contracts import build_contract
+from pearlalgo.brokers.contracts import build_contract, resolve_future_contract
 from pearlalgo.config.settings import Settings, get_settings
 from pearlalgo.data_providers.base import DataProvider
 
@@ -61,60 +60,16 @@ class IBKRDataProvider(DataProvider):
             ) from exc
         return ib
 
-    @staticmethod
-    def _parse_ib_expiry(expiry: str) -> datetime | None:
-        clean = expiry.replace("-", "")
-        if len(clean) == 6:
-            try:
-                year, month = int(clean[:4]), int(clean[4:6])
-                last_day = calendar.monthrange(year, month)[1]
-                return datetime(year, month, last_day, tzinfo=timezone.utc)
-            except ValueError:
-                return None
-        for fmt in ("%Y%m%d",):
-            try:
-                return datetime.strptime(clean, fmt).replace(tzinfo=timezone.utc)
-            except ValueError:
-                continue
-        return None
-
     def _resolve_front_future(self, ib: IB, symbol: str, exchange: str | None = None) -> Future:
         """
         Resolve the nearest-dated future for a symbol. Falls back to simple Future if lookup fails.
         """
         exch = exchange or "GLOBEX"
-        candidates: list[tuple[datetime, Future]] = []
-        now = datetime.now(timezone.utc)
-
-        try:
-            details = ib.reqContractDetails(ContFuture(symbol=symbol, exchange=exch))
-            if not details:
-                details = ib.reqContractDetails(Future(symbol=symbol, exchange=exch, currency="USD"))
-        except Exception as exc:
-            logger.warning("IBKR contract lookup failed for %s on %s: %s", symbol, exch, exc)
-            details = []
-
-        for det in details or []:
-            expiry = det.contract.lastTradeDateOrContractMonth or ""
-            expiry_dt = self._parse_ib_expiry(expiry)
-            if not expiry_dt or expiry_dt <= now:
-                continue
-            candidates.append((expiry_dt, det.contract))
-
-        if not candidates:
-            logger.warning("No valid front-month contract for %s on %s; falling back to simple Future", symbol, exch)
-            return Future(symbol=symbol, exchange=exch, currency="USD")
-
-        candidates.sort(key=lambda item: item[0])
-        front_contract = candidates[0][1]
-
-        try:
-            qualified = ib.qualifyContracts(front_contract)
-            if qualified:
-                front_contract = qualified[0]
-        except Exception as exc:
-            logger.warning("Qualification failed for %s on %s: %s", symbol, exch, exc)
-        return front_contract
+        contract = resolve_future_contract(ib, symbol, exchange=exch)
+        if contract:
+            return contract
+        logger.warning("No valid front-month contract for %s on %s; falling back to simple Future", symbol, exch)
+        return Future(symbol=symbol, exchange=exch, currency="USD")
 
     def _resolve_specific_future(
         self,
@@ -130,84 +85,23 @@ class IBKRDataProvider(DataProvider):
         Use contract details to pick a dated future matching expiry/local symbol/trading class.
         Tries explicit futures (CME/GLOBEX) then continuous; warns and returns None if no match.
         """
-        exchanges = []
-        if exchange:
-            exchanges.append(exchange)
-        exchanges.extend(["CME", "GLOBEX"])
-        # Deduplicate while preserving order
-        seen: set[str] = set()
-        exchanges = [ex for ex in exchanges if not (ex in seen or seen.add(ex))]
-
-        candidates: list[tuple[datetime, Future]] = []
-        now = datetime.now(timezone.utc)
-
-        for exch in exchanges:
-            reqs = []
-            if local_symbol:
-                reqs.append(
-                    Future(
-                        localSymbol=local_symbol,
-                        exchange=exch,
-                        tradingClass=trading_class or None,
-                        currency="USD",
-                    )
-                )
-            if expiry or trading_class:
-                reqs.append(
-                    Future(
-                        symbol=symbol,
-                        exchange=exch,
-                        currency="USD",
-                        lastTradeDateOrContractMonth=expiry,
-                        tradingClass=trading_class or None,
-                    )
-                )
-            reqs.append(ContFuture(symbol=symbol, exchange=exch))
-
-            details: list = []
-            for req in reqs:
-                try:
-                    details = ib.reqContractDetails(req)
-                except Exception as exc:  # pragma: no cover - requires IB
-                    logger.warning("ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc)
-                    continue
-                if details:
-                    break
-
-            for det in details or []:
-                c = det.contract
-                if local_symbol and c.localSymbol != local_symbol:
-                    continue
-                if trading_class and getattr(c, "tradingClass", None) not in {trading_class, symbol}:
-                    continue
-                exp_str = c.lastTradeDateOrContractMonth or ""
-                if expiry and exp_str and not exp_str.startswith(expiry):
-                    continue
-                exp_dt = self._parse_ib_expiry(exp_str) or now
-                candidates.append((exp_dt, c))
-
-            if candidates:
-                break
-
-        if not candidates:
+        contract = resolve_future_contract(
+            ib,
+            symbol,
+            exchange=exchange,
+            target_expiry=expiry,
+            local_symbol=local_symbol,
+            trading_class=trading_class,
+        )
+        if not contract:
             logger.warning(
                 "No matching contract for %s expiry=%s local=%s tc=%s on %s",
                 symbol,
                 expiry,
                 local_symbol,
                 trading_class,
-                "/".join(exchanges),
+                exchange or "GLOBEX/CME",
             )
-            return None
-
-        candidates.sort(key=lambda item: item[0])
-        contract = candidates[0][1]
-        try:
-            qualified = ib.qualifyContracts(contract)
-            if qualified:
-                contract = qualified[0]
-        except Exception as exc:
-            logger.warning("Qualification failed for %s on %s: %s", symbol, contract.exchange, exc)
         return contract
 
     def fetch_historical(  # type: ignore[override]
@@ -233,7 +127,6 @@ class IBKRDataProvider(DataProvider):
         ib = self._connect()
         try:
             stype = sec_type.upper()
-            contract = None
             if stype.startswith("FUT") and (expiry or local_symbol):
                 contract = self._resolve_specific_future(
                     ib,
@@ -247,10 +140,11 @@ class IBKRDataProvider(DataProvider):
                     raise RuntimeError(
                         f"Could not resolve future for {symbol} (expiry={expiry}, local={local_symbol}, tc={trading_class})"
                     )
-            if contract is None:
-                contract = build_contract(symbol, sec_type=sec_type, exchange=exchange)
-            if stype.startswith("FUT_CONT") and not (expiry or local_symbol):
+            elif stype.startswith("FUT"):
+                # Use discovered front-month contract to avoid sec-def errors.
                 contract = self._resolve_front_future(ib, symbol, exchange)
+            else:
+                contract = build_contract(symbol, sec_type=sec_type, exchange=exchange)
             # Qualify to ensure conId is resolved (important for futures/continuous).
             if not getattr(contract, "conId", 0):
                 qualified = ib.qualifyContracts(contract)
