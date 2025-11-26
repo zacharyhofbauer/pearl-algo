@@ -113,11 +113,30 @@ class IBKRBroker(Broker):
         trading_class: str | None = None,
     ) -> Future | None:
         exch = exchange or "GLOBEX"
-        try:
-            details = ib.reqContractDetails(ContFuture(symbol=symbol, exchange=exch))
-        except Exception as exc:
-            logger.warning("ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc)
-            details = []
+        reqs = []
+        if local_symbol:
+            reqs.append(Future(localSymbol=local_symbol, exchange=exch, tradingClass=trading_class or symbol, currency="USD"))
+        if expiry or trading_class:
+            reqs.append(
+                Future(
+                    symbol=symbol,
+                    exchange=exch,
+                    currency="USD",
+                    lastTradeDateOrContractMonth=expiry,
+                    tradingClass=trading_class or symbol,
+                )
+            )
+        reqs.append(ContFuture(symbol=symbol, exchange=exch))
+
+        details = []
+        for req in reqs:
+            try:
+                details = ib.reqContractDetails(req)
+            except Exception as exc:
+                logger.warning("ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc)
+                continue
+            if details:
+                break
 
         candidates = []
         now = datetime.utcnow()
@@ -134,6 +153,14 @@ class IBKRBroker(Broker):
             candidates.append((exp_dt, c))
 
         if not candidates:
+            logger.warning(
+                "No matching contract for %s expiry=%s local=%s tc=%s on %s",
+                symbol,
+                expiry,
+                local_symbol,
+                trading_class,
+                exch,
+            )
             return None
 
         contract = sorted(candidates, key=lambda item: item[0])[0][1]

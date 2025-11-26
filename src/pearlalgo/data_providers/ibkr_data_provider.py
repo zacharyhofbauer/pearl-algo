@@ -130,11 +130,38 @@ class IBKRDataProvider(DataProvider):
         Use contract details to pick a dated future matching expiry/local symbol/trading class.
         """
         exch = exchange or "GLOBEX"
-        try:
-            details = ib.reqContractDetails(ContFuture(symbol=symbol, exchange=exch))
-        except Exception as exc:
-            logger.warning("ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc)
-            details = []
+        # Try explicit futures first, fall back to continuous.
+        reqs = []
+        if local_symbol:
+            reqs.append(
+                Future(
+                    localSymbol=local_symbol,
+                    exchange=exch,
+                    tradingClass=trading_class or symbol,
+                    currency="USD",
+                )
+            )
+        if expiry or trading_class:
+            reqs.append(
+                Future(
+                    symbol=symbol,
+                    exchange=exch,
+                    currency="USD",
+                    lastTradeDateOrContractMonth=expiry,
+                    tradingClass=trading_class or symbol,
+                )
+            )
+        reqs.append(ContFuture(symbol=symbol, exchange=exch))
+
+        details = []
+        for req in reqs:
+            try:
+                details = ib.reqContractDetails(req)
+            except Exception as exc:  # pragma: no cover - requires IB
+                logger.warning("ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc)
+                continue
+            if details:
+                break
 
         candidates: list[tuple[datetime, Future]] = []
         now = datetime.now(timezone.utc)
@@ -152,6 +179,14 @@ class IBKRDataProvider(DataProvider):
             candidates.append((exp_dt, c))
 
         if not candidates:
+            logger.warning(
+                "No matching contract for %s expiry=%s local=%s tc=%s on %s",
+                symbol,
+                expiry,
+                local_symbol,
+                trading_class,
+                exch,
+            )
             return None
 
         candidates.sort(key=lambda item: item[0])
