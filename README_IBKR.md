@@ -71,13 +71,6 @@ Outputs:
 - Broker: `pearlalgo.brokers.ibkr_broker.IBKRBroker`
 - Both read host/port/clientId and live-safety flags from settings/.env. Market-data connections default to `PEARLALGO_IB_CLIENT_ID + 1`; override with `PEARLALGO_IB_DATA_CLIENT_ID` if you need a specific value.
 
-## Futures-focused scripts
-- Contract sanity check: `python scripts/test_contracts.py` (connects to Gateway, lists ES/NQ/GC contracts, front-month lookup).
-- Daily signals: `python scripts/run_daily_signals.py --symbols ES NQ GC --source ibkr` (writes `signals/YYYYMMDD_signals.csv` + logs decisions to `data/performance/futures_decisions.csv`).
-- Paper loop: `python scripts/live_paper_loop.py --mode ibkr-paper --symbols ES NQ GC` (fetch data, MA-cross signals, prop-profile sizing, routes tiny paper orders; logs decisions).
-- Risk monitor: `python scripts/risk_monitor.py --max-daily-loss 2500` (watches performance/journal PnL and writes `RISK_HALT` on breach).
-- Daily workflow: `python scripts/daily_workflow.py` (run signals then build daily markdown report from signals + performance log).
-
 ## Profile switching
 - Backtest (default): safest, no external connections.
 - Paper: connect to Gateway on port 4002; orders still require `PEARLALGO_ALLOW_LIVE_TRADING=true` **and** `PEARLALGO_PROFILE=live` to actually route.

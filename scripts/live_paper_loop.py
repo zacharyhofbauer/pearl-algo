@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "GC"])
     parser.add_argument("--sec-types", nargs="+", default=["FUT", "FUT", "FUT"])
-    parser.add_argument("--strategy", choices=["ma_cross"], default="ma_cross")
+    parser.add_argument("--strategy", choices=["ma_cross", "sr"], default="ma_cross")
     parser.add_argument("--source", choices=["ibkr", "csv"], default="ibkr")
     parser.add_argument("--data-paths", nargs="*", help="CSV paths matching symbols when source=csv")
     parser.add_argument("--interval", type=int, default=300, help="Loop interval seconds")
@@ -241,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
                             fast_ma=signal.get("fast_ma"),
                             slow_ma=signal.get("slow_ma"),
                             risk_status=risk_label,
-                            notes="live_paper_loop",
+                            notes=f"live_paper_loop; sr={ {k: signal.get(k) for k in ('support1','resistance1','vwap')} }",
                         )
                     )
                 except Exception as exc:

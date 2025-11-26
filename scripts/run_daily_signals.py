@@ -15,7 +15,9 @@ import pandas as pd
 
 from pearlalgo.data.loaders import load_csv
 from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+from pearlalgo.futures.config import load_profile
 from pearlalgo.futures.performance import PerformanceRow, log_performance_row
+from pearlalgo.futures.risk import compute_position_size, compute_risk_state
 from pearlalgo.futures.signals import generate_signal
 
 
@@ -48,7 +50,7 @@ def get_data(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run daily futures signals and write to CSV + performance log.")
-    parser.add_argument("--strategy", choices=["ma_cross"], default="ma_cross")
+    parser.add_argument("--strategy", choices=["ma_cross", "sr"], default="ma_cross")
     parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "GC"])
     parser.add_argument("--sec-types", nargs="+", default=["FUT", "FUT", "FUT"])
     parser.add_argument("--source", choices=["ibkr", "csv"], default="ibkr")
@@ -59,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--trading-classes", nargs="*", help="Optional trading classes matching symbols (defaults to symbol)")
     args = parser.parse_args(argv)
 
+    profile = load_profile()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
@@ -90,6 +93,13 @@ def main(argv: list[str] | None = None) -> int:
             signal = generate_signal(symbol, df, strategy_name=args.strategy, fast=20, slow=50)
             side = signal["side"]
             price = float(df["Close"].iloc[-1])
+            risk_state = compute_risk_state(
+                profile,
+                day_start_equity=profile.starting_balance,
+                realized_pnl=0.0,
+                unrealized_pnl=0.0,
+            )
+            size = compute_position_size(symbol, side, profile, risk_state, price=price)
             direction = "BUY" if side == "long" else "SELL" if side == "short" else "FLAT"
             rows.append(
                 {
@@ -97,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
                     "symbol": symbol,
                     "instrument_type": sec_type,
                     "direction": direction,
-                    "size_hint": 1,
+                    "size_hint": abs(size),
                 }
             )
             log_performance_row(
@@ -107,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
                     sec_type=sec_type,
                     strategy_name=signal["strategy_name"],
                     side=side,
-                    requested_size=1,
+                    requested_size=size,
                     filled_size=0,
                     entry_price=price,
                     realized_pnl=None,
@@ -115,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
                     fast_ma=signal.get("fast_ma"),
                     slow_ma=signal.get("slow_ma"),
                     risk_status="SAFE" if side != "flat" else "NEUTRAL",
-                    notes="daily signal",
+                    notes=f"daily signal; sr={ {k: signal.get(k) for k in ('support1','resistance1','vwap')} }",
                 )
             )
         except Exception as exc:
