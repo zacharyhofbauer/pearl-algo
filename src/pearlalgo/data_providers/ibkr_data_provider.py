@@ -244,8 +244,9 @@ class IBKRDataProvider(DataProvider):
                     trading_class=trading_class or symbol,
                 )
                 if contract is None:
-                    logger.warning("Falling back to front future for %s after explicit lookup failed", symbol)
-                    contract = self._resolve_front_future(ib, symbol, exchange)
+                    raise RuntimeError(
+                        f"Could not resolve future for {symbol} (expiry={expiry}, local={local_symbol}, tc={trading_class})"
+                    )
             if contract is None:
                 contract = build_contract(symbol, sec_type=sec_type, exchange=exchange)
             if stype.startswith("FUT_CONT") and not (expiry or local_symbol):
