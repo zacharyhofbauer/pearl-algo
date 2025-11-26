@@ -6,6 +6,11 @@ __pycache__/
 # Data and outputs
 data/
 logs/
+signals/
+journal/
+telemetry/
+reports/
+state_cache/
 
 # IB/IBC artifacts (not for VCS)
 Jts/

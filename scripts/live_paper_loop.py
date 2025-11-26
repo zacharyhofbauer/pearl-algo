@@ -15,6 +15,8 @@ from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
 from pearlalgo.risk.limits import RiskGuard, RiskLimits
 from pearlalgo.risk.pnl import DailyPnLTracker
 from pearlalgo.strategies.daily import MovingAverageCross, Breakout
+from pearlalgo.utils.brain_log import brain_log
+from pearlalgo.utils.journal import append_trade
 
 
 def fetch_data(symbol: str, sec_type: str, source: str, data_path: Path | None = None):
@@ -86,11 +88,66 @@ def main(argv: list[str] | None = None) -> int:
                         continue
                     size = args.tiny_size
                     print(f"[{ts}] {sym} {sec_type} {args.strategy}: sending {direction} qty={size} (paper)")
+                    brain_log(
+                        {
+                            "symbol": sym,
+                            "sec_type": sec_type,
+                            "strategy": args.strategy,
+                            "direction": direction,
+                            "size": size,
+                            "features": {
+                                "entry": float(entry),
+                                "price": float(df["Close"].iloc[-1]),
+                            },
+                            "risk": {
+                                "max_daily_loss": args.max_daily_loss,
+                                "pnl_realized": risk_guard.pnl_tracker.realized_today(),
+                            },
+                        }
+                    )
+                    append_trade(
+                        {
+                            "symbol": sym,
+                            "direction": direction,
+                            "size": size,
+                            "price": float(df["Close"].iloc[-1]),
+                            "reason": args.strategy,
+                            "pnl_after": risk_guard.pnl_tracker.realized_today(),
+                            "risk_state": "ok",
+                        }
+                    )
                     # Build a one-row signals df for ExecutionAgent
                     sig_df = latest.to_frame().T
                     sig_df.index = [df.index[-1]]
                     sig_df["entry"] = 1 if direction == "BUY" else -1
                     sig_df["size"] = size
+                    # Snapshot/telemetry
+                    snapshot_dir = Path("state_cache")
+                    snapshot_dir.mkdir(parents=True, exist_ok=True)
+                    snap_path = snapshot_dir / f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.pkl"
+                    import pickle
+                    pickle.dump(
+                        {
+                            "symbol": sym,
+                            "sec_type": sec_type,
+                            "strategy": args.strategy,
+                            "entry": entry,
+                            "close": float(df["Close"].iloc[-1]),
+                            "risk_ok": True,
+                        },
+                        snap_path.open("wb"),
+                    )
+                    telem_dir = Path("telemetry")
+                    telem_dir.mkdir(parents=True, exist_ok=True)
+                    with (telem_dir / "strategy_stream.jsonl").open("a") as f:
+                        f.write(
+                            (
+                                f'{{"timestamp":"{ts}","symbol":"{sym}","strategy":"{args.strategy}",'
+                                f'"direction":"{direction}","signal_strength":{abs(entry)},'
+                                f'"raw_indicators":{{"entry":{entry}}}}}\n'
+                            )
+                        )
+
                     exec_agent.symbol = sym
                     exec_agent.execute(sig_df)
                 except Exception as exc:
