@@ -4,7 +4,7 @@ from typing import Any, Literal, Optional
 
 import pandas as pd
 
-from pearlalgo.futures.sr import Bar, calculate_support_resistance
+from pearlalgo.futures.sr import Bar, calculate_support_resistance, sr_signal_from_levels
 
 Side = Literal["long", "short", "flat"]
 
@@ -36,24 +36,9 @@ def sr_strategy(symbol: str, df: pd.DataFrame, *, fast: int = 20, slow: int = 50
     ]
     sr_levels = calculate_support_resistance(bars)
     close = float(df["Close"].iloc[-1])
-    vwap = sr_levels.get("vwap")
-    support = sr_levels.get("support1")
-    resistance = sr_levels.get("resistance1")
-    side: Side = "flat"
-    comment = "flat"
-
-    def near(level: Optional[float]) -> bool:
-        if level is None:
-            return False
-        return abs(close - level) <= level * tolerance
-
-    if vwap:
-        if close > vwap and near(support):
-            side = "long"
-            comment = "long above vwap near support1"
-        elif close < vwap and near(resistance):
-            side = "short"
-            comment = "short below vwap near resistance1"
+    signal_obj = sr_signal_from_levels(close, sr_levels, tolerance=tolerance)
+    side: Side = signal_obj.signal_type if signal_obj.signal_type in {"long", "short"} else "flat"
+    comment = signal_obj.context.get("comment", "") if signal_obj.context else ""
 
     # Optional MA trend filter
     trend = ma_cross_signal(df, fast=fast, slow=slow)
@@ -70,9 +55,12 @@ def sr_strategy(symbol: str, df: pd.DataFrame, *, fast: int = 20, slow: int = 50
         "side": side,
         "fast_ma": float(df["Close"].rolling(fast).mean().iloc[-1]) if len(df) >= fast else None,
         "slow_ma": float(df["Close"].rolling(slow).mean().iloc[-1]) if len(df) >= slow else None,
-        "support1": support,
-        "resistance1": resistance,
-        "vwap": vwap,
+        "support1": sr_levels.get("support1"),
+        "resistance1": sr_levels.get("resistance1"),
+        "vwap": sr_levels.get("vwap"),
+        "entry_price": signal_obj.entry_price,
+        "stop_price": signal_obj.stop_price,
+        "target_price": signal_obj.target_price,
         "comment": comment,
         "params": {"fast": fast, "slow": slow, "tolerance": tolerance},
     }

@@ -21,9 +21,7 @@ def test_build_future_fields():
 
 def test_risk_state_and_position_size():
     profile = PropProfile()
-    state = compute_risk_state(
-        profile, day_start_equity=profile.starting_balance, realized_pnl=-500, unrealized_pnl=0
-    )
+    state = compute_risk_state(profile, day_start_equity=profile.starting_balance, realized_pnl=-500, unrealized_pnl=0)
     assert state.status == "OK"
     size_ok = compute_position_size("ES", "long", profile, state, price=5000)
     assert size_ok > 0

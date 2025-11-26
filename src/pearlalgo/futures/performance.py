@@ -20,6 +20,8 @@ class PerformanceRow:
     side: str
     requested_size: int
     filled_size: int
+    entry_time: Optional[datetime] = None
+    exit_time: Optional[datetime] = None
     entry_price: Optional[float] = None
     exit_price: Optional[float] = None
     realized_pnl: Optional[float] = None
@@ -27,6 +29,9 @@ class PerformanceRow:
     fast_ma: Optional[float] = None
     slow_ma: Optional[float] = None
     risk_status: str = "UNKNOWN"
+    drawdown_remaining: Optional[float] = None
+    trade_reason: str | None = None
+    emotion_state: str | None = None
     notes: str | None = None
 
 
@@ -38,6 +43,8 @@ DEFAULT_COLUMNS = [
     "side",
     "requested_size",
     "filled_size",
+    "entry_time",
+    "exit_time",
     "entry_price",
     "exit_price",
     "realized_pnl",
@@ -45,6 +52,9 @@ DEFAULT_COLUMNS = [
     "fast_ma",
     "slow_ma",
     "risk_status",
+    "drawdown_remaining",
+    "trade_reason",
+    "emotion_state",
     "notes",
 ]
 
@@ -66,6 +76,12 @@ def log_performance_row(row: PerformanceRow, path: Path | str = DEFAULT_PERF_PAT
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
     data["timestamp"] = ts.isoformat()
+    if row.entry_time:
+        et = row.entry_time if row.entry_time.tzinfo else row.entry_time.replace(tzinfo=timezone.utc)
+        data["entry_time"] = et.isoformat()
+    if row.exit_time:
+        xt = row.exit_time if row.exit_time.tzinfo else row.exit_time.replace(tzinfo=timezone.utc)
+        data["exit_time"] = xt.isoformat()
     with outfile.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=DEFAULT_COLUMNS)
         writer.writerow({col: data.get(col) for col in DEFAULT_COLUMNS})

@@ -15,6 +15,15 @@ class Bar:
     volume: float
 
 
+@dataclass
+class SRSignal:
+    signal_type: str  # long | short | flat
+    entry_price: float | None
+    stop_price: float | None
+    target_price: float | None
+    context: Dict[str, float]
+
+
 def identify_pivots(bars: Iterable[Bar], lookback: int = 20, sensitivity: int = 3) -> List[Tuple[str, float]]:
     """
     Identify pivot highs/lows in a sequence of bars.
@@ -49,6 +58,20 @@ def compute_vwap(bars: Iterable[Bar]) -> float:
     return total_pv / total_vol if total_vol > 0 else 0.0
 
 
+def compute_daily_pivots(prev_close: float, prev_high: float, prev_low: float) -> Dict[str, float]:
+    """
+    Floor-trader pivots: P, R1-3, S1-3.
+    """
+    p = (prev_high + prev_low + prev_close) / 3
+    r1 = 2 * p - prev_low
+    s1 = 2 * p - prev_high
+    r2 = p + (prev_high - prev_low)
+    s2 = p - (prev_high - prev_low)
+    r3 = prev_high + 2 * (p - prev_low)
+    s3 = prev_low - 2 * (prev_high - p)
+    return {"pivot": p, "r1": r1, "r2": r2, "r3": r3, "s1": s1, "s2": s2, "s3": s3}
+
+
 def chartprime_sr(indicators: Dict[str, float] | None = None) -> Dict[str, float]:
     """
     Stub for external high-timeframe support/resistance (e.g., ChartPrime).
@@ -66,7 +89,6 @@ def calculate_support_resistance(bars: Iterable[Bar], indicators: Dict[str, floa
     pivots = identify_pivots(bar_list)
     vwap = compute_vwap(bar_list)
 
-    # Separate highs/lows
     pivot_highs = [(ts, price) for ts, price in pivots if price >= max(b.low for b in bar_list)]
     pivot_lows = [(ts, price) for ts, price in pivots if price <= max(b.high for b in bar_list)]
 
@@ -80,3 +102,27 @@ def calculate_support_resistance(bars: Iterable[Bar], indicators: Dict[str, floa
     }
     sr.update(chartprime_sr(indicators))
     return sr
+
+
+def sr_signal_from_levels(close: float, sr: Dict[str, float], tolerance: float = 0.002) -> SRSignal:
+    support = sr.get("support1")
+    resistance = sr.get("resistance1")
+    vwap = sr.get("vwap")
+
+    def near(level: float | None) -> bool:
+        if level is None:
+            return False
+        return abs(close - level) <= level * tolerance
+
+    if vwap and close > vwap and near(support):
+        entry = close
+        stop = support * (1 - tolerance) if support else None
+        target = sr.get("resistance1") or sr.get("r1")
+        return SRSignal("long", entry, stop, target, context=sr)
+    if vwap and close < vwap and near(resistance):
+        entry = close
+        stop = resistance * (1 + tolerance) if resistance else None
+        target = sr.get("support1") or sr.get("s1")
+        return SRSignal("short", entry, stop, target, context=sr)
+
+    return SRSignal("flat", None, None, None, context=sr)

@@ -198,7 +198,16 @@ def main(argv: list[str] | None = None) -> int:
                         continue
 
                     atr_val = compute_atr(df)
-                    risk_label = "SAFE" if risk_state.status == "OK" else "NEAR_LIMIT" if risk_state.status == "NEAR_LIMIT" else "BLOCKED_DD"
+                    if risk_state.status == "OK":
+                        risk_label = "SAFE"
+                    elif risk_state.status == "NEAR_LIMIT":
+                        risk_label = "NEAR_LIMIT"
+                    elif risk_state.status == "HARD_STOP":
+                        risk_label = "BLOCKED_DD"
+                    elif risk_state.status in {"COOLDOWN", "PAUSED"}:
+                        risk_label = risk_state.status
+                    else:
+                        risk_label = "UNKNOWN"
                     print(
                         f"[{ts}] {sym} {sec_type} {args.strategy}: {side.upper()} qty={abs(size)} "
                         f"risk={risk_label} price={price}"
@@ -229,6 +238,8 @@ def main(argv: list[str] | None = None) -> int:
                     log_performance_row(
                         PerformanceRow(
                             timestamp=datetime.now(timezone.utc),
+                            entry_time=None,
+                            exit_time=None,
                             symbol=sym,
                             sec_type=sec_type,
                             strategy_name=signal["strategy_name"],
@@ -241,6 +252,9 @@ def main(argv: list[str] | None = None) -> int:
                             fast_ma=signal.get("fast_ma"),
                             slow_ma=signal.get("slow_ma"),
                             risk_status=risk_label,
+                            drawdown_remaining=risk_state.remaining_loss_buffer,
+                            trade_reason=signal.get("comment"),
+                            emotion_state=risk_state.status if risk_state.status in {"COOLDOWN", "PAUSED"} else "normal",
                             notes=f"live_paper_loop; sr={ {k: signal.get(k) for k in ('support1','resistance1','vwap')} }",
                         )
                     )
