@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+"""
+Generate daily futures signals and log decisions using the futures core modules.
+- Fetch data (IBKR or CSV)
+- Run MA-cross signals
+- Log decision rows for later review/LLM training
+"""
+
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 
-from pearlalgo.strategies.daily import MovingAverageCross, Breakout
-from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
 from pearlalgo.data.loaders import load_csv
+from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+from pearlalgo.futures.performance import PerformanceRow, log_decision
+from pearlalgo.futures.signals import generate_signal
 
 
 def get_data(
@@ -25,7 +33,6 @@ def get_data(
         if not path:
             raise ValueError("CSV source requires --data-path")
         return load_csv(path)
-    # default: IBKR historical fetch
     provider = IBKRDataProvider()
     df = provider.fetch_historical(
         symbol,
@@ -39,21 +46,11 @@ def get_data(
     return df
 
 
-def run_strategy(strategy_name: str, data: pd.DataFrame):
-    if strategy_name == "ma_cross":
-        strat = MovingAverageCross(fast=10, slow=20)
-    else:
-        strat = Breakout(lookback=20)
-    sigs = strat.run(data)
-    # attach close for sizing/reference
-    return sigs
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run daily signals and write to CSV.")
-    parser.add_argument("--strategy", choices=["ma_cross", "breakout"], default="ma_cross")
-    parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "SPY", "QQQ"])
-    parser.add_argument("--sec-types", nargs="+", default=["FUT_CONT", "FUT_CONT", "STK", "STK"])
+    parser.add_argument("--strategy", choices=["ma_cross"], default="ma_cross")
+    parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "GC"])
+    parser.add_argument("--sec-types", nargs="+", default=["FUT", "FUT", "FUT"])
     parser.add_argument("--source", choices=["ibkr", "csv"], default="ibkr")
     parser.add_argument("--data-paths", nargs="*", help="CSV paths matching symbols order when source=csv")
     parser.add_argument("--outdir", default="signals")
