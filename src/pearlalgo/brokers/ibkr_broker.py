@@ -209,14 +209,8 @@ class IBKRBroker(Broker):
             )
             if contract:
                 return contract
-            return build_contract(
-                symbol,
-                sec_type="FUT",
-                exchange=exchange or "CME",
-                expiry=expiry,
-                local_symbol=local_symbol,
-                trading_class=trading_class or symbol,
-            )
+            logger.warning("Falling back to front future for %s after explicit lookup failed", symbol)
+            return self._resolve_front_future(ib, symbol, exchange)
         if stype.startswith("FUT_CONT"):
             return self._resolve_front_future(ib, symbol, exchange)
         return build_contract(symbol, sec_type=sec_type, exchange=exchange)

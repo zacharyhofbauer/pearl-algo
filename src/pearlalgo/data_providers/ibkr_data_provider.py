@@ -232,7 +232,9 @@ class IBKRDataProvider(DataProvider):
         """
         ib = self._connect()
         try:
-            if sec_type.upper().startswith("FUT") and (expiry or local_symbol):
+            stype = sec_type.upper()
+            contract = None
+            if stype.startswith("FUT") and (expiry or local_symbol):
                 contract = self._resolve_specific_future(
                     ib,
                     symbol,
@@ -240,17 +242,13 @@ class IBKRDataProvider(DataProvider):
                     expiry=expiry,
                     local_symbol=local_symbol,
                     trading_class=trading_class or symbol,
-                ) or build_contract(
-                    symbol,
-                    sec_type="FUT",
-                    exchange=exchange or "CME",
-                    expiry=expiry,
-                    local_symbol=local_symbol,
-                    trading_class=trading_class or symbol,
                 )
-            else:
+                if contract is None:
+                    logger.warning("Falling back to front future for %s after explicit lookup failed", symbol)
+                    contract = self._resolve_front_future(ib, symbol, exchange)
+            if contract is None:
                 contract = build_contract(symbol, sec_type=sec_type, exchange=exchange)
-            if sec_type.upper().startswith("FUT_CONT") and not (expiry or local_symbol):
+            if stype.startswith("FUT_CONT") and not (expiry or local_symbol):
                 contract = self._resolve_front_future(ib, symbol, exchange)
             # Qualify to ensure conId is resolved (important for futures/continuous).
             if not getattr(contract, "conId", 0):
