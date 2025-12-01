@@ -60,6 +60,20 @@ python scripts/workflow.py --dashboard
 python scripts/status_dashboard.py --live
 ```
 
+**🤖 Automated Trading (NEW):**
+```bash
+# Run automated trading agent manually (for testing)
+python scripts/automated_trading.py --symbols ES NQ GC --strategy sr
+
+# Setup as systemd service for 24/7 operation
+sudo bash scripts/setup_automated_trading.sh
+
+# Check system health
+python scripts/health_check.py
+
+# See docs/AUTOMATED_TRADING.md for full setup guide
+```
+
 Backtest a registered strategy (defaults to backtest profile):
 ```bash
 python -m pearlalgo.cli backtest --data data/futures/ES_15m_sample.csv --strategy es_breakout --symbol ES --cash 100000 --commission 0.0
