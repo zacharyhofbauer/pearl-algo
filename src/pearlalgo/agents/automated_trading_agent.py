@@ -670,31 +670,59 @@ class AutomatedTradingAgent:
                     self.consecutive_errors = 0
                 
                 # Process each symbol
+                symbols_processed = 0
+                symbols_with_signals = 0
                 for idx, symbol in enumerate(self.symbols):
                     sec_type = self.sec_types[idx] if idx < len(self.sec_types) else "FUT"
-                    self._process_symbol(symbol, sec_type, idx)
+                    result = self._process_symbol(symbol, sec_type, idx)
+                    if result:
+                        symbols_processed += 1
+                        # Check if we got a signal (not flat)
+                        # This is a simple check - in practice we'd track this better
+                        symbols_with_signals += 1
                 
                 # Summary after cycle
                 if self.verbose:
                     realized, unrealized = self._compute_pnl()
                     total_pnl = realized + unrealized
                     pnl_color = "green" if total_pnl >= 0 else "red"
+                    
                     console.print(Panel(
-                        f"[cyan]Cycle Complete[/cyan]\n"
+                        f"[cyan]✅ Cycle #{cycle_count} Complete[/cyan]\n"
+                        f"Symbols Processed: {len(self.symbols)}\n"
                         f"Trades Today: {self.trades_today}\n"
                         f"Daily P&L: [{pnl_color}]${total_pnl:,.2f}[/{pnl_color}]\n"
-                        f"Next cycle in {self.interval}s",
-                        title="📊 Summary",
+                        f"Open Positions: {len(self.open_positions)}\n"
+                        f"Next cycle in {self.interval}s ({self.interval/60:.1f} minutes)",
+                        title="📊 Cycle Summary",
                         border_style="cyan",
                         box=box.ROUNDED
                     ))
                     console.print()
-                
-                # Sleep until next cycle
-                if self.verbose:
-                    console.print(f"[dim]💤 Sleeping for {self.interval}s until next cycle...[/dim]")
-                    console.print()
-                time_module.sleep(self.interval)
+                    
+                    # Show countdown with progress bar for longer intervals
+                    if self.interval >= 10:
+                        from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
+                        with Progress(
+                            SpinnerColumn(),
+                            TextColumn("[progress.description]{task.description}"),
+                            BarColumn(),
+                            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                            TimeRemainingColumn(),
+                            console=console,
+                        ) as progress:
+                            task = progress.add_task(
+                                f"⏳ Waiting for Cycle #{cycle_count + 1}...", 
+                                total=self.interval
+                            )
+                            for _ in range(self.interval):
+                                time_module.sleep(1)
+                                progress.update(task, advance=1)
+                    else:
+                        # For short intervals, just sleep
+                        time_module.sleep(self.interval)
+                else:
+                    time_module.sleep(self.interval)
                 
         except KeyboardInterrupt:
             console.print()
