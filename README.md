@@ -21,10 +21,34 @@ cp .env.example .env
 
 ## 🚀 Quickstart (Easy Workflow)
 
-**NEW: Interactive Menu System**
+**NEW: Unified CLI (Recommended)**
 ```bash
 cd ~/pearlalgo-dev-ai-agents
 source .venv/bin/activate
+pip install -e .  # Install CLI command
+
+# Show system status
+pearlalgo status
+
+# Live dashboard
+pearlalgo dashboard
+
+# Generate signals
+pearlalgo signals --strategy sr --symbols ES NQ GC
+
+# Start automated trading
+pearlalgo trade auto --symbols ES NQ --strategy sr --interval 300
+
+# Gateway management
+pearlalgo gateway start --wait
+pearlalgo gateway status
+
+# See all commands
+pearlalgo --help
+```
+
+**Legacy: Interactive Menu System** (still works)
+```bash
 python scripts/workflow.py
 ```
 

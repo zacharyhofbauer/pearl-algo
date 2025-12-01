@@ -15,6 +15,7 @@ Requires-Dist: python-dotenv>=1.0
 Requires-Dist: rich>=13.7
 Requires-Dist: ib-insync>=0.9.86
 Requires-Dist: scipy>=1.12
+Requires-Dist: click>=8.1
 Provides-Extra: backtrader
 Requires-Dist: backtrader>=1.9.78.123; extra == "backtrader"
 Provides-Extra: dev
@@ -42,10 +43,85 @@ pip install -e .
 cp .env.example .env
 ```
 
-## Quickstart
+## 🚀 Quickstart (Easy Workflow)
+
+**NEW: Unified CLI (Recommended)**
 ```bash
-python -m pearlalgo.cli list-strategies
-python -m pearlalgo.cli backtest --data data/futures/ES_15m_sample.csv --strategy es_breakout --symbol ES
+cd ~/pearlalgo-dev-ai-agents
+source .venv/bin/activate
+pip install -e .  # Install CLI command
+
+# Show system status
+pearlalgo status
+
+# Live dashboard
+pearlalgo dashboard
+
+# Generate signals
+pearlalgo signals --strategy sr --symbols ES NQ GC
+
+# Start automated trading
+pearlalgo trade auto --symbols ES NQ --strategy sr --interval 300
+
+# Gateway management
+pearlalgo gateway start --wait
+pearlalgo gateway status
+
+# See all commands
+pearlalgo --help
+```
+
+**Legacy: Interactive Menu System** (still works)
+```bash
+python scripts/workflow.py
+```
+
+This opens an interactive menu where you can:
+- Generate daily signals & reports
+- View status dashboard
+- Run paper trading loops
+- Manage IB Gateway
+- View latest signals/reports
+
+**Setup & Management Assistant:**
+```bash
+# Interactive setup and management
+python scripts/setup_assistant.py
+
+# Quick commands
+python scripts/setup_assistant.py --status          # Show system status
+python scripts/setup_assistant.py --quick-start    # Ensure Gateway is running
+python scripts/setup_assistant.py --start-gateway   # Start IB Gateway
+python scripts/setup_assistant.py --restart-gateway # Restart Gateway
+python scripts/setup_assistant.py --test-connection # Test API connection
+```
+
+**Quick Commands:**
+```bash
+# Generate signals (default: sr strategy)
+python scripts/workflow.py --signals
+
+# View dashboard
+python scripts/workflow.py --dashboard
+
+# View live-updating dashboard
+python scripts/status_dashboard.py --live
+```
+
+**🤖 Automated Trading:**
+```bash
+# Run automated trading agent
+python scripts/automated_trading.py --symbols ES NQ --strategy sr --interval 300
+
+# Micro contracts (fast pace, 1min intervals)
+bash scripts/run_micro_strategy.sh
+
+# Diagnostics
+python scripts/debug_trading.py      # Check configuration
+python scripts/health_check.py     # System health
+python scripts/status_dashboard.py  # Real-time dashboard
+
+# See docs/AUTOMATED_TRADING.md for full guide
 ```
 
 Backtest a registered strategy (defaults to backtest profile):
