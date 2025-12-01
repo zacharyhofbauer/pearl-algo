@@ -6,10 +6,28 @@ from __future__ import annotations
 Beautiful Rich-based terminal dashboard with real-time updates.
 """
 
+import sys
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
+
+# Add project root to path (for editable install)
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+# Ensure we're in project root and it's in path
+import os
+original_cwd = os.getcwd()
+try:
+    os.chdir(PROJECT_ROOT)
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    # Remove any conflicting pearlalgo modules from cache (but keep submodules)
+    modules_to_remove = [k for k in list(sys.modules.keys()) if k == 'pearlalgo']
+    for mod in modules_to_remove:
+        del sys.modules[mod]
+except Exception:
+    pass  # If chdir fails, continue anyway
 
 import pandas as pd
 from rich.console import Console

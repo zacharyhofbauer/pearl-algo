@@ -25,7 +25,7 @@ cp .env.example .env
 ```bash
 cd ~/pearlalgo-dev-ai-agents
 source .venv/bin/activate
-python scripts/pearlalgo.py
+python scripts/workflow.py
 ```
 
 This opens an interactive menu where you can:
@@ -35,13 +35,26 @@ This opens an interactive menu where you can:
 - Manage IB Gateway
 - View latest signals/reports
 
+**Setup & Management Assistant:**
+```bash
+# Interactive setup and management
+python scripts/setup_assistant.py
+
+# Quick commands
+python scripts/setup_assistant.py --status          # Show system status
+python scripts/setup_assistant.py --quick-start    # Ensure Gateway is running
+python scripts/setup_assistant.py --start-gateway   # Start IB Gateway
+python scripts/setup_assistant.py --restart-gateway # Restart Gateway
+python scripts/setup_assistant.py --test-connection # Test API connection
+```
+
 **Quick Commands:**
 ```bash
 # Generate signals (default: sr strategy)
-python scripts/pearlalgo.py --signals
+python scripts/workflow.py --signals
 
 # View dashboard
-python scripts/pearlalgo.py --dashboard
+python scripts/workflow.py --dashboard
 
 # View live-updating dashboard
 python scripts/status_dashboard.py --live

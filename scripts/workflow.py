@@ -11,6 +11,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Add project root to path
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -46,7 +52,7 @@ def run_daily_signals(strategy: str = "sr"):
     console.print(f"\n[bold cyan]📊 Generating Daily Signals ({strategy.upper()} strategy)...[/bold cyan]\n")
     
     cmd = [sys.executable, "scripts/daily_workflow.py", "--strategy", strategy]
-    result = subprocess.run(cmd, cwd=Path(__file__).parent.parent)
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT)
     
     if result.returncode == 0:
         console.print("[bold green]✅ Signals generated successfully![/bold green]\n")
@@ -60,7 +66,7 @@ def view_dashboard():
     """View status dashboard."""
     console.print("\n[bold cyan]📈 Loading Status Dashboard...[/bold cyan]\n")
     cmd = [sys.executable, "scripts/status_dashboard.py"]
-    subprocess.run(cmd, cwd=Path(__file__).parent.parent)
+    subprocess.run(cmd, cwd=PROJECT_ROOT)
 
 
 def run_paper_loop():
@@ -92,7 +98,7 @@ def run_paper_loop():
     ]
     
     try:
-        subprocess.run(cmd, cwd=Path(__file__).parent.parent)
+        subprocess.run(cmd, cwd=PROJECT_ROOT)
     except KeyboardInterrupt:
         console.print("\n[bold yellow]⚠️  Paper loop stopped by user[/bold yellow]\n")
 
@@ -101,14 +107,14 @@ def download_data():
     """Download historical data."""
     console.print("\n[bold cyan]📥 Downloading Historical Data...[/bold cyan]\n")
     cmd = [sys.executable, "scripts/ibkr_download_data.py"]
-    subprocess.run(cmd, cwd=Path(__file__).parent.parent)
+    subprocess.run(cmd, cwd=PROJECT_ROOT)
 
 
 def test_gateway():
     """Test IB Gateway connection."""
     console.print("\n[bold cyan]🔍 Testing IB Gateway Connection...[/bold cyan]\n")
     cmd = [sys.executable, "scripts/test_contracts.py"]
-    result = subprocess.run(cmd, cwd=Path(__file__).parent.parent)
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT)
     return result.returncode
 
 
@@ -193,7 +199,7 @@ def view_signals():
     """View latest signals."""
     from datetime import datetime
     today = datetime.now().strftime("%Y%m%d")
-    signals_file = Path(__file__).parent.parent / "signals" / f"{today}_signals.csv"
+    signals_file = PROJECT_ROOT / "signals" / f"{today}_signals.csv"
     
     if not signals_file.exists():
         console.print(f"[bold red]❌ No signals file found for today ({today})[/bold red]\n")
@@ -226,7 +232,7 @@ def view_report():
     """View latest report."""
     from datetime import datetime
     today = datetime.now().strftime("%Y%m%d")
-    report_file = Path(__file__).parent.parent / "reports" / f"{today}_report.md"
+    report_file = PROJECT_ROOT / "reports" / f"{today}_report.md"
     
     if not report_file.exists():
         console.print(f"[bold red]❌ No report found for today ({today})[/bold red]\n")
