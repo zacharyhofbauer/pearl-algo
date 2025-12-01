@@ -63,8 +63,10 @@ class IBKRDataProvider(DataProvider):
     def _resolve_front_future(self, ib: IB, symbol: str, exchange: str | None = None) -> Future:
         """
         Resolve the nearest-dated future for a symbol. Falls back to simple Future if lookup fails.
+        Uses symbol-specific exchange mapping for micro contracts.
         """
-        exch = exchange or "CME"
+        from pearlalgo.brokers.contracts import _default_exchange_for_symbol
+        exch = exchange or _default_exchange_for_symbol(symbol)
         contract = resolve_future_contract(ib, symbol, exchange=exch)
         if contract:
             return contract

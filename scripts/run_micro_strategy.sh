@@ -20,9 +20,11 @@ echo "Interval: 60s (1 minute - fast paced)"
 echo "Contract Size: 3-5 micro contracts"
 echo ""
 
+# Use MGC, MYM, MCL (skip MRTY - not available as micro contract)
+# Alternative: Use RTY (regular) with smaller size if you want Russell exposure
 python scripts/automated_trading.py \
-  --symbols MGC MYM MRTY MCL \
-  --sec-types FUT FUT FUT FUT \
+  --symbols MGC MYM MCL \
+  --sec-types FUT FUT FUT \
   --strategy sr \
   --interval 60 \
   --tiny-size 3 \

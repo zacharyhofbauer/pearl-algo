@@ -12,13 +12,14 @@ min_contract_size: 1
 
 # Micro contracts - higher max contracts (3-5 at a time)
 max_contracts_by_symbol:
-  # Micro contracts
-  MGC: 5   # Micro Gold
-  MYM: 5   # Micro E-mini Dow
-  MRTY: 5  # Micro Russell 2000
-  MCL: 5   # Micro Crude Oil
-  MNQ: 5   # Micro NASDAQ (if using)
-  MES: 5   # Micro S&P 500 (if using)
+  # Micro contracts (verified working)
+  MGC: 5   # Micro Gold (COMEX)
+  MYM: 5   # Micro E-mini Dow (CBOT)
+  MCL: 5   # Micro Crude Oil (NYMEX)
+  MNQ: 5   # Micro NASDAQ (CME)
+  MES: 5   # Micro S&P 500 (CME)
+  # Note: MRTY (Micro Russell) may not be available - use RTY instead
+  RTY: 2   # Regular Russell (use if MRTY unavailable)
   
   # Regular contracts (lower limits)
   GC: 2    # Gold

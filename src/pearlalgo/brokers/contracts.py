@@ -40,17 +40,24 @@ def _default_exchange_for_symbol(symbol: str | None) -> str:
     """
     Map common CME-family roots to their primary venue to avoid sec-def 200s.
     YM/ZB/ZN/ZF/ZT are CBOT; CL/NG are NYMEX; GC/SI/HG are COMEX.
+    Micro contracts: MGC (COMEX), MYM (CBOT), MRTY (ICE), MCL (NYMEX), MNQ/MES (CME).
     """
     sym = (symbol or "").upper()
-    cbot = {"YM", "ZB", "ZN", "ZF", "ZT", "ZC", "ZW", "ZS"}
-    nymex = {"CL", "NG", "RB", "HO", "B0"}
-    comex = {"GC", "SI", "HG", "PA", "PL"}
+    cbot = {"YM", "ZB", "ZN", "ZF", "ZT", "ZC", "ZW", "ZS", "MYM"}  # Micro Dow
+    nymex = {"CL", "NG", "RB", "HO", "B0", "MCL"}  # Micro Crude
+    comex = {"GC", "SI", "HG", "PA", "PL", "MGC"}  # Micro Gold
+    ice = {"MRTY"}  # Micro Russell (ICE, not CME!)
+    cme_micro = {"MNQ", "MES"}  # Micro NASDAQ, Micro S&P
     if sym in cbot:
         return "CBOT"
     if sym in nymex:
         return "NYMEX"
     if sym in comex:
         return "COMEX"
+    if sym in ice:
+        return "ICE"  # Micro Russell is on ICE
+    if sym in cme_micro:
+        return "CME"
     return "CME"
 
 
@@ -62,7 +69,7 @@ def _exchange_candidates(symbol: str | None, exchange: str | None) -> list[str]:
     200s when CME/GLOBEX do not host that contract.
     """
     exchange = exchange.upper() if exchange else None
-    base_order = ["CME", "GLOBEX", "CBOT", "NYMEX", "COMEX", "ECBOT"]
+    base_order = ["CME", "GLOBEX", "CBOT", "NYMEX", "COMEX", "ECBOT", "ICE"]
     preferred = _default_exchange_for_symbol(symbol)
     exchanges: list[str] = [preferred]
     if exchange:
