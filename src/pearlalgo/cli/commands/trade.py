@@ -59,6 +59,7 @@ def paper_cmd(ctx: click.Context, symbols: tuple, strategy: str, interval: int, 
 @click.option("--profile-config", type=click.Path(exists=True), help="Profile config file (YAML/JSON)")
 @click.option("--ib-client-id", type=int, help="IB Gateway client ID override")
 @click.option("--log-file", type=click.Path(), help="Log file path")
+@click.option("--log-level", type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]), default="INFO", help="Log level")
 @click.argument("symbol_args", nargs=-1, required=False)
 @click.pass_context
 def auto_cmd(
@@ -70,6 +71,7 @@ def auto_cmd(
     profile_config: str | None,
     ib_client_id: int | None,
     log_file: str | None,
+    log_level: str,
     symbol_args: tuple,
 ) -> None:
     """Start automated trading agent.
@@ -119,8 +121,8 @@ def auto_cmd(
     if log_file:
         args.extend(["--log-file", log_file])
     
-    # Note: automated_trading.py accepts --log-level, but we'll let it use defaults
-    # The verbose output goes to console via the agent's self.verbose flag
+    if log_level:
+        args.extend(["--log-level", log_level])
     
     console.print(f"\n[bold cyan]🤖 Starting Automated Trading Agent...[/bold cyan]\n")
     console.print(f"Symbols: {', '.join(unique_symbols)}")
@@ -133,6 +135,8 @@ def auto_cmd(
         console.print(f"IB Client ID: {ib_client_id}")
     if log_file:
         console.print(f"Log File: {log_file}")
+    if log_level:
+        console.print(f"Log Level: {log_level}")
     console.print()
     
     raise SystemExit(automated_trading.main(args))

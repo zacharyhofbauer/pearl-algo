@@ -1,9 +1,10 @@
-"""Live trading monitor - Real-time feed of trading activity."""
+"""Live trading monitor - Real-time feed of trading activity and cycles."""
 
 from __future__ import annotations
 
 import click
 import time
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 import pandas as pd
@@ -200,18 +201,141 @@ def create_live_monitor() -> Layout:
 
 
 @click.command(name="monitor")
-@click.option("--refresh", type=float, default=2.0, help="Refresh interval in seconds (default: 2)")
+@click.option("--refresh", type=float, default=2.0, help="Refresh interval in seconds for dashboard view (default: 2)")
+@click.option("--live-feed", is_flag=True, default=False, help="Show live trading cycle feed (console output)")
+@click.option("--log-file", type=click.Path(), help="Log file to tail (default: auto-detect)")
 @click.pass_context
-def monitor_cmd(ctx: click.Context, refresh: float) -> None:
-    """Live trading monitor with real-time activity feed."""
-    console.print(f"\n[bold cyan]📊 Starting Live Trading Monitor (refreshes every {refresh}s)[/bold cyan]")
+def monitor_cmd(ctx: click.Context, refresh: float, live_feed: bool, log_file: str | None) -> None:
+    """Live trading monitor with real-time activity feed.
+    
+    Two modes:
+    1. Dashboard mode (default): Shows trades, signals, and performance summary
+    2. Live feed mode (--live-feed): Shows real-time trading cycle activity
+    """
+    if live_feed:
+        # Live feed mode - tail the console log
+        _show_live_feed(log_file)
+    else:
+        # Dashboard mode
+        console.print(f"\n[bold cyan]📊 Starting Live Trading Monitor (refreshes every {refresh}s)[/bold cyan]")
+        console.print("[dim]Press Ctrl+C to exit[/dim]\n")
+        
+        try:
+            with Live(create_live_monitor(), refresh_per_second=1.0/refresh, screen=True) as live:
+                while True:
+                    time.sleep(refresh)
+                    live.update(create_live_monitor())
+        except KeyboardInterrupt:
+            console.print("\n[bold yellow]Monitor closed[/bold yellow]\n")
+
+
+def _show_live_feed(log_file: str | None = None) -> None:
+    """Show live trading cycle feed from console logs."""
+    console.print(f"\n[bold cyan]📡 Live Trading Cycle Feed[/bold cyan]")
+    console.print("[dim]Shows real-time trading activity and cycles[/dim]")
     console.print("[dim]Press Ctrl+C to exit[/dim]\n")
     
+    # Auto-detect log file
+    if not log_file:
+        log_paths = [
+            Path("logs/micro_console.log"),
+            Path("logs/test_trading.log"),
+            Path("logs/automated_trading.log"),
+        ]
+        for path in log_paths:
+            if path.exists():
+                log_file = str(path)
+                break
+    
+    if not log_file or not Path(log_file).exists():
+        console.print("[red]❌ No log file found![/red]")
+        console.print("\n[dim]Make sure trading is running. Try:[/dim]")
+        console.print("  [yellow]pearlalgo trade auto ES NQ GC --strategy sr[/yellow]")
+        console.print("\n[dim]Or specify log file:[/dim]")
+        console.print("  [yellow]pearlalgo monitor --live-feed --log-file logs/your_log.log[/yellow]\n")
+        return
+    
+    # Check if trading process is running
+    result = subprocess.run(["pgrep", "-f", "pearlalgo trade auto"], capture_output=True)
+    if result.returncode != 0:
+        result = subprocess.run(["pgrep", "-f", "automated_trading"], capture_output=True)
+    
+    if result.returncode == 0:
+        console.print(f"[green]✅ Trading process is running[/green]")
+    else:
+        console.print(f"[yellow]⚠️  No trading process detected (but log exists)[/yellow]")
+    
+    console.print(f"[dim]📝 Watching: {log_file}[/dim]\n")
+    
+    # Show recent activity first
     try:
-        with Live(create_live_monitor(), refresh_per_second=1.0/refresh, screen=True) as live:
-            while True:
-                time.sleep(refresh)
-                live.update(create_live_monitor())
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+            if lines:
+                console.print("[dim]📋 Recent Activity:[/dim]")
+                console.print("[dim]" + "─" * 60 + "[/dim]")
+                for line in lines[-20:]:
+                    # Color code important events
+                    line_stripped = line.strip()
+                    if any(x in line_stripped for x in ["Analyzing", "🔍"]):
+                        console.print(f"[cyan]{line_stripped}[/cyan]")
+                    elif any(x in line_stripped for x in ["EXECUTING", "✅ EXECUTING"]):
+                        console.print(f"[bold green]{line_stripped}[/bold green]")
+                    elif any(x in line_stripped for x in ["FLAT", "⚪"]):
+                        console.print(f"[yellow]{line_stripped}[/yellow]")
+                    elif any(x in line_stripped for x in ["LONG", "SHORT"]):
+                        console.print(f"[bold]{line_stripped}[/bold]")
+                    elif any(x in line_stripped for x in ["SKIP", "BLOCKED", "🚫"]):
+                        console.print(f"[red]{line_stripped}[/red]")
+                    else:
+                        console.print(f"[dim]{line_stripped}[/dim]")
+                console.print("[dim]" + "─" * 60 + "[/dim]\n")
+    except Exception as e:
+        console.print(f"[yellow]⚠️  Could not read recent activity: {e}[/yellow]\n")
+    
+    console.print("[bold]👀 Live feed (Ctrl+C to stop):[/bold]\n")
+    
+    # Tail the log file
+    process = None
+    try:
+        process = subprocess.Popen(
+            ["tail", "-f", log_file],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+        
+        for line in iter(process.stdout.readline, ''):
+            if not line:
+                break
+            
+            line_stripped = line.strip()
+            if not line_stripped:
+                continue
+            
+            # Color code important events
+            if any(x in line_stripped for x in ["Analyzing", "🔍"]):
+                console.print(f"[cyan]{line_stripped}[/cyan]")
+            elif any(x in line_stripped for x in ["EXECUTING", "✅ EXECUTING"]):
+                console.print(f"[bold green]{line_stripped}[/bold green]")
+            elif any(x in line_stripped for x in ["FLAT", "⚪"]):
+                console.print(f"[yellow]{line_stripped}[/yellow]")
+            elif any(x in line_stripped for x in ["LONG", "SHORT"]):
+                console.print(f"[bold]{line_stripped}[/bold]")
+            elif any(x in line_stripped for x in ["SKIP", "BLOCKED", "🚫", "Risk-based"]):
+                console.print(f"[red]{line_stripped}[/red]")
+            elif any(x in line_stripped for x in ["Fetching", "📊", "Generating", "🧠"]):
+                console.print(f"[dim]{line_stripped}[/dim]")
+            elif "Cycle" in line_stripped or "P&L" in line_stripped:
+                console.print(f"[bold cyan]{line_stripped}[/bold cyan]")
+            else:
+                console.print(line_stripped)
+                
     except KeyboardInterrupt:
-        console.print("\n[bold yellow]Monitor closed[/bold yellow]\n")
+        console.print("\n[bold yellow]Live feed closed[/bold yellow]\n")
+        if process:
+            process.terminate()
+    except Exception as e:
+        console.print(f"\n[red]Error: {e}[/red]\n")
 

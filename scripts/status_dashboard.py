@@ -287,20 +287,27 @@ def create_dashboard() -> Layout:
     )
     
     layout["main"].split_row(
-        Layout(name="left"),
-        Layout(name="right")
+        Layout(name="left", ratio=1, minimum_size=40),
+        Layout(name="right", ratio=1, minimum_size=40)
     )
     
     layout["left"].split_column(
-        Layout(create_gateway_panel(), name="gateway"),
-        Layout(create_files_panel(), name="files"),
-        Layout(create_risk_panel(), name="risk")
+        Layout(name="gateway", size=10),
+        Layout(name="files", size=8),
+        Layout(name="risk")
     )
     
     layout["right"].split_column(
-        Layout(create_performance_panel(), name="performance"),
-        Layout(create_signals_panel(), name="signals")
+        Layout(name="performance", ratio=2),
+        Layout(name="signals", ratio=1)
     )
+    
+    # Populate panels
+    layout["gateway"].update(create_gateway_panel())
+    layout["files"].update(create_files_panel())
+    layout["risk"].update(create_risk_panel())
+    layout["performance"].update(create_performance_panel())
+    layout["signals"].update(create_signals_panel())
     
     # Header
     now = datetime.now(timezone.utc)

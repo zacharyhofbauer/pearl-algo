@@ -53,36 +53,85 @@ pearlalgo trade auto ES NQ GC --strategy sr --interval 300
 
 ## 6. Monitor Trading
 
-### Recommended: Two Terminal Setup
+### Recommended: Multi-Terminal Setup
 
-**Terminal 1: System Dashboard** (overall status)
+**Terminal 1: Comprehensive Dashboard** (full overview)
 ```bash
-pearlalgo dashboard
+pearlalgo dashboard --full
 ```
-Shows: Gateway status, risk state, performance summary
+Shows:
+- IB Gateway status with uptime
+- Trading processes status
+- System health (memory, disk)
+- Performance metrics (P&L, win rate, W/L)
+- Recent trades history
+- Risk state with visual buffer indicator
+- Current positions
+- Latest signals
 
-**Terminal 2: Live Trading Monitor** (trading activity)
+**Terminal 2: Live Trading Cycle Feed** (real-time trading cycles)
 ```bash
-pearlalgo monitor
+pearlalgo monitor --live-feed
 ```
-Shows: Latest trades, signals, real-time P&L, activity feed
+Shows: Real-time trading cycles, "Analyzing", "FLAT", "EXECUTING", cycle-by-cycle activity with color-coded output
 
-### Alternative: Single Terminal
+### Dashboard Options
+
 ```bash
-# System dashboard
+# Standard dashboard (simpler view)
 pearlalgo dashboard
 
-# Or trading activity monitor
+# Comprehensive full-screen dashboard (more details)
+pearlalgo dashboard --full
+
+# Custom refresh rate (in seconds)
+pearlalgo dashboard --refresh 3
+
+# Show once and exit (for screenshots/logging)
+pearlalgo dashboard --once
+```
+
+### Monitor Options
+
+```bash
+# Dashboard view of trades/signals/P&L
 pearlalgo monitor
+
+# Live feed with real-time log tailing
+pearlalgo monitor --live-feed
+
+# Specify custom log file
+pearlalgo monitor --live-feed --log-file logs/standard_console.log
+
+# Custom refresh rate
+pearlalgo monitor --refresh 1
+```
+
+### Direct Dashboard Scripts
+
+```bash
+# Run comprehensive dashboard directly
+python scripts/comprehensive_dashboard.py
+
+# Run with custom refresh
+python scripts/comprehensive_dashboard.py --refresh 2
+
+# Show once (for scripts/automation)
+python scripts/comprehensive_dashboard.py --once
 ```
 
 ### View Logs
+
 ```bash
-# Trading log
+# Trading decisions log
 tail -f logs/micro_trading.log
 
-# Console output
+# Console output (detailed strategy reasoning)
 tail -f logs/micro_console.log
+
+# Standard strategy logs
+tail -f logs/standard_trading.log
+tail -f logs/standard_console.log
 ```
 
 ### Check Status
