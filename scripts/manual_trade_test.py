@@ -37,6 +37,12 @@ def show_positions(broker: IBKRBroker, portfolio: Portfolio) -> None:
     try:
         # Get positions from IB
         ib = broker._connect()
+        
+        # Request fresh position data
+        ib.reqPositions()
+        import time
+        time.sleep(0.5)  # Give IB time to send position updates
+        
         positions = ib.positions()
         
         if not positions and not any(pos.size != 0 for pos in portfolio.positions.values()):
@@ -152,6 +158,93 @@ def enter_trade(broker: IBKRBroker, portfolio: Portfolio) -> None:
         
     except Exception as e:
         console.print(f"[red]❌ Error placing order: {e}[/red]\n")
+        import traceback
+        traceback.print_exc()
+
+
+def check_orders(broker: IBKRBroker) -> None:
+    """Check recent orders and their status."""
+    console.print("\n[bold cyan]📋 Recent Orders[/bold cyan]\n")
+    
+    try:
+        ib = broker._connect()
+        
+        # Get open orders
+        open_orders = ib.openOrders()
+        
+        # Get all trades (filled orders)
+        all_trades = ib.trades()
+        
+        if not open_orders and not all_trades:
+            console.print("[dim]No recent orders[/dim]\n")
+            return
+        
+        table = Table(title="Recent Orders", box=box.ROUNDED, show_header=True, header_style="bold cyan")
+        table.add_column("Order ID", style="yellow")
+        table.add_column("Symbol", style="cyan")
+        table.add_column("Action", justify="center")
+        table.add_column("Quantity", justify="right")
+        table.add_column("Order Type", justify="center")
+        table.add_column("Status", justify="center")
+        table.add_column("Filled", justify="right")
+        
+        # Show open orders
+        for trade in open_orders:
+            order = trade.order
+            contract = trade.contract
+            order_status = trade.orderStatus if hasattr(trade, 'orderStatus') else None
+            status = order_status.status if order_status else "Unknown"
+            filled = float(order_status.filled) if order_status and hasattr(order_status, 'filled') else 0.0
+            total = float(order.totalQuantity) if hasattr(order, 'totalQuantity') else 0.0
+            
+            # Check if cancelled
+            if status == "Cancelled":
+                status_display = f"[red]CANCELLED[/red]"
+                if order_status and hasattr(order_status, 'whyHeld') and order_status.whyHeld:
+                    status_display += f" ({order_status.whyHeld})"
+            elif status in ["Submitted", "PreSubmitted", "PendingSubmit"]:
+                status_display = "[yellow]OPEN[/]"
+            elif status == "Filled":
+                status_display = "[green]FILLED[/]"
+            else:
+                status_display = status
+            
+            action_color = "[bold green]" if order.action == "BUY" else "[bold red]"
+            table.add_row(
+                str(order.orderId),
+                contract.symbol if hasattr(contract, 'symbol') else "N/A",
+                f"{action_color}{order.action}[/]",
+                str(int(total)),
+                order.orderType,
+                status_display,
+                f"{int(filled)}/{int(total)}"
+            )
+        
+        # Show recent filled orders (last 10)
+        for trade in all_trades[-10:]:
+            order = trade.order
+            contract = trade.contract
+            order_status = trade.orderStatus if hasattr(trade, 'orderStatus') else None
+            filled = order_status.filled if order_status and hasattr(order_status, 'filled') else 0
+            
+            if filled > 0 or (order_status and order_status.status == "Filled"):
+                status = order_status.status if order_status else "Filled"
+                total = order.totalQuantity if hasattr(order, 'totalQuantity') else 0
+                table.add_row(
+                    str(order.orderId),
+                    contract.symbol if hasattr(contract, 'symbol') else "N/A",
+                    f"[{'green' if order.action == 'BUY' else 'red'}]{order.action}[/]",
+                    str(int(total)),
+                    order.orderType,
+                    "[green]FILLED[/]" if status == "Filled" else f"[yellow]{status}[/]",
+                    f"{int(filled)}/{int(total)}"
+                )
+        
+        console.print(table)
+        console.print()
+        
+    except Exception as e:
+        console.print(f"[red]❌ Error checking orders: {e}[/red]\n")
         import traceback
         traceback.print_exc()
 
@@ -307,12 +400,13 @@ def main():
         table.add_row("[bold green]2.[/bold green]", "📈 Enter Trade", "Manually enter a new trade")
         table.add_row("[bold green]3.[/bold green]", "📤 Close Position", "Close an open position")
         table.add_row("[bold green]4.[/bold green]", "🔄 Refresh Positions", "Update position data")
-        table.add_row("[bold green]5.[/bold green]", "🚪 Exit", "Quit manual trading test")
+        table.add_row("[bold green]5.[/bold green]", "📋 Check Orders", "View recent orders and fills")
+        table.add_row("[bold green]6.[/bold green]", "🚪 Exit", "Quit manual trading test")
         
         console.print(table)
         console.print()
         
-        choice = Prompt.ask("Select option", choices=["1", "2", "3", "4", "5"], default="5")
+        choice = Prompt.ask("Select option", choices=["1", "2", "3", "4", "5", "6"], default="6")
         
         if choice == "1":
             show_positions(broker, portfolio)
@@ -322,13 +416,22 @@ def main():
             close_position(broker, portfolio)
         elif choice == "4":
             console.print("\n[dim]Refreshing positions...[/dim]")
-            # In real implementation, would fetch from broker
-            console.print("[green]✅ Positions refreshed[/green]\n")
+            try:
+                # Force refresh from IB
+                ib = broker._connect()
+                ib.reqPositions()  # Request position updates
+                import time
+                time.sleep(1)  # Give IB time to send updates
+                console.print("[green]✅ Positions refreshed[/green]\n")
+            except Exception as e:
+                console.print(f"[yellow]⚠️  Refresh completed (may need to check positions again): {e}[/yellow]\n")
         elif choice == "5":
+            check_orders(broker)
+        elif choice == "6":
             console.print("\n[bold cyan]👋 Exiting manual trading test[/bold cyan]\n")
             break
         
-        if choice != "5":
+        if choice != "6":
             Prompt.ask("\n[dim]Press Enter to continue...[/dim]", default="")
     
     return 0

@@ -23,7 +23,7 @@ from pearlalgo.config.settings import get_settings
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.risk.limits import RiskGuard, RiskLimits
 from pearlalgo.futures.config import load_profile
-from pearlalgo.brokers.contracts import build_future_contract
+from pearlalgo.brokers.contracts import resolve_future_contract
 
 console = Console()
 
@@ -59,15 +59,26 @@ def test_contract_lookup(broker):
     
     test_symbols = ["MES", "MNQ", "MGC"]
     
-    for symbol in test_symbols:
-        try:
-            console.print(f"Looking up {symbol}...")
-            contract = build_future_contract(symbol, "FUT", trading_class=symbol)
-            console.print(f"  [green]✅[/green] {symbol}: {contract.localSymbol if hasattr(contract, 'localSymbol') else 'Found'}")
-        except Exception as e:
-            console.print(f"  [red]❌[/red] {symbol}: {e}")
-    
-    console.print()
+    try:
+        ib = broker._connect()
+        
+        from pearlalgo.brokers.contracts import _default_exchange_for_symbol
+        
+        for symbol in test_symbols:
+            try:
+                console.print(f"Looking up {symbol}...")
+                exchange = _default_exchange_for_symbol(symbol)
+                contract = resolve_future_contract(ib, symbol, exchange=exchange, trading_class=symbol)
+                if contract:
+                    console.print(f"  [green]✅[/green] {symbol}: {contract.localSymbol if hasattr(contract, 'localSymbol') else contract.symbol} (Exchange: {exchange})")
+                else:
+                    console.print(f"  [yellow]⚠️[/yellow] {symbol}: Contract not found")
+            except Exception as e:
+                console.print(f"  [red]❌[/red] {symbol}: {e}")
+        
+        console.print()
+    except Exception as e:
+        console.print(f"[red]❌ Error connecting to broker: {e}[/red]\n")
 
 
 def test_position_check(broker, portfolio):

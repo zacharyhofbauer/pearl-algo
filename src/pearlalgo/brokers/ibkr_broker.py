@@ -174,22 +174,34 @@ class IBKRBroker(Broker):
             raise
 
     def _build_order(self, order: OrderEvent):
+        from ib_insync import Order
+        
         side = "BUY" if order.side.upper() == "BUY" else "SELL"
+        ib_order: Order
+        
         if order.order_type == "MKT":
-            return MarketOrder(side, order.quantity)
-        if order.order_type == "LMT":
+            ib_order = MarketOrder(side, order.quantity)
+        elif order.order_type == "LMT":
             if order.limit_price is None:
                 raise ValueError("Limit order requires limit_price")
-            return LimitOrder(side, order.quantity, order.limit_price)
-        if order.order_type in {"STP", "STOP"}:
+            ib_order = LimitOrder(side, order.quantity, order.limit_price)
+        elif order.order_type in {"STP", "STOP"}:
             if order.stop_price is None:
                 raise ValueError("Stop order requires stop_price")
-            return StopOrder(side, order.quantity, order.stop_price)
-        if order.order_type in {"STPLMT", "STOP_LIMIT"}:
+            ib_order = StopOrder(side, order.quantity, order.stop_price)
+        elif order.order_type in {"STPLMT", "STOP_LIMIT"}:
             if order.stop_price is None or order.limit_price is None:
                 raise ValueError("Stop-limit order requires stop_price and limit_price")
-            return StopLimitOrder(side, order.quantity, order.limit_price, order.stop_price)
-        raise ValueError(f"Unsupported order_type: {order.order_type}")
+            ib_order = StopLimitOrder(side, order.quantity, order.limit_price, order.stop_price)
+        else:
+            raise ValueError(f"Unsupported order_type: {order.order_type}")
+        
+        # Set TimeInForce explicitly to avoid error 10349
+        # For futures, use DAY (good for the day) or GTC (good till cancelled)
+        # DAY is safer for testing
+        ib_order.tif = "DAY"  # Time In Force: DAY
+        
+        return ib_order
 
     def fetch_fills(self, since: datetime | None = None) -> Iterable[FillEvent]:
         if not self._live_enabled() or not self._ib.isConnected():
