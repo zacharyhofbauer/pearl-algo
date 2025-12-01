@@ -18,6 +18,7 @@ src/pearlalgo/cli/commands/__init__.py
 src/pearlalgo/cli/commands/dashboard.py
 src/pearlalgo/cli/commands/data.py
 src/pearlalgo/cli/commands/gateway.py
+src/pearlalgo/cli/commands/monitor.py
 src/pearlalgo/cli/commands/report.py
 src/pearlalgo/cli/commands/setup.py
 src/pearlalgo/cli/commands/signals.py

@@ -52,13 +52,14 @@ def paper_cmd(ctx: click.Context, symbols: tuple, strategy: str, interval: int, 
 
 
 @trade_group.command(name="auto")
-@click.option("--symbols", multiple=True, default=["ES", "NQ", "GC"], help="Symbols to trade")
+@click.option("--symbols", multiple=True, default=[], help="Symbols to trade (repeat --symbols for each, or pass as arguments)")
 @click.option("--strategy", type=click.Choice(["ma_cross", "sr"]), default="sr", help="Trading strategy")
 @click.option("--interval", type=int, default=300, help="Loop interval in seconds")
 @click.option("--tiny-size", type=int, default=1, help="Base contract size")
 @click.option("--profile-config", type=click.Path(exists=True), help="Profile config file (YAML/JSON)")
 @click.option("--ib-client-id", type=int, help="IB Gateway client ID override")
 @click.option("--log-file", type=click.Path(), help="Log file path")
+@click.argument("symbol_args", nargs=-1, required=False)
 @click.pass_context
 def auto_cmd(
     ctx: click.Context,
@@ -69,9 +70,31 @@ def auto_cmd(
     profile_config: str | None,
     ib_client_id: int | None,
     log_file: str | None,
+    symbol_args: tuple,
 ) -> None:
-    """Start automated trading agent."""
+    """Start automated trading agent.
+    
+    Examples:
+        pearlalgo trade auto ES NQ GC
+        pearlalgo trade auto --symbols ES --symbols NQ --symbols GC
+        pearlalgo trade auto ES NQ GC --strategy sr --interval 300
+    """
     verbosity = ctx.obj.get("verbosity", "NORMAL")
+    
+    # Combine symbols from --symbols option and positional arguments
+    all_symbols = list(symbols) + list(symbol_args)
+    
+    # If no symbols provided, use defaults
+    if not all_symbols:
+        all_symbols = ["ES", "NQ", "GC"]
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_symbols = []
+    for s in all_symbols:
+        if s not in seen:
+            seen.add(s)
+            unique_symbols.append(s)
     
     # Import and run existing script
     SCRIPT_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent
@@ -81,7 +104,7 @@ def auto_cmd(
     from scripts import automated_trading
     
     args = [
-        "--symbols"] + list(symbols) + [
+        "--symbols"] + unique_symbols + [
         "--strategy", strategy,
         "--interval", str(interval),
         "--tiny-size", str(tiny_size),
@@ -100,12 +123,16 @@ def auto_cmd(
     # The verbose output goes to console via the agent's self.verbose flag
     
     console.print(f"\n[bold cyan]🤖 Starting Automated Trading Agent...[/bold cyan]\n")
-    console.print(f"Symbols: {', '.join(symbols)}")
+    console.print(f"Symbols: {', '.join(unique_symbols)}")
     console.print(f"Strategy: {strategy}")
     console.print(f"Interval: {interval}s")
     console.print(f"Contract Size: {tiny_size}")
     if profile_config:
         console.print(f"Profile: {profile_config}")
+    if ib_client_id:
+        console.print(f"IB Client ID: {ib_client_id}")
+    if log_file:
+        console.print(f"Log File: {log_file}")
     console.print()
     
     raise SystemExit(automated_trading.main(args))
