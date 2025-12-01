@@ -60,18 +60,20 @@ python scripts/workflow.py --dashboard
 python scripts/status_dashboard.py --live
 ```
 
-**🤖 Automated Trading (NEW):**
+**🤖 Automated Trading:**
 ```bash
-# Run automated trading agent manually (for testing)
-python scripts/automated_trading.py --symbols ES NQ GC --strategy sr
+# Run automated trading agent
+python scripts/automated_trading.py --symbols ES NQ --strategy sr --interval 300
 
-# Setup as systemd service for 24/7 operation
-sudo bash scripts/setup_automated_trading.sh
+# Micro contracts (fast pace, 1min intervals)
+bash scripts/run_micro_strategy.sh
 
-# Check system health
-python scripts/health_check.py
+# Diagnostics
+python scripts/debug_trading.py      # Check configuration
+python scripts/health_check.py     # System health
+python scripts/status_dashboard.py  # Real-time dashboard
 
-# See docs/AUTOMATED_TRADING.md for full setup guide
+# See docs/AUTOMATED_TRADING.md for full guide
 ```
 
 Backtest a registered strategy (defaults to backtest profile):

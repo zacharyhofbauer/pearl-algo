@@ -44,14 +44,14 @@ python scripts/automated_trading.py \
 sleep 2
 
 # Micro contracts - faster pace (1 min intervals, 3-5 contracts)
-# Note: MRTY (Micro Russell) not available - using MGC, MYM, MCL only
-echo "⚡ Starting Micro Contracts (MGC, MYM, MCL) - 1min intervals, 3-5 contracts..."
+# Using all available micro contracts: MGC, MYM, MCL, MNQ, MES
+echo "⚡ Starting Micro Contracts (MGC, MYM, MCL, MNQ, MES) - 1min intervals, 3-5 contracts..."
 screen -dmS micro-contracts bash -c "
 cd $PROJECT_ROOT
 source .venv/bin/activate
 python scripts/automated_trading.py \
-  --symbols MGC MYM MCL \
-  --sec-types FUT FUT FUT \
+  --symbols MGC MYM MCL MNQ MES \
+  --sec-types FUT FUT FUT FUT FUT \
   --strategy sr \
   --interval 60 \
   --tiny-size 3 \

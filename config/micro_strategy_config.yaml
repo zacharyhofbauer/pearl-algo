@@ -16,9 +16,9 @@ max_contracts_by_symbol:
   MGC: 5   # Micro Gold (COMEX)
   MYM: 5   # Micro E-mini Dow (CBOT)
   MCL: 5   # Micro Crude Oil (NYMEX)
-  MNQ: 5   # Micro NASDAQ (CME)
-  MES: 5   # Micro S&P 500 (CME)
-  # Note: MRTY (Micro Russell) may not be available - use RTY instead
+  MNQ: 5   # Micro NASDAQ (CME) ✅ Added
+  MES: 5   # Micro S&P 500 (CME) ✅ Added
+  # Note: MRTY (Micro Russell) not available - use RTY instead
   RTY: 2   # Regular Russell (use if MRTY unavailable)
   
   # Regular contracts (lower limits)
@@ -34,10 +34,10 @@ tick_values_by_symbol:
   # Micro contracts (smaller tick values)
   MGC: 1.0      # Micro Gold: $1 per tick
   MYM: 0.5      # Micro Dow: $0.50 per tick
-  MRTY: 0.50    # Micro Russell: $0.50 per tick
   MCL: 1.0      # Micro Crude: $1 per tick
-  MNQ: 0.5      # Micro NASDAQ: $0.50 per tick
-  MES: 1.25     # Micro S&P: $1.25 per tick
+  MNQ: 0.5      # Micro NASDAQ: $0.50 per tick ✅ Added
+  MES: 1.25     # Micro S&P: $1.25 per tick ✅ Added
+  # Note: MRTY not available
   
   # Regular contracts
   GC: 10.0      # Gold: $10 per tick

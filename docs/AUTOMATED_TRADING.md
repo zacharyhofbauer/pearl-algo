@@ -85,14 +85,25 @@ python scripts/status_dashboard.py --live
 
 ## Configuration
 
+### .env File (Required)
+```bash
+PEARLALGO_PROFILE=live
+PEARLALGO_ALLOW_LIVE_TRADING=true
+PEARLALGO_IB_HOST=127.0.0.1
+PEARLALGO_IB_PORT=4002
+PEARLALGO_IB_CLIENT_ID=1
+```
+
 ### Trading Parameters
 
 Edit the service file or command line arguments:
 
 - `--symbols`: Symbols to trade (default: ES NQ GC)
+  - Regular: ES, NQ, GC, YM, RTY, CL
+  - Micro: MGC, MYM, MCL, MNQ, MES (use `config/micro_strategy_config.yaml`)
 - `--strategy`: Strategy name (ma_cross or sr, default: sr)
 - `--interval`: Loop interval in seconds (default: 300 = 5 minutes)
-- `--tiny-size`: Base contract size (default: 1)
+- `--tiny-size`: Base contract size (default: 1, use 3-5 for micro)
 - `--profile-config`: Path to prop profile config (optional)
 
 ### Risk Profile
@@ -185,7 +196,34 @@ Checks:
 - Recent trading activity
 - Current risk state
 
+## Micro Contracts
+
+### Quick Start
+```bash
+bash scripts/run_micro_strategy.sh
+```
+
+Trades: MGC (Gold), MYM (Dow), MCL (Crude), MNQ (NASDAQ), MES (S&P)
+- 1-minute intervals
+- 3-5 contracts per trade
+- Uses `config/micro_strategy_config.yaml`
+
+### Available Micro Contracts
+- ✅ MGC - Micro Gold (COMEX)
+- ✅ MYM - Micro Dow (CBOT)
+- ✅ MCL - Micro Crude (NYMEX)
+- ✅ MNQ - Micro NASDAQ (CME)
+- ✅ MES - Micro S&P 500 (CME)
+- ❌ MRTY - Micro Russell (not available in IBKR)
+
 ## Troubleshooting
+
+### No Trades Executing
+1. **Check configuration**: `python scripts/debug_trading.py`
+   - Should show: Profile=live, Allow Live Trading=True
+2. **Check signals**: Look for "FLAT signal" vs "LONG/SHORT" in output
+3. **Check risk state**: Look for "TRADE BLOCKED" messages
+4. **Check IB Gateway**: `sudo systemctl status ibgateway.service`
 
 ### Agent Not Starting
 

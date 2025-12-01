@@ -14,17 +14,16 @@ echo "╔═══════════════════════�
 echo "║  🚀 Micro Contracts Fast-Paced Strategy                      ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
-echo "Symbols: MGC (Micro Gold), MYM (Micro Dow), MRTY (Micro Russell), MCL (Micro Crude)"
+echo "Symbols: MGC (Micro Gold), MYM (Micro Dow), MCL (Micro Crude), MNQ (Micro NASDAQ), MES (Micro S&P)"
 echo "Strategy: sr (Support/Resistance)"
 echo "Interval: 60s (1 minute - fast paced)"
 echo "Contract Size: 3-5 micro contracts"
 echo ""
 
-# Use MGC, MYM, MCL (skip MRTY - not available as micro contract)
-# Alternative: Use RTY (regular) with smaller size if you want Russell exposure
+# All available major equity and commodity micro contracts
 python scripts/automated_trading.py \
-  --symbols MGC MYM MCL \
-  --sec-types FUT FUT FUT \
+  --symbols MGC MYM MCL MNQ MES \
+  --sec-types FUT FUT FUT FUT FUT \
   --strategy sr \
   --interval 60 \
   --tiny-size 3 \
