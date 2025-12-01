@@ -13,7 +13,9 @@ from typing import Iterable
 
 import pandas as pd
 
-from pearlalgo.futures.performance import DEFAULT_PERF_PATH, load_performance
+from pearlalgo.futures.config import load_profile
+from pearlalgo.futures.performance import DEFAULT_PERF_PATH, load_performance, summarize_daily_performance
+from pearlalgo.futures.risk import compute_risk_state
 
 
 CYAN = "\033[1;36m"
@@ -128,9 +130,62 @@ def main() -> int:
         today_realized = today_stats["realized"]
         print(f"Total rows: {int(total_stats['rows'])}, realized: {color(f'{total_realized:.2f}', total_pnl_color)}")
         print(f"Today rows: {int(today_stats['rows'])}, realized: {color(f'{today_realized:.2f}', today_pnl_color)}")
+        
+        # Enhanced metrics from summarize_daily_performance
+        daily_summary = summarize_daily_performance(perf_path, date=today)
+        if daily_summary:
+            win_rate = daily_summary.get("win_rate", 0.0)
+            avg_pnl = daily_summary.get("avg_realized_pnl", 0.0)
+            worst_dd = daily_summary.get("worst_drawdown", 0.0)
+            avg_time = daily_summary.get("avg_time_in_trade_minutes", 0.0)
+            trades = int(daily_summary.get("trades", 0))
+            print(f"Today trades: {trades}, win rate: {win_rate*100:.1f}%, avg P&L: {color(f'{avg_pnl:.2f}', GREEN if avg_pnl >= 0 else RED)}")
+            print(f"Worst drawdown: {color(f'{worst_dd:.2f}', RED if worst_dd < 0 else GREEN)}, avg time in trade: {avg_time:.1f} min")
+        
         print("Per-symbol (today):")
         per_sym = perf_by_symbol(df, today)
         print_per_symbol(per_sym, symbols=("ES", "NQ", "GC"))
+        
+        # Show last trade_reason for each symbol
+        if not df.empty:
+            today_df = df[df["timestamp"].dt.strftime("%Y%m%d") == today] if "timestamp" in df.columns else df
+            if not today_df.empty and "trade_reason" in today_df.columns:
+                print("Last trade reasons:")
+                for sym in ("ES", "NQ", "GC"):
+                    sym_df = today_df[today_df["symbol"] == sym]
+                    if not sym_df.empty:
+                        last_reason = sym_df.iloc[-1].get("trade_reason")
+                        # Handle NaN/None values
+                        if pd.isna(last_reason) or last_reason is None:
+                            last_reason = "N/A"
+                        print(f"  {sym}: {last_reason}")
+    
+    # Risk state section
+    section("Risk State")
+    profile = load_profile()
+    if not df.empty:
+        today_df = df[df["timestamp"].dt.strftime("%Y%m%d") == today] if "timestamp" in df.columns else df
+        trades_today = len(today_df) if not today_df.empty else 0
+        realized_pnl = today_stats.get("realized", 0.0)
+        risk_state = compute_risk_state(
+            profile,
+            day_start_equity=profile.starting_balance,
+            realized_pnl=realized_pnl,
+            unrealized_pnl=0.0,
+            trades_today=trades_today,
+            max_trades=profile.max_trades,
+            now=datetime.now(timezone.utc),
+        )
+        status_color = GREEN if risk_state.status == "OK" else YELLOW if risk_state.status == "NEAR_LIMIT" else RED
+        print(f"Status: {color(risk_state.status, status_color)}")
+        print(f"Remaining buffer: {color(f'{risk_state.remaining_loss_buffer:.2f}', GREEN if risk_state.remaining_loss_buffer > 0 else RED)}")
+        if risk_state.max_trades:
+            remaining_trades = max(0, risk_state.max_trades - trades_today)
+            print(f"Trades today: {trades_today}/{risk_state.max_trades}, remaining: {remaining_trades}")
+        if risk_state.cooldown_until:
+            print(f"Cooldown until: {color(risk_state.cooldown_until.isoformat(), YELLOW)}")
+    else:
+        print("No data available (run signals first)")
 
     print()
     return 0

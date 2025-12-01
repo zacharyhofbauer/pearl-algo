@@ -50,7 +50,7 @@ def get_data(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run daily futures signals and write to CSV + performance log.")
-    parser.add_argument("--strategy", choices=["ma_cross", "sr"], default="ma_cross")
+    parser.add_argument("--strategy", choices=["ma_cross", "sr"], default="sr")
     parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "GC"])
     parser.add_argument("--sec-types", nargs="+", default=["FUT", "FUT", "FUT"])
     parser.add_argument("--source", choices=["ibkr", "csv"], default="ibkr")
@@ -126,11 +126,11 @@ def main(argv: list[str] | None = None) -> int:
                     unrealized_pnl=None,
                     fast_ma=signal.get("fast_ma"),
                     slow_ma=signal.get("slow_ma"),
-                    risk_status=risk_state.status if hasattr(risk_state, "status") else "UNKNOWN",
-                    drawdown_remaining=risk_state.remaining_loss_buffer if hasattr(risk_state, "remaining_loss_buffer") else None,
-                    trade_reason=signal.get("comment"),
+                    risk_status=risk_state.status,
+                    drawdown_remaining=risk_state.remaining_loss_buffer,
+                    trade_reason=signal.get("comment"),  # This is the trade_reason string from S/R strategy
                     emotion_state=risk_state.status if risk_state.status in {"COOLDOWN", "PAUSED"} else "normal",
-                    notes=f"daily signal; sr={ {k: signal.get(k) for k in ('support1','resistance1','vwap')} }",
+                    notes=f"daily signal; sr={ {k: signal.get(k) for k in ('support1','resistance1','vwap') if k in signal} }",
                 )
             )
         except Exception as exc:

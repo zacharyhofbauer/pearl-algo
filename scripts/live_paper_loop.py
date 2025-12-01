@@ -94,10 +94,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "GC"])
     parser.add_argument("--sec-types", nargs="+", default=["FUT", "FUT", "FUT"])
-    parser.add_argument("--strategy", choices=["ma_cross", "sr"], default="ma_cross")
+    parser.add_argument("--strategy", choices=["ma_cross", "sr"], default="sr")
     parser.add_argument("--source", choices=["ibkr", "csv"], default="ibkr")
     parser.add_argument("--data-paths", nargs="*", help="CSV paths matching symbols when source=csv")
     parser.add_argument("--interval", type=int, default=300, help="Loop interval seconds")
+    parser.add_argument("--tiny-size", type=int, default=1, help="Base tiny size for paper trading (will be adjusted by risk taper)")
     parser.add_argument("--profile-config", default=None, help="Optional prop profile config (yaml/json)")
     parser.add_argument("--mode", choices=["print", "ibkr-paper"], default="print")
     parser.add_argument("--ib-host", default=None, help="IB host override")
@@ -153,6 +154,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     last_fill_ts: datetime | None = None
+    trades_today = 0
+    open_positions: dict[str, dict] = {}  # Track entry_time for open positions: {symbol: {"entry_time": ..., "entry_price": ...}}
 
     try:
         while True:
@@ -186,13 +189,109 @@ def main(argv: list[str] | None = None) -> int:
                     price = float(df["Close"].iloc[-1])
                     marks = {sym: price}
                     realized_pnl, unrealized_pnl = portfolio_pnls(portfolio, marks)
+                    
+                    # Compute risk state first
                     risk_state = compute_risk_state(
                         profile,
                         day_start_equity=profile.starting_balance,
                         realized_pnl=realized_pnl,
                         unrealized_pnl=unrealized_pnl,
+                        trades_today=trades_today,
+                        max_trades=profile.max_trades,
+                        now=datetime.now(timezone.utc),
                     )
+                    
+                    # Check if we have an open position that should be closed
+                    current_pos = portfolio.positions.get(sym)
+                    if current_pos and current_pos.size != 0:
+                        # Position exists - check if we should exit (opposite signal or risk state)
+                        should_exit = False
+                        if (current_pos.size > 0 and side == "short") or (current_pos.size < 0 and side == "long"):
+                            should_exit = True  # Opposite signal
+                        if risk_state.status in {"HARD_STOP", "COOLDOWN", "PAUSED"}:
+                            should_exit = True  # Risk-based exit
+                        
+                        if should_exit:
+                            # Log exit
+                            entry_info = open_positions.pop(sym, {})
+                            exit_time = datetime.now(timezone.utc)
+                            entry_time = entry_info.get("entry_time", exit_time)
+                            entry_price = entry_info.get("entry_price", current_pos.avg_price)
+                            exit_pnl = current_pos.realized_pnl + (current_pos.size * (price - current_pos.avg_price))
+                            
+                            log_performance_row(
+                                PerformanceRow(
+                                    timestamp=exit_time,
+                                    entry_time=entry_time,
+                                    exit_time=exit_time,
+                                    symbol=sym,
+                                    sec_type=sec_type,
+                                    strategy_name=signal["strategy_name"],
+                                    side="long" if current_pos.size > 0 else "short",
+                                    requested_size=abs(current_pos.size),
+                                    filled_size=abs(current_pos.size),
+                                    entry_price=entry_price,
+                                    exit_price=price,
+                                    realized_pnl=exit_pnl,
+                                    unrealized_pnl=0.0,
+                                    fast_ma=signal.get("fast_ma"),
+                                    slow_ma=signal.get("slow_ma"),
+                                    risk_status=risk_state.status,
+                                    drawdown_remaining=risk_state.remaining_loss_buffer,
+                                    trade_reason=f"Exit: {signal.get('comment', 'position closed')}",
+                                    emotion_state=risk_state.status if risk_state.status in {"COOLDOWN", "PAUSED"} else "normal",
+                                    notes=f"live_paper_loop exit",
+                                )
+                            )
+                            # Close position (would need broker call in real implementation)
+                            print(f"[{ts}] {sym} {sec_type}: EXIT position size={current_pos.size} pnl={exit_pnl:.2f}")
+                            # Recompute risk state after exit
+                            realized_pnl, unrealized_pnl = portfolio_pnls(portfolio, marks)
+                            risk_state = compute_risk_state(
+                                profile,
+                                day_start_equity=profile.starting_balance,
+                                realized_pnl=realized_pnl,
+                                unrealized_pnl=unrealized_pnl,
+                                trades_today=trades_today,
+                                max_trades=profile.max_trades,
+                                now=datetime.now(timezone.utc),
+                            )
+                    
+                    # Skip trading if paused/cooldown but continue logging
+                    if risk_state.status in {"COOLDOWN", "PAUSED"}:
+                        cooldown_msg = f"cooldown until {risk_state.cooldown_until.isoformat()}" if risk_state.cooldown_until else "cooldown"
+                        print(f"[{ts}] {sym} {sec_type} {args.strategy}: SKIP (status={risk_state.status}, {cooldown_msg})")
+                        # Still log the signal for tracking
+                        log_performance_row(
+                            PerformanceRow(
+                                timestamp=datetime.now(timezone.utc),
+                                entry_time=None,
+                                exit_time=None,
+                                symbol=sym,
+                                sec_type=sec_type,
+                                strategy_name=signal["strategy_name"],
+                                side=side,
+                                requested_size=0,
+                                filled_size=0,
+                                entry_price=price,
+                                realized_pnl=realized_pnl,
+                                unrealized_pnl=unrealized_pnl,
+                                fast_ma=signal.get("fast_ma"),
+                                slow_ma=signal.get("slow_ma"),
+                                risk_status=risk_state.status,
+                                drawdown_remaining=risk_state.remaining_loss_buffer,
+                                trade_reason=signal.get("comment"),
+                                emotion_state=risk_state.status,
+                                notes=f"live_paper_loop skipped (cooldown/paused)",
+                            )
+                        )
+                        continue
+                    
                     size = compute_position_size(sym, side, profile, risk_state, price=price)
+                    # Apply tiny-size cap (but still respect risk taper)
+                    if args.tiny_size > 0:
+                        size = min(abs(size), args.tiny_size) * (1 if size >= 0 else -1)
+                    
                     if size == 0:
                         print(f"[{ts}] {sym} {sec_type} {args.strategy}: blocked by risk state {risk_state.status}")
                         continue
@@ -225,8 +324,17 @@ def main(argv: list[str] | None = None) -> int:
                         },
                         index=[df.index[-1]],
                     )
+                    entry_time = datetime.now(timezone.utc)
                     exec_agent.symbol = sym
                     exec_agent.execute(sig_df)
+                    trades_today += 1
+                    
+                    # Track open position
+                    open_positions[sym] = {
+                        "entry_time": entry_time,
+                        "entry_price": price,
+                    }
+                    
                     # Apply any available fills from the broker (IBKR or dummy).
                     fills = list(broker.fetch_fills(since=last_fill_ts))
                     if fills:
@@ -237,9 +345,9 @@ def main(argv: list[str] | None = None) -> int:
                     realized_pnl_after, unrealized_pnl_after = portfolio_pnls(portfolio, {sym: price})
                     log_performance_row(
                         PerformanceRow(
-                            timestamp=datetime.now(timezone.utc),
-                            entry_time=None,
-                            exit_time=None,
+                            timestamp=entry_time,
+                            entry_time=entry_time,
+                            exit_time=None,  # Will be set when position closes
                             symbol=sym,
                             sec_type=sec_type,
                             strategy_name=signal["strategy_name"],
@@ -255,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
                             drawdown_remaining=risk_state.remaining_loss_buffer,
                             trade_reason=signal.get("comment"),
                             emotion_state=risk_state.status if risk_state.status in {"COOLDOWN", "PAUSED"} else "normal",
-                            notes=f"live_paper_loop; sr={ {k: signal.get(k) for k in ('support1','resistance1','vwap')} }",
+                            notes=f"live_paper_loop entry; sr={ {k: signal.get(k) for k in ('support1','resistance1','vwap') if k in signal} }",
                         )
                     )
                 except Exception as exc:

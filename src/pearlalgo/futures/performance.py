@@ -91,13 +91,22 @@ def load_performance(path: Path | str = DEFAULT_PERF_PATH) -> pd.DataFrame:
     infile = Path(path)
     if not infile.exists():
         return pd.DataFrame(columns=DEFAULT_COLUMNS)
-    return pd.read_csv(infile, parse_dates=["timestamp"])
+    df = pd.read_csv(infile)
+    # Parse datetime columns
+    date_cols = ["timestamp", "entry_time", "exit_time"]
+    for col in date_cols:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+    return df
 
 
 def summarize_daily_performance(
     path: str | Path = DEFAULT_PERF_PATH,
     date: str | None = None,
 ) -> dict[str, float]:
+    """
+    Calculate comprehensive performance metrics including win rate, avg P&L, worst drawdown, and time in trade.
+    """
     df = load_performance(path)
     if df.empty:
         return {}
@@ -105,11 +114,45 @@ def summarize_daily_performance(
         df = df[df["timestamp"].dt.date == pd.to_datetime(date).date()]
     if df.empty:
         return {}
+    
     trades = df.dropna(subset=["realized_pnl"])
-    wins = trades[trades["realized_pnl"] > 0] if not trades.empty else pd.DataFrame()
+    if trades.empty:
+        return {
+            "rows": float(len(df)),
+            "trades": 0.0,
+            "win_rate": 0.0,
+            "avg_realized_pnl": 0.0,
+            "worst_drawdown": 0.0,
+            "avg_time_in_trade_minutes": 0.0,
+        }
+    
+    wins = trades[trades["realized_pnl"] > 0]
+    losses = trades[trades["realized_pnl"] < 0]
+    
+    # Calculate worst drawdown from drawdown_remaining column
+    worst_drawdown = 0.0
+    if "drawdown_remaining" in df.columns:
+        drawdowns = df["drawdown_remaining"].dropna()
+        if not drawdowns.empty:
+            # Worst drawdown is the minimum remaining buffer (most negative relative to starting)
+            # If we track from starting balance, worst is when remaining is closest to 0
+            worst_drawdown = float(drawdowns.min()) if len(drawdowns) > 0 else 0.0
+    
+    # Calculate average time in trade
+    avg_time_minutes = 0.0
+    if "entry_time" in trades.columns and "exit_time" in trades.columns:
+        completed_trades = trades.dropna(subset=["entry_time", "exit_time"])
+        if not completed_trades.empty:
+            durations = (completed_trades["exit_time"] - completed_trades["entry_time"]).dt.total_seconds() / 60.0
+            avg_time_minutes = float(durations.mean()) if len(durations) > 0 else 0.0
+    
     return {
         "rows": float(len(df)),
         "trades": float(len(trades)),
+        "wins": float(len(wins)),
+        "losses": float(len(losses)),
         "win_rate": float(len(wins) / len(trades)) if len(trades) > 0 else 0.0,
         "avg_realized_pnl": float(trades["realized_pnl"].mean()) if len(trades) > 0 else 0.0,
+        "worst_drawdown": worst_drawdown,
+        "avg_time_in_trade_minutes": avg_time_minutes,
     }

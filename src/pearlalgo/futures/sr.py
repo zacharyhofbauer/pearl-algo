@@ -72,6 +72,49 @@ def compute_daily_pivots(prev_close: float, prev_high: float, prev_low: float) -
     return {"pivot": p, "r1": r1, "r2": r2, "r3": r3, "s1": s1, "s2": s2, "s3": s3}
 
 
+def compute_premarket_levels(bars: Iterable[Bar], session_start_hour: int = 9) -> Dict[str, float | None]:
+    """
+    Compute pre-market high/low from bars before the main session starts.
+    Assumes bars are ordered chronologically.
+    """
+    bar_list = list(bars)
+    if not bar_list:
+        return {"premarket_high": None, "premarket_low": None}
+    
+    # Filter bars before session start (e.g., 9 AM ET = hour 9)
+    # Handle both pd.Timestamp and datetime objects
+    premarket_bars = []
+    for b in bar_list:
+        if hasattr(b.timestamp, 'hour'):
+            if b.timestamp.hour < session_start_hour:
+                premarket_bars.append(b)
+        # If timestamp doesn't have hour attribute, skip pre-market filtering
+        # (assume all bars are in session)
+    
+    if not premarket_bars:
+        return {"premarket_high": None, "premarket_low": None}
+    
+    premarket_high = max(b.high for b in premarket_bars)
+    premarket_low = min(b.low for b in premarket_bars)
+    return {"premarket_high": premarket_high, "premarket_low": premarket_low}
+
+
+def compute_swing_levels(bars: Iterable[Bar], lookback: int = 20) -> Dict[str, float | None]:
+    """
+    Compute recent swing high/low from the last N bars.
+    Swing high: highest high in lookback period.
+    Swing low: lowest low in lookback period.
+    """
+    bar_list = list(bars)
+    if not bar_list:
+        return {"swing_high": None, "swing_low": None}
+    
+    recent_bars = bar_list[-lookback:] if len(bar_list) > lookback else bar_list
+    swing_high = max(b.high for b in recent_bars)
+    swing_low = min(b.low for b in recent_bars)
+    return {"swing_high": swing_high, "swing_low": swing_low}
+
+
 def chartprime_sr(indicators: Dict[str, float] | None = None) -> Dict[str, float]:
     """
     Stub for external high-timeframe support/resistance (e.g., ChartPrime).
@@ -80,9 +123,14 @@ def chartprime_sr(indicators: Dict[str, float] | None = None) -> Dict[str, float
     return indicators or {}
 
 
-def calculate_support_resistance(bars: Iterable[Bar], indicators: Dict[str, float] | None = None) -> Dict[str, float]:
+def calculate_support_resistance(
+    bars: Iterable[Bar],
+    indicators: Dict[str, float] | None = None,
+    session_start_hour: int = 9,
+    swing_lookback: int = 20,
+) -> Dict[str, float]:
     """
-    Combine pivots, VWAP, and optional external levels into a simple SR dict.
+    Combine pivots, VWAP, pre-market levels, swing levels, and optional external levels into a comprehensive SR dict.
     Picks most recent pivot low as support1 and most recent pivot high as resistance1.
     """
     bar_list = list(bars)
@@ -95,10 +143,16 @@ def calculate_support_resistance(bars: Iterable[Bar], indicators: Dict[str, floa
     support1 = pivot_lows[-1][1] if pivot_lows else None
     resistance1 = pivot_highs[-1][1] if pivot_highs else None
 
+    # Add pre-market and swing levels
+    premarket = compute_premarket_levels(bar_list, session_start_hour=session_start_hour)
+    swing = compute_swing_levels(bar_list, lookback=swing_lookback)
+
     sr = {
         "support1": support1,
         "resistance1": resistance1,
         "vwap": vwap,
+        **premarket,
+        **swing,
     }
     sr.update(chartprime_sr(indicators))
     return sr
