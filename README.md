@@ -19,10 +19,32 @@ pip install -e .
 cp .env.example .env
 ```
 
-## Quickstart
+## 🚀 Quickstart (Easy Workflow)
+
+**NEW: Interactive Menu System**
 ```bash
-python -m pearlalgo.cli list-strategies
-python -m pearlalgo.cli backtest --data data/futures/ES_15m_sample.csv --strategy es_breakout --symbol ES
+cd ~/pearlalgo-dev-ai-agents
+source .venv/bin/activate
+python scripts/pearlalgo.py
+```
+
+This opens an interactive menu where you can:
+- Generate daily signals & reports
+- View status dashboard
+- Run paper trading loops
+- Manage IB Gateway
+- View latest signals/reports
+
+**Quick Commands:**
+```bash
+# Generate signals (default: sr strategy)
+python scripts/pearlalgo.py --signals
+
+# View dashboard
+python scripts/pearlalgo.py --dashboard
+
+# View live-updating dashboard
+python scripts/status_dashboard.py --live
 ```
 
 Backtest a registered strategy (defaults to backtest profile):
