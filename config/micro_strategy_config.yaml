@@ -1,0 +1,48 @@
+# Micro Contracts Fast-Paced Trading Configuration
+# Strategy for trading micro futures with faster intervals and higher contract counts
+
+name: micro_fast
+starting_balance: 50000.0
+daily_loss_limit: 2500.0
+target_profit: 5000.0
+risk_taper_threshold: 0.3
+max_trades: 50  # Higher for faster-paced trading
+cooldown_minutes: 30  # Shorter cooldown for micro
+min_contract_size: 1
+
+# Micro contracts - higher max contracts (3-5 at a time)
+max_contracts_by_symbol:
+  # Micro contracts
+  MGC: 5   # Micro Gold
+  MYM: 5   # Micro E-mini Dow
+  MRTY: 5  # Micro Russell 2000
+  MCL: 5   # Micro Crude Oil
+  MNQ: 5   # Micro NASDAQ (if using)
+  MES: 5   # Micro S&P 500 (if using)
+  
+  # Regular contracts (lower limits)
+  GC: 2    # Gold
+  YM: 2    # E-mini Dow
+  RTY: 2   # Russell 2000
+  CL: 2    # Crude Oil
+  NQ: 2    # NASDAQ
+  ES: 2    # S&P 500
+
+# Tick values (dollar per minimum tick move)
+tick_values_by_symbol:
+  # Micro contracts (smaller tick values)
+  MGC: 1.0      # Micro Gold: $1 per tick
+  MYM: 0.5      # Micro Dow: $0.50 per tick
+  MRTY: 0.50    # Micro Russell: $0.50 per tick
+  MCL: 1.0      # Micro Crude: $1 per tick
+  MNQ: 0.5      # Micro NASDAQ: $0.50 per tick
+  MES: 1.25     # Micro S&P: $1.25 per tick
+  
+  # Regular contracts
+  GC: 10.0      # Gold: $10 per tick
+  YM: 5.0       # Dow: $5 per tick
+  RTY: 5.0      # Russell: $5 per tick
+  CL: 10.0      # Crude: $10 per tick
+  NQ: 20.0      # NASDAQ: $20 per tick
+  ES: 12.5      # S&P: $12.50 per tick
+

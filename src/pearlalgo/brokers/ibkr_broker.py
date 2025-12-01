@@ -137,8 +137,8 @@ class IBKRBroker(Broker):
         if not self._live_enabled():
             self._dry_run_counter += 1
             order_id = f"dry-run-{self._dry_run_counter}"
-            logger.info(
-                "Live trading disabled (profile=%s, allow_live_trading=%s); would submit %s %s qty=%s %s",
+            logger.warning(
+                "⚠️  LIVE TRADING DISABLED - Order not submitted (profile=%s, allow_live_trading=%s); would submit %s %s qty=%s %s",
                 self.settings.profile,
                 self.settings.allow_live_trading,
                 order.side,
@@ -146,6 +146,8 @@ class IBKRBroker(Broker):
                 order.quantity,
                 order.order_type,
             )
+            # Also print to console for visibility
+            print(f"⚠️  DRY RUN MODE: Would submit {order.side} {order.quantity} {order.symbol} @ {order.order_type}")
             return order_id
 
         ib = self._connect()
@@ -160,8 +162,16 @@ class IBKRBroker(Broker):
             trading_class=metadata.get("trading_class"),
         )
         ib_order = self._build_order(order)
-        trade = ib.placeOrder(contract, ib_order)
-        return str(trade.order.orderId)
+        
+        logger.info(f"🚀 SUBMITTING LIVE ORDER: {order.side} {order.quantity} {order.symbol} @ {order.order_type}")
+        try:
+            trade = ib.placeOrder(contract, ib_order)
+            order_id = str(trade.order.orderId)
+            logger.info(f"✅ Order placed successfully: OrderID={order_id}, Contract={contract.symbol}")
+            return order_id
+        except Exception as e:
+            logger.error(f"❌ Order placement failed: {e}", exc_info=True)
+            raise
 
     def _build_order(self, order: OrderEvent):
         side = "BUY" if order.side.upper() == "BUY" else "SELL"

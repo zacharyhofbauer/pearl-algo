@@ -553,7 +553,22 @@ class AutomatedTradingAgent:
         
         entry_time = datetime.now(timezone.utc)
         self.exec_agent.symbol = symbol
-        self.exec_agent.execute(sig_df)
+        
+        # Execute trade and capture order IDs
+        if self.verbose:
+            console.print(f"[dim]📤 Submitting order to broker...[/dim]")
+        try:
+            order_ids = self.exec_agent.execute(sig_df)
+            if self.verbose:
+                if order_ids:
+                    console.print(f"[green]✅ Order submitted: {order_ids}[/green]")
+                else:
+                    console.print(f"[yellow]⚠️  No order IDs returned (may be dry-run mode)[/yellow]")
+        except Exception as e:
+            if self.verbose:
+                console.print(f"[red]❌ Order submission failed: {e}[/red]")
+            logger.error(f"Order submission failed for {symbol}: {e}", exc_info=True)
+            raise
         
         # Track open position
         self.open_positions[symbol] = {
