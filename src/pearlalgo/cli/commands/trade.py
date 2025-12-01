@@ -96,10 +96,8 @@ def auto_cmd(
     if log_file:
         args.extend(["--log-file", log_file])
     
-    # Map CLI verbosity to log level (automated_trading only accepts DEBUG/INFO/WARNING/ERROR)
-    if verbosity == "VERBOSE" or verbosity == "DEBUG":
-        args.append("--log-level")
-        args.append("DEBUG" if verbosity == "DEBUG" else "INFO")
+    # Note: automated_trading.py accepts --log-level, but we'll let it use defaults
+    # The verbose output goes to console via the agent's self.verbose flag
     
     console.print(f"\n[bold cyan]🤖 Starting Automated Trading Agent...[/bold cyan]\n")
     console.print(f"Symbols: {', '.join(symbols)}")
