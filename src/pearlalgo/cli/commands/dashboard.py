@@ -26,11 +26,10 @@ console = Console()
 
 
 @click.command(name="dashboard")
-@click.option("--live", is_flag=True, default=True, help="Live updating dashboard (default)")
-@click.option("--once", is_flag=True, help="Show dashboard once and exit")
+@click.option("--once", is_flag=True, help="Show dashboard once and exit (default: live updating)")
 @click.option("--refresh", type=int, default=5, help="Refresh interval in seconds (default: 5)")
 @click.pass_context
-def dashboard_cmd(ctx: click.Context, live: bool, once: bool, refresh: int) -> None:
+def dashboard_cmd(ctx: click.Context, once: bool, refresh: int) -> None:
     """Show real-time status dashboard with live updates."""
     verbosity = ctx.obj.get("verbosity", "NORMAL")
     
@@ -39,6 +38,8 @@ def dashboard_cmd(ctx: click.Context, live: bool, once: bool, refresh: int) -> N
         console.print(create_dashboard())
     else:
         # Live updating dashboard
+        console.print(f"\n[bold cyan]📊 Starting Live Dashboard (refreshes every {refresh}s)[/bold cyan]")
+        console.print("[dim]Press Ctrl+C to exit[/dim]\n")
         try:
             with Live(create_dashboard(), refresh_per_second=1.0/refresh, screen=True) as live_display:
                 while True:

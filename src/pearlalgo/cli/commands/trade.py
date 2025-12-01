@@ -56,8 +56,20 @@ def paper_cmd(ctx: click.Context, symbols: tuple, strategy: str, interval: int, 
 @click.option("--strategy", type=click.Choice(["ma_cross", "sr"]), default="sr", help="Trading strategy")
 @click.option("--interval", type=int, default=300, help="Loop interval in seconds")
 @click.option("--tiny-size", type=int, default=1, help="Base contract size")
+@click.option("--profile-config", type=click.Path(exists=True), help="Profile config file (YAML/JSON)")
+@click.option("--ib-client-id", type=int, help="IB Gateway client ID override")
+@click.option("--log-file", type=click.Path(), help="Log file path")
 @click.pass_context
-def auto_cmd(ctx: click.Context, symbols: tuple, strategy: str, interval: int, tiny_size: int) -> None:
+def auto_cmd(
+    ctx: click.Context,
+    symbols: tuple,
+    strategy: str,
+    interval: int,
+    tiny_size: int,
+    profile_config: str | None,
+    ib_client_id: int | None,
+    log_file: str | None,
+) -> None:
     """Start automated trading agent."""
     verbosity = ctx.obj.get("verbosity", "NORMAL")
     
@@ -75,11 +87,27 @@ def auto_cmd(ctx: click.Context, symbols: tuple, strategy: str, interval: int, t
         "--tiny-size", str(tiny_size),
     ]
     
+    if profile_config:
+        args.extend(["--profile-config", profile_config])
+    
+    if ib_client_id:
+        args.extend(["--ib-client-id", str(ib_client_id)])
+    
+    if log_file:
+        args.extend(["--log-file", log_file])
+    
     if verbosity == "VERBOSE" or verbosity == "DEBUG":
         args.append("--log-level")
         args.append(verbosity)
     
     console.print(f"\n[bold cyan]🤖 Starting Automated Trading Agent...[/bold cyan]\n")
+    console.print(f"Symbols: {', '.join(symbols)}")
+    console.print(f"Strategy: {strategy}")
+    console.print(f"Interval: {interval}s")
+    console.print(f"Contract Size: {tiny_size}")
+    if profile_config:
+        console.print(f"Profile: {profile_config}")
+    console.print()
     
     raise SystemExit(automated_trading.main(args))
 
