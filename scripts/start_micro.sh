@@ -12,13 +12,14 @@ echo ""
 
 # Start in background
 nohup pearlalgo --verbosity VERBOSE trade auto \
-  --symbols MGC MYM MCL MNQ MES \
+  --symbols MGC --symbols MYM --symbols MCL --symbols MNQ --symbols MES \
   --strategy sr \
   --interval 60 \
   --tiny-size 3 \
   --profile-config config/micro_strategy_config.yaml \
   --ib-client-id 10 \
-  --log-file logs/micro_trading.log > logs/micro_console.log 2>&1 &
+  --log-file logs/micro_trading.log \
+  --log-level INFO > logs/micro_console.log 2>&1 &
 
 PID=$!
 echo "✅ Micro strategy started (PID: $PID)"
