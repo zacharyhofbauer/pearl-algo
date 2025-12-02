@@ -1,4 +1,5 @@
 # LangGraph Multi-Agent Trading System Configuration
+# All API keys should be set via environment variables for security
 
 # Broker Configuration
 broker:
@@ -8,25 +9,24 @@ broker:
   # IBKR Configuration (for futures)
   ibkr:
     host: "${IBKR_HOST:-127.0.0.1}"
-    port: ${IBKR_PORT:-7497}
-    client_id: ${IBKR_CLIENT_ID:-1}
-    data_client_id: ${IBKR_DATA_CLIENT_ID:-2}
-    paper_trading: ${IBKR_PAPER:-true}
-    # API keys not needed for IBKR (uses Gateway authentication)
+    port: "${IBKR_PORT:-7497}"
+    client_id: "${IBKR_CLIENT_ID:-1}"
+    data_client_id: "${IBKR_DATA_CLIENT_ID:-2}"
+    # Set IBKR_API_KEY and IBKR_API_SECRET in .env if needed
   
   # Bybit Configuration (for crypto perps)
   bybit:
-    api_key: "${BYBIT_API_KEY:-}"
-    api_secret: "${BYBIT_API_SECRET:-}"
-    testnet: ${BYBIT_TESTNET:-true}
+    api_key: "${BYBIT_API_KEY}"
+    api_secret: "${BYBIT_API_SECRET}"
+    testnet: false  # Set to true for paper trading
     unified_margin: true
   
   # Alpaca Configuration (for US futures)
   alpaca:
-    api_key: "${ALPACA_API_KEY:-}"
-    api_secret: "${ALPACA_API_SECRET:-}"
-    base_url: "${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"
-    paper_trading: ${ALPACA_PAPER:-true}
+    api_key: "${ALPACA_API_KEY}"
+    api_secret: "${ALPACA_API_SECRET}"
+    base_url: "${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"  # Use paper by default
+    data_feed: "iex"  # or "sip" for live
 
 # Trading Symbols
 symbols:
@@ -48,7 +48,7 @@ symbols:
       tick_value: 10.0
       contract_size: 1000
     - symbol: "GC"
-      exchange: "COMEX"
+      exchange: "NYMEX"
       sec_type: "FUT"
       tick_value: 10.0
       contract_size: 100
@@ -56,40 +56,30 @@ symbols:
   # Crypto perpetuals (Bybit equivalents)
   crypto_perps:
     - symbol: "BTCUSDT"
-      base: "BTC"
-      quote: "USDT"
-      tick_value: 0.1
+      exchange: "bybit"
+      tick_value: 0.01
+      contract_size: 1
     - symbol: "ETHUSDT"
-      base: "ETH"
-      quote: "USDT"
-      tick_value: 0.1
+      exchange: "bybit"
+      tick_value: 0.01
+      contract_size: 1
 
-# Data Sources
-data:
-  # Primary data source: "ibkr", "polygon", "bybit", or "websocket"
-  primary: "ibkr"
-  
-  # Polygon.io Configuration (free tier for US futures)
-  polygon:
-    api_key: "${POLYGON_API_KEY:-}"
-    use_free_tier: true
-  
-  # WebSocket Configuration
-  websocket:
-    enabled: true
-    reconnect_delay: 5
-    max_reconnect_attempts: 10
+# Timeframes
+timeframes:
+  primary: "15m"  # Primary timeframe for signals
+  secondary: "5m"  # Secondary for entry/exit
+  backtest: "15m"  # For backtesting
 
-# Strategy Configuration
+# Strategy Parameters
 strategy:
-  # Default strategy: "sr", "ma_cross", "breakout", "mean_reversion", "momentum"
-  default: "sr"
+  # Default strategy
+  default: "sr"  # Options: "sr", "ma_cross", "breakout", "mean_reversion"
   
-  # Strategy parameters
+  # Strategy-specific parameters
   sr:
-    fast: 20
-    slow: 50
-    tolerance: 0.002
+    fast: 20  # Fast EMA period
+    slow: 50  # Slow MA period
+    tolerance: 0.002  # Support/resistance tolerance (0.2%)
   
   ma_cross:
     fast: 20
@@ -106,145 +96,166 @@ strategy:
     rsi_period: 14
     rsi_oversold: 30.0
     rsi_overbought: 70.0
-  
-  momentum:
-    lookback: 20
-    min_momentum: 0.01
 
 # Risk Management Rules (HARDCODED - DO NOT MODIFY)
 risk:
-  # Max risk per trade (2% of account)
-  max_risk_per_trade: 0.02
+  # Maximum risk per trade (2% as specified)
+  max_risk_per_trade: 0.02  # 2%
   
-  # Volatility targeting (0.5-1% daily volatility)
+  # Volatility targeting (0.5-1% daily vol)
   volatility_target:
-    min: 0.005
-    max: 0.01
+    min: 0.005  # 0.5%
+    max: 0.01   # 1.0%
   
-  # Hard drawdown kill-switch (15% of account)
-  max_drawdown: 0.15
+  # Maximum account drawdown kill-switch (15% as specified)
+  max_drawdown: 0.15  # 15%
   
   # Position sizing
   position_sizing:
-    method: "volatility_target"  # "volatility_target" or "fixed_risk"
-    base_size: 1
+    method: "volatility_target"  # or "fixed_percent"
+    base_size: 1  # Base contract size
   
   # Stop loss and take profit
   stop_loss:
-    enabled: true
-    method: "atr"  # "atr", "percentage", or "fixed"
+    method: "atr"  # or "fixed_percent", "support_resistance"
     atr_multiplier: 2.0
-    percentage: 0.01
+    fixed_percent: 0.01  # 1% if using fixed
   
   take_profit:
-    enabled: true
-    method: "risk_reward"  # "risk_reward" or "percentage"
-    risk_reward_ratio: 2.0
-    percentage: 0.02
+    method: "risk_reward"  # or "fixed_percent"
+    risk_reward_ratio: 2.0  # 2:1 R/R
+    fixed_percent: 0.02  # 2% if using fixed
   
   # Circuit breakers
   circuit_breakers:
-    max_daily_loss: 0.05  # 5% daily loss limit
+    max_daily_loss: 2500.0  # Hard stop in dollars
     max_consecutive_losses: 5
     cooldown_minutes: 30
+    max_trades_per_day: 50
   
-  # No martingale, no averaging down
-  no_martingale: true
-  no_averaging_down: true
+  # No martingale, no averaging down (enforced in code)
+  allow_martingale: false
+  allow_averaging_down: false
 
 # LLM Configuration (for Quant Research Agent reasoning)
 llm:
-  # Provider: "groq" or "litellm"
-  provider: "groq"
+  provider: "groq"  # Options: "groq", "litellm"
   
   groq:
-    api_key: "${GROQ_API_KEY:-}"
+    api_key: "${GROQ_API_KEY}"
     model: "mixtral-8x7b-32768"  # or "llama-3-70b-8192"
     temperature: 0.3
+    max_tokens: 1000
   
   litellm:
-    api_key: "${LITELLM_API_KEY:-}"
-    model: "gpt-4o-mini"  # or any supported model
+    api_key: "${OPENAI_API_KEY}"  # or other provider key
+    model: "gpt-4o-mini"  # or other model
     temperature: 0.3
+    max_tokens: 1000
+
+# Data Sources
+data:
+  # Primary data source
+  primary: "broker"  # Uses broker's data feed
+  
+  # Fallback data sources
+  fallback:
+    polygon:
+      api_key: "${POLYGON_API_KEY}"
+      free_tier: true  # Use free tier limits
+  
+  # WebSocket streaming
+  websocket:
+    enabled: true
+    reconnect_delay: 5  # seconds
+    max_reconnect_attempts: 10
 
 # Trading Mode
 trading:
-  # Mode: "paper" or "live"
+  # Default mode: "paper" or "live"
   mode: "paper"
   
   # Paper trading settings
   paper:
-    starting_balance: 100000.0
-    commission: 0.0
+    starting_balance: 50000.0
+    commission: 0.0  # No commission in paper trading
   
   # Live trading settings
   live:
-    # Require explicit confirmation
-    require_confirmation: true
-    # Max position size in live mode
-    max_position_size: 5
-
-# Timeframes
-timeframes:
-  # Default timeframe for analysis
-  default: "15m"
-  
-  # Available timeframes: "1m", "5m", "15m", "30m", "1h", "4h", "1d"
-  available: ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+    starting_balance: "${LIVE_STARTING_BALANCE:-50000.0}"
+    commission: 0.85  # Per contract (IBKR typical)
+    require_confirmation: false  # Set to true for manual confirmation
 
 # Logging
 logging:
   level: "INFO"  # DEBUG, INFO, WARNING, ERROR
   file: "logs/langgraph_trading.log"
   console: true
-  structured: true
-  
-  # Agent reasoning logging
-  log_agent_reasoning: true
-  reasoning_file: "logs/agent_reasoning.jsonl"
+  structured: true  # Use loguru structured logging
 
 # Alerts
 alerts:
-  # Telegram Configuration
+  # Telegram
   telegram:
-    enabled: ${TELEGRAM_ENABLED:-false}
-    bot_token: "${TELEGRAM_BOT_TOKEN:-}"
-    chat_id: "${TELEGRAM_CHAT_ID:-}"
+    enabled: false
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    chat_id: "${TELEGRAM_CHAT_ID}"
     notify_on:
       - "trade"
       - "risk_warning"
       - "daily_summary"
-      - "error"
   
-  # Discord Configuration
+  # Discord
   discord:
-    enabled: ${DISCORD_ENABLED:-false}
-    webhook_url: "${DISCORD_WEBHOOK_URL:-}"
+    enabled: false
+    webhook_url: "${DISCORD_WEBHOOK_URL}"
     notify_on:
       - "trade"
       - "risk_warning"
       - "daily_summary"
-      - "error"
 
 # Backtesting
 backtesting:
-  engine: "vectorbt"  # "vectorbt" or "backtesting"
+  engine: "vectorbt"  # Options: "vectorbt", "backtesting", "backtrader"
   start_date: "2024-01-01"
   end_date: null  # null = today
   initial_cash: 100000.0
-  commission: 0.0
+  commission: 0.85
 
 # Dashboard
 dashboard:
-  enabled: true
-  port: 8501
-  host: "0.0.0.0"
-  refresh_interval: 5  # seconds
+  streamlit:
+    enabled: true
+    port: 8501
+    host: "0.0.0.0"
+    refresh_interval: 5  # seconds
+
+# Agent Configuration
+agents:
+  # Market Data Agent
+  market_data:
+    update_interval: 1  # seconds
+    buffer_size: 1000  # Number of bars to keep in memory
+  
+  # Quant Research Agent
+  quant_research:
+    use_llm_reasoning: true
+    regime_detection: true
+    ml_models: false  # Set to true to enable lightweight ML
+  
+  # Risk Manager Agent
+  risk_manager:
+    check_interval: 1  # seconds
+    enforce_strict: true  # Strict enforcement of all risk rules
+  
+  # Portfolio/Execution Agent
+  portfolio_execution:
+    execution_delay: 0.5  # seconds between order submission
+    max_order_retries: 3
 
 # Health Checks
 health:
   enabled: true
   check_interval: 60  # seconds
-  max_consecutive_failures: 3
+  max_consecutive_errors: 5
   auto_restart: true
-

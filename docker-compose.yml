@@ -8,48 +8,72 @@ services:
     container_name: langgraph-trading-bot
     restart: unless-stopped
     environment:
-      - PEARLALGO_PROFILE=paper
+      # Broker configuration
       - IBKR_HOST=${IBKR_HOST:-127.0.0.1}
       - IBKR_PORT=${IBKR_PORT:-7497}
       - IBKR_CLIENT_ID=${IBKR_CLIENT_ID:-1}
       - IBKR_DATA_CLIENT_ID=${IBKR_DATA_CLIENT_ID:-2}
+      
+      # Bybit (if using)
       - BYBIT_API_KEY=${BYBIT_API_KEY:-}
       - BYBIT_API_SECRET=${BYBIT_API_SECRET:-}
+      
+      # Alpaca (if using)
       - ALPACA_API_KEY=${ALPACA_API_KEY:-}
       - ALPACA_API_SECRET=${ALPACA_API_SECRET:-}
+      - ALPACA_BASE_URL=${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}
+      
+      # Data providers
       - POLYGON_API_KEY=${POLYGON_API_KEY:-}
+      
+      # LLM
       - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      
+      # Alerts
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      
+      # Trading
+      - PEARLALGO_PROFILE=${PEARLALGO_PROFILE:-paper}
+      - LIVE_STARTING_BALANCE=${LIVE_STARTING_BALANCE:-50000.0}
+      
+      # Python
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
     volumes:
+      # Persist logs and data
       - ./logs:/app/logs
       - ./data:/app/data
       - ./signals:/app/signals
       - ./reports:/app/reports
       - ./state_cache:/app/state_cache
       - ./telemetry:/app/telemetry
+      # Config
       - ./config:/app/config
-    ports:
-      - "8501:8501"  # Streamlit dashboard
+    networks:
+      - trading-network
     healthcheck:
-      test: ["CMD", "python3", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 60s
       timeout: 10s
       retries: 3
       start_period: 30s
-    networks:
-      - trading-network
 
+  # Streamlit Dashboard (optional)
   dashboard:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: langgraph-dashboard
     restart: unless-stopped
-    command: ["streamlit", "run", "scripts/streamlit_dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    command: streamlit run scripts/streamlit_dashboard.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
     environment:
-      - PEARLALGO_PROFILE=paper
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
     volumes:
       - ./logs:/app/logs
       - ./data:/app/data
@@ -58,14 +82,11 @@ services:
       - ./state_cache:/app/state_cache
       - ./telemetry:/app/telemetry
       - ./config:/app/config
-    ports:
-      - "8501:8501"
-    depends_on:
-      - trading-bot
     networks:
       - trading-network
+    depends_on:
+      - trading-bot
 
 networks:
   trading-network:
     driver: bridge
-
