@@ -17,6 +17,7 @@ from pearlalgo.cli.commands import (
     data,
     setup,
     monitor,
+    help,
 )
 
 console = Console()
@@ -98,6 +99,8 @@ cli.add_command(trade.trade_group)
 cli.add_command(gateway.gateway_group)
 cli.add_command(data.data_group)
 cli.add_command(setup.setup_cmd)
+cli.add_command(help.help_cmd)
+cli.add_command(help.cheat_sheet_cmd)
 
 
 if __name__ == "__main__":

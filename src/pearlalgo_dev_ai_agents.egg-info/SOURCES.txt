@@ -18,6 +18,7 @@ src/pearlalgo/cli/commands/__init__.py
 src/pearlalgo/cli/commands/dashboard.py
 src/pearlalgo/cli/commands/data.py
 src/pearlalgo/cli/commands/gateway.py
+src/pearlalgo/cli/commands/help.py
 src/pearlalgo/cli/commands/monitor.py
 src/pearlalgo/cli/commands/report.py
 src/pearlalgo/cli/commands/setup.py
@@ -70,6 +71,7 @@ src/pearlalgo_dev_ai_agents.egg-info/dependency_links.txt
 src/pearlalgo_dev_ai_agents.egg-info/entry_points.txt
 src/pearlalgo_dev_ai_agents.egg-info/requires.txt
 src/pearlalgo_dev_ai_agents.egg-info/top_level.txt
+tests/test_dashboard_metrics.py
 tests/test_futures_contracts.py
 tests/test_futures_core.py
 tests/test_providers_and_broker.py

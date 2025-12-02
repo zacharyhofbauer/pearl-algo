@@ -21,7 +21,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from scripts.status_dashboard import create_dashboard
+from scripts.dashboard import create_dashboard
 
 console = Console()
 
@@ -52,15 +52,9 @@ def dashboard_cmd(ctx: click.Context, once: bool, refresh: int, full: bool) -> N
     # Change to project root for file access
     os.chdir(SCRIPT_DIR)
     
-    if full:
-        # Use comprehensive dashboard
-        from scripts.comprehensive_dashboard import create_comprehensive_dashboard
-        create_fn = create_comprehensive_dashboard
-        title = "Comprehensive Dashboard"
-    else:
-        # Use standard dashboard
-        create_fn = create_dashboard
-        title = "Status Dashboard"
+    # Use unified dashboard (full mode removed - dashboard is always comprehensive)
+    create_fn = create_dashboard
+    title = "Trading Dashboard"
     
     if once:
         # Show once
