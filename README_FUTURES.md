@@ -241,3 +241,6 @@ Extend the dashboard by adding new functions and panels:
 - `src/pearlalgo/futures/risk.py`: Risk calculation implementation
 - `src/pearlalgo/futures/performance.py`: Performance logging implementation
 
+
+
+

@@ -11,7 +11,8 @@ import ast
 import re
 import sys
 import subprocess
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -40,6 +41,8 @@ from rich.layout import Layout
 from rich.live import Live
 from rich import box
 from rich.text import Text
+from rich.progress import Progress, BarColumn, TextColumn, SpinnerColumn
+from rich.align import Align
 
 from pearlalgo.futures.config import load_profile
 from pearlalgo.futures.performance import DEFAULT_PERF_PATH, load_performance, summarize_daily_performance
@@ -53,6 +56,10 @@ try:
     US_EASTERN = pytz.timezone('US/Eastern')
 except ImportError:
     US_EASTERN = None
+
+# Micro contract symbols
+MICRO_SYMBOLS = {"MGC", "MYM", "MCL", "MNQ", "MES", "M2K", "M6E", "M6B", "M6A", "M6J"}
+MINI_SYMBOLS = {"ES", "NQ", "GC", "YM", "CL", "NG", "ZB", "ZN", "ZF", "ZT"}
 
 
 def run_cmd(cmd: list[str]) -> str:
@@ -76,6 +83,71 @@ def get_us_eastern_time(utc_time: datetime) -> str:
     offset_hours = -4
     eastern_time = utc_time.replace(tzinfo=timezone.utc) + pd.Timedelta(hours=offset_hours)
     return eastern_time.strftime('%Y-%m-%d %H:%M:%S EST')
+
+
+def get_trading_processes() -> list[dict[str, Any]]:
+    """Get list of running trading processes with details."""
+    processes = []
+    try:
+        result = subprocess.run(
+            ["pgrep", "-af", "pearlalgo trade"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split("\n"):
+                if line and "pearlalgo trade" in line:
+                    parts = line.split(" ", 1)
+                    if len(parts) >= 2:
+                        pid = parts[0]
+                        cmd = parts[1]
+                        # Extract symbols and strategy from command
+                        symbols = []
+                        strategy = "unknown"
+                        contract_type = "unknown"
+                        
+                        # Check for micro symbols
+                        for sym in MICRO_SYMBOLS:
+                            if sym in cmd:
+                                symbols.append(sym)
+                                contract_type = "micro"
+                        # Check for mini/standard symbols
+                        if contract_type == "unknown":
+                            for sym in MINI_SYMBOLS:
+                                if sym in cmd:
+                                    symbols.append(sym)
+                                    contract_type = "mini"
+                        
+                        # Extract strategy
+                        if "--strategy" in cmd:
+                            match = re.search(r"--strategy\s+(\w+)", cmd)
+                            if match:
+                                strategy = match.group(1)
+                        
+                        processes.append({
+                            "pid": pid,
+                            "command": cmd[:80] + "..." if len(cmd) > 80 else cmd,
+                            "symbols": symbols,
+                            "strategy": strategy,
+                            "contract_type": contract_type,
+                        })
+    except Exception:
+        pass
+    return processes
+
+
+def detect_contract_type(symbols: list[str]) -> str:
+    """Detect if trading micro or mini contracts based on symbols."""
+    has_micro = any(sym in MICRO_SYMBOLS for sym in symbols)
+    has_mini = any(sym in MINI_SYMBOLS for sym in symbols)
+    
+    if has_micro and has_mini:
+        return "mixed"
+    elif has_micro:
+        return "micro"
+    elif has_mini:
+        return "mini"
+    else:
+        return "unknown"
 
 
 def gateway_status() -> tuple[str, str, bool]:
@@ -409,8 +481,44 @@ def find_latest_file(pattern: str, directory: str) -> tuple[Path, bool]:
     return Path(directory) / pattern, False
 
 
-def create_header_panel() -> Panel:
-    """Create header panel with system name, timestamps, and gateway status."""
+def create_refresh_indicator(seconds_until_refresh: float, refresh_interval: int) -> Panel:
+    """Create refresh indicator with countdown and progress bar."""
+    progress = (refresh_interval - seconds_until_refresh) / refresh_interval
+    progress_pct = int(progress * 100)
+    seconds_left = int(seconds_until_refresh)
+    
+    # Create progress bar
+    progress_bar = Progress(
+        BarColumn(bar_width=40, style="cyan", complete_style="green", finished_style="bold green"),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TextColumn("•"),
+        TextColumn("[dim]{task.description}[/dim]"),
+        console=console,
+    )
+    
+    with progress_bar:
+        task = progress_bar.add_task(
+            f"Next refresh in {seconds_left}s",
+            total=refresh_interval,
+            completed=refresh_interval - seconds_until_refresh
+        )
+    
+    # Create text version for layout
+    bar_length = 40
+    filled = int(bar_length * progress)
+    bar = "█" * filled + "░" * (bar_length - filled)
+    
+    content = Text()
+    content.append("🔄 ", style="bold cyan")
+    content.append(f"Refreshing in {seconds_left:2d}s ", style="bold")
+    content.append(f"[{progress_pct:3d}%] ", style="dim")
+    content.append(bar, style="green" if progress > 0.8 else "yellow" if progress > 0.5 else "cyan")
+    
+    return Panel(content, border_style="cyan", box=box.ROUNDED)
+
+
+def create_header_panel(processes: list[dict[str, Any]]) -> Panel:
+    """Create header panel with system name, timestamps, gateway status, and trading info."""
     now_utc = datetime.now(timezone.utc)
     now_eastern = get_us_eastern_time(now_utc)
     
@@ -423,6 +531,43 @@ def create_header_panel() -> Panel:
     content.append(f"\nGateway: {status}", style="bold green" if is_ready else "bold red")
     if version:
         content.append(f"\n{version[:80]}", style="dim")
+    
+    # Add trading process info
+    if processes:
+        content.append("\n\n", style="dim")
+        content.append("🤖 Active Trading Processes:\n", style="bold yellow")
+        all_symbols = []
+        all_strategies = set()
+        contract_types = set()
+        
+        for proc in processes:
+            all_symbols.extend(proc.get("symbols", []))
+            all_strategies.add(proc.get("strategy", "unknown"))
+            contract_types.add(proc.get("contract_type", "unknown"))
+        
+        if all_symbols:
+            contract_type_str = detect_contract_type(all_symbols)
+            if contract_type_str == "mixed":
+                content.append("Contract Type: ", style="dim")
+                content.append("Mixed (Micro + Mini)\n", style="bold yellow")
+            elif contract_type_str == "micro":
+                content.append("Contract Type: ", style="dim")
+                content.append("Micro Contracts\n", style="bold cyan")
+            elif contract_type_str == "mini":
+                content.append("Contract Type: ", style="dim")
+                content.append("Mini/Standard Contracts\n", style="bold green")
+            
+            content.append("Symbols: ", style="dim")
+            content.append(", ".join(sorted(set(all_symbols))), style="yellow")
+            content.append("\n", style="dim")
+            
+            if all_strategies:
+                content.append("Strategies: ", style="dim")
+                content.append(", ".join(sorted(all_strategies)), style="cyan")
+                content.append("\n", style="dim")
+    else:
+        content.append("\n\n", style="dim")
+        content.append("⚠️  No active trading processes", style="bold yellow")
     
     return Panel(content, border_style="cyan", box=box.DOUBLE)
 
@@ -469,6 +614,9 @@ def create_risk_summary_panel(perf_df: pd.DataFrame, profile: Any, today: str) -
     sortino = compute_sortino_ratio(today_df if not today_df.empty else perf_df)
     
     table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_column("Metric", style="cyan", width=20)
+    table.add_column("Value", style="white", width=18)
+    
     table.add_row("Risk State:", f"[bold {risk_color}]{risk_indicator} ({risk_state.status})[/]")
     table.add_row("", "")  # Spacer
     table.add_row("Remaining Drawdown:", f"${risk_state.remaining_loss_buffer:,.2f}")
@@ -498,12 +646,12 @@ def create_per_symbol_table(perf_df: pd.DataFrame, profile: Any, today: str) -> 
         signals_df["timestamp"] = pd.to_datetime(signals_df["timestamp"], errors="coerce")
     
     table = Table(show_header=True, box=box.ROUNDED, header_style="bold cyan")
-    table.add_column("Symbol", style="yellow", width=8)
-    table.add_column("Contract", width=10)
-    table.add_column("Last Signal", width=12)
+    table.add_column("Symbol", style="yellow", width=8, justify="center")
+    table.add_column("Contract", width=10, justify="center")
+    table.add_column("Last Signal", width=10, justify="center")
     table.add_column("Side", justify="center", width=8)
-    table.add_column("Realized P&L", justify="right", width=12)
-    table.add_column("Unrealized P&L", justify="right", width=14)
+    table.add_column("Realized P&L", justify="right", width=14)
+    table.add_column("Unrealized P&L", justify="right", width=16)
     table.add_column("Risk", justify="center", width=6)
     table.add_column("Position", justify="right", width=8)
     table.add_column("Trades", justify="right", width=7)
@@ -560,7 +708,7 @@ def create_per_symbol_table(perf_df: pd.DataFrame, profile: Any, today: str) -> 
         # Contract month (not in current data, show N/A)
         contract_month = "N/A"
         
-        table.add_row(
+            table.add_row(
             str(symbol),
             contract_month,
             last_signal_time,
@@ -581,8 +729,8 @@ def create_signal_context_table(perf_df: pd.DataFrame, signals_df: pd.DataFrame)
     context_df = extract_signal_context(perf_df, signals_df)
     
     table = Table(show_header=True, box=box.ROUNDED, header_style="bold cyan")
-    table.add_column("Symbol", style="yellow", width=8)
-    table.add_column("Strategy", width=10)
+    table.add_column("Symbol", style="yellow", width=8, justify="center")
+    table.add_column("Strategy", width=10, justify="center")
     table.add_column("Direction", justify="center", width=8)
     table.add_column("Entry", justify="right", width=10)
     table.add_column("Stop", justify="right", width=10)
@@ -628,6 +776,9 @@ def create_trade_stats_panel(perf_df: pd.DataFrame, today: str) -> Panel:
     stats = compute_trade_statistics(today_df if not today_df.empty else perf_df)
     
     table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
+    table.add_column("Metric", style="cyan", width=18)
+    table.add_column("Value", style="white", width=20)
+    
     table.add_row("Total Trades:", f"{stats['total_trades']}")
     table.add_row("Winners:", f"[green]{stats['winners']}[/] ({stats['win_rate']:.1f}%)")
     table.add_row("Losers:", f"[red]{stats['losers']}[/] ({100 - stats['win_rate']:.1f}%)")
@@ -662,7 +813,7 @@ def create_files_panel() -> Panel:
     return Panel(content, title="📁 Files & Logs", border_style="cyan")
 
 
-def create_dashboard() -> Layout:
+def create_dashboard(refresh_interval: int = 60, seconds_until_refresh: float = 60.0) -> Layout:
     """Create the main quant-grade dashboard layout."""
     layout = Layout()
     
@@ -678,11 +829,15 @@ def create_dashboard() -> Layout:
     if not signals_df.empty and "timestamp" in signals_df.columns:
         signals_df["timestamp"] = pd.to_datetime(signals_df["timestamp"], errors="coerce")
     
+    # Get trading processes
+    processes = get_trading_processes()
+    
     # Main layout structure
     layout.split_column(
-        Layout(name="header", size=6),
+        Layout(name="refresh", size=3),
+        Layout(name="header", size=10),
         Layout(name="main"),
-        Layout(name="footer", size=2)
+        Layout(name="footer", size=3)
     )
     
     layout["main"].split_row(
@@ -702,7 +857,8 @@ def create_dashboard() -> Layout:
     )
     
     # Populate panels
-    layout["header"].update(create_header_panel())
+    layout["refresh"].update(create_refresh_indicator(seconds_until_refresh, refresh_interval))
+    layout["header"].update(create_header_panel(processes))
     layout["risk"].update(create_risk_summary_panel(perf_df, profile, today))
     layout["per_symbol"].update(Panel(create_per_symbol_table(perf_df, profile, today), title="📈 Per-Symbol Metrics", border_style="cyan"))
     layout["signals"].update(Panel(create_signal_context_table(perf_df, signals_df), title="📋 Latest Signal Context", border_style="cyan"))
@@ -710,7 +866,7 @@ def create_dashboard() -> Layout:
     layout["files"].update(create_files_panel())
     
     # Footer
-    footer_text = Text("Press Ctrl+C to exit | Refresh: --live flag", style="dim", justify="center")
+    footer_text = Text("Press Ctrl+C to exit | Refresh interval: " + str(refresh_interval) + "s", style="dim", justify="center")
     layout["footer"].update(Panel(footer_text, border_style="dim"))
     
     return layout
@@ -719,24 +875,39 @@ def create_dashboard() -> Layout:
 def main() -> int:
     """Main entry point."""
     import argparse
-    parser = argparse.ArgumentParser(description="PearlAlgo Futures Desk — Quant-Grade Trading Dashboard")
-    parser.add_argument("--live", action="store_true", help="Live updating dashboard (refreshes every 5s)")
+    parser = argparse.ArgumentParser(
+        description="PearlAlgo Futures Desk — Quant-Grade Trading Dashboard",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python scripts/status_dashboard.py              # Show once and exit
+  python scripts/status_dashboard.py --live      # Live updating (60s default)
+  python scripts/status_dashboard.py --live --refresh 30  # 30 second refresh
+        """
+    )
+    parser.add_argument("--live", action="store_true", help="Live updating dashboard")
     parser.add_argument("--once", action="store_true", help="Show dashboard once and exit")
+    parser.add_argument("--refresh", type=int, default=60, metavar="SECONDS",
+                       help="Refresh interval in seconds (default: 60)")
     args = parser.parse_args()
     
-    if args.live:
+    refresh_interval = max(1, args.refresh)  # Ensure at least 1 second
+    
+    if args.live or not args.once:
         # Live updating dashboard
-        with Live(create_dashboard(), refresh_per_second=0.2, screen=True) as live:
+        start_time = time.time()
+        with Live(create_dashboard(refresh_interval, refresh_interval), refresh_per_second=2, screen=True) as live:
             try:
                 while True:
-                    import time
-                    time.sleep(5)
-                    live.update(create_dashboard())
+                    elapsed = time.time() - start_time
+                    seconds_until_refresh = refresh_interval - (elapsed % refresh_interval)
+                    live.update(create_dashboard(refresh_interval, seconds_until_refresh))
+                    time.sleep(0.5)  # Update every 0.5 seconds for smooth countdown
             except KeyboardInterrupt:
                 console.print("\n[bold yellow]Dashboard closed[/bold yellow]\n")
     else:
         # Show once
-        console.print(create_dashboard())
+        console.print(create_dashboard(refresh_interval, refresh_interval))
     
     return 0
 
