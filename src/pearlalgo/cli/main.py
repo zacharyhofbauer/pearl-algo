@@ -19,6 +19,7 @@ from pearlalgo.cli.commands import (
     monitor,
     help,
     terminal,
+    sdk,
 )
 
 console = Console()
@@ -95,6 +96,7 @@ cli.add_command(status.status_cmd)
 cli.add_command(dashboard.dashboard_cmd)
 cli.add_command(monitor.monitor_cmd)
 cli.add_command(terminal.terminal_cmd)
+cli.add_command(sdk.sdk_cmd)
 cli.add_command(signals.signals_cmd)
 cli.add_command(report.report_cmd)
 cli.add_command(trade.trade_group)

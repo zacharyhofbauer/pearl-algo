@@ -35,13 +35,14 @@ nohup pearlalgo --verbosity VERBOSE trade auto \
   --interval 60 \
   --tiny-size 2 \
   --profile-config config/micro_strategy_config.yaml \
-  --ib-client-id 10 \
+  --ib-client-id 20 \
   --log-file logs/micro_scalping_trading.log \
   --log-level INFO > logs/micro_scalping_console.log 2>&1 &
 
 SCALPING_PID=$!
 echo "   ✅ Scalping started (PID: $SCALPING_PID)"
 echo "   📊 Logs: logs/micro_scalping_trading.log"
+echo "   🔌 Client ID: 20"
 echo ""
 
 # Strategy 2: Intraday Swing on MGC, MYM (longer holds)
@@ -52,13 +53,14 @@ nohup pearlalgo --verbosity VERBOSE trade auto \
   --interval 900 \
   --tiny-size 3 \
   --profile-config config/micro_strategy_config.yaml \
-  --ib-client-id 11 \
+  --ib-client-id 21 \
   --log-file logs/micro_swing_trading.log \
   --log-level INFO > logs/micro_swing_console.log 2>&1 &
 
 SWING_PID=$!
 echo "   ✅ Intraday Swing started (PID: $SWING_PID)"
 echo "   📊 Logs: logs/micro_swing_trading.log"
+echo "   🔌 Client ID: 21"
 echo ""
 
 # Strategy 3: SR on MCL (support/resistance)
@@ -69,7 +71,7 @@ nohup pearlalgo --verbosity VERBOSE trade auto \
   --interval 300 \
   --tiny-size 2 \
   --profile-config config/micro_strategy_config.yaml \
-  --ib-client-id 12 \
+  --ib-client-id 22 \
   --log-file logs/micro_sr_trading.log \
   --log-level INFO > logs/micro_sr_console.log 2>&1 &
 

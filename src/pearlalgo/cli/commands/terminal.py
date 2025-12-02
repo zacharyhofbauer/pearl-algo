@@ -120,11 +120,30 @@ class TradingTerminal:
         if perf_path.exists():
             try:
                 perf_df = load_performance(perf_path)
+                if perf_df.empty:
+                    return list(positions_dict.values())
+                
+                # Ensure timestamp column exists and is datetime
+                if "timestamp" not in perf_df.columns:
+                    return list(positions_dict.values())
+                
+                # Convert timestamp to datetime if it's a string
+                if perf_df["timestamp"].dtype == 'object':
+                    perf_df["timestamp"] = pd.to_datetime(perf_df["timestamp"], errors='coerce')
+                
                 today = datetime.now(timezone.utc).strftime("%Y%m%d")
-                today_df = perf_df[perf_df["timestamp"].dt.strftime("%Y%m%d") == today] if "timestamp" in perf_df.columns and not perf_df.empty else pd.DataFrame()
+                today_df = perf_df[perf_df["timestamp"].dt.strftime("%Y%m%d") == today] if not perf_df.empty else pd.DataFrame()
                 
                 # Find positions without exit_time (open positions)
-                open_trades = today_df[today_df["exit_time"].isna()] if "exit_time" in today_df.columns else pd.DataFrame()
+                if "exit_time" not in today_df.columns:
+                    return list(positions_dict.values())
+                
+                # Handle exit_time as string or datetime
+                if today_df["exit_time"].dtype == 'object':
+                    # Check for NaN/empty strings
+                    open_trades = today_df[today_df["exit_time"].isna() | (today_df["exit_time"] == "") | (today_df["exit_time"].str.strip() == "")]
+                else:
+                    open_trades = today_df[today_df["exit_time"].isna()]
                 
                 for _, row in open_trades.iterrows():
                     symbol = str(row.get("symbol", ""))
@@ -176,7 +195,10 @@ class TradingTerminal:
                                 "_strategies": {strategy} if strategy != "unknown" else set(),
                             }
             except Exception as e:
-                # Silently fail - don't break terminal if there's an issue
+                # Log error but don't break terminal
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Error loading positions: {e}")
                 pass
         
         # Convert to list and sort by symbol
@@ -360,15 +382,23 @@ class TradingTerminal:
         
         try:
             perf_df = load_performance(perf_path)
-            today_df = perf_df[perf_df["timestamp"].dt.strftime("%Y%m%d") == today] if "timestamp" in perf_df.columns and not perf_df.empty else pd.DataFrame()
+            if perf_df.empty or "timestamp" not in perf_df.columns:
+                table.add_row("[yellow]No performance data[/yellow]", "")
+                return Panel(table, title="📊 Performance", border_style="cyan", box=box.ROUNDED)
+            
+            # Convert timestamp if needed
+            if perf_df["timestamp"].dtype == 'object':
+                perf_df["timestamp"] = pd.to_datetime(perf_df["timestamp"], errors='coerce')
+            
+            today_df = perf_df[perf_df["timestamp"].dt.strftime("%Y%m%d") == today] if not perf_df.empty else pd.DataFrame()
             
             profile = load_profile()
-            realized_pnl = today_df["realized_pnl"].fillna(0).sum() if not today_df.empty else 0.0
-            unrealized_pnl = today_df["unrealized_pnl"].fillna(0).sum() if not today_df.empty else 0.0
+            realized_pnl = today_df["realized_pnl"].fillna(0).sum() if not today_df.empty and "realized_pnl" in today_df.columns else 0.0
+            unrealized_pnl = today_df["unrealized_pnl"].fillna(0).sum() if not today_df.empty and "unrealized_pnl" in today_df.columns else 0.0
             total_pnl = realized_pnl + unrealized_pnl
             
             trades_today = len(today_df) if not today_df.empty else 0
-            winning_trades = len(today_df[today_df["realized_pnl"] > 0]) if not today_df.empty else 0
+            winning_trades = len(today_df[today_df["realized_pnl"] > 0]) if not today_df.empty and "realized_pnl" in today_df.columns else 0
             win_rate = (winning_trades / trades_today * 100) if trades_today > 0 else 0.0
             
             # Compute risk state
@@ -396,7 +426,7 @@ class TradingTerminal:
             table.add_row("Buffer:", f"${risk_state.remaining_loss_buffer:,.2f}")
             
         except Exception as e:
-            table.add_row("[dim]Loading metrics...[/dim]", "")
+            table.add_row(f"[red]Error: {str(e)[:30]}[/red]", "")
         
         return Panel(table, title="📊 Performance", border_style="cyan", box=box.ROUNDED)
     
@@ -442,11 +472,11 @@ class TradingTerminal:
         console.print(f"[dim]Refresh rate: {self.refresh_rate}s | Press Ctrl+C to exit[/dim]\n")
         
         try:
-            # Use Live with proper refresh rate
+            # Use Live with proper refresh rate - don't use auto_refresh, manually control
             refresh_per_second = max(0.1, 1.0 / self.refresh_rate)  # Ensure positive value
-            with Live(self.render(), refresh_per_second=refresh_per_second, screen=True, auto_refresh=True) as live:
+            with Live(self.render(), refresh_per_second=refresh_per_second, screen=True, auto_refresh=False) as live:
                 while True:
-                    # Force update on each iteration
+                    # Manually update on each iteration
                     live.update(self.render())
                     time.sleep(self.refresh_rate)
         except KeyboardInterrupt:

@@ -82,8 +82,10 @@ def create_strategy_signal(
         merged_params = {**strategy["default_params"], **params}
         return func(symbol, df, **merged_params)
     
-    # Fall back to signals.generate_signal for built-in strategies
-    return generate_signal(symbol, df, strategy_name=name, **params)
+    # Fall back to signals.generate_signal for built-in strategies (ma_cross, sr, breakout, etc.)
+    # Import here to avoid circular import
+    from pearlalgo.futures.signals import generate_signal as _generate_signal
+    return _generate_signal(symbol, df, strategy_name=name, **params)
 
 
 class BaseStrategy(ABC):

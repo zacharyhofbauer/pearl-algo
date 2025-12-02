@@ -466,14 +466,12 @@ def generate_signal(
     Returns a dict with side, indicators, and metadata.
     """
     # First check if strategy is registered (scalping, intraday_swing, etc.)
-    from pearlalgo.strategies.base import create_strategy_signal
-    try:
-        registered_signal = create_strategy_signal(strategy_name, symbol, df, **params)
-        if registered_signal:
-            return registered_signal
-    except (ValueError, KeyError):
-        # Strategy not in registry, fall through to built-in strategies
-        pass
+    from pearlalgo.strategies.base import get_strategy
+    strategy_info = get_strategy(strategy_name)
+    if strategy_info:
+        func = strategy_info["function"]
+        merged_params = {**strategy_info["default_params"], **params}
+        return func(symbol, df, **merged_params)
     
     fast = int(params.get("fast", 20))
     slow = int(params.get("slow", 50))

@@ -114,7 +114,26 @@ def load_performance(path: Path | str = DEFAULT_PERF_PATH) -> pd.DataFrame:
     infile = Path(path)
     if not infile.exists():
         return pd.DataFrame(columns=DEFAULT_COLUMNS)
-    df = pd.read_csv(infile)
+    
+    # Try reading with error handling for malformed CSV
+    try:
+        # First try standard read
+        df = pd.read_csv(infile)
+    except pd.errors.ParserError:
+        # If that fails, try with error handling
+        try:
+            df = pd.read_csv(infile, on_bad_lines='skip', engine='python')
+        except Exception:
+            # Last resort: try with minimal parsing
+            try:
+                df = pd.read_csv(infile, sep=',', quotechar='"', on_bad_lines='skip', engine='python', error_bad_lines=False)
+            except Exception:
+                # If all else fails, return empty DataFrame
+                return pd.DataFrame(columns=DEFAULT_COLUMNS)
+    
+    if df.empty:
+        return pd.DataFrame(columns=DEFAULT_COLUMNS)
+    
     # Parse datetime columns
     date_cols = ["timestamp", "entry_time", "exit_time"]
     for col in date_cols:
