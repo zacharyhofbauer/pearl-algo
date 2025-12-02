@@ -30,7 +30,29 @@ broker:
 
 # Trading Symbols
 symbols:
-  # Futures contracts (ES, NQ, CL, GC)
+  # Micro futures contracts (MES, MNQ, MCL, MGC) - Lower risk, smaller size
+  micro_futures:
+    - symbol: "MES"
+      exchange: "CME"
+      sec_type: "FUT"
+      tick_value: 1.25
+      contract_size: 5
+    - symbol: "MNQ"
+      exchange: "CME"
+      sec_type: "FUT"
+      tick_value: 2.0
+      contract_size: 2
+    - symbol: "MCL"
+      exchange: "NYMEX"
+      sec_type: "FUT"
+      tick_value: 1.0
+      contract_size: 100
+    - symbol: "MGC"
+      exchange: "NYMEX"
+      sec_type: "FUT"
+      tick_value: 1.0
+      contract_size: 10
+  # Standard futures contracts (ES, NQ, CL, GC)
   futures:
     - symbol: "ES"
       exchange: "CME"
