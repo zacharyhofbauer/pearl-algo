@@ -149,9 +149,9 @@ docker-compose logs -f trading-bot
 docker-compose down
 ```
 
-### Legacy Workflow (Still Supported)
+### LangGraph System (Recommended)
 
-**NEW: Unified CLI (Recommended)**
+**Unified CLI**
 ```bash
 cd ~/pearlalgo-dev-ai-agents
 source .venv/bin/activate
@@ -177,17 +177,7 @@ pearlalgo gateway status
 pearlalgo --help
 ```
 
-**Legacy: Interactive Menu System** (still works)
-```bash
-python scripts/workflow.py
-```
-
-This opens an interactive menu where you can:
-- Generate daily signals & reports
-- View status dashboard
-- Run paper trading loops
-- Manage IB Gateway
-- View latest signals/reports
+**Note**: Legacy scripts (`workflow.py`, `automated_trading.py`) have been deprecated in favor of the LangGraph system. See `MIGRATION_GUIDE.md` for migration instructions.
 
 **Setup & Management Assistant:**
 ```bash

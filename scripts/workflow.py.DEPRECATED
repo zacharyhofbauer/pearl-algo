@@ -1,0 +1,10 @@
+"""
+DEPRECATED: This script has been replaced by the LangGraph multi-agent system.
+
+Migration Guide:
+- Old: python scripts/workflow.py
+- New: python -m pearlalgo.live.langgraph_trader --mode paper
+
+See LANGGRAPH_QUICKSTART.md for details.
+"""
+

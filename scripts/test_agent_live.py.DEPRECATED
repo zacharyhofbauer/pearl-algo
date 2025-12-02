@@ -1,0 +1,16 @@
+"""
+DEPRECATED: This script has been replaced by LangGraph agent tests.
+
+Migration Guide:
+- Old: python scripts/test_agent_live.py
+- New: pytest tests/test_langgraph_agents.py -v
+
+The new test suite provides:
+- Comprehensive unit tests for all agents
+- Integration tests for the full workflow
+- LLM provider tests
+- Broker connection tests
+
+See TESTING_GUIDE.md for details.
+"""
+

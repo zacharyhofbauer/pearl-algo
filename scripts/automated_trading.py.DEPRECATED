@@ -1,0 +1,16 @@
+"""
+DEPRECATED: This script has been replaced by the LangGraph multi-agent system.
+
+Migration Guide:
+- Old: python scripts/automated_trading.py --symbols ES NQ
+- New: python -m pearlalgo.live.langgraph_trader --symbols ES NQ --mode paper
+
+The LangGraph system provides:
+- Multi-agent architecture with specialized agents
+- LLM-powered reasoning
+- Enhanced risk management
+- Better error handling and recovery
+
+See LANGGRAPH_QUICKSTART.md for details.
+"""
+

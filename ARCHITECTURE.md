@@ -1,5 +1,7 @@
 # Architecture Overview - LangGraph Multi-Agent Trading System
 
+**Note**: This system uses LangGraph architecture exclusively. Legacy components have been archived. See `MIGRATION_GUIDE.md` for details.
+
 ## System Architecture
 
 ### High-Level Flow

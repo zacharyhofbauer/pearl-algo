@@ -4,6 +4,8 @@
 
 This system implements a fully agentic trading architecture using LangGraph, with 4 specialized agents collaborating in real-time to trade futures contracts (ES, NQ, CL, GC) and crypto perpetuals.
 
+**Note**: This is the primary system. Legacy components have been archived. See `MIGRATION_GUIDE.md` if migrating from the old system.
+
 ## Architecture
 
 ```
