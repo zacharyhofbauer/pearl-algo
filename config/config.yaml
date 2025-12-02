@@ -1,0 +1,250 @@
+# LangGraph Multi-Agent Trading System Configuration
+
+# Broker Configuration
+broker:
+  # Primary broker: "ibkr", "bybit", or "alpaca"
+  primary: "ibkr"
+  
+  # IBKR Configuration (for futures)
+  ibkr:
+    host: "${IBKR_HOST:-127.0.0.1}"
+    port: ${IBKR_PORT:-7497}
+    client_id: ${IBKR_CLIENT_ID:-1}
+    data_client_id: ${IBKR_DATA_CLIENT_ID:-2}
+    paper_trading: ${IBKR_PAPER:-true}
+    # API keys not needed for IBKR (uses Gateway authentication)
+  
+  # Bybit Configuration (for crypto perps)
+  bybit:
+    api_key: "${BYBIT_API_KEY:-}"
+    api_secret: "${BYBIT_API_SECRET:-}"
+    testnet: ${BYBIT_TESTNET:-true}
+    unified_margin: true
+  
+  # Alpaca Configuration (for US futures)
+  alpaca:
+    api_key: "${ALPACA_API_KEY:-}"
+    api_secret: "${ALPACA_API_SECRET:-}"
+    base_url: "${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"
+    paper_trading: ${ALPACA_PAPER:-true}
+
+# Trading Symbols
+symbols:
+  # Futures contracts (ES, NQ, CL, GC)
+  futures:
+    - symbol: "ES"
+      exchange: "CME"
+      sec_type: "FUT"
+      tick_value: 12.5
+      contract_size: 50
+    - symbol: "NQ"
+      exchange: "CME"
+      sec_type: "FUT"
+      tick_value: 20.0
+      contract_size: 20
+    - symbol: "CL"
+      exchange: "NYMEX"
+      sec_type: "FUT"
+      tick_value: 10.0
+      contract_size: 1000
+    - symbol: "GC"
+      exchange: "COMEX"
+      sec_type: "FUT"
+      tick_value: 10.0
+      contract_size: 100
+  
+  # Crypto perpetuals (Bybit equivalents)
+  crypto_perps:
+    - symbol: "BTCUSDT"
+      base: "BTC"
+      quote: "USDT"
+      tick_value: 0.1
+    - symbol: "ETHUSDT"
+      base: "ETH"
+      quote: "USDT"
+      tick_value: 0.1
+
+# Data Sources
+data:
+  # Primary data source: "ibkr", "polygon", "bybit", or "websocket"
+  primary: "ibkr"
+  
+  # Polygon.io Configuration (free tier for US futures)
+  polygon:
+    api_key: "${POLYGON_API_KEY:-}"
+    use_free_tier: true
+  
+  # WebSocket Configuration
+  websocket:
+    enabled: true
+    reconnect_delay: 5
+    max_reconnect_attempts: 10
+
+# Strategy Configuration
+strategy:
+  # Default strategy: "sr", "ma_cross", "breakout", "mean_reversion", "momentum"
+  default: "sr"
+  
+  # Strategy parameters
+  sr:
+    fast: 20
+    slow: 50
+    tolerance: 0.002
+  
+  ma_cross:
+    fast: 20
+    slow: 50
+  
+  breakout:
+    lookback: 20
+    volume_multiplier: 1.5
+    min_breakout_pct: 0.001
+  
+  mean_reversion:
+    bb_period: 20
+    bb_std: 2.0
+    rsi_period: 14
+    rsi_oversold: 30.0
+    rsi_overbought: 70.0
+  
+  momentum:
+    lookback: 20
+    min_momentum: 0.01
+
+# Risk Management Rules (HARDCODED - DO NOT MODIFY)
+risk:
+  # Max risk per trade (2% of account)
+  max_risk_per_trade: 0.02
+  
+  # Volatility targeting (0.5-1% daily volatility)
+  volatility_target:
+    min: 0.005
+    max: 0.01
+  
+  # Hard drawdown kill-switch (15% of account)
+  max_drawdown: 0.15
+  
+  # Position sizing
+  position_sizing:
+    method: "volatility_target"  # "volatility_target" or "fixed_risk"
+    base_size: 1
+  
+  # Stop loss and take profit
+  stop_loss:
+    enabled: true
+    method: "atr"  # "atr", "percentage", or "fixed"
+    atr_multiplier: 2.0
+    percentage: 0.01
+  
+  take_profit:
+    enabled: true
+    method: "risk_reward"  # "risk_reward" or "percentage"
+    risk_reward_ratio: 2.0
+    percentage: 0.02
+  
+  # Circuit breakers
+  circuit_breakers:
+    max_daily_loss: 0.05  # 5% daily loss limit
+    max_consecutive_losses: 5
+    cooldown_minutes: 30
+  
+  # No martingale, no averaging down
+  no_martingale: true
+  no_averaging_down: true
+
+# LLM Configuration (for Quant Research Agent reasoning)
+llm:
+  # Provider: "groq" or "litellm"
+  provider: "groq"
+  
+  groq:
+    api_key: "${GROQ_API_KEY:-}"
+    model: "mixtral-8x7b-32768"  # or "llama-3-70b-8192"
+    temperature: 0.3
+  
+  litellm:
+    api_key: "${LITELLM_API_KEY:-}"
+    model: "gpt-4o-mini"  # or any supported model
+    temperature: 0.3
+
+# Trading Mode
+trading:
+  # Mode: "paper" or "live"
+  mode: "paper"
+  
+  # Paper trading settings
+  paper:
+    starting_balance: 100000.0
+    commission: 0.0
+  
+  # Live trading settings
+  live:
+    # Require explicit confirmation
+    require_confirmation: true
+    # Max position size in live mode
+    max_position_size: 5
+
+# Timeframes
+timeframes:
+  # Default timeframe for analysis
+  default: "15m"
+  
+  # Available timeframes: "1m", "5m", "15m", "30m", "1h", "4h", "1d"
+  available: ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "logs/langgraph_trading.log"
+  console: true
+  structured: true
+  
+  # Agent reasoning logging
+  log_agent_reasoning: true
+  reasoning_file: "logs/agent_reasoning.jsonl"
+
+# Alerts
+alerts:
+  # Telegram Configuration
+  telegram:
+    enabled: ${TELEGRAM_ENABLED:-false}
+    bot_token: "${TELEGRAM_BOT_TOKEN:-}"
+    chat_id: "${TELEGRAM_CHAT_ID:-}"
+    notify_on:
+      - "trade"
+      - "risk_warning"
+      - "daily_summary"
+      - "error"
+  
+  # Discord Configuration
+  discord:
+    enabled: ${DISCORD_ENABLED:-false}
+    webhook_url: "${DISCORD_WEBHOOK_URL:-}"
+    notify_on:
+      - "trade"
+      - "risk_warning"
+      - "daily_summary"
+      - "error"
+
+# Backtesting
+backtesting:
+  engine: "vectorbt"  # "vectorbt" or "backtesting"
+  start_date: "2024-01-01"
+  end_date: null  # null = today
+  initial_cash: 100000.0
+  commission: 0.0
+
+# Dashboard
+dashboard:
+  enabled: true
+  port: 8501
+  host: "0.0.0.0"
+  refresh_interval: 5  # seconds
+
+# Health Checks
+health:
+  enabled: true
+  check_interval: 60  # seconds
+  max_consecutive_failures: 3
+  auto_restart: true
+

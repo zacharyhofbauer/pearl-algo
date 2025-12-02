@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  trading-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: langgraph-trading-bot
+    restart: unless-stopped
+    environment:
+      - PEARLALGO_PROFILE=paper
+      - IBKR_HOST=${IBKR_HOST:-127.0.0.1}
+      - IBKR_PORT=${IBKR_PORT:-7497}
+      - IBKR_CLIENT_ID=${IBKR_CLIENT_ID:-1}
+      - IBKR_DATA_CLIENT_ID=${IBKR_DATA_CLIENT_ID:-2}
+      - BYBIT_API_KEY=${BYBIT_API_KEY:-}
+      - BYBIT_API_SECRET=${BYBIT_API_SECRET:-}
+      - ALPACA_API_KEY=${ALPACA_API_KEY:-}
+      - ALPACA_API_SECRET=${ALPACA_API_SECRET:-}
+      - POLYGON_API_KEY=${POLYGON_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./signals:/app/signals
+      - ./reports:/app/reports
+      - ./state_cache:/app/state_cache
+      - ./telemetry:/app/telemetry
+      - ./config:/app/config
+    ports:
+      - "8501:8501"  # Streamlit dashboard
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys; sys.exit(0)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - trading-network
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: langgraph-dashboard
+    restart: unless-stopped
+    command: ["streamlit", "run", "scripts/streamlit_dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    environment:
+      - PEARLALGO_PROFILE=paper
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./signals:/app/signals
+      - ./reports:/app/reports
+      - ./state_cache:/app/state_cache
+      - ./telemetry:/app/telemetry
+      - ./config:/app/config
+    ports:
+      - "8501:8501"
+    depends_on:
+      - trading-bot
+    networks:
+      - trading-network
+
+networks:
+  trading-network:
+    driver: bridge
+
