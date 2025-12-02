@@ -30,7 +30,9 @@ class PropProfile:
     starting_balance: float = 50000.0
     daily_loss_limit: float = 2500.0
     target_profit: float = 5000.0
-    risk_taper_threshold: float = 0.3  # fraction of loss limit remaining where sizing tapers
+    risk_taper_threshold: float = (
+        0.3  # fraction of loss limit remaining where sizing tapers
+    )
     max_trades: int | None = None  # Max trades per session; None = unlimited
     cooldown_minutes: int = 60  # Cooldown period after HARD_STOP or max_trades reached
     min_contract_size: int = 1  # Minimum contract size (futures don't allow fractional)
@@ -47,18 +49,34 @@ class PropProfile:
         merged = {**DEFAULT_PROP_PROFILE.__dict__, **(data or {})}
         return cls(
             name=merged.get("name", "default"),
-            starting_balance=float(merged.get("starting_balance", DEFAULT_PROP_PROFILE.starting_balance)),
-            daily_loss_limit=float(merged.get("daily_loss_limit", DEFAULT_PROP_PROFILE.daily_loss_limit)),
-            target_profit=float(merged.get("target_profit", DEFAULT_PROP_PROFILE.target_profit)),
+            starting_balance=float(
+                merged.get("starting_balance", DEFAULT_PROP_PROFILE.starting_balance)
+            ),
+            daily_loss_limit=float(
+                merged.get("daily_loss_limit", DEFAULT_PROP_PROFILE.daily_loss_limit)
+            ),
+            target_profit=float(
+                merged.get("target_profit", DEFAULT_PROP_PROFILE.target_profit)
+            ),
             risk_taper_threshold=float(
-                merged.get("risk_taper_threshold", DEFAULT_PROP_PROFILE.risk_taper_threshold)
+                merged.get(
+                    "risk_taper_threshold", DEFAULT_PROP_PROFILE.risk_taper_threshold
+                )
             ),
             max_trades=merged.get("max_trades", DEFAULT_PROP_PROFILE.max_trades),
-            cooldown_minutes=int(merged.get("cooldown_minutes", DEFAULT_PROP_PROFILE.cooldown_minutes)),
-            min_contract_size=int(merged.get("min_contract_size", DEFAULT_PROP_PROFILE.min_contract_size)),
-            max_contracts_by_symbol=merged.get("max_contracts_by_symbol", DEFAULT_PROP_PROFILE.max_contracts_by_symbol)
+            cooldown_minutes=int(
+                merged.get("cooldown_minutes", DEFAULT_PROP_PROFILE.cooldown_minutes)
+            ),
+            min_contract_size=int(
+                merged.get("min_contract_size", DEFAULT_PROP_PROFILE.min_contract_size)
+            ),
+            max_contracts_by_symbol=merged.get(
+                "max_contracts_by_symbol", DEFAULT_PROP_PROFILE.max_contracts_by_symbol
+            )
             or {},
-            tick_values_by_symbol=merged.get("tick_values_by_symbol", DEFAULT_PROP_PROFILE.tick_values_by_symbol)
+            tick_values_by_symbol=merged.get(
+                "tick_values_by_symbol", DEFAULT_PROP_PROFILE.tick_values_by_symbol
+            )
             or {},
         )
 

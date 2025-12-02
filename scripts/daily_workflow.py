@@ -3,6 +3,7 @@
 One-stop daily runner for the futures core: build signals, then generate the daily report.
 Wraps `run_daily_signals.py` (futures-focused MA cross + logging) and `daily_report.py`.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,9 +22,13 @@ from scripts import daily_report, run_daily_signals  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run futures signals then generate the daily report.")
+    parser = argparse.ArgumentParser(
+        description="Run futures signals then generate the daily report."
+    )
     parser.add_argument("--strategy", choices=["ma_cross", "sr"], default="sr")
-    parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "GC"], help="Symbols to process")
+    parser.add_argument(
+        "--symbols", nargs="+", default=["ES", "NQ", "GC"], help="Symbols to process"
+    )
     parser.add_argument(
         "--sec-types",
         nargs="+",
@@ -31,12 +36,30 @@ def main(argv: list[str] | None = None) -> int:
         help="Security types matching symbols (use FUT with expiries/local symbols to avoid sec-def errors)",
     )
     parser.add_argument("--source", choices=["ibkr", "csv"], default="ibkr")
-    parser.add_argument("--data-paths", nargs="*", help="CSV paths matching symbols when source=csv")
-    parser.add_argument("--outdir", default="signals", help="Where to write signals CSV")
-    parser.add_argument("--date", help="Report date YYYYMMDD; defaults to today", default=None)
-    parser.add_argument("--expiries", nargs="*", help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols")
-    parser.add_argument("--local-symbols", nargs="*", help="Optional IBKR local symbols matching symbols")
-    parser.add_argument("--trading-classes", nargs="*", help="Optional trading classes matching symbols (defaults to symbol)")
+    parser.add_argument(
+        "--data-paths", nargs="*", help="CSV paths matching symbols when source=csv"
+    )
+    parser.add_argument(
+        "--outdir", default="signals", help="Where to write signals CSV"
+    )
+    parser.add_argument(
+        "--date", help="Report date YYYYMMDD; defaults to today", default=None
+    )
+    parser.add_argument(
+        "--expiries",
+        nargs="*",
+        help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols",
+    )
+    parser.add_argument(
+        "--local-symbols",
+        nargs="*",
+        help="Optional IBKR local symbols matching symbols",
+    )
+    parser.add_argument(
+        "--trading-classes",
+        nargs="*",
+        help="Optional trading classes matching symbols (defaults to symbol)",
+    )
     parser.add_argument(
         "--performance-path",
         default="data/performance/futures_decisions.csv",
@@ -44,9 +67,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--ib-host", help="IBKR host override (e.g., 127.0.0.1)")
     parser.add_argument("--ib-port", type=int, help="IBKR port override (e.g., 4002)")
-    parser.add_argument("--ib-client-id", type=int, help="IBKR clientId override for orders")
-    parser.add_argument("--ib-data-client-id", type=int, help="IBKR clientId override for data")
-    parser.add_argument("--skip-report", action="store_true", help="Only run signals, skip report generation")
+    parser.add_argument(
+        "--ib-client-id", type=int, help="IBKR clientId override for orders"
+    )
+    parser.add_argument(
+        "--ib-data-client-id", type=int, help="IBKR clientId override for data"
+    )
+    parser.add_argument(
+        "--skip-report",
+        action="store_true",
+        help="Only run signals, skip report generation",
+    )
     args = parser.parse_args(argv)
 
     # Propagate IB overrides via env so downstream scripts pick them up.
@@ -95,7 +126,9 @@ def main(argv: list[str] | None = None) -> int:
     report_date = args.date or datetime.now(timezone.utc).strftime("%Y%m%d")
     signals_path = Path(args.outdir) / f"{report_date}_signals.csv"
     if not signals_path.exists():
-        print(f"[WARN] Expected signals file not found: {signals_path}; report may be empty")
+        print(
+            f"[WARN] Expected signals file not found: {signals_path}; report may be empty"
+        )
 
     rep_args: List[str] = ["--performance-path", args.performance_path]
     if args.date:

@@ -24,7 +24,9 @@ class SRSignal:
     context: Dict[str, float]
 
 
-def identify_pivots(bars: Iterable[Bar], lookback: int = 20, sensitivity: int = 3) -> List[Tuple[str, float]]:
+def identify_pivots(
+    bars: Iterable[Bar], lookback: int = 20, sensitivity: int = 3
+) -> List[Tuple[str, float]]:
     """
     Identify pivot highs/lows in a sequence of bars.
     Returns list of (iso_timestamp, price) for highs and lows combined, ordered by time.
@@ -58,7 +60,9 @@ def compute_vwap(bars: Iterable[Bar]) -> float:
     return total_pv / total_vol if total_vol > 0 else 0.0
 
 
-def compute_daily_pivots(prev_close: float, prev_high: float, prev_low: float) -> Dict[str, float]:
+def compute_daily_pivots(
+    prev_close: float, prev_high: float, prev_low: float
+) -> Dict[str, float]:
     """
     Floor-trader pivots: P, R1-3, S1-3.
     """
@@ -72,7 +76,9 @@ def compute_daily_pivots(prev_close: float, prev_high: float, prev_low: float) -
     return {"pivot": p, "r1": r1, "r2": r2, "r3": r3, "s1": s1, "s2": s2, "s3": s3}
 
 
-def compute_premarket_levels(bars: Iterable[Bar], session_start_hour: int = 9) -> Dict[str, float | None]:
+def compute_premarket_levels(
+    bars: Iterable[Bar], session_start_hour: int = 9
+) -> Dict[str, float | None]:
     """
     Compute pre-market high/low from bars before the main session starts.
     Assumes bars are ordered chronologically.
@@ -80,26 +86,28 @@ def compute_premarket_levels(bars: Iterable[Bar], session_start_hour: int = 9) -
     bar_list = list(bars)
     if not bar_list:
         return {"premarket_high": None, "premarket_low": None}
-    
+
     # Filter bars before session start (e.g., 9 AM ET = hour 9)
     # Handle both pd.Timestamp and datetime objects
     premarket_bars = []
     for b in bar_list:
-        if hasattr(b.timestamp, 'hour'):
+        if hasattr(b.timestamp, "hour"):
             if b.timestamp.hour < session_start_hour:
                 premarket_bars.append(b)
         # If timestamp doesn't have hour attribute, skip pre-market filtering
         # (assume all bars are in session)
-    
+
     if not premarket_bars:
         return {"premarket_high": None, "premarket_low": None}
-    
+
     premarket_high = max(b.high for b in premarket_bars)
     premarket_low = min(b.low for b in premarket_bars)
     return {"premarket_high": premarket_high, "premarket_low": premarket_low}
 
 
-def compute_swing_levels(bars: Iterable[Bar], lookback: int = 20) -> Dict[str, float | None]:
+def compute_swing_levels(
+    bars: Iterable[Bar], lookback: int = 20
+) -> Dict[str, float | None]:
     """
     Compute recent swing high/low from the last N bars.
     Swing high: highest high in lookback period.
@@ -108,7 +116,7 @@ def compute_swing_levels(bars: Iterable[Bar], lookback: int = 20) -> Dict[str, f
     bar_list = list(bars)
     if not bar_list:
         return {"swing_high": None, "swing_low": None}
-    
+
     recent_bars = bar_list[-lookback:] if len(bar_list) > lookback else bar_list
     swing_high = max(b.high for b in recent_bars)
     swing_low = min(b.low for b in recent_bars)
@@ -137,14 +145,20 @@ def calculate_support_resistance(
     pivots = identify_pivots(bar_list)
     vwap = compute_vwap(bar_list)
 
-    pivot_highs = [(ts, price) for ts, price in pivots if price >= max(b.low for b in bar_list)]
-    pivot_lows = [(ts, price) for ts, price in pivots if price <= max(b.high for b in bar_list)]
+    pivot_highs = [
+        (ts, price) for ts, price in pivots if price >= max(b.low for b in bar_list)
+    ]
+    pivot_lows = [
+        (ts, price) for ts, price in pivots if price <= max(b.high for b in bar_list)
+    ]
 
     support1 = pivot_lows[-1][1] if pivot_lows else None
     resistance1 = pivot_highs[-1][1] if pivot_highs else None
 
     # Add pre-market and swing levels
-    premarket = compute_premarket_levels(bar_list, session_start_hour=session_start_hour)
+    premarket = compute_premarket_levels(
+        bar_list, session_start_hour=session_start_hour
+    )
     swing = compute_swing_levels(bar_list, lookback=swing_lookback)
 
     sr = {
@@ -158,7 +172,9 @@ def calculate_support_resistance(
     return sr
 
 
-def sr_signal_from_levels(close: float, sr: Dict[str, float], tolerance: float = 0.002) -> SRSignal:
+def sr_signal_from_levels(
+    close: float, sr: Dict[str, float], tolerance: float = 0.002
+) -> SRSignal:
     support = sr.get("support1")
     resistance = sr.get("resistance1")
     vwap = sr.get("vwap")

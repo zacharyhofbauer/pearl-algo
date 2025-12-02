@@ -112,9 +112,13 @@ def discover_future_contracts(
     seen: set[int] = set()
     for exch in _exchange_candidates(symbol, exchange):
         try:
-            res = ib.reqContractDetails(Future(symbol=symbol, exchange=exch, currency=currency))
+            res = ib.reqContractDetails(
+                Future(symbol=symbol, exchange=exch, currency=currency)
+            )
         except Exception as exc:  # pragma: no cover - requires live IB
-            logger.warning("ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc)
+            logger.warning(
+                "ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc
+            )
             continue
         if not res:
             continue
@@ -127,7 +131,10 @@ def discover_future_contracts(
         if details:
             break
     details.sort(
-        key=lambda d: parse_ib_expiry(getattr(d.contract, "lastTradeDateOrContractMonth", "") or "") or datetime.max.replace(tzinfo=timezone.utc)
+        key=lambda d: parse_ib_expiry(
+            getattr(d.contract, "lastTradeDateOrContractMonth", "") or ""
+        )
+        or datetime.max.replace(tzinfo=timezone.utc)
     )
     return details
 
@@ -145,7 +152,10 @@ def _select_from_details(
         c = det.contract
         if local_symbol and c.localSymbol != local_symbol:
             continue
-        if trading_class and getattr(c, "tradingClass", None) not in {trading_class, c.symbol}:
+        if trading_class and getattr(c, "tradingClass", None) not in {
+            trading_class,
+            c.symbol,
+        }:
             continue
         exp = getattr(c, "lastTradeDateOrContractMonth", "") or ""
         if target_expiry and not _expiry_matches(exp, target_expiry):
@@ -160,7 +170,10 @@ def _select_from_details(
     if not candidates:
         return None
     candidates.sort(
-        key=lambda d: parse_ib_expiry(getattr(d.contract, "lastTradeDateOrContractMonth", "") or "") or datetime.max.replace(tzinfo=timezone.utc)
+        key=lambda d: parse_ib_expiry(
+            getattr(d.contract, "lastTradeDateOrContractMonth", "") or ""
+        )
+        or datetime.max.replace(tzinfo=timezone.utc)
     )
     return candidates[0].contract
 
@@ -185,9 +198,15 @@ def resolve_future_contract(
        If no filters are given, the front (nearest future) is returned.
     3) Returning the contract (qualified if needed) that IBKR will accept.
     """
-    details = discover_future_contracts(ib, symbol, exchange=exchange, currency=currency)
+    details = discover_future_contracts(
+        ib, symbol, exchange=exchange, currency=currency
+    )
     if not details:
-        logger.warning("No futures contracts returned for %s on %s", symbol, exchange or "GLOBEX/CME")
+        logger.warning(
+            "No futures contracts returned for %s on %s",
+            symbol,
+            exchange or "GLOBEX/CME",
+        )
         return None
 
     contract = _select_from_details(
@@ -211,7 +230,9 @@ def resolve_future_contract(
         if qualified:
             contract = qualified[0]
     except Exception as exc:  # pragma: no cover - requires live IB
-        logger.warning("Qualification failed for %s on %s: %s", symbol, contract.exchange, exc)
+        logger.warning(
+            "Qualification failed for %s on %s: %s", symbol, contract.exchange, exc
+        )
     return contract
 
 
@@ -243,7 +264,9 @@ def future(
 
 def continuous_future(symbol: str, exchange: str | None = None) -> ContFuture:
     # IB may require the symbol's home venue for routing continuous CME futures.
-    return ContFuture(symbol=symbol, exchange=exchange or _default_exchange_for_symbol(symbol))
+    return ContFuture(
+        symbol=symbol, exchange=exchange or _default_exchange_for_symbol(symbol)
+    )
 
 
 def build_contract(

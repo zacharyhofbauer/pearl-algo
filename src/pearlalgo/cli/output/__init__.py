@@ -3,4 +3,3 @@
 from pearlalgo.cli.output.console import TraderConsole
 
 __all__ = ["TraderConsole"]
-

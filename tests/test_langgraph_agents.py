@@ -1,6 +1,7 @@
 """
 Comprehensive tests for LangGraph agents and workflow.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -9,7 +10,6 @@ from datetime import datetime, timezone
 from pearlalgo.agents.langgraph_state import (
     MarketData,
     Signal,
-    TradingState,
     create_initial_state,
 )
 from pearlalgo.agents.market_data_agent import MarketDataAgent
@@ -142,4 +142,3 @@ def test_risk_manager_hardcoded_rules(sample_portfolio, sample_config):
     assert agent.MAX_DRAWDOWN == 0.15
     assert agent.ALLOW_MARTINGALE is False
     assert agent.ALLOW_AVERAGING_DOWN is False
-

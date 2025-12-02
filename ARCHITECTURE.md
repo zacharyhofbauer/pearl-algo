@@ -43,9 +43,15 @@
 **Responsibility**: Fetch and stream real-time market data
 
 **Data Sources**:
-- WebSocket streaming (Bybit/Binance)
+- WebSocket streaming (Bybit/Binance) with automatic reconnection
 - IBKR REST API (futures)
 - Polygon.io (fallback)
+
+**Features**:
+- Automatic reconnection with exponential backoff
+- Data normalization to consistent format (timestamp, symbol, price, volume)
+- Both synchronous and asynchronous interfaces
+- Data buffering for historical context
 
 **Output**: `MarketData` objects in shared state
 
@@ -54,21 +60,35 @@
 
 **Capabilities**:
 - Technical analysis (momentum, mean-reversion, breakout)
+- Modular strategy selection (configurable per symbol)
 - Regime detection (trending vs ranging)
-- LLM reasoning (Groq/LiteLLM) for signal explanation
+- ML model support (placeholder for sklearn/vectorbt integration)
+- LLM reasoning (Groq/LiteLLM) for signal explanation with retry logic
 - Confidence scoring
 
-**Output**: `Signal` objects in shared state
+**Features**:
+- Strategy parameters from config (per-symbol overrides)
+- ML feature extraction for future model integration
+- Circuit breaker protection for LLM calls
+- Retry logic with exponential backoff
+
+**Output**: `Signal` objects in shared state with all required fields (symbol, direction, entry, stop, target, confidence, rationale)
 
 ### 3. Risk Manager Agent
 **Responsibility**: Evaluate risk and calculate position sizes
 
-**Enforced Rules** (HARDCODED):
-- Max 2% risk per trade
-- 15% account drawdown kill-switch
-- No martingale
-- No averaging down
-- Volatility targeting (0.5-1% daily vol)
+**Enforced Rules** (Configurable, defaults to safe values):
+- Max 2% risk per trade (configurable, defaults to 2%)
+- 15% account drawdown kill-switch (hardcoded for safety)
+- No martingale (hardcoded)
+- No averaging down (hardcoded)
+- Volatility targeting (0.5-1% daily vol, ATR-based)
+- Cool-down periods after max trades or stopping conditions
+
+**Features**:
+- Volatility-targeted position sizing (ATR or realized volatility)
+- Configurable risk per trade (with safe defaults)
+- Enhanced performance logging (entry/exit times, drawdown, trade reason)
 
 **Output**: `PositionDecision` objects in shared state
 
@@ -77,11 +97,18 @@
 
 **Capabilities**:
 - Final decision making (combines signals + risk)
-- Order placement via broker abstraction
+- Order placement via broker abstraction with retry logic
 - Position management
 - Stop-loss and take-profit orders
+- Enhanced performance logging
 
-**Output**: Executed orders, updated portfolio
+**Features**:
+- Retry logic with exponential backoff for order submission
+- Circuit breaker protection for broker API calls
+- Comprehensive trade logging (entry/exit times, drawdown remaining, trade reason)
+- Automatic performance tracking
+
+**Output**: Executed orders, updated portfolio, performance logs
 
 ## State Management
 
@@ -95,6 +122,29 @@
 - `equity_curve`: List[float] - Historical equity
 - `trading_enabled`: bool - Trading flag
 - `kill_switch_triggered`: bool - Kill-switch status
+
+### State Persistence
+
+**File-Based Storage (Default)**:
+- State saved to `data/state_cache/state.json`
+- Automatic save on workflow completion
+- Automatic load on startup
+- JSON format for human readability
+
+**Redis Backend (Optional)**:
+- Configured via `docker-compose.yml`
+- Distributed state for multi-instance deployments
+- Automatic fallback to file-based if Redis unavailable
+
+**Migration Path**:
+- Schema versioning for state evolution
+- Automatic migration on schema changes
+- Backward compatibility maintained
+
+**Integration**:
+- State loaded before workflow execution
+- State saved after each workflow cycle
+- Graceful handling of corrupted state files
 
 ## Broker Abstraction
 
@@ -163,15 +213,49 @@ Check Drawdown vs 15% Limit
 python -m pearlalgo.live.langgraph_trader --mode paper
 ```
 
-### Docker Deployment
+### Docker Deployment (24/7 Operation)
+
+**Multi-Stage Build**:
+- Optimized Dockerfile with minimal image size (<500MB)
+- Separate build and runtime stages
+- Fast startup time
+
+**Docker Compose Services**:
+- `trading-bot`: Main trading system with health checks
+- `dashboard`: Streamlit dashboard
+- `redis`: Optional Redis service for state persistence
+
+**Features**:
+- Health checks (`/healthz` endpoint)
+- Auto-restart on failures
+- State persistence across restarts
+- Resource limits and restart policies
+- Volume mounts for logs, data, and state
+
+**Deployment Commands**:
 ```bash
+# Build and start
 docker-compose up -d
+
+# View logs
+docker-compose logs -f trading-bot
+
+# Check health
+curl http://localhost:8080/healthz
+
+# Restart (preserves state)
+docker-compose restart trading-bot
+
+# Stop
+docker-compose down
 ```
 
 ### Cloud Deployment
 - Use docker-compose for orchestration
 - Health checks ensure 24/7 operation
 - Auto-restart on failures
+- State persistence for seamless recovery
+- Graceful shutdown with signal handling
 
 ## Monitoring
 
@@ -186,9 +270,12 @@ docker-compose up -d
 - Discord: Same as Telegram via webhooks
 
 ### Logging
-- Structured logging with loguru
+- Structured logging with correlation IDs
+- JSON-formatted logs (optional) for log aggregation
+- Timing metrics for each agent execution
 - Agent reasoning traces
 - Performance metrics
+- Request tracing with correlation IDs
 
 ## Testing Strategy
 

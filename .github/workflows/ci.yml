@@ -17,7 +17,12 @@ jobs:
         run: |
           python -m pip install -U pip
           python -m pip install -e .[dev]
-      - name: Lint (ruff)
-        run: ruff check .
-      - name: Tests
-        run: pytest -q
+      - name: Lint (ruff check)
+        run: ruff check . --exclude legacy_backup --exclude legacy
+      - name: Format (ruff format)
+        run: ruff format --check . --exclude legacy_backup --exclude legacy
+      - name: Tests with coverage
+        run: |
+          pytest tests/ -v --cov=src/pearlalgo --cov-report=term-missing --cov-report=xml
+      - name: Build Docker image
+        run: docker build -t pearlalgo:test .

@@ -7,15 +7,14 @@ This agent is responsible for:
 - Polygon.io fallback for US futures
 - Real-time data aggregation and normalization
 """
+
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
-import logging
 
 try:
     from loguru import logger
@@ -38,11 +37,11 @@ logger = logging.getLogger(__name__)
 class MarketDataAgent:
     """
     Market Data Agent for LangGraph workflow.
-    
+
     Fetches and streams real-time market data for all configured symbols.
     Uses WebSocket when available, falls back to REST APIs.
     """
-    
+
     def __init__(
         self,
         symbols: List[str],
@@ -52,30 +51,28 @@ class MarketDataAgent:
         self.symbols = symbols
         self.broker = broker.lower()
         self.config = config or {}
-        
+
         # Initialize data providers
         self.websocket_provider: Optional[WebSocketDataProvider] = None
         self.rest_provider = None
         self.polygon_provider: Optional[PolygonDataProvider] = None
-        
-        # Data buffers
-        self.data_buffers: Dict[str, List[MarketData]] = {}
-        
+
+        # Data buffers (for caching normalized data)
+        self.data_buffers: Dict[str, List[MarketData]] = {symbol: [] for symbol in symbols}
+
         # Initialize providers based on broker
         self._initialize_providers()
-        
-        logger.info(
-            f"MarketDataAgent initialized: broker={broker}, symbols={symbols}"
-        )
-    
+
+        logger.info(f"MarketDataAgent initialized: broker={broker}, symbols={symbols}")
+
     def _initialize_providers(self) -> None:
         """Initialize data providers based on broker configuration."""
         try:
             # Try WebSocket provider first (if enabled)
-            websocket_enabled = self.config.get("data", {}).get(
-                "websocket", {}
-            ).get("enabled", True)
-            
+            websocket_enabled = (
+                self.config.get("data", {}).get("websocket", {}).get("enabled", True)
+            )
+
             if websocket_enabled:
                 try:
                     self.websocket_provider = WebSocketDataProvider(
@@ -86,7 +83,7 @@ class MarketDataAgent:
                     logger.info("WebSocket provider initialized")
                 except Exception as e:
                     logger.warning(f"WebSocket provider failed to initialize: {e}")
-            
+
             # Initialize REST provider based on broker
             if self.broker == "ibkr":
                 settings = get_settings()
@@ -98,52 +95,60 @@ class MarketDataAgent:
             elif self.broker == "alpaca":
                 # Alpaca will be handled via REST API
                 pass
-            
+
             # Initialize Polygon.io as fallback
-            polygon_api_key = self.config.get("data", {}).get(
-                "fallback", {}
-            ).get("polygon", {}).get("api_key")
+            polygon_api_key = (
+                self.config.get("data", {})
+                .get("fallback", {})
+                .get("polygon", {})
+                .get("api_key")
+            )
             if polygon_api_key:
                 try:
-                    self.polygon_provider = PolygonDataProvider(
-                        api_key=polygon_api_key
-                    )
+                    self.polygon_provider = PolygonDataProvider(api_key=polygon_api_key)
                     logger.info("Polygon.io provider initialized as fallback")
                 except Exception as e:
                     logger.warning(f"Polygon.io provider failed: {e}")
-        
+
         except Exception as e:
             logger.error(f"Error initializing providers: {e}", exc_info=True)
-    
-    async def fetch_live_data(
-        self, state: TradingState
-    ) -> TradingState:
+
+    async def fetch_live_data(self, state: TradingState) -> TradingState:
         """
         Fetch live market data for all symbols.
-        
+
         This is the main entry point called by the LangGraph workflow.
         """
         logger.info("MarketDataAgent: Fetching live data for all symbols")
-        
+
         state = add_agent_reasoning(
             state,
             "market_data_agent",
             f"Fetching market data for {len(self.symbols)} symbols",
             level="info",
         )
-        
+
         # Try WebSocket first, then REST fallback
         for symbol in self.symbols:
             try:
                 market_data = await self._fetch_symbol_data(symbol)
                 if market_data:
+                    # Store in state
                     state.market_data[symbol] = market_data
+                    
+                    # Update buffer (keep last 100 entries per symbol)
+                    if symbol not in self.data_buffers:
+                        self.data_buffers[symbol] = []
+                    self.data_buffers[symbol].append(market_data)
+                    if len(self.data_buffers[symbol]) > 100:
+                        self.data_buffers[symbol] = self.data_buffers[symbol][-100:]
+                    
                     state = add_agent_reasoning(
                         state,
                         "market_data_agent",
                         f"Updated market data for {symbol}: ${market_data.close:.2f}",
                         level="debug",
-                        data={"symbol": symbol, "price": market_data.close},
+                        data={"symbol": symbol, "price": market_data.close, "volume": market_data.volume},
                     )
             except Exception as e:
                 error_msg = f"Error fetching data for {symbol}: {e}"
@@ -156,23 +161,21 @@ class MarketDataAgent:
                     level="error",
                     data={"symbol": symbol, "error": str(e)},
                 )
-        
+
         # Update timestamp
         state.timestamp = datetime.now(timezone.utc)
-        
-        logger.info(
-            f"MarketDataAgent: Updated {len(state.market_data)} symbols"
-        )
-        
+
+        logger.info(f"MarketDataAgent: Updated {len(state.market_data)} symbols")
+
         # Cleanup: Close Polygon provider session if it exists
         if self.polygon_provider:
             try:
                 await self.polygon_provider.close()
             except Exception as e:
                 logger.debug(f"Error closing Polygon provider: {e}")
-        
+
         return state
-    
+
     async def _fetch_symbol_data(self, symbol: str) -> Optional[MarketData]:
         """
         Fetch data for a single symbol.
@@ -186,7 +189,7 @@ class MarketDataAgent:
                     return self._convert_to_market_data(symbol, data)
             except Exception as e:
                 logger.debug(f"WebSocket fetch failed for {symbol}: {e}")
-        
+
         # Try REST provider
         if self.rest_provider:
             try:
@@ -201,7 +204,7 @@ class MarketDataAgent:
                     return self._convert_dataframe_to_market_data(symbol, df)
             except Exception as e:
                 logger.debug(f"REST fetch failed for {symbol}: {e}")
-        
+
         # Try Polygon fallback
         if self.polygon_provider:
             try:
@@ -210,16 +213,16 @@ class MarketDataAgent:
                     return self._convert_to_market_data(symbol, data)
             except Exception as e:
                 logger.debug(f"Polygon fetch failed for {symbol}: {e}")
-        
+
         logger.warning(f"All data sources failed for {symbol}")
         return None
-    
+
     def _convert_dataframe_to_market_data(
         self, symbol: str, df: pd.DataFrame
     ) -> MarketData:
         """Convert pandas DataFrame row to MarketData."""
         latest = df.iloc[-1]
-        
+
         return MarketData(
             symbol=symbol,
             timestamp=datetime.now(timezone.utc),
@@ -232,29 +235,48 @@ class MarketDataAgent:
             if "VWAP" in latest or "vwap" in latest
             else None,
         )
-    
-    def _convert_to_market_data(
-        self, symbol: str, data: Dict
-    ) -> MarketData:
-        """Convert dict data to MarketData."""
+
+    def _convert_to_market_data(self, symbol: str, data: Dict) -> MarketData:
+        """
+        Convert dict data to MarketData with normalization.
+        
+        Ensures consistent format: (timestamp, symbol, price, volume).
+        Normalizes data from different sources to common format.
+        """
+        # Normalize timestamp
+        timestamp = data.get("timestamp")
+        if isinstance(timestamp, str):
+            try:
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            except Exception:
+                timestamp = datetime.now(timezone.utc)
+        elif not isinstance(timestamp, datetime):
+            timestamp = datetime.now(timezone.utc)
+        
+        # Normalize price (use close as primary price)
+        price = float(data.get("close") or data.get("last") or data.get("price", 0))
+        
+        # Normalize volume
+        volume = float(data.get("volume") or data.get("quoteVolume") or data.get("baseVolume", 0))
+        
         return MarketData(
             symbol=symbol,
-            timestamp=data.get("timestamp", datetime.now(timezone.utc)),
-            open=float(data.get("open", 0)),
-            high=float(data.get("high", 0)),
-            low=float(data.get("low", 0)),
-            close=float(data.get("close", 0)),
-            volume=float(data.get("volume", 0)),
-            vwap=data.get("vwap"),
-            bid=data.get("bid"),
-            ask=data.get("ask"),
-            bid_size=data.get("bid_size"),
-            ask_size=data.get("ask_size"),
-            funding_rate=data.get("funding_rate"),
-            open_interest=data.get("open_interest"),
+            timestamp=timestamp,
+            open=float(data.get("open", price)) if data.get("open") else price,
+            high=float(data.get("high", price)) if data.get("high") else price,
+            low=float(data.get("low", price)) if data.get("low") else price,
+            close=price,
+            volume=volume,
+            vwap=float(data.get("vwap")) if data.get("vwap") else None,
+            bid=float(data.get("bid")) if data.get("bid") else None,
+            ask=float(data.get("ask")) if data.get("ask") else None,
+            bid_size=float(data.get("bid_size") or data.get("bidVolume")) if data.get("bid_size") or data.get("bidVolume") else None,
+            ask_size=float(data.get("ask_size") or data.get("askVolume")) if data.get("ask_size") or data.get("askVolume") else None,
+            funding_rate=float(data.get("funding_rate")) if data.get("funding_rate") else None,
+            open_interest=float(data.get("open_interest")) if data.get("open_interest") else None,
             metadata=data.get("metadata", {}),
         )
-    
+
     async def start_websocket_stream(self) -> None:
         """Start WebSocket streaming (if available)."""
         if self.websocket_provider:
@@ -263,7 +285,7 @@ class MarketDataAgent:
                 logger.info("WebSocket stream started")
             except Exception as e:
                 logger.error(f"Failed to start WebSocket stream: {e}")
-    
+
     async def stop_websocket_stream(self) -> None:
         """Stop WebSocket streaming."""
         if self.websocket_provider:
@@ -272,10 +294,28 @@ class MarketDataAgent:
                 logger.info("WebSocket stream stopped")
             except Exception as e:
                 logger.error(f"Failed to stop WebSocket stream: {e}")
-    
-    def get_latest_data(self, symbol: str) -> Optional[MarketData]:
-        """Get latest cached data for a symbol."""
-        # This would be used if we're maintaining a buffer
-        # For now, we fetch on-demand
-        return None
 
+    def get_latest_data(self, symbol: str) -> Optional[MarketData]:
+        """
+        Get latest cached data for a symbol (synchronous interface).
+        
+        Returns cached MarketData if available, otherwise None.
+        """
+        if symbol in self.data_buffers and self.data_buffers[symbol]:
+            return self.data_buffers[symbol][-1]
+        return None
+    
+    def fetch_live_data_sync(self, state: TradingState) -> TradingState:
+        """
+        Synchronous interface for fetching live data.
+        
+        Uses asyncio.run() to execute async fetch_live_data.
+        """
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        return loop.run_until_complete(self.fetch_live_data(state))

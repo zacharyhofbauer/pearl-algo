@@ -29,10 +29,10 @@ def _suggest_command(ctx: click.Context, param: click.Parameter, value: str) -> 
     """Suggest similar commands on typo."""
     if value is None:
         return
-    
+
     # Get all available commands
     available_commands = list(ctx.command.commands.keys())
-    
+
     # Simple Levenshtein-like suggestion (find closest match)
     def similarity(s1: str, s2: str) -> float:
         """Simple similarity score."""
@@ -44,7 +44,7 @@ def _suggest_command(ctx: click.Context, param: click.Parameter, value: str) -> 
         # Count common characters
         common = sum(1 for c in s1 if c in s2)
         return common / max(len(s1), len(s2))
-    
+
     # Find best match
     best_match = None
     best_score = 0.0
@@ -53,9 +53,11 @@ def _suggest_command(ctx: click.Context, param: click.Parameter, value: str) -> 
         if score > best_score and score > 0.5:
             best_score = score
             best_match = cmd
-    
+
     if best_match:
-        console.print(f"\n[yellow]💡 Did you mean '[cyan]{best_match}[/cyan]'?[/yellow]\n")
+        console.print(
+            f"\n[yellow]💡 Did you mean '[cyan]{best_match}[/cyan]'?[/yellow]\n"
+        )
 
 
 @click.group(invoke_without_command=False)
@@ -70,12 +72,12 @@ def _suggest_command(ctx: click.Context, param: click.Parameter, value: str) -> 
 def cli(ctx: click.Context, verbosity: str) -> None:
     """
     🎯 PearlAlgo Futures Desk — Professional Trading Console
-    
+
     Unified command-line interface for trading operations, monitoring, and management.
     """
     ctx.ensure_object(dict)
     ctx.obj["verbosity"] = verbosity.upper()
-    
+
     # Show banner on first run
     if not ctx.obj.get("banner_shown"):
         console.print()
@@ -109,4 +111,3 @@ cli.add_command(help.cheat_sheet_cmd)
 
 if __name__ == "__main__":
     cli()
-

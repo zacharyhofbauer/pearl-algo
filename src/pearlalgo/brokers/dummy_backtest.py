@@ -54,10 +54,10 @@ class DummyBacktestBroker(Broker):
         # Percentage-based slippage
         slippage_pct = (self._slippage_bps / 10000.0) * abs(quantity)  # Scale with size
         slippage_amount = price * slippage_pct
-        
+
         # Fixed slippage
         slippage_amount += self._fixed_slippage
-        
+
         # Apply slippage based on side
         if side.lower() in ["long", "buy"]:
             return price + slippage_amount
@@ -81,7 +81,9 @@ class DummyBacktestBroker(Broker):
         order_id = f"sim-{len(self._orders) + 1}"
         self._orders[order_id] = order
 
-        base_price = order.limit_price or order.stop_price or self._price_lookup(order.symbol)
+        base_price = (
+            order.limit_price or order.stop_price or self._price_lookup(order.symbol)
+        )
         if base_price is None:
             return order_id
 
@@ -93,7 +95,10 @@ class DummyBacktestBroker(Broker):
 
         # Simulate partial fills if enabled
         fill_quantity = order.quantity
-        if self._enable_partial_fills and random.random() < self._partial_fill_probability:
+        if (
+            self._enable_partial_fills
+            and random.random() < self._partial_fill_probability
+        ):
             # Partial fill: 50-90% of order
             fill_ratio = random.uniform(0.5, 0.9)
             fill_quantity = int(order.quantity * fill_ratio)

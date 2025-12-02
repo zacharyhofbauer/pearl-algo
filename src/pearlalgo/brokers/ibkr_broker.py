@@ -4,7 +4,15 @@ import logging
 from datetime import datetime
 from typing import Dict, Iterable
 
-from ib_insync import IB, Future, LimitOrder, MarketOrder, Stock, StopLimitOrder, StopOrder
+from ib_insync import (
+    IB,
+    Future,
+    LimitOrder,
+    MarketOrder,
+    Stock,
+    StopLimitOrder,
+    StopOrder,
+)
 
 from pearlalgo.brokers.base import Broker, BrokerConfig
 from pearlalgo.brokers.contracts import build_contract, resolve_future_contract
@@ -48,15 +56,25 @@ class IBKRBroker(Broker):
     def _connect(self) -> IB:
         if self._ib.isConnected():
             return self._ib
-        self._ib.connect(self.settings.ib_host, int(self.settings.ib_port), clientId=int(self.settings.ib_client_id))
+        self._ib.connect(
+            self.settings.ib_host,
+            int(self.settings.ib_port),
+            clientId=int(self.settings.ib_client_id),
+        )
         return self._ib
 
-    def _resolve_front_future(self, ib: IB, symbol: str, exchange: str | None = None) -> Future:
+    def _resolve_front_future(
+        self, ib: IB, symbol: str, exchange: str | None = None
+    ) -> Future:
         exch = exchange or "CME"
         contract = resolve_future_contract(ib, symbol, exchange=exch)
         if contract:
             return contract
-        logger.warning("No valid front-month contract found for %s on %s; using fallback future", symbol, exch)
+        logger.warning(
+            "No valid front-month contract found for %s on %s; using fallback future",
+            symbol,
+            exch,
+        )
         return Future(symbol=symbol, exchange=exch, currency="USD")
 
     def _resolve_specific_future(
@@ -112,21 +130,28 @@ class IBKRBroker(Broker):
             )
             if contract:
                 return contract
-            logger.warning("Falling back to front future for %s after explicit lookup failed", symbol)
+            logger.warning(
+                "Falling back to front future for %s after explicit lookup failed",
+                symbol,
+            )
             return self._resolve_front_future(ib, symbol, exchange)
         if stype.startswith("FUT"):
             return self._resolve_front_future(ib, symbol, exchange)
         return build_contract(symbol, sec_type=sec_type, exchange=exchange)
 
     def _live_enabled(self) -> bool:
-        return bool(self.settings.allow_live_trading) and self.settings.profile == "live"
+        return (
+            bool(self.settings.allow_live_trading) and self.settings.profile == "live"
+        )
 
     # --- Broker interface ---------------------------------------------------
     def submit_order(self, order: OrderEvent) -> str:
         sec_type = (order.metadata or {}).get("sec_type") if order.metadata else None
         exchange = (order.metadata or {}).get("exchange") if order.metadata else None
         sec_type = sec_type or "STK"
-        last_price = (order.metadata or {}).get("last_price") if order.metadata else None
+        last_price = (
+            (order.metadata or {}).get("last_price") if order.metadata else None
+        )
 
         # Risk guard check before routing.
         try:
@@ -147,7 +172,9 @@ class IBKRBroker(Broker):
                 order.order_type,
             )
             # Also print to console for visibility
-            print(f"⚠️  DRY RUN MODE: Would submit {order.side} {order.quantity} {order.symbol} @ {order.order_type}")
+            print(
+                f"⚠️  DRY RUN MODE: Would submit {order.side} {order.quantity} {order.symbol} @ {order.order_type}"
+            )
             return order_id
 
         ib = self._connect()
@@ -162,12 +189,16 @@ class IBKRBroker(Broker):
             trading_class=metadata.get("trading_class"),
         )
         ib_order = self._build_order(order)
-        
-        logger.info(f"🚀 SUBMITTING LIVE ORDER: {order.side} {order.quantity} {order.symbol} @ {order.order_type}")
+
+        logger.info(
+            f"🚀 SUBMITTING LIVE ORDER: {order.side} {order.quantity} {order.symbol} @ {order.order_type}"
+        )
         try:
             trade = ib.placeOrder(contract, ib_order)
             order_id = str(trade.order.orderId)
-            logger.info(f"✅ Order placed successfully: OrderID={order_id}, Contract={contract.symbol}")
+            logger.info(
+                f"✅ Order placed successfully: OrderID={order_id}, Contract={contract.symbol}"
+            )
             return order_id
         except Exception as e:
             logger.error(f"❌ Order placement failed: {e}", exc_info=True)
@@ -175,10 +206,10 @@ class IBKRBroker(Broker):
 
     def _build_order(self, order: OrderEvent):
         from ib_insync import Order
-        
+
         side = "BUY" if order.side.upper() == "BUY" else "SELL"
         ib_order: Order
-        
+
         if order.order_type == "MKT":
             ib_order = MarketOrder(side, order.quantity)
         elif order.order_type == "LMT":
@@ -192,15 +223,17 @@ class IBKRBroker(Broker):
         elif order.order_type in {"STPLMT", "STOP_LIMIT"}:
             if order.stop_price is None or order.limit_price is None:
                 raise ValueError("Stop-limit order requires stop_price and limit_price")
-            ib_order = StopLimitOrder(side, order.quantity, order.limit_price, order.stop_price)
+            ib_order = StopLimitOrder(
+                side, order.quantity, order.limit_price, order.stop_price
+            )
         else:
             raise ValueError(f"Unsupported order_type: {order.order_type}")
-        
+
         # Set TimeInForce explicitly to avoid error 10349
         # For futures, use DAY (good for the day) or GTC (good till cancelled)
         # DAY is safer for testing
         ib_order.tif = "DAY"  # Time In Force: DAY
-        
+
         return ib_order
 
     def fetch_fills(self, since: datetime | None = None) -> Iterable[FillEvent]:
@@ -209,7 +242,11 @@ class IBKRBroker(Broker):
         fills = []
         for fill in self._ib.fills():  # pragma: no cover - requires live IB
             exec_report, commission = fill
-            ts = exec_report.time.replace(tzinfo=None) if hasattr(exec_report.time, "replace") else datetime.utcnow()
+            ts = (
+                exec_report.time.replace(tzinfo=None)
+                if hasattr(exec_report.time, "replace")
+                else datetime.utcnow()
+            )
             if since and ts < since:
                 continue
             fe = FillEvent(
@@ -226,7 +263,10 @@ class IBKRBroker(Broker):
 
     def cancel_order(self, order_id: str) -> None:
         if not self._live_enabled() or not self._ib.isConnected():
-            logger.info("Cancel requested for %s but live trading disabled or not connected", order_id)
+            logger.info(
+                "Cancel requested for %s but live trading disabled or not connected",
+                order_id,
+            )
             return
         for trade in list(self._ib.trades()):  # pragma: no cover - requires live IB
             if str(trade.order.orderId) == str(order_id):

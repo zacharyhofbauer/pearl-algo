@@ -1,21 +1,34 @@
-# Dockerfile for LangGraph Multi-Agent Trading System
-FROM python:3.12-slim
+# Multi-stage Dockerfile for LangGraph Multi-Agent Trading System
+# Stage 1: Build dependencies
+FROM python:3.12-slim as builder
 
-# Set working directory
-WORKDIR /app
+WORKDIR /build
 
-# Install system dependencies
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     make \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
+# Copy and install Python dependencies
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -e .
+
+# Stage 2: Runtime image (minimal)
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install only runtime system dependencies (minimal)
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from builder
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY . .

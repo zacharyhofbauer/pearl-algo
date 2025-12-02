@@ -3,7 +3,7 @@ Setup script for LangGraph Multi-Agent Trading System.
 
 Helps users configure the system with environment variables and initial setup.
 """
-import os
+
 import sys
 from pathlib import Path
 
@@ -11,11 +11,11 @@ from pathlib import Path
 def create_env_template():
     """Create .env.example template if it doesn't exist."""
     env_example = Path(__file__).parent.parent / ".env.example"
-    
+
     if env_example.exists():
         print(f"✓ .env.example already exists at {env_example}")
         return
-    
+
     template = """# LangGraph Multi-Agent Trading System - Environment Variables
 # Copy this file to .env and fill in your API keys
 
@@ -50,7 +50,7 @@ DISCORD_WEBHOOK_URL=your_discord_webhook_url
 PEARLALGO_PROFILE=paper
 LIVE_STARTING_BALANCE=50000.0
 """
-    
+
     env_example.write_text(template)
     print(f"✓ Created .env.example at {env_example}")
 
@@ -58,7 +58,7 @@ LIVE_STARTING_BALANCE=50000.0
 def check_config():
     """Check if config.yaml exists."""
     config_path = Path(__file__).parent.parent / "config" / "config.yaml"
-    
+
     if config_path.exists():
         print(f"✓ config.yaml exists at {config_path}")
         return True
@@ -79,7 +79,7 @@ def check_dependencies():
         "groq",
         "loguru",
     ]
-    
+
     missing = []
     for dep in required:
         try:
@@ -93,12 +93,12 @@ def check_dependencies():
         except ImportError:
             print(f"✗ {dep} NOT installed")
             missing.append(dep)
-    
+
     if missing:
         print(f"\n⚠ Missing dependencies: {', '.join(missing)}")
         print("  Run: pip install -e .")
         return False
-    
+
     return True
 
 
@@ -108,27 +108,29 @@ def main():
     print("LangGraph Multi-Agent Trading System - Setup")
     print("=" * 60)
     print()
-    
+
     # Check Python version
     if sys.version_info < (3, 12):
-        print("⚠ Python 3.12+ required (current: {}.{})".format(
-            sys.version_info.major, sys.version_info.minor
-        ))
+        print(
+            "⚠ Python 3.12+ required (current: {}.{})".format(
+                sys.version_info.major, sys.version_info.minor
+            )
+        )
     else:
         print(f"✓ Python {sys.version_info.major}.{sys.version_info.minor}")
-    
+
     print()
     print("Checking dependencies...")
     deps_ok = check_dependencies()
-    
+
     print()
     print("Checking configuration...")
     config_ok = check_config()
-    
+
     print()
     print("Creating environment template...")
     create_env_template()
-    
+
     print()
     print("=" * 60)
     if deps_ok and config_ok:

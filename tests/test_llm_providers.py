@@ -1,11 +1,11 @@
 """
 Tests for all LLM providers (Groq, OpenAI, Anthropic).
 """
+
 from __future__ import annotations
 
 import os
 import pytest
-from unittest.mock import Mock, patch
 
 from pearlalgo.agents.quant_research_agent import QuantResearchAgent
 from pearlalgo.agents.langgraph_state import MarketData, Signal
@@ -15,6 +15,7 @@ from pearlalgo.agents.langgraph_state import MarketData, Signal
 def sample_market_data():
     """Create sample market data."""
     from datetime import datetime, timezone
+
     return MarketData(
         symbol="ES",
         timestamp=datetime.now(timezone.utc),
@@ -30,6 +31,7 @@ def sample_market_data():
 def sample_signal():
     """Create sample signal."""
     from datetime import datetime, timezone
+
     return Signal(
         symbol="ES",
         timestamp=datetime.now(timezone.utc),
@@ -52,9 +54,9 @@ def test_groq_initialization():
         },
         "strategy": {"default": "sr"},
     }
-    
+
     agent = QuantResearchAgent(symbols=["ES"], strategy="sr", config=config)
-    
+
     # If API key is set in environment, agent may initialize with LLM
     # If not set, should gracefully disable
     if groq_key:
@@ -77,9 +79,9 @@ def test_openai_initialization():
         },
         "strategy": {"default": "sr"},
     }
-    
+
     agent = QuantResearchAgent(symbols=["ES"], strategy="sr", config=config)
-    
+
     # Should handle missing key gracefully
     if not os.getenv("OPENAI_API_KEY"):
         assert agent.use_llm == False
@@ -97,9 +99,9 @@ def test_anthropic_initialization():
         },
         "strategy": {"default": "sr"},
     }
-    
+
     agent = QuantResearchAgent(symbols=["ES"], strategy="sr", config=config)
-    
+
     # Should handle missing key gracefully
     if not os.getenv("ANTHROPIC_API_KEY"):
         assert agent.use_llm == False
@@ -117,7 +119,7 @@ def test_llm_fallback_on_missing_key():
         },
         "strategy": {"default": "sr"},
     }
-    
+
     agent = QuantResearchAgent(symbols=["ES"], strategy="sr", config=config)
     # Should disable LLM when key is missing
     assert agent.use_llm == False
@@ -127,30 +129,41 @@ def test_llm_provider_switching():
     """Test switching between LLM providers."""
     symbols = ["ES"]
     strategy = "sr"
-    
+
     # Test Groq
     config_groq = {
-        "llm": {"provider": "groq", "groq": {"api_key": "test", "model": "mixtral-8x7b-32768"}},
+        "llm": {
+            "provider": "groq",
+            "groq": {"api_key": "test", "model": "mixtral-8x7b-32768"},
+        },
         "strategy": {"default": "sr"},
     }
-    agent_groq = QuantResearchAgent(symbols=symbols, strategy=strategy, config=config_groq)
-    
+    agent_groq = QuantResearchAgent(
+        symbols=symbols, strategy=strategy, config=config_groq
+    )
+
     # Test OpenAI
     config_openai = {
         "llm": {"provider": "openai", "openai": {"api_key": "test", "model": "gpt-4o"}},
         "strategy": {"default": "sr"},
     }
-    agent_openai = QuantResearchAgent(symbols=symbols, strategy=strategy, config=config_openai)
-    
+    agent_openai = QuantResearchAgent(
+        symbols=symbols, strategy=strategy, config=config_openai
+    )
+
     # Test Anthropic
     config_anthropic = {
-        "llm": {"provider": "anthropic", "anthropic": {"api_key": "test", "model": "claude-3-opus-20240229"}},
+        "llm": {
+            "provider": "anthropic",
+            "anthropic": {"api_key": "test", "model": "claude-3-opus-20240229"},
+        },
         "strategy": {"default": "sr"},
     }
-    agent_anthropic = QuantResearchAgent(symbols=symbols, strategy=strategy, config=config_anthropic)
-    
+    agent_anthropic = QuantResearchAgent(
+        symbols=symbols, strategy=strategy, config=config_anthropic
+    )
+
     # All should initialize (may disable LLM if keys invalid, but shouldn't crash)
     assert agent_groq is not None
     assert agent_openai is not None
     assert agent_anthropic is not None
-

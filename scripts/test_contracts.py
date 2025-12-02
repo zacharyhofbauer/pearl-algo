@@ -12,6 +12,7 @@ combinations. The safe pattern is:
 This script demonstrates that flow for ES and NQ (and can be extended to other
 Globex futures easily).
 """
+
 from __future__ import annotations
 
 import sys
@@ -59,7 +60,9 @@ def _choose_upcoming_expiry(details) -> str | None:
     return None
 
 
-def _request_and_report(ib: IB, symbol: str, *, expiry: str | None = None, label: str = "") -> None:
+def _request_and_report(
+    ib: IB, symbol: str, *, expiry: str | None = None, label: str = ""
+) -> None:
     contract = fut_contract(symbol, expiry=expiry)
     try:
         cds = ib.reqContractDetails(contract)
@@ -68,7 +71,9 @@ def _request_and_report(ib: IB, symbol: str, *, expiry: str | None = None, label
             return
         c = cds[0].contract
         exp = c.lastTradeDateOrContractMonth
-        print(f"✓ {symbol} {label or 'front'} -> localSymbol={c.localSymbol}, expiry={exp}, conId={c.conId}")
+        print(
+            f"✓ {symbol} {label or 'front'} -> localSymbol={c.localSymbol}, expiry={exp}, conId={c.conId}"
+        )
     except Exception as exc:  # pragma: no cover - requires live IB
         print(f"✗ {symbol} {label or 'front'} -> {exc}")
 

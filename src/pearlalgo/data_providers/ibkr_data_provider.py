@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -51,7 +51,11 @@ class IBKRDataProvider(DataProvider):
     def _connect(self) -> IB:
         ib = IB()
         try:
-            ib.connect(self.connection.host, self.connection.port, clientId=self.connection.client_id)
+            ib.connect(
+                self.connection.host,
+                self.connection.port,
+                clientId=self.connection.client_id,
+            )
         except Exception as exc:  # pragma: no cover - requires live IB
             raise RuntimeError(
                 f"Failed to connect to IB at {self.connection.host}:{self.connection.port} "
@@ -60,17 +64,24 @@ class IBKRDataProvider(DataProvider):
             ) from exc
         return ib
 
-    def _resolve_front_future(self, ib: IB, symbol: str, exchange: str | None = None) -> Future:
+    def _resolve_front_future(
+        self, ib: IB, symbol: str, exchange: str | None = None
+    ) -> Future:
         """
         Resolve the nearest-dated future for a symbol. Falls back to simple Future if lookup fails.
         Uses symbol-specific exchange mapping for micro contracts.
         """
         from pearlalgo.brokers.contracts import _default_exchange_for_symbol
+
         exch = exchange or _default_exchange_for_symbol(symbol)
         contract = resolve_future_contract(ib, symbol, exchange=exch)
         if contract:
             return contract
-        logger.warning("No valid front-month contract for %s on %s; falling back to simple Future", symbol, exch)
+        logger.warning(
+            "No valid front-month contract for %s on %s; falling back to simple Future",
+            symbol,
+            exch,
+        )
         return Future(symbol=symbol, exchange=exch, currency="USD")
 
     def _resolve_specific_future(

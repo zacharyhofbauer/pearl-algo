@@ -20,14 +20,34 @@ class FutureSpec:
 
 FUTURES_METADATA: dict[str, FutureSpec] = {
     # Equity index futures (CME/GLOBEX)
-    "ES": FutureSpec(symbol="ES", exchange="GLOBEX", trading_class="ES", multiplier="50", tick_value=12.5),
-    "NQ": FutureSpec(symbol="NQ", exchange="GLOBEX", trading_class="NQ", multiplier="20", tick_value=20.0),
+    "ES": FutureSpec(
+        symbol="ES",
+        exchange="GLOBEX",
+        trading_class="ES",
+        multiplier="50",
+        tick_value=12.5,
+    ),
+    "NQ": FutureSpec(
+        symbol="NQ",
+        exchange="GLOBEX",
+        trading_class="NQ",
+        multiplier="20",
+        tick_value=20.0,
+    ),
     # Metals (COMEX)
-    "GC": FutureSpec(symbol="GC", exchange="COMEX", trading_class="GC", multiplier="100", tick_value=10.0),
+    "GC": FutureSpec(
+        symbol="GC",
+        exchange="COMEX",
+        trading_class="GC",
+        multiplier="100",
+        tick_value=10.0,
+    ),
 }
 
 
-def fut_contract(symbol: FuturesSymbol, expiry: str | None = None, local_symbol: str | None = None) -> Future:
+def fut_contract(
+    symbol: FuturesSymbol, expiry: str | None = None, local_symbol: str | None = None
+) -> Future:
     """
     Build an IBKR Future contract for ES/NQ/GC.
     - If local_symbol provided, tradingClass is left to IBKR resolution.

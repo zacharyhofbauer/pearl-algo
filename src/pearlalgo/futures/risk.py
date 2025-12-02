@@ -55,7 +55,9 @@ def compute_risk_state(
     Automatically sets cooldown_until after HARD_STOP or when max_trades is reached.
     """
     loss_limit = abs(profile.daily_loss_limit)
-    near_level = near_threshold if near_threshold is not None else profile.risk_taper_threshold
+    near_level = (
+        near_threshold if near_threshold is not None else profile.risk_taper_threshold
+    )
     net_pnl = realized_pnl + unrealized_pnl
     remaining = max(0.0, loss_limit + net_pnl)  # net_pnl negative reduces buffer
     status: RiskStatus
@@ -73,12 +75,16 @@ def compute_risk_state(
         # HARD_STOP: set cooldown if not already set
         status = "HARD_STOP"
         if effective_cooldown_until is None or current_time >= effective_cooldown_until:
-            effective_cooldown_until = current_time + timedelta(minutes=profile.cooldown_minutes)
+            effective_cooldown_until = current_time + timedelta(
+                minutes=profile.cooldown_minutes
+            )
     elif effective_max_trades is not None and trades_today >= effective_max_trades:
         # Max trades reached: set cooldown if not already set
         status = "COOLDOWN"
         if effective_cooldown_until is None or current_time >= effective_cooldown_until:
-            effective_cooldown_until = current_time + timedelta(minutes=profile.cooldown_minutes)
+            effective_cooldown_until = current_time + timedelta(
+                minutes=profile.cooldown_minutes
+            )
     elif effective_cooldown_until and current_time < effective_cooldown_until:
         status = "COOLDOWN"
     elif remaining <= loss_limit * near_level:
@@ -115,7 +121,11 @@ def compute_position_size(
     - Caps by per-symbol max contracts.
     - Tapers sizing as remaining buffer shrinks and as max_trades is approached.
     """
-    if desired_side == "flat" or risk_state.status in {"HARD_STOP", "COOLDOWN", "PAUSED"}:
+    if desired_side == "flat" or risk_state.status in {
+        "HARD_STOP",
+        "COOLDOWN",
+        "PAUSED",
+    }:
         return 0
 
     root = symbol.upper()
@@ -126,7 +136,9 @@ def compute_position_size(
     buffer = remaining_daily_drawdown
     if buffer is None:
         buffer = risk_state.remaining_loss_buffer
-    buffer_frac = buffer / risk_state.daily_loss_limit if risk_state.daily_loss_limit > 0 else 1.0
+    buffer_frac = (
+        buffer / risk_state.daily_loss_limit if risk_state.daily_loss_limit > 0 else 1.0
+    )
     taper_floor = max(profile.risk_taper_threshold, 0.1)
     buffer_scale = max(taper_floor, min(1.0, buffer_frac))
 
@@ -141,7 +153,11 @@ def compute_position_size(
 
     # Combine both scales (use the more restrictive)
     combined_scale = min(buffer_scale, trades_scale)
-    allowed = max(profile.min_contract_size, int(max_cap * combined_scale)) if buffer > 0 else 0
+    allowed = (
+        max(profile.min_contract_size, int(max_cap * combined_scale))
+        if buffer > 0
+        else 0
+    )
     # Cap at max_cap
     allowed = min(allowed, max_cap)
 

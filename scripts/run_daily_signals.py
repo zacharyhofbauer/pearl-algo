@@ -49,16 +49,34 @@ def get_data(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run daily futures signals and write to CSV + performance log.")
+    parser = argparse.ArgumentParser(
+        description="Run daily futures signals and write to CSV + performance log."
+    )
     parser.add_argument("--strategy", choices=["ma_cross", "sr"], default="sr")
     parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "GC"])
     parser.add_argument("--sec-types", nargs="+", default=["FUT", "FUT", "FUT"])
     parser.add_argument("--source", choices=["ibkr", "csv"], default="ibkr")
-    parser.add_argument("--data-paths", nargs="*", help="CSV paths matching symbols order when source=csv")
+    parser.add_argument(
+        "--data-paths",
+        nargs="*",
+        help="CSV paths matching symbols order when source=csv",
+    )
     parser.add_argument("--outdir", default="signals")
-    parser.add_argument("--expiries", nargs="*", help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols")
-    parser.add_argument("--local-symbols", nargs="*", help="Optional IBKR local symbols matching symbols")
-    parser.add_argument("--trading-classes", nargs="*", help="Optional trading classes matching symbols (defaults to symbol)")
+    parser.add_argument(
+        "--expiries",
+        nargs="*",
+        help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols",
+    )
+    parser.add_argument(
+        "--local-symbols",
+        nargs="*",
+        help="Optional IBKR local symbols matching symbols",
+    )
+    parser.add_argument(
+        "--trading-classes",
+        nargs="*",
+        help="Optional trading classes matching symbols (defaults to symbol)",
+    )
     args = parser.parse_args(argv)
 
     profile = load_profile()
@@ -77,7 +95,11 @@ def main(argv: list[str] | None = None) -> int:
         expiry = expiries[idx] if idx < len(expiries) else None
         local_symbol = local_symbols[idx] if idx < len(local_symbols) else None
         trading_class = trading_classes[idx] if idx < len(trading_classes) else symbol
-        path = Path(data_paths[idx]) if args.source == "csv" and idx < len(data_paths) else None
+        path = (
+            Path(data_paths[idx])
+            if args.source == "csv" and idx < len(data_paths)
+            else None
+        )
         try:
             df = get_data(
                 symbol,
@@ -90,7 +112,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             if df.empty:
                 continue
-            signal = generate_signal(symbol, df, strategy_name=args.strategy, fast=20, slow=50)
+            signal = generate_signal(
+                symbol, df, strategy_name=args.strategy, fast=20, slow=50
+            )
             side = signal["side"]
             price = float(df["Close"].iloc[-1])
             risk_state = compute_risk_state(
@@ -100,7 +124,9 @@ def main(argv: list[str] | None = None) -> int:
                 unrealized_pnl=0.0,
             )
             size = compute_position_size(symbol, side, profile, risk_state, price=price)
-            direction = "BUY" if side == "long" else "SELL" if side == "short" else "FLAT"
+            direction = (
+                "BUY" if side == "long" else "SELL" if side == "short" else "FLAT"
+            )
             rows.append(
                 {
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -128,9 +154,13 @@ def main(argv: list[str] | None = None) -> int:
                     slow_ma=signal.get("slow_ma"),
                     risk_status=risk_state.status,
                     drawdown_remaining=risk_state.remaining_loss_buffer,
-                    trade_reason=signal.get("comment"),  # This is the trade_reason string from S/R strategy
-                    emotion_state=risk_state.status if risk_state.status in {"COOLDOWN", "PAUSED"} else "normal",
-                    notes=f"daily signal; sr={ {k: signal.get(k) for k in ('support1','resistance1','vwap') if k in signal} }",
+                    trade_reason=signal.get(
+                        "comment"
+                    ),  # This is the trade_reason string from S/R strategy
+                    emotion_state=risk_state.status
+                    if risk_state.status in {"COOLDOWN", "PAUSED"}
+                    else "normal",
+                    notes=f"daily signal; sr={ {k: signal.get(k) for k in ('support1', 'resistance1', 'vwap') if k in signal} }",
                 )
             )
         except Exception as exc:

@@ -20,10 +20,13 @@
 
 ### 🚀 LangGraph Multi-Agent System (NEW)
 - **4 Specialized Agents** collaborating in real-time:
-  1. **Market Data Agent** - WebSocket streaming for OHLCV, order book, funding rates (crypto), OI
-  2. **Quant Research Agent** - Signal generation with momentum, mean-reversion, regime detection, and LLM reasoning
-  3. **Risk Manager Agent** - Position sizing (2% max risk), 15% drawdown kill-switch, volatility targeting
-  4. **Portfolio/Execution Agent** - Final decision making and order placement
+  1. **Market Data Agent** - WebSocket streaming for OHLCV, order book, funding rates (crypto), OI with reconnection logic
+  2. **Quant Research Agent** - Signal generation with momentum, mean-reversion, regime detection, ML support, and LLM reasoning
+  3. **Risk Manager Agent** - Position sizing (2% max risk), 15% drawdown kill-switch, volatility targeting, cool-down periods
+  4. **Portfolio/Execution Agent** - Final decision making and order placement with retry logic
+- **State Persistence**: File-based (default) or Redis-backed state storage for seamless restarts
+- **Enhanced Error Handling**: Retry logic with exponential backoff and circuit breakers for API/LLM calls
+- **Structured Logging**: Correlation IDs and timing metrics for request tracing
 
 ### 📊 Core Features
 - **Multi-Broker Support**: IBKR (primary), Bybit (crypto perps), Alpaca (US futures)
@@ -162,17 +165,32 @@ python -m pearlalgo.backtesting.vectorbt_engine \
 streamlit run scripts/streamlit_dashboard.py
 ```
 
-**Docker Deployment:**
+**Docker Deployment (24/7 Operation):**
 ```bash
-# Build and run with docker-compose
+# Build and run with docker-compose (includes Redis for state persistence)
 docker-compose up -d
 
 # View logs
 docker-compose logs -f trading-bot
 
+# Check health
+curl http://localhost:8080/healthz
+
+# View dashboard
+docker-compose logs -f dashboard
+
 # Stop
 docker-compose down
+
+# Restart (preserves state)
+docker-compose restart trading-bot
 ```
+
+**State Persistence:**
+- State is automatically saved to `data/state_cache/` (file-based, default)
+- Optional Redis backend for distributed state (configured in `docker-compose.yml`)
+- State persists across restarts, allowing seamless recovery
+- Migration path for schema evolution
 
 ### Testing & Validation
 
@@ -270,12 +288,13 @@ Legacy (moon-era) CLI/backtesting: archived under `legacy/src/pearlalgo/` with t
 ```
 src/pearlalgo/
   agents/
-    langgraph_state.py          # Shared state schema (Pydantic)
+    langgraph_state.py          # Shared state schema (Pydantic) with validation
+    state_store.py              # State persistence (file-based + Redis)
     langgraph_workflow.py        # Main workflow graph connecting all agents
-    market_data_agent.py          # WebSocket data streaming agent
-    quant_research_agent.py       # Signal generation + LLM reasoning agent
+    market_data_agent.py          # WebSocket data streaming agent (with reconnection)
+    quant_research_agent.py       # Signal generation + LLM reasoning + ML support
     risk_manager_agent.py         # Enhanced risk management agent
-    portfolio_execution_agent.py  # Order execution agent
+    portfolio_execution_agent.py  # Order execution agent (with retry logic)
     automated_trading_agent.py    # Legacy agent (backward compatible)
     execution_agent.py            # Legacy execution agent
     risk_agent.py                 # Legacy risk agent
@@ -312,6 +331,11 @@ src/pearlalgo/
     contracts.py                  # Contract metadata
     signals.py                    # Signal generation
     risk.py                       # Risk state management
+  
+  utils/
+    retry.py                    # Retry logic and circuit breakers
+    logging.py                  # Structured logging with correlation IDs
+    health.py                   # Health check endpoint
     performance.py                # Performance logging
     
   core/                           # Core portfolio and events

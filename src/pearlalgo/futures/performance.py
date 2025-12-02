@@ -77,7 +77,9 @@ def _ensure_file(path: Path) -> None:
         writer.writeheader()
 
 
-def log_performance_row(row: PerformanceRow, path: Path | str = DEFAULT_PERF_PATH) -> None:
+def log_performance_row(
+    row: PerformanceRow, path: Path | str = DEFAULT_PERF_PATH
+) -> None:
     outfile = Path(path)
     _ensure_file(outfile)
     data = asdict(row)
@@ -86,25 +88,45 @@ def log_performance_row(row: PerformanceRow, path: Path | str = DEFAULT_PERF_PAT
         ts = ts.replace(tzinfo=timezone.utc)
     data["timestamp"] = ts.isoformat()
     if row.entry_time:
-        et = row.entry_time if row.entry_time.tzinfo else row.entry_time.replace(tzinfo=timezone.utc)
+        et = (
+            row.entry_time
+            if row.entry_time.tzinfo
+            else row.entry_time.replace(tzinfo=timezone.utc)
+        )
         data["entry_time"] = et.isoformat()
     if row.exit_time:
-        xt = row.exit_time if row.exit_time.tzinfo else row.exit_time.replace(tzinfo=timezone.utc)
+        xt = (
+            row.exit_time
+            if row.exit_time.tzinfo
+            else row.exit_time.replace(tzinfo=timezone.utc)
+        )
         data["exit_time"] = xt.isoformat()
-    
+
     # Calculate enhanced metrics if not already set
     if row.hold_time_minutes is None and row.entry_time and row.exit_time:
-        entry = row.entry_time if row.entry_time.tzinfo else row.entry_time.replace(tzinfo=timezone.utc)
-        exit_t = row.exit_time if row.exit_time.tzinfo else row.exit_time.replace(tzinfo=timezone.utc)
+        entry = (
+            row.entry_time
+            if row.entry_time.tzinfo
+            else row.entry_time.replace(tzinfo=timezone.utc)
+        )
+        exit_t = (
+            row.exit_time
+            if row.exit_time.tzinfo
+            else row.exit_time.replace(tzinfo=timezone.utc)
+        )
         data["hold_time_minutes"] = (exit_t - entry).total_seconds() / 60.0
-    
+
     if row.time_of_day_hour is None and row.entry_time:
-        entry = row.entry_time if row.entry_time.tzinfo else row.entry_time.replace(tzinfo=timezone.utc)
+        entry = (
+            row.entry_time
+            if row.entry_time.tzinfo
+            else row.entry_time.replace(tzinfo=timezone.utc)
+        )
         data["time_of_day_hour"] = entry.hour
-    
+
     if row.day_of_week is None:
         data["day_of_week"] = ts.strftime("%A")
-    
+
     with outfile.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=DEFAULT_COLUMNS)
         writer.writerow({col: data.get(col) for col in DEFAULT_COLUMNS})
@@ -114,7 +136,7 @@ def load_performance(path: Path | str = DEFAULT_PERF_PATH) -> pd.DataFrame:
     infile = Path(path)
     if not infile.exists():
         return pd.DataFrame(columns=DEFAULT_COLUMNS)
-    
+
     # Try reading with error handling for malformed CSV
     try:
         # First try standard read
@@ -122,18 +144,25 @@ def load_performance(path: Path | str = DEFAULT_PERF_PATH) -> pd.DataFrame:
     except pd.errors.ParserError:
         # If that fails, try with error handling
         try:
-            df = pd.read_csv(infile, on_bad_lines='skip', engine='python')
+            df = pd.read_csv(infile, on_bad_lines="skip", engine="python")
         except Exception:
             # Last resort: try with minimal parsing
             try:
-                df = pd.read_csv(infile, sep=',', quotechar='"', on_bad_lines='skip', engine='python', error_bad_lines=False)
+                df = pd.read_csv(
+                    infile,
+                    sep=",",
+                    quotechar='"',
+                    on_bad_lines="skip",
+                    engine="python",
+                    error_bad_lines=False,
+                )
             except Exception:
                 # If all else fails, return empty DataFrame
                 return pd.DataFrame(columns=DEFAULT_COLUMNS)
-    
+
     if df.empty:
         return pd.DataFrame(columns=DEFAULT_COLUMNS)
-    
+
     # Parse datetime columns
     date_cols = ["timestamp", "entry_time", "exit_time"]
     for col in date_cols:
@@ -159,24 +188,26 @@ def calculate_profit_factor(df: pd.DataFrame) -> float:
 def calculate_enhanced_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate enhanced metrics for all trades in dataframe."""
     df = df.copy()
-    
+
     # Calculate hold_time_minutes if entry/exit times exist
     if "entry_time" in df.columns and "exit_time" in df.columns:
         mask = df["entry_time"].notna() & df["exit_time"].notna()
         if mask.any():
-            durations = (df.loc[mask, "exit_time"] - df.loc[mask, "entry_time"]).dt.total_seconds() / 60.0
+            durations = (
+                df.loc[mask, "exit_time"] - df.loc[mask, "entry_time"]
+            ).dt.total_seconds() / 60.0
             df.loc[mask, "hold_time_minutes"] = durations
-    
+
     # Calculate time_of_day_hour from entry_time
     if "entry_time" in df.columns:
         mask = df["entry_time"].notna()
         if mask.any():
             df.loc[mask, "time_of_day_hour"] = df.loc[mask, "entry_time"].dt.hour
-    
+
     # Calculate day_of_week from timestamp
     if "timestamp" in df.columns:
         df["day_of_week"] = df["timestamp"].dt.strftime("%A")
-    
+
     # Calculate profit factor per strategy (rolling)
     if "strategy_name" in df.columns and "realized_pnl" in df.columns:
         for strategy in df["strategy_name"].dropna().unique():
@@ -185,11 +216,17 @@ def calculate_enhanced_metrics(df: pd.DataFrame) -> pd.DataFrame:
             if len(strategy_df) > 0:
                 # Calculate cumulative profit factor
                 cumulative_wins = strategy_df["realized_pnl"].clip(lower=0).cumsum()
-                cumulative_losses = abs(strategy_df["realized_pnl"].clip(upper=0).cumsum())
-                profit_factors = cumulative_wins / cumulative_losses.replace(0, float("inf"))
-                profit_factors = profit_factors.replace([float("inf"), float("-inf")], 0.0)
+                cumulative_losses = abs(
+                    strategy_df["realized_pnl"].clip(upper=0).cumsum()
+                )
+                profit_factors = cumulative_wins / cumulative_losses.replace(
+                    0, float("inf")
+                )
+                profit_factors = profit_factors.replace(
+                    [float("inf"), float("-inf")], 0.0
+                )
                 df.loc[strategy_mask, "profit_factor"] = profit_factors.values
-    
+
     return df
 
 
@@ -207,10 +244,10 @@ def summarize_daily_performance(
         df = df[df["timestamp"].dt.date == pd.to_datetime(date).date()]
     if df.empty:
         return {}
-    
+
     # Calculate enhanced metrics
     df = calculate_enhanced_metrics(df)
-    
+
     trades = df.dropna(subset=["realized_pnl"])
     if trades.empty:
         return {
@@ -222,10 +259,10 @@ def summarize_daily_performance(
             "avg_time_in_trade_minutes": 0.0,
             "profit_factor": 0.0,
         }
-    
+
     wins = trades[trades["realized_pnl"] > 0]
     losses = trades[trades["realized_pnl"] < 0]
-    
+
     # Calculate worst drawdown from drawdown_remaining column
     worst_drawdown = 0.0
     if "drawdown_remaining" in df.columns:
@@ -234,7 +271,7 @@ def summarize_daily_performance(
             # Worst drawdown is the minimum remaining buffer (most negative relative to starting)
             # If we track from starting balance, worst is when remaining is closest to 0
             worst_drawdown = float(drawdowns.min()) if len(drawdowns) > 0 else 0.0
-    
+
     # Calculate average time in trade
     avg_time_minutes = 0.0
     if "hold_time_minutes" in trades.columns:
@@ -244,19 +281,23 @@ def summarize_daily_performance(
     elif "entry_time" in trades.columns and "exit_time" in trades.columns:
         completed_trades = trades.dropna(subset=["entry_time", "exit_time"])
         if not completed_trades.empty:
-            durations = (completed_trades["exit_time"] - completed_trades["entry_time"]).dt.total_seconds() / 60.0
+            durations = (
+                completed_trades["exit_time"] - completed_trades["entry_time"]
+            ).dt.total_seconds() / 60.0
             avg_time_minutes = float(durations.mean()) if len(durations) > 0 else 0.0
-    
+
     # Calculate profit factor
     profit_factor = calculate_profit_factor(trades)
-    
+
     return {
         "rows": float(len(df)),
         "trades": float(len(trades)),
         "wins": float(len(wins)),
         "losses": float(len(losses)),
         "win_rate": float(len(wins) / len(trades)) if len(trades) > 0 else 0.0,
-        "avg_realized_pnl": float(trades["realized_pnl"].mean()) if len(trades) > 0 else 0.0,
+        "avg_realized_pnl": float(trades["realized_pnl"].mean())
+        if len(trades) > 0
+        else 0.0,
         "worst_drawdown": worst_drawdown,
         "avg_time_in_trade_minutes": avg_time_minutes,
         "profit_factor": profit_factor,

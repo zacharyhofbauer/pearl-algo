@@ -21,7 +21,15 @@ logger = logging.getLogger(__name__)
 # Default tasks; override with CLI to control expiries/local symbols.
 DEFAULT_TASKS = [
     ("SPY", "STK", "1 D", "5 mins", Path("data/equities/SPY_ib_5m.csv"), None, None),
-    ("ES", "FUT_CONT", "1 D", "15 mins", Path("data/futures/ES_ib_15m.csv"), None, None),
+    (
+        "ES",
+        "FUT_CONT",
+        "1 D",
+        "15 mins",
+        Path("data/futures/ES_ib_15m.csv"),
+        None,
+        None,
+    ),
 ]
 
 
@@ -85,7 +93,9 @@ def download_symbol(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path)
-    logger.info("[OK] Saved %s (%s) %s rows -> %s", symbol, sec_type, len(df), output_path)
+    logger.info(
+        "[OK] Saved %s (%s) %s rows -> %s", symbol, sec_type, len(df), output_path
+    )
 
 
 def run_download(
@@ -99,7 +109,9 @@ def run_download(
     local_symbols: list[str] | None = None,
 ) -> None:
     ib = IB()
-    logger.info("Connecting to IBKR Gateway %s:%s (clientId=%s) ...", host, port, client_id)
+    logger.info(
+        "Connecting to IBKR Gateway %s:%s (clientId=%s) ...", host, port, client_id
+    )
     try:
         ib.connect(host, port, clientId=client_id)
     except Exception as exc:  # pragma: no cover - requires IB
@@ -120,7 +132,17 @@ def run_download(
                 exp = exp_list[idx] if idx < len(exp_list) else None
                 loc = loc_list[idx] if idx < len(loc_list) else None
                 # default duration/bar_size if user overrides tasks
-                tasks.append((symbol, stype, "1 D", "15 mins", Path(f"data/{symbol}_{stype.lower()}.csv"), exp, loc))
+                tasks.append(
+                    (
+                        symbol,
+                        stype,
+                        "1 D",
+                        "15 mins",
+                        Path(f"data/{symbol}_{stype.lower()}.csv"),
+                        exp,
+                        loc,
+                    )
+                )
 
         for task in tasks:
             symbol, sec_type, duration, bar_size, out_path, *rest = task
@@ -146,14 +168,38 @@ def run_download(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="IBKR historical data downloader (paper-safe).")
-    parser.add_argument("--host", default=None, help="IBKR host (default from settings or 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=None, help="IBKR port (default from settings or 4002)")
-    parser.add_argument("--client-id", type=int, default=None, help="IBKR clientId (default from settings or 1)")
+    parser = argparse.ArgumentParser(
+        description="IBKR historical data downloader (paper-safe)."
+    )
+    parser.add_argument(
+        "--host", default=None, help="IBKR host (default from settings or 127.0.0.1)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="IBKR port (default from settings or 4002)",
+    )
+    parser.add_argument(
+        "--client-id",
+        type=int,
+        default=None,
+        help="IBKR clientId (default from settings or 1)",
+    )
     parser.add_argument("--symbols", nargs="*", help="Override default symbols")
-    parser.add_argument("--sec-types", nargs="*", help="Override default security types")
-    parser.add_argument("--expiries", nargs="*", help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols")
-    parser.add_argument("--local-symbols", nargs="*", help="Optional IBKR local symbols matching symbols")
+    parser.add_argument(
+        "--sec-types", nargs="*", help="Override default security types"
+    )
+    parser.add_argument(
+        "--expiries",
+        nargs="*",
+        help="Optional futures expiries (YYYYMM or YYYYMMDD) matching symbols",
+    )
+    parser.add_argument(
+        "--local-symbols",
+        nargs="*",
+        help="Optional IBKR local symbols matching symbols",
+    )
     return parser
 
 

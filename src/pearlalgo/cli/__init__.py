@@ -3,4 +3,3 @@
 from pearlalgo.cli.main import cli
 
 __all__ = ["cli"]
-

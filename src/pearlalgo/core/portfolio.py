@@ -22,7 +22,9 @@ class Position:
 
         # If flipping direction, realize PnL on closed portion
         if self.size != 0 and (self.size > 0 > fill_qty or self.size < 0 < fill_qty):
-            closing_qty = min(abs(self.size), abs(fill_qty)) * (1 if self.size > 0 else -1)
+            closing_qty = min(abs(self.size), abs(fill_qty)) * (
+                1 if self.size > 0 else -1
+            )
             pnl = -closing_qty * (fill.price - self.avg_price)
             self.realized_pnl += pnl
 
@@ -40,7 +42,9 @@ class Position:
         else:
             # Adjust average price for same-direction adds
             if (self.size > 0 and new_size > 0) or (self.size < 0 and new_size < 0):
-                weighted_notional = self.avg_price * abs(self.size) + fill.price * abs(fill_qty)
+                weighted_notional = self.avg_price * abs(self.size) + fill.price * abs(
+                    fill_qty
+                )
                 self.avg_price = weighted_notional / abs(new_size)
             else:
                 # Reduced but not flipped; keep existing avg

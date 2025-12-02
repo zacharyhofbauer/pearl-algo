@@ -24,19 +24,18 @@ console = Console()
 def report_cmd(ctx: click.Context, date: str | None) -> None:
     """Generate daily trading report."""
     verbosity = ctx.obj.get("verbosity", "NORMAL")
-    
+
     console.print("\n[bold cyan]📄 Generating Daily Report...[/bold cyan]\n")
-    
+
     args = []
     if date:
         args.extend(["--date", date])
-    
+
     result = daily_report.main(args)
-    
+
     if result == 0:
         console.print("[bold green]✅ Report generated successfully![/bold green]\n")
     else:
         console.print("[bold red]❌ Failed to generate report[/bold red]\n")
-    
-    raise SystemExit(result)
 
+    raise SystemExit(result)

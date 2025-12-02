@@ -29,7 +29,9 @@ def _load_config_file(path: str | Path | None) -> Dict[str, Any]:
 class Settings(BaseSettings):
     """Centralized settings loaded from env plus optional config file."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="PEARLALGO_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_prefix="PEARLALGO_", extra="ignore"
+    )
 
     profile: str = Field(default="backtest")
     data_dir: str = Field(default="data")
@@ -50,7 +52,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     @classmethod
-    def from_profile(cls: type[Self], profile: str | None = None, config_file: str | Path | None = None) -> Self:
+    def from_profile(
+        cls: type[Self],
+        profile: str | None = None,
+        config_file: str | Path | None = None,
+    ) -> Self:
         """
         Load settings from env with optional overrides from a config file.
         Precedence: explicit profile arg > config profile > env default.
@@ -60,7 +66,9 @@ class Settings(BaseSettings):
         merged: Dict[str, Any] = env_settings.model_dump()
 
         file_data = _load_config_file(config_file)
-        file_profile = (profile or file_data.get("profile") or env_settings.profile).lower()
+        file_profile = (
+            profile or file_data.get("profile") or env_settings.profile
+        ).lower()
 
         profiles_section = file_data.get("profiles", {})
         profile_values = profiles_section.get(file_profile, {})
@@ -77,7 +85,9 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid settings: {exc}") from exc
 
 
-def get_settings(profile: str | None = None, config_file: str | Path | None = None) -> Settings:
+def get_settings(
+    profile: str | None = None, config_file: str | Path | None = None
+) -> Settings:
     """Public helper to load settings with profile/config file support."""
     return Settings.from_profile(profile=profile, config_file=config_file)
 

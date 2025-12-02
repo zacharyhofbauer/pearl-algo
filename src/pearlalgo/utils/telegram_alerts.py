@@ -1,15 +1,16 @@
 """
 Telegram Alerts - Send notifications for trades and major events.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
+from typing import Optional
 
-import logging
 
 try:
     from loguru import logger as loguru_logger
+
     logger = loguru_logger
 except ImportError:
     logger = logging.getLogger(__name__)
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 class TelegramAlerts:
     """Telegram alert sender for trading notifications."""
-    
+
     def __init__(
         self,
         bot_token: str,
@@ -36,7 +37,7 @@ class TelegramAlerts:
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.enabled = enabled
-        
+
         self.bot = None
         if enabled and Bot:
             try:
@@ -46,21 +47,23 @@ class TelegramAlerts:
                 logger.warning(f"Failed to initialize Telegram bot: {e}")
                 self.enabled = False
         elif enabled and not Bot:
-            logger.warning("python-telegram-bot not installed, Telegram alerts disabled")
+            logger.warning(
+                "python-telegram-bot not installed, Telegram alerts disabled"
+            )
             self.enabled = False
-    
+
     async def send_message(self, message: str) -> bool:
         """Send a message to Telegram."""
         if not self.enabled or not self.bot:
             return False
-        
+
         try:
             await self.bot.send_message(chat_id=self.chat_id, text=message)
             return True
         except TelegramError as e:
             logger.error(f"Failed to send Telegram message: {e}")
             return False
-    
+
     async def notify_trade(
         self,
         symbol: str,
@@ -79,9 +82,9 @@ class TelegramAlerts:
         )
         if order_id:
             message += f"Order ID: {order_id}"
-        
+
         await self.send_message(message)
-    
+
     async def notify_risk_warning(
         self,
         message: str,
@@ -91,9 +94,9 @@ class TelegramAlerts:
         alert = f"⚠️ *Risk Warning*\n\n{message}"
         if risk_status:
             alert += f"\nRisk Status: {risk_status}"
-        
+
         await self.send_message(alert)
-    
+
     async def notify_daily_summary(
         self,
         daily_pnl: float,
@@ -108,12 +111,11 @@ class TelegramAlerts:
             f"Trades: {total_trades}\n"
         )
         if win_rate is not None:
-            message += f"Win Rate: {win_rate*100:.1f}%"
-        
+            message += f"Win Rate: {win_rate * 100:.1f}%"
+
         await self.send_message(message)
-    
+
     async def notify_kill_switch(self, reason: str) -> None:
         """Notify about kill-switch activation."""
         message = f"🛑 *KILL-SWITCH ACTIVATED*\n\n{reason}"
         await self.send_message(message)
-

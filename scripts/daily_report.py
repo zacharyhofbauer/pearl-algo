@@ -25,7 +25,11 @@ def main(argv: list[str] | None = None) -> int:
         default="data/performance/futures_decisions.csv",
         help="Futures performance log (decisions/trades).",
     )
-    parser.add_argument("--journal-path", default="journal/trades.csv", help="Legacy trades journal path.")
+    parser.add_argument(
+        "--journal-path",
+        default="journal/trades.csv",
+        help="Legacy trades journal path.",
+    )
     args = parser.parse_args(argv)
 
     today = args.date or datetime.now(timezone.utc).strftime("%Y%m%d")
@@ -33,9 +37,17 @@ def main(argv: list[str] | None = None) -> int:
     trades_path = Path(args.journal_path)
     perf_path = Path(args.performance_path)
 
-    signals = pd.read_csv(signals_path) if signals_path and signals_path.exists() else pd.DataFrame()
+    signals = (
+        pd.read_csv(signals_path)
+        if signals_path and signals_path.exists()
+        else pd.DataFrame()
+    )
     trades = pd.read_csv(trades_path) if trades_path.exists() else pd.DataFrame()
-    perf = pd.read_csv(perf_path, parse_dates=["timestamp"]) if perf_path.exists() else pd.DataFrame()
+    perf = (
+        pd.read_csv(perf_path, parse_dates=["timestamp"])
+        if perf_path.exists()
+        else pd.DataFrame()
+    )
     if not perf.empty:
         perf = perf[perf["timestamp"].dt.strftime("%Y%m%d") == today]
 
@@ -55,7 +67,11 @@ def main(argv: list[str] | None = None) -> int:
     lines.append("## Trades (legacy journal)")
     if not trades.empty and "timestamp" in trades.columns:
         today_trades = trades[trades["timestamp"].str.startswith(today)]
-        lines.append(today_trades.to_markdown(index=False) if not today_trades.empty else "No trades.")
+        lines.append(
+            today_trades.to_markdown(index=False)
+            if not today_trades.empty
+            else "No trades."
+        )
     else:
         lines.append("No trades.")
     lines.append("")
@@ -67,7 +83,9 @@ def main(argv: list[str] | None = None) -> int:
     lines.append("")
     lines.append("## Summary")
     if not perf.empty and "realized_pnl" in perf.columns:
-        lines.append(f"- Realized PnL (sum): {perf['realized_pnl'].fillna(0).sum():.2f}")
+        lines.append(
+            f"- Realized PnL (sum): {perf['realized_pnl'].fillna(0).sum():.2f}"
+        )
         lines.append(f"- Decisions logged: {len(perf)}")
     elif not trades.empty:
         pnl = trades["pnl_after"].iloc[-1] if "pnl_after" in trades.columns else 0.0

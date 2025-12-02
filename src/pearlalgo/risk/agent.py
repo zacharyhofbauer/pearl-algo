@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict
 import csv
 
 from pearlalgo.risk.pnl import DailyPnLTracker
@@ -35,8 +35,12 @@ class RiskAgent:
         self._equity_trough = float(self.starting_equity)
         self._equity_curve: list[float] = [float(self.starting_equity)]
 
-    def update(self, realized_pnl: float | None = None, equity: float | None = None) -> None:
-        pnl = self.pnl_tracker.realized_today() if realized_pnl is None else realized_pnl
+    def update(
+        self, realized_pnl: float | None = None, equity: float | None = None
+    ) -> None:
+        pnl = (
+            self.pnl_tracker.realized_today() if realized_pnl is None else realized_pnl
+        )
         eq = equity if equity is not None else self.starting_equity + pnl
         self._equity_peak = max(self._equity_peak, eq)
         self._equity_trough = min(self._equity_trough, eq)
@@ -81,7 +85,11 @@ class RiskAgent:
         size = base_size if base_size is not None else self.base_size
         if self.max_daily_loss:
             remaining = self.remaining_drawdown() or 0.0
-            scale = min(1.0, max(0.1, remaining / float(self.max_daily_loss))) if self.max_daily_loss > 0 else 1.0
+            scale = (
+                min(1.0, max(0.1, remaining / float(self.max_daily_loss)))
+                if self.max_daily_loss > 0
+                else 1.0
+            )
             size *= scale
 
         if atr and dollar_vol_per_point and account_equity:
@@ -90,7 +98,9 @@ class RiskAgent:
                 risk_per_trade=risk_fraction,
                 atr=atr,
                 dollar_vol_per_point=dollar_vol_per_point,
-                max_units=int(self.max_contracts) if self.max_contracts is not None else None,
+                max_units=int(self.max_contracts)
+                if self.max_contracts is not None
+                else None,
             )
             if vol_units > 0:
                 size = min(size, vol_units)
@@ -203,7 +213,9 @@ class PerformanceTracker:
         self.trades.clear()
 
 
-def append_trade_log(row: Dict[str, Any], path: Path = Path("logs/trades_detailed.csv")) -> Path:
+def append_trade_log(
+    row: Dict[str, Any], path: Path = Path("logs/trades_detailed.csv")
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     is_new = not path.exists()
     with path.open("a", newline="") as f:
@@ -231,7 +243,9 @@ def append_trade_log(row: Dict[str, Any], path: Path = Path("logs/trades_detaile
     return path
 
 
-def append_daily_summary(row: Dict[str, Any], path: Path = Path("logs/daily_summary.csv")) -> Path:
+def append_daily_summary(
+    row: Dict[str, Any], path: Path = Path("logs/daily_summary.csv")
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     is_new = not path.exists()
     with path.open("a", newline="") as f:

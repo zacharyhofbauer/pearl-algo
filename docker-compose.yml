@@ -1,13 +1,44 @@
 version: '3.8'
 
 services:
+  # Redis for optional state persistence
+  redis:
+    image: redis:7-alpine
+    container_name: langgraph-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - trading-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
   trading-bot:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: langgraph-trading-bot
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     environment:
+      # Redis configuration (optional - falls back to file-based if not available)
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_DB=${REDIS_DB:-0}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       # Broker configuration
       - IBKR_HOST=${IBKR_HOST:-127.0.0.1}
       - IBKR_PORT=${IBKR_PORT:-7497}
@@ -60,6 +91,19 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Streamlit Dashboard (optional)
   dashboard:
@@ -87,6 +131,34 @@ services:
     depends_on:
       - trading-bot
 
+  # Health check endpoint service (optional - for external monitoring)
+  healthz:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: langgraph-healthz
+    restart: unless-stopped
+    command: python -m pearlalgo.utils.health --port 8080
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+    networks:
+      - trading-network
+    depends_on:
+      - trading-bot
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 networks:
   trading-network:
     driver: bridge
+
+volumes:
+  redis-data:
+    driver: local

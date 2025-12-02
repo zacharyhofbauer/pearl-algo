@@ -8,31 +8,36 @@ from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 from rich import box
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TimeRemainingColumn,
+)
 
 from pearlalgo.cli.output.colors import Colors, Icons
 
 
 class TraderConsole:
     """Unified console output for trading operations with trader-focused formatting."""
-    
+
     def __init__(self, verbosity: str = "NORMAL"):
         """
         Initialize trader console.
-        
+
         Args:
             verbosity: Output level - QUIET, NORMAL, VERBOSE, or DEBUG
         """
         self.console = Console()
         self.verbosity = verbosity.upper()
-    
+
     def _should_print(self, level: str) -> bool:
         """Check if message should be printed at current verbosity level."""
         levels = {"QUIET": 0, "NORMAL": 1, "VERBOSE": 2, "DEBUG": 3}
         return levels.get(self.verbosity, 1) >= levels.get(level, 1)
-    
+
     def status_panel(
         self,
         title: str,
@@ -42,7 +47,7 @@ class TraderConsole:
     ) -> Panel:
         """Create a comprehensive status panel."""
         content_parts = []
-        
+
         if gateway_status:
             status_icon = Icons.SUCCESS if gateway_status.get("ready") else Icons.ERROR
             content_parts.append(
@@ -50,7 +55,7 @@ class TraderConsole:
             )
             if gateway_status.get("pid"):
                 content_parts.append(f"   PID: {gateway_status['pid']}")
-        
+
         if risk_status:
             risk_icon = {
                 "OK": Icons.SUCCESS,
@@ -66,19 +71,19 @@ class TraderConsole:
                 content_parts.append(
                     f"   Buffer: ${risk_status['remaining_buffer']:,.2f}"
                 )
-        
+
         if performance:
             pnl = performance.get("total_pnl", 0.0)
             pnl_color = Colors.PNL_POSITIVE if pnl >= 0 else Colors.PNL_NEGATIVE
-            content_parts.append(
-                f"📊 P&L: [{pnl_color}]${pnl:,.2f}[/{pnl_color}]"
-            )
+            content_parts.append(f"📊 P&L: [{pnl_color}]${pnl:,.2f}[/{pnl_color}]")
             if performance.get("trades_today") is not None:
                 content_parts.append(f"   Trades Today: {performance['trades_today']}")
-        
+
         content = "\n".join(content_parts) if content_parts else "No status data"
-        return Panel(content, title=title, border_style=Colors.BORDER_INFO, box=box.ROUNDED)
-    
+        return Panel(
+            content, title=title, border_style=Colors.BORDER_INFO, box=box.ROUNDED
+        )
+
     def trade_alert(
         self,
         symbol: str,
@@ -92,7 +97,7 @@ class TraderConsole:
         """Display a trade alert with key metrics."""
         if not self._should_print("NORMAL"):
             return
-        
+
         # Determine direction icon and color
         if side.upper() == "LONG" or side.upper() == "BUY":
             direction_icon = Icons.BUY
@@ -106,14 +111,14 @@ class TraderConsole:
             direction_icon = Icons.FLAT
             direction_color = Colors.FLAT
             direction_text = "FLAT"
-        
+
         # Build content
         content_lines = [
             f"Direction:  [{direction_color}]{direction_text}[/{direction_color}]",
             f"Size:       {abs(size)} contract{'s' if abs(size) != 1 else ''}",
             f"Price:      ${price:,.2f}",
         ]
-        
+
         if risk_status:
             risk_icon = {
                 "OK": Icons.SUCCESS,
@@ -121,26 +126,30 @@ class TraderConsole:
                 "HARD_STOP": Icons.ERROR,
             }.get(risk_status, Icons.INFO)
             content_lines.append(f"Risk:       {risk_icon} {risk_status}")
-        
+
         if reason:
             content_lines.append(f"Signal:     {reason}")
-        
+
         if order_id:
             content_lines.append(f"Order ID:   {order_id}")
-        
-        content_lines.append(f"Time:       {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
-        
+
+        content_lines.append(
+            f"Time:       {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}"
+        )
+
         content = "\n".join(content_lines)
-        
+
         self.console.print(
             Panel(
                 content,
                 title=f"{direction_icon} TRADE ALERT: {symbol}",
-                border_style=Colors.BORDER_SUCCESS if risk_status == "OK" else Colors.BORDER_WARNING,
+                border_style=Colors.BORDER_SUCCESS
+                if risk_status == "OK"
+                else Colors.BORDER_WARNING,
                 box=box.ROUNDED,
             )
         )
-    
+
     def analysis_table(
         self,
         symbol: str,
@@ -152,7 +161,7 @@ class TraderConsole:
         """Display detailed analysis table for a trading decision."""
         if not self._should_print("VERBOSE"):
             return
-        
+
         table = Table(
             title=f"{Icons.ANALYSIS} Analysis: {symbol}",
             box=box.ROUNDED,
@@ -162,15 +171,23 @@ class TraderConsole:
         table.add_column("Metric", style="cyan", no_wrap=True)
         table.add_column("Value", style="white")
         table.add_column("Reasoning", style="dim")
-        
+
         # Signal information
         side = signal.get("side", "flat")
-        side_emoji = Icons.BUY if side == "long" else Icons.SELL if side == "short" else Icons.FLAT
-        table.add_row("Signal", f"{side_emoji} {side.upper()}", signal.get("comment", "No signal"))
-        
+        side_emoji = (
+            Icons.BUY
+            if side == "long"
+            else Icons.SELL
+            if side == "short"
+            else Icons.FLAT
+        )
+        table.add_row(
+            "Signal", f"{side_emoji} {side.upper()}", signal.get("comment", "No signal")
+        )
+
         # Price and indicators
         table.add_row("Current Price", f"${price:,.2f}", "")
-        
+
         if signal.get("vwap"):
             vwap_diff = ((price - signal["vwap"]) / signal["vwap"]) * 100
             vwap_status = "Above" if price > signal["vwap"] else "Below"
@@ -179,7 +196,7 @@ class TraderConsole:
                 f"${signal['vwap']:,.2f} ({vwap_status} {abs(vwap_diff):.2f}%)",
                 "Price above VWAP = bullish, below = bearish",
             )
-        
+
         if signal.get("fast_ma"):
             ema_diff = ((price - signal["fast_ma"]) / signal["fast_ma"]) * 100
             ema_status = "Above" if price > signal["fast_ma"] else "Below"
@@ -188,7 +205,7 @@ class TraderConsole:
                 f"${signal['fast_ma']:,.2f} ({ema_status} {abs(ema_diff):.2f}%)",
                 "Trend filter: long only above EMA, short only below",
             )
-        
+
         if signal.get("support1"):
             sup_dist = ((price - signal["support1"]) / signal["support1"]) * 100
             table.add_row(
@@ -196,7 +213,7 @@ class TraderConsole:
                 f"${signal['support1']:,.2f} ({abs(sup_dist):.2f}% away)",
                 "Near support = potential bounce zone",
             )
-        
+
         if signal.get("resistance1"):
             res_dist = ((signal["resistance1"] - price) / price) * 100
             table.add_row(
@@ -204,7 +221,7 @@ class TraderConsole:
                 f"${signal['resistance1']:,.2f} ({abs(res_dist):.2f}% away)",
                 "Near resistance = potential rejection zone",
             )
-        
+
         # Risk state
         if risk_state:
             risk_status = risk_state.get("status", "UNKNOWN")
@@ -221,7 +238,7 @@ class TraderConsole:
                 f"{risk_emoji} {risk_status}",
                 f"Remaining buffer: ${remaining:,.2f}",
             )
-        
+
         # Position sizing
         if size is not None:
             if size != 0:
@@ -231,11 +248,13 @@ class TraderConsole:
                     "Based on risk taper and profile limits",
                 )
             else:
-                table.add_row("Position Size", "0 (BLOCKED)", "Risk limits prevent trading")
-        
+                table.add_row(
+                    "Position Size", "0 (BLOCKED)", "Risk limits prevent trading"
+                )
+
         self.console.print(table)
         self.console.print()
-    
+
     def cycle_summary(
         self,
         cycle_num: int,
@@ -249,16 +268,18 @@ class TraderConsole:
         """Display cycle summary after processing all symbols."""
         if not self._should_print("NORMAL"):
             return
-        
+
         pnl_color = Colors.PNL_POSITIVE if total_pnl >= 0 else Colors.PNL_NEGATIVE
-        
+
         content = f"{Icons.SUCCESS} Cycle #{cycle_num} Complete\n"
         content += f"Trades Today: {trades_today}\n"
         content += f"Daily P&L: [{pnl_color}]${total_pnl:,.2f}[/{pnl_color}]\n"
-        content += f"  Realized: ${realized_pnl:,.2f} | Unrealized: ${unrealized_pnl:,.2f}\n"
+        content += (
+            f"  Realized: ${realized_pnl:,.2f} | Unrealized: ${unrealized_pnl:,.2f}\n"
+        )
         content += f"Open Positions: {open_positions}\n"
-        content += f"Next cycle in {next_interval}s ({next_interval/60:.1f} minutes)"
-        
+        content += f"Next cycle in {next_interval}s ({next_interval / 60:.1f} minutes)"
+
         self.console.print(
             Panel(
                 content,
@@ -268,16 +289,16 @@ class TraderConsole:
             )
         )
         self.console.print()
-    
+
     def error_alert(self, error: Exception, context: Optional[str] = None) -> None:
         """Display an error alert with context."""
         if not self._should_print("QUIET"):
             return
-        
+
         content = f"{Icons.ERROR} {type(error).__name__}: {str(error)}"
         if context:
             content += f"\n\nContext: {context}"
-        
+
         self.console.print(
             Panel(
                 content,
@@ -286,7 +307,7 @@ class TraderConsole:
                 box=box.ROUNDED,
             )
         )
-    
+
     def progress_bar(self, task_description: str, current: int, total: int) -> Progress:
         """Create a progress bar for long-running operations."""
         progress = Progress(
@@ -299,29 +320,32 @@ class TraderConsole:
         )
         progress.add_task(task_description, total=total)
         return progress
-    
+
     def info(self, message: str, icon: Optional[str] = None) -> None:
         """Print an info message."""
         if not self._should_print("NORMAL"):
             return
         icon_str = f"{icon} " if icon else ""
         self.console.print(f"[{Colors.INFO}]{icon_str}{message}[/{Colors.INFO}]")
-    
+
     def success(self, message: str) -> None:
         """Print a success message."""
         if not self._should_print("NORMAL"):
             return
-        self.console.print(f"[{Colors.SUCCESS}]{Icons.SUCCESS} {message}[/{Colors.SUCCESS}]")
-    
+        self.console.print(
+            f"[{Colors.SUCCESS}]{Icons.SUCCESS} {message}[/{Colors.SUCCESS}]"
+        )
+
     def warning(self, message: str) -> None:
         """Print a warning message."""
         if not self._should_print("NORMAL"):
             return
-        self.console.print(f"[{Colors.WARNING}]{Icons.WARNING} {message}[/{Colors.WARNING}]")
-    
+        self.console.print(
+            f"[{Colors.WARNING}]{Icons.WARNING} {message}[/{Colors.WARNING}]"
+        )
+
     def error(self, message: str) -> None:
         """Print an error message."""
         if not self._should_print("QUIET"):
             return
         self.console.print(f"[{Colors.ERROR}]{Icons.ERROR} {message}[/{Colors.ERROR}]")
-

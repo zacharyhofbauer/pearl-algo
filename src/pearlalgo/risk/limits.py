@@ -31,9 +31,14 @@ class RiskGuard:
         if self.limits.max_order_notional and last_price is not None:
             notional = abs(order.quantity) * last_price
             if notional > self.limits.max_order_notional:
-                raise RuntimeError(f"Order exceeds notional limit: {notional} > {self.limits.max_order_notional}")
+                raise RuntimeError(
+                    f"Order exceeds notional limit: {notional} > {self.limits.max_order_notional}"
+                )
 
-        if self.limits.max_symbol_position and order.symbol in self.limits.max_symbol_position:
+        if (
+            self.limits.max_symbol_position
+            and order.symbol in self.limits.max_symbol_position
+        ):
             # Placeholder: ideally compare against live positions + this order.
             if abs(order.quantity) > self.limits.max_symbol_position[order.symbol]:
                 raise RuntimeError(

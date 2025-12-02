@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable
 import pandas as pd
 
-from pearlalgo.futures.signals import generate_signal
 
 # Strategy registry
 _STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {}
@@ -17,12 +16,13 @@ def register_strategy(
 ) -> Callable:
     """
     Decorator to register a strategy.
-    
+
     Usage:
         @register_strategy("my_strategy", "My strategy description", {"param1": 10})
         def my_strategy_func(symbol, df, **params):
             ...
     """
+
     def decorator(func: Callable) -> Callable:
         _STRATEGY_REGISTRY[name] = {
             "name": name,
@@ -31,6 +31,7 @@ def register_strategy(
             "default_params": default_params or {},
         }
         return func
+
     return decorator
 
 
@@ -64,13 +65,13 @@ def create_strategy_signal(
 ) -> dict[str, Any]:
     """
     Factory function to create a signal using a registered strategy.
-    
+
     Args:
         name: Strategy name (must be registered)
         symbol: Trading symbol
         df: OHLCV DataFrame
         **params: Strategy-specific parameters
-    
+
     Returns:
         Signal dictionary with side, indicators, confidence, etc.
     """
@@ -81,15 +82,17 @@ def create_strategy_signal(
         # Merge default params with provided params
         merged_params = {**strategy["default_params"], **params}
         return func(symbol, df, **merged_params)
-    
+
     # Fall back to signals.generate_signal for built-in strategies (ma_cross, sr, breakout, etc.)
     # Import here to avoid circular import
     from pearlalgo.futures.signals import generate_signal as _generate_signal
+
     return _generate_signal(symbol, df, strategy_name=name, **params)
 
 
 class BaseStrategy(ABC):
     """Base class for strategy implementations."""
+
     name: str = "base"
     description: str = ""
     default_params: dict[str, Any] = {}
@@ -97,8 +100,10 @@ class BaseStrategy(ABC):
     @abstractmethod
     def run(self, data: pd.DataFrame) -> pd.DataFrame:
         """Return signals/positions given OHLCV data."""
-    
-    def get_signal(self, symbol: str, df: pd.DataFrame, **params: Any) -> dict[str, Any]:
+
+    def get_signal(
+        self, symbol: str, df: pd.DataFrame, **params: Any
+    ) -> dict[str, Any]:
         """Generate a signal using this strategy."""
         merged_params = {**self.default_params, **params}
         return create_strategy_signal(self.name, symbol, df, **merged_params)

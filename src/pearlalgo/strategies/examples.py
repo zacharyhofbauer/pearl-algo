@@ -89,7 +89,11 @@ class OptionsPremiumSellStrategy(BaseStrategy):
         df["rv"] = df["Close"].pct_change().rolling(20).std()
         df["trend"] = df["Close"].diff().rolling(10).mean()
         df["entry"] = 0
-        df.loc[(df["rv"] < df["rv"].median()) & (abs(df["trend"]) < df["Close"].pct_change().std()), "entry"] = 1
+        df.loc[
+            (df["rv"] < df["rv"].median())
+            & (abs(df["trend"]) < df["Close"].pct_change().std()),
+            "entry",
+        ] = 1
         df["stop"] = pd.NA
         df["target"] = pd.NA
         df["size"] = 1

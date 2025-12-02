@@ -1,12 +1,16 @@
 """
 Tests for IBKR broker connection and contract resolution.
 """
+
 from __future__ import annotations
 
 import pytest
 
 from pearlalgo.brokers.ibkr_broker import IBKRBroker
-from pearlalgo.brokers.contracts import resolve_future_contract, _default_exchange_for_symbol
+from pearlalgo.brokers.contracts import (
+    resolve_future_contract,
+    _default_exchange_for_symbol,
+)
 from pearlalgo.core.portfolio import Portfolio
 
 
@@ -25,7 +29,9 @@ def test_ibkr_broker_initialization(sample_portfolio):
         assert hasattr(broker, "fetch_fills")
         assert hasattr(broker, "sync_positions")
     except Exception as e:
-        pytest.skip(f"IBKR broker initialization failed (expected if Gateway not running): {e}")
+        pytest.skip(
+            f"IBKR broker initialization failed (expected if Gateway not running): {e}"
+        )
 
 
 def test_contract_resolution_es():
@@ -35,7 +41,9 @@ def test_contract_resolution_es():
         assert contract is not None
         assert contract.symbol == "ES"
     except Exception as e:
-        pytest.skip(f"Contract resolution failed (expected if Gateway not running): {e}")
+        pytest.skip(
+            f"Contract resolution failed (expected if Gateway not running): {e}"
+        )
 
 
 def test_contract_resolution_nq():
@@ -45,7 +53,9 @@ def test_contract_resolution_nq():
         assert contract is not None
         assert contract.symbol == "NQ"
     except Exception as e:
-        pytest.skip(f"Contract resolution failed (expected if Gateway not running): {e}")
+        pytest.skip(
+            f"Contract resolution failed (expected if Gateway not running): {e}"
+        )
 
 
 def test_default_exchange_mapping():
@@ -65,5 +75,6 @@ def test_ibkr_connection_check(sample_portfolio):
         # This is OK - we're just testing the code path
         assert isinstance(connected, bool)
     except Exception as e:
-        pytest.skip(f"IBKR connection check failed (expected if Gateway not running): {e}")
-
+        pytest.skip(
+            f"IBKR connection check failed (expected if Gateway not running): {e}"
+        )
