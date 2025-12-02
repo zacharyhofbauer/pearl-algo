@@ -39,13 +39,33 @@ Edit `config/config.yaml`:
 
 ### 3. Paper Trading
 
+**Quick Start:**
 ```bash
-# Start paper trading
+# Verify setup first
+python scripts/verify_setup.py
+
+# Test single cycle
+python scripts/test_paper_trading.py
+
+# Start paper trading (recommended)
+./scripts/start_langgraph_paper.sh ES sr
+
+# Or manual start
 python -m pearlalgo.live.langgraph_trader \
     --symbols ES NQ \
     --strategy sr \
     --mode paper \
-    --interval 60
+    --interval 60 \
+    --max-cycles 10
+```
+
+**Monitor:**
+```bash
+# In another terminal
+python scripts/monitor_paper_trading.py
+
+# Or watch logs
+tail -f logs/*.log | grep -E '(Agent|Signal|Risk|Position)'
 ```
 
 ### 4. Backtesting

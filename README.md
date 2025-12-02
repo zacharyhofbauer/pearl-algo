@@ -105,19 +105,44 @@ nano .env  # or use your preferred editor
 
 ## 🚀 Quickstart
 
-### LangGraph Multi-Agent Trading (NEW)
+### LangGraph Multi-Agent Trading (PRIMARY SYSTEM)
+
+**Verify Setup First:**
+```bash
+# Check system is ready
+python scripts/verify_setup.py
+```
 
 **Start Paper Trading:**
 ```bash
-# Run LangGraph trading system in paper mode
+# Quick start (single symbol)
+./scripts/start_langgraph_paper.sh ES sr
+
+# Multiple symbols
+./scripts/start_langgraph_paper.sh ES NQ sr
+
+# Manual start with options
 python -m pearlalgo.live.langgraph_trader \
     --symbols ES NQ \
     --strategy sr \
     --mode paper \
-    --interval 60
+    --interval 60 \
+    --max-cycles 10
 
 # Or use config file
 python -m pearlalgo.live.langgraph_trader --config config/config.yaml
+```
+
+**Monitor Trading:**
+```bash
+# In another terminal
+python scripts/monitor_paper_trading.py
+
+# Or watch logs
+tail -f logs/*.log | grep -E '(Agent|Signal|Risk|Position|ERROR)'
+
+# Or use the live monitor script
+./scripts/watch_trading_live.sh
 ```
 
 **Run Backtest:**
@@ -149,35 +174,24 @@ docker-compose logs -f trading-bot
 docker-compose down
 ```
 
-### LangGraph System (Recommended)
+### Testing & Validation
 
-**Unified CLI**
+**Run Tests:**
 ```bash
-cd ~/pearlalgo-dev-ai-agents
-source .venv/bin/activate
-pip install -e .  # Install CLI command
+# Quick validation
+./QUICK_TEST_RUN.sh
 
-# Show system status
-pearlalgo status
+# Full test suite
+pytest tests/ -v
 
-# Live dashboard
-pearlalgo dashboard
+# Test single cycle
+python scripts/test_paper_trading.py
 
-# Generate signals
-pearlalgo signals --strategy sr --symbols ES NQ GC
-
-# Start automated trading
-pearlalgo trade auto --symbols ES NQ --strategy sr --interval 300
-
-# Gateway management
-pearlalgo gateway start --wait
-pearlalgo gateway status
-
-# See all commands
-pearlalgo --help
+# Test LLM providers
+python scripts/test_all_llm_providers.py
 ```
 
-**Note**: Legacy scripts (`workflow.py`, `automated_trading.py`) have been deprecated in favor of the LangGraph system. See `MIGRATION_GUIDE.md` for migration instructions.
+**Note**: Legacy scripts (`workflow.py`, `automated_trading.py`) have been archived. The LangGraph system is the primary trading system. See `MIGRATION_GUIDE.md` for details.
 
 **Setup & Management Assistant:**
 ```bash
@@ -341,14 +355,24 @@ docker-compose.yml                # Docker orchestration (NEW)
 
 ## Documentation
 
+### Essential Reading
 - **README.md** - This file (overview and quickstart)
+- **AI_ONBOARDING_GUIDE.md** - **START HERE for new AI assistants** - Complete onboarding guide
 - **ARCHITECTURE.md** - Detailed system architecture
 - **LANGGRAPH_QUICKSTART.md** - Quick start guide for LangGraph system
+- **MIGRATION_GUIDE.md** - Guide for migrating from legacy system
+
+### Reference Documentation
 - **TESTING_GUIDE.md** - Testing instructions
 - **SYSTEM_STATUS.md** - Current implementation status
+- **PLAN_IMPLEMENTATION_COMPLETE.md** - Implementation completion status
+- **PROFESSIONAL_TEST_PLAN.md** - Comprehensive test plan
+- **STEP_BY_STEP_TESTS.md** - Step-by-step testing guide
 - **docs/STRUCTURE.md** - Project structure details
 - **docs/ROADMAP.md** - Development roadmap
 - **docs/OPS.md** - Operations guide (IBKR Gateway setup)
+- **ENV_SETUP.md** - Environment variable setup
+- **LLM_SETUP.md** - LLM provider configuration
 
 ## Notes
 - Strategies are educational examples—customize with your own logic
