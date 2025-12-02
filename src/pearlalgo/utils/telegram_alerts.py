@@ -6,7 +6,13 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional
 
-from loguru import logger
+import logging
+
+try:
+    from loguru import logger as loguru_logger
+    logger = loguru_logger
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 try:
     from telegram import Bot

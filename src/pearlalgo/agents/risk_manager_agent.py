@@ -17,7 +17,13 @@ from datetime import datetime, timezone
 from typing import Dict, Optional
 
 import numpy as np
-from loguru import logger
+import logging
+
+try:
+    from loguru import logger as loguru_logger
+    logger = loguru_logger
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 from pearlalgo.agents.langgraph_state import (
     PositionDecision,

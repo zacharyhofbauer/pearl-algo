@@ -7,11 +7,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import yaml
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from loguru import logger
+try:
+    import yaml
+except ImportError:
+    # Fallback if PyYAML not installed
+    try:
+        from yaml import safe_load
+    except ImportError:
+        yaml = None
+
+import logging
+
+try:
+    from loguru import logger as loguru_logger
+    logger = loguru_logger
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 from pearlalgo.agents.langgraph_workflow import TradingWorkflow
 from pearlalgo.core.portfolio import Portfolio
@@ -38,13 +52,21 @@ class LangGraphTrader:
         # Load configuration
         if config_path:
             with open(config_path, "r") as f:
-                self.config = yaml.safe_load(f)
+                if yaml:
+                    self.config = yaml.safe_load(f)
+                else:
+                    import json
+                    self.config = json.load(f)
         else:
             # Default config path
             default_config = Path(__file__).parent.parent.parent.parent / "config" / "config.yaml"
             if default_config.exists():
                 with open(default_config, "r") as f:
-                    self.config = yaml.safe_load(f)
+                    if yaml:
+                        self.config = yaml.safe_load(f)
+                    else:
+                        import json
+                        self.config = json.load(f)
             else:
                 self.config = {}
         

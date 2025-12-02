@@ -12,7 +12,13 @@ from typing import Dict, Optional
 
 import pandas as pd
 import vectorbt as vbt
-from loguru import logger
+import logging
+
+try:
+    from loguru import logger as loguru_logger
+    logger = loguru_logger
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 from pearlalgo.futures.signals import generate_signal
 

@@ -6,7 +6,7 @@ Defines the shared state schema that all agents use to communicate and collabora
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -113,7 +113,7 @@ class TradingState(BaseModel):
     """
     
     # Current timestamp
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
     # Market data (by symbol)
     market_data: Dict[str, MarketData] = Field(default_factory=dict)
@@ -151,8 +151,7 @@ class TradingState(BaseModel):
     trading_enabled: bool = True
     kill_switch_triggered: bool = False
     
-    class Config:
-        arbitrary_types_allowed = True  # Allow Portfolio and RiskState objects
+    model_config = {"arbitrary_types_allowed": True}  # Allow Portfolio and RiskState objects
 
 
 def create_initial_state(
@@ -161,8 +160,10 @@ def create_initial_state(
     timestamp: Optional[datetime] = None,
 ) -> TradingState:
     """Create initial trading state."""
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
     return TradingState(
-        timestamp=timestamp or datetime.utcnow(),
+        timestamp=timestamp,
         portfolio=portfolio,
         config=config,
         equity_curve=[portfolio.cash] if portfolio else [],
@@ -179,7 +180,7 @@ def add_agent_reasoning(
     """Helper to add agent reasoning to state."""
     reasoning = AgentReasoning(
         agent_name=agent_name,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         message=message,
         level=level,
         data=data or {},

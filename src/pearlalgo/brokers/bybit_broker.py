@@ -11,7 +11,13 @@ from typing import Dict, Optional
 
 import ccxt
 import ccxt.pro as ccxtpro
-from loguru import logger
+import logging
+
+try:
+    from loguru import logger as loguru_logger
+    logger = loguru_logger
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 from pearlalgo.brokers.base import Broker, BrokerConfig
 from pearlalgo.core.events import FillEvent, OrderEvent

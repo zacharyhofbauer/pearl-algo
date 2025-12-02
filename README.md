@@ -260,12 +260,87 @@ python -m pearlalgo.cli scan --symbols ES NQ --strategy es_breakout
 Legacy (moon-era) CLI/backtesting: archived under `legacy/src/pearlalgo/` with the original CLI (`legacy/src/pearlalgo/cli.py`), agents, backtesting, and live scaffolding preserved for reference.
 
 
-## Structure
-- `src/pearlalgo/futures`: futures-focused config, contracts, signals, risk, and performance logging
-- `src/pearlalgo/data_providers`: IBKR + CSV providers
-- `src/pearlalgo/brokers`: IBKR broker + contract helpers
-- `src/pearlalgo/config`: env/settings
-- `legacy/`: archived moon-era agents/backtesting/live CLI + unused scripts/tests (kept for reference)
+## Project Structure
+
+### LangGraph Multi-Agent System (NEW)
+```
+src/pearlalgo/
+  agents/
+    langgraph_state.py          # Shared state schema (Pydantic)
+    langgraph_workflow.py        # Main workflow graph connecting all agents
+    market_data_agent.py          # WebSocket data streaming agent
+    quant_research_agent.py       # Signal generation + LLM reasoning agent
+    risk_manager_agent.py         # Enhanced risk management agent
+    portfolio_execution_agent.py  # Order execution agent
+    automated_trading_agent.py    # Legacy agent (backward compatible)
+    execution_agent.py            # Legacy execution agent
+    risk_agent.py                 # Legacy risk agent
+    
+  brokers/
+    factory.py                    # Unified broker factory (IBKR/Bybit/Alpaca)
+    bybit_broker.py               # Bybit crypto perpetuals broker
+    alpaca_broker.py              # Alpaca US futures broker
+    ibkr_broker.py                # IBKR futures broker (primary)
+    base.py                       # Abstract broker interface
+    contracts.py                  # Contract builders and metadata
+    dummy_backtest.py             # Backtest broker
+    
+  data_providers/
+    websocket_provider.py         # WebSocket streaming provider
+    polygon_provider.py           # Polygon.io data provider
+    ibkr_data_provider.py         # IBKR data provider
+    local_csv_provider.py         # CSV data provider
+    base.py                       # Abstract data provider
+    
+  backtesting/
+    vectorbt_engine.py            # Vectorized backtesting engine
+    
+  live/
+    langgraph_trader.py           # Main LangGraph trading loop
+    
+  utils/
+    telegram_alerts.py            # Telegram notifications
+    discord_alerts.py             # Discord notifications
+    logging.py                    # Enhanced logging
+    
+  futures/                        # Futures-focused modules (existing)
+    config.py                     # Prop profile config
+    contracts.py                  # Contract metadata
+    signals.py                    # Signal generation
+    risk.py                       # Risk state management
+    performance.py                # Performance logging
+    
+  core/                           # Core portfolio and events
+  config/                         # Configuration and settings
+  strategies/                     # Trading strategies
+  risk/                           # Risk management modules
+  models/                         # Data models
+  cli/                            # CLI commands
+
+config/
+  config.yaml                     # Main configuration file (NEW)
+  micro_strategy_config.yaml      # Micro strategy config
+
+scripts/
+  streamlit_dashboard.py          # Streamlit dashboard (NEW)
+  setup_langgraph.py             # LangGraph setup helper (NEW)
+  automated_trading.py            # Legacy automated trading
+  workflow.py                     # Legacy workflow
+  # ... other legacy scripts
+
+tests/
+  test_langgraph_agents.py        # LangGraph agent tests (NEW)
+  test_futures_core.py            # Futures tests
+  test_risk.py                    # Risk tests
+  # ... other tests
+
+Dockerfile                        # Docker container setup (NEW)
+docker-compose.yml                # Docker orchestration (NEW)
+```
+
+### Legacy Components (Still Supported)
+- `legacy/`: Archived moon-era agents/backtesting/live CLI (kept for reference)
+- Existing scripts and workflows continue to work alongside new LangGraph system
 
 ## Roadmap (live trading)
 1. Add Interactive Brokers adapter via `ib_insync` (connection mgmt, contract builders for ES/NQ/GC/ZN/CL, order routing).
@@ -274,11 +349,22 @@ Legacy (moon-era) CLI/backtesting: archived under `legacy/src/pearlalgo/` with t
 4. Add data adapters for continuous futures/roll logic.
 5. Integrate feature store and ML pipelines (optional).
 
+## Documentation
+
+- **README.md** - This file (overview and quickstart)
+- **ARCHITECTURE.md** - Detailed system architecture
+- **LANGGRAPH_QUICKSTART.md** - Quick start guide for LangGraph system
+- **TESTING_GUIDE.md** - Testing instructions
+- **SYSTEM_STATUS.md** - Current implementation status
+- **docs/STRUCTURE.md** - Project structure details
+- **docs/ROADMAP.md** - Development roadmap
+- **docs/OPS.md** - Operations guide (IBKR Gateway setup)
+
 ## Notes
 - Strategies are educational examples—customize with your own logic
 - Sample data: `data/futures/ES_15m_sample.csv` (synthetic OHLCV for testing)
 - IBKR integration: see `docs/OPS.md` for headless Gateway + ib_insync usage
-- All risk rules are hardcoded for safety - modify at your own risk
+- **All risk rules are hardcoded for safety** - 2% max risk, 15% drawdown limit, no martingale, no averaging down
 - Required env for live trading (example keys only; do not commit secrets):
   - `PEARLALGO_BROKER_API_KEY`, `PEARLALGO_BROKER_API_SECRET`, `PEARLALGO_BROKER_BASE_URL`
   - `PEARLALGO_DATA_API_KEY` if your data provider needs it

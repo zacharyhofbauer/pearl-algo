@@ -11,7 +11,13 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import ccxt.pro as ccxtpro
-from loguru import logger
+import logging
+
+try:
+    from loguru import logger as loguru_logger
+    logger = loguru_logger
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 

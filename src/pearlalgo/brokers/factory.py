@@ -8,7 +8,13 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional
 
-from loguru import logger
+import logging
+
+try:
+    from loguru import logger as loguru_logger
+    logger = loguru_logger
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 from pearlalgo.brokers.alpaca_broker import AlpacaBroker
 from pearlalgo.brokers.base import Broker
