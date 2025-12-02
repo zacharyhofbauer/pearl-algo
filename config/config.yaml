@@ -144,7 +144,7 @@ llm:
   # Groq (Direct integration - Recommended for free tier)
   groq:
     api_key: "${GROQ_API_KEY}"
-    model: "mixtral-8x7b-32768"  # or "llama-3-70b-8192", "llama-3-8b-8192"
+    model: "llama-3.1-70b-versatile"  # Current model (mixtral-8x7b-32768 was decommissioned) - Alternative: "llama-3-70b-8192"
     temperature: 0.3
     max_tokens: 1000
   
@@ -158,7 +158,7 @@ llm:
   # Anthropic Claude (Via LiteLLM)
   anthropic:
     api_key: "${ANTHROPIC_API_KEY}"
-    model: "claude-3-opus-20240229"  # or "claude-3-sonnet-20240229", "claude-3-haiku-20240307"
+    model: "claude-3-5-sonnet-20241022"  # Current model - Alternative: "claude-3-opus" or "claude-3-5-haiku-20241022"
     temperature: 0.3
     max_tokens: 1000
   

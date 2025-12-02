@@ -14,6 +14,16 @@ import os
 import sys
 from pathlib import Path
 
+# Load .env file if it exists
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+except ImportError:
+    # python-dotenv not installed, that's OK
+    pass
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from pearlalgo.agents.quant_research_agent import QuantResearchAgent
@@ -149,14 +159,18 @@ def main():
     
     results = {}
     
-    # Test Groq
-    results["groq"] = test_provider("groq", "GROQ_API_KEY", "mixtral-8x7b-32768")
+    # Test Groq - use current model from config
+    import yaml
+    config_path = Path(__file__).parent.parent / "config" / "config.yaml"
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    groq_model = config.get("llm", {}).get("groq", {}).get("model", "llama-3.1-70b-versatile")
+    openai_model = config.get("llm", {}).get("openai", {}).get("model", "gpt-4o")
+    anthropic_model = config.get("llm", {}).get("anthropic", {}).get("model", "claude-3-5-sonnet-20241022")
     
-    # Test OpenAI
-    results["openai"] = test_provider("openai", "OPENAI_API_KEY", "gpt-4o")
-    
-    # Test Anthropic
-    results["anthropic"] = test_provider("anthropic", "ANTHROPIC_API_KEY", "claude-3-opus-20240229")
+    results["groq"] = test_provider("groq", "GROQ_API_KEY", groq_model)
+    results["openai"] = test_provider("openai", "OPENAI_API_KEY", openai_model)
+    results["anthropic"] = test_provider("anthropic", "ANTHROPIC_API_KEY", anthropic_model)
     
     # Summary
     logger.info("\n" + "=" * 70)
@@ -179,14 +193,23 @@ def main():
     logger.info("Testing LLM Reasoning")
     logger.info("=" * 70)
     
+    # Use models from config
+    import yaml
+    config_path = Path(__file__).parent.parent / "config" / "config.yaml"
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    groq_model = config.get("llm", {}).get("groq", {}).get("model", "llama-3.1-70b-versatile")
+    openai_model = config.get("llm", {}).get("openai", {}).get("model", "gpt-4o")
+    anthropic_model = config.get("llm", {}).get("anthropic", {}).get("model", "claude-3-5-sonnet-20241022")
+    
     if results.get("groq"):
-        asyncio.run(test_llm_reasoning("groq", "GROQ_API_KEY", "mixtral-8x7b-32768"))
+        asyncio.run(test_llm_reasoning("groq", "GROQ_API_KEY", groq_model))
     
     if results.get("openai"):
-        asyncio.run(test_llm_reasoning("openai", "OPENAI_API_KEY", "gpt-4o"))
+        asyncio.run(test_llm_reasoning("openai", "OPENAI_API_KEY", openai_model))
     
     if results.get("anthropic"):
-        asyncio.run(test_llm_reasoning("anthropic", "ANTHROPIC_API_KEY", "claude-3-opus-20240229"))
+        asyncio.run(test_llm_reasoning("anthropic", "ANTHROPIC_API_KEY", anthropic_model))
 
 
 if __name__ == "__main__":
