@@ -164,6 +164,13 @@ class MarketDataAgent:
             f"MarketDataAgent: Updated {len(state.market_data)} symbols"
         )
         
+        # Cleanup: Close Polygon provider session if it exists
+        if self.polygon_provider:
+            try:
+                await self.polygon_provider.close()
+            except Exception as e:
+                logger.debug(f"Error closing Polygon provider: {e}")
+        
         return state
     
     async def _fetch_symbol_data(self, symbol: str) -> Optional[MarketData]:

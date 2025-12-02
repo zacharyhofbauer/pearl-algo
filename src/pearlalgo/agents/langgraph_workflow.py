@@ -189,7 +189,14 @@ class TradingWorkflow:
                 logger.info(f"Starting cycle #{cycle_count}")
                 
                 # Run workflow cycle
-                state = await self.run_cycle(state)
+                result = await self.run_cycle(state)
+                
+                # LangGraph returns a dict, convert back to TradingState if needed
+                if isinstance(result, dict):
+                    from pearlalgo.agents.langgraph_state import TradingState
+                    state = TradingState(**result)
+                else:
+                    state = result
                 
                 # Check for kill-switch
                 if state.kill_switch_triggered:
