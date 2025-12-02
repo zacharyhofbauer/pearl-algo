@@ -7,7 +7,7 @@ import pandas as pd
 from pearlalgo.futures.signals import generate_signal
 
 # Strategy registry
-_STRATEGY_REGISTRY: dict[str, dict[str, Any]]] = {}
+_STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {}
 
 
 def register_strategy(

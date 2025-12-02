@@ -9,6 +9,10 @@ from pearlalgo.strategies.base import (
     create_strategy_signal,
 )
 
+# Import strategies to register them
+from pearlalgo.strategies import scalping  # noqa: F401
+from pearlalgo.strategies import intraday_swing  # noqa: F401
+
 __all__ = [
     "BaseStrategy",
     "register_strategy",

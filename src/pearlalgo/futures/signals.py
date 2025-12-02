@@ -462,9 +462,19 @@ def generate_signal(
     **params: Any,
 ) -> dict[str, Any]:
     """
-    Strategy-agnostic signal wrapper. Supports ma_cross, sr, and breakout.
+    Strategy-agnostic signal wrapper. Supports ma_cross, sr, breakout, scalping, intraday_swing.
     Returns a dict with side, indicators, and metadata.
     """
+    # First check if strategy is registered (scalping, intraday_swing, etc.)
+    from pearlalgo.strategies.base import create_strategy_signal
+    try:
+        registered_signal = create_strategy_signal(strategy_name, symbol, df, **params)
+        if registered_signal:
+            return registered_signal
+    except (ValueError, KeyError):
+        # Strategy not in registry, fall through to built-in strategies
+        pass
+    
     fast = int(params.get("fast", 20))
     slow = int(params.get("slow", 50))
     if strategy_name == "ma_cross":

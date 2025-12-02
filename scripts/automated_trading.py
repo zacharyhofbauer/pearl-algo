@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--symbols", nargs="+", default=["ES", "NQ", "GC"], help="Symbols to trade")
     parser.add_argument("--sec-types", nargs="+", default=["FUT", "FUT", "FUT"], help="Security types")
-    parser.add_argument("--strategy", choices=["ma_cross", "sr"], default="sr", help="Trading strategy")
+    parser.add_argument("--strategy", type=str, default="sr", help="Trading strategy (sr, ma_cross, scalping, intraday_swing, etc.)")
     parser.add_argument("--interval", type=int, default=300, help="Loop interval in seconds (default: 300 = 5min)")
     parser.add_argument("--tiny-size", type=int, default=1, help="Base contract size (will be adjusted by risk)")
     parser.add_argument("--profile-config", default=None, help="Prop profile config path")

@@ -69,3 +69,124 @@ class ExecutionAgent:
             order_id = self.broker.submit_order(order)
             order_ids.append(order_id)
         return order_ids
+
+    def execute_advanced(
+        self,
+        signals: pd.DataFrame,
+        order_type: str = "market",
+        use_stop_loss: bool = True,
+        use_take_profit: bool = True,
+        max_slippage: float = 0.001,
+    ) -> list[str]:
+        """
+        Execute orders with advanced order types.
+        
+        Args:
+            signals: DataFrame with signals including stop_loss and take_profit columns
+            order_type: "market", "limit", "stop", "stop_limit"
+            use_stop_loss: Whether to place stop loss orders
+            use_take_profit: Whether to place take profit orders
+            max_slippage: Maximum acceptable slippage (0.1% default)
+        """
+        if self.profile != "live":
+            print(f"ExecutionAgent running in profile '{self.profile}'; live trading disabled.")
+        
+        order_ids: list[str] = []
+        
+        for ts, row in signals.iterrows():
+            signal_val = row.get("entry", 0)
+            if signal_val is None or pd.isna(signal_val) or signal_val == 0:
+                continue
+            
+            side = "BUY" if float(signal_val) > 0 else "SELL"
+            qty = abs(float(row.get("size", 1)))
+            sec_type = row.get("sec_type") or "FUT"
+            price = float(row.get("Close", row.get("close", row.get("price", 0.0))))
+            
+            # Futures do not allow fractional contracts
+            if str(sec_type).upper().startswith("FUT") and qty < 1:
+                qty = 1
+            
+            # Main entry order
+            if order_type == "limit":
+                limit_price = row.get("limit_price", price)
+                order = OrderEvent(
+                    timestamp=ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts,
+                    symbol=self.symbol,
+                    side=side,
+                    quantity=qty,
+                    order_type="LMT",
+                    limit_price=limit_price,
+                    metadata={
+                        "profile": self.profile,
+                        "sec_type": sec_type,
+                        "last_price": price,
+                        "expiry": row.get("expiry"),
+                        "local_symbol": row.get("local_symbol"),
+                        "trading_class": row.get("trading_class"),
+                    },
+                )
+            else:  # market order
+                order = OrderEvent(
+                    timestamp=ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts,
+                    symbol=self.symbol,
+                    side=side,
+                    quantity=qty,
+                    order_type="MKT",
+                    limit_price=price,
+                    metadata={
+                        "profile": self.profile,
+                        "sec_type": sec_type,
+                        "last_price": price,
+                        "expiry": row.get("expiry"),
+                        "local_symbol": row.get("local_symbol"),
+                        "trading_class": row.get("trading_class"),
+                    },
+                )
+            
+            # Risk guard pre-check
+            self.risk_guard.check_order(order, last_price=price)
+            order_id = self.broker.submit_order(order)
+            order_ids.append(order_id)
+            
+            # Place stop loss order if specified
+            if use_stop_loss and "stop_loss" in row and pd.notna(row.get("stop_loss")):
+                stop_price = float(row.get("stop_loss"))
+                stop_order = OrderEvent(
+                    timestamp=ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts,
+                    symbol=self.symbol,
+                    side="SELL" if side == "BUY" else "BUY",
+                    quantity=qty,
+                    order_type="STP",
+                    limit_price=stop_price,
+                    metadata={
+                        "profile": self.profile,
+                        "sec_type": sec_type,
+                        "parent_order_id": order_id,
+                        "order_type": "stop_loss",
+                    },
+                )
+                stop_order_id = self.broker.submit_order(stop_order)
+                order_ids.append(stop_order_id)
+            
+            # Place take profit order if specified
+            if use_take_profit and "take_profit" in row and pd.notna(row.get("take_profit")):
+                tp_price = float(row.get("take_profit"))
+                tp_order = OrderEvent(
+                    timestamp=ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts,
+                    symbol=self.symbol,
+                    side="SELL" if side == "BUY" else "BUY",
+                    quantity=qty,
+                    order_type="LMT",
+                    limit_price=tp_price,
+                    metadata={
+                        "profile": self.profile,
+                        "sec_type": sec_type,
+                        "parent_order_id": order_id,
+                        "order_type": "take_profit",
+                    },
+                )
+                tp_order_id = self.broker.submit_order(tp_order)
+                order_ids.append(tp_order_id)
+        
+        return order_ids

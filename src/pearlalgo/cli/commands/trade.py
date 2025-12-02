@@ -7,8 +7,17 @@ import sys
 from pathlib import Path
 
 from rich.console import Console
+from pearlalgo.strategies.base import list_strategies
 
 console = Console()
+
+# Get available strategies dynamically
+_AVAILABLE_STRATEGIES = list_strategies()
+# Add legacy strategies if not already registered
+if "sr" not in _AVAILABLE_STRATEGIES:
+    _AVAILABLE_STRATEGIES.append("sr")
+if "ma_cross" not in _AVAILABLE_STRATEGIES:
+    _AVAILABLE_STRATEGIES.append("ma_cross")
 
 
 @click.group(name="trade")
@@ -20,7 +29,7 @@ def trade_group(ctx: click.Context) -> None:
 
 @trade_group.command(name="paper")
 @click.option("--symbols", multiple=True, default=["ES", "NQ", "GC"], help="Symbols to trade")
-@click.option("--strategy", type=click.Choice(["ma_cross", "sr"]), default="sr", help="Trading strategy")
+@click.option("--strategy", type=str, default="sr", help=f"Trading strategy (available: {', '.join(_AVAILABLE_STRATEGIES)})")
 @click.option("--interval", type=int, default=300, help="Loop interval in seconds")
 @click.option("--tiny-size", type=int, default=1, help="Base contract size")
 @click.pass_context
@@ -53,7 +62,7 @@ def paper_cmd(ctx: click.Context, symbols: tuple, strategy: str, interval: int, 
 
 @trade_group.command(name="auto")
 @click.option("--symbols", multiple=True, default=[], help="Symbols to trade (repeat --symbols for each, or pass as arguments)")
-@click.option("--strategy", type=click.Choice(["ma_cross", "sr"]), default="sr", help="Trading strategy")
+@click.option("--strategy", type=str, default="sr", help=f"Trading strategy (available: {', '.join(_AVAILABLE_STRATEGIES)})")
 @click.option("--interval", type=int, default=300, help="Loop interval in seconds")
 @click.option("--tiny-size", type=int, default=1, help="Base contract size")
 @click.option("--profile-config", type=click.Path(exists=True), help="Profile config file (YAML/JSON)")
@@ -80,8 +89,16 @@ def auto_cmd(
         pearlalgo trade auto ES NQ GC
         pearlalgo trade auto --symbols ES --symbols NQ --symbols GC
         pearlalgo trade auto ES NQ GC --strategy sr --interval 300
+        pearlalgo trade auto MES MNQ --strategy scalping --interval 60
+        pearlalgo trade auto ES NQ --strategy intraday_swing --interval 900
     """
     verbosity = ctx.obj.get("verbosity", "NORMAL")
+    
+    # Validate strategy
+    if strategy not in _AVAILABLE_STRATEGIES:
+        console.print(f"[yellow]⚠️  Warning: Strategy '{strategy}' not in registered strategies.[/yellow]")
+        console.print(f"[dim]Available strategies: {', '.join(_AVAILABLE_STRATEGIES)}[/dim]")
+        console.print(f"[dim]Continuing anyway - strategy may be handled by signal generator...[/dim]\n")
     
     # Combine symbols from --symbols option and positional arguments
     all_symbols = list(symbols) + list(symbol_args)
