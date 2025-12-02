@@ -30,8 +30,10 @@ console = Console()
 @click.option("--once", is_flag=True, help="Show dashboard once and exit (default: live updating)")
 @click.option("--refresh", type=int, default=5, help="Refresh interval in seconds (default: 5)")
 @click.option("--full", is_flag=True, help="Show comprehensive full-screen dashboard with more details")
+@click.option("--menu", is_flag=True, help="Show interactive menu panel")
+@click.option("--interactive", is_flag=True, help="Interactive mode with menu and keyboard commands")
 @click.pass_context
-def dashboard_cmd(ctx: click.Context, once: bool, refresh: int, full: bool) -> None:
+def dashboard_cmd(ctx: click.Context, once: bool, refresh: int, full: bool, menu: bool, interactive: bool) -> None:
     """Show real-time status dashboard with live updates.
     
     Two modes available:
@@ -56,18 +58,20 @@ def dashboard_cmd(ctx: click.Context, once: bool, refresh: int, full: bool) -> N
     create_fn = create_dashboard
     title = "Trading Dashboard"
     
+    # Import main function from dashboard script
+    from scripts.dashboard import main as dashboard_main
+    import sys
+    
+    # Build arguments for dashboard script
+    sys.argv = ["dashboard"]
     if once:
-        # Show once
-        console.print(create_fn())
-    else:
-        # Live updating dashboard
-        console.print(f"\n[bold cyan]📊 Starting {title} (refreshes every {refresh}s)[/bold cyan]")
-        console.print("[dim]Press Ctrl+C to exit[/dim]\n")
-        try:
-            with Live(create_fn(), refresh_per_second=1.0/refresh, screen=True) as live_display:
-                while True:
-                    time.sleep(refresh)
-                    live_display.update(create_fn())
-        except KeyboardInterrupt:
-            console.print("\n[bold yellow]Dashboard closed[/bold yellow]\n")
+        sys.argv.append("--once")
+    if menu:
+        sys.argv.append("--menu")
+    if interactive:
+        sys.argv.append("--interactive")
+    sys.argv.extend(["--refresh", str(refresh)])
+    
+    # Call the main dashboard function
+    dashboard_main()
 

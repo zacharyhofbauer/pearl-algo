@@ -41,7 +41,13 @@ from rich import box
 from rich.text import Text
 
 from pearlalgo.futures.config import load_profile
-from pearlalgo.futures.performance import DEFAULT_PERF_PATH, load_performance, summarize_daily_performance
+from pearlalgo.futures.performance import (
+    DEFAULT_PERF_PATH,
+    load_performance,
+    summarize_daily_performance,
+    calculate_enhanced_metrics,
+    calculate_profit_factor,
+)
 from pearlalgo.futures.risk import compute_risk_state
 
 console = Console()
@@ -586,6 +592,12 @@ def create_trade_stats_panel(perf_df: pd.DataFrame, today: str) -> Panel:
     
     stats = compute_trade_statistics(today_df if not today_df.empty else perf_df)
     
+    # Calculate profit factor
+    trades_for_pf = today_df if not today_df.empty else perf_df
+    profit_factor = 0.0
+    if not trades_for_pf.empty and "realized_pnl" in trades_for_pf.columns:
+        profit_factor = calculate_profit_factor(trades_for_pf.dropna(subset=["realized_pnl"]))
+    
     table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
     table.add_column("Metric", style="cyan", width=18)
     table.add_column("Value", style="white", width=20)
@@ -594,6 +606,7 @@ def create_trade_stats_panel(perf_df: pd.DataFrame, today: str) -> Panel:
     table.add_row("Winners:", f"[green]{stats['winners']}[/] ({stats['win_rate']:.1f}%)")
     table.add_row("Losers:", f"[red]{stats['losers']}[/] ({100 - stats['win_rate']:.1f}%)")
     table.add_row("", "")
+    table.add_row("Profit Factor:", f"{profit_factor:.2f}")
     table.add_row("Avg Hold Time:", f"{stats['avg_hold_time_minutes']:.1f} min")
     table.add_row("Largest Winner:", f"[green]${stats['largest_winner']:,.2f}[/]")
     table.add_row("Largest Loser:", f"[red]${stats['largest_loser']:,.2f}[/]")
@@ -674,6 +687,68 @@ def create_signal_context_table(perf_df: pd.DataFrame, signals_df: pd.DataFrame)
         )
     
     return table
+
+
+def create_equity_curve_panel(perf_df: pd.DataFrame, profile: Any, today: str) -> Panel:
+    """Create equity curve visualization panel."""
+    today_df = perf_df[perf_df["timestamp"].dt.strftime("%Y%m%d") == today] if "timestamp" in perf_df.columns and not perf_df.empty else pd.DataFrame()
+    
+    if today_df.empty:
+        return Panel("[dim]No data for equity curve[/dim]", title="📈 Equity Curve", border_style="cyan")
+    
+    # Calculate cumulative P&L
+    trades = today_df.dropna(subset=["realized_pnl"]).sort_values("timestamp")
+    if trades.empty:
+        return Panel("[dim]No completed trades for equity curve[/dim]", title="📈 Equity Curve", border_style="cyan")
+    
+    starting_equity = profile.starting_balance
+    cumulative_pnl = trades["realized_pnl"].cumsum()
+    equity_curve = starting_equity + cumulative_pnl
+    
+    # Create ASCII chart
+    if len(equity_curve) < 2:
+        return Panel("[dim]Insufficient data for chart[/dim]", title="📈 Equity Curve", border_style="cyan")
+    
+    min_equity = equity_curve.min()
+    max_equity = equity_curve.max()
+    range_equity = max_equity - min_equity if max_equity != min_equity else 1.0
+    
+    # Create simple text chart (20 characters wide)
+    chart_width = 30
+    chart_height = 8
+    
+    # Sample points for display
+    num_points = min(chart_width, len(equity_curve))
+    step = max(1, len(equity_curve) // num_points)
+    sampled_equity = equity_curve.iloc[::step].tail(num_points)
+    
+    # Build chart
+    chart_lines = []
+    for row in range(chart_height - 1, -1, -1):
+        line = ""
+        threshold = min_equity + (range_equity * row / chart_height)
+        for val in sampled_equity:
+            if val >= threshold:
+                line += "█"
+            else:
+                line += " "
+        chart_lines.append(line)
+    
+    # Add labels
+    content = Text()
+    content.append(f"Starting: ${starting_equity:,.2f}\n", style="dim")
+    content.append(f"Current: ${equity_curve.iloc[-1]:,.2f}\n", style="bold green" if equity_curve.iloc[-1] >= starting_equity else "bold red")
+    content.append(f"High: ${max_equity:,.2f} | Low: ${min_equity:,.2f}\n\n", style="dim")
+    
+    # Add chart
+    for line in chart_lines:
+        content.append(line + "\n", style="green" if equity_curve.iloc[-1] >= starting_equity else "red")
+    
+    content.append(f"\n[{min_equity:,.0f}]", style="dim")
+    content.append(" " * (chart_width - len(f"[{min_equity:,.0f}]") - len(f"[{max_equity:,.0f}]")))
+    content.append(f"[{max_equity:,.0f}]", style="dim")
+    
+    return Panel(content, title="📈 Equity Curve", border_style="cyan")
 
 
 def create_files_panel() -> Panel:
@@ -766,7 +841,43 @@ def analyze_why_no_trades(perf_df: pd.DataFrame, signals_df: pd.DataFrame, profi
     return Panel(content, title="🔍 Trade Analysis", border_style="cyan")
 
 
-def create_dashboard(refresh_interval: int = 60, seconds_until_refresh: float = 60.0) -> Layout:
+def create_menu_panel() -> Panel:
+    """Create interactive menu panel with common commands."""
+    menu_text = Text()
+    menu_text.append("📋 Quick Actions Menu\n\n", style="bold cyan")
+    
+    menu_items = [
+        ("1", "Generate Signals", "pearlalgo signals --strategy sr --symbols ES NQ GC"),
+        ("2", "Start Micro Trading", "bash scripts/start_micro.sh"),
+        ("3", "Start Standard Trading", "bash scripts/start_standard.sh"),
+        ("4", "Stop All Trading", "bash scripts/kill_my_processes.sh"),
+        ("5", "Performance Analysis", "python scripts/analyze_performance.py"),
+        ("6", "Test Broker Connection", "python scripts/test_broker_connection.py"),
+        ("7", "Gateway Status", "pearlalgo gateway status"),
+        ("8", "Gateway Start", "pearlalgo gateway start --wait"),
+        ("9", "Gateway Restart", "pearlalgo gateway restart"),
+        ("A", "View Latest Signals", "ls -lt signals/*.csv | head -1"),
+        ("B", "View Latest Report", "ls -lt reports/*.md | head -1"),
+        ("C", "View Trading Logs", "tail -f logs/micro_trading.log"),
+        ("D", "System Health Check", "python scripts/system_health_check.py"),
+        ("E", "Walk-Forward Test", "python scripts/walk_forward_test.py --help"),
+        ("F", "Validate Backtest", "python scripts/validate_backtest.py --help"),
+        ("Q", "Quit Dashboard", ""),
+    ]
+    
+    for key, label, cmd in menu_items:
+        menu_text.append(f"[bold yellow]{key}[/] ", style="bold")
+        menu_text.append(f"{label:25s}", style="cyan")
+        if cmd:
+            menu_text.append(f"  [dim]{cmd[:50]}[/]", style="dim")
+        menu_text.append("\n")
+    
+    menu_text.append("\n[dim]Press number/letter to execute, or Ctrl+C to exit[/dim]", style="dim")
+    
+    return Panel(menu_text, title="🎯 Quick Actions", border_style="cyan")
+
+
+def create_dashboard(refresh_interval: int = 60, seconds_until_refresh: float = 60.0, show_menu: bool = False) -> Layout:
     """Create the unified dashboard layout."""
     layout = Layout()
     
@@ -799,7 +910,8 @@ def create_dashboard(refresh_interval: int = 60, seconds_until_refresh: float = 
     layout["left"].split_column(
         Layout(name="risk", size=20),
         Layout(name="stats", size=14),
-        Layout(name="files", size=8)
+        Layout(name="equity", size=12),
+        Layout(name="files", size=6)
     )
     
     layout["center"].split_column(
@@ -807,19 +919,30 @@ def create_dashboard(refresh_interval: int = 60, seconds_until_refresh: float = 
         Layout(name="signals", ratio=1)
     )
     
-    layout["right"].split_column(
-        Layout(name="reasoning", size=16),
-        Layout(name="trades", size=12),
-        Layout(name="analysis", size=10)
-    )
+    if show_menu:
+        layout["right"].split_column(
+            Layout(name="menu", size=20),
+            Layout(name="reasoning", size=12),
+            Layout(name="trades", size=10),
+            Layout(name="analysis", size=8)
+        )
+    else:
+        layout["right"].split_column(
+            Layout(name="reasoning", size=16),
+            Layout(name="trades", size=12),
+            Layout(name="analysis", size=10)
+        )
     
     # Populate panels
     layout["header"].update(create_header_panel(processes, refresh_interval, seconds_until_refresh))
     layout["risk"].update(create_risk_summary_panel(perf_df, profile, today))
     layout["stats"].update(create_trade_stats_panel(perf_df, today))
+    layout["equity"].update(create_equity_curve_panel(perf_df, profile, today))
     layout["files"].update(create_files_panel())
     layout["per_symbol"].update(Panel(create_per_symbol_table(perf_df, profile, today), title="📈 Per-Symbol Metrics", border_style="cyan"))
     layout["signals"].update(Panel(create_signal_context_table(perf_df, signals_df), title="📋 Latest Signals", border_style="cyan"))
+    if show_menu:
+        layout["menu"].update(create_menu_panel())
     layout["reasoning"].update(create_decision_reasoning_panel(perf_df, signals_df))
     layout["trades"].update(create_recent_trades_panel(perf_df))
     layout["analysis"].update(analyze_why_no_trades(perf_df, signals_df, profile))
@@ -831,30 +954,163 @@ def create_dashboard(refresh_interval: int = 60, seconds_until_refresh: float = 
     return layout
 
 
+def execute_menu_command(choice: str) -> bool:
+    """Execute a menu command based on user choice. Returns True if should continue, False to quit."""
+    import subprocess
+    
+    commands = {
+        "1": {
+            "cmd": ["pearlalgo", "signals", "--strategy", "sr", "--symbols", "ES", "NQ", "GC"],
+            "desc": "Generate signals for ES, NQ, GC",
+        },
+        "2": {
+            "cmd": ["bash", "scripts/start_micro.sh"],
+            "desc": "Start micro contracts trading",
+        },
+        "3": {
+            "cmd": ["bash", "scripts/start_standard.sh"],
+            "desc": "Start standard contracts trading",
+        },
+        "4": {
+            "cmd": ["bash", "scripts/kill_my_processes.sh"],
+            "desc": "Stop all trading processes",
+        },
+        "5": {
+            "cmd": ["python", "scripts/analyze_performance.py", "--summary"],
+            "desc": "Show performance summary",
+        },
+        "6": {
+            "cmd": ["python", "scripts/test_broker_connection.py"],
+            "desc": "Test IBKR broker connection",
+        },
+        "7": {
+            "cmd": ["pearlalgo", "gateway", "status"],
+            "desc": "Check IB Gateway status",
+        },
+        "8": {
+            "cmd": ["pearlalgo", "gateway", "start", "--wait"],
+            "desc": "Start IB Gateway",
+        },
+        "9": {
+            "cmd": ["pearlalgo", "gateway", "restart"],
+            "desc": "Restart IB Gateway",
+        },
+        "A": {
+            "cmd": ["ls", "-lt", "signals/"],
+            "desc": "List latest signals files",
+        },
+        "B": {
+            "cmd": ["ls", "-lt", "reports/"],
+            "desc": "List latest reports",
+        },
+        "C": {
+            "cmd": ["tail", "-30", "logs/micro_trading.log"],
+            "desc": "View recent trading logs",
+        },
+        "D": {
+            "cmd": ["python", "scripts/system_health_check.py"],
+            "desc": "Run system health check",
+        },
+        "E": {
+            "cmd": ["python", "scripts/walk_forward_test.py", "--help"],
+            "desc": "Show walk-forward test help",
+        },
+        "F": {
+            "cmd": ["python", "scripts/validate_backtest.py", "--help"],
+            "desc": "Show backtest validation help",
+        },
+        "Q": None,  # Quit
+    }
+    
+    choice_upper = choice.upper()
+    if choice_upper not in commands:
+        console.print(f"[red]Invalid choice: {choice}[/red]")
+        return True
+    
+    if choice_upper == "Q":
+        return False
+    
+    cmd_info = commands[choice_upper]
+    if not cmd_info:
+        return False
+    
+    cmd = cmd_info["cmd"]
+    desc = cmd_info.get("desc", "")
+    
+    console.print(f"[cyan]Executing: {desc}[/cyan]")
+    console.print(f"[dim]{' '.join(cmd)}[/dim]\n")
+    
+    try:
+        result = subprocess.run(cmd, cwd=SCRIPT_DIR, capture_output=False, text=True)
+        if result.returncode == 0:
+            console.print(f"\n[green]✓ Command completed successfully[/green]")
+        else:
+            console.print(f"\n[yellow]⚠ Command completed with exit code: {result.returncode}[/yellow]")
+    except FileNotFoundError:
+        console.print(f"[red]Error: Command not found. Make sure you're in the project directory.[/red]")
+    except Exception as e:
+        console.print(f"[red]Error executing command: {e}[/red]")
+    
+    return True
+
+
 def main() -> int:
     """Main entry point."""
     import argparse
+    
     parser = argparse.ArgumentParser(description="PearlAlgo Trading Dashboard")
     parser.add_argument("--live", action="store_true", help="Live updating dashboard")
     parser.add_argument("--once", action="store_true", help="Show dashboard once and exit")
     parser.add_argument("--refresh", type=int, default=60, metavar="SECONDS", help="Refresh interval in seconds (default: 60)")
+    parser.add_argument("--menu", action="store_true", help="Show interactive menu (requires --once)")
+    parser.add_argument("--interactive", action="store_true", help="Interactive mode with menu and keyboard input")
     args = parser.parse_args()
     
     refresh_interval = max(1, args.refresh)
+    show_menu = args.menu or args.interactive
     
-    if args.live or not args.once:
+    if args.interactive:
+        # Interactive mode with menu
+        console.print("[bold cyan]📊 PearlAlgo Interactive Dashboard[/bold cyan]")
+        console.print("[dim]Enter number/letter to execute command, 'Q' to quit[/dim]\n")
+        
+        try:
+            while True:
+                # Clear screen and show dashboard
+                console.clear()
+                console.print(create_dashboard(refresh_interval, refresh_interval, show_menu=True))
+                console.print("\n" + "="*80 + "\n")
+                console.print("[bold yellow]Enter command (1-9, A-F, Q to quit): [/bold yellow]", end="")
+                
+                choice = input().strip().upper()
+                
+                if not choice:
+                    continue
+                
+                console.print(f"\n[cyan]Selected: {choice}[/cyan]\n")
+                
+                if not execute_menu_command(choice):
+                    break
+                
+                console.print("\n[dim]Press Enter to return to dashboard...[/dim]")
+                input()
+        except KeyboardInterrupt:
+            console.print("\n[bold yellow]Dashboard closed[/bold yellow]\n")
+    elif args.live or not args.once:
+        # Live updating mode
         start_time = time.time()
-        with Live(create_dashboard(refresh_interval, refresh_interval), refresh_per_second=2, screen=True) as live:
+        with Live(create_dashboard(refresh_interval, refresh_interval, show_menu=show_menu), refresh_per_second=2, screen=True) as live:
             try:
                 while True:
                     elapsed = time.time() - start_time
                     seconds_until_refresh = refresh_interval - (elapsed % refresh_interval)
-                    live.update(create_dashboard(refresh_interval, seconds_until_refresh))
+                    live.update(create_dashboard(refresh_interval, seconds_until_refresh, show_menu=show_menu))
                     time.sleep(0.5)
             except KeyboardInterrupt:
                 console.print("\n[bold yellow]Dashboard closed[/bold yellow]\n")
     else:
-        console.print(create_dashboard(refresh_interval, refresh_interval))
+        # Show once
+        console.print(create_dashboard(refresh_interval, refresh_interval, show_menu=show_menu))
     
     return 0
 
