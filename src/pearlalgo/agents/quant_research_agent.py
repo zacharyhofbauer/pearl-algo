@@ -85,7 +85,7 @@ class QuantResearchAgent:
         )
     
     def _initialize_llm(self) -> None:
-        """Initialize LLM provider (Groq or LiteLLM)."""
+        """Initialize LLM provider (Groq, OpenAI, Anthropic, or LiteLLM)."""
         try:
             llm_config = self.config.get("llm", {})
             provider = llm_config.get("provider", "groq")
@@ -110,6 +110,54 @@ class QuantResearchAgent:
                 )
                 logger.info(f"Groq LLM initialized: {self.llm_model}")
             
+            elif provider == "openai":
+                try:
+                    import litellm
+                except ImportError:
+                    logger.warning("litellm package not installed, LLM reasoning disabled")
+                    self.use_llm = False
+                    return
+                
+                api_key = llm_config.get("openai", {}).get("api_key")
+                model = llm_config.get("openai", {}).get("model", "gpt-4o")
+                
+                if not api_key:
+                    logger.warning("OpenAI API key not found, LLM reasoning disabled")
+                    self.use_llm = False
+                    return
+                
+                # Set OpenAI API key for LiteLLM
+                import os
+                os.environ["OPENAI_API_KEY"] = api_key
+                self.llm_provider = litellm
+                # LiteLLM format: "openai/model-name"
+                self.llm_model = f"openai/{model}" if not model.startswith("openai/") else model
+                logger.info(f"OpenAI LLM initialized: {self.llm_model}")
+            
+            elif provider == "anthropic":
+                try:
+                    import litellm
+                except ImportError:
+                    logger.warning("litellm package not installed, LLM reasoning disabled")
+                    self.use_llm = False
+                    return
+                
+                api_key = llm_config.get("anthropic", {}).get("api_key")
+                model = llm_config.get("anthropic", {}).get("model", "claude-3-opus-20240229")
+                
+                if not api_key:
+                    logger.warning("Anthropic API key not found, LLM reasoning disabled")
+                    self.use_llm = False
+                    return
+                
+                # Set Anthropic API key for LiteLLM
+                import os
+                os.environ["ANTHROPIC_API_KEY"] = api_key
+                self.llm_provider = litellm
+                # LiteLLM format: "anthropic/model-name"
+                self.llm_model = f"anthropic/{model}" if not model.startswith("anthropic/") else model
+                logger.info(f"Anthropic LLM initialized: {self.llm_model}")
+            
             elif provider == "litellm":
                 import litellm
                 
@@ -121,13 +169,22 @@ class QuantResearchAgent:
                     self.use_llm = False
                     return
                 
-                litellm.api_key = api_key
+                # Try to detect provider from model name
+                import os
+                if model.startswith("openai/"):
+                    os.environ["OPENAI_API_KEY"] = api_key
+                elif model.startswith("anthropic/"):
+                    os.environ["ANTHROPIC_API_KEY"] = api_key
+                else:
+                    # Default to OpenAI if no prefix
+                    os.environ["OPENAI_API_KEY"] = api_key
+                
                 self.llm_provider = litellm
                 self.llm_model = model
                 logger.info(f"LiteLLM initialized: {self.llm_model}")
             
             else:
-                logger.warning(f"Unknown LLM provider: {provider}")
+                logger.warning(f"Unknown LLM provider: {provider}. Supported: groq, openai, anthropic, litellm")
                 self.use_llm = False
         
         except Exception as e:
@@ -355,7 +412,8 @@ class QuantResearchAgent:
         """
         Generate LLM reasoning for the trading signal.
         
-        Uses Groq or LiteLLM to explain why the signal was generated.
+        Uses Groq (direct), OpenAI (via LiteLLM), or Anthropic (via LiteLLM) 
+        to explain why the signal was generated.
         """
         if not self.llm_provider:
             return None
@@ -380,9 +438,9 @@ Key Indicators:
 
 Provide a concise explanation of why this signal was generated and its risk/reward profile."""
 
-            # Check if it's a Groq client
+            # Check if it's a Groq client (direct integration)
             if hasattr(self.llm_provider, "chat") and hasattr(self.llm_provider.chat, "completions"):
-                # Groq
+                # Groq (direct)
                 response = self.llm_provider.chat.completions.create(
                     model=self.llm_model,
                     messages=[
@@ -395,7 +453,7 @@ Provide a concise explanation of why this signal was generated and its risk/rewa
                 return response.choices[0].message.content
             
             else:
-                # LiteLLM
+                # LiteLLM (for OpenAI, Anthropic, or other providers)
                 response = await self.llm_provider.acompletion(
                     model=self.llm_model,
                     messages=[
