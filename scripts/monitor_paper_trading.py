@@ -163,14 +163,14 @@ def main():
     logger.info("=" * 70)
     logger.info("PAPER TRADING MONITORING & VALIDATION")
     logger.info("=" * 70)
-    logger.info()
+    logger.info("")
     
     # This would typically be called after a trading cycle
     # For now, we'll create a mock state to demonstrate validation
     
     logger.info("Note: This script validates the monitoring functions.")
     logger.info("In production, this would be called after each trading cycle.")
-    logger.info()
+    logger.info("")
     
     # Test Telegram if configured
     test_telegram_alerts()

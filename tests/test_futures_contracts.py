@@ -11,7 +11,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from pearlalgo.futures.contracts import es_contract, fut_contract  # noqa: E402
-from scripts.live_paper_loop import fetch_data  # noqa: E402
+# Legacy import removed - use LangGraph system instead
+# from scripts.live_paper_loop import fetch_data  # noqa: E402
 
 
 def test_build_contract_fields():

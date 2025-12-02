@@ -41,11 +41,12 @@ def sample_signal():
 
 def test_groq_initialization():
     """Test Groq LLM provider initialization."""
+    groq_key = os.getenv("GROQ_API_KEY")
     config = {
         "llm": {
             "provider": "groq",
             "groq": {
-                "api_key": os.getenv("GROQ_API_KEY", "test_key"),
+                "api_key": groq_key if groq_key else "",  # Use empty string if not set
                 "model": "mixtral-8x7b-32768",
             },
         },
@@ -54,9 +55,11 @@ def test_groq_initialization():
     
     agent = QuantResearchAgent(symbols=["ES"], strategy="sr", config=config)
     
-    # If API key is set, should initialize
-    if os.getenv("GROQ_API_KEY"):
-        assert agent.use_llm == True or agent.use_llm == False  # May be False if key invalid
+    # If API key is set in environment, agent may initialize with LLM
+    # If not set, should gracefully disable
+    if groq_key:
+        # Agent should initialize, use_llm may be True or False depending on key validity
+        assert isinstance(agent.use_llm, bool)  # Should be a boolean
     else:
         # Without key, should gracefully disable
         assert agent.use_llm == False
