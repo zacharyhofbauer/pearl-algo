@@ -9,18 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-import sys
 from pathlib import Path
 from typing import List, Optional
 
 try:
     import yaml
 except ImportError:
-    # Fallback if PyYAML not installed
-    try:
-        from yaml import safe_load
-    except ImportError:
-        yaml = None
+    yaml = None
 
 
 try:
@@ -56,7 +51,7 @@ class LangGraphTrader:
         if config_path:
             with open(config_path, "r") as f:
                 if yaml:
-                    self.config = yaml.safe_load(f)
+                    self.config = yaml.safe_load(f)  # noqa: F401
                 else:
                     import json
 
@@ -160,7 +155,7 @@ class LangGraphTrader:
             await self.workflow.run_continuous(
                 interval=interval,
                 max_cycles=max_cycles,
-                shutdown_flag=lambda: self.shutdown_requested
+                shutdown_check=lambda: self.shutdown_requested,
             )
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received, shutting down...")

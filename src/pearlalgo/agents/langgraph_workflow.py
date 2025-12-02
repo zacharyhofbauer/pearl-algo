@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 from langgraph.graph import END, START, StateGraph
 
@@ -160,6 +160,7 @@ class TradingWorkflow:
         self,
         interval: int = 60,
         max_cycles: Optional[int] = None,
+        shutdown_check: Optional[Callable[[], bool]] = None,
     ) -> None:
         """
         Run workflow continuously with specified interval.
@@ -167,6 +168,7 @@ class TradingWorkflow:
         Args:
             interval: Seconds between cycles
             max_cycles: Maximum number of cycles (None for infinite)
+            shutdown_check: Optional callable that returns True to stop the workflow
         """
         logger.info(
             f"Starting continuous workflow: interval={interval}s, "
@@ -182,6 +184,11 @@ class TradingWorkflow:
 
         try:
             while True:
+                # Check for shutdown request
+                if shutdown_check and shutdown_check():
+                    logger.info("Shutdown requested - stopping workflow")
+                    break
+
                 if max_cycles and cycle_count >= max_cycles:
                     logger.info(f"Reached max cycles: {max_cycles}")
                     break
@@ -205,9 +212,15 @@ class TradingWorkflow:
                     logger.critical("Kill-switch triggered - stopping workflow")
                     break
 
-                # Wait for next cycle
+                # Wait for next cycle (check shutdown during sleep)
                 if interval > 0:
-                    await asyncio.sleep(interval)
+                    # Sleep in smaller chunks to check shutdown more frequently
+                    sleep_chunks = max(1, interval // 5)  # Check every 1/5 of interval
+                    for _ in range(5):
+                        await asyncio.sleep(sleep_chunks)
+                        if shutdown_check and shutdown_check():
+                            logger.info("Shutdown requested during sleep - stopping workflow")
+                            return
 
         except KeyboardInterrupt:
             logger.info("Workflow interrupted by user")
