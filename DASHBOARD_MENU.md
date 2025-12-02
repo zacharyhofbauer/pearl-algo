@@ -85,3 +85,5 @@ pearlalgo dashboard --interactive
 - Some commands (like starting trading) may take time to complete
 - The dashboard refreshes automatically in live mode
 
+
+
