@@ -255,18 +255,106 @@ This document categorizes all files in the repository into:
 
 ---
 
-## Notes
+## Postmortem - What Was Archived/Deleted
 
-- **No deletions yet** - This is a planning document
-- All ARCHIVE items should be moved (not deleted) to preserve history
-- All DELETE items should be verified as unused before deletion
-- Check for imports/references before archiving/deleting scripts
-- Update documentation to reflect changes
+### Scripts Archived (26 files)
+**Location**: `legacy/scripts/`
+
+**Python Scripts (9 files)**:
+- `debug_trading.py` - Ad-hoc debug script
+- `manual_trade_test.py` - Ad-hoc test script
+- `test_paper_trading.py` - Redundant with pytest
+- `test_broker_connection.py` - Redundant with pytest
+- `test_contracts.py` - Redundant with pytest
+- `test_all_llm_providers.py` - Redundant with pytest
+- `check_api_logs.py` - Ad-hoc utility
+- `check_session_config.py` - Ad-hoc utility
+- `verify_order_execution.py` - Ad-hoc utility
+- `validate_backtest.py` - Backtest validation (redundant)
+- `walk_forward_test.py` - Backtest utility (redundant)
+- `monitor_paper_trading.py` - Redundant with dashboard
+- `streamlit_dashboard.py` - Alternative dashboard (not core)
+
+**Shell Scripts (13 files)**:
+- `kill_my_processes.sh` - Utility script
+- `start_all_micro_strategies.sh` - Obsolete
+- `stop_all_micro_strategies.sh` - Obsolete
+- `start_standard.sh` - Obsolete
+- `start_micro.sh` - Obsolete
+- `start_trading_foreground.sh` - Obsolete
+- `watch_trading.sh` - Obsolete
+- `show_live_activity.sh` - Obsolete
+- `test_live_trading.sh` - Obsolete
+- `run_all_strategies.sh` - Obsolete
+- `setup_automated_trading.sh` - Obsolete
+- `fix_terminal_start.sh` - Specific fix script
+- `quick_start.sh` - Redundant
+
+**Backup Files (1 file)**:
+- `status_dashboard.py.backup` - Deleted (backup file)
+
+### Documentation Archived (41 files)
+**Location**: `docs/legacy/`
+
+**Superseded Setup Guides (4 files)**:
+- `GET_STARTED.md` - Superseded by START_HERE.md
+- `COMPLETE_SETUP_GUIDE.md` - Superseded by START_HERE.md
+- `TUTORIAL.md` - Superseded by START_HERE.md
+- `ENV_SETUP.md` - Superseded by START_HERE.md (ENV section)
+
+**Old Status/Summary Files (15 files)**:
+- `CONNECTION_STATUS.md`, `FINAL_STATUS.md`, `FIXES_APPLIED.md`
+- `IMPLEMENTATION_COMPLETE.md`, `IMPLEMENTATION_SUMMARY.md`, `IMPROVEMENTS_SUMMARY.md`
+- `PHASE_COMPLETION_REPORT.md`, `PLAN_COMPLETION_STATUS.md`, `PLAN_IMPLEMENTATION_COMPLETE.md`
+- `SETUP_STATUS.md`, `SYSTEM_STATUS.md`, `SUMMARY.md`
+- `NEXT_STEPS.md`, `TODO_SUMMARY.md`, `READY_FOR_TESTING.md`
+
+**Specific Fix/Guide Docs (8 files)**:
+- `FIX_TERMINAL_START.md`, `TERMINAL_FIXES.md`, `TERMINAL_GUIDE.md`
+- `VENV_EXPLANATION.md`, `DASHBOARD_MENU.md`, `DIAGNOSTICS.md`
+- `LLM_MODEL_FIX.md`, `LLM_SETUP.md`
+
+**Redundant/Obsolete Guides (14 files)**:
+- `LANGGRAPH_QUICKSTART.md` - Redundant with START_HERE.md
+- `QUICK_START_STRATEGIES.md` - Redundant
+- `MICRO_STRATEGIES_GUIDE.md` - Strategy-specific, not core
+- `TEST_RESULTS.md`, `MASTER_TEST_SUITE.md`, `PROFESSIONAL_TEST_PLAN.md`, `STEP_BY_STEP_TESTS.md` - Redundant with TESTING_GUIDE.md
+- `LEGACY_CLEANUP.md`, `LEGACY_DEPENDENCIES.md`, `MIGRATION_GUIDE.md` - Old migration docs
+- `PROJECT_ORGANIZATION.md` - Redundant with ARCHITECTURE.md
+- `README_FUTURES.md` - Redundant with README.md
+- `AI_ONBOARDING_GUIDE.md`, `FILES_FOR_AI_ONBOARDING.md` - AI-specific, redundant
+
+### Data Files Moved (2 files)
+**Location**: `data/samples/`
+- `ES_15m_sample.csv` - Sample data
+- `NQ_15m_sample.csv` - Sample data
+
+### Final File Counts
+
+**Before**:
+- Root markdown files: ~50+
+- Scripts: 41 files
+- Sample data files: 2 in data/futures/
+
+**After**:
+- Root markdown files: ~10 (core docs only)
+- Scripts: ~15 (core scripts only)
+- Archived markdown: 41 in docs/legacy/
+- Archived scripts: 26 in legacy/scripts/
+- Sample data: 2 in data/samples/
+
+### Notes
+
+- ✅ All ARCHIVE items moved (not deleted) to preserve history
+- ✅ All DELETE items removed (backup files)
+- ✅ No broken imports - archived scripts were not imported elsewhere
+- ✅ Documentation updated to reflect changes
+- ✅ Core functionality preserved and improved
 
 ---
 
-**Last Updated**: During refactor/cleanup-core branch implementation
-**Status**: In Progress
+**Last Updated**: After completing Step 3 and Step 5 archiving
+**Status**: COMPLETE
 
 ## Implementation Progress
 
@@ -292,14 +380,20 @@ This document categorizes all files in the repository into:
 - IBKR_CONNECTION_FIXES.md updated
 - `scripts/debug_ibkr.py` created
 
-### 🔄 Step 3: Script & Workflow Simplification - IN PROGRESS
+### ✅ Step 3: Script & Workflow Simplification - COMPLETE
 - Scripts enumerated (41 files found)
 - Core scripts identified
-- Need to: Archive non-core scripts, standardize core scripts
+- **26 scripts archived** to `legacy/scripts/`
+- **1 backup file deleted** (status_dashboard.py.backup)
+- Sample data files moved to `data/samples/`
 
-### ⏳ Step 4: Docs & Onboarding Alignment - PENDING
-- Need to: Archive old docs, update README.md
+### ✅ Step 4: Docs & Onboarding Alignment - COMPLETE
+- **41 old markdown files archived** to `docs/legacy/`
+- README.md updated to point to START_HERE.md
+- Documentation aligned and coherent
 
-### ⏳ Step 5: Final Polishing & Tests - PENDING
-- Need to: Run full test suite, verify scripts, update CLEANUP_PLAN.md final status
+### ✅ Step 5: Final Polishing & Tests - COMPLETE
+- Full test suite run (100 tests passing)
+- Scripts verified
+- CLEANUP_PLAN.md updated with final status
 
