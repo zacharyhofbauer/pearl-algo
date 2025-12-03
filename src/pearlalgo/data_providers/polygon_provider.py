@@ -1,16 +1,20 @@
 """
-Polygon.io Data Provider for US futures fallback.
+Polygon.io Data Provider for US equities, futures, and options.
 
-Uses Polygon.io free tier API for historical and real-time data.
+Enhanced with options chains, historical data, and improved error handling.
+Uses Polygon.io API for historical and real-time data.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import aiohttp
+import pandas as pd
 
 try:
     from loguru import logger as loguru_logger
@@ -26,15 +30,28 @@ logger = logging.getLogger(__name__)
 
 class PolygonDataProvider(DataProvider):
     """
-    Polygon.io data provider for US futures.
+    Enhanced Polygon.io data provider for US equities, futures, and options.
 
-    Uses free tier API with rate limits.
+    Supports:
+    - Historical OHLCV data
+    - Real-time quotes
+    - Options chains
+    - Rate limit handling
     """
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, rate_limit_delay: float = 0.25):
+        """
+        Initialize Polygon.io data provider.
+
+        Args:
+            api_key: Polygon.io API key
+            rate_limit_delay: Delay between API calls in seconds (default 0.25 for 4 calls/sec)
+        """
         self.api_key = api_key
         self.base_url = "https://api.polygon.io"
+        self.rate_limit_delay = rate_limit_delay
         self.session: Optional[aiohttp.ClientSession] = None
+        self._last_request_time: float = 0.0
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -42,30 +59,159 @@ class PolygonDataProvider(DataProvider):
             self.session = aiohttp.ClientSession()
         return self.session
 
+    async def _rate_limit(self) -> None:
+        """Enforce rate limiting."""
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.rate_limit_delay:
+            await asyncio.sleep(self.rate_limit_delay - elapsed)
+        self._last_request_time = time.time()
+
     async def close(self) -> None:
         """Close aiohttp session."""
         if self.session and not self.session.closed:
             await self.session.close()
 
+    def fetch_historical(
+        self,
+        symbol: str,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        timeframe: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Fetch historical OHLCV data synchronously.
+
+        Args:
+            symbol: Ticker symbol (e.g., 'AAPL', 'ES' for futures)
+            start: Start datetime (default: 1 year ago)
+            end: End datetime (default: now)
+            timeframe: Timeframe (e.g., '1m', '5m', '15m', '1h', '1d')
+
+        Returns:
+            DataFrame with columns: timestamp, open, high, low, close, volume
+        """
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        return loop.run_until_complete(
+            self._fetch_historical_async(symbol, start, end, timeframe)
+        )
+
+    async def _fetch_historical_async(
+        self,
+        symbol: str,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+        timeframe: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Async implementation of fetch_historical."""
+        if start is None:
+            start = datetime.now(timezone.utc).replace(
+                year=datetime.now(timezone.utc).year - 1
+            )
+        if end is None:
+            end = datetime.now(timezone.utc)
+
+        # Convert timeframe to Polygon format
+        timespan_map = {
+            "1m": ("minute", 1),
+            "5m": ("minute", 5),
+            "15m": ("minute", 15),
+            "30m": ("minute", 30),
+            "1h": ("hour", 1),
+            "1d": ("day", 1),
+        }
+
+        if timeframe:
+            timespan, multiplier = timespan_map.get(
+                timeframe.lower(), ("day", 1)
+            )
+        else:
+            timespan, multiplier = ("day", 1)
+
+        # Format dates
+        date_from = start.strftime("%Y-%m-%d")
+        date_to = end.strftime("%Y-%m-%d")
+
+        all_results = []
+        session = await self._get_session()
+
+        url = f"{self.base_url}/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{date_from}/{date_to}"
+        params = {"adjusted": "true", "sort": "asc", "apikey": self.api_key}
+
+        try:
+            await self._rate_limit()
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "OK":
+                        results = data.get("results", [])
+                        if results:
+                            for result in results:
+                                all_results.append(
+                                    {
+                                        "timestamp": datetime.fromtimestamp(
+                                            result["t"] / 1000, tz=timezone.utc
+                                        ),
+                                        "open": result["o"],
+                                        "high": result["h"],
+                                        "low": result["l"],
+                                        "close": result["c"],
+                                        "volume": result.get("v", 0),
+                                    }
+                                )
+                elif response.status == 401:
+                    logger.error(
+                        f"Polygon API unauthorized for {symbol} (API key invalid)"
+                    )
+                    return pd.DataFrame()
+                elif response.status == 429:
+                    logger.warning(f"Polygon API rate limit exceeded for {symbol}")
+                    return pd.DataFrame()
+                else:
+                    logger.warning(
+                        f"Polygon API error for {symbol}: {response.status}"
+                    )
+                    return pd.DataFrame()
+
+        except Exception as e:
+            logger.error(f"Error fetching historical data for {symbol}: {e}")
+            return pd.DataFrame()
+
+        if not all_results:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(all_results)
+        df.set_index("timestamp", inplace=True)
+        return df
+
     async def get_latest_bar(self, symbol: str) -> Optional[Dict]:
         """
         Get latest bar for a symbol.
 
-        Note: Polygon.io uses different symbol formats.
-        For futures, format is like: ES1 (for front month ES contract).
+        Args:
+            symbol: Ticker symbol
+
+        Returns:
+            Dict with timestamp, open, high, low, close, volume, vwap
         """
         try:
             session = await self._get_session()
 
-            # For futures, we need to use the aggregates endpoint
-            # This is a simplified version - in production, you'd resolve the contract
             url = f"{self.base_url}/v2/aggs/ticker/{symbol}/prev"
-            params = {"apikey": self.api_key}
+            params = {"adjusted": "true", "apikey": self.api_key}
 
+            await self._rate_limit()
             async with session.get(url, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
-                    if data.get("status") == "OK" and data.get("resultsCount", 0) > 0:
+                    if (
+                        data.get("status") == "OK"
+                        and data.get("resultsCount", 0) > 0
+                    ):
                         result = data["results"][0]
                         return {
                             "timestamp": datetime.fromtimestamp(
@@ -75,37 +221,160 @@ class PolygonDataProvider(DataProvider):
                             "high": result["h"],
                             "low": result["l"],
                             "close": result["c"],
-                            "volume": result["v"],
+                            "volume": result.get("v", 0),
                             "vwap": result.get("vw"),
                         }
+                elif response.status == 401:
+                    logger.debug(
+                        f"Polygon API unauthorized for {symbol} (API key may be invalid or missing)"
+                    )
+                elif response.status == 403:
+                    logger.debug(
+                        f"Polygon API forbidden for {symbol} (may need paid tier)"
+                    )
+                elif response.status == 429:
+                    logger.warning(f"Polygon API rate limit for {symbol}")
                 else:
-                    # 401 = unauthorized (invalid/missing API key), 403 = forbidden, 429 = rate limit
-                    if response.status == 401:
-                        logger.debug(f"Polygon API unauthorized for {symbol} (API key may be invalid or missing)")
-                    elif response.status == 403:
-                        logger.debug(f"Polygon API forbidden for {symbol} (may need paid tier)")
-                    elif response.status == 429:
-                        logger.warning(f"Polygon API rate limit for {symbol}")
-                    else:
-                        logger.debug(f"Polygon API error for {symbol}: {response.status}")
+                    logger.debug(
+                        f"Polygon API error for {symbol}: {response.status}"
+                    )
 
         except Exception as e:
             logger.error(f"Error fetching Polygon data for {symbol}: {e}")
 
         return None
 
-    def fetch_historical(
-        self,
-        symbol: str,
-        start: Optional[datetime] = None,
-        end: Optional[datetime] = None,
-        timeframe: Optional[str] = None,
-    ) -> None:
+    async def get_options_chain(
+        self, underlying_symbol: str, expiration_date: Optional[str] = None
+    ) -> List[Dict]:
         """
-        Fetch historical data (not implemented for async provider).
+        Get options chain for an underlying symbol.
 
-        Use get_latest_bar for real-time data, or implement sync version.
+        Args:
+            underlying_symbol: Underlying ticker (e.g., 'AAPL', 'QQQ')
+            expiration_date: Expiration date in YYYY-MM-DD format (optional)
+
+        Returns:
+            List of option contracts with strike, expiration, type (call/put)
         """
-        raise NotImplementedError(
-            "Use async get_latest_bar or implement sync fetch_historical"
-        )
+        try:
+            session = await self._get_session()
+
+            # Polygon uses O: prefix for options
+            url = f"{self.base_url}/v3/snapshot/options/{underlying_symbol}"
+            if expiration_date:
+                url += f"/{expiration_date}"
+
+            params = {"apikey": self.api_key}
+
+            await self._rate_limit()
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "OK":
+                        results = data.get("results", [])
+                        options = []
+                        for result in results:
+                            options.append(
+                                {
+                                    "symbol": result.get("details", {}).get(
+                                        "ticker"
+                                    ),
+                                    "strike": result.get("details", {}).get(
+                                        "strike_price"
+                                    ),
+                                    "expiration": result.get("details", {}).get(
+                                        "expiration_date"
+                                    ),
+                                    "option_type": result.get("details", {}).get(
+                                        "contract_type"
+                                    ),  # 'call' or 'put'
+                                    "bid": result.get("last_quote", {}).get(
+                                        "bid"
+                                    ),
+                                    "ask": result.get("last_quote", {}).get(
+                                        "ask"
+                                    ),
+                                    "last_price": result.get("last_trade", {}).get(
+                                        "price"
+                                    ),
+                                    "volume": result.get("session", {}).get(
+                                        "volume"
+                                    ),
+                                    "open_interest": result.get("session", {}).get(
+                                        "open_interest"
+                                    ),
+                                }
+                            )
+                        return options
+                elif response.status == 401:
+                    logger.debug(
+                        f"Polygon API unauthorized for options on {underlying_symbol}"
+                    )
+                elif response.status == 403:
+                    logger.debug(
+                        f"Polygon API forbidden for options on {underlying_symbol} (may need paid tier)"
+                    )
+                elif response.status == 429:
+                    logger.warning(
+                        f"Polygon API rate limit for options on {underlying_symbol}"
+                    )
+
+        except Exception as e:
+            logger.error(
+                f"Error fetching options chain for {underlying_symbol}: {e}"
+            )
+
+        return []
+
+    async def get_real_time_quote(self, symbol: str) -> Optional[Dict]:
+        """
+        Get real-time quote (last trade and current bid/ask).
+
+        Args:
+            symbol: Ticker symbol
+
+        Returns:
+            Dict with last_price, bid, ask, bid_size, ask_size, timestamp
+        """
+        try:
+            session = await self._get_session()
+
+            url = f"{self.base_url}/v2/last/trade/{symbol}"
+            params = {"apikey": self.api_key}
+
+            await self._rate_limit()
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "OK":
+                        result = data.get("results", {})
+                        return {
+                            "last_price": result.get("p"),
+                            "timestamp": datetime.fromtimestamp(
+                                result.get("t", 0) / 1000000, tz=timezone.utc
+                            ),
+                        }
+
+            # Get quote (bid/ask)
+            url = f"{self.base_url}/v2/last/nbbo/{symbol}"
+            await self._rate_limit()
+            async with session.get(url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "OK":
+                        result = data.get("results", {})
+                        return {
+                            "bid": result.get("b"),
+                            "ask": result.get("a"),
+                            "bid_size": result.get("x"),
+                            "ask_size": result.get("y"),
+                            "timestamp": datetime.fromtimestamp(
+                                result.get("t", 0) / 1000000, tz=timezone.utc
+                            ),
+                        }
+
+        except Exception as e:
+            logger.error(f"Error fetching real-time quote for {symbol}: {e}")
+
+        return None

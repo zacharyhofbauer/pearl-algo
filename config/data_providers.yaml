@@ -1,0 +1,145 @@
+# Data Provider Configuration
+# Configure multiple data providers with priority and fallback options
+
+# Primary data provider (used by default)
+primary: "polygon"
+
+# Provider configurations
+providers:
+  polygon:
+    enabled: true
+    priority: 1
+    api_key: "${POLYGON_API_KEY}"
+    rate_limit_delay: 0.25  # seconds between requests (4 req/sec)
+    # Use environment variable: export POLYGON_API_KEY=your_key
+
+  tradier:
+    enabled: false  # Set to true if using Tradier
+    priority: 2
+    api_key: "${TRADIER_API_KEY}"
+    account_id: "${TRADIER_ACCOUNT_ID}"  # Optional
+    sandbox: true  # Set to false for production
+
+  local_parquet:
+    enabled: true
+    priority: 3
+    root_dir: "data/historical"  # Local storage directory
+
+  local_csv:
+    enabled: true
+    priority: 4
+    root_dir: "data"  # Fallback CSV directory
+
+# Provider selection strategy
+selection:
+  # Strategy: "primary", "fallback", or "round_robin"
+  strategy: "fallback"
+  
+  # Fallback order (used when strategy is "fallback")
+  fallback_order:
+    - "polygon"
+    - "local_parquet"
+    - "local_csv"
+
+# Data provider use cases
+use_cases:
+  # For intraday futures trading
+  intraday_futures:
+    providers:
+      - "polygon"
+      - "local_parquet"  # fallback
+  
+  # For options chains
+  options_chains:
+    providers:
+      - "polygon"
+      - "tradier"  # if enabled
+  
+  # For swing trading equities
+  swing_equities:
+    providers:
+      - "polygon"
+      - "local_parquet"
+  
+  # For backtesting (deterministic)
+  backtesting:
+    providers:
+      - "local_parquet"
+      - "local_csv"
+  
+  # For live forward testing
+  forward_testing:
+    providers:
+      - "polygon"
+      - "local_parquet"
+
+# Timeframe configurations
+timeframes:
+  supported:
+    - "1m"
+    - "5m"
+    - "15m"
+    - "30m"
+    - "1h"
+    - "1d"
+  
+  default: "15m"
+  
+  # Timeframe to provider mapping
+  mapping:
+    "1m": ["polygon"]  # High-frequency data
+    "5m": ["polygon", "local_parquet"]
+    "15m": ["polygon", "local_parquet", "local_csv"]
+    "1d": ["polygon", "tradier", "local_parquet", "local_csv"]
+
+# Symbol-specific configurations
+symbols:
+  # Options-focused symbols (QQQ, SPY, VXX, etc.)
+  options_symbols:
+    - "QQQ"
+    - "SPY"
+    - "VXX"
+    - "AAPL"
+    - "META"
+    - "NVDA"
+    - "MSFT"
+  
+  # Futures symbols
+  futures_symbols:
+    - "ES"
+    - "NQ"
+    - "MES"
+    - "MNQ"
+    - "CL"
+    - "GC"
+
+# Historical data storage
+historical_storage:
+  # Primary storage format
+  format: "parquet"  # or "csv"
+  
+  # Storage location
+  root_dir: "data/historical"
+  
+  # Compression for Parquet
+  compression: "snappy"
+  
+  # Retention policy (days, None for unlimited)
+  retention_days: null
+
+# Rate limiting
+rate_limits:
+  polygon:
+    requests_per_minute: 200  # Developer tier
+    burst_limit: 10
+  
+  tradier:
+    requests_per_minute: 60
+    burst_limit: 5
+
+# Caching
+cache:
+  enabled: true
+  ttl_seconds: 300  # 5 minutes
+  max_size_mb: 100
+
