@@ -18,9 +18,11 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 from pearlalgo.brokers.alpaca_broker import AlpacaBroker
-from pearlalgo.brokers.base import Broker
+from pearlalgo.brokers.base import Broker, BrokerConfig
 from pearlalgo.brokers.bybit_broker import BybitBroker
 from pearlalgo.brokers.ibkr_broker import IBKRBroker
+from pearlalgo.brokers.mock_broker import MockBroker
+from pearlalgo.brokers.paper_broker import PaperBroker
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.risk.limits import RiskGuard, RiskLimits
 
@@ -82,7 +84,26 @@ def get_broker(
             base_url=alpaca_config.get("base_url"),
         )
 
+    elif broker_name == "paper":
+        # Paper broker for internal simulation
+        broker_config_obj = BrokerConfig(paper=True)
+        return PaperBroker(
+            portfolio=portfolio,
+            config=broker_config_obj,
+            deterministic=config.get("deterministic", False),
+        )
+
+    elif broker_name == "mock":
+        # Mock broker for testing
+        broker_config_obj = BrokerConfig(paper=True)
+        return MockBroker(
+            portfolio=portfolio,
+            config=broker_config_obj,
+            always_fill=config.get("always_fill", True),
+        )
+
     else:
         raise ValueError(
-            f"Unknown broker: {broker_name}. Supported: ibkr, bybit, alpaca"
+            f"Unknown broker: {broker_name}. "
+            f"Supported: ibkr, bybit, alpaca, paper, mock"
         )
