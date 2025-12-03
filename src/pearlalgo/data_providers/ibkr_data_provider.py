@@ -184,15 +184,57 @@ class IBKRDataProvider(DataProvider):
                 qualified = ib.qualifyContracts(contract)
                 if qualified:
                     contract = qualified[0]
-            bars = ib.reqHistoricalData(
-                contract,
-                endDateTime=end or "",
-                durationStr=duration,
-                barSizeSetting=bar_size,
-                whatToShow=what_to_show,
-                useRTH=use_rth,
-                formatDate=1,
-            )
+            
+            # reqHistoricalData - handle async context by running in thread
+            # The connection is already in a thread with its own event loop
+            # When called from async context, we need to run in a thread to avoid event loop conflicts
+            import asyncio
+            import threading
+            from queue import Queue
+            
+            try:
+                # Check if we're in async context
+                asyncio.get_running_loop()
+                # In async context - run in thread to avoid event loop conflicts
+                result_queue = Queue()
+                error_queue = Queue()
+                
+                def fetch_in_thread():
+                    try:
+                        bars = ib.reqHistoricalData(
+                            contract,
+                            endDateTime=end or "",
+                            durationStr=duration,
+                            barSizeSetting=bar_size,
+                            whatToShow=what_to_show,
+                            useRTH=use_rth,
+                            formatDate=1,
+                        )
+                        result_queue.put(bars)
+                    except Exception as e:
+                        error_queue.put(e)
+                
+                thread = threading.Thread(target=fetch_in_thread, daemon=True)
+                thread.start()
+                thread.join(timeout=30)  # Wait up to 30 seconds
+                
+                if not error_queue.empty():
+                    raise error_queue.get()
+                if not result_queue.empty():
+                    bars = result_queue.get()
+                else:
+                    raise TimeoutError("Historical data request timed out")
+            except RuntimeError:
+                # No running loop - use sync method directly
+                bars = ib.reqHistoricalData(
+                    contract,
+                    endDateTime=end or "",
+                    durationStr=duration,
+                    barSizeSetting=bar_size,
+                    whatToShow=what_to_show,
+                    useRTH=use_rth,
+                    formatDate=1,
+                )
         except Exception as e:
             logger.error(f"Error fetching historical data for {symbol}: {e}")
             raise

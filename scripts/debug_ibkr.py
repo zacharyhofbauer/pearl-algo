@@ -66,9 +66,10 @@ def main() -> int:
         ib = provider._connect()
         
         if ib.isConnected():
+            actual_client_id = ib.client.clientId if hasattr(ib, 'client') and hasattr(ib.client, 'clientId') else 'unknown'
             print("\n✅ SUCCESS: Connected to IBKR Gateway!")
             print(f"   Connected to {settings.ib_host}:{settings.ib_port}")
-            print(f"   Client ID: {settings.ib_client_id}")
+            print(f"   Client ID: {actual_client_id}")
             
             # Try to disconnect
             try:
