@@ -74,7 +74,17 @@ class IBKRBroker(Broker):
                 f"Please start IB Gateway or use paper trading with dummy data."
             ) from exc
         except Exception as exc:
-            logger.warning(f"IBKR connection error: {exc}")
+            error_msg = str(exc).lower()
+            # Handle client ID conflicts and event loop issues gracefully
+            if "client id" in error_msg or "already in use" in error_msg:
+                logger.debug(
+                    f"IBKR client ID {self.settings.ib_client_id} already in use. "
+                    f"This is expected if another connection exists."
+                )
+            elif "event loop" in error_msg:
+                logger.debug(f"IBKR event loop conflict: {exc}")
+            else:
+                logger.warning(f"IBKR connection error: {exc}")
             raise
         return self._ib
 

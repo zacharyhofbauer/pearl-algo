@@ -215,10 +215,18 @@ class MarketDataAgent:
                 if df is not None and not df.empty:
                     return self._convert_dataframe_to_market_data(symbol, df)
             except RuntimeError as e:
-                # IBKR Gateway not available - expected in paper mode
-                logger.debug(f"IBKR REST fetch failed for {symbol}: {e}")
+                # IBKR Gateway not available or connection issues - expected in paper mode
+                error_msg = str(e).lower()
+                if "gateway not available" in error_msg or "client id" in error_msg or "already in use" in error_msg:
+                    logger.debug(f"IBKR unavailable for {symbol}: {e}. Will use dummy data.")
+                else:
+                    logger.debug(f"IBKR REST fetch failed for {symbol}: {e}")
             except Exception as e:
-                logger.debug(f"REST fetch failed for {symbol}: {e}")
+                error_msg = str(e).lower()
+                if "event loop" in error_msg or "client id" in error_msg or "already in use" in error_msg:
+                    logger.debug(f"IBKR connection issue for {symbol}: {e}. Will use dummy data.")
+                else:
+                    logger.debug(f"REST fetch failed for {symbol}: {e}")
 
         # Try Polygon fallback
         if self.polygon_provider:

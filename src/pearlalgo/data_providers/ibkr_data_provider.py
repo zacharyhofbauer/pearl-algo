@@ -37,18 +37,35 @@ class IBKRDataProvider(DataProvider):
         connection: IBKRConnection | None = None,
     ):
         self.settings = settings or get_settings()
-        data_client_id = (
-            int(self.settings.ib_data_client_id)
-            if self.settings.ib_data_client_id is not None
-            else int(self.settings.ib_client_id) + 1
-        )
+        # Get client ID from environment or settings
+        # Check for IBKR_DATA_CLIENT_ID first (direct env var), then PEARLALGO_IB_DATA_CLIENT_ID, then fallback
+        import os
+        env_data_client_id = os.getenv("IBKR_DATA_CLIENT_ID") or os.getenv("PEARLALGO_IB_DATA_CLIENT_ID")
+        env_client_id = os.getenv("IBKR_CLIENT_ID") or os.getenv("PEARLALGO_IB_CLIENT_ID")
+        
+        if env_data_client_id:
+            data_client_id = int(env_data_client_id)
+        elif self.settings.ib_data_client_id is not None:
+            data_client_id = int(self.settings.ib_data_client_id)
+        elif env_client_id:
+            data_client_id = int(env_client_id) + 1
+        else:
+            data_client_id = int(self.settings.ib_client_id) + 1
+        
         self.connection = connection or IBKRConnection(
             host=self.settings.ib_host,
             port=int(self.settings.ib_port),
             client_id=data_client_id,
         )
+        logger.debug(f"IBKRDataProvider initialized with client_id={data_client_id}")
 
     def _connect(self) -> IB:
+        """
+        Connect to IBKR Gateway with proper error handling.
+        
+        Handles event loop conflicts, client ID issues, and connection errors gracefully.
+        All errors are caught and re-raised as RuntimeError for consistent handling upstream.
+        """
         ib = IB()
         try:
             ib.connect(
@@ -58,7 +75,7 @@ class IBKRDataProvider(DataProvider):
                 timeout=3,  # Short timeout to fail fast
             )
         except (ConnectionRefusedError, OSError) as exc:
-            # Suppress noisy connection errors - these are expected when Gateway isn't running
+            # Gateway not running - expected in paper mode
             logger.debug(
                 f"IBKR connection refused at {self.connection.host}:{self.connection.port} "
                 f"(clientId={self.connection.client_id}). Gateway may not be running."
@@ -67,12 +84,42 @@ class IBKRDataProvider(DataProvider):
                 f"IBKR Gateway not available at {self.connection.host}:{self.connection.port}. "
                 f"Please start IB Gateway or use paper trading with dummy data."
             ) from exc
-        except Exception as exc:  # pragma: no cover - requires live IB
-            logger.warning(f"IBKR connection error: {exc}")
-            raise RuntimeError(
-                f"Failed to connect to IB at {self.connection.host}:{self.connection.port} "
-                f"(clientId={self.connection.client_id}). Ensure IB Gateway is running and API is enabled."
-            ) from exc
+        except Exception as exc:
+            # Handle various connection errors
+            error_msg = str(exc).lower()
+            
+            if "client id" in error_msg or "already in use" in error_msg:
+                logger.debug(
+                    f"IBKR client ID {self.connection.client_id} already in use. "
+                    f"Will use dummy data instead."
+                )
+                raise RuntimeError(
+                    f"IBKR client ID {self.connection.client_id} already in use. "
+                    f"Will use dummy data instead."
+                ) from exc
+            elif "event loop" in error_msg or "already running" in error_msg:
+                logger.debug(
+                    f"IBKR event loop conflict (likely called from async context). "
+                    f"Will use dummy data instead."
+                )
+                raise RuntimeError(
+                    f"IBKR event loop conflict. Will use dummy data instead."
+                ) from exc
+            elif "timeout" in error_msg:
+                logger.debug(
+                    f"IBKR connection timeout at {self.connection.host}:{self.connection.port}. "
+                    f"Will use dummy data instead."
+                )
+                raise RuntimeError(
+                    f"IBKR connection timeout. Will use dummy data instead."
+                ) from exc
+            else:
+                logger.debug(f"IBKR connection error: {exc}")
+                raise RuntimeError(
+                    f"Failed to connect to IB at {self.connection.host}:{self.connection.port} "
+                    f"(clientId={self.connection.client_id}). Error: {exc}"
+                ) from exc
+        
         return ib
 
     def _resolve_front_future(
