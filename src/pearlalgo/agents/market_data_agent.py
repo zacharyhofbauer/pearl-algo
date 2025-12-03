@@ -27,6 +27,7 @@ from pearlalgo.agents.langgraph_state import (
     add_agent_reasoning,
 )
 from pearlalgo.config.settings import get_settings
+from pearlalgo.data_providers.dummy_provider import DummyDataProvider
 from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
 from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
 from pearlalgo.data_providers.websocket_provider import WebSocketDataProvider
@@ -56,6 +57,7 @@ class MarketDataAgent:
         self.websocket_provider: Optional[WebSocketDataProvider] = None
         self.rest_provider = None
         self.polygon_provider: Optional[PolygonDataProvider] = None
+        self.dummy_provider: Optional[DummyDataProvider] = None
 
         # Data buffers (for caching normalized data)
         self.data_buffers: Dict[str, List[MarketData]] = {symbol: [] for symbol in symbols}
@@ -109,6 +111,16 @@ class MarketDataAgent:
                     logger.info("Polygon.io provider initialized as fallback")
                 except Exception as e:
                     logger.warning(f"Polygon.io provider failed: {e}")
+
+            # Initialize dummy provider as final fallback (for paper trading)
+            # Only use if in paper mode and no real data sources available
+            trading_mode = self.config.get("trading", {}).get("mode", "paper")
+            if trading_mode == "paper":
+                try:
+                    self.dummy_provider = DummyDataProvider(symbols=self.symbols)
+                    logger.info("Dummy data provider initialized (paper trading fallback)")
+                except Exception as e:
+                    logger.warning(f"Dummy provider failed: {e}")
 
         except Exception as e:
             logger.error(f"Error initializing providers: {e}", exc_info=True)
@@ -213,6 +225,16 @@ class MarketDataAgent:
                     return self._convert_to_market_data(symbol, data)
             except Exception as e:
                 logger.debug(f"Polygon fetch failed for {symbol}: {e}")
+
+        # Final fallback: Dummy provider (paper trading only)
+        if self.dummy_provider:
+            try:
+                data = self.dummy_provider.get_latest_bar(symbol)
+                if data:
+                    logger.info(f"Using dummy data for {symbol} (all real sources failed)")
+                    return self._convert_to_market_data(symbol, data)
+            except Exception as e:
+                logger.debug(f"Dummy provider failed for {symbol}: {e}")
 
         logger.warning(f"All data sources failed for {symbol}")
         return None

@@ -86,6 +86,11 @@ class LangGraphTrader:
         self.strategy = strategy or self.config.get("strategy", {}).get("default", "sr")
         self.mode = mode or self.config.get("trading", {}).get("mode", "paper")
 
+        # Ensure trading mode is in config for agents
+        if "trading" not in self.config:
+            self.config["trading"] = {}
+        self.config["trading"]["mode"] = self.mode
+
         # Load profile
         self.profile = load_profile()
 
