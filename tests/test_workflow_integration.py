@@ -137,7 +137,7 @@ def test_error_handling_in_state(sample_state):
 
     # Trading should still be enabled unless kill switch
     assert sample_state.trading_enabled
-    
+
     # Trigger kill switch
     sample_state.kill_switch_triggered = True
     assert sample_state.kill_switch_triggered

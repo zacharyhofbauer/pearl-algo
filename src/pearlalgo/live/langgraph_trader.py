@@ -19,8 +19,8 @@ warnings.filterwarnings('ignore', message='.*This event loop is already running.
 
 try:
     import yaml
-except ImportError:
-    yaml = None
+    except ImportError:
+        yaml = None
 
 
 try:
@@ -192,7 +192,7 @@ class LangGraphTrader:
         signal.signal(signal.SIGTERM, signal_handler)
 
         try:
-            # Run continuous workflow
+        # Run continuous workflow
             await self.workflow.run_continuous(
                 interval=interval,
                 max_cycles=max_cycles,

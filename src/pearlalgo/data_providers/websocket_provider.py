@@ -44,7 +44,7 @@ class WebSocketDataProvider:
         self.streams: Dict[str, any] = {}
         self.data_cache: Dict[str, Dict] = {}
         self.running = False
-        
+
         # Reconnection settings
         websocket_config = self.config.get("data", {}).get("websocket", {})
         self.reconnect_delay = websocket_config.get("reconnect_delay", 5)
@@ -155,13 +155,13 @@ class WebSocketDataProvider:
         if not self.exchange:
             return
 
-        normalized_symbol = self._normalize_symbol(symbol)
+            normalized_symbol = self._normalize_symbol(symbol)
         self.reconnect_attempts[symbol] = 0
 
-        while self.running:
-            try:
+            while self.running:
+                try:
                 # Subscribe to ticker (OHLCV updates)
-                ticker = await self.exchange.watch_ticker(normalized_symbol)
+                    ticker = await self.exchange.watch_ticker(normalized_symbol)
 
                 # Reset reconnect attempts on successful data
                 self.reconnect_attempts[symbol] = 0
@@ -170,7 +170,7 @@ class WebSocketDataProvider:
                 normalized_data = self._normalize_ticker_data(ticker)
                 self.data_cache[symbol] = normalized_data
 
-            except Exception as e:
+                except Exception as e:
                 self.reconnect_attempts[symbol] = self.reconnect_attempts.get(symbol, 0) + 1
                 
                 if self.reconnect_attempts[symbol] >= self.max_reconnect_attempts:

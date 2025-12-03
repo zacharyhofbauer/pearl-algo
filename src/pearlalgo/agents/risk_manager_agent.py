@@ -447,11 +447,11 @@ class RiskManagerAgent:
                 else:  # Short
                     stop_loss = price + (atr * atr_multiplier)
             else:
-                # Default: 1% stop loss
+            # Default: 1% stop loss
                 fixed_percent = self.config.get("risk", {}).get("stop_loss", {}).get("fixed_percent", 0.01)
-                if position_size > 0:  # Long
+            if position_size > 0:  # Long
                     stop_loss = price * (1 - fixed_percent)
-                else:  # Short
+            else:  # Short
                     stop_loss = price * (1 + fixed_percent)
 
         if not take_profit:

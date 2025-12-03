@@ -17,7 +17,7 @@ try:
     HAS_LOGURU = True
 except ImportError:
     HAS_LOGURU = False
-    from rich.logging import RichHandler
+from rich.logging import RichHandler
 
 # Context variable for correlation ID
 correlation_id_var: ContextVar[Optional[str]] = ContextVar("correlation_id", default=None)
@@ -131,28 +131,28 @@ def setup_logging(
         else:
             # Rich handler for console
             handlers.append(RichHandler(rich_tracebacks=True))
-        
-        if log_file:
-            log_path = Path(log_file)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_path)
+
+    if log_file:
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_path)
             if structured:
                 file_handler.setFormatter(StructuredFormatter())
             else:
-                file_handler.setFormatter(
-                    logging.Formatter(
-                        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-                        datefmt="%Y-%m-%d %H:%M:%S",
-                    )
-                )
-            handlers.append(file_handler)
-        
-        logging.basicConfig(
-            level=level,
-            format="%(message)s" if not json_output else "",
-            datefmt="[%X]",
-            handlers=handlers,
+        file_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
         )
+        handlers.append(file_handler)
+
+    logging.basicConfig(
+        level=level,
+            format="%(message)s" if not json_output else "",
+        datefmt="[%X]",
+        handlers=handlers,
+    )
 
 
 def log_timing(func: Callable[..., Any]) -> Callable[..., Any]:
