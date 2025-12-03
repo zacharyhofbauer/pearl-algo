@@ -3,11 +3,14 @@
 
 # Broker Configuration
 broker:
-  # Primary broker: "ibkr", "bybit", or "alpaca"
-  primary: "ibkr"
+  # Primary broker: "paper" (recommended), "ibkr" (deprecated), "bybit", or "alpaca"
+  # NOTE: IBKR is deprecated. Use "paper" for internal simulation.
+  primary: "paper"
   
-  # IBKR Configuration (for futures)
+  # IBKR Configuration (OPTIONAL - DEPRECATED)
+  # IBKR is deprecated. Use paper broker instead. See IBKR_DEPRECATION_NOTICE.md
   ibkr:
+    enabled: false  # Set to true only if using IBKR (not recommended)
     host: "${IBKR_HOST:-127.0.0.1}"
     port: "${IBKR_PORT:-7497}"
     client_id: "${IBKR_CLIENT_ID:-1}"

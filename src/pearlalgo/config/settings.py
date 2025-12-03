@@ -92,26 +92,23 @@ class Settings(BaseSettings):
     
     @model_validator(mode="after")
     def validate_ibkr_config(self) -> Self:
-        """Validate IBKR configuration and provide helpful error messages."""
-        # If profile is paper/live and not in dummy mode, validate IBKR config
-        if self.profile in {"paper", "live"} and not self.dummy_mode:
+        """
+        Validate IBKR configuration (now optional).
+        
+        Note: IBKR is deprecated. Use paper broker or other providers instead.
+        IBKR configuration is only validated if explicitly using IBKR broker.
+        """
+        # IBKR is now optional - only validate if explicitly using IBKR
+        # System works without IBKR using paper broker and other data providers
+        if self.ib_enable:
+            # Only validate if IBKR is explicitly enabled
             if not self.ib_host or self.ib_host == "":
-                raise ValueError(
-                    "IBKR host is required for paper/live trading. "
-                    "Set IBKR_HOST in .env or enable dummy_mode for testing. "
-                    "See IBKR_CONNECTION_FIXES.md for help."
-                )
-            if self.ib_port <= 0:
-                raise ValueError(
-                    f"Invalid IBKR port: {self.ib_port}. "
-                    "Set IBKR_PORT in .env (default: 4002 for Gateway, 7497 for TWS). "
-                    "See IBKR_CONNECTION_FIXES.md for help."
-                )
-            if self.ib_client_id < 0:
-                raise ValueError(
-                    f"Invalid IBKR client ID: {self.ib_client_id}. "
-                    "Set IBKR_CLIENT_ID in .env (default: 1). "
-                    "See IBKR_CONNECTION_FIXES.md for help."
+                import warnings
+                warnings.warn(
+                    "IBKR is deprecated. Use paper broker instead. "
+                    "See IBKR_DEPRECATION_NOTICE.md for migration guide.",
+                    DeprecationWarning,
+                    stacklevel=2
                 )
         return self
     

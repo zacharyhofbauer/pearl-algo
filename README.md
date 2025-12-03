@@ -1,6 +1,6 @@
 # pearlalgo-dev-ai-agents
 
-**Professional-grade, agentic AI trading bot for futures contracts** using LangGraph multi-agent architecture. Supports ES, NQ, CL, GC futures and crypto perpetuals via IBKR, Bybit, and Alpaca brokers.
+**Professional-grade, vendor-agnostic quantitative trading platform** using LangGraph multi-agent architecture. **Operates independently of IBKR** with Polygon.io/Tradier data providers and internal paper trading engines. Supports futures, options, and crypto via multiple brokers.
 
 ## ⚠️ RISK WARNINGS
 
@@ -33,9 +33,10 @@ This system implements a professional quant/agentic trading architecture:
 - Real-time PnL tracking and risk monitoring
 
 ### Data & Execution
-- Multi-broker support: IBKR (futures), Bybit (crypto perps), Alpaca (US futures)
-- Explicit dummy mode flag for testing (no silent fallbacks)
-- Fail-fast configuration validation
+- **Vendor-Agnostic Data Layer**: Polygon.io, Tradier, Local Parquet (IBKR optional/deprecated)
+- **Professional Paper Trading**: Realistic futures/options simulation with slippage and margin
+- **Multi-Broker Support**: Paper (internal), IBKR (deprecated), Bybit, Alpaca
+- **Complete Audit Trail**: SQLite trade ledger for immutable record-keeping
 - Professional error handling with clear diagnostics
 
 ### Open-Source Philosophy

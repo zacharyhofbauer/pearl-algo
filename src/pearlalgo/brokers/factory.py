@@ -1,7 +1,10 @@
 """
 Broker Factory - Unified broker selection and initialization.
 
-Provides a factory pattern for creating brokers (IBKR, Bybit, Alpaca).
+Provides a factory pattern for creating brokers (Paper, Mock, IBKR, Bybit, Alpaca).
+
+Recommended: Use "paper" broker for internal simulation (no external dependencies).
+IBKR is deprecated - see IBKR_DEPRECATION_NOTICE.md.
 """
 
 from __future__ import annotations
@@ -40,7 +43,7 @@ def get_broker(
     Factory function to create a broker instance.
 
     Args:
-        broker_name: "ibkr", "bybit", or "alpaca"
+        broker_name: "paper" (recommended), "mock", "ibkr" (deprecated), "bybit", or "alpaca"
         portfolio: Portfolio instance
         config: Configuration dictionary
         risk_guard: Optional risk guard
@@ -52,6 +55,14 @@ def get_broker(
     config = config or {}
 
     if broker_name == "ibkr":
+        import warnings
+        warnings.warn(
+            "IBKR broker is deprecated. Use 'paper' broker instead. "
+            "See IBKR_DEPRECATION_NOTICE.md for migration guide.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        
         from pearlalgo.config.settings import get_settings
 
         settings = get_settings()

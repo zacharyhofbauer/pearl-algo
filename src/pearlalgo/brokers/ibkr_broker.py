@@ -34,6 +34,10 @@ def _contract(symbol: str, sec_type: str = "STK", exchange: str | None = None):
 class IBKRBroker(Broker):
     """
     Minimal IBKR broker adapter using ib_insync.
+    
+    **DEPRECATED**: IBKR is now optional and deprecated.
+    Use PaperBroker for internal simulation instead.
+    See IBKR_DEPRECATION_NOTICE.md for migration guide.
 
     Safe-by-default: unless allow_live_trading and profile=live are set, orders are logged and not sent.
     """

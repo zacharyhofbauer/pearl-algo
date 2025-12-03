@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 class IBKRDataProvider(DataProvider):
     """
     Thin ib_insync wrapper for historical data.
+    
+    **DEPRECATED**: IBKR is now optional and deprecated.
+    Use Polygon/Tradier/local providers instead.
+    See IBKR_DEPRECATION_NOTICE.md for migration guide.
 
     This provider is read-only and intended for research/backtesting.
     """
