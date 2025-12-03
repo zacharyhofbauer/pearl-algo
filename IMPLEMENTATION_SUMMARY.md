@@ -128,3 +128,4 @@
 4. **Efficient data storage** - Parquet format for fast historical access
 5. **Modular architecture** - Easy to extend and enhance
 
+

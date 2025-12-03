@@ -147,3 +147,4 @@ class FuturesRiskCalculator:
         max_size = available_margin / margin_req.total_required
         return max_size
 
+

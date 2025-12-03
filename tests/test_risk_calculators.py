@@ -121,3 +121,4 @@ class TestPortfolioRiskAggregator:
         assert "margin_usage_pct" in metrics
         assert "num_positions" in metrics
 
+

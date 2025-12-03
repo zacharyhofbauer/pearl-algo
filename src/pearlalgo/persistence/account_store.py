@@ -214,3 +214,4 @@ class AccountStore:
         snapshots = self.get_snapshots(limit=1)
         return snapshots[0] if snapshots else None
 
+

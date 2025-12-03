@@ -285,3 +285,4 @@ class OptionsFillModel(FillModel):
         # Fallback to base model if bid/ask not available
         return super().calculate_slippage(price, side, quantity)
 
+

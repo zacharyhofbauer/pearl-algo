@@ -163,3 +163,4 @@ def register_provider(name: str, provider_class: Type[DataProvider]) -> None:
     _PROVIDER_REGISTRY[name] = provider_class
     logger.info(f"Registered custom data provider: {name}")
 
+

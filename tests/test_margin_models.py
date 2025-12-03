@@ -113,3 +113,4 @@ class TestOptionsMarginModel:
         expected = 5.0 - 1.50  # max_loss - short_premium
         assert margin.total_required == pytest.approx(expected, abs=0.01)
 
+

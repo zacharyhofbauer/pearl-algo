@@ -145,3 +145,4 @@ class TestDataNormalizer:
         invalid_df = pd.DataFrame({"open": [100.0]}, index=[dates[0]])
         assert not normalizer.validate_ohlcv(invalid_df)
 
+

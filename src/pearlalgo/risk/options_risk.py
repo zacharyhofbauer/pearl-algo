@@ -184,3 +184,4 @@ class OptionsRiskCalculator:
             "total_pnl_estimate": delta_pnl + gamma_pnl + theta_pnl + vega_pnl,
         }
 
+

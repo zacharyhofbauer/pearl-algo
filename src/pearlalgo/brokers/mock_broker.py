@@ -157,3 +157,4 @@ class MockBroker(Broker):
         """Set a fixed fill price for all orders."""
         self.fill_price_func = lambda order: price
 
+

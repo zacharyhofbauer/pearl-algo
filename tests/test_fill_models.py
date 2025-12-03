@@ -103,3 +103,4 @@ class TestOptionsFillModel:
         # Sell should fill near bid
         assert sell_fill <= 2.45
 
+

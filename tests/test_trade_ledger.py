@@ -131,3 +131,4 @@ class TestTradeLedger:
         assert daily_pnl["realized_pnl"] == pytest.approx(8.0, abs=0.01)
         assert daily_pnl["num_fills"] == 2
 
+

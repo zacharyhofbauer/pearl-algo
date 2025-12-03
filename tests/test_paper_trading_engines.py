@@ -140,3 +140,4 @@ class TestPaperOptionsEngine:
             assert fill.symbol == "QQQ_20241220_C_400"
             assert fill.price >= 2.45  # Should be in bid-ask range
 
+

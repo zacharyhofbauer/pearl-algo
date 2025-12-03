@@ -269,3 +269,4 @@ class LocalParquetProvider(DataProvider):
         """
         return self._get_file_path(symbol, timeframe).exists()
 
+

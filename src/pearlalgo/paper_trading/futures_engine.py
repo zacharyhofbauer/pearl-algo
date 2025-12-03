@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 from typing import Callable, Dict, Optional
 
-from pearlalgo.core.events import FillEvent, MarketDataEvent, OrderEvent
+from pearlalgo.core.events import FillEvent, OrderEvent
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.paper_trading.fill_models import FillModelConfig, FuturesFillModel
 from pearlalgo.paper_trading.margin_models import FuturesMarginModel
@@ -217,4 +217,5 @@ class PaperFuturesEngine:
             for symbol, pos in self.portfolio.positions.items()
             if pos.size != 0
         }
+
 
