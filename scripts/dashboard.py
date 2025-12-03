@@ -261,12 +261,35 @@ def compute_trade_statistics(perf_df: pd.DataFrame) -> dict[str, Any]:
         "entry_time" in completed_trades.columns
         and "exit_time" in completed_trades.columns
     ):
-        durations = (
-            completed_trades["exit_time"] - completed_trades["entry_time"]
-        ).dt.total_seconds() / 60.0
-        durations = durations.dropna()
-        if len(durations) > 0:
-            avg_hold_time = float(durations.mean())
+        try:
+            # Ensure both datetime columns are timezone-aware or both are naive
+            entry_times = pd.to_datetime(completed_trades["entry_time"])
+            exit_times = pd.to_datetime(completed_trades["exit_time"])
+            
+            # Normalize timezones: if one is aware and one is naive, make both aware (UTC)
+            entry_tz = entry_times.dt.tz
+            exit_tz = exit_times.dt.tz
+            
+            if entry_tz is None and exit_tz is not None:
+                # Entry is naive, exit is aware - make entry aware (assume UTC)
+                entry_times = entry_times.dt.tz_localize('UTC')
+            elif exit_tz is None and entry_tz is not None:
+                # Exit is naive, entry is aware - make exit aware (assume UTC)
+                exit_times = exit_times.dt.tz_localize('UTC')
+            elif entry_tz is not None and exit_tz is not None:
+                # Both are aware - ensure same timezone
+                if entry_tz != exit_tz:
+                    exit_times = exit_times.dt.tz_convert(entry_tz)
+            
+            # Now safe to subtract
+            durations = (exit_times - entry_times).dt.total_seconds() / 60.0
+            durations = durations.dropna()
+            if len(durations) > 0:
+                avg_hold_time = float(durations.mean())
+        except (TypeError, ValueError) as e:
+            # If timezone handling fails, skip duration calculation
+            # This can happen with mixed timezone data
+            pass
     total_trades = len(completed_trades)
     win_rate = (len(winners) / total_trades * 100.0) if total_trades > 0 else 0.0
     largest_winner = float(winners.max()) if len(winners) > 0 else 0.0
