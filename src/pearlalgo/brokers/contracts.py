@@ -115,79 +115,28 @@ def discover_future_contracts(
     details: list[ContractDetails] = []
     seen: set[int] = set()
     
-    # Check if we're in an async context
-    try:
-        loop = asyncio.get_running_loop()
-        # In async context - need to handle carefully
-        # Use a thread to run the sync call
-        import threading
-        from queue import Queue
-        result_queue = Queue()
-        error_queue = Queue()
-        
-        def _discover_in_thread():
-            nonlocal details, seen
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            try:
-                for exch in _exchange_candidates(symbol, exchange):
-                    try:
-                        contract = Future(symbol=symbol, exchange=exch, currency=currency)
-                        # Use async method in new loop
-                        res = new_loop.run_until_complete(ib.reqContractDetailsAsync(contract))
-                        if res:
-                            for det in res:
-                                cid = getattr(det.contract, "conId", 0)
-                                if cid and cid in seen:
-                                    continue
-                                seen.add(cid)
-                                details.append(det)
-                            if details:
-                                break
-                    except Exception as exc:
-                        logger.debug(
-                            "ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc
-                        )
+    # Use sync method - ib_insync's sync methods work from any context
+    # The connection's internal event loop handles async operations
+    for exch in _exchange_candidates(symbol, exchange):
+        try:
+            contract = Future(symbol=symbol, exchange=exch, currency=currency)
+            # Use sync method - works even in async contexts
+            # ib_insync handles the event loop internally
+            res = ib.reqContractDetails(contract)
+            if res:
+                for det in res:
+                    cid = getattr(det.contract, "conId", 0)
+                    if cid and cid in seen:
                         continue
-                result_queue.put(details)
-            except Exception as e:
-                error_queue.put(e)
-            finally:
-                new_loop.close()
-        
-        thread = threading.Thread(target=_discover_in_thread, daemon=True)
-        thread.start()
-        thread.join(timeout=10)
-        
-        if not error_queue.empty():
-            raise error_queue.get()
-        if not result_queue.empty():
-            details = result_queue.get()
-        else:
-            logger.warning(f"Contract discovery timed out for {symbol}")
-            
-    except RuntimeError:
-        # No running event loop - use sync method
-        for exch in _exchange_candidates(symbol, exchange):
-            try:
-                res = ib.reqContractDetails(
-                    Future(symbol=symbol, exchange=exch, currency=currency)
-                )
-            except Exception as exc:
-                logger.debug(
-                    "ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc
-                )
-                continue
-            if not res:
-                continue
-            for det in res:
-                cid = getattr(det.contract, "conId", 0)
-                if cid and cid in seen:
-                    continue
-                seen.add(cid)
-                details.append(det)
-            if details:
-                break
+                    seen.add(cid)
+                    details.append(det)
+                if details:
+                    break
+        except Exception as exc:
+            logger.debug(
+                "ContractDetails lookup failed for %s on %s: %s", symbol, exch, exc
+            )
+            continue
     
     details.sort(
         key=lambda d: parse_ib_expiry(
@@ -284,48 +233,17 @@ def resolve_future_contract(
         )
         return None
 
-    # Qualify contract - handle both sync and async contexts
-    import asyncio
+    # Qualify contract - use sync method
+    # ib_insync's sync methods work from any context (sync or async)
+    # The connection's internal event loop handles async operations
     try:
-        loop = asyncio.get_running_loop()
-        # In async context - use thread for qualification
-        import threading
-        from queue import Queue
-        result_queue = Queue()
-        
-        def _qualify_in_thread():
-            nonlocal contract
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            try:
-                qualified = new_loop.run_until_complete(ib.qualifyContractsAsync(contract))
-                if qualified:
-                    result_queue.put(qualified[0])
-                else:
-                    result_queue.put(contract)
-            except Exception as exc:
-                logger.debug(
-                    "Qualification failed for %s on %s: %s", symbol, contract.exchange, exc
-                )
-                result_queue.put(contract)
-            finally:
-                new_loop.close()
-        
-        thread = threading.Thread(target=_qualify_in_thread, daemon=True)
-        thread.start()
-        thread.join(timeout=5)
-        if not result_queue.empty():
-            contract = result_queue.get()
-    except RuntimeError:
-        # No running loop - use sync method
-        try:
-            qualified = ib.qualifyContracts(contract)
-            if qualified:
-                contract = qualified[0]
-        except Exception as exc:
-            logger.debug(
-                "Qualification failed for %s on %s: %s", symbol, contract.exchange, exc
-            )
+        qualified = ib.qualifyContracts(contract)
+        if qualified:
+            contract = qualified[0]
+    except Exception as exc:
+        logger.debug(
+            "Qualification failed for %s on %s: %s", symbol, contract.exchange, exc
+        )
     return contract
 
 
