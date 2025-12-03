@@ -75,16 +75,16 @@ pearlalgo trade auto MGC MYM MCL MNQ MES --strategy sr --interval 60 --tiny-size
 
 ### 6. Monitor Trading
 
-**Terminal 1: Quant-Grade Dashboard** (Recommended)
+**Terminal 1: Unified Dashboard** (Recommended)
 ```bash
-# Live updating dashboard (60s refresh default)
-python scripts/status_dashboard.py --live
+# Unified dashboard
+python scripts/dashboard.py
 
-# Custom refresh rate (30 seconds)
-python scripts/status_dashboard.py --live --refresh 30
+# Monitor trades
+./monitor_trades.sh
 
-# Show once and exit
-python scripts/status_dashboard.py
+# Health check
+python scripts/health_check.py
 ```
 
 **Terminal 2: Live Trading Feed**
@@ -94,50 +94,31 @@ pearlalgo monitor --live-feed
 
 ### 7. Stop Trading
 ```bash
-# Kill all trading processes
-bash scripts/kill_my_processes.sh
+# Stop the trader (in the terminal running it)
+Ctrl+C
 
-# Or manually
-pkill -f "pearlalgo trade auto"
+# Or kill by process name
+pkill -f "langgraph_trader"
+pkill -f "pearlalgo.live.langgraph_trader"
 ```
 
 ---
 
 ## 📊 Dashboard Commands
 
-### Quant-Grade Dashboard (New)
+### Unified Dashboard
 ```bash
-# Show dashboard once
-python scripts/status_dashboard.py
+# Main dashboard
+python scripts/dashboard.py
 
-# Live updating (default 60s refresh)
-python scripts/status_dashboard.py --live
+# Monitor trades
+./monitor_trades.sh
 
-# Custom refresh interval
-python scripts/status_dashboard.py --live --refresh 30
-```
+# Health check
+python scripts/health_check.py
 
-### Legacy Dashboard Commands
-```bash
-# Standard dashboard
-pearlalgo dashboard
-
-# Comprehensive full-screen dashboard
-pearlalgo dashboard --full
-
-# Custom refresh rate
-pearlalgo dashboard --refresh 3
-
-# Show once and exit
-pearlalgo dashboard --once
-```
-
-### Direct Script Access
-```bash
-# Comprehensive dashboard
-python scripts/comprehensive_dashboard.py
-python scripts/comprehensive_dashboard.py --refresh 2
-python scripts/comprehensive_dashboard.py --once
+# System health
+python scripts/system_health_check.py
 ```
 
 ---
@@ -250,8 +231,11 @@ pearlalgo status
 # Detailed health check
 python scripts/system_health_check.py
 
-# Test IB connection
-python scripts/test_broker_connection.py
+# Debug environment configuration
+python scripts/debug_env.py
+
+# Test IBKR connection
+python scripts/debug_ibkr.py
 
 # Check trading processes
 ps aux | grep "pearlalgo trade"
@@ -274,9 +258,10 @@ pearlalgo gateway stop
 pearlalgo signals --strategy sr --symbols ES NQ GC
 
 # View dashboard
-python scripts/status_dashboard.py --live
+python scripts/dashboard.py
 
 # Health check
+python scripts/health_check.py
 python scripts/system_health_check.py
 ```
 
@@ -298,10 +283,14 @@ pearlalgo gateway restart
 
 ### Can't Connect?
 ```bash
-# Test connection
-python scripts/test_broker_connection.py
+# Debug configuration
+python scripts/debug_env.py
+
+# Test IBKR connection
+python scripts/debug_ibkr.py
 
 # Check health
+python scripts/health_check.py
 python scripts/system_health_check.py
 
 # Verify gateway is running
@@ -316,8 +305,11 @@ ps aux | grep "pearlalgo trade"
 # Check logs
 tail -50 logs/micro_trading.log
 
-# Verify gateway connection
-python scripts/test_broker_connection.py
+# Debug environment
+python scripts/debug_env.py
+
+# Verify IBKR gateway connection
+python scripts/debug_ibkr.py
 ```
 
 ### Dashboard Shows No Data?
@@ -345,9 +337,9 @@ head -20 data/performance/futures_decisions.csv
 ## 💡 Pro Tips
 
 1. **Multi-Terminal Setup**: Use 2-3 terminals:
-   - Terminal 1: Dashboard (`python scripts/status_dashboard.py --live`)
-   - Terminal 2: Live feed (`pearlalgo monitor --live-feed`)
-   - Terminal 3: Logs (`tail -f logs/micro_trading.log`)
+   - Terminal 1: Dashboard (`python scripts/dashboard.py`)
+   - Terminal 2: Monitor (`./monitor_trades.sh`)
+   - Terminal 3: Logs (`tail -f logs/langgraph_trading.log`)
 
 2. **Start with Micro**: Always test with micro contracts first (MGC, MYM, etc.) before trading standard contracts.
 
@@ -355,7 +347,9 @@ head -20 data/performance/futures_decisions.csv
 
 4. **Check Gateway First**: Always verify gateway is running before starting trading.
 
-5. **Use Scripts**: Prefer using `start_micro.sh` over manual commands for consistency.
+5. **Use Scripts**: Prefer using `./start_micro_paper_trading.sh` or LangGraph trader for consistency.
+6. **Verify Config First**: Always run `python scripts/debug_env.py` before trading.
+7. **Test IBKR Connection**: Run `python scripts/debug_ibkr.py` if having connection issues.
 
 ---
 
@@ -371,10 +365,10 @@ Old scripts still work, but you can migrate to the new CLI:
 
 | Old Command | New Command |
 |------------|-------------|
-| `python scripts/workflow.py --signals` | `pearlalgo signals` |
-| `python scripts/status_dashboard.py` | `python scripts/status_dashboard.py --live` or `pearlalgo dashboard` |
-| `python scripts/automated_trading.py` | `pearlalgo trade auto` |
-| `python scripts/live_paper_loop.py` | `pearlalgo trade paper` |
+| `python scripts/run_daily_signals.py` | Daily signals generation |
+| `python scripts/dashboard.py` | Unified dashboard |
+| `python -m pearlalgo.live.langgraph_trader` | Main LangGraph trader |
+| `python scripts/daily_workflow.py` | Daily workflow (signals + report) |
 | `python scripts/setup_assistant.py` | `pearlalgo setup` |
 
 ---
@@ -383,13 +377,14 @@ Old scripts still work, but you can migrate to the new CLI:
 
 | Action | Command |
 |--------|---------|
-| **Start Trading (Micro)** | `bash scripts/start_micro.sh` |
-| **View Dashboard** | `python scripts/status_dashboard.py --live` |
-| **Check Status** | `pearlalgo status` |
-| **Start Gateway** | `pearlalgo gateway start` |
-| **Stop Trading** | `bash scripts/kill_my_processes.sh` |
-| **View Logs** | `tail -f logs/micro_trading.log` |
-| **Test Connection** | `python scripts/test_broker_connection.py` |
+| **Verify Config** | `python scripts/debug_env.py` |
+| **Test IBKR Connection** | `python scripts/debug_ibkr.py` |
+| **Start Trading (Paper)** | `./start_micro_paper_trading.sh` |
+| **View Dashboard** | `python scripts/dashboard.py` |
+| **Monitor Trades** | `./monitor_trades.sh` |
+| **Health Check** | `python scripts/health_check.py` |
+| **Stop Trading** | `Ctrl+C` in trader terminal |
+| **View Logs** | `tail -f logs/langgraph_trading.log` |
 
 ---
 

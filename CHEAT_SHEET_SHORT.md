@@ -7,43 +7,66 @@
 ## 🚀 Daily Workflow
 
 ```bash
-# 1. Activate & Check Status
+# 1. Activate & Check Configuration
 cd ~/pearlalgo-dev-ai-agents && source .venv/bin/activate
-pearlalgo status
+python scripts/debug_env.py          # Verify .env configuration
 
-# 2. Start Gateway (if needed)
-pearlalgo gateway start --wait
+# 2. Test IBKR Connection (if using IBKR)
+python scripts/debug_ibkr.py         # Test IBKR Gateway connection
 
-# 3. Start Trading (Micro - Recommended)
-bash scripts/start_micro.sh
+# 3. Start Trading (Paper Mode - Recommended)
+./start_micro_paper_trading.sh       # Quick start with micro contracts
+# OR
+python -m pearlalgo.live.langgraph_trader \
+    --symbols MES MNQ \
+    --strategy sr \
+    --mode paper \
+    --interval 60
 
 # 4. View Dashboard (New Terminal)
-python scripts/status_dashboard.py --live --refresh 30
+python scripts/dashboard.py           # Unified dashboard
 
-# 5. Stop Trading
-bash scripts/kill_my_processes.sh
+# 5. Monitor Logs (New Terminal)
+tail -f logs/langgraph_trading.log   # Trading logs
+./monitor_trades.sh                  # Monitor script
+
+# 6. Stop Trading
+# Press Ctrl+C in the terminal running the trader
 ```
 
 ---
 
-## 📊 Dashboard
+## 📊 Dashboard & Monitoring
 
 ```bash
-# Live dashboard (60s refresh)
-python scripts/status_dashboard.py --live
+# Unified dashboard
+python scripts/dashboard.py
 
-# Custom refresh (30s)
-python scripts/status_dashboard.py --live --refresh 30
+# Monitor trades
+./monitor_trades.sh
 
-# Show once
-python scripts/status_dashboard.py
+# Health check
+python scripts/health_check.py
+
+# System health
+python scripts/system_health_check.py
 ```
 
 ---
 
-## 🔌 Gateway
+## 🔌 IBKR Gateway & Connection
 
 ```bash
+# Debug IBKR connection
+python scripts/debug_ibkr.py
+
+# Check IBKR Gateway status
+bash scripts/ibgateway_status.sh
+
+# View IBKR Gateway logs
+bash scripts/ibgateway_logs.sh
+
+# Or use CLI (if available)
 pearlalgo gateway status    # Check status
 pearlalgo gateway start     # Start
 pearlalgo gateway stop      # Stop
@@ -55,14 +78,21 @@ pearlalgo gateway restart   # Restart
 ## 📈 Trading
 
 ```bash
-# Micro Strategy (Recommended)
-bash scripts/start_micro.sh
+# Quick Start (Paper Trading with Micro Contracts)
+./start_micro_paper_trading.sh
 
-# Standard Contracts
-pearlalgo trade auto ES NQ GC --strategy sr --interval 300
+# LangGraph Trader (Main System)
+python -m pearlalgo.live.langgraph_trader \
+    --symbols MES MNQ \
+    --strategy sr \
+    --mode paper \
+    --interval 60
 
-# Micro Contracts
-pearlalgo trade auto MGC MYM MCL MNQ MES --strategy sr --interval 60 --tiny-size 3
+# Daily Workflow (Signals + Report)
+python scripts/daily_workflow.py --symbols ES NQ GC
+
+# Run Daily Signals
+python scripts/run_daily_signals.py --strategy sr --symbols ES NQ
 ```
 
 ---
@@ -70,11 +100,18 @@ pearlalgo trade auto MGC MYM MCL MNQ MES --strategy sr --interval 60 --tiny-size
 ## 📝 Logs
 
 ```bash
-# Trading logs
-tail -f logs/micro_trading.log
-tail -f logs/micro_console.log
+# Main trading logs
+tail -f logs/langgraph_trading.log
+
+# Daily summary
+tail -20 logs/daily_summary.csv
+
+# Performance data
+tail -20 data/performance/futures_decisions.csv
 
 # Gateway logs
+bash scripts/ibgateway_logs.sh
+# or
 tail -50 /tmp/ibgateway.log
 ```
 
@@ -83,19 +120,34 @@ tail -50 /tmp/ibgateway.log
 ## 🛑 Stop Trading
 
 ```bash
-bash scripts/kill_my_processes.sh
-# or
-pkill -f "pearlalgo trade auto"
+# Stop the trader (in the terminal running it)
+Ctrl+C
+
+# Or kill by process name
+pkill -f "langgraph_trader"
+pkill -f "pearlalgo.live.langgraph_trader"
 ```
 
 ---
 
-## 🔍 Quick Checks
+## 🔍 Quick Checks & Debugging
 
 ```bash
-pearlalgo status                              # System status
-python scripts/test_broker_connection.py     # Test connection
-ps aux | grep "pearlalgo trade"              # Check if trading
+# Verify environment configuration
+python scripts/debug_env.py
+
+# Test IBKR connection
+python scripts/debug_ibkr.py
+
+# System health check
+python scripts/health_check.py
+
+# Verify setup
+python scripts/verify_setup.py
+
+# Check if trading is running
+ps aux | grep "langgraph_trader"
+ps aux | grep "pearlalgo.live"
 ```
 
 ---
@@ -104,33 +156,65 @@ ps aux | grep "pearlalgo trade"              # Check if trading
 
 - **Signals**: `signals/YYYYMMDD_signals.csv`
 - **Performance**: `data/performance/futures_decisions.csv`
-- **Config**: `config/prop_profile.yaml`
+- **Config**: `config/config.yaml`
+- **Environment**: `.env` (see `.env.example` for template)
+- **State Cache**: `data/state_cache/` (LangGraph state)
+- **Logs**: `logs/langgraph_trading.log`
 
 ---
 
 ## 💡 Pro Tips
 
-1. **Use 2 terminals**: Dashboard in one, logs in another
-2. **Start with micro**: Test with MGC, MYM before standard contracts
-3. **Monitor risk**: Keep dashboard open to watch risk state
-4. **Check gateway first**: Always verify gateway is running
+1. **Use multiple terminals**: Dashboard in one, logs in another, trading in third
+2. **Start with paper mode**: Always test in paper mode first (`PEARLALGO_PROFILE=paper`)
+3. **Verify config first**: Run `python scripts/debug_env.py` before trading
+4. **Use dummy mode for testing**: Set `PEARLALGO_DUMMY_MODE=true` to test without IBKR
+5. **Monitor risk**: Keep dashboard open to watch risk state
+6. **Check IBKR connection**: Run `python scripts/debug_ibkr.py` if having connection issues
 
 ---
 
 ## 🆘 Quick Troubleshooting
 
 ```bash
-# Gateway not starting?
-pearlalgo gateway restart
+# Configuration issues?
+python scripts/debug_env.py          # Check .env configuration
 
-# Can't connect?
-python scripts/test_broker_connection.py
+# IBKR connection problems?
+python scripts/debug_ibkr.py         # Test IBKR connection
+# See IBKR_CONNECTION_FIXES.md for detailed help
+
+# Gateway not starting?
+bash scripts/ibgateway_status.sh     # Check status
+pearlalgo gateway restart            # Restart (if CLI available)
 
 # Dashboard shows no data?
 ls -la data/performance/futures_decisions.csv
+tail -20 data/performance/futures_decisions.csv
+
+# System not working?
+python scripts/health_check.py       # Run health check
+python test_system.py                # Run system tests
 ```
 
 ---
 
-**For full documentation**: `pearlalgo help --full` or see `CHEAT_SHEET.md`
+## ⚙️ Environment Variables
+
+Key variables in `.env`:
+```bash
+# IBKR Configuration
+IBKR_HOST=127.0.0.1
+IBKR_PORT=4002
+IBKR_CLIENT_ID=10
+IBKR_DATA_CLIENT_ID=11
+
+# Trading Mode
+PEARLALGO_PROFILE=paper              # paper, live, backtest, dummy
+PEARLALGO_DUMMY_MODE=false           # true = allow dummy data fallback
+
+# See .env.example for complete template
+```
+
+**For full documentation**: See `START_HERE.md` or `CHEAT_SHEET.md`
 
