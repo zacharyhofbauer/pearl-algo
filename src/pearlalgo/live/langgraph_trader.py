@@ -9,8 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import warnings
 from pathlib import Path
 from typing import List, Optional
+
+# Suppress noisy warnings from third-party libraries
+warnings.filterwarnings('ignore', message='.*Task exception was never retrieved.*')
+warnings.filterwarnings('ignore', message='.*This event loop is already running.*')
 
 try:
     import yaml
@@ -48,6 +53,34 @@ class LangGraphTrader:
         mode: str = "paper",
     ):
         # Load configuration
+        import os
+        import re
+        
+        def expand_env_vars(obj):
+            """Recursively expand ${VAR} environment variables in config."""
+            if isinstance(obj, dict):
+                return {k: expand_env_vars(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [expand_env_vars(item) for item in obj]
+            elif isinstance(obj, str):
+                # Match ${VAR} or ${VAR:-default} (handles both ${VAR} and \${VAR} from YAML)
+                def replace_env(match):
+                    var_expr = match.group(1)
+                    if ':-' in var_expr:
+                        var_name, default = var_expr.split(':-', 1)
+                        return os.getenv(var_name.strip(), default)
+                    else:
+                        var_name = var_expr.strip()
+                        env_value = os.getenv(var_name)
+                        if env_value:
+                            return env_value
+                        # Return original if not found (keep ${VAR} in config)
+                        return match.group(0)
+                # Match ${VAR} pattern
+                result = re.sub(r'\$\{([^}]+)\}', replace_env, obj)
+                return result
+            return obj
+        
         if config_path:
             with open(config_path, "r") as f:
                 if yaml:
@@ -71,6 +104,9 @@ class LangGraphTrader:
                         self.config = json.load(f)
             else:
                 self.config = {}
+        
+        # Expand environment variables in config
+        self.config = expand_env_vars(self.config)
 
         # Override with parameters
         self.symbols = symbols or self.config.get("symbols", {}).get("futures", [])

@@ -214,6 +214,9 @@ class MarketDataAgent:
                 )
                 if df is not None and not df.empty:
                     return self._convert_dataframe_to_market_data(symbol, df)
+            except RuntimeError as e:
+                # IBKR Gateway not available - expected in paper mode
+                logger.debug(f"IBKR REST fetch failed for {symbol}: {e}")
             except Exception as e:
                 logger.debug(f"REST fetch failed for {symbol}: {e}")
 

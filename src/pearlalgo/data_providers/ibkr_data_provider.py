@@ -55,12 +55,23 @@ class IBKRDataProvider(DataProvider):
                 self.connection.host,
                 self.connection.port,
                 clientId=self.connection.client_id,
+                timeout=3,  # Short timeout to fail fast
             )
+        except (ConnectionRefusedError, OSError) as exc:
+            # Suppress noisy connection errors - these are expected when Gateway isn't running
+            logger.debug(
+                f"IBKR connection refused at {self.connection.host}:{self.connection.port} "
+                f"(clientId={self.connection.client_id}). Gateway may not be running."
+            )
+            raise RuntimeError(
+                f"IBKR Gateway not available at {self.connection.host}:{self.connection.port}. "
+                f"Please start IB Gateway or use paper trading with dummy data."
+            ) from exc
         except Exception as exc:  # pragma: no cover - requires live IB
+            logger.warning(f"IBKR connection error: {exc}")
             raise RuntimeError(
                 f"Failed to connect to IB at {self.connection.host}:{self.connection.port} "
-                f"(clientId={self.connection.client_id}). Ensure IB Gateway is running and API is enabled. "
-                f"Original error: {exc}"
+                f"(clientId={self.connection.client_id}). Ensure IB Gateway is running and API is enabled."
             ) from exc
         return ib
 

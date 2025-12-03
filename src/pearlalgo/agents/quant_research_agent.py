@@ -101,6 +101,7 @@ class QuantResearchAgent:
     def _initialize_llm(self) -> None:
         """Initialize LLM provider (Groq, OpenAI, Anthropic, or LiteLLM)."""
         try:
+            import os
             llm_config = self.config.get("llm", {})
             provider = llm_config.get("provider", "groq")
 
@@ -112,7 +113,8 @@ class QuantResearchAgent:
                     self.use_llm = False
                     return
 
-                api_key = llm_config.get("groq", {}).get("api_key")
+                # Try config first, then environment variable
+                api_key = llm_config.get("groq", {}).get("api_key") or os.getenv("GROQ_API_KEY")
                 if not api_key:
                     logger.warning("Groq API key not found, LLM reasoning disabled")
                     self.use_llm = False
@@ -120,7 +122,7 @@ class QuantResearchAgent:
 
                 self.llm_provider = Groq(api_key=api_key)
                 self.llm_model = llm_config.get("groq", {}).get(
-                    "model", "mixtral-8x7b-32768"
+                    "model", "llama-3.1-70b-versatile"
                 )
                 logger.info(f"Groq LLM initialized: {self.llm_model}")
 
@@ -134,7 +136,8 @@ class QuantResearchAgent:
                     self.use_llm = False
                     return
 
-                api_key = llm_config.get("openai", {}).get("api_key")
+                # Try config first, then environment variable
+                api_key = llm_config.get("openai", {}).get("api_key") or os.getenv("OPENAI_API_KEY")
                 model = llm_config.get("openai", {}).get("model", "gpt-4o")
 
                 if not api_key:
@@ -143,8 +146,6 @@ class QuantResearchAgent:
                     return
 
                 # Set OpenAI API key for LiteLLM
-                import os
-
                 os.environ["OPENAI_API_KEY"] = api_key
                 self.llm_provider = litellm
                 # LiteLLM format: "openai/model-name"
@@ -163,9 +164,10 @@ class QuantResearchAgent:
                     self.use_llm = False
                     return
 
-                api_key = llm_config.get("anthropic", {}).get("api_key")
+                # Try config first, then environment variable
+                api_key = llm_config.get("anthropic", {}).get("api_key") or os.getenv("ANTHROPIC_API_KEY")
                 model = llm_config.get("anthropic", {}).get(
-                    "model", "claude-3-opus-20240229"
+                    "model", "claude-3-5-sonnet-20241022"
                 )
 
                 if not api_key:
@@ -176,8 +178,6 @@ class QuantResearchAgent:
                     return
 
                 # Set Anthropic API key for LiteLLM
-                import os
-
                 os.environ["ANTHROPIC_API_KEY"] = api_key
                 self.llm_provider = litellm
                 # LiteLLM format: "anthropic/model-name"

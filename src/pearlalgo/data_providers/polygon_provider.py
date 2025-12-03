@@ -79,7 +79,15 @@ class PolygonDataProvider(DataProvider):
                             "vwap": result.get("vw"),
                         }
                 else:
-                    logger.warning(f"Polygon API error for {symbol}: {response.status}")
+                    # 401 = unauthorized (invalid/missing API key), 403 = forbidden, 429 = rate limit
+                    if response.status == 401:
+                        logger.debug(f"Polygon API unauthorized for {symbol} (API key may be invalid or missing)")
+                    elif response.status == 403:
+                        logger.debug(f"Polygon API forbidden for {symbol} (may need paid tier)")
+                    elif response.status == 429:
+                        logger.warning(f"Polygon API rate limit for {symbol}")
+                    else:
+                        logger.debug(f"Polygon API error for {symbol}: {response.status}")
 
         except Exception as e:
             logger.error(f"Error fetching Polygon data for {symbol}: {e}")

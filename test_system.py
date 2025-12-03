@@ -5,7 +5,13 @@ Quick system test - verifies everything is working.
 
 import asyncio
 import sys
+import warnings
 from pathlib import Path
+
+# Suppress noisy warnings from third-party libraries
+warnings.filterwarnings('ignore', message='.*Task exception was never retrieved.*')
+warnings.filterwarnings('ignore', message='.*This event loop is already running.*')
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*coroutine.*')
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -45,13 +51,44 @@ async def test_full_cycle():
     print("TEST 2: Full Trading Cycle")
     print("=" * 60)
     
+    import os
     from pearlalgo.agents.langgraph_workflow import TradingWorkflow
     from pearlalgo.core.portfolio import Portfolio
     
-    config = {
-        'trading': {'mode': 'paper'},
-        'symbols': {'micro_futures': [{'symbol': 'MES'}]}
-    }
+    # Load full config to test environment variable expansion
+    import yaml
+    from pathlib import Path
+    config_path = Path(__file__).parent / "config" / "config.yaml"
+    if config_path.exists():
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        # Expand environment variables
+        import re
+        def expand_env_vars(obj):
+            if isinstance(obj, dict):
+                return {k: expand_env_vars(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [expand_env_vars(item) for item in obj]
+            elif isinstance(obj, str):
+                def replace_env(match):
+                    var_expr = match.group(1)
+                    if ':-' in var_expr:
+                        var_name, default = var_expr.split(':-', 1)
+                        return os.getenv(var_name.strip(), default)
+                    else:
+                        var_name = var_expr.strip()
+                        env_value = os.getenv(var_name)
+                        if env_value:
+                            return env_value
+                        return match.group(0)
+                return re.sub(r'\$\{([^}]+)\}', replace_env, obj)
+            return obj
+        config = expand_env_vars(config)
+    else:
+        config = {
+            'trading': {'mode': 'paper'},
+            'symbols': {'micro_futures': [{'symbol': 'MES'}]}
+        }
     
     portfolio = Portfolio(cash=50000)
     workflow = TradingWorkflow(

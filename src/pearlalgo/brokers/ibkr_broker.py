@@ -56,11 +56,26 @@ class IBKRBroker(Broker):
     def _connect(self) -> IB:
         if self._ib.isConnected():
             return self._ib
-        self._ib.connect(
-            self.settings.ib_host,
-            int(self.settings.ib_port),
-            clientId=int(self.settings.ib_client_id),
-        )
+        try:
+            self._ib.connect(
+                self.settings.ib_host,
+                int(self.settings.ib_port),
+                clientId=int(self.settings.ib_client_id),
+                timeout=3,  # Short timeout to fail fast
+            )
+        except (ConnectionRefusedError, OSError) as exc:
+            # Suppress noisy connection errors - expected when Gateway isn't running
+            logger.debug(
+                f"IBKR connection refused at {self.settings.ib_host}:{self.settings.ib_port} "
+                f"(clientId={self.settings.ib_client_id}). Gateway may not be running."
+            )
+            raise RuntimeError(
+                f"IBKR Gateway not available at {self.settings.ib_host}:{self.settings.ib_port}. "
+                f"Please start IB Gateway or use paper trading with dummy data."
+            ) from exc
+        except Exception as exc:
+            logger.warning(f"IBKR connection error: {exc}")
+            raise
         return self._ib
 
     def _resolve_front_future(
