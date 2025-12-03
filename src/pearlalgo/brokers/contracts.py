@@ -288,20 +288,6 @@ def resolve_future_contract(
     import asyncio
     try:
         loop = asyncio.get_running_loop()
-        # In async context - use async method
-        try:
-            qualified = loop.run_until_complete(ib.qualifyContractsAsync(contract))
-            if qualified:
-                contract = qualified[0]
-        except RuntimeError:
-            # Can't use run_until_complete - skip qualification
-            logger.debug("Skipping contract qualification (async context)")
-    except RuntimeError:
-        # No running loop - use sync method
-    # Qualify contract - handle both sync and async contexts
-    import asyncio
-    try:
-        loop = asyncio.get_running_loop()
         # In async context - use thread for qualification
         import threading
         from queue import Queue

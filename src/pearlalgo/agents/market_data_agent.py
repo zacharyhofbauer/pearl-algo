@@ -112,15 +112,17 @@ class MarketDataAgent:
                 except Exception as e:
                     logger.warning(f"Polygon.io provider failed: {e}")
 
-            # Initialize dummy provider as final fallback (for paper trading)
-            # Only use if in paper mode and no real data sources available
-            trading_mode = self.config.get("trading", {}).get("mode", "paper")
-            if trading_mode == "paper":
+            # Initialize dummy provider ONLY if dummy_mode is explicitly enabled
+            # This prevents silent fallback to dummy data when IBKR is misconfigured
+            settings = get_settings()
+            if settings.dummy_mode:
                 try:
                     self.dummy_provider = DummyDataProvider(symbols=self.symbols)
-                    logger.info("Dummy data provider initialized (paper trading fallback)")
+                    logger.info("Dummy data provider initialized (dummy_mode=True)")
                 except Exception as e:
                     logger.warning(f"Dummy provider failed: {e}")
+            else:
+                logger.debug("Dummy provider disabled (dummy_mode=False). IBKR failures will raise errors.")
 
         except Exception as e:
             logger.error(f"Error initializing providers: {e}", exc_info=True)
@@ -238,16 +240,29 @@ class MarketDataAgent:
             except Exception as e:
                 logger.debug(f"Polygon fetch failed for {symbol}: {e}")
 
-        # Final fallback: Dummy provider (paper trading only)
+        # Final fallback: Dummy provider (ONLY if dummy_mode is enabled)
         if self.dummy_provider:
             try:
                 data = self.dummy_provider.get_latest_bar(symbol)
                 if data:
-                    logger.info(f"Using dummy data for {symbol} (all real sources failed)")
+                    logger.info(f"Using dummy data for {symbol} (dummy_mode=True, all real sources failed)")
                     return self._convert_to_market_data(symbol, data)
             except Exception as e:
                 logger.debug(f"Dummy provider failed for {symbol}: {e}")
 
+        # If we get here and dummy_mode is False, raise clear error
+        settings = get_settings()
+        if not settings.dummy_mode:
+            error_msg = (
+                f"All data sources failed for {symbol}. "
+                f"IBKR connection failed and dummy_mode is disabled. "
+                f"To enable dummy data for testing, set PEARLALGO_DUMMY_MODE=true in .env. "
+                f"Otherwise, ensure IBKR Gateway is running and configured correctly. "
+                f"See IBKR_CONNECTION_FIXES.md for help."
+            )
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+        
         logger.warning(f"All data sources failed for {symbol}")
         return None
 

@@ -295,9 +295,9 @@ class QuantResearchAgent:
                 if self.use_llm and signal_dict.get("side") != "flat":
                     try:
                         reasoning = await self._generate_llm_reasoning_with_retry(
-                        symbol, signal_dict, market_data, regime
-                    )
-                    signal_dict["reasoning"] = reasoning
+                            symbol, signal_dict, market_data, regime
+                        )
+                        signal_dict["reasoning"] = reasoning
                     except Exception as e:
                         logger.warning(f"LLM reasoning failed for {symbol}: {e}")
                         signal_dict["reasoning"] = None

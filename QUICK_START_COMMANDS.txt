@@ -10,13 +10,16 @@ cd /home/pearlalgo/pearlalgo-dev-ai-agents
 # STEP 2: Activate virtual environment
 source .venv/bin/activate
 
-# STEP 3: Test the system (VERIFY EVERYTHING WORKS)
+# STEP 3: Verify environment configuration
+python scripts/debug_env.py
+
+# STEP 4: Test the system (VERIFY EVERYTHING WORKS)
 python test_system.py
 
-# STEP 4: Start paper trading
+# STEP 5: Start paper trading
 ./start_micro_paper_trading.sh
 
-# STEP 5: In a NEW terminal, monitor logs
+# STEP 6: In a NEW terminal, monitor logs
 cd /home/pearlalgo/pearlalgo-dev-ai-agents
 tail -f logs/langgraph_trading.log
 

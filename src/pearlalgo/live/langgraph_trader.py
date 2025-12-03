@@ -19,8 +19,8 @@ warnings.filterwarnings('ignore', message='.*This event loop is already running.
 
 try:
     import yaml
-    except ImportError:
-        yaml = None
+except ImportError:
+    yaml = None
 
 
 try:

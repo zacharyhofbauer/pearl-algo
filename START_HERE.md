@@ -139,7 +139,22 @@ ANTHROPIC_API_KEY=your_key_here
 - ✅ **LLM keys are OPTIONAL** - System works without them (just no LLM reasoning)
 - ✅ **Paper mode is SAFE** - No real money is used
 
-### Step 3: Verify Config File
+### Step 3: Verify Your Configuration
+
+```bash
+# Debug your environment configuration
+python scripts/debug_env.py
+```
+
+This will show you:
+- All parsed settings
+- IBKR configuration
+- Any validation warnings or errors
+- Optional API keys status
+
+**Expected output:** All checks should pass (✓) with no errors.
+
+### Step 4: Verify Config File
 
 ```bash
 # Check config file exists
@@ -152,6 +167,19 @@ cat config/config.yaml | head -30
 ---
 
 ## 🧪 Test the System
+
+### Step 0: Verify Environment Configuration
+
+```bash
+# Make sure you're in project root and venv is activated
+cd /home/pearlalgo/pearlalgo-dev-ai-agents
+source .venv/bin/activate
+
+# Run the debug script to verify your .env is configured correctly
+python scripts/debug_env.py
+```
+
+This will validate your configuration and show any issues. Fix any errors before proceeding.
 
 ### Step 1: Run Quick System Test
 
@@ -519,10 +547,11 @@ tail -f logs/langgraph_trading.log
 
 ## 🆘 Still Need Help?
 
-1. **Check logs:** `tail -100 logs/langgraph_trading.log`
-2. **Run test:** `python test_system.py`
-3. **Verify setup:** `python scripts/verify_setup.py`
-4. **Check status:** `python scripts/setup_assistant.py --status`
+1. **Check configuration:** `python scripts/debug_env.py`
+2. **Check logs:** `tail -100 logs/langgraph_trading.log`
+3. **Run test:** `python test_system.py`
+4. **Verify setup:** `python scripts/verify_setup.py`
+5. **Check status:** `python scripts/setup_assistant.py --status`
 
 ---
 

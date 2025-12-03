@@ -16,6 +16,31 @@
 
 **The authors are not responsible for any financial losses. Trade at your own risk.**
 
+## For Quants
+
+This system implements a professional quant/agentic trading architecture:
+
+### Multi-Agent Architecture
+- **Market Data Agent**: Real-time data streaming with WebSocket + REST fallbacks
+- **Quant Research Agent**: Signal generation with momentum, mean-reversion, regime detection, and optional ML/LLM reasoning
+- **Risk Manager Agent**: Position sizing (2% max risk), 15% drawdown kill-switch, volatility targeting
+- **Portfolio Execution Agent**: Order placement with retry logic and execution quality tracking
+
+### Risk Management
+- Hardcoded safety rules: 2% max risk per trade, 15% account drawdown limit
+- No martingale, no averaging down (enforced)
+- Volatility-based position sizing
+- Real-time PnL tracking and risk monitoring
+
+### Data & Execution
+- Multi-broker support: IBKR (futures), Bybit (crypto perps), Alpaca (US futures)
+- Explicit dummy mode flag for testing (no silent fallbacks)
+- Fail-fast configuration validation
+- Professional error handling with clear diagnostics
+
+### Open-Source Philosophy
+Built entirely on free/open-source tools (Pandas, TA-Lib, Scikit-Learn, Plotly, ib_insync, etc.) - no paid dependencies required for core functionality.
+
 ## Features
 
 ### 🚀 LangGraph Multi-Agent System (NEW)
@@ -44,7 +69,11 @@
 - **Paper Trading**: Default mode with one-click switch to live
 - **LLM Reasoning**: Optional Groq/LiteLLM integration for signal explanation
 
-## Setup
+## Quick Start
+
+**👉 Start here: [START_HERE.md](START_HERE.md)** - Complete step-by-step setup guide
+
+For a quick command reference, see [QUICK_START_COMMANDS.txt](QUICK_START_COMMANDS.txt)
 
 ### Prerequisites
 - Python 3.12+
@@ -72,7 +101,12 @@ cp .env.example .env
 
 # Edit .env with your API keys
 nano .env  # or use your preferred editor
+
+# Verify configuration
+python scripts/debug_env.py
 ```
+
+**For detailed setup instructions, see [START_HERE.md](START_HERE.md)**
 
 ### Configuration
 
@@ -86,8 +120,13 @@ nano .env  # or use your preferred editor
    ```bash
    # IBKR (if using)
    IBKR_HOST=127.0.0.1
-   IBKR_PORT=7497
-   IBKR_CLIENT_ID=1
+   IBKR_PORT=4002
+   IBKR_CLIENT_ID=10
+   IBKR_DATA_CLIENT_ID=11
+
+   # Trading Mode
+   PEARLALGO_PROFILE=paper
+   PEARLALGO_DUMMY_MODE=false
 
    # Bybit (if using)
    BYBIT_API_KEY=your_key

@@ -126,7 +126,9 @@ class IBKRDataProvider(DataProvider):
                 )
                 raise RuntimeError(
                     f"IBKR Gateway not available at {self.connection.host}:{self.connection.port}. "
-                    f"Please start IB Gateway and ensure API is enabled."
+                    f"Please start IB Gateway and ensure API is enabled. "
+                    f"See IBKR_CONNECTION_FIXES.md for help. "
+                    f"If testing without IBKR, set PEARLALGO_DUMMY_MODE=true in .env"
                 ) from exc
             except Exception as exc:
                 error_msg = str(exc).lower()
@@ -138,7 +140,8 @@ class IBKRDataProvider(DataProvider):
                     )
                     raise RuntimeError(
                         f"IBKR client ID {self.connection.client_id} already in use. "
-                        f"Please use a different client ID or close existing connections."
+                        f"Please use a different client ID or close existing connections. "
+                        f"See IBKR_CONNECTION_FIXES.md for help."
                     ) from exc
                 elif "event loop" in error_msg or "already running" in error_msg:
                     logger.error(f"IBKR event loop conflict: {exc}")
