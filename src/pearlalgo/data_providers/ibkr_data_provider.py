@@ -37,88 +37,120 @@ class IBKRDataProvider(DataProvider):
         connection: IBKRConnection | None = None,
     ):
         self.settings = settings or get_settings()
-        # Get client ID from environment or settings
-        # Check for IBKR_DATA_CLIENT_ID first (direct env var), then PEARLALGO_IB_DATA_CLIENT_ID, then fallback
-        import os
-        env_data_client_id = os.getenv("IBKR_DATA_CLIENT_ID") or os.getenv("PEARLALGO_IB_DATA_CLIENT_ID")
-        env_client_id = os.getenv("IBKR_CLIENT_ID") or os.getenv("PEARLALGO_IB_CLIENT_ID")
         
-        if env_data_client_id:
-            data_client_id = int(env_data_client_id)
-        elif self.settings.ib_data_client_id is not None:
-            data_client_id = int(self.settings.ib_data_client_id)
-        elif env_client_id:
-            data_client_id = int(env_client_id) + 1
-        else:
-            data_client_id = int(self.settings.ib_client_id) + 1
+        # Use settings values (which now read IBKR_* env vars)
+        data_client_id = (
+            int(self.settings.ib_data_client_id)
+            if self.settings.ib_data_client_id is not None
+            else int(self.settings.ib_client_id) + 1
+        )
         
         self.connection = connection or IBKRConnection(
             host=self.settings.ib_host,
             port=int(self.settings.ib_port),
             client_id=data_client_id,
         )
-        logger.debug(f"IBKRDataProvider initialized with client_id={data_client_id}")
+        logger.info(f"IBKRDataProvider initialized: host={self.connection.host}, port={self.connection.port}, client_id={self.connection.client_id}")
 
     def _connect(self) -> IB:
         """
-        Connect to IBKR Gateway with proper error handling.
+        Connect to IBKR Gateway with proper event loop handling.
         
-        Handles event loop conflicts, client ID issues, and connection errors gracefully.
-        All errors are caught and re-raised as RuntimeError for consistent handling upstream.
+        Fixes event loop conflicts by running connection in a thread when called from async context.
         """
+        import asyncio
+        import threading
+        from queue import Queue
+        
         ib = IB()
+        
+        # Check if we're in an async context
         try:
-            ib.connect(
-                self.connection.host,
-                self.connection.port,
-                clientId=self.connection.client_id,
-                timeout=3,  # Short timeout to fail fast
-            )
-        except (ConnectionRefusedError, OSError) as exc:
-            # Gateway not running - expected in paper mode
-            logger.debug(
-                f"IBKR connection refused at {self.connection.host}:{self.connection.port} "
-                f"(clientId={self.connection.client_id}). Gateway may not be running."
-            )
-            raise RuntimeError(
-                f"IBKR Gateway not available at {self.connection.host}:{self.connection.port}. "
-                f"Please start IB Gateway or use paper trading with dummy data."
-            ) from exc
-        except Exception as exc:
-            # Handle various connection errors
-            error_msg = str(exc).lower()
+            loop = asyncio.get_running_loop()
+            # We're in an async context - need to run connection in a separate thread
+            result_queue = Queue()
+            error_queue = Queue()
             
-            if "client id" in error_msg or "already in use" in error_msg:
-                logger.debug(
-                    f"IBKR client ID {self.connection.client_id} already in use. "
-                    f"Will use dummy data instead."
-                )
-                raise RuntimeError(
-                    f"IBKR client ID {self.connection.client_id} already in use. "
-                    f"Will use dummy data instead."
-                ) from exc
-            elif "event loop" in error_msg or "already running" in error_msg:
-                logger.debug(
-                    f"IBKR event loop conflict (likely called from async context). "
-                    f"Will use dummy data instead."
-                )
-                raise RuntimeError(
-                    f"IBKR event loop conflict. Will use dummy data instead."
-                ) from exc
-            elif "timeout" in error_msg:
-                logger.debug(
-                    f"IBKR connection timeout at {self.connection.host}:{self.connection.port}. "
-                    f"Will use dummy data instead."
-                )
-                raise RuntimeError(
-                    f"IBKR connection timeout. Will use dummy data instead."
-                ) from exc
+            def connect_in_thread():
+                """Connect in a new thread with its own event loop."""
+                try:
+                    # Create new event loop for this thread
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    
+                    # Connect (ib.connect is synchronous but uses asyncio internally)
+                    ib.connect(
+                        self.connection.host,
+                        self.connection.port,
+                        clientId=self.connection.client_id,
+                        timeout=5,  # Longer timeout for thread-based connection
+                    )
+                    result_queue.put(ib)
+                except Exception as e:
+                    error_queue.put(e)
+                finally:
+                    try:
+                        new_loop.close()
+                    except:
+                        pass
+            
+            # Run in daemon thread
+            thread = threading.Thread(target=connect_in_thread, daemon=True)
+            thread.start()
+            thread.join(timeout=10)  # Wait up to 10 seconds
+            
+            if not error_queue.empty():
+                exc = error_queue.get()
+                raise exc
+            if not result_queue.empty():
+                ib = result_queue.get()
+                logger.info(f"IBKR connected successfully (clientId={self.connection.client_id})")
+                return ib
             else:
-                logger.debug(f"IBKR connection error: {exc}")
+                raise TimeoutError("IBKR connection timed out")
+                
+        except RuntimeError:
+            # No running event loop - can connect directly
+            try:
+                ib.connect(
+                    self.connection.host,
+                    self.connection.port,
+                    clientId=self.connection.client_id,
+                    timeout=5,
+                )
+                logger.info(f"IBKR connected successfully (clientId={self.connection.client_id})")
+            except (ConnectionRefusedError, OSError) as exc:
+                logger.error(
+                    f"IBKR connection refused at {self.connection.host}:{self.connection.port} "
+                    f"(clientId={self.connection.client_id}). Is IB Gateway running?"
+                )
                 raise RuntimeError(
-                    f"Failed to connect to IB at {self.connection.host}:{self.connection.port} "
-                    f"(clientId={self.connection.client_id}). Error: {exc}"
+                    f"IBKR Gateway not available at {self.connection.host}:{self.connection.port}. "
+                    f"Please start IB Gateway and ensure API is enabled."
                 ) from exc
+            except Exception as exc:
+                error_msg = str(exc).lower()
+                
+                if "client id" in error_msg or "already in use" in error_msg:
+                    logger.error(
+                        f"IBKR client ID {self.connection.client_id} already in use. "
+                        f"Try using a different client ID or close existing connections."
+                    )
+                    raise RuntimeError(
+                        f"IBKR client ID {self.connection.client_id} already in use. "
+                        f"Please use a different client ID or close existing connections."
+                    ) from exc
+                elif "event loop" in error_msg or "already running" in error_msg:
+                    logger.error(f"IBKR event loop conflict: {exc}")
+                    raise RuntimeError(
+                        f"IBKR event loop conflict. This should not happen in sync context. Error: {exc}"
+                    ) from exc
+                else:
+                    logger.error(f"IBKR connection error: {exc}")
+                    raise RuntimeError(
+                        f"Failed to connect to IB at {self.connection.host}:{self.connection.port} "
+                        f"(clientId={self.connection.client_id}). Error: {exc}"
+                    ) from exc
         
         return ib
 
