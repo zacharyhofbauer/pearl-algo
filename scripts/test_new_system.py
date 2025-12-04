@@ -143,3 +143,4 @@ print("1. Configure API keys in .env file")
 print("2. Download historical data: python scripts/download_historical_data.py")
 print("3. Start trading: See START_TO_FINISH_GUIDE.md")
 
+
