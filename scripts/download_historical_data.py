@@ -9,11 +9,16 @@ in local Parquet format for deterministic backtesting.
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -72,22 +77,54 @@ async def download_symbol_data(
             f"({start_date.date()} to {end_date.date()}, {timeframe})"
         )
 
-        # Create provider
-        provider = create_data_provider(provider_name)
+        # Get API key from environment if needed
+        api_key = None
+        if provider_name == "polygon":
+            api_key = os.getenv("POLYGON_API_KEY")
+        elif provider_name == "tradier":
+            api_key = os.getenv("TRADIER_API_KEY")
 
-        # Fetch historical data
-        if hasattr(provider, "fetch_historical"):
-            df = provider.fetch_historical(
-                symbol=symbol, start=start_date, end=end_date, timeframe=timeframe
-            )
-        else:
-            logger.error(
-                f"Provider {provider_name} does not support fetch_historical"
-            )
+        # Create provider with API key if available
+        provider_kwargs = {}
+        if api_key:
+            provider_kwargs["api_key"] = api_key
+        
+        provider = create_data_provider(provider_name, **provider_kwargs)
+
+        # Ensure dates are timezone-aware (UTC)
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=timezone.utc)
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=timezone.utc)
+
+        # Fetch historical data (use async method if available since we're in async context)
+        try:
+            if hasattr(provider, "_fetch_historical_async"):
+                logger.debug(f"Using async method for {symbol}")
+                df = await provider._fetch_historical_async(
+                    symbol=symbol, start=start_date, end=end_date, timeframe=timeframe
+                )
+            elif hasattr(provider, "fetch_historical"):
+                logger.debug(f"Using sync method for {symbol}")
+                df = provider.fetch_historical(
+                    symbol=symbol, start=start_date, end=end_date, timeframe=timeframe
+                )
+            else:
+                logger.error(
+                    f"Provider {provider_name} does not support fetch_historical"
+                )
+                return False
+        except Exception as e:
+            logger.error(f"Error fetching data for {symbol}: {e}", exc_info=True)
             return False
 
+        if df is None:
+            logger.warning(f"No data retrieved for {symbol} (dataframe is None)")
+            return False
+        
         if df.empty:
-            logger.warning(f"No data retrieved for {symbol}")
+            logger.warning(f"No data retrieved for {symbol} (dataframe is empty)")
+            logger.info(f"Date range: {start_date.date()} to {end_date.date()}, timeframe: {timeframe}")
             return False
 
         # Normalize data
@@ -123,12 +160,19 @@ async def download_symbol_data(
                 logger.error(f"Failed to save {symbol} to Parquet")
                 return False
 
-        # Close provider if needed
-        if hasattr(provider, "close"):
-            if asyncio.iscoroutinefunction(provider.close):
-                await provider.close()
-            else:
-                provider.close()
+        # Close provider if needed (ensure proper cleanup)
+        try:
+            if hasattr(provider, "close"):
+                if asyncio.iscoroutinefunction(provider.close):
+                    await provider.close()
+                else:
+                    provider.close()
+            elif hasattr(provider, "_session") and provider._session:
+                # Close aiohttp session if exists
+                if hasattr(provider._session, "close"):
+                    await provider._session.close()
+        except Exception as e:
+            logger.debug(f"Error closing provider: {e}")
 
         return True
 

@@ -107,17 +107,13 @@ class LocalParquetProvider(DataProvider):
             table = pa.Table.from_pandas(df_to_save)
 
             # Write to Parquet with compression
+            # Note: Metadata is optional and causes issues with some pyarrow versions
+            # The file path already encodes symbol and timeframe information
             pq.write_table(
                 table,
                 file_path,
                 compression="snappy",  # Good balance of speed and compression
                 write_statistics=True,
-                metadata={
-                    "symbol": symbol,
-                    "timeframe": timeframe or "default",
-                    "created_at": datetime.now().isoformat(),
-                    "row_count": str(len(df)),
-                },
             )
 
             logger.info(

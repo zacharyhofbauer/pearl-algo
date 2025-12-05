@@ -60,7 +60,7 @@ def create_data_provider(
 
     try:
         if provider_name == "polygon":
-            api_key = kwargs.get("api_key") or settings.data_api_key
+            api_key = kwargs.pop("api_key", None) or os.getenv("POLYGON_API_KEY") or settings.data_api_key
             if not api_key:
                 raise ValueError(
                     "Polygon API key required. Set POLYGON_API_KEY env var or pass api_key."
