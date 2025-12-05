@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import aiohttp
@@ -132,60 +132,116 @@ class PolygonDataProvider(DataProvider):
         else:
             timespan, multiplier = ("day", 1)
 
-        # Format dates
-        date_from = start.strftime("%Y-%m-%d")
-        date_to = end.strftime("%Y-%m-%d")
-
         all_results = []
         session = await self._get_session()
 
-        url = f"{self.base_url}/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{date_from}/{date_to}"
-        params = {"adjusted": "true", "sort": "asc", "apikey": self.api_key}
+        # Polygon API has limits on results per request (~50000 bars)
+        # For large date ranges, we need to chunk the requests
+        # Free/starter tier may have stricter limits, so use smaller chunks
+        # Estimate: 15m bars = ~390 per day
+        # Use 30 days chunks to be safe and avoid rate limits
+        chunk_days = 30
+        current_start = start
+        total_days = (end - start).days
+        
+        logger.debug(f"Fetching {symbol} from {start.date()} to {end.date()} ({total_days} days)")
 
-        try:
-            await self._rate_limit()
-            async with session.get(url, params=params) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data.get("status") == "OK":
-                        results = data.get("results", [])
-                        if results:
-                            for result in results:
-                                all_results.append(
-                                    {
-                                        "timestamp": datetime.fromtimestamp(
-                                            result["t"] / 1000, tz=timezone.utc
-                                        ),
-                                        "open": result["o"],
-                                        "high": result["h"],
-                                        "low": result["l"],
-                                        "close": result["c"],
-                                        "volume": result.get("v", 0),
-                                    }
+        while current_start < end:
+            # Calculate chunk end date
+            chunk_end = min(
+                current_start + timedelta(days=chunk_days),
+                end
+            )
+            
+            date_from = current_start.strftime("%Y-%m-%d")
+            date_to = chunk_end.strftime("%Y-%m-%d")
+
+            url = f"{self.base_url}/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{date_from}/{date_to}"
+            params = {"adjusted": "true", "sort": "asc", "apikey": self.api_key}
+
+            try:
+                await self._rate_limit()
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get("status") == "OK":
+                            results = data.get("results", [])
+                            if results:
+                                chunk_count = len(results)
+                                logger.debug(
+                                    f"Retrieved {chunk_count} bars for {symbol} "
+                                    f"({date_from} to {date_to})"
                                 )
-                elif response.status == 401:
-                    logger.error(
-                        f"Polygon API unauthorized for {symbol} (API key invalid)"
-                    )
-                    return pd.DataFrame()
-                elif response.status == 429:
-                    logger.warning(f"Polygon API rate limit exceeded for {symbol}")
-                    return pd.DataFrame()
-                else:
-                    logger.warning(
-                        f"Polygon API error for {symbol}: {response.status}"
-                    )
-                    return pd.DataFrame()
+                                for result in results:
+                                    all_results.append(
+                                        {
+                                            "timestamp": datetime.fromtimestamp(
+                                                result["t"] / 1000, tz=timezone.utc
+                                            ),
+                                            "open": result["o"],
+                                            "high": result["h"],
+                                            "low": result["l"],
+                                            "close": result["c"],
+                                            "volume": result.get("v", 0),
+                                        }
+                                    )
+                            else:
+                                logger.debug(
+                                    f"No results for {symbol} ({date_from} to {date_to})"
+                                )
+                    elif response.status == 401:
+                        logger.error(
+                            f"Polygon API unauthorized for {symbol} (API key invalid)"
+                        )
+                        return pd.DataFrame()
+                    elif response.status == 429:
+                        logger.warning(
+                            f"Polygon API rate limit exceeded for {symbol} "
+                            f"({date_from} to {date_to}). Waiting 2 minutes..."
+                        )
+                        # Wait longer for rate limit (free tier has strict limits)
+                        await asyncio.sleep(120)
+                        # Retry this chunk
+                        continue
+                    else:
+                        logger.warning(
+                            f"Polygon API error for {symbol}: {response.status} "
+                            f"({date_from} to {date_to})"
+                        )
+                        # Continue with next chunk instead of failing completely
+                        current_start = chunk_end
+                        continue
 
-        except Exception as e:
-            logger.error(f"Error fetching historical data for {symbol}: {e}")
-            return pd.DataFrame()
+            except Exception as e:
+                logger.error(
+                    f"Error fetching data for {symbol} ({date_from} to {date_to}): {e}"
+                )
+                # Continue with next chunk
+                current_start = chunk_end
+                continue
+
+            # Move to next chunk
+            current_start = chunk_end
+            
+            # Longer delay between chunks to respect rate limits
+            # Free/starter tier needs more time between requests
+            if current_start < end:
+                await asyncio.sleep(2.0)  # 2 second delay between chunks
 
         if not all_results:
+            logger.warning(f"No data retrieved for {symbol} in date range")
             return pd.DataFrame()
 
         df = pd.DataFrame(all_results)
+        # Remove duplicates (in case of overlapping chunks)
+        df = df.drop_duplicates(subset=['timestamp'])
         df.set_index("timestamp", inplace=True)
+        df.sort_index(inplace=True)
+        
+        logger.info(
+            f"Retrieved {len(df)} total bars for {symbol} "
+            f"({df.index.min().date()} to {df.index.max().date()})"
+        )
         return df
 
     async def get_latest_bar(self, symbol: str) -> Optional[Dict]:
