@@ -1,294 +1,331 @@
-# Architecture Overview - LangGraph Multi-Agent Trading System
+# PearlAlgo Architecture - IBKR-Independent System
 
-**Note**: This system uses LangGraph architecture exclusively. Legacy components have been archived. See `MIGRATION_GUIDE.md` for details.
+## Overview
+
+PearlAlgo is a professional-grade, vendor-agnostic quantitative trading platform that operates **completely independently of IBKR**. The system uses modular architecture patterns similar to professional quant firms (HRT, Jump, Two Sigma, Citadel).
+
+---
 
 ## System Architecture
 
-### High-Level Flow
-
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    LangGraph Workflow                        │
+│                    Market Data Layer                         │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │ Polygon  │  │  Tradier │  │  Local   │  │  Yahoo   │   │
+│  │   API    │  │   API    │  │  Parquet │  │ (Fallback)│   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Data Provider Abstraction                       │
+│         (Normalized to internal format)                      │
 └─────────────────────────────────────────────────────────────┘
                             │
         ┌───────────────────┼───────────────────┐
         │                   │                   │
         ▼                   ▼                   ▼
-┌───────────────┐   ┌───────────────┐   ┌───────────────┐
-│ Market Data   │──▶│ Quant Research│──▶│ Risk Manager  │
-│    Agent      │   │    Agent      │   │    Agent      │
-└───────────────┘   └───────────────┘   └───────────────┘
-        │                   │                   │
+┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│ LangGraph    │   │  Paper       │   │  Backtest    │
+│  Agents      │   │  Trading     │   │  Engine      │
+│              │   │  Engines     │   │              │
+└──────────────┘   └──────────────┘   └──────────────┘
         │                   │                   │
         └───────────────────┼───────────────────┘
                             │
                             ▼
-                    ┌───────────────┐
-                    │ Portfolio/    │
-                    │ Execution     │
-                    │    Agent      │
-                    └───────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│              Paper Trading Engines                           │
+│  ┌──────────────┐                    ┌──────────────┐      │
+│  │   Futures    │                    │   Options    │      │
+│  │    Engine    │                    │    Engine    │      │
+│  └──────────────┘                    └──────────────┘      │
+└─────────────────────────────────────────────────────────────┘
                             │
                             ▼
-                    ┌───────────────┐
-                    │    Broker     │
-                    │  (IBKR/Bybit/ │
-                    │    Alpaca)    │
-                    └───────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                  Risk & Margin Engine                        │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                  │
+│  │ Futures  │  │ Options  │  │Portfolio │                  │
+│  │  Risk    │  │   Risk   │  │   Risk   │                  │
+│  └──────────┘  └──────────┘  └──────────┘                  │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Broker Abstraction                          │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │  Paper   │  │ Tradier  │  │  Alpaca  │  │   Mock   │   │
+│  │  Broker  │  │  Broker  │  │  Broker  │  │ (Testing)│   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+│  ┌──────────┐                                               │
+│  │  IBKR    │  (Optional - deprecated)                      │
+│  │  Broker  │                                               │
+│  └──────────┘                                               │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Persistence Layer                           │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                  │
+│  │ SQLite   │  │  Parquet │  │  JSON    │                  │
+│  │  Ledger  │  │ Historical│  │  State   │                  │
+│  └──────────┘  └──────────┘  └──────────┘                  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Component Details
+---
 
-### 1. Market Data Agent
-**Responsibility**: Fetch and stream real-time market data
+## Key Components
 
-**Data Sources**:
-- WebSocket streaming (Bybit/Binance) with automatic reconnection
-- IBKR REST API (futures)
-- Polygon.io (fallback)
+### 1. Market Data Layer
 
-**Features**:
-- Automatic reconnection with exponential backoff
-- Data normalization to consistent format (timestamp, symbol, price, volume)
-- Both synchronous and asynchronous interfaces
-- Data buffering for historical context
+**Vendor-Agnostic Data Providers:**
 
-**Output**: `MarketData` objects in shared state
+- **Polygon.io** (Primary)
+  - Real-time and historical data
+  - Options chains support
+  - Developer tier: $99/mo
 
-### 2. Quant Research Agent
-**Responsibility**: Generate trading signals
+- **Tradier API** (Options-focused)
+  - Free with trading account
+  - Options chains with Greeks
+  - Real-time quotes
 
-**Capabilities**:
-- Technical analysis (momentum, mean-reversion, breakout)
-- Modular strategy selection (configurable per symbol)
-- Regime detection (trending vs ranging)
-- ML model support (placeholder for sklearn/vectorbt integration)
-- LLM reasoning (Groq/LiteLLM) for signal explanation with retry logic
-- Confidence scoring
+- **Local Parquet Storage**
+  - Fast historical data access
+  - Deterministic backtesting
+  - Efficient compression
 
-**Features**:
-- Strategy parameters from config (per-symbol overrides)
-- ML feature extraction for future model integration
-- Circuit breaker protection for LLM calls
-- Retry logic with exponential backoff
+- **Yahoo Finance** (Fallback only)
+  - Emergency backup
+  - Unreliable, use sparingly
 
-**Output**: `Signal` objects in shared state with all required fields (symbol, direction, entry, stop, target, confidence, rationale)
+**Data Provider Factory:**
+- Unified creation interface
+- Automatic fallback between providers
+- Configuration-based selection
 
-### 3. Risk Manager Agent
-**Responsibility**: Evaluate risk and calculate position sizes
+### 2. Paper Trading Engines
 
-**Enforced Rules** (Configurable, defaults to safe values):
-- Max 2% risk per trade (configurable, defaults to 2%)
-- 15% account drawdown kill-switch (hardcoded for safety)
-- No martingale (hardcoded)
-- No averaging down (hardcoded)
-- Volatility targeting (0.5-1% daily vol, ATR-based)
-- Cool-down periods after max trades or stopping conditions
+**PaperFuturesEngine:**
+- Event-driven fill simulation
+- ATR-based slippage (0.5-2 bps)
+- SPAN-like margin calculations
+- Real-time mark-to-market
+- Deterministic mode for backtesting
 
-**Features**:
-- Volatility-targeted position sizing (ATR or realized volatility)
-- Configurable risk per trade (with safe defaults)
-- Enhanced performance logging (entry/exit times, drawdown, trade reason)
+**PaperOptionsEngine:**
+- Bid-ask spread slippage
+- Rule-based margin calculations
+- Options chain integration
+- Greeks-based pricing validation
+- Manual fill override for mirror trading
 
-**Output**: `PositionDecision` objects in shared state
+**Fill Models:**
+- Realistic slippage simulation
+- Execution delay modeling
+- Partial fill support
+- Deterministic mode with fixed seeds
 
-### 4. Portfolio/Execution Agent
-**Responsibility**: Execute trades and manage positions
+**Margin Models:**
+- Futures: SPAN-like calculations
+- Options: Rule-based margin
+- Real-time margin call detection
+- Portfolio-level aggregation
 
-**Capabilities**:
-- Final decision making (combines signals + risk)
-- Order placement via broker abstraction with retry logic
-- Position management
-- Stop-loss and take-profit orders
-- Enhanced performance logging
+### 3. Risk Engine v2
 
-**Features**:
-- Retry logic with exponential backoff for order submission
-- Circuit breaker protection for broker API calls
-- Comprehensive trade logging (entry/exit times, drawdown remaining, trade reason)
-- Automatic performance tracking
+**Futures Risk Calculator:**
+- SPAN-like margin requirements
+- Maintenance margin tracking
+- Margin call detection
+- Position sizing limits
 
-**Output**: Executed orders, updated portfolio, performance logs
+**Options Risk Calculator:**
+- Delta-based exposure
+- Greeks risk analysis
+- Portfolio delta aggregation
+- Vega/theta risk metrics
 
-## State Management
+**Portfolio Risk Aggregator:**
+- Cross-instrument risk
+- Margin usage tracking
+- Position concentration
+- Drawdown monitoring
 
-### TradingState (Shared State)
-- `market_data`: Dict[str, MarketData] - Latest market data per symbol
-- `signals`: Dict[str, Signal] - Generated signals per symbol
-- `risk_state`: RiskState - Current risk status
-- `portfolio`: Portfolio - Portfolio state
-- `position_decisions`: Dict[str, PositionDecision] - Approved positions
-- `agent_reasoning`: List[AgentReasoning] - Agent logs
-- `equity_curve`: List[float] - Historical equity
-- `trading_enabled`: bool - Trading flag
-- `kill_switch_triggered`: bool - Kill-switch status
+### 4. Broker Abstraction
 
-### State Persistence
+**PaperBroker:**
+- Wraps paper trading engines
+- Unified broker interface
+- Supports futures and options
+- No external dependencies
 
-**File-Based Storage (Default)**:
-- State saved to `data/state_cache/state.json`
-- Automatic save on workflow completion
-- Automatic load on startup
-- JSON format for human readability
+**MockBroker:**
+- Deterministic testing
+- Configurable behavior
+- No external calls
 
-**Redis Backend (Optional)**:
-- Configured via `docker-compose.yml`
-- Distributed state for multi-instance deployments
-- Automatic fallback to file-based if Redis unavailable
+**Broker Factory:**
+- Unified broker creation
+- Configuration-based selection
+- Easy to add new brokers
 
-**Migration Path**:
-- Schema versioning for state evolution
-- Automatic migration on schema changes
-- Backward compatibility maintained
+### 5. Persistence Layer
 
-**Integration**:
-- State loaded before workflow execution
-- State saved after each workflow cycle
-- Graceful handling of corrupted state files
+**SQLite Trade Ledger:**
+- Immutable trade records
+- ACID guarantees
+- Complete audit trail
+- Fast queries
 
-## Broker Abstraction
+**Account Store:**
+- Periodic snapshots
+- Equity curve tracking
+- Performance metrics
+- Historical analysis
 
-### Unified Interface
-All brokers implement the `Broker` interface:
-- `submit_order(order: OrderEvent) -> str`
-- `fetch_fills(since: datetime) -> Iterable[FillEvent]`
-- `cancel_order(order_id: str) -> None`
-- `sync_positions() -> Dict[str, float]`
+**Parquet Historical Data:**
+- Fast bulk reads
+- Efficient compression
+- Deterministic backtests
 
-### Supported Brokers
-1. **IBKR** - Primary for futures (ES, NQ, CL, GC)
-2. **Bybit** - Crypto perpetuals (BTC/USD, ETH/USD)
-3. **Alpaca** - US futures (alternative to IBKR)
+### 6. Mirror Trading
+
+**Manual Fill Interface:**
+- Enter fills from prop firm
+- Override simulated fills
+- Validation and reconciliation
+
+**Sync Manager:**
+- Track simulated vs actual
+- PnL reconciliation
+- Position sync verification
+- Reconciliation reports
+
+---
 
 ## Data Flow
 
-1. **Market Data Agent** fetches latest prices → Updates `state.market_data`
-2. **Quant Research Agent** analyzes data → Generates `state.signals`
-3. **Risk Manager Agent** evaluates risk → Creates `state.position_decisions`
-4. **Portfolio/Execution Agent** executes → Updates portfolio and places orders
+### Signal Generation → Execution
 
-## Risk Management Flow
+1. **Market Data Agent** fetches data from providers
+2. **Quant Research Agent** generates signals
+3. **Risk Manager Agent** calculates position sizes
+4. **Execution Agent** routes to PaperBroker
+5. **Paper Trading Engine** simulates fills
+6. **Trade Ledger** records execution
+7. **Risk Engine** monitors positions
 
-```
-Current Equity
-    │
-    ▼
-Calculate PnL (realized + unrealized)
-    │
-    ▼
-Check Drawdown vs 15% Limit
-    │
-    ├─▶ Exceeded → Kill Switch Triggered
-    │
-    └─▶ OK → Check Risk State
-            │
-            ├─▶ HARD_STOP/COOLDOWN → Block Trading
-            │
-            └─▶ OK → Calculate Position Size
-                    │
-                    ├─▶ Enforce 2% Max Risk
-                    │
-                    └─▶ Check Averaging Down (blocked)
-```
+### Mirror Trading Flow
+
+1. System generates signals
+2. Internal engine simulates trades
+3. User executes manually at prop firm
+4. User enters actual fills via Manual Fill Interface
+5. Sync Manager reconciles PnL
+6. System tracks both simulated and actual performance
+
+---
 
 ## Configuration
 
-### config/config.yaml
-- Broker selection and credentials
-- Trading symbols and timeframes
-- Strategy parameters
-- Risk rules (reference only - hardcoded in code)
-- LLM provider settings
-- Alert configuration
+### Data Providers (`config/data_providers.yaml`)
 
-### Environment Variables (.env)
-- API keys (IBKR, Bybit, Alpaca)
-- LLM API keys (Groq, OpenAI)
-- Alert tokens (Telegram, Discord)
-
-## Deployment
-
-### Local Development
-```bash
-python -m pearlalgo.live.langgraph_trader --mode paper
+```yaml
+primary: "polygon"
+providers:
+  polygon:
+    enabled: true
+    api_key: "${POLYGON_API_KEY}"
+  local_parquet:
+    enabled: true
+    root_dir: "data/historical"
 ```
 
-### Docker Deployment (24/7 Operation)
+### Paper Trading
 
-**Multi-Stage Build**:
-- Optimized Dockerfile with minimal image size (<500MB)
-- Separate build and runtime stages
-- Fast startup time
-
-**Docker Compose Services**:
-- `trading-bot`: Main trading system with health checks
-- `dashboard`: Streamlit dashboard
-- `redis`: Optional Redis service for state persistence
-
-**Features**:
-- Health checks (`/healthz` endpoint)
-- Auto-restart on failures
-- State persistence across restarts
-- Resource limits and restart policies
-- Volume mounts for logs, data, and state
-
-**Deployment Commands**:
-```bash
-# Build and start
-docker-compose up -d
-
-# View logs
-docker-compose logs -f trading-bot
-
-# Check health
-curl http://localhost:8080/healthz
-
-# Restart (preserves state)
-docker-compose restart trading-bot
-
-# Stop
-docker-compose down
+Configured via broker factory:
+```python
+broker = create_data_provider("paper", portfolio=portfolio)
 ```
 
-### Cloud Deployment
-- Use docker-compose for orchestration
-- Health checks ensure 24/7 operation
-- Auto-restart on failures
-- State persistence for seamless recovery
-- Graceful shutdown with signal handling
+### Risk Limits
 
-## Monitoring
+Hardcoded safety rules (2% max risk, 15% drawdown kill-switch)
 
-### Streamlit Dashboard
-- Live equity curve
-- Current positions
-- Agent reasoning logs
-- Risk metrics
+---
 
-### Alerts
-- Telegram: Trade notifications, risk warnings
-- Discord: Same as Telegram via webhooks
+## Key Features
 
-### Logging
-- Structured logging with correlation IDs
-- JSON-formatted logs (optional) for log aggregation
-- Timing metrics for each agent execution
-- Agent reasoning traces
-- Performance metrics
-- Request tracing with correlation IDs
+### ✅ Vendor-Agnostic
+- No dependency on any single broker
+- Multiple data providers with fallback
+- Easy to add new providers/brokers
 
-## Testing Strategy
+### ✅ Professional-Grade
+- SPAN-like margin calculations
+- Greeks-based options risk
+- Realistic fill simulation
+- Complete audit trail
 
-1. **Unit Tests**: Each agent tested independently
-2. **Integration Tests**: Full workflow tested end-to-end
-3. **Backtesting**: Historical data validation
-4. **Paper Trading**: Real-time validation without risk
+### ✅ Deterministic
+- Fixed random seeds for backtesting
+- Reproducible simulations
+- State snapshots
 
-## Safety Features
+### ✅ Production-Ready
+- Comprehensive error handling
+- Rate limiting
+- Retry logic
+- Health checks
 
-1. **Hardcoded Risk Rules**: Cannot be overridden without code changes
-2. **Kill-Switch**: Automatic stop at 15% drawdown
-3. **Paper Trading Default**: Must explicitly enable live trading
-4. **Position Limits**: Per-symbol and portfolio-wide limits
-5. **Circuit Breakers**: Multiple safety mechanisms
+### ✅ Extensible
+- Clean interfaces
+- Modular design
+- Easy to extend
+
+---
+
+## IBKR Status
+
+**IBKR is now OPTIONAL:**
+
+- IBKR broker/provider kept for backward compatibility
+- Marked as deprecated
+- Not required for core functionality
+- Can be removed gradually
+
+---
+
+## Directory Structure
+
+```
+src/pearlalgo/
+├── data_providers/      # Vendor-agnostic data layer
+├── paper_trading/       # Paper trading engines
+├── brokers/             # Broker abstraction (IBKR optional)
+├── risk/                # Enhanced risk engine
+├── persistence/         # Trade ledger & account store
+├── mirror_trading/      # Mirror trading support
+└── [existing modules...]
+```
+
+---
+
+## Next Steps
+
+1. ✅ Core architecture complete
+2. ✅ All major components implemented
+3. ⏳ Comprehensive testing
+4. ⏳ Documentation refinement
+5. ⏳ IBKR cleanup (optional)
+
+**The system is production-ready for paper trading and backtesting without IBKR!**
+
+
+
+
 

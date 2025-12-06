@@ -1,6 +1,6 @@
-# PearlAlgo v2 - Documentation Index
+# PearlAlgo - Documentation Index
 
-Complete index of all documentation for PearlAlgo v2 system.
+Complete index of all documentation for PearlAlgo system.
 
 ---
 
@@ -40,15 +40,12 @@ Complete index of all documentation for PearlAlgo v2 system.
 
 ## 🏗️ Architecture & Design
 
-6. **[ARCHITECTURE_V2.md](ARCHITECTURE_V2.md)** 🏛️ System Architecture
-   - Complete system design
-   - Component relationships
-   - Data flow diagrams
-   - Professional patterns
-
-7. **[ARCHITECTURE.md](ARCHITECTURE.md)** (Original)
-   - Original architecture docs
-   - May reference old IBKR setup
+6. **[ARCHITECTURE.md](ARCHITECTURE.md)** 🏛️ System Architecture
+    - Complete system design
+    - Component relationships
+    - Data flow diagrams
+    - Professional patterns
+    - IBKR-independent architecture
 
 ---
 

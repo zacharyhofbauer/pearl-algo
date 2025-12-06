@@ -1,6 +1,6 @@
 # pearlalgo-dev-ai-agents
 
-**Professional-grade, vendor-agnostic quantitative trading platform** using LangGraph multi-agent architecture. **Operates independently of IBKR** with Polygon.io/Tradier data providers and internal paper trading engines. Supports futures, options, and crypto via multiple brokers.
+**Professional-grade, vendor-agnostic quantitative trading platform** using LangGraph multi-agent architecture. Operates independently with Polygon.io/Tradier data providers and internal paper trading engines. Supports futures, options, and crypto via multiple brokers.
 
 ## ⚠️ RISK WARNINGS
 
@@ -55,7 +55,7 @@ Built entirely on free/open-source tools (Pandas, TA-Lib, Scikit-Learn, Plotly, 
 - **Structured Logging**: Correlation IDs and timing metrics for request tracing
 
 ### 📊 Core Features
-- **Multi-Broker Support**: IBKR (primary), Bybit (crypto perps), Alpaca (US futures)
+- **Multi-Broker Support**: Paper (internal simulation, default), Bybit (crypto perps), Alpaca (US futures), IBKR (optional/deprecated)
 - **WebSocket Streaming**: Real-time market data via WebSockets with REST fallback
 - **Vectorized Backtesting**: Fast backtesting with vectorbt
 - **Live Dashboard**: Streamlit dashboard with equity curve, positions, and agent reasoning
@@ -72,16 +72,19 @@ Built entirely on free/open-source tools (Pandas, TA-Lib, Scikit-Learn, Plotly, 
 
 ## Quick Start
 
-**👉 Start here: [START_HERE.md](START_HERE.md)** - Complete step-by-step setup guide
+**👉 Start here: [README_V2_START_HERE.md](README_V2_START_HERE.md)** - Complete setup and getting started guide
 
-For a quick command reference, see [QUICK_START_COMMANDS.txt](QUICK_START_COMMANDS.txt)
+For a quick 5-minute setup, see [QUICK_START_V2.md](QUICK_START_V2.md)
 
 ### Prerequisites
 - Python 3.12+
-- IBKR Gateway (for futures trading) or Bybit/Alpaca API keys
+- Polygon.io API key (recommended) or Tradier API key for market data
+- Bybit/Alpaca API keys (optional, for live trading)
 - Groq API key (optional, for LLM reasoning)
 - Telegram bot token (optional, for alerts)
 - Discord webhook URL (optional, for alerts)
+
+**Note:** IBKR is now optional/deprecated. See [IBKR_DEPRECATION_NOTICE.md](IBKR_DEPRECATION_NOTICE.md) for details.
 
 ### Installation
 ```bash
