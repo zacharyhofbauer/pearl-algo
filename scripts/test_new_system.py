@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from datetime import datetime
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.core.events import OrderEvent
-from pearlalgo.brokers.paper_broker import PaperBroker
+# PaperBroker removed - system is data-only
 from pearlalgo.persistence.trade_ledger import TradeLedger
 from pearlalgo.data_providers.factory import create_data_provider
 from pearlalgo.risk.portfolio_risk import PortfolioRiskAggregator
@@ -33,30 +33,20 @@ try:
 except Exception as e:
     print(f"   ❌ Error: {e}")
 
-# Test 2: Paper Broker
-print("\n2. Testing Paper Broker...")
+# Test 2: Polygon Data Provider (Paper Broker removed - system is data-only)
+print("\n2. Testing Polygon Data Provider...")
 try:
-    portfolio = Portfolio(cash=50000.0)
+    from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+    import os
     
-    def price_lookup(symbol: str):
-        prices = {"ES": 4000.0, "QQQ": 400.0}
-        return prices.get(symbol)
-    
-    broker = PaperBroker(portfolio=portfolio, price_lookup=price_lookup)
-    print("   ✅ PaperBroker created successfully")
-    
-    # Test order submission
-    order = OrderEvent(
-        timestamp=datetime.now(),
-        symbol="ES",
-        side="BUY",
-        quantity=1.0,
-    )
-    order_id = broker.submit_order(order)
-    print(f"   ✅ Order submitted: {order_id}")
-    
-    positions = broker.sync_positions()
-    print(f"   ✅ Positions: {positions}")
+    api_key = os.getenv("POLYGON_API_KEY")
+    if api_key:
+        provider = PolygonDataProvider(api_key=api_key)
+        print("   ✅ PolygonDataProvider created successfully")
+        print("   ℹ️  System is data-only (no broker execution)")
+    else:
+        print("   ⚠️  POLYGON_API_KEY not set - skipping provider test")
+        print("   ℹ️  System is data-only (no broker execution)")
     
 except Exception as e:
     print(f"   ❌ Error: {e}")
@@ -103,17 +93,15 @@ try:
 except Exception as e:
     print(f"   ❌ Error: {e}")
 
-# Test 5: Paper Trading Engines
-print("\n5. Testing Paper Trading Engines...")
+# Test 5: Margin Models (Paper Trading Engines removed - system is data-only)
+print("\n5. Testing Margin Models...")
 try:
-    from pearlalgo.paper_trading.futures_engine import PaperFuturesEngine
+    from pearlalgo.risk.margin_models import FuturesMarginModel
     
-    portfolio = Portfolio(cash=50000.0)
-    engine = PaperFuturesEngine(
-        portfolio=portfolio,
-        price_lookup=lambda s: 4000.0 if s == "ES" else None,
-    )
-    print("   ✅ PaperFuturesEngine created successfully")
+    model = FuturesMarginModel()
+    margin = model.get_margin_requirements("ES", quantity=1.0)
+    print(f"   ✅ FuturesMarginModel working: ${margin.total_required:.2f} margin for ES")
+    print("   ℹ️  Paper trading engines removed - system is data-only")
     
 except Exception as e:
     print(f"   ❌ Error: {e}")

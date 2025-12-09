@@ -27,7 +27,7 @@ async def test_market_data():
     from pearlalgo.core.portfolio import Portfolio
     
     config = {'trading': {'mode': 'paper'}}
-    agent = MarketDataAgent(['MES', 'MNQ'], broker='ibkr', config=config)
+    agent = MarketDataAgent(['MES', 'MNQ'], config=config)  # broker parameter removed
     portfolio = Portfolio(cash=50000)
     state = create_initial_state(portfolio=portfolio, config=config)
     
