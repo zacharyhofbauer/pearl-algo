@@ -4,7 +4,7 @@ Tests for margin models (futures SPAN-like, options rule-based).
 
 import pytest
 
-from pearlalgo.paper_trading.margin_models import (
+from pearlalgo.risk.margin_models import (
     FuturesMarginModel,
     OptionsMarginModel,
     MarginRequirements,
@@ -38,22 +38,22 @@ class TestFuturesMarginModel:
         model = FuturesMarginModel()
 
         # Account with enough equity
-        is_call1, additional1, usage1 = model.check_margin_call(
+        is_call1, additional1 = model.check_margin_call(
             symbol="ES",
             quantity=1.0,
-            avg_entry_price=4000.0,
             current_price=4100.0,
+            avg_entry_price=4000.0,
             account_equity=15000.0,  # Above margin requirement
         )
 
         assert not is_call1
 
         # Account with insufficient equity
-        is_call2, additional2, usage2 = model.check_margin_call(
+        is_call2, additional2 = model.check_margin_call(
             symbol="ES",
             quantity=1.0,
-            avg_entry_price=4000.0,
             current_price=3900.0,  # Loss
+            avg_entry_price=4000.0,
             account_equity=5000.0,  # Below maintenance margin
         )
 

@@ -295,14 +295,15 @@ class PolygonDataProvider(DataProvider):
     
     async def _get_latest_bar_impl(self, symbol: str) -> Optional[Dict]:
         """Internal implementation of get_latest_bar."""
-        session = await self._get_session()
+        try:
+            session = await self._get_session()
 
-        url = f"{self.base_url}/v2/aggs/ticker/{symbol}/prev"
-        params = {"adjusted": "true", "apikey": self.api_key}
+            url = f"{self.base_url}/v2/aggs/ticker/{symbol}/prev"
+            params = {"adjusted": "true", "apikey": self.api_key}
 
-        await self._rate_limit()
-        timeout = aiohttp.ClientTimeout(total=self.config.request_timeout)
-        async with session.get(url, params=params, timeout=timeout) as response:
+            await self._rate_limit()
+            timeout = aiohttp.ClientTimeout(total=self.config.request_timeout)
+            async with session.get(url, params=params, timeout=timeout) as response:
                 if response.status == 200:
                     data = await response.json()
                     if (
