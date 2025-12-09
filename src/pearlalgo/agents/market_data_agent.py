@@ -115,24 +115,19 @@ class MarketDataAgent:
                 # Alpaca will be handled via REST API
                 pass
 
-            # Initialize Polygon.io as fallback
-            polygon_api_key = (
-                self.config.get("data", {})
-                .get("fallback", {})
-                .get("polygon", {})
-                .get("api_key")
-            )
-            if polygon_api_key:
-                try:
-                    self.polygon_provider = PolygonDataProvider(api_key=polygon_api_key)
-                    logger.info("Polygon.io provider initialized as fallback")
-                except Exception as e:
-                    logger.warning(f"Polygon.io provider failed: {e}")
-
             # Initialize dummy provider (enabled by default for testing)
-            settings = get_settings()
-            # Default to True if not set, to allow testing without API keys
-            dummy_mode = getattr(settings, 'dummy_mode', True)
+            import os
+            # Check environment variable first
+            dummy_mode_env = os.getenv("PEARLALGO_DUMMY_MODE", "").lower()
+            if dummy_mode_env in ("true", "1", "yes"):
+                dummy_mode = True
+            elif dummy_mode_env in ("false", "0", "no"):
+                dummy_mode = False
+            else:
+                # Default to True if not explicitly set (allows testing without API keys)
+                # This ensures system works even without API keys or IBKR
+                dummy_mode = True
+            
             if dummy_mode:
                 try:
                     self.dummy_provider = DummyDataProvider(symbols=self.symbols)
