@@ -38,6 +38,7 @@ from pearlalgo.futures.risk import RiskState
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.futures.config import PropProfile, load_profile
 from pearlalgo.futures.risk import compute_position_size, compute_risk_state
+from pearlalgo.utils.telegram_alerts import TelegramAlerts
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +67,12 @@ class RiskManagerAgent:
         portfolio: Portfolio,
         profile: Optional[PropProfile] = None,
         config: Optional[Dict] = None,
+        telegram_alerts: Optional[TelegramAlerts] = None,
     ):
         self.portfolio = portfolio
         self.profile = profile or load_profile()
         self.config = config or {}
+        self.telegram_alerts = telegram_alerts
 
         # Configurable risk (from config, defaults to hardcoded values)
         risk_config = self.config.get("risk", {})
@@ -146,16 +149,24 @@ class RiskManagerAgent:
         if drawdown >= self.max_drawdown:
             state.kill_switch_triggered = True
             state.trading_enabled = False
+            reason = f"Drawdown {drawdown * 100:.2f}% >= {self.max_drawdown * 100}%"
             state = add_agent_reasoning(
                 state,
                 "risk_manager_agent",
-                f"KILL-SWITCH TRIGGERED: Drawdown {drawdown * 100:.2f}% >= {self.max_drawdown * 100}%",
+                f"KILL-SWITCH TRIGGERED: {reason}",
                 level="error",
                 data={"drawdown": drawdown, "max_drawdown": self.max_drawdown},
             )
             # Trigger cooldown after kill-switch
             self.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=self.cooldown_minutes)
             logger.critical(f"Kill-switch triggered: {drawdown * 100:.2f}% drawdown")
+            
+            # Send Telegram notification
+            if self.telegram_alerts:
+                try:
+                    await self.telegram_alerts.notify_kill_switch(reason)
+                except Exception as e:
+                    logger.warning(f"Failed to send Telegram kill-switch notification: {e}")
 
         # Update peak equity
         if current_equity > self.peak_equity:
@@ -181,13 +192,22 @@ class RiskManagerAgent:
 
             # Check if we can trade (risk state allows)
             if risk_state.status in {"HARD_STOP", "COOLDOWN", "PAUSED"}:
+                warning_msg = f"Signal for {symbol} BLOCKED: risk state = {risk_state.status}"
                 state = add_agent_reasoning(
                     state,
                     "risk_manager_agent",
-                    f"Signal for {symbol} BLOCKED: risk state = {risk_state.status}",
+                    warning_msg,
                     level="warning",
                     data={"symbol": symbol, "risk_status": risk_state.status},
                 )
+                # Send Telegram notification for risk warning
+                if self.telegram_alerts:
+                    try:
+                        await self.telegram_alerts.notify_risk_warning(
+                            warning_msg, risk_status=risk_state.status
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to send Telegram risk warning: {e}")
                 continue
 
             # Get market data for price

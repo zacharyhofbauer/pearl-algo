@@ -216,6 +216,9 @@ trading:
   # Default mode: "paper" or "live"
   mode: "paper"
   
+  # Signal-only mode: Generate signals and track PnL without executing trades
+  signal_only: true
+  
   # Paper trading settings
   paper:
     starting_balance: 50000.0
@@ -238,13 +241,15 @@ logging:
 alerts:
   # Telegram
   telegram:
-    enabled: false
+    enabled: true
     bot_token: "${TELEGRAM_BOT_TOKEN}"
     chat_id: "${TELEGRAM_CHAT_ID}"
     notify_on:
+      - "signal"
       - "trade"
       - "risk_warning"
       - "daily_summary"
+      - "pnl_update"
   
   # Discord
   discord:

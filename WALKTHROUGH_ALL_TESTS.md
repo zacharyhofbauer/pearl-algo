@@ -467,7 +467,7 @@ ls -la *.md | grep -E "(START|QUICK|ARCHITECTURE|MIGRATION)"
 **Expected:**
 - START_TO_FINISH_GUIDE.md
 - QUICK_START_V2.md
-- ARCHITECTURE_V2.md
+- ARCHITECTURE.md
 - MIGRATION_GUIDE_IBKR_TO_V2.md
 
 ---
@@ -585,7 +585,7 @@ After completing all tests, verify:
 4. **Read Documentation**
    - `START_TO_FINISH_GUIDE.md` - Complete walkthrough
    - `QUICK_START_V2.md` - Quick reference
-   - `ARCHITECTURE_V2.md` - System design
+   - `ARCHITECTURE.md` - System design
 
 ---
 

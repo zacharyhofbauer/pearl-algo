@@ -100,7 +100,7 @@ You're now trading with PearlAlgo v2 **without IBKR**!
 
 **Next Steps:**
 - See `START_TO_FINISH_GUIDE.md` for detailed walkthrough
-- See `ARCHITECTURE_V2.md` for system architecture
+- See `ARCHITECTURE.md` for system architecture
 - See `MIGRATION_GUIDE_IBKR_TO_V2.md` if migrating from IBKR
 
 ---

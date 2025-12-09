@@ -63,14 +63,23 @@ def status_cmd(ctx: click.Context) -> None:
         "",
     )
 
+    # Show IB Gateway as optional (v2 doesn't require it)
+    gateway_title = "🔌 IB Gateway (Optional)"
+    if not gateway_ready:
+        gateway_title += " - Not Required for v2 System"
+    
     console.print(
         Panel(
             gateway_table,
-            title="🔌 IB Gateway",
-            border_style="cyan" if gateway_ready else "red",
+            title=gateway_title,
+            border_style="cyan" if gateway_ready else "yellow",
             box=box.ROUNDED,
         )
     )
+    
+    if not gateway_ready:
+        console.print("[dim yellow]ℹ️  IB Gateway is optional. System works with Paper Broker and other data providers.[/dim yellow]")
+    
     console.print()
 
     # Risk status

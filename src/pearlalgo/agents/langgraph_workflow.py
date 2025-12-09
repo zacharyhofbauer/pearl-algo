@@ -29,6 +29,7 @@ from pearlalgo.agents.portfolio_execution_agent import PortfolioExecutionAgent
 from pearlalgo.agents.quant_research_agent import QuantResearchAgent
 from pearlalgo.agents.risk_manager_agent import RiskManagerAgent
 from pearlalgo.core.portfolio import Portfolio
+from pearlalgo.utils.telegram_alerts import TelegramAlerts
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,25 @@ class TradingWorkflow:
         self.strategy = strategy
         self.config = config or {}
 
+        # Initialize Telegram alerts if enabled
+        self.telegram_alerts = None
+        alerts_config = self.config.get("alerts", {})
+        telegram_config = alerts_config.get("telegram", {})
+        if telegram_config.get("enabled", False):
+            bot_token = telegram_config.get("bot_token", "")
+            chat_id = telegram_config.get("chat_id", "")
+            if bot_token and chat_id:
+                try:
+                    self.telegram_alerts = TelegramAlerts(
+                        bot_token=bot_token,
+                        chat_id=chat_id,
+                        enabled=True,
+                    )
+                    logger.info("Telegram alerts initialized")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize Telegram alerts: {e}")
+                    self.telegram_alerts = None
+
         # Initialize agents
         self.market_data_agent = MarketDataAgent(
             symbols=symbols,
@@ -69,17 +89,20 @@ class TradingWorkflow:
             symbols=symbols,
             strategy=strategy,
             config=config,
+            telegram_alerts=self.telegram_alerts,
         )
 
         self.risk_manager_agent = RiskManagerAgent(
             portfolio=portfolio,
             config=config,
+            telegram_alerts=self.telegram_alerts,
         )
 
         self.portfolio_execution_agent = PortfolioExecutionAgent(
             portfolio=portfolio,
             broker_name=broker_name,
             config=config,
+            telegram_alerts=self.telegram_alerts,
         )
 
         # Build workflow graph

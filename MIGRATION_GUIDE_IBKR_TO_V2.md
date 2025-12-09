@@ -333,7 +333,7 @@ If you need to rollback to IBKR:
 
 For issues or questions:
 1. Check `IMPLEMENTATION_COMPLETE.md` for system status
-2. Review `ARCHITECTURE_V2.md` for architecture details
+2. Review `ARCHITECTURE.md` for architecture details
 3. See test files in `tests/` for usage examples
 
 ---

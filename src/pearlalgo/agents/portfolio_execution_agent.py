@@ -33,6 +33,7 @@ from pearlalgo.core.events import OrderEvent
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.futures.performance import PerformanceRow, log_performance_row
 from pearlalgo.utils.retry import CircuitBreaker, retry_with_backoff
+from pearlalgo.utils.telegram_alerts import TelegramAlerts
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +51,15 @@ class PortfolioExecutionAgent:
         broker: Optional[Broker] = None,
         broker_name: str = "ibkr",
         config: Optional[Dict] = None,
+        telegram_alerts: Optional[TelegramAlerts] = None,
     ):
         self.portfolio = portfolio
         self.config = config or {}
         self.broker_name = broker_name
+        self.telegram_alerts = telegram_alerts
+        
+        # Check if signal-only mode is enabled
+        self.signal_only = self.config.get("trading", {}).get("signal_only", False)
 
         # Initialize broker if not provided
         if broker:
@@ -89,7 +95,7 @@ class PortfolioExecutionAgent:
             expected_exception=Exception,
         )
 
-        logger.info(f"PortfolioExecutionAgent initialized: broker={broker_name}")
+        logger.info(f"PortfolioExecutionAgent initialized: broker={broker_name}, signal_only={self.signal_only}")
 
     async def execute_decisions(self, state: TradingState) -> TradingState:
         """
@@ -115,6 +121,10 @@ class PortfolioExecutionAgent:
                 level="warning",
             )
             return state
+
+        # If signal-only mode, log signals without executing trades
+        if self.signal_only:
+            return await self._log_signals_only(state)
 
         # Execute each position decision
         for symbol, decision in state.position_decisions.items():
@@ -593,6 +603,113 @@ class PortfolioExecutionAgent:
             
         except Exception as e:
             logger.warning(f"Failed to log trade exit for {symbol}: {e}")
+    
+    async def _log_signals_only(self, state: TradingState) -> TradingState:
+        """
+        Log signals to performance CSV without executing trades.
+        
+        In signal-only mode, we track signals and calculate potential PnL
+        without actually placing orders.
+        """
+        logger.info("PortfolioExecutionAgent: Signal-only mode - logging signals without execution")
+        
+        state = add_agent_reasoning(
+            state,
+            "portfolio_execution_agent",
+            f"Signal-only mode: Logging {len(state.position_decisions)} signals",
+            level="info",
+        )
+        
+        for symbol, decision in state.position_decisions.items():
+            try:
+                # Get current market price
+                market_data = state.market_data.get(symbol)
+                if not market_data:
+                    logger.warning(f"No market data for {symbol}, skipping signal log")
+                    continue
+                
+                current_price = market_data.close
+                entry_price = decision.entry_price or current_price
+                
+                # Calculate potential PnL (unrealized)
+                # For signals, we calculate based on entry price vs current price
+                direction = 1 if decision.action in ["enter_long", "long"] else -1
+                size = abs(decision.size)
+                unrealized_pnl = direction * size * (current_price - entry_price)
+                
+                # Get signal from state
+                signal = state.signals.get(symbol)
+                strategy_name = signal.strategy_name if signal else "unknown"
+                
+                # Create performance row for signal
+                perf_row = PerformanceRow(
+                    timestamp=datetime.now(timezone.utc),
+                    symbol=symbol,
+                    sec_type="FUT",
+                    strategy_name=strategy_name,
+                    side=decision.action.replace("enter_", "").upper(),
+                    requested_size=size,
+                    filled_size=0,  # No actual fill in signal-only mode
+                    entry_time=datetime.now(timezone.utc),
+                    entry_price=entry_price,
+                    exit_price=None,
+                    realized_pnl=None,
+                    unrealized_pnl=unrealized_pnl,
+                    risk_status=state.risk_state.status if state.risk_state else "UNKNOWN",
+                    drawdown_remaining=None,
+                    trade_reason=decision.reasoning or (signal.reasoning if signal else None),
+                    notes="Signal-only mode - no trade executed",
+                )
+                
+                # Log to CSV
+                log_performance_row(perf_row)
+                
+                # Send Telegram notification with signal and PnL
+                if self.telegram_alerts:
+                    try:
+                        pnl_emoji = "📈" if unrealized_pnl >= 0 else "📉"
+                        message = (
+                            f"{pnl_emoji} *Signal Logged*\n\n"
+                            f"Symbol: {symbol}\n"
+                            f"Direction: {decision.action.replace('enter_', '').upper()}\n"
+                            f"Strategy: {strategy_name}\n"
+                            f"Entry Price: ${entry_price:.2f}\n"
+                            f"Size: {size} contracts\n"
+                            f"Stop Loss: ${decision.stop_loss:.2f}\n"
+                            f"Take Profit: ${decision.take_profit:.2f}\n"
+                            f"Risk: {decision.risk_percent * 100:.2f}%\n"
+                            f"Potential P&L: ${unrealized_pnl:,.2f}\n"
+                        )
+                        if decision.reasoning:
+                            message += f"\nReasoning: {decision.reasoning[:150]}..."
+                        await self.telegram_alerts.send_message(message)
+                    except Exception as e:
+                        logger.warning(f"Failed to send Telegram notification for signal: {e}")
+                
+                decision.status = "logged"
+                
+                state = add_agent_reasoning(
+                    state,
+                    "portfolio_execution_agent",
+                    f"Logged signal for {symbol}: {decision.action} @ ${entry_price:.2f}, "
+                    f"potential P&L: ${unrealized_pnl:,.2f}",
+                    level="info",
+                    data={
+                        "symbol": symbol,
+                        "action": decision.action,
+                        "entry_price": entry_price,
+                        "unrealized_pnl": unrealized_pnl,
+                    },
+                )
+                
+            except Exception as e:
+                error_msg = f"Error logging signal for {symbol}: {e}"
+                logger.error(error_msg, exc_info=True)
+                state.errors.append(error_msg)
+                decision.status = "error"
+        
+        logger.info(f"PortfolioExecutionAgent: Logged {len([d for d in state.position_decisions.values() if d.status == 'logged'])} signals")
+        return state
     
     @retry_with_backoff(
         max_attempts=3,

@@ -32,6 +32,7 @@ from pearlalgo.agents.langgraph_state import (
 )
 from pearlalgo.futures.signals import generate_signal
 from pearlalgo.utils.retry import CircuitBreaker, async_retry_with_backoff
+from pearlalgo.utils.telegram_alerts import TelegramAlerts
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +50,12 @@ class QuantResearchAgent:
         symbols: List[str],
         strategy: str = "sr",
         config: Optional[Dict] = None,
+        telegram_alerts: Optional[TelegramAlerts] = None,
     ):
         self.symbols = symbols
         self.strategy = strategy
         self.config = config or {}
+        self.telegram_alerts = telegram_alerts
 
         # LLM configuration
         self.use_llm = (
@@ -333,6 +336,24 @@ class QuantResearchAgent:
                         "regime": regime,
                     },
                 )
+
+                # Send Telegram notification for signal generation
+                if self.telegram_alerts and signal.side != "flat":
+                    try:
+                        price_str = f"@ ${signal.entry_price:.2f}" if signal.entry_price else ""
+                        message = (
+                            f"📊 *Signal Generated*\n\n"
+                            f"Symbol: {symbol}\n"
+                            f"Direction: {signal.side.upper()}\n"
+                            f"Strategy: {signal.strategy_name}\n"
+                            f"Confidence: {signal.confidence:.1%}\n"
+                            f"{price_str}\n"
+                        )
+                        if signal.reasoning:
+                            message += f"\nReasoning: {signal.reasoning[:200]}..."
+                        await self.telegram_alerts.send_message(message)
+                    except Exception as e:
+                        logger.warning(f"Failed to send Telegram notification for signal: {e}")
 
             except Exception as e:
                 error_msg = f"Error generating signal for {symbol}: {e}"

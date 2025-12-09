@@ -116,7 +116,7 @@ Complete index of all documentation for PearlAlgo system.
 3. START_TO_FINISH_GUIDE.md 📖
 
 ### For Developers
-1. ARCHITECTURE_V2.md 🏛️
+1. ARCHITECTURE.md 🏛️
 2. WALKTHROUGH_ALL_TESTS.md ✅
 3. CLEANUP_SUMMARY.md 🧹
 
@@ -143,7 +143,7 @@ Complete index of all documentation for PearlAlgo system.
 → WALKTHROUGH_ALL_TESTS.md
 
 ### "I want to understand the architecture"
-→ ARCHITECTURE_V2.md
+→ ARCHITECTURE.md
 
 ### "I'm migrating from IBKR"
 → MIGRATION_GUIDE_IBKR_TO_V2.md
@@ -160,7 +160,7 @@ Complete index of all documentation for PearlAlgo system.
 - QUICK_START_V2.md
 - START_TO_FINISH_GUIDE.md
 - WALKTHROUGH_ALL_TESTS.md
-- ARCHITECTURE_V2.md
+- ARCHITECTURE.md
 - MIGRATION_GUIDE_IBKR_TO_V2.md
 - IBKR_DEPRECATION_NOTICE.md
 - CLEANUP_SUMMARY.md
@@ -186,7 +186,7 @@ Complete index of all documentation for PearlAlgo system.
 → WALKTHROUGH_ALL_TESTS.md
 
 ### "What data providers are available?"
-→ ARCHITECTURE_V2.md → Data Providers section
+→ ARCHITECTURE.md → Data Providers section
 → START_TO_FINISH_GUIDE.md → Step 2
 
 ### "How do I migrate from IBKR?"

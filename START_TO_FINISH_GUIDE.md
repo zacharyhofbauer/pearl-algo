@@ -679,7 +679,7 @@ pip install pyarrow requests py-vollib
 
 ## 📚 Additional Resources
 
-- `ARCHITECTURE_V2.md` - System architecture details
+- `ARCHITECTURE.md` - System architecture details
 - `MIGRATION_GUIDE_IBKR_TO_V2.md` - Migration from IBKR
 - `COMPLETE_IMPLEMENTATION_REPORT.md` - Full implementation report
 - `tests/` - All test files for examples

@@ -52,13 +52,17 @@ class TelegramAlerts:
             )
             self.enabled = False
 
-    async def send_message(self, message: str) -> bool:
+    async def send_message(self, message: str, parse_mode: str = "Markdown") -> bool:
         """Send a message to Telegram."""
         if not self.enabled or not self.bot:
             return False
 
         try:
-            await self.bot.send_message(chat_id=self.chat_id, text=message)
+            await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode=parse_mode
+            )
             return True
         except TelegramError as e:
             logger.error(f"Failed to send Telegram message: {e}")

@@ -138,7 +138,7 @@ All core functionality is implemented, tested, and documented. The system follow
 ## 📚 Documentation
 
 See these files for details:
-- `ARCHITECTURE_V2.md` - New architecture
+- `ARCHITECTURE.md` - System architecture
 - `MIGRATION_GUIDE_IBKR_TO_V2.md` - Migration instructions
 - `COMPLETE_IMPLEMENTATION_REPORT.md` - Full report
 - `FINAL_SUMMARY.md` - Quick summary

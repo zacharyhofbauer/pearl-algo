@@ -59,7 +59,7 @@ print(f"Order {order_id} submitted!")
 👉 **[WALKTHROUGH_ALL_TESTS.md](WALKTHROUGH_ALL_TESTS.md)** - Complete testing guide
 
 ### For Understanding Architecture:
-👉 **[ARCHITECTURE_V2.md](ARCHITECTURE_V2.md)** - System design & architecture
+👉 **[ARCHITECTURE.md](ARCHITECTURE.md)** - System design & architecture
 
 ### For Migration from IBKR:
 👉 **[MIGRATION_GUIDE_IBKR_TO_V2.md](MIGRATION_GUIDE_IBKR_TO_V2.md)** - Step-by-step migration
@@ -167,7 +167,7 @@ print(f"Order {order_id} submitted!")
 
 1. **Read Quick Start**: [QUICK_START_V2.md](QUICK_START_V2.md)
 2. **Run Tests**: [WALKTHROUGH_ALL_TESTS.md](WALKTHROUGH_ALL_TESTS.md)
-3. **Understand Architecture**: [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md)
+3. **Understand Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
 4. **Start Trading**: Use paper broker in your strategies
 
 ---

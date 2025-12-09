@@ -100,7 +100,7 @@ See `MIGRATION_GUIDE_IBKR_TO_V2.md` for complete migration instructions.
 
 For questions about migrating from IBKR:
 1. See `MIGRATION_GUIDE_IBKR_TO_V2.md`
-2. Review `ARCHITECTURE_V2.md` for new architecture
+2. Review `ARCHITECTURE.md` for system architecture
 3. Check `IMPLEMENTATION_COMPLETE.md` for system status
 
 **The new system is production-ready and recommended for all new deployments!**
