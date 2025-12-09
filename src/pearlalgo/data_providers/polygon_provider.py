@@ -24,6 +24,8 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 from pearlalgo.data_providers.base import DataProvider
+from pearlalgo.data_providers.polygon_config import PolygonConfig
+from pearlalgo.utils.retry import CircuitBreaker, async_retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -39,24 +41,43 @@ class PolygonDataProvider(DataProvider):
     - Rate limit handling
     """
 
-    def __init__(self, api_key: str, rate_limit_delay: float = 0.25):
+    def __init__(
+        self, 
+        api_key: str, 
+        rate_limit_delay: float = 0.25,
+        config: Optional[PolygonConfig] = None,
+    ):
         """
         Initialize Polygon.io data provider.
 
         Args:
             api_key: Polygon.io API key
             rate_limit_delay: Delay between API calls in seconds (default 0.25 for 4 calls/sec)
+            config: Optional PolygonConfig (if None, creates from api_key)
         """
-        self.api_key = api_key
-        self.base_url = "https://api.polygon.io"
-        self.rate_limit_delay = rate_limit_delay
+        if config:
+            self.config = config
+        else:
+            self.config = PolygonConfig(api_key=api_key, rate_limit_delay=rate_limit_delay)
+        
+        self.api_key = self.config.api_key
+        self.base_url = self.config.base_url
+        self.rate_limit_delay = self.config.rate_limit_delay
         self.session: Optional[aiohttp.ClientSession] = None
         self._last_request_time: float = 0.0
+        
+        # Circuit breaker for API calls
+        self.circuit_breaker = CircuitBreaker(
+            failure_threshold=self.config.circuit_breaker_failure_threshold,
+            recovery_timeout=self.config.circuit_breaker_recovery_timeout,
+            expected_exception=Exception,
+        )
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or create aiohttp session."""
+        """Get or create aiohttp session with timeout."""
         if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
+            timeout = aiohttp.ClientTimeout(total=self.config.request_timeout)
+            self.session = aiohttp.ClientSession(timeout=timeout)
         return self.session
 
     async def _rate_limit(self) -> None:
@@ -161,7 +182,8 @@ class PolygonDataProvider(DataProvider):
 
             try:
                 await self._rate_limit()
-                async with session.get(url, params=params) as response:
+                timeout = aiohttp.ClientTimeout(total=self.config.request_timeout)
+                async with session.get(url, params=params, timeout=timeout) as response:
                     if response.status == 200:
                         data = await response.json()
                         if data.get("status") == "OK":
@@ -197,10 +219,14 @@ class PolygonDataProvider(DataProvider):
                     elif response.status == 429:
                         logger.warning(
                             f"Polygon API rate limit exceeded for {symbol} "
-                            f"({date_from} to {date_to}). Waiting 2 minutes..."
+                            f"({date_from} to {date_to}). Applying exponential backoff..."
                         )
-                        # Wait longer for rate limit (free tier has strict limits)
-                        await asyncio.sleep(120)
+                        # Exponential backoff for rate limits
+                        backoff_delay = min(
+                            self.config.initial_backoff * (self.config.backoff_multiplier ** 2),
+                            self.config.max_backoff
+                        )
+                        await asyncio.sleep(backoff_delay)
                         # Retry this chunk
                         continue
                     else:
@@ -244,9 +270,16 @@ class PolygonDataProvider(DataProvider):
         )
         return df
 
+    @async_retry_with_backoff(
+        max_attempts=3,
+        initial_delay=1.0,
+        max_delay=60.0,
+        exponential_base=2.0,
+        exceptions=(aiohttp.ClientError, asyncio.TimeoutError, Exception),
+    )
     async def get_latest_bar(self, symbol: str) -> Optional[Dict]:
         """
-        Get latest bar for a symbol.
+        Get latest bar for a symbol with retry and circuit breaker.
 
         Args:
             symbol: Ticker symbol
@@ -255,13 +288,21 @@ class PolygonDataProvider(DataProvider):
             Dict with timestamp, open, high, low, close, volume, vwap
         """
         try:
-            session = await self._get_session()
+            return await self.circuit_breaker.acall(self._get_latest_bar_impl, symbol)
+        except Exception as e:
+            logger.error(f"Error fetching latest bar for {symbol}: {e}")
+            return None
+    
+    async def _get_latest_bar_impl(self, symbol: str) -> Optional[Dict]:
+        """Internal implementation of get_latest_bar."""
+        session = await self._get_session()
 
-            url = f"{self.base_url}/v2/aggs/ticker/{symbol}/prev"
-            params = {"adjusted": "true", "apikey": self.api_key}
+        url = f"{self.base_url}/v2/aggs/ticker/{symbol}/prev"
+        params = {"adjusted": "true", "apikey": self.api_key}
 
-            await self._rate_limit()
-            async with session.get(url, params=params) as response:
+        await self._rate_limit()
+        timeout = aiohttp.ClientTimeout(total=self.config.request_timeout)
+        async with session.get(url, params=params, timeout=timeout) as response:
                 if response.status == 200:
                     data = await response.json()
                     if (

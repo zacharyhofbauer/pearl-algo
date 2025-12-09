@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional
 
-from pearlalgo.paper_trading.margin_models import FuturesMarginModel
+from pearlalgo.risk.margin_models import FuturesMarginModel
 
 logger = logging.getLogger(__name__)
 

@@ -19,7 +19,7 @@ from rich.prompt import Prompt
 from pearlalgo.futures.performance import load_performance, DEFAULT_PERF_PATH
 from pearlalgo.futures.config import load_profile
 from pearlalgo.futures.risk import compute_risk_state
-from pearlalgo.brokers.ibkr_broker import IBKRBroker
+# IBKR broker removed - system is data-only
 from pearlalgo.core.portfolio import Portfolio
 
 console = Console()
@@ -34,7 +34,7 @@ class TradingSDK:
     def __init__(self):
         self.console = Console()
         self.portfolio: Optional[Portfolio] = None
-        self.broker: Optional[IBKRBroker] = None
+        # Broker removed - system is data-only
 
     def get_positions(self) -> List[Dict[str, Any]]:
         """Get all open positions."""

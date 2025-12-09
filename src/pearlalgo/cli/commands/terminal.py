@@ -20,7 +20,7 @@ from rich import box
 from pearlalgo.futures.performance import load_performance, DEFAULT_PERF_PATH
 from pearlalgo.futures.config import load_profile
 from pearlalgo.futures.risk import compute_risk_state
-from pearlalgo.brokers.ibkr_broker import IBKRBroker
+# IBKR broker removed - system is data-only
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.config.settings import get_settings
 

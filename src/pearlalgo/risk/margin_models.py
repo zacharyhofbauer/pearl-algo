@@ -1,7 +1,8 @@
 """
-Margin Models for Paper Trading Simulation.
+Margin Models for Risk Calculations.
 
 Implements SPAN-like margin for futures and rule-based margin for options.
+Extracted from paper_trading for use in risk calculations.
 """
 
 from __future__ import annotations
@@ -151,7 +152,7 @@ class OptionsMarginModel:
     """
     Rule-based margin model for options.
 
-    Simplified margin calculations sufficient for small-scale paper trading.
+    Simplified margin calculations for risk assessment.
     """
 
     def get_margin_requirements(
@@ -246,8 +247,3 @@ class OptionsMarginModel:
             maintenance_margin=margin_required * 0.85,
             total_required=margin_required,
         )
-
-
-
-
-

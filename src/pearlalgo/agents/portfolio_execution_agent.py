@@ -27,8 +27,7 @@ from pearlalgo.agents.langgraph_state import (
     TradingState,
     add_agent_reasoning,
 )
-from pearlalgo.brokers.base import Broker
-from pearlalgo.brokers.factory import get_broker
+# Broker dependencies removed - system is data-only
 from pearlalgo.core.events import OrderEvent
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.futures.performance import PerformanceRow, log_performance_row
@@ -48,28 +47,15 @@ class PortfolioExecutionAgent:
     def __init__(
         self,
         portfolio: Portfolio,
-        broker: Optional[Broker] = None,
-        broker_name: str = "paper",
         config: Optional[Dict] = None,
         telegram_alerts: Optional[TelegramAlerts] = None,
     ):
         self.portfolio = portfolio
         self.config = config or {}
-        self.broker_name = broker_name
         self.telegram_alerts = telegram_alerts
         
-        # Check if signal-only mode is enabled
-        self.signal_only = self.config.get("trading", {}).get("signal_only", False)
-
-        # Initialize broker if not provided
-        if broker:
-            self.broker = broker
-        else:
-            self.broker = get_broker(
-                broker_name=broker_name,
-                portfolio=portfolio,
-                config=config,
-            )
+        # System is data-only - always signal-only mode
+        self.signal_only = True
 
         # Execution settings
         self.execution_delay = (
@@ -88,14 +74,7 @@ class PortfolioExecutionAgent:
         self.entry_prices: Dict[str, float] = {}
         self.trade_reasons: Dict[str, str] = {}
         
-        # Circuit breaker for broker API calls
-        self.broker_circuit_breaker = CircuitBreaker(
-            failure_threshold=5,
-            recovery_timeout=60.0,
-            expected_exception=Exception,
-        )
-
-        logger.info(f"PortfolioExecutionAgent initialized: broker={broker_name}, signal_only={self.signal_only}")
+        logger.info(f"PortfolioExecutionAgent initialized: signal_only={self.signal_only} (data-only mode)")
 
     async def execute_decisions(self, state: TradingState) -> TradingState:
         """
@@ -122,11 +101,11 @@ class PortfolioExecutionAgent:
             )
             return state
 
-        # If signal-only mode, log signals without executing trades
-        if self.signal_only:
-            return await self._log_signals_only(state)
+        # Data-only system: always log signals without executing trades
+        return await self._log_signals_only(state)
 
-        # Execute each position decision
+        # Original execution code removed - system is data-only
+        # Execute each position decision (DISABLED)
         for symbol, decision in state.position_decisions.items():
             try:
                 # Check if we should execute
@@ -711,26 +690,20 @@ class PortfolioExecutionAgent:
         logger.info(f"PortfolioExecutionAgent: Logged {len([d for d in state.position_decisions.values() if d.status == 'logged'])} signals")
         return state
     
-    @retry_with_backoff(
-        max_attempts=3,
-        initial_delay=1.0,
-        max_delay=10.0,
-        exceptions=(Exception,),
-    )
     def _submit_order_with_retry(self, order: OrderEvent) -> str:
         """
-        Submit order with retry logic and circuit breaker protection.
+        Stub method for order submission - system is data-only.
+        
+        In data-only mode, orders are not actually submitted.
+        This method exists for compatibility but always returns a dummy ID.
         
         Args:
-            order: OrderEvent to submit
+            order: OrderEvent (not actually submitted)
             
         Returns:
-            Order ID from broker
-            
-        Raises:
-            Exception: If all retry attempts fail or circuit breaker is open
+            Dummy order ID string
         """
-        return self.broker_circuit_breaker.call(
-            self.broker.submit_order,
-            order,
-        )
+        import uuid
+        dummy_order_id = f"signal-{uuid.uuid4().hex[:8]}"
+        logger.debug(f"Signal-only mode: Order {dummy_order_id} logged but not executed for {order.symbol}")
+        return dummy_order_id

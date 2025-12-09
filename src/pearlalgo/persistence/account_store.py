@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from pearlalgo.core.portfolio import Portfolio
-from pearlalgo.brokers.interfaces import AccountSummary
+from pearlalgo.core.events import AccountSummary
 
 logger = logging.getLogger(__name__)
 

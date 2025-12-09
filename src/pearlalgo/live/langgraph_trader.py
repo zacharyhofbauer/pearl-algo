@@ -48,9 +48,7 @@ class LangGraphTrader:
         self,
         config_path: Optional[str] = None,
         symbols: Optional[List[str]] = None,
-        broker: Optional[str] = None,
         strategy: Optional[str] = None,
-        mode: str = "paper",
     ):
         # Load configuration
         import os
@@ -118,28 +116,13 @@ class LangGraphTrader:
             # Extract symbol names from config
             self.symbols = [s["symbol"] for s in self.symbols]
 
-        self.broker = broker or self.config.get("broker", {}).get("primary", "paper")
         self.strategy = strategy or self.config.get("strategy", {}).get("default", "sr")
-        self.mode = mode or self.config.get("trading", {}).get("mode", "paper")
-
-        # Ensure trading mode is in config for agents
-        if "trading" not in self.config:
-            self.config["trading"] = {}
-        self.config["trading"]["mode"] = self.mode
 
         # Load profile
         self.profile = load_profile()
 
-        # Initialize portfolio
-        starting_balance = (
-            self.config.get("trading", {})
-            .get("paper", {})
-            .get("starting_balance", 50000.0)
-            if self.mode == "paper"
-            else self.config.get("trading", {})
-            .get("live", {})
-            .get("starting_balance", 50000.0)
-        )
+        # Initialize portfolio (data-only system)
+        starting_balance = self.config.get("trading", {}).get("paper", {}).get("starting_balance", 50000.0)
 
         self.portfolio = Portfolio(cash=starting_balance)
 
@@ -147,7 +130,6 @@ class LangGraphTrader:
         self.workflow = TradingWorkflow(
             symbols=self.symbols,
             portfolio=self.portfolio,
-            broker_name=self.broker,
             strategy=self.strategy,
             config=self.config,
         )
@@ -156,8 +138,7 @@ class LangGraphTrader:
         self.shutdown_requested = False
 
         logger.info(
-            f"LangGraphTrader initialized: mode={self.mode}, "
-            f"broker={self.broker}, strategy={self.strategy}, symbols={self.symbols}"
+            f"LangGraphTrader initialized: strategy={self.strategy}, symbols={self.symbols}"
         )
 
     async def start(
@@ -219,7 +200,7 @@ def main():
     parser.add_argument("--config", type=str, help="Path to config.yaml")
     parser.add_argument("--symbols", nargs="+", help="Trading symbols")
     parser.add_argument(
-        "--broker", type=str, choices=["ibkr", "bybit", "alpaca"], help="Broker"
+# Broker argument removed - system is data-only
     )
     parser.add_argument("--strategy", type=str, help="Trading strategy")
     parser.add_argument(
@@ -240,7 +221,7 @@ def main():
     trader = LangGraphTrader(
         config_path=args.config,
         symbols=args.symbols,
-        broker=args.broker,
+# Broker argument removed
         strategy=args.strategy,
         mode=args.mode,
     )

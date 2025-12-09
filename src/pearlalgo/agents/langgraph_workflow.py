@@ -49,13 +49,11 @@ class TradingWorkflow:
         self,
         symbols: list[str],
         portfolio: Portfolio,
-        broker_name: str = "paper",
         strategy: str = "sr",
         config: Optional[Dict] = None,
     ):
         self.symbols = symbols
         self.portfolio = portfolio
-        self.broker_name = broker_name
         self.strategy = strategy
         self.config = config or {}
 
@@ -81,7 +79,6 @@ class TradingWorkflow:
         # Initialize agents
         self.market_data_agent = MarketDataAgent(
             symbols=symbols,
-            broker=broker_name,
             config=config,
         )
 
@@ -100,7 +97,6 @@ class TradingWorkflow:
 
         self.portfolio_execution_agent = PortfolioExecutionAgent(
             portfolio=portfolio,
-            broker_name=broker_name,
             config=config,
             telegram_alerts=self.telegram_alerts,
         )
@@ -110,7 +106,7 @@ class TradingWorkflow:
 
         logger.info(
             f"TradingWorkflow initialized: symbols={symbols}, "
-            f"broker={broker_name}, strategy={strategy}"
+            f"strategy={strategy}"
         )
 
     def _build_workflow(self) -> StateGraph:
@@ -265,7 +261,6 @@ class TradingWorkflow:
 def create_workflow(
     symbols: list[str],
     portfolio: Portfolio,
-    broker_name: str = "ibkr",
     strategy: str = "sr",
     config: Optional[Dict] = None,
 ) -> TradingWorkflow:
@@ -273,7 +268,6 @@ def create_workflow(
     return TradingWorkflow(
         symbols=symbols,
         portfolio=portfolio,
-        broker_name=broker_name,
         strategy=strategy,
         config=config,
     )

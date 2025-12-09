@@ -1,36 +1,6 @@
 # LangGraph Multi-Agent Trading System Configuration
 # All API keys should be set via environment variables for security
 
-# Broker Configuration
-broker:
-  # Primary broker: "paper" (recommended), "ibkr" (deprecated), "bybit", or "alpaca"
-  # NOTE: IBKR is deprecated. Use "paper" for internal simulation.
-  primary: "paper"
-  
-  # IBKR Configuration (OPTIONAL - DEPRECATED)
-  # IBKR is deprecated. Use paper broker instead. See IBKR_DEPRECATION_NOTICE.md
-  ibkr:
-    enabled: false  # Set to true only if using IBKR (not recommended)
-    host: "${IBKR_HOST:-127.0.0.1}"
-    port: "${IBKR_PORT:-7497}"
-    client_id: "${IBKR_CLIENT_ID:-1}"
-    data_client_id: "${IBKR_DATA_CLIENT_ID:-2}"
-    # Set IBKR_API_KEY and IBKR_API_SECRET in .env if needed
-  
-  # Bybit Configuration (for crypto perps)
-  bybit:
-    api_key: "${BYBIT_API_KEY}"
-    api_secret: "${BYBIT_API_SECRET}"
-    testnet: false  # Set to true for paper trading
-    unified_margin: true
-  
-  # Alpaca Configuration (for US futures)
-  alpaca:
-    api_key: "${ALPACA_API_KEY}"
-    api_secret: "${ALPACA_API_SECRET}"
-    base_url: "${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}"  # Use paper by default
-    data_feed: "iex"  # or "sip" for live
-
 # Trading Symbols
 symbols:
   # Micro futures contracts (MES, MNQ, MCL, MGC) - Lower risk, smaller size
@@ -219,16 +189,10 @@ trading:
   # Signal-only mode: Generate signals and track PnL without executing trades
   signal_only: true
   
-  # Paper trading settings
+  # Data-only system settings
   paper:
     starting_balance: 50000.0
-    commission: 0.0  # No commission in paper trading
-  
-  # Live trading settings
-  live:
-    starting_balance: "${LIVE_STARTING_BALANCE:-50000.0}"
-    commission: 0.85  # Per contract (IBKR typical)
-    require_confirmation: false  # Set to true for manual confirmation
+    commission: 0.0  # No commission in data-only mode
 
 # Logging
 logging:

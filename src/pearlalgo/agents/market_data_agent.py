@@ -29,7 +29,7 @@ from pearlalgo.agents.langgraph_state import (
 from pearlalgo.config.settings import get_settings
 from pearlalgo.data_providers.dummy_provider import DummyDataProvider
 from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
-from pearlalgo.data_providers.websocket_provider import WebSocketDataProvider
+# WebSocket provider removed - system uses Polygon REST API only
 
 logger = logging.getLogger(__name__)
 
@@ -45,47 +45,29 @@ class MarketDataAgent:
     def __init__(
         self,
         symbols: List[str],
-        broker: str = "paper",
         config: Optional[Dict] = None,
     ):
         self.symbols = symbols
-        self.broker = broker.lower()
         self.config = config or {}
 
         # Initialize data providers
-        self.websocket_provider: Optional[WebSocketDataProvider] = None
-        self.rest_provider = None
         self.polygon_provider: Optional[PolygonDataProvider] = None
         self.dummy_provider: Optional[DummyDataProvider] = None
 
         # Data buffers (for caching normalized data)
         self.data_buffers: Dict[str, List[MarketData]] = {symbol: [] for symbol in symbols}
 
-        # Initialize providers based on broker
+        # Initialize Polygon provider
         self._initialize_providers()
 
-        logger.info(f"MarketDataAgent initialized: broker={broker}, symbols={symbols}")
+        logger.info(f"MarketDataAgent initialized: symbols={symbols}")
 
     def _initialize_providers(self) -> None:
-        """Initialize data providers based on broker configuration."""
+        """Initialize Polygon data provider."""
         try:
-            # Try WebSocket provider first (if enabled)
-            websocket_enabled = (
-                self.config.get("data", {}).get("websocket", {}).get("enabled", True)
-            )
-
-            if websocket_enabled:
-                try:
-                    self.websocket_provider = WebSocketDataProvider(
-                        broker=self.broker,
-                        symbols=self.symbols,
-                        config=self.config,
-                    )
-                    logger.info("WebSocket provider initialized")
-                except Exception as e:
-                    logger.warning(f"WebSocket provider failed to initialize: {e}")
-
-            # Initialize Polygon provider (primary for US futures)
+            import os
+            
+            # Initialize Polygon provider (primary data source)
             # Try to get API key from config or environment
             polygon_api_key = (
                 self.config.get("data", {})
@@ -95,7 +77,6 @@ class MarketDataAgent:
             )
             if not polygon_api_key:
                 # Try environment variable
-                import os
                 polygon_api_key = os.getenv("POLYGON_API_KEY")
             
             if polygon_api_key:
@@ -105,19 +86,9 @@ class MarketDataAgent:
                 except Exception as e:
                     logger.warning(f"Polygon provider initialization failed: {e}")
             else:
-                logger.debug("Polygon API key not found, Polygon provider disabled")
-            
-            # Initialize REST provider based on broker (for non-paper brokers)
-            if self.broker == "bybit":
-                # Bybit will be handled via ccxt in websocket provider
-                pass
-            elif self.broker == "alpaca":
-                # Alpaca will be handled via REST API
-                pass
+                logger.warning("Polygon API key not found - Polygon provider disabled. Set POLYGON_API_KEY environment variable.")
 
-            # Initialize dummy provider (enabled by default for testing)
-            import os
-            # Check environment variable first
+            # Initialize dummy provider as fallback (enabled by default for testing)
             dummy_mode_env = os.getenv("PEARLALGO_DUMMY_MODE", "").lower()
             if dummy_mode_env in ("true", "1", "yes"):
                 dummy_mode = True
@@ -125,7 +96,6 @@ class MarketDataAgent:
                 dummy_mode = False
             else:
                 # Default to True if not explicitly set (allows testing without API keys)
-                # This ensures system works even without API keys or IBKR
                 dummy_mode = True
             
             if dummy_mode:
@@ -206,18 +176,9 @@ class MarketDataAgent:
     async def _fetch_symbol_data(self, symbol: str) -> Optional[MarketData]:
         """
         Fetch data for a single symbol.
-        Tries WebSocket first, then Polygon, then Dummy provider as fallback.
+        Tries Polygon first, then Dummy provider as fallback.
         """
-        # Try WebSocket first
-        if self.websocket_provider:
-            try:
-                data = await self.websocket_provider.get_latest_data(symbol)
-                if data:
-                    return self._convert_to_market_data(symbol, data)
-            except Exception as e:
-                logger.debug(f"WebSocket fetch failed for {symbol}: {e}")
-
-        # Try Polygon provider (primary for US futures)
+        # Try Polygon provider (primary data source)
         if self.polygon_provider:
             try:
                 data = await self.polygon_provider.get_latest_bar(symbol)
@@ -240,7 +201,7 @@ class MarketDataAgent:
         # If we get here, all providers failed
         logger.warning(
             f"All data sources failed for {symbol}. "
-            f"Tried: WebSocket, Polygon, Dummy. "
+            f"Tried: Polygon, Dummy. "
             f"To enable dummy data for testing, set PEARLALGO_DUMMY_MODE=true in .env. "
             f"To use Polygon, set POLYGON_API_KEY in .env."
         )
@@ -306,23 +267,7 @@ class MarketDataAgent:
             metadata=data.get("metadata", {}),
         )
 
-    async def start_websocket_stream(self) -> None:
-        """Start WebSocket streaming (if available)."""
-        if self.websocket_provider:
-            try:
-                await self.websocket_provider.start_stream()
-                logger.info("WebSocket stream started")
-            except Exception as e:
-                logger.error(f"Failed to start WebSocket stream: {e}")
-
-    async def stop_websocket_stream(self) -> None:
-        """Stop WebSocket streaming."""
-        if self.websocket_provider:
-            try:
-                await self.websocket_provider.stop_stream()
-                logger.info("WebSocket stream stopped")
-            except Exception as e:
-                logger.error(f"Failed to stop WebSocket stream: {e}")
+    # WebSocket methods removed - system uses Polygon REST API only
 
     def get_latest_data(self, symbol: str) -> Optional[MarketData]:
         """

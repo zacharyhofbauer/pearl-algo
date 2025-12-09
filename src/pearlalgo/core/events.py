@@ -60,6 +60,20 @@ class FillEvent:
     metadata: Mapping[str, Any] | None = None
 
 
+@dataclass
+class AccountSummary:
+    """Account summary information."""
+
+    equity: float
+    cash: float
+    buying_power: float
+    margin_used: float
+    margin_available: float
+    unrealized_pnl: float
+    realized_pnl: float
+    timestamp: datetime
+
+
 @dataclass(frozen=True)
 class PortfolioEvent:
     """Portfolio update such as PnL or risk trigger."""
