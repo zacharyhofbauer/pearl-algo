@@ -60,3 +60,4 @@ The system now works without IBKR:
 
 **Status:** ✅ IBKR dependencies removed  
 **Date:** 2025-12-05
+

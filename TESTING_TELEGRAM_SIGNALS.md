@@ -261,3 +261,4 @@ Once testing is successful:
 2. Analyze signal performance from CSV
 3. Optimize signal generation for maximum returns
 4. Add more sophisticated PnL tracking with mark-to-market updates
+
