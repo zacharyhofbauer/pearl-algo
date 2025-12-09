@@ -103,16 +103,20 @@ class TestPolygonProviderUnit:
             }]
         }
         
-        with patch.object(provider, '_get_session') as mock_session:
-            mock_session_obj = AsyncMock()
-            mock_response_obj = AsyncMock()
-            mock_response_obj.status = 200
-            mock_response_obj.json = AsyncMock(return_value=mock_response)
-            mock_session_obj.get = AsyncMock(return_value=mock_response_obj)
-            mock_session_obj.__aenter__ = AsyncMock(return_value=mock_response_obj)
-            mock_session_obj.__aexit__ = AsyncMock(return_value=None)
-            mock_session.return_value = mock_session_obj
-            
+        # Create proper async context manager mock
+        mock_response_obj = AsyncMock()
+        mock_response_obj.status = 200
+        mock_response_obj.json = AsyncMock(return_value=mock_response)
+        
+        # Create async context manager for session.get()
+        mock_get_context = AsyncMock()
+        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response_obj)
+        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_session_obj = AsyncMock()
+        mock_session_obj.get = MagicMock(return_value=mock_get_context)
+        
+        with patch.object(provider, '_get_session', return_value=mock_session_obj):
             result = await provider._get_latest_bar_impl("AAPL")
             
             assert result is not None
@@ -123,15 +127,18 @@ class TestPolygonProviderUnit:
     @pytest.mark.asyncio
     async def test_get_latest_bar_rate_limit(self, provider):
         """Test handling of rate limit (429) response."""
-        with patch.object(provider, '_get_session') as mock_session:
-            mock_session_obj = AsyncMock()
-            mock_response_obj = AsyncMock()
-            mock_response_obj.status = 429
-            mock_session_obj.get = AsyncMock(return_value=mock_response_obj)
-            mock_session_obj.__aenter__ = AsyncMock(return_value=mock_response_obj)
-            mock_session_obj.__aexit__ = AsyncMock(return_value=None)
-            mock_session.return_value = mock_session_obj
-            
+        # Create proper async context manager mock
+        mock_response_obj = AsyncMock()
+        mock_response_obj.status = 429
+        
+        mock_get_context = AsyncMock()
+        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response_obj)
+        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_session_obj = AsyncMock()
+        mock_session_obj.get = MagicMock(return_value=mock_get_context)
+        
+        with patch.object(provider, '_get_session', return_value=mock_session_obj):
             result = await provider._get_latest_bar_impl("AAPL")
             
             # Should return None on rate limit
@@ -140,15 +147,18 @@ class TestPolygonProviderUnit:
     @pytest.mark.asyncio
     async def test_get_latest_bar_unauthorized(self, provider):
         """Test handling of unauthorized (401) response."""
-        with patch.object(provider, '_get_session') as mock_session:
-            mock_session_obj = AsyncMock()
-            mock_response_obj = AsyncMock()
-            mock_response_obj.status = 401
-            mock_session_obj.get = AsyncMock(return_value=mock_response_obj)
-            mock_session_obj.__aenter__ = AsyncMock(return_value=mock_response_obj)
-            mock_session_obj.__aexit__ = AsyncMock(return_value=None)
-            mock_session.return_value = mock_session_obj
-            
+        # Create proper async context manager mock
+        mock_response_obj = AsyncMock()
+        mock_response_obj.status = 401
+        
+        mock_get_context = AsyncMock()
+        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response_obj)
+        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_session_obj = AsyncMock()
+        mock_session_obj.get = MagicMock(return_value=mock_get_context)
+        
+        with patch.object(provider, '_get_session', return_value=mock_session_obj):
             result = await provider._get_latest_bar_impl("AAPL")
             
             # Should return None on unauthorized
@@ -173,16 +183,19 @@ class TestPolygonProviderUnit:
             ]
         }
         
-        with patch.object(provider, '_get_session') as mock_session:
-            mock_session_obj = AsyncMock()
-            mock_response_obj = AsyncMock()
-            mock_response_obj.status = 200
-            mock_response_obj.json = AsyncMock(return_value=mock_response_data)
-            mock_session_obj.get = AsyncMock(return_value=mock_response_obj)
-            mock_session_obj.__aenter__ = AsyncMock(return_value=mock_response_obj)
-            mock_session_obj.__aexit__ = AsyncMock(return_value=None)
-            mock_session.return_value = mock_session_obj
-            
+        # Create proper async context manager mock
+        mock_response_obj = AsyncMock()
+        mock_response_obj.status = 200
+        mock_response_obj.json = AsyncMock(return_value=mock_response_data)
+        
+        mock_get_context = AsyncMock()
+        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response_obj)
+        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_session_obj = AsyncMock()
+        mock_session_obj.get = MagicMock(return_value=mock_get_context)
+        
+        with patch.object(provider, '_get_session', return_value=mock_session_obj):
             start = datetime.now(timezone.utc) - timedelta(days=60)
             end = datetime.now(timezone.utc)
             
@@ -330,9 +343,7 @@ class TestPolygonProviderErrorHandling:
     @pytest.mark.asyncio
     async def test_network_error_handling(self, provider):
         """Test handling of network errors."""
-        with patch.object(provider, '_get_session') as mock_session:
-            mock_session.side_effect = aiohttp.ClientError("Network error")
-            
+        with patch.object(provider, '_get_session', side_effect=aiohttp.ClientError("Network error")):
             result = await provider.get_latest_bar("AAPL")
             
             # Should return None on network error
@@ -341,9 +352,7 @@ class TestPolygonProviderErrorHandling:
     @pytest.mark.asyncio
     async def test_timeout_handling(self, provider):
         """Test handling of timeouts."""
-        with patch.object(provider, '_get_session') as mock_session:
-            mock_session.side_effect = asyncio.TimeoutError()
-            
+        with patch.object(provider, '_get_session', side_effect=asyncio.TimeoutError()):
             result = await provider.get_latest_bar("AAPL")
             
             # Should return None on timeout
@@ -352,16 +361,19 @@ class TestPolygonProviderErrorHandling:
     @pytest.mark.asyncio
     async def test_invalid_json_response(self, provider):
         """Test handling of invalid JSON response."""
-        with patch.object(provider, '_get_session') as mock_session:
-            mock_session_obj = AsyncMock()
-            mock_response_obj = AsyncMock()
-            mock_response_obj.status = 200
-            mock_response_obj.json = AsyncMock(side_effect=ValueError("Invalid JSON"))
-            mock_session_obj.get = AsyncMock(return_value=mock_response_obj)
-            mock_session_obj.__aenter__ = AsyncMock(return_value=mock_response_obj)
-            mock_session_obj.__aexit__ = AsyncMock(return_value=None)
-            mock_session.return_value = mock_session_obj
-            
+        # Create proper async context manager mock
+        mock_response_obj = AsyncMock()
+        mock_response_obj.status = 200
+        mock_response_obj.json = AsyncMock(side_effect=ValueError("Invalid JSON"))
+        
+        mock_get_context = AsyncMock()
+        mock_get_context.__aenter__ = AsyncMock(return_value=mock_response_obj)
+        mock_get_context.__aexit__ = AsyncMock(return_value=None)
+        
+        mock_session_obj = AsyncMock()
+        mock_session_obj.get = MagicMock(return_value=mock_get_context)
+        
+        with patch.object(provider, '_get_session', return_value=mock_session_obj):
             result = await provider.get_latest_bar("AAPL")
             
             # Should handle gracefully
