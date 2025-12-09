@@ -68,3 +68,4 @@ echo "Next steps:"
 echo "  - Set POLYGON_API_KEY to run integration tests"
 echo "  - See TESTING_GUIDE_POLYGON.md for detailed testing instructions"
 echo "  - Run: pytest --cov=src/pearlalgo/data_providers --cov-report=html for coverage"
+

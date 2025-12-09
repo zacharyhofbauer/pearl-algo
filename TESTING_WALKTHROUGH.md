@@ -317,3 +317,4 @@ pytest --cov=src/pearlalgo/data_providers --cov-report=html
 ```
 
 Happy testing! 🚀
+

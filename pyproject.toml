@@ -38,6 +38,7 @@ dependencies = [
     "pyarrow>=14.0.0",
     "requests>=2.31.0",
     "py-vollib>=1.0.1",
+    "pytz>=2024.1",
 ]
 
 [project.scripts]

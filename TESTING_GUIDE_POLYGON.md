@@ -298,3 +298,4 @@ Integration tests should run separately with a test API key.
 - Polygon API Docs: https://polygon.io/docs
 - Polygon Rate Limits: https://polygon.io/pricing
 - Test Data: Use free tier for testing (limited requests)
+

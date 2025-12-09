@@ -378,3 +378,4 @@ class TestPolygonProviderErrorHandling:
             
             # Should handle gracefully
             assert result is None or isinstance(result, dict)
+

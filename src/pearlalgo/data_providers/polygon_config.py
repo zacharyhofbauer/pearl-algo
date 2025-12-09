@@ -75,3 +75,4 @@ class PolygonConfig:
             ),
             request_timeout=float(os.getenv("POLYGON_REQUEST_TIMEOUT", "30.0")),
         )
+

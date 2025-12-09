@@ -247,3 +247,4 @@ class OptionsMarginModel:
             maintenance_margin=margin_required * 0.85,
             total_required=margin_required,
         )
+

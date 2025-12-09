@@ -1,0 +1,59 @@
+# Production Configuration for 24/7 Signal Generation
+# This extends the base config.yaml with production-specific settings
+
+# Signal Generation Settings
+signal_generation:
+  enabled: true
+  interval_seconds: 300  # 5 minutes (adjust based on Polygon rate limits)
+  symbols: ["ES", "NQ", "MES", "MNQ"]
+  strategy: "sr"
+  
+  # Signal deduplication
+  deduplication:
+    enabled: true
+    window_minutes: 15  # Skip duplicate signals within 15 minutes
+  
+  # Market hours awareness
+  market_hours:
+    enabled: true
+    skip_during_close: true  # Skip signal generation when market is closed
+  
+  # Polygon API settings
+  polygon:
+    rate_limit_delay: 0.25  # 4 calls/second (free tier: 5/min, paid: 200/min)
+    max_retries: 3
+    circuit_breaker_threshold: 5
+    circuit_breaker_recovery_timeout: 60.0
+  
+  # Telegram notification settings
+  telegram:
+    enabled: true
+    batch_notifications: false  # Send individual notifications (set to true to batch)
+    max_per_minute: 10  # Rate limit notifications
+    quiet_hours: false  # Set to true to reduce notifications during off-hours
+
+# Monitoring
+monitoring:
+  health_check_interval: 60  # seconds
+  alert_on_failure: true
+  daily_summary: true
+  log_retention_days: 30
+
+# Logging
+logging:
+  level: "INFO"
+  file: "logs/signal_generation.log"
+  console: true
+  structured: true
+  rotation:
+    time: "00:00"  # Rotate at midnight
+    retention: "30 days"
+    compression: "zip"
+
+# Health Checks
+health:
+  enabled: true
+  check_interval: 60  # seconds
+  max_consecutive_errors: 5
+  auto_restart: true
+

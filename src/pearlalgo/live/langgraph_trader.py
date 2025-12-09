@@ -49,6 +49,7 @@ class LangGraphTrader:
         config_path: Optional[str] = None,
         symbols: Optional[List[str]] = None,
         strategy: Optional[str] = None,
+        mode: str = "paper",
     ):
         # Load configuration
         import os
@@ -117,6 +118,7 @@ class LangGraphTrader:
             self.symbols = [s["symbol"] for s in self.symbols]
 
         self.strategy = strategy or self.config.get("strategy", {}).get("default", "sr")
+        self.mode = mode or self.config.get("trading", {}).get("mode", "paper")
 
         # Load profile
         self.profile = load_profile()
@@ -199,9 +201,7 @@ def main():
     parser = argparse.ArgumentParser(description="LangGraph Multi-Agent Trading System")
     parser.add_argument("--config", type=str, help="Path to config.yaml")
     parser.add_argument("--symbols", nargs="+", help="Trading symbols")
-    parser.add_argument(
-# Broker argument removed - system is data-only
-    )
+    # Broker argument removed - system is data-only
     parser.add_argument("--strategy", type=str, help="Trading strategy")
     parser.add_argument(
         "--mode",
@@ -221,7 +221,6 @@ def main():
     trader = LangGraphTrader(
         config_path=args.config,
         symbols=args.symbols,
-# Broker argument removed
         strategy=args.strategy,
         mode=args.mode,
     )
