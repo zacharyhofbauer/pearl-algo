@@ -49,7 +49,7 @@ class TradingWorkflow:
         self,
         symbols: list[str],
         portfolio: Portfolio,
-        broker_name: str = "ibkr",
+        broker_name: str = "paper",
         strategy: str = "sr",
         config: Optional[Dict] = None,
     ):

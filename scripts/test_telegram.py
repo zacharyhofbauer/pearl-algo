@@ -13,11 +13,14 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dotenv import load_dotenv
-from pearlalgo.utils.telegram_alerts import TelegramAlerts
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv not available, use environment variables directly
+    pass
 
-# Load environment variables
-load_dotenv()
+from pearlalgo.utils.telegram_alerts import TelegramAlerts
 
 
 async def test_telegram():

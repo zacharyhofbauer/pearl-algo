@@ -23,9 +23,29 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Get symbols from command line or use default
-SYMBOLS=${1:-"ES NQ"}
-STRATEGY=${2:-"sr"}
+# Get symbols and strategy from command line
+# Handle multiple symbols: ./script.sh ES NQ sr  or  ./script.sh "ES NQ" sr
+if [ $# -eq 0 ]; then
+    SYMBOLS="ES NQ"
+    STRATEGY="sr"
+elif [ $# -eq 1 ]; then
+    SYMBOLS="$1"
+    STRATEGY="sr"
+elif [ $# -eq 2 ]; then
+    # If second arg is a known strategy, treat first as single symbol
+    if [[ "$2" =~ ^(sr|ma_cross|breakout|mean_reversion)$ ]]; then
+        SYMBOLS="$1"
+        STRATEGY="$2"
+    else
+        # Otherwise treat as multiple symbols
+        SYMBOLS="$1 $2"
+        STRATEGY="sr"
+    fi
+else
+    # 3+ args: last one is strategy, rest are symbols
+    STRATEGY="${!#}"
+    SYMBOLS="${@:1:$(($#-1))}"
+fi
 
 echo "Starting signal generation..."
 echo "  Symbols: $SYMBOLS"

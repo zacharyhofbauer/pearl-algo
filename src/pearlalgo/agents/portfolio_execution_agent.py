@@ -49,7 +49,7 @@ class PortfolioExecutionAgent:
         self,
         portfolio: Portfolio,
         broker: Optional[Broker] = None,
-        broker_name: str = "ibkr",
+        broker_name: str = "paper",
         config: Optional[Dict] = None,
         telegram_alerts: Optional[TelegramAlerts] = None,
     ):

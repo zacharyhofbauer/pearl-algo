@@ -118,7 +118,7 @@ class LangGraphTrader:
             # Extract symbol names from config
             self.symbols = [s["symbol"] for s in self.symbols]
 
-        self.broker = broker or self.config.get("broker", {}).get("primary", "ibkr")
+        self.broker = broker or self.config.get("broker", {}).get("primary", "paper")
         self.strategy = strategy or self.config.get("strategy", {}).get("default", "sr")
         self.mode = mode or self.config.get("trading", {}).get("mode", "paper")
 

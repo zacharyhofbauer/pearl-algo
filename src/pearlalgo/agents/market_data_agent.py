@@ -3,8 +3,8 @@ Market Data Agent - Streams live market data via WebSockets with REST fallback.
 
 This agent is responsible for:
 - WebSocket streaming for OHLCV, order book, funding rates (crypto), OI
-- IBKR REST fallback for futures
-- Polygon.io fallback for US futures
+- Polygon.io primary provider for US futures
+- Dummy data provider for testing/development
 - Real-time data aggregation and normalization
 """
 
@@ -28,7 +28,6 @@ from pearlalgo.agents.langgraph_state import (
 )
 from pearlalgo.config.settings import get_settings
 from pearlalgo.data_providers.dummy_provider import DummyDataProvider
-from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
 from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
 from pearlalgo.data_providers.websocket_provider import WebSocketDataProvider
 
@@ -46,7 +45,7 @@ class MarketDataAgent:
     def __init__(
         self,
         symbols: List[str],
-        broker: str = "ibkr",
+        broker: str = "paper",
         config: Optional[Dict] = None,
     ):
         self.symbols = symbols
@@ -86,12 +85,30 @@ class MarketDataAgent:
                 except Exception as e:
                     logger.warning(f"WebSocket provider failed to initialize: {e}")
 
-            # Initialize REST provider based on broker
-            if self.broker == "ibkr":
-                settings = get_settings()
-                self.rest_provider = IBKRDataProvider(settings=settings)
-                logger.info("IBKR REST provider initialized")
-            elif self.broker == "bybit":
+            # Initialize Polygon provider (primary for US futures)
+            # Try to get API key from config or environment
+            polygon_api_key = (
+                self.config.get("data", {})
+                .get("fallback", {})
+                .get("polygon", {})
+                .get("api_key")
+            )
+            if not polygon_api_key:
+                # Try environment variable
+                import os
+                polygon_api_key = os.getenv("POLYGON_API_KEY")
+            
+            if polygon_api_key:
+                try:
+                    self.polygon_provider = PolygonDataProvider(api_key=polygon_api_key)
+                    logger.info("Polygon.io provider initialized")
+                except Exception as e:
+                    logger.warning(f"Polygon provider initialization failed: {e}")
+            else:
+                logger.debug("Polygon API key not found, Polygon provider disabled")
+            
+            # Initialize REST provider based on broker (for non-paper brokers)
+            if self.broker == "bybit":
                 # Bybit will be handled via ccxt in websocket provider
                 pass
             elif self.broker == "alpaca":
@@ -112,17 +129,18 @@ class MarketDataAgent:
                 except Exception as e:
                     logger.warning(f"Polygon.io provider failed: {e}")
 
-            # Initialize dummy provider ONLY if dummy_mode is explicitly enabled
-            # This prevents silent fallback to dummy data when IBKR is misconfigured
+            # Initialize dummy provider (enabled by default for testing)
             settings = get_settings()
-            if settings.dummy_mode:
+            # Default to True if not set, to allow testing without API keys
+            dummy_mode = getattr(settings, 'dummy_mode', True)
+            if dummy_mode:
                 try:
                     self.dummy_provider = DummyDataProvider(symbols=self.symbols)
-                    logger.info("Dummy data provider initialized (dummy_mode=True)")
+                    logger.info("Dummy data provider initialized (for testing/development)")
                 except Exception as e:
-                    logger.warning(f"Dummy provider failed: {e}")
+                    logger.warning(f"Dummy provider initialization failed: {e}")
             else:
-                logger.debug("Dummy provider disabled (dummy_mode=False). IBKR failures will raise errors.")
+                logger.debug("Dummy provider disabled (dummy_mode=False)")
 
         except Exception as e:
             logger.error(f"Error initializing providers: {e}", exc_info=True)
@@ -193,7 +211,7 @@ class MarketDataAgent:
     async def _fetch_symbol_data(self, symbol: str) -> Optional[MarketData]:
         """
         Fetch data for a single symbol.
-        Tries WebSocket first, then REST, then Polygon fallback.
+        Tries WebSocket first, then Polygon, then Dummy provider as fallback.
         """
         # Try WebSocket first
         if self.websocket_provider:
@@ -204,66 +222,33 @@ class MarketDataAgent:
             except Exception as e:
                 logger.debug(f"WebSocket fetch failed for {symbol}: {e}")
 
-        # Try REST provider
-        if self.rest_provider:
-            try:
-                # Fetch recent bars and get latest
-                df = self.rest_provider.fetch_historical(
-                    symbol,
-                    sec_type="FUT",
-                    duration="1 D",
-                    bar_size="1 min",
-                )
-                if df is not None and not df.empty:
-                    logger.info(f"Successfully fetched IBKR data for {symbol}")
-                    return self._convert_dataframe_to_market_data(symbol, df)
-            except RuntimeError as e:
-                # IBKR connection issues - log but don't fail completely
-                error_msg = str(e).lower()
-                if "gateway not available" in error_msg:
-                    logger.warning(f"IBKR Gateway not available for {symbol}: {e}")
-                elif "client id" in error_msg or "already in use" in error_msg:
-                    logger.warning(f"IBKR client ID conflict for {symbol}: {e}")
-                elif "event loop" in error_msg:
-                    logger.warning(f"IBKR event loop issue for {symbol}: {e}")
-                else:
-                    logger.warning(f"IBKR REST fetch failed for {symbol}: {e}")
-            except Exception as e:
-                logger.warning(f"IBKR connection error for {symbol}: {e}")
-
-        # Try Polygon fallback
+        # Try Polygon provider (primary for US futures)
         if self.polygon_provider:
             try:
                 data = await self.polygon_provider.get_latest_bar(symbol)
                 if data:
+                    logger.debug(f"Successfully fetched Polygon data for {symbol}")
                     return self._convert_to_market_data(symbol, data)
             except Exception as e:
                 logger.debug(f"Polygon fetch failed for {symbol}: {e}")
 
-        # Final fallback: Dummy provider (ONLY if dummy_mode is enabled)
+        # Final fallback: Dummy provider (for testing/development)
         if self.dummy_provider:
             try:
                 data = self.dummy_provider.get_latest_bar(symbol)
                 if data:
-                    logger.info(f"Using dummy data for {symbol} (dummy_mode=True, all real sources failed)")
+                    logger.info(f"Using dummy data for {symbol} (all real sources failed or unavailable)")
                     return self._convert_to_market_data(symbol, data)
             except Exception as e:
                 logger.debug(f"Dummy provider failed for {symbol}: {e}")
 
-        # If we get here and dummy_mode is False, raise clear error
-        settings = get_settings()
-        if not settings.dummy_mode:
-            error_msg = (
-                f"All data sources failed for {symbol}. "
-                f"IBKR connection failed and dummy_mode is disabled. "
-                f"To enable dummy data for testing, set PEARLALGO_DUMMY_MODE=true in .env. "
-                f"Otherwise, ensure IBKR Gateway is running and configured correctly. "
-                f"See IBKR_CONNECTION_FIXES.md for help."
-            )
-            logger.error(error_msg)
-            raise RuntimeError(error_msg)
-        
-        logger.warning(f"All data sources failed for {symbol}")
+        # If we get here, all providers failed
+        logger.warning(
+            f"All data sources failed for {symbol}. "
+            f"Tried: WebSocket, Polygon, Dummy. "
+            f"To enable dummy data for testing, set PEARLALGO_DUMMY_MODE=true in .env. "
+            f"To use Polygon, set POLYGON_API_KEY in .env."
+        )
         return None
 
     def _convert_dataframe_to_market_data(
