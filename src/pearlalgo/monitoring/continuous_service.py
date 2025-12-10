@@ -34,13 +34,14 @@ from pearlalgo.utils.market_hours import is_market_open
 
 class ContinuousService:
     """
-    Enhanced 24/7 continuous service with worker pool orchestration.
+    Enhanced 24/7 continuous service for futures trading.
 
     Manages:
-    - Worker pool for parallel scanning
+    - Futures worker for continuous NQ/ES monitoring
     - Data feed management
     - Health monitoring
     - Graceful shutdown
+    - Telegram alerts for entry and exit signals
     """
 
     def __init__(
@@ -139,13 +140,7 @@ class ContinuousService:
                     .get("futures", {})
                     .get("symbols", [])
                 )
-                options_symbols = (
-                    self.config.get("monitoring", {})
-                    .get("workers", {})
-                    .get("options", {})
-                    .get("universe", [])
-                )
-                all_symbols = list(set(futures_symbols + options_symbols)) or ["SPY"]
+                all_symbols = futures_symbols or ["NQ"]
                 provider = DummyDataProvider(symbols=all_symbols)
                 logger.info("Using DummyDataProvider (for testing/development)")
 
@@ -177,13 +172,7 @@ class ContinuousService:
                     .get("futures", {})
                     .get("symbols", [])
                 )
-                options_symbols = (
-                    self.config.get("monitoring", {})
-                    .get("workers", {})
-                    .get("options", {})
-                    .get("universe", [])
-                )
-                all_symbols = list(set(futures_symbols + options_symbols)) or ["SPY"]
+                all_symbols = futures_symbols or ["NQ"]
                 provider = DummyDataProvider(symbols=all_symbols)
                 self.data_feed_manager = DataFeedManager(
                     data_provider=provider,
@@ -255,66 +244,6 @@ class ContinuousService:
                 logger.error(f"Error in futures worker: {e}", exc_info=True)
                 await asyncio.sleep(interval)  # Wait before retry
 
-    async def _options_worker(
-        self, universe: List[str], strategy: str, interval: int
-    ) -> None:
-        """
-        Worker for options swing scanning.
-
-        Args:
-            universe: List of equity symbols to scan
-            strategy: Strategy name
-            interval: Scan interval in seconds
-        """
-        logger.info(
-            f"Options worker started: universe={len(universe)} symbols, "
-            f"strategy={strategy}, interval={interval}s"
-        )
-
-        # Initialize trader for options
-        trader = LangGraphTrader(
-            symbols=universe,
-            strategy=strategy,
-            mode="paper",
-            config_path=None,
-        )
-        trader.config = self.config
-
-        # Pass buffer manager to agents
-        if self.buffer_manager:
-            trader.workflow.market_data_agent.buffer_manager = self.buffer_manager
-            trader.workflow.quant_research_agent.buffer_manager = self.buffer_manager
-
-        # Backfill buffers on startup
-        if self.data_feed_manager and self.buffer_manager:
-            logger.info(f"Backfilling buffers for {len(universe)} symbols...")
-            await self.buffer_manager.backfill_multiple(
-                universe,
-                timeframe="15m",
-                days=30,
-                data_provider=self.data_feed_manager.data_provider,
-            )
-
-        while not self.shutdown_requested:
-            try:
-                # Check market hours (options trade during regular hours)
-                if not is_market_open():
-                    logger.debug("Market closed, waiting...")
-                    await asyncio.sleep(60)
-                    continue
-
-                # Run trading cycle
-                logger.info(f"Running options cycle for {len(universe)} symbols")
-                await trader.workflow.run_cycle()
-                self.cycle_count += 1
-
-                # Wait for next cycle
-                await asyncio.sleep(interval)
-
-            except Exception as e:
-                logger.error(f"Error in options worker: {e}", exc_info=True)
-                await asyncio.sleep(interval)
-
     async def start(self) -> None:
         """Start the continuous service."""
         logger.info("=" * 60)
@@ -336,7 +265,7 @@ class ContinuousService:
         # Start worker pool health checks
         await self.worker_pool.start_health_checks()
 
-        # Register workers from config
+        # Register futures worker from config
         workers_config = self.config.get("monitoring", {}).get("workers", {})
 
         # Futures worker
@@ -351,22 +280,6 @@ class ContinuousService:
                 "futures",
                 self._futures_worker,
                 symbols=symbols,
-                strategy=strategy,
-                interval=interval,
-            )
-
-        # Options worker
-        options_config = workers_config.get("options", {})
-        if options_config.get("enabled", False):
-            universe = options_config.get("universe", ["SPY", "QQQ"])
-            strategy = options_config.get("strategy", "swing_momentum")
-            interval = options_config.get("interval", 900)
-
-            self.worker_pool.register_worker(
-                "options_scanner",
-                "options",
-                self._options_worker,
-                universe=universe,
                 strategy=strategy,
                 interval=interval,
             )

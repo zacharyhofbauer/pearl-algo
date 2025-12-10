@@ -282,11 +282,6 @@ monitoring:
       symbols: ["NQ", "ES"]
       interval: 60  # seconds (1 minute)
       strategy: "intraday_swing"
-    options:
-      enabled: true
-      universe: ["SPY", "QQQ", "AAPL", "MSFT"]  # Expandable
-      interval: 900  # seconds (15 minutes)
-      strategy: "swing_momentum"
   
   data_feeds:
     polygon:
@@ -299,21 +294,6 @@ monitoring:
     enabled: true
     port: 8080
     check_interval: 60  # seconds
-
-# Options Configuration
-options:
-  scanning:
-    min_volume: 100
-    min_open_interest: 50
-    max_dte: 45  # days to expiration
-    min_iv_rank: 20  # IV rank threshold (0-100)
-    strike_selection: "atm"  # atm, otm, itm
-  
-  strategies:
-    swing_momentum:
-      lookback: 20
-      volume_multiplier: 1.5
-      min_move: 0.02  # 2%
 
 # Enhanced Telegram Configuration
 telegram:
