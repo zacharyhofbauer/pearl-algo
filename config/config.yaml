@@ -269,3 +269,57 @@ health:
   check_interval: 60  # seconds
   max_consecutive_errors: 5
   auto_restart: true
+
+# 24/7 Monitoring Configuration
+monitoring:
+  max_workers: 10
+  max_restarts: 10
+  buffer_size: 1000  # Number of bars per symbol
+  
+  workers:
+    futures:
+      enabled: true
+      symbols: ["NQ", "ES"]
+      interval: 60  # seconds (1 minute)
+      strategy: "intraday_swing"
+    options:
+      enabled: true
+      universe: ["SPY", "QQQ", "AAPL", "MSFT"]  # Expandable
+      interval: 900  # seconds (15 minutes)
+      strategy: "swing_momentum"
+  
+  data_feeds:
+    polygon:
+      websocket_enabled: false  # Start with REST, add WebSocket later
+      rate_limit: 5  # calls per second
+      reconnect_delay: 5.0  # seconds
+      max_reconnect_attempts: 10
+    
+  health:
+    enabled: true
+    port: 8080
+    check_interval: 60  # seconds
+
+# Options Configuration
+options:
+  scanning:
+    min_volume: 100
+    min_open_interest: 50
+    max_dte: 45  # days to expiration
+    min_iv_rank: 20  # IV rank threshold (0-100)
+    strike_selection: "atm"  # atm, otm, itm
+  
+  strategies:
+    swing_momentum:
+      lookback: 20
+      volume_multiplier: 1.5
+      min_move: 0.02  # 2%
+
+# Enhanced Telegram Configuration
+telegram:
+  exit_alerts:
+    enabled: true
+    notify_on_stop: true
+    notify_on_target: true
+    notify_on_time_exit: true
+    mark_to_market_interval: 300  # 5 minutes

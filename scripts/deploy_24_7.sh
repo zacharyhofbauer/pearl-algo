@@ -1,10 +1,10 @@
 #!/bin/bash
-# Deploy 24/7 Signal Generation Service
+# Deploy 24/7 Continuous Service
 
 set -e
 
 echo "=========================================="
-echo "PearlAlgo 24/7 Signal Generation Deployment"
+echo "PearlAlgo 24/7 Continuous Service Deployment"
 echo "=========================================="
 echo
 
@@ -18,7 +18,7 @@ fi
 # Get project directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SERVICE_NAME="pearlalgo-signal_service.service"
+SERVICE_NAME="pearlalgo-continuous-service.service"
 
 echo "Project root: $PROJECT_ROOT"
 echo "Service name: $SERVICE_NAME"
@@ -50,10 +50,12 @@ echo "📁 Creating log directory..."
 mkdir -p "$PROJECT_ROOT/logs"
 chown -R pearlalgo:pearlalgo "$PROJECT_ROOT/logs" 2>/dev/null || true
 
-# Make scripts executable
-echo "🔧 Making scripts executable..."
-chmod +x "$PROJECT_ROOT/scripts/signal_generation_service.py"
-chmod +x "$PROJECT_ROOT/scripts/signal_health_monitor.py"
+# Create data/buffers directory for persistence
+echo "📁 Creating data directories..."
+mkdir -p "$PROJECT_ROOT/data/buffers"
+mkdir -p "$PROJECT_ROOT/logs"
+chown -R pearlalgo:pearlalgo "$PROJECT_ROOT/data" 2>/dev/null || true
+chown -R pearlalgo:pearlalgo "$PROJECT_ROOT/logs" 2>/dev/null || true
 
 # Install systemd service
 echo "📦 Installing systemd service..."
@@ -62,7 +64,7 @@ SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
 # Create service file
 cat > "$SERVICE_FILE" << EOF
 [Unit]
-Description=PearlAlgo 24/7 Signal Generation Service (Polygon)
+Description=PearlAlgo 24/7 Continuous Trading Service
 After=network.target
 Wants=network.target
 
@@ -78,14 +80,10 @@ Environment="PYTHONUNBUFFERED=1"
 $(grep -v '^#' "$PROJECT_ROOT/.env" | grep -v '^$' | sed 's/^/Environment="/;s/$/"/')
 
 # Main service command
-ExecStart=$PROJECT_ROOT/.venv/bin/python \\
-    $PROJECT_ROOT/scripts/signal_generation_service.py \\
-    --symbols ES NQ MES MNQ \\
-    --strategy sr \\
-    --interval 300 \\
-    --log-file logs/signal_generation.log \\
-    --max-retries 3 \\
-    --retry-backoff 60.0
+ExecStart=$PROJECT_ROOT/.venv/bin/python -m pearlalgo.monitoring.continuous_service \\
+    --config $PROJECT_ROOT/config/config.yaml \\
+    --log-file $PROJECT_ROOT/logs/continuous_service.log \\
+    --health-port 8080
 
 # Restart policy
 Restart=always
@@ -137,11 +135,18 @@ echo "   sudo journalctl -u $SERVICE_NAME -f"
 echo "   or"
 echo "   tail -f $PROJECT_ROOT/logs/signal_generation.log"
 echo
-echo "4. Run health check:"
+echo "4. Check health endpoint:"
+echo "   curl http://localhost:8080/healthz"
+echo
+echo "5. Run health check:"
 echo "   cd $PROJECT_ROOT && source .venv/bin/activate"
 echo "   python scripts/signal_health_monitor.py"
 echo
-echo "5. Stop the service:"
+echo "6. Stop the service:"
 echo "   sudo systemctl stop $SERVICE_NAME"
+echo
+echo "For more information, see:"
+echo "   - docs/24_7_OPERATIONS_GUIDE.md"
+echo "   - docs/OPTIONS_SCANNING_GUIDE.md"
 echo
 

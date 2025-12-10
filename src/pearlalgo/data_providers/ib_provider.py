@@ -1,5 +1,23 @@
+"""
+DEPRECATED: IBKR Data Provider
+
+⚠️  WARNING: This provider is DEPRECATED and will be removed in a future version.
+
+The system now operates independently of IBKR using:
+- Polygon.io (primary data provider)
+- Tradier (options-focused)
+- Local Parquet/CSV storage
+- Dummy provider (for testing)
+
+Migration Guide: See IBKR_DEPRECATION_NOTICE.md
+
+This code is kept for backward compatibility only. New code should use
+PolygonDataProvider or other non-IBKR providers.
+"""
+
 from __future__ import annotations
 
+import warnings
 from datetime import datetime
 from typing import Iterable, Optional
 
@@ -12,9 +30,13 @@ from pearlalgo.config.settings import Settings
 
 class IBDataProvider(DataProvider):
     """
-    Thin ib_insync wrapper for pulling historical bars from IBKR Gateway/TWS.
+    DEPRECATED: Thin ib_insync wrapper for pulling historical bars from IBKR Gateway/TWS.
 
+    ⚠️  This provider is DEPRECATED. Use PolygonDataProvider or other providers instead.
+    
     This is read-only for research/backtesting. It does NOT place orders.
+    
+    See IBKR_DEPRECATION_NOTICE.md for migration instructions.
     """
 
     def __init__(
@@ -24,6 +46,13 @@ class IBDataProvider(DataProvider):
         port: Optional[int] = None,
         client_id: Optional[int] = None,
     ):
+        warnings.warn(
+            "IBDataProvider is DEPRECATED and will be removed in a future version. "
+            "Use PolygonDataProvider or other non-IBKR providers instead. "
+            "See IBKR_DEPRECATION_NOTICE.md for migration guide.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.settings = settings
         self.host = host or settings.ib_host
         self.port = port or settings.ib_port

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import pandas as pd
-from typing import Dict, Any
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional
 from pearlalgo.strategies.base import register_strategy
 
 Side = str  # "long" | "short" | "flat"
@@ -116,6 +117,28 @@ def intraday_swing_strategy(symbol: str, df: pd.DataFrame, **params) -> Dict[str
         stop_loss = price * (1 + params.get("stop_loss_pct", 0.005))
         take_profit = price * (1 - params.get("min_move_target", 0.01))
 
+    # Time-based exit rules for intraday
+    exit_time = None
+    time_exit_reason = None
+    
+    # Check if we should exit at end of day (for intraday strategies)
+    if df.index is not None and len(df) > 0:
+        try:
+            current_time = df.index[-1]
+            if isinstance(current_time, pd.Timestamp):
+                # Convert to ET for market hours check
+                import pytz
+                et = pytz.timezone("America/New_York")
+                et_time = current_time.tz_convert(et) if current_time.tz else current_time.tz_localize(et)
+                
+                # Exit 30 minutes before market close (4:30 PM ET)
+                if et_time.hour == 16 and et_time.minute >= 30:
+                    side = "flat"
+                    time_exit_reason = "End of day exit (4:30 PM ET)"
+                    exit_time = et_time
+        except Exception:
+            pass  # Ignore time conversion errors
+
     return {
         "side": side,
         "confidence": confidence,
@@ -129,5 +152,7 @@ def intraday_swing_strategy(symbol: str, df: pd.DataFrame, **params) -> Dict[str
         "take_profit": take_profit,
         "min_hold_bars": params.get("min_hold_bars", 4),
         "max_hold_bars": params.get("max_hold_bars", 16),
+        "exit_time": exit_time.isoformat() if exit_time else None,
+        "time_exit_reason": time_exit_reason,
         "strategy_name": "intraday_swing",
     }

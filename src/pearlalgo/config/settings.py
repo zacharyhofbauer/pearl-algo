@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
-from pydantic import Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Self
 
@@ -240,3 +240,155 @@ def require_keys(settings: Settings, required: list[str]) -> None:
     missing = [k for k in required if not getattr(settings, k)]
     if missing:
         raise RuntimeError(f"Missing required settings: {', '.join(missing)}")
+
+
+# Pydantic models for config.yaml validation
+class SymbolConfig(BaseModel):
+    """Configuration for a single trading symbol."""
+    symbol: str
+    exchange: str
+    sec_type: str = "FUT"
+    tick_value: float = Field(gt=0, description="Tick value in dollars")
+    contract_size: float = Field(gt=0, description="Contract size")
+
+
+class SymbolsConfig(BaseModel):
+    """Configuration for trading symbols."""
+    micro_futures: Optional[List[SymbolConfig]] = None
+    futures: Optional[List[SymbolConfig]] = None
+    crypto_perps: Optional[List[SymbolConfig]] = None
+
+
+class TimeframesConfig(BaseModel):
+    """Configuration for timeframes."""
+    primary: str = "15m"
+    secondary: str = "5m"
+    backtest: str = "15m"
+
+
+class StrategyParams(BaseModel):
+    """Strategy-specific parameters."""
+    fast: Optional[int] = None
+    slow: Optional[int] = None
+    tolerance: Optional[float] = None
+    lookback: Optional[int] = None
+    volume_multiplier: Optional[float] = None
+    min_breakout_pct: Optional[float] = None
+    bb_period: Optional[int] = None
+    bb_std: Optional[float] = None
+    rsi_period: Optional[int] = None
+    rsi_oversold: Optional[float] = None
+    rsi_overbought: Optional[float] = None
+
+
+class StrategyConfig(BaseModel):
+    """Configuration for trading strategies."""
+    default: str = Field(default="sr", description="Default strategy name")
+    sr: Optional[StrategyParams] = None
+    ma_cross: Optional[StrategyParams] = None
+    breakout: Optional[StrategyParams] = None
+    mean_reversion: Optional[StrategyParams] = None
+
+
+class RiskConfig(BaseModel):
+    """Configuration for risk management."""
+    max_risk_per_trade: float = Field(default=0.02, ge=0, le=1, description="Max risk per trade (0-1)")
+    max_drawdown: float = Field(default=0.15, ge=0, le=1, description="Max account drawdown (0-1)")
+    volatility_target: Optional[Dict[str, float]] = None
+    position_sizing: Optional[Dict[str, Any]] = None
+    stop_loss: Optional[Dict[str, Any]] = None
+    take_profit: Optional[Dict[str, Any]] = None
+    circuit_breakers: Optional[Dict[str, Any]] = None
+    allow_martingale: bool = Field(default=False, description="Martingale prohibited")
+    allow_averaging_down: bool = Field(default=False, description="Averaging down prohibited")
+
+
+class LLMConfig(BaseModel):
+    """Configuration for LLM providers."""
+    provider: str = "groq"
+    groq: Optional[Dict[str, Any]] = None
+    openai: Optional[Dict[str, Any]] = None
+    anthropic: Optional[Dict[str, Any]] = None
+    litellm: Optional[Dict[str, Any]] = None
+
+
+class DataConfig(BaseModel):
+    """Configuration for data providers."""
+    primary: str = "broker"
+    fallback: Optional[Dict[str, Any]] = None
+    websocket: Optional[Dict[str, Any]] = None
+
+
+class TradingConfig(BaseModel):
+    """Configuration for trading mode."""
+    mode: str = Field(default="paper", description="Trading mode: paper or live")
+    signal_only: bool = Field(default=True, description="Signal-only mode (no execution)")
+    paper: Optional[Dict[str, Any]] = None
+
+
+class AlertsConfig(BaseModel):
+    """Configuration for alerts."""
+    telegram: Optional[Dict[str, Any]] = None
+    discord: Optional[Dict[str, Any]] = None
+
+
+class AgentsConfig(BaseModel):
+    """Configuration for agents."""
+    market_data: Optional[Dict[str, Any]] = None
+    quant_research: Optional[Dict[str, Any]] = None
+    risk_manager: Optional[Dict[str, Any]] = None
+    portfolio_execution: Optional[Dict[str, Any]] = None
+
+
+class AppConfig(BaseModel):
+    """Complete application configuration schema."""
+    symbols: Optional[SymbolsConfig] = None
+    timeframes: Optional[TimeframesConfig] = None
+    strategy: Optional[StrategyConfig] = None
+    risk: Optional[RiskConfig] = None
+    llm: Optional[LLMConfig] = None
+    data: Optional[DataConfig] = None
+    trading: Optional[TradingConfig] = None
+    alerts: Optional[AlertsConfig] = None
+    agents: Optional[AgentsConfig] = None
+    backtesting: Optional[Dict[str, Any]] = None
+    dashboard: Optional[Dict[str, Any]] = None
+    logging: Optional[Dict[str, Any]] = None
+    health: Optional[Dict[str, Any]] = None
+
+    @classmethod
+    def validate_config_file(cls, config_path: str | Path) -> "AppConfig":
+        """
+        Load and validate a config.yaml file.
+        
+        Args:
+            config_path: Path to config.yaml file
+            
+        Returns:
+            Validated AppConfig instance
+            
+        Raises:
+            ValidationError: If config structure is invalid
+            FileNotFoundError: If config file doesn't exist
+        """
+        config_data = _load_config_file(config_path)
+        return cls(**config_data)
+
+
+def validate_config(config_path: str | Path | None = None) -> AppConfig:
+    """
+    Validate configuration file.
+    
+    Args:
+        config_path: Path to config file (defaults to config/config.yaml)
+        
+    Returns:
+        Validated AppConfig instance
+        
+    Raises:
+        ValidationError: If config is invalid
+    """
+    if config_path is None:
+        config_path = Path(__file__).parent.parent.parent.parent / "config" / "config.yaml"
+    
+    return AppConfig.validate_config_file(config_path)

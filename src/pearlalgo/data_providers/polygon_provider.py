@@ -271,11 +271,11 @@ class PolygonDataProvider(DataProvider):
         return df
 
     @async_retry_with_backoff(
-        max_attempts=3,
-        initial_delay=1.0,
-        max_delay=60.0,
+        max_attempts=5,  # Increased attempts for rate limit scenarios
+        initial_delay=2.0,  # Start with 2s delay for rate limits
+        max_delay=120.0,  # Allow up to 2 minutes for rate limit recovery
         exponential_base=2.0,
-        exceptions=(aiohttp.ClientError, asyncio.TimeoutError, Exception),
+        exceptions=(aiohttp.ClientError, aiohttp.ClientResponseError, asyncio.TimeoutError, Exception),
     )
     async def get_latest_bar(self, symbol: str) -> Optional[Dict]:
         """
@@ -331,14 +331,35 @@ class PolygonDataProvider(DataProvider):
                         f"Polygon API forbidden for {symbol} (may need paid tier)"
                     )
                 elif response.status == 429:
-                    logger.warning(f"Polygon API rate limit for {symbol}")
+                    # Rate limit hit - raise exception to trigger exponential backoff
+                    error_msg = f"Polygon API rate limit for {symbol}"
+                    logger.warning(error_msg)
+                    # Raise exception to trigger retry with exponential backoff
+                    raise aiohttp.ClientResponseError(
+                        request_info=response.request_info,
+                        history=response.history,
+                        status=429,
+                        message=error_msg,
+                    )
                 else:
                     logger.debug(
                         f"Polygon API error for {symbol}: {response.status}"
                     )
+                    # Raise exception for non-200 responses to trigger retry
+                    raise aiohttp.ClientResponseError(
+                        request_info=response.request_info,
+                        history=response.history,
+                        status=response.status,
+                        message=f"Polygon API error: {response.status}",
+                    )
 
+        except aiohttp.ClientResponseError as e:
+            # Re-raise HTTP errors to trigger retry
+            logger.error(f"Polygon API HTTP error for {symbol}: {e.status} - {e.message}")
+            raise
         except Exception as e:
             logger.error(f"Error fetching Polygon data for {symbol}: {e}")
+            raise
 
         return None
 

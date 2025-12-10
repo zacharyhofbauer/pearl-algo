@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Mapping
+from typing import Dict, Mapping, Optional
 
 from pearlalgo.core.events import FillEvent
 
@@ -14,6 +14,7 @@ class Position:
     size: float = 0.0
     avg_price: float = 0.0
     realized_pnl: float = 0.0
+    unrealized_pnl: Optional[float] = None
 
     def update_with_fill(self, fill: FillEvent) -> None:
         """Adjust position given a fill."""

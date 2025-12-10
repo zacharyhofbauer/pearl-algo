@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -33,6 +33,7 @@ from pearlalgo.agents.langgraph_state import (
 from pearlalgo.futures.signals import generate_signal
 from pearlalgo.utils.retry import CircuitBreaker, async_retry_with_backoff
 from pearlalgo.utils.telegram_alerts import TelegramAlerts
+from pearlalgo.data_providers.buffer_manager import BufferManager
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +52,13 @@ class QuantResearchAgent:
         strategy: str = "sr",
         config: Optional[Dict] = None,
         telegram_alerts: Optional[TelegramAlerts] = None,
+        buffer_manager: Optional[BufferManager] = None,
     ):
         self.symbols = symbols
         self.strategy = strategy
         self.config = config or {}
         self.telegram_alerts = telegram_alerts
+        self.buffer_manager = buffer_manager
 
         # LLM configuration
         self.use_llm = (
@@ -79,7 +82,7 @@ class QuantResearchAgent:
             .get("quant_research", {})
             .get("ml_models", False)
         )
-        self.ml_models: Dict[str, any] = {}
+        self.ml_models: Dict[str, Any] = {}
 
         # Initialize LLM if enabled
         if self.use_llm:
@@ -377,10 +380,26 @@ class QuantResearchAgent:
         """
         Convert MarketData to DataFrame format expected by signal generators.
 
-        For now, we create a minimal DataFrame. In production, you'd maintain
-        a rolling buffer of historical bars.
+        Uses historical buffer if available, otherwise creates minimal DataFrame.
         """
-        # Create a simple DataFrame with the latest bar
+        # Try to get historical buffer first
+        if self.buffer_manager and self.buffer_manager.has_buffer(symbol):
+            buffer_df = self.buffer_manager.get_buffer(symbol)
+            if len(buffer_df) > 0:
+                # Convert buffer to expected format
+                df = pd.DataFrame({
+                    "Open": buffer_df["open"].values,
+                    "High": buffer_df["high"].values,
+                    "Low": buffer_df["low"].values,
+                    "Close": buffer_df["close"].values,
+                    "Volume": buffer_df["volume"].values,
+                })
+                # Set index to timestamp if available
+                if "timestamp" in buffer_df.columns:
+                    df.index = pd.to_datetime(buffer_df["timestamp"])
+                return df
+
+        # Fallback: Create a simple DataFrame with the latest bar
         df = pd.DataFrame(
             {
                 "Open": [market_data.open],
@@ -390,9 +409,7 @@ class QuantResearchAgent:
                 "Volume": [market_data.volume],
             }
         )
-
-        # In production, you'd append to a rolling buffer
-        # For now, this is a minimal implementation
+        df.index = [market_data.timestamp]
 
         return df
 

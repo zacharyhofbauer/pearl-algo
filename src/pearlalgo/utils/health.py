@@ -41,41 +41,94 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     
     def get_health_status(self) -> dict:
         """
-        Get current health status.
+        Get current health status with comprehensive checks.
         
         Returns:
             Dictionary with health status information
         """
-        # Basic health check - can be extended with actual system checks
+        checks = {}
+        overall_status = "healthy"
+        errors = []
+        
+        # Check 1: Core imports
         try:
-            # Check if we can import main modules
             from pearlalgo.agents.langgraph_state import TradingState
             from pearlalgo.core.portfolio import Portfolio
-            
-            # Try to create a minimal state to verify system is functional
+            checks["imports"] = "ok"
+        except Exception as e:
+            checks["imports"] = "failed"
+            errors.append(f"Import error: {e}")
+            overall_status = "unhealthy"
+        
+        # Check 2: State creation
+        try:
             portfolio = Portfolio(cash=100000.0)
             state = TradingState(portfolio=portfolio)
-            
-            return {
-                "status": "healthy",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "version": "0.1.0",
-                "checks": {
-                    "imports": "ok",
-                    "state_creation": "ok",
-                },
-            }
+            checks["state_creation"] = "ok"
         except Exception as e:
-            return {
-                "status": "unhealthy",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "version": "0.1.0",
-                "error": str(e),
-                "checks": {
-                    "imports": "failed",
-                    "state_creation": "failed",
-                },
-            }
+            checks["state_creation"] = "failed"
+            errors.append(f"State creation error: {e}")
+            overall_status = "unhealthy"
+        
+        # Check 3: Configuration loading
+        try:
+            from pearlalgo.config.settings import get_settings
+            settings = get_settings()
+            checks["config_loading"] = "ok"
+        except Exception as e:
+            checks["config_loading"] = "failed"
+            errors.append(f"Config loading error: {e}")
+            overall_status = "unhealthy"
+        
+        # Check 4: Data provider availability
+        try:
+            from pearlalgo.data_providers.dummy_provider import DummyDataProvider
+            dummy_provider = DummyDataProvider(symbols=["ES"])
+            checks["dummy_provider"] = "ok"
+        except Exception as e:
+            checks["dummy_provider"] = "failed"
+            errors.append(f"Dummy provider error: {e}")
+            # Don't fail overall health for dummy provider
+        
+        # Check 5: Agent initialization
+        try:
+            from pearlalgo.agents.market_data_agent import MarketDataAgent
+            agent = MarketDataAgent(symbols=["ES"], config={})
+            checks["agent_initialization"] = "ok"
+        except Exception as e:
+            checks["agent_initialization"] = "failed"
+            errors.append(f"Agent initialization error: {e}")
+            overall_status = "unhealthy"
+        
+        # Check 6: State persistence
+        try:
+            from pearlalgo.agents.state_store import StateStore
+            import tempfile
+            temp_dir = tempfile.mkdtemp()
+            store = StateStore(storage_path=temp_dir)
+            checks["state_persistence"] = "ok"
+            import shutil
+            shutil.rmtree(temp_dir)
+        except Exception as e:
+            checks["state_persistence"] = "failed"
+            errors.append(f"State persistence error: {e}")
+            # Don't fail overall health for state persistence
+        
+        # Check 7: Environment variables (optional)
+        import os
+        env_checks = {}
+        optional_vars = ["POLYGON_API_KEY", "TELEGRAM_BOT_TOKEN", "GROQ_API_KEY"]
+        for var in optional_vars:
+            env_checks[var] = "set" if os.getenv(var) else "not_set"
+        checks["environment_variables"] = env_checks
+        
+        return {
+            "status": overall_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "version": "0.1.0",
+            "checks": checks,
+            "errors": errors if errors else None,
+        }
     
     def log_message(self, format, *args):
         """Override to use logger instead of stderr."""

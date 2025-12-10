@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Callable, Dict, Optional
 
 from langgraph.graph import END, START, StateGraph
@@ -30,6 +31,8 @@ from pearlalgo.agents.quant_research_agent import QuantResearchAgent
 from pearlalgo.agents.risk_manager_agent import RiskManagerAgent
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.utils.telegram_alerts import TelegramAlerts
+from pearlalgo.futures.signal_tracker import SignalTracker
+from pearlalgo.futures.exit_signals import ExitSignalGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +104,12 @@ class TradingWorkflow:
             telegram_alerts=self.telegram_alerts,
         )
 
+        # Initialize signal tracker and exit signal generator
+        self.signal_tracker = SignalTracker()
+        self.exit_signal_generator = ExitSignalGenerator(
+            signal_tracker=self.signal_tracker
+        )
+
         # Build workflow graph
         self.workflow = self._build_workflow()
 
@@ -119,13 +128,15 @@ class TradingWorkflow:
         workflow.add_node("quant_research", self._quant_research_node)
         workflow.add_node("risk_manager", self._risk_manager_node)
         workflow.add_node("portfolio_execution", self._portfolio_execution_node)
+        workflow.add_node("exit_signals", self._exit_signals_node)
 
         # Define edges (workflow)
         workflow.add_edge(START, "market_data")
         workflow.add_edge("market_data", "quant_research")
         workflow.add_edge("quant_research", "risk_manager")
         workflow.add_edge("risk_manager", "portfolio_execution")
-        workflow.add_edge("portfolio_execution", END)
+        workflow.add_edge("portfolio_execution", "exit_signals")
+        workflow.add_edge("exit_signals", END)
 
         # Compile workflow
         return workflow.compile()
@@ -152,7 +163,96 @@ class TradingWorkflow:
         """Portfolio/Execution Agent node."""
         logger.debug("Workflow: Portfolio/Execution Agent")
         state.current_step = "portfolio_execution"
-        return await self.portfolio_execution_agent.execute_decisions(state)
+        result_state = await self.portfolio_execution_agent.execute_decisions(state)
+        
+        # Track new signals in signal tracker
+        for symbol, decision in result_state.position_decisions.items():
+            if decision.status == "logged" and decision.action in ["enter_long", "enter_short"]:
+                signal = result_state.signals.get(symbol)
+                if signal:
+                    direction = "long" if decision.action == "enter_long" else "short"
+                    self.signal_tracker.add_signal(
+                        symbol=symbol,
+                        direction=direction,
+                        entry_price=decision.entry_price,
+                        size=abs(decision.size),
+                        stop_loss=decision.stop_loss,
+                        take_profit=decision.take_profit,
+                        strategy_name=signal.strategy_name,
+                        reasoning=signal.reasoning,
+                    )
+        
+        return result_state
+
+    async def _exit_signals_node(self, state: TradingState) -> TradingState:
+        """Exit Signals node - checks for stop/target/time exits."""
+        logger.debug("Workflow: Exit Signals")
+        state.current_step = "exit_signals"
+        
+        # Update PnL for all tracked signals
+        self.exit_signal_generator.update_tracked_pnl(state)
+        
+        # Generate exit signals
+        exit_signals = self.exit_signal_generator.generate_exit_signals(state)
+        
+        # Add exit signals to state and send Telegram alerts
+        for symbol, exit_signal in exit_signals.items():
+            state.signals[symbol] = exit_signal
+            
+            # Remove from tracker
+            tracked_signal = self.signal_tracker.remove_signal(symbol)
+            if tracked_signal:
+                logger.info(
+                    f"Exit signal generated for {symbol}: "
+                    f"PnL=${tracked_signal.unrealized_pnl:.2f}, "
+                    f"reason={exit_signal.reasoning}"
+                )
+                
+                # Send Telegram alert
+                if self.telegram_alerts:
+                    try:
+                        exit_type = exit_signal.indicators.get("exit_type", "unknown")
+                        exit_price = exit_signal.entry_price  # Exit price
+                        entry_price = exit_signal.indicators.get("entry_price", exit_price)
+                        realized_pnl = tracked_signal.unrealized_pnl
+                        
+                        if exit_type == "stop_loss":
+                            await self.telegram_alerts.notify_stop_loss(
+                                symbol=symbol,
+                                direction=tracked_signal.direction,
+                                entry_price=entry_price,
+                                stop_price=tracked_signal.stop_loss or exit_price,
+                                size=tracked_signal.size,
+                                realized_pnl=realized_pnl,
+                            )
+                        elif exit_type == "take_profit":
+                            await self.telegram_alerts.notify_take_profit(
+                                symbol=symbol,
+                                direction=tracked_signal.direction,
+                                entry_price=entry_price,
+                                target_price=tracked_signal.take_profit or exit_price,
+                                size=tracked_signal.size,
+                                realized_pnl=realized_pnl,
+                            )
+                        else:
+                            # Generic exit
+                            hold_duration = str(
+                                datetime.now(timezone.utc) - tracked_signal.timestamp
+                            )
+                            await self.telegram_alerts.notify_exit(
+                                symbol=symbol,
+                                direction=tracked_signal.direction,
+                                entry_price=entry_price,
+                                exit_price=exit_price,
+                                size=tracked_signal.size,
+                                realized_pnl=realized_pnl,
+                                hold_duration=hold_duration,
+                                exit_reason=exit_signal.reasoning,
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to send Telegram exit alert: {e}")
+        
+        return state
 
     async def run_cycle(self, state: Optional[TradingState] = None) -> TradingState:
         """

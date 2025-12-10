@@ -255,3 +255,144 @@ class TelegramAlerts:
             message += f"*Risk:* ${risk_amount:,.2f}\n"
         
         await self.send_message(message)
+
+    async def notify_exit(
+        self,
+        symbol: str,
+        direction: str,
+        entry_price: float,
+        exit_price: float,
+        size: int,
+        realized_pnl: float,
+        hold_duration: Optional[str] = None,
+        exit_reason: Optional[str] = None,
+    ) -> None:
+        """
+        Notify about a position exit with P&L.
+
+        Args:
+            symbol: Trading symbol
+            direction: "long" or "short"
+            entry_price: Entry price
+            exit_price: Exit price
+            size: Position size
+            realized_pnl: Realized profit/loss
+            hold_duration: How long position was held (optional)
+            exit_reason: Reason for exit (optional)
+        """
+        pnl_emoji = "💰" if realized_pnl >= 0 else "💸"
+        direction_emoji = "📈" if direction.lower() == "long" else "📉"
+        
+        message = f"{pnl_emoji} *Position Exited*\n\n"
+        message += f"*Symbol:* {symbol}\n"
+        message += f"*Direction:* {direction.upper()} {direction_emoji}\n"
+        message += f"*Entry:* ${entry_price:,.2f}\n"
+        message += f"*Exit:* ${exit_price:,.2f}\n"
+        message += f"*Size:* {size} contracts\n"
+        
+        if hold_duration:
+            message += f"*Hold Duration:* {hold_duration}\n"
+        
+        message += f"\n*Realized P&L:* ${realized_pnl:,.2f}\n"
+        
+        if exit_reason:
+            message += f"\n*Exit Reason:* {exit_reason}\n"
+        
+        await self.send_message(message)
+
+    async def notify_stop_loss(
+        self,
+        symbol: str,
+        direction: str,
+        entry_price: float,
+        stop_price: float,
+        size: int,
+        realized_pnl: float,
+    ) -> None:
+        """
+        Notify about a stop loss hit.
+
+        Args:
+            symbol: Trading symbol
+            direction: "long" or "short"
+            entry_price: Entry price
+            stop_price: Stop loss price
+            size: Position size
+            realized_pnl: Realized loss
+        """
+        loss_pct = abs((stop_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+        
+        message = f"🛑 *Stop Loss Hit*\n\n"
+        message += f"*Symbol:* {symbol}\n"
+        message += f"*Direction:* {direction.upper()}\n"
+        message += f"*Entry:* ${entry_price:,.2f}\n"
+        message += f"*Stop:* ${stop_price:,.2f} ({loss_pct:.2f}%)\n"
+        message += f"*Size:* {size} contracts\n"
+        message += f"\n*Realized Loss:* ${realized_pnl:,.2f}\n"
+        
+        await self.send_message(message)
+
+    async def notify_take_profit(
+        self,
+        symbol: str,
+        direction: str,
+        entry_price: float,
+        target_price: float,
+        size: int,
+        realized_pnl: float,
+    ) -> None:
+        """
+        Notify about a take profit hit.
+
+        Args:
+            symbol: Trading symbol
+            direction: "long" or "short"
+            entry_price: Entry price
+            target_price: Take profit price
+            size: Position size
+            realized_pnl: Realized profit
+        """
+        profit_pct = abs((target_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+        
+        message = f"🎯 *Take Profit Hit*\n\n"
+        message += f"*Symbol:* {symbol}\n"
+        message += f"*Direction:* {direction.upper()}\n"
+        message += f"*Entry:* ${entry_price:,.2f}\n"
+        message += f"*Target:* ${target_price:,.2f} ({profit_pct:.2f}%)\n"
+        message += f"*Size:* {size} contracts\n"
+        message += f"\n*Realized Profit:* ${realized_pnl:,.2f}\n"
+        
+        await self.send_message(message)
+
+    async def notify_position_update(
+        self,
+        symbol: str,
+        direction: str,
+        entry_price: float,
+        current_price: float,
+        size: int,
+        unrealized_pnl: float,
+    ) -> None:
+        """
+        Notify about a position update (mark-to-market).
+
+        Args:
+            symbol: Trading symbol
+            direction: "long" or "short"
+            entry_price: Entry price
+            current_price: Current market price
+            size: Position size
+            unrealized_pnl: Unrealized profit/loss
+        """
+        pnl_emoji = "📈" if unrealized_pnl >= 0 else "📉"
+        pnl_pct = abs((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+        
+        message = f"{pnl_emoji} *Position Update*\n\n"
+        message += f"*Symbol:* {symbol}\n"
+        message += f"*Direction:* {direction.upper()}\n"
+        message += f"*Entry:* ${entry_price:,.2f}\n"
+        message += f"*Current:* ${current_price:,.2f} ({pnl_pct:.2f}%)\n"
+        message += f"*Size:* {size} contracts\n"
+        message += f"\n*Unrealized P&L:* ${unrealized_pnl:,.2f}\n"
+        
+        await self.send_message(message)

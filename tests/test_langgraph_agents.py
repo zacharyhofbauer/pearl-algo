@@ -51,11 +51,9 @@ def test_market_data_agent(sample_config):
     """Test Market Data Agent initialization."""
     agent = MarketDataAgent(
         symbols=["ES", "NQ"],
-        broker="ibkr",
         config=sample_config,
     )
     assert agent.symbols == ["ES", "NQ"]
-    assert agent.broker == "ibkr"
 
 
 def test_quant_research_agent(sample_config):
@@ -84,11 +82,9 @@ def test_portfolio_execution_agent(sample_portfolio, sample_config):
     """Test Portfolio/Execution Agent initialization."""
     agent = PortfolioExecutionAgent(
         portfolio=sample_portfolio,
-        broker_name="ibkr",
         config=sample_config,
     )
     assert agent.portfolio == sample_portfolio
-    assert agent.broker_name == "ibkr"
 
 
 def test_trading_state_creation(sample_portfolio, sample_config):

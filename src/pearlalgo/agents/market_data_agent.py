@@ -29,6 +29,7 @@ from pearlalgo.agents.langgraph_state import (
 from pearlalgo.config.settings import get_settings
 from pearlalgo.data_providers.dummy_provider import DummyDataProvider
 from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+from pearlalgo.data_providers.buffer_manager import BufferManager
 # WebSocket provider removed - system uses Polygon REST API only
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class MarketDataAgent:
         self,
         symbols: List[str],
         config: Optional[Dict] = None,
+        buffer_manager: Optional[BufferManager] = None,
     ):
         self.symbols = symbols
         self.config = config or {}
@@ -56,6 +58,9 @@ class MarketDataAgent:
 
         # Data buffers (for caching normalized data)
         self.data_buffers: Dict[str, List[MarketData]] = {symbol: [] for symbol in symbols}
+
+        # Historical data buffer manager
+        self.buffer_manager = buffer_manager
 
         # Initialize Polygon provider
         self._initialize_providers()
@@ -133,6 +138,18 @@ class MarketDataAgent:
                     # Store in state
                     state.market_data[symbol] = market_data
                     
+                    # Update historical buffer if available
+                    if self.buffer_manager:
+                        self.buffer_manager.add_bar(
+                            symbol=symbol,
+                            timestamp=market_data.timestamp,
+                            open=market_data.open,
+                            high=market_data.high,
+                            low=market_data.low,
+                            close=market_data.close,
+                            volume=market_data.volume,
+                        )
+                    
                     # Update buffer (keep last 100 entries per symbol)
                     if symbol not in self.data_buffers:
                         self.data_buffers[symbol] = []
@@ -169,7 +186,9 @@ class MarketDataAgent:
             try:
                 await self.polygon_provider.close()
             except Exception as e:
-                logger.debug(f"Error closing Polygon provider: {e}")
+                error_msg = f"Error closing Polygon provider: {e}"
+                logger.warning(error_msg, exc_info=True)
+                # Don't add to state.errors as this is cleanup, not critical
 
         return state
 
@@ -177,7 +196,12 @@ class MarketDataAgent:
         """
         Fetch data for a single symbol.
         Tries Polygon first, then Dummy provider as fallback.
+        
+        Raises:
+            Exception: If all providers fail and no data can be retrieved
         """
+        errors = []
+        
         # Try Polygon provider (primary data source)
         if self.polygon_provider:
             try:
@@ -186,7 +210,9 @@ class MarketDataAgent:
                     logger.debug(f"Successfully fetched Polygon data for {symbol}")
                     return self._convert_to_market_data(symbol, data)
             except Exception as e:
-                logger.debug(f"Polygon fetch failed for {symbol}: {e}")
+                error_msg = f"Polygon fetch failed for {symbol}: {e}"
+                logger.warning(error_msg, exc_info=True)
+                errors.append(error_msg)
 
         # Final fallback: Dummy provider (for testing/development)
         if self.dummy_provider:
@@ -196,12 +222,16 @@ class MarketDataAgent:
                     logger.info(f"Using dummy data for {symbol} (all real sources failed or unavailable)")
                     return self._convert_to_market_data(symbol, data)
             except Exception as e:
-                logger.debug(f"Dummy provider failed for {symbol}: {e}")
+                error_msg = f"Dummy provider failed for {symbol}: {e}"
+                logger.warning(error_msg, exc_info=True)
+                errors.append(error_msg)
 
         # If we get here, all providers failed
-        logger.warning(
-            f"All data sources failed for {symbol}. "
-            f"Tried: Polygon, Dummy. "
+        error_summary = f"All data sources failed for {symbol}. Tried: Polygon, Dummy."
+        if errors:
+            error_summary += f" Errors: {'; '.join(errors)}"
+        logger.error(error_summary)
+        raise RuntimeError(error_summary)
             f"To enable dummy data for testing, set PEARLALGO_DUMMY_MODE=true in .env. "
             f"To use Polygon, set POLYGON_API_KEY in .env."
         )

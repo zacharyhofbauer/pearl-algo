@@ -54,6 +54,14 @@ Built entirely on free/open-source tools (Pandas, TA-Lib, Scikit-Learn, Plotly, 
 - **Enhanced Error Handling**: Retry logic with exponential backoff and circuit breakers for API/LLM calls
 - **Structured Logging**: Correlation IDs and timing metrics for request tracing
 
+### 🔄 24/7 Continuous Monitoring (NEW)
+- **Worker Pool Architecture**: Parallel workers for futures and options scanning
+- **Historical Data Buffers**: Rolling buffers (1000+ bars) with automatic backfill
+- **Data Feed Manager**: Automatic reconnection, rate-limit queuing, health monitoring
+- **Health Check Endpoints**: HTTP endpoints (`/healthz`, `/ready`, `/live`) for monitoring
+- **Exit Signal Generation**: Automatic stop loss, take profit, and time-based exits
+- **Real-time Telegram Alerts**: Entry and exit notifications with P&L tracking
+
 ### 📊 Core Features
 - **Multi-Broker Support**: Paper (internal simulation, default), Bybit (crypto perps), Alpaca (US futures), IBKR (optional/deprecated)
 - **WebSocket Streaming**: Real-time market data via WebSockets with REST fallback
@@ -65,8 +73,10 @@ Built entirely on free/open-source tools (Pandas, TA-Lib, Scikit-Learn, Plotly, 
 
 ### 📈 Trading Capabilities
 - **Futures Contracts**: ES, NQ, CL, GC (and more)
+- **Futures Intraday Scanning**: High-frequency scanning (1-5 min) for NQ/ES
+- **Equity Options Scanning**: Swing-trade scanning (15-60 min) for broad-market equities
 - **Crypto Perpetuals**: BTC/USD, ETH/USD equivalents via Bybit
-- **Strategies**: Support/Resistance, MA Cross, Breakout, Mean Reversion
+- **Strategies**: Support/Resistance, MA Cross, Breakout, Mean Reversion, Intraday Swing, Swing Momentum
 - **Paper Trading**: Default mode with one-click switch to live
 - **LLM Reasoning**: Optional Groq/LiteLLM integration for signal explanation
 
@@ -206,6 +216,22 @@ python -m pearlalgo.backtesting.vectorbt_engine \
 **Start Dashboard:**
 ```bash
 streamlit run scripts/streamlit_dashboard.py
+```
+
+**24/7 Continuous Service:**
+```bash
+# Start 24/7 service (manual)
+python -m pearlalgo.monitoring.continuous_service --config config/config.yaml
+
+# Or use systemd (recommended)
+sudo ./scripts/deploy_24_7.sh
+sudo systemctl start pearlalgo-continuous-service.service
+
+# Check health
+curl http://localhost:8080/healthz
+
+# View logs
+sudo journalctl -u pearlalgo-continuous-service.service -f
 ```
 
 **Docker Deployment (24/7 Operation):**
@@ -428,6 +454,8 @@ docker-compose.yml                # Docker orchestration (NEW)
 - **ARCHITECTURE.md** - Detailed system architecture
 - **LANGGRAPH_QUICKSTART.md** - Quick start guide for LangGraph system
 - **MIGRATION_GUIDE.md** - Guide for migrating from legacy system
+- **docs/24_7_OPERATIONS_GUIDE.md** - 24/7 operations and monitoring guide
+- **docs/OPTIONS_SCANNING_GUIDE.md** - Options scanning configuration and usage
 
 ### Reference Documentation
 - **TESTING_GUIDE.md** - Testing instructions

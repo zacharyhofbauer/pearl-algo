@@ -39,6 +39,8 @@ from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.futures.config import PropProfile, load_profile
 from pearlalgo.futures.risk import compute_position_size, compute_risk_state
 from pearlalgo.utils.telegram_alerts import TelegramAlerts
+from pearlalgo.risk.options_risk import OptionsRiskCalculator
+from pearlalgo.core.signal_router import SignalRouter
 
 logger = logging.getLogger(__name__)
 
@@ -74,12 +76,22 @@ class RiskManagerAgent:
         self.config = config or {}
         self.telegram_alerts = telegram_alerts
 
+        # Options risk calculator
+        self.options_risk_calculator = OptionsRiskCalculator()
+
+        # Signal router for asset type detection
+        self.signal_router = SignalRouter()
+
         # Configurable risk (from config, defaults to hardcoded values)
         risk_config = self.config.get("risk", {})
         self.max_risk_per_trade = risk_config.get("max_risk_per_trade", self.MAX_RISK_PER_TRADE)
         self.max_drawdown = risk_config.get("max_drawdown", self.MAX_DRAWDOWN)
         self.volatility_target_min = risk_config.get("volatility_target", {}).get("min", self.VOLATILITY_TARGET_MIN)
         self.volatility_target_max = risk_config.get("volatility_target", {}).get("max", self.VOLATILITY_TARGET_MAX)
+        
+        # Separate risk rules for futures vs options
+        self.futures_max_risk = risk_config.get("futures", {}).get("max_risk_per_trade", self.max_risk_per_trade)
+        self.options_max_risk = risk_config.get("options", {}).get("max_risk_per_trade", self.max_risk_per_trade * 0.5)  # Options: 50% of futures risk
         
         # Cool-down tracking
         self.cooldown_until: Optional[datetime] = None
@@ -217,9 +229,17 @@ class RiskManagerAgent:
 
             price = market_data.close
 
+            # Determine asset type
+            is_futures = self.signal_router.is_futures(symbol)
+            is_options = self.signal_router.is_options(symbol)
+            
+            # Use appropriate risk rules
+            max_risk = self.futures_max_risk if is_futures else self.options_max_risk
+            
             # Calculate position size with volatility targeting and risk limit
             position_size = self._calculate_position_size(
-                symbol, signal, price, risk_state, current_equity, state.market_data
+                symbol, signal, price, risk_state, current_equity, state.market_data,
+                is_futures=is_futures, is_options=is_options, max_risk=max_risk
             )
 
             # Calculate stop loss and take profit (with ATR if available)
@@ -234,7 +254,7 @@ class RiskManagerAgent:
             # Enforce max risk per trade (configurable, default 2%)
             if risk_percent > self.max_risk_per_trade:
                 # Reduce position size to meet risk limit
-                max_risk_amount = current_equity * self.max_risk_per_trade
+                max_risk_amount = current_equity * max_risk
                 if stop_loss and abs(price - stop_loss) > 0:
                     max_size = int(max_risk_amount / abs(price - stop_loss))
                     position_size = max_size if position_size > 0 else -max_size
@@ -246,7 +266,7 @@ class RiskManagerAgent:
                 state = add_agent_reasoning(
                     state,
                     "risk_manager_agent",
-                    f"Position size reduced for {symbol} to meet {self.max_risk_per_trade * 100:.1f}% risk limit",
+                    f"Position size reduced for {symbol} to meet {max_risk * 100:.1f}% risk limit",
                     level="info",
                     data={
                         "symbol": symbol,
@@ -349,6 +369,9 @@ class RiskManagerAgent:
         risk_state: RiskState,
         current_equity: float,
         market_data_history: Optional[Dict[str, MarketData]] = None,
+        is_futures: bool = True,
+        is_options: bool = False,
+        max_risk: float = None,
     ) -> int:
         """
         Calculate position size with volatility targeting and max risk per trade.
@@ -376,9 +399,12 @@ class RiskManagerAgent:
         # Use volatility size if available, otherwise use base size
         position_size = volatility_size if volatility_size is not None else base_size
 
-        # Enforce max risk per trade (configurable, default 2%)
+        # Enforce max risk per trade (asset-specific)
+        if max_risk is None:
+            max_risk = self.futures_max_risk if is_futures else self.options_max_risk
+            
         if signal.stop_loss:
-            max_risk_amount = current_equity * self.max_risk_per_trade
+            max_risk_amount = current_equity * max_risk
             risk_per_contract = abs(price - signal.stop_loss)
 
             if risk_per_contract > 0:
