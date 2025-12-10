@@ -183,15 +183,17 @@ class ContinuousService:
             strategy = futures_config.get("strategy", "intraday_swing")
             interval = futures_config.get("interval", 60)
             
+            # Format message - use simple formatting to avoid Markdown parsing issues
+            symbols_str = ', '.join(symbols)
             message = (
-                f"🚀 *Service Started*\n\n"
-                f"*Status:* Monitoring Active\n"
-                f"*Symbols:* {', '.join(symbols)}\n"
+                "🚀 *Service Started*\n\n"
+                "*Status:* Monitoring Active\n"
+                f"*Symbols:* {symbols_str}\n"
                 f"*Strategy:* {strategy}\n"
                 f"*Scan Interval:* {interval}s\n"
-                f"*Health Check:* http://localhost:{self.health_port}/healthz\n\n"
-                f"System is now monitoring markets 24/7. "
-                f"You'll receive alerts for entry and exit signals."
+                f"*Health Check:* localhost:{self.health_port}/healthz\n\n"
+                "System is now monitoring markets 24/7. "
+                "You'll receive alerts for entry and exit signals."
             )
             success = await self.telegram_alerts.send_message(message)
             if success:
@@ -237,12 +239,12 @@ class ContinuousService:
                 buffer_info = "  • Buffers initializing..."
             
             message = (
-                f"📊 *Status Update*\n\n"
+                "📊 *Status Update*\n\n"
                 f"*Uptime:* {uptime_str}\n"
                 f"*Cycles Run:* {self.cycle_count}\n"
                 f"*Worker Status:* {worker_status}\n\n"
                 f"*Buffer Status:*\n{buffer_info}\n\n"
-                f"System is running normally. Monitoring for signals..."
+                "System is running normally. Monitoring for signals..."
             )
             await self.telegram_alerts.send_message(message)
         except Exception as e:
@@ -281,10 +283,10 @@ class ContinuousService:
             uptime_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
             
             message = (
-                f"🛑 *Service Stopped*\n\n"
+                "🛑 *Service Stopped*\n\n"
                 f"*Uptime:* {uptime_str}\n"
                 f"*Total Cycles:* {self.cycle_count}\n\n"
-                f"Service has been shut down gracefully."
+                "Service has been shut down gracefully."
             )
             await self.telegram_alerts.send_message(message)
         except Exception as e:
