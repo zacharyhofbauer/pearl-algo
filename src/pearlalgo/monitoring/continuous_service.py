@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -105,6 +105,7 @@ class ContinuousService:
         """Initialize data provider and feed manager."""
         try:
             from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+            from pearlalgo.data_providers.dummy_provider import DummyDataProvider
             import os
 
             polygon_api_key = (
@@ -114,8 +115,41 @@ class ContinuousService:
                 .get("api_key")
             ) or os.getenv("POLYGON_API_KEY")
 
+            provider = None
+            use_dummy = False
+
             if polygon_api_key:
-                provider = PolygonDataProvider(api_key=polygon_api_key)
+                try:
+                    # Initialize Polygon provider
+                    provider = PolygonDataProvider(api_key=polygon_api_key)
+                    logger.info("Polygon provider initialized (will validate on first request)")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize Polygon provider: {e}, using dummy provider")
+                    use_dummy = True
+            else:
+                logger.info("No Polygon API key found, using dummy data provider")
+                use_dummy = True
+
+            # Fall back to dummy provider if needed
+            if use_dummy:
+                # Get symbols from config for dummy provider
+                futures_symbols = (
+                    self.config.get("monitoring", {})
+                    .get("workers", {})
+                    .get("futures", {})
+                    .get("symbols", [])
+                )
+                options_symbols = (
+                    self.config.get("monitoring", {})
+                    .get("workers", {})
+                    .get("options", {})
+                    .get("universe", [])
+                )
+                all_symbols = list(set(futures_symbols + options_symbols)) or ["SPY"]
+                provider = DummyDataProvider(symbols=all_symbols)
+                logger.info("Using DummyDataProvider (for testing/development)")
+
+            if provider:
                 self.data_feed_manager = DataFeedManager(
                     data_provider=provider,
                     rate_limit=self.config.get("monitoring", {})
@@ -131,9 +165,35 @@ class ContinuousService:
                 self.health_checker.data_feed_manager = self.data_feed_manager
                 logger.info("Data provider initialized")
             else:
-                logger.warning("No Polygon API key found, data provider not initialized")
+                logger.error("Failed to initialize any data provider")
         except Exception as e:
             logger.error(f"Error initializing data provider: {e}", exc_info=True)
+            # Last resort: use dummy provider
+            try:
+                from pearlalgo.data_providers.dummy_provider import DummyDataProvider
+                futures_symbols = (
+                    self.config.get("monitoring", {})
+                    .get("workers", {})
+                    .get("futures", {})
+                    .get("symbols", [])
+                )
+                options_symbols = (
+                    self.config.get("monitoring", {})
+                    .get("workers", {})
+                    .get("options", {})
+                    .get("universe", [])
+                )
+                all_symbols = list(set(futures_symbols + options_symbols)) or ["SPY"]
+                provider = DummyDataProvider(symbols=all_symbols)
+                self.data_feed_manager = DataFeedManager(
+                    data_provider=provider,
+                    rate_limit=5,
+                    reconnect_delay=5.0,
+                )
+                self.buffer_manager.data_provider = provider
+                logger.warning("Using DummyDataProvider as fallback")
+            except Exception as fallback_error:
+                logger.error(f"Even fallback provider failed: {fallback_error}")
 
     async def _futures_worker(
         self, symbols: List[str], strategy: str, interval: int
@@ -339,9 +399,16 @@ class ContinuousService:
         # Stop all workers
         await self.worker_pool.stop_all_workers()
 
-        # Disconnect data feed
+        # Disconnect data feed (this should close provider sessions)
         if self.data_feed_manager:
             await self.data_feed_manager.disconnect()
+            # Explicitly ensure provider session is closed
+            if hasattr(self.data_feed_manager, 'data_provider') and self.data_feed_manager.data_provider:
+                if hasattr(self.data_feed_manager.data_provider, 'close'):
+                    try:
+                        await self.data_feed_manager.data_provider.close()
+                    except Exception as e:
+                        logger.debug(f"Error closing data provider session: {e}")
 
         # Save buffers
         self.buffer_manager.save_all_buffers()
@@ -355,6 +422,13 @@ def main():
     import argparse
     import yaml
     from pathlib import Path
+    
+    # Load .env file to get environment variables
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass  # dotenv not required, but helpful
 
     parser = argparse.ArgumentParser(
         description="24/7 Continuous Trading Service",

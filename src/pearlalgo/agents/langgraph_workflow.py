@@ -62,22 +62,35 @@ class TradingWorkflow:
 
         # Initialize Telegram alerts if enabled
         self.telegram_alerts = None
+        import os
+        
         alerts_config = self.config.get("alerts", {})
         telegram_config = alerts_config.get("telegram", {})
-        if telegram_config.get("enabled", False):
-            bot_token = telegram_config.get("bot_token", "")
-            chat_id = telegram_config.get("chat_id", "")
-            if bot_token and chat_id:
-                try:
-                    self.telegram_alerts = TelegramAlerts(
-                        bot_token=bot_token,
-                        chat_id=chat_id,
-                        enabled=True,
-                    )
-                    logger.info("Telegram alerts initialized")
-                except Exception as e:
-                    logger.warning(f"Failed to initialize Telegram alerts: {e}")
-                    self.telegram_alerts = None
+        
+        # Get Telegram credentials from config or environment variables
+        bot_token = (
+            telegram_config.get("bot_token") or 
+            os.getenv("TELEGRAM_BOT_TOKEN", "")
+        )
+        chat_id = (
+            telegram_config.get("chat_id") or 
+            os.getenv("TELEGRAM_CHAT_ID", "")
+        )
+        
+        # Enable if explicitly enabled in config, or if credentials are available
+        enabled = telegram_config.get("enabled", False) or (bool(bot_token and chat_id))
+        
+        if enabled and bot_token and chat_id:
+            try:
+                self.telegram_alerts = TelegramAlerts(
+                    bot_token=bot_token,
+                    chat_id=chat_id,
+                    enabled=True,
+                )
+                logger.info("Telegram alerts initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Telegram alerts: {e}")
+                self.telegram_alerts = None
 
         # Initialize agents
         self.market_data_agent = MarketDataAgent(

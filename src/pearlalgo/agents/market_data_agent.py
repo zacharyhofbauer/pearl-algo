@@ -230,12 +230,12 @@ class MarketDataAgent:
         error_summary = f"All data sources failed for {symbol}. Tried: Polygon, Dummy."
         if errors:
             error_summary += f" Errors: {'; '.join(errors)}"
-        logger.error(error_summary)
-        raise RuntimeError(error_summary)
-            f"To enable dummy data for testing, set PEARLALGO_DUMMY_MODE=true in .env. "
+        error_summary += (
+            f" To enable dummy data for testing, set PEARLALGO_DUMMY_MODE=true in .env. "
             f"To use Polygon, set POLYGON_API_KEY in .env."
         )
-        return None
+        logger.error(error_summary)
+        raise RuntimeError(error_summary)
 
     def _convert_dataframe_to_market_data(
         self, symbol: str, df: pd.DataFrame

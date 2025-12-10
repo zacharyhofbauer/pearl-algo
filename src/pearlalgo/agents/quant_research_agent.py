@@ -282,9 +282,18 @@ class QuantResearchAgent:
                 strategy_params = self._get_strategy_params(symbol)
                 
                 # Generate base signal using modular strategy selection
-                signal_dict = generate_signal(
-                    symbol, df, strategy_name=self.strategy, **strategy_params
-                )
+                # Route to options strategies if strategy is options-specific
+                if self.strategy == "swing_momentum":
+                    # Use options strategy (lazy import to avoid circular dependency)
+                    from pearlalgo.options.strategies import swing_momentum_strategy
+                    signal_dict = swing_momentum_strategy(
+                        symbol, df, **strategy_params
+                    )
+                else:
+                    # Use futures strategy
+                    signal_dict = generate_signal(
+                        symbol, df, strategy_name=self.strategy, **strategy_params
+                    )
 
                 # Detect regime
                 regime = None

@@ -212,9 +212,16 @@ class PolygonDataProvider(DataProvider):
                                     f"No results for {symbol} ({date_from} to {date_to})"
                                 )
                     elif response.status == 401:
-                        logger.error(
-                            f"Polygon API unauthorized for {symbol} (API key invalid)"
-                        )
+                        # Only log once per symbol to reduce noise
+                        if not hasattr(self, '_unauthorized_logged'):
+                            self._unauthorized_logged = set()
+                        if symbol not in self._unauthorized_logged:
+                            logger.error(
+                                f"Polygon API unauthorized - API key is invalid or expired. "
+                                f"Please check your POLYGON_API_KEY in .env file. "
+                                f"Falling back to dummy data for {symbol}."
+                            )
+                            self._unauthorized_logged.add(symbol)
                         return pd.DataFrame()
                     elif response.status == 429:
                         logger.warning(
@@ -323,9 +330,17 @@ class PolygonDataProvider(DataProvider):
                             "vwap": result.get("vw"),
                         }
                 elif response.status == 401:
-                    logger.debug(
-                        f"Polygon API unauthorized for {symbol} (API key may be invalid or missing)"
-                    )
+                    # Only log once per symbol to reduce noise
+                    if not hasattr(self, '_unauthorized_logged_live'):
+                        self._unauthorized_logged_live = set()
+                    if symbol not in self._unauthorized_logged_live:
+                        logger.error(
+                            f"Polygon API unauthorized for {symbol} - API key is invalid or expired. "
+                            f"Please check your POLYGON_API_KEY in .env file."
+                        )
+                        self._unauthorized_logged_live.add(symbol)
+                    # Return None to allow fallback to dummy data
+                    return None
                 elif response.status == 403:
                     logger.debug(
                         f"Polygon API forbidden for {symbol} (may need paid tier)"

@@ -214,14 +214,27 @@ class BufferManager:
             )
 
             # Fetch historical data
-            if hasattr(provider, "fetch_historical"):
-                df = provider.fetch_historical(
-                    symbol=symbol, start=start, end=end, timeframe=timeframe
-                )
-            elif hasattr(provider, "_fetch_historical_async"):
+            # In async context, prefer async method directly to avoid event loop conflicts
+            if hasattr(provider, "_fetch_historical_async"):
+                # Use async method directly (we're already in async context)
                 df = await provider._fetch_historical_async(
                     symbol=symbol, start=start, end=end, timeframe=timeframe
                 )
+            elif hasattr(provider, "fetch_historical"):
+                # Fall back to sync method only if async is not available
+                # Note: This may fail if called from async context with running event loop
+                try:
+                    df = provider.fetch_historical(
+                        symbol=symbol, start=start, end=end, timeframe=timeframe
+                    )
+                except RuntimeError as e:
+                    if "event loop" in str(e).lower():
+                        logger.warning(
+                            f"Event loop conflict for {symbol}, skipping backfill. "
+                            f"Buffer will populate from live data."
+                        )
+                        return False
+                    raise
             else:
                 logger.error(f"Data provider {provider} does not support historical data")
                 return False
