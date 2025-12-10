@@ -80,6 +80,19 @@ class TelegramAlerts:
                 )
                 return True
             except TelegramError as e:
+                error_msg = str(e)
+                # "Not Found" usually means invalid chat_id or bot not started
+                if "Not Found" in error_msg or "404" in error_msg:
+                    logger.error(
+                        f"Telegram chat not found. This usually means:\n"
+                        f"  1. Chat ID is incorrect: {self.chat_id}\n"
+                        f"  2. Bot hasn't been started (send /start to your bot first)\n"
+                        f"  3. Bot doesn't have permission to send to this chat\n"
+                        f"  Error: {e}"
+                    )
+                    # Don't retry on 404 - it won't work
+                    return False
+                
                 if attempt < max_retries - 1:
                     # Exponential backoff
                     wait_time = 2 ** attempt

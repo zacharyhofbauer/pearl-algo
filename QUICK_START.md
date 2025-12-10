@@ -227,13 +227,30 @@ tail -50 logs/continuous_service.log
 
 ### Telegram Not Working
 
-```bash
-# Test Telegram connection
-python scripts/test_telegram.py
+**Common Issues:**
 
-# Check Telegram config
-grep -A 5 "telegram:" config/config.yaml
-```
+1. **"Not Found" Error:**
+   - Make sure you've started the bot by sending `/start` to your bot in Telegram
+   - Verify your chat_id is correct
+   - Check that the bot has permission to send messages
+
+2. **Test Connection:**
+   ```bash
+   # Test Telegram connection
+   python scripts/test_telegram.py
+   ```
+
+3. **Check Credentials:**
+   ```bash
+   # Verify environment variables are loaded
+   source .venv/bin/activate
+   python3 -c "from dotenv import load_dotenv; import os; load_dotenv(); print('Chat ID:', os.getenv('TELEGRAM_CHAT_ID'))"
+   ```
+
+4. **Check Telegram Config:**
+   ```bash
+   grep -A 5 "telegram:" config/config.yaml
+   ```
 
 ## Quick Commands Reference
 

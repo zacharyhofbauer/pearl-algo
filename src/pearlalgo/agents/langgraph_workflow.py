@@ -72,10 +72,18 @@ class TradingWorkflow:
             telegram_config.get("bot_token") or 
             os.getenv("TELEGRAM_BOT_TOKEN", "")
         )
-        chat_id = (
+        chat_id_raw = (
             telegram_config.get("chat_id") or 
             os.getenv("TELEGRAM_CHAT_ID", "")
         )
+        
+        # Ensure chat_id is a string (Telegram API requires string)
+        # Also handle template variables like "${TELEGRAM_CHAT_ID}"
+        chat_id = str(chat_id_raw) if chat_id_raw else ""
+        if chat_id.startswith("${") and chat_id.endswith("}"):
+            # Template variable not resolved, try env var directly
+            var_name = chat_id[2:-1]
+            chat_id = str(os.getenv(var_name, ""))
         
         # Enable if explicitly enabled in config, or if credentials are available
         enabled = telegram_config.get("enabled", False) or (bool(bot_token and chat_id))
@@ -83,8 +91,8 @@ class TradingWorkflow:
         if enabled and bot_token and chat_id:
             try:
                 self.telegram_alerts = TelegramAlerts(
-                    bot_token=bot_token,
-                    chat_id=chat_id,
+                    bot_token=str(bot_token),
+                    chat_id=str(chat_id),
                     enabled=True,
                 )
                 logger.info("Telegram alerts initialized")

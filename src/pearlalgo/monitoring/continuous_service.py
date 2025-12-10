@@ -120,31 +120,63 @@ class ContinuousService:
             telegram_config.get("bot_token") or 
             os.getenv("TELEGRAM_BOT_TOKEN", "")
         )
-        chat_id = (
+        chat_id_raw = (
             telegram_config.get("chat_id") or 
             os.getenv("TELEGRAM_CHAT_ID", "")
         )
+        
+        # Ensure chat_id is a string (Telegram API requires string)
+        # Also handle template variables like "${TELEGRAM_CHAT_ID}"
+        chat_id = str(chat_id_raw) if chat_id_raw else ""
+        if chat_id.startswith("${") and chat_id.endswith("}"):
+            # Template variable not resolved, try env var directly
+            var_name = chat_id[2:-1]
+            chat_id = str(os.getenv(var_name, ""))
+        
+        # Handle bot_token template variables too
+        if bot_token and bot_token.startswith("${") and bot_token.endswith("}"):
+            var_name = bot_token[2:-1]
+            bot_token = os.getenv(var_name, "")
         
         enabled = telegram_config.get("enabled", False) or (bool(bot_token and chat_id))
         
         if enabled and bot_token and chat_id:
             try:
+                # Log for debugging (mask sensitive data)
+                logger.debug(
+                    f"Initializing Telegram: bot_token={bot_token[:10]}..., "
+                    f"chat_id={chat_id}, enabled={enabled}"
+                )
                 self.telegram_alerts = TelegramAlerts(
-                    bot_token=bot_token,
-                    chat_id=chat_id,
+                    bot_token=str(bot_token),
+                    chat_id=str(chat_id),
                     enabled=True,
                 )
-                logger.info("Telegram alerts initialized for status updates")
+                if self.telegram_alerts.enabled:
+                    logger.info(
+                        f"Telegram alerts initialized for status updates "
+                        f"(chat_id: {self.telegram_alerts.chat_id})"
+                    )
+                    # Test connection by sending a silent test (we'll catch errors in send methods)
+                else:
+                    logger.warning("Telegram alerts initialized but not enabled")
             except Exception as e:
-                logger.warning(f"Failed to initialize Telegram alerts: {e}")
+                logger.warning(f"Failed to initialize Telegram alerts: {e}", exc_info=True)
                 self.telegram_alerts = None
+        else:
+            logger.debug(
+                f"Telegram not enabled: bot_token={'set' if bot_token else 'missing'}, "
+                f"chat_id={'set' if chat_id else 'missing'}"
+            )
     
     async def _send_startup_notification(self):
         """Send startup notification to Telegram."""
         if not self.telegram_alerts:
+            logger.debug("Telegram alerts not available, skipping startup notification")
             return
         
         try:
+            logger.debug(f"Sending startup notification to chat_id: {self.telegram_alerts.chat_id}")
             workers_config = self.config.get("monitoring", {}).get("workers", {})
             futures_config = workers_config.get("futures", {})
             symbols = futures_config.get("symbols", ["NQ", "ES"])
@@ -161,9 +193,19 @@ class ContinuousService:
                 f"System is now monitoring markets 24/7. "
                 f"You'll receive alerts for entry and exit signals."
             )
-            await self.telegram_alerts.send_message(message)
+            success = await self.telegram_alerts.send_message(message)
+            if success:
+                logger.info("Startup notification sent to Telegram")
+            else:
+                logger.warning(
+                    "Failed to send startup notification to Telegram. "
+                    "Make sure you've started the bot by sending /start to it first."
+                )
         except Exception as e:
-            logger.warning(f"Failed to send startup notification: {e}")
+            logger.warning(
+                f"Failed to send startup notification: {e}. "
+                "If you see 'Not Found', make sure you've sent /start to your bot first."
+            )
     
     async def _send_status_update(self):
         """Send periodic status update to Telegram."""
