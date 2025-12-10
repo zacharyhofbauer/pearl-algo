@@ -294,6 +294,9 @@ monitoring:
     enabled: true
     port: 8080
     check_interval: 60  # seconds
+  
+  # Status update notifications (Telegram)
+  status_update_interval: 600  # seconds (10 minutes) - Send periodic status updates
 
 # Enhanced Telegram Configuration
 telegram:

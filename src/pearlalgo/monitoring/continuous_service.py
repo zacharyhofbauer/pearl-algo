@@ -30,6 +30,7 @@ from pearlalgo.monitoring.data_feed_manager import DataFeedManager
 from pearlalgo.monitoring.health import HealthChecker, run_health_server
 from pearlalgo.data_providers.buffer_manager import BufferManager
 from pearlalgo.utils.market_hours import is_market_open
+from pearlalgo.utils.telegram_alerts import TelegramAlerts
 
 
 class ContinuousService:
@@ -90,6 +91,13 @@ class ContinuousService:
 
         # Health server task
         self.health_server_task: Optional[asyncio.Task] = None
+        
+        # Status update task
+        self.status_update_task: Optional[asyncio.Task] = None
+        
+        # Telegram alerts (for status updates)
+        self.telegram_alerts: Optional[TelegramAlerts] = None
+        self._initialize_telegram()
 
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -101,6 +109,144 @@ class ContinuousService:
         """Handle shutdown signals."""
         logger.info(f"Received signal {signum}, initiating graceful shutdown...")
         self.shutdown_requested = True
+    
+    def _initialize_telegram(self):
+        """Initialize Telegram alerts for status updates."""
+        import os
+        alerts_config = self.config.get("alerts", {})
+        telegram_config = alerts_config.get("telegram", {})
+        
+        bot_token = (
+            telegram_config.get("bot_token") or 
+            os.getenv("TELEGRAM_BOT_TOKEN", "")
+        )
+        chat_id = (
+            telegram_config.get("chat_id") or 
+            os.getenv("TELEGRAM_CHAT_ID", "")
+        )
+        
+        enabled = telegram_config.get("enabled", False) or (bool(bot_token and chat_id))
+        
+        if enabled and bot_token and chat_id:
+            try:
+                self.telegram_alerts = TelegramAlerts(
+                    bot_token=bot_token,
+                    chat_id=chat_id,
+                    enabled=True,
+                )
+                logger.info("Telegram alerts initialized for status updates")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Telegram alerts: {e}")
+                self.telegram_alerts = None
+    
+    async def _send_startup_notification(self):
+        """Send startup notification to Telegram."""
+        if not self.telegram_alerts:
+            return
+        
+        try:
+            workers_config = self.config.get("monitoring", {}).get("workers", {})
+            futures_config = workers_config.get("futures", {})
+            symbols = futures_config.get("symbols", ["NQ", "ES"])
+            strategy = futures_config.get("strategy", "intraday_swing")
+            interval = futures_config.get("interval", 60)
+            
+            message = (
+                f"🚀 *Service Started*\n\n"
+                f"*Status:* Monitoring Active\n"
+                f"*Symbols:* {', '.join(symbols)}\n"
+                f"*Strategy:* {strategy}\n"
+                f"*Scan Interval:* {interval}s\n"
+                f"*Health Check:* http://localhost:{self.health_port}/healthz\n\n"
+                f"System is now monitoring markets 24/7. "
+                f"You'll receive alerts for entry and exit signals."
+            )
+            await self.telegram_alerts.send_message(message)
+        except Exception as e:
+            logger.warning(f"Failed to send startup notification: {e}")
+    
+    async def _send_status_update(self):
+        """Send periodic status update to Telegram."""
+        if not self.telegram_alerts:
+            return
+        
+        try:
+            uptime = datetime.now(timezone.utc) - self.start_time
+            hours = int(uptime.total_seconds() // 3600)
+            minutes = int((uptime.total_seconds() % 3600) // 60)
+            uptime_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+            
+            # Get buffer status
+            buffer_status = {}
+            if self.buffer_manager:
+                for symbol in ["NQ", "ES"]:
+                    if self.buffer_manager.has_buffer(symbol):
+                        buffer_size = len(self.buffer_manager.get_buffer(symbol))
+                        buffer_status[symbol] = buffer_size
+            
+            # Get worker status
+            worker_status = "Running"
+            if self.worker_pool:
+                health = self.worker_pool.get_health_status()
+                worker_status = health.get("status", "Unknown")
+            
+            buffer_info = "\n".join([f"  • {sym}: {size} bars" for sym, size in buffer_status.items()])
+            if not buffer_info:
+                buffer_info = "  • Buffers initializing..."
+            
+            message = (
+                f"📊 *Status Update*\n\n"
+                f"*Uptime:* {uptime_str}\n"
+                f"*Cycles Run:* {self.cycle_count}\n"
+                f"*Worker Status:* {worker_status}\n\n"
+                f"*Buffer Status:*\n{buffer_info}\n\n"
+                f"System is running normally. Monitoring for signals..."
+            )
+            await self.telegram_alerts.send_message(message)
+        except Exception as e:
+            logger.warning(f"Failed to send status update: {e}")
+    
+    async def _status_update_loop(self, interval: int = 600):
+        """
+        Periodic status update loop.
+        
+        Args:
+            interval: Update interval in seconds (default: 600 = 10 minutes)
+        """
+        # Wait a bit before first update (let system initialize)
+        await asyncio.sleep(60)  # Wait 1 minute after startup
+        
+        while not self.shutdown_requested:
+            try:
+                await self._send_status_update()
+                # Wait for next update
+                for _ in range(interval):
+                    if self.shutdown_requested:
+                        break
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.warning(f"Error in status update loop: {e}")
+                await asyncio.sleep(interval)
+    
+    async def _send_shutdown_notification(self, uptime: timedelta):
+        """Send shutdown notification to Telegram."""
+        if not self.telegram_alerts:
+            return
+        
+        try:
+            hours = int(uptime.total_seconds() // 3600)
+            minutes = int((uptime.total_seconds() % 3600) // 60)
+            uptime_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+            
+            message = (
+                f"🛑 *Service Stopped*\n\n"
+                f"*Uptime:* {uptime_str}\n"
+                f"*Total Cycles:* {self.cycle_count}\n\n"
+                f"Service has been shut down gracefully."
+            )
+            await self.telegram_alerts.send_message(message)
+        except Exception as e:
+            logger.warning(f"Failed to send shutdown notification: {e}")
 
     async def _initialize_data_provider(self):
         """Initialize data provider and feed manager."""
@@ -286,6 +432,15 @@ class ContinuousService:
 
         logger.info(f"Registered {len(self.worker_pool.workers)} workers")
 
+        # Send startup notification
+        await self._send_startup_notification()
+        
+        # Start periodic status updates (every 10 minutes)
+        status_update_interval = self.config.get("monitoring", {}).get("status_update_interval", 600)
+        self.status_update_task = asyncio.create_task(
+            self._status_update_loop(interval=status_update_interval)
+        )
+
         # Wait for shutdown
         try:
             while not self.shutdown_requested:
@@ -300,6 +455,14 @@ class ContinuousService:
         logger.info("=" * 60)
         logger.info("Shutting down Continuous Service")
         logger.info("=" * 60)
+
+        # Stop status update task
+        if self.status_update_task:
+            self.status_update_task.cancel()
+            try:
+                await self.status_update_task
+            except asyncio.CancelledError:
+                pass
 
         # Stop health server
         if self.health_server_task:
@@ -327,6 +490,10 @@ class ContinuousService:
         self.buffer_manager.save_all_buffers()
 
         uptime = datetime.now(timezone.utc) - self.start_time
+        
+        # Send shutdown notification
+        await self._send_shutdown_notification(uptime)
+        
         logger.info(f"Service stopped: uptime={uptime}, cycles={self.cycle_count}")
 
 
