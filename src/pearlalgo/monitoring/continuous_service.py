@@ -35,9 +35,19 @@ from pearlalgo.utils.telegram_alerts import TelegramAlerts
 # Load .env file early so environment variables are available
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    from pathlib import Path
+    # Try to find .env file in project root (works when run as module)
+    project_root = Path(__file__).parent.parent.parent.parent
+    env_path = project_root / '.env'
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path)
+    else:
+        # Fallback to default behavior (current directory)
+        load_dotenv()
 except ImportError:
     pass  # dotenv not required, but helpful
+except Exception as e:
+    logger.warning(f"Could not load .env file: {e}")
 
 
 class ContinuousService:
@@ -305,12 +315,33 @@ class ContinuousService:
             from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
             import os
 
-            polygon_api_key = (
+            # Get API key from config or environment
+            config_api_key = (
                 self.config.get("data", {})
                 .get("fallback", {})
                 .get("polygon", {})
                 .get("api_key")
-            ) or os.getenv("POLYGON_API_KEY")
+            )
+            
+            # If config has template variable like ${POLYGON_API_KEY}, expand it
+            if config_api_key and config_api_key.startswith("${") and config_api_key.endswith("}"):
+                var_name = config_api_key[2:-1]  # Remove ${ and }
+                polygon_api_key = os.getenv(var_name)
+                logger.debug(f"Expanded config template {config_api_key} -> environment variable {var_name}")
+            elif config_api_key:
+                polygon_api_key = config_api_key
+            else:
+                polygon_api_key = os.getenv("POLYGON_API_KEY")
+            
+            # Strip whitespace in case .env file has extra spaces
+            if polygon_api_key:
+                polygon_api_key = polygon_api_key.strip()
+            
+            # Debug logging (only first few chars for security)
+            if polygon_api_key:
+                logger.debug(f"Polygon API key loaded: {polygon_api_key[:10]}... (length: {len(polygon_api_key)})")
+            else:
+                logger.error("POLYGON_API_KEY not found in config or environment")
 
             if not polygon_api_key:
                 raise ValueError(

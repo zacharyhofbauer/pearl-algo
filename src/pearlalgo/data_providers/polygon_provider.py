@@ -30,6 +30,54 @@ from pearlalgo.utils.retry import CircuitBreaker, async_retry_with_backoff
 logger = logging.getLogger(__name__)
 
 
+def _convert_futures_symbol_to_polygon(symbol: str) -> str:
+    """
+    Convert futures symbol (e.g., 'ES', 'NQ') to Polygon.io format.
+    
+    Polygon requires futures symbols in format: ROOT + MONTH_CODE + YEAR_DIGIT
+    Example: ES -> ESZ5 (ES + December + 2025)
+    
+    Month codes: F=Jan, G=Feb, H=Mar, J=Apr, K=May, M=Jun, 
+                 N=Jul, Q=Aug, U=Sep, V=Oct, X=Nov, Z=Dec
+    
+    Args:
+        symbol: Futures symbol (e.g., 'ES', 'NQ')
+        
+    Returns:
+        Polygon-formatted symbol (e.g., 'ESZ5')
+    """
+    # Common futures symbols
+    futures_symbols = {'ES', 'NQ', 'YM', 'RTY', 'MES', 'MNQ', 'MYM', 'M2K', 
+                       'CL', 'GC', 'SI', 'HG', 'NG', 'ZC', 'ZS', 'ZW'}
+    
+    # Check if it's a futures symbol (not already formatted)
+    root = symbol.upper().split()[0]  # Get root, remove any suffix
+    
+    if root not in futures_symbols:
+        # Not a futures symbol or already formatted, return as-is
+        return symbol
+    
+    # Get current month and year
+    now = datetime.now(timezone.utc)
+    current_month = now.month
+    current_year = now.year
+    
+    # Month codes
+    month_codes = {
+        1: 'F', 2: 'G', 3: 'H', 4: 'J', 5: 'K', 6: 'M',
+        7: 'N', 8: 'Q', 9: 'U', 10: 'V', 11: 'X', 12: 'Z'
+    }
+    
+    month_code = month_codes[current_month]
+    year_digit = str(current_year)[-1]  # Last digit of year
+    
+    # Format: ROOT + MONTH + YEAR
+    polygon_symbol = f"{root}{month_code}{year_digit}"
+    
+    logger.debug(f"Converted futures symbol {symbol} -> {polygon_symbol}")
+    return polygon_symbol
+
+
 class PolygonDataProvider(DataProvider):
     """
     Enhanced Polygon.io data provider for US equities, futures, and options.
@@ -177,7 +225,10 @@ class PolygonDataProvider(DataProvider):
             date_from = current_start.strftime("%Y-%m-%d")
             date_to = chunk_end.strftime("%Y-%m-%d")
 
-            url = f"{self.base_url}/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{date_from}/{date_to}"
+            # Convert futures symbols to Polygon format
+            polygon_symbol = _convert_futures_symbol_to_polygon(symbol)
+
+            url = f"{self.base_url}/v2/aggs/ticker/{polygon_symbol}/range/{multiplier}/{timespan}/{date_from}/{date_to}"
             params = {"adjusted": "true", "sort": "asc", "apikey": self.api_key}
 
             try:
@@ -304,8 +355,11 @@ class PolygonDataProvider(DataProvider):
         """Internal implementation of get_latest_bar."""
         try:
             session = await self._get_session()
+            
+            # Convert futures symbols to Polygon format
+            polygon_symbol = _convert_futures_symbol_to_polygon(symbol)
 
-            url = f"{self.base_url}/v2/aggs/ticker/{symbol}/prev"
+            url = f"{self.base_url}/v2/aggs/ticker/{polygon_symbol}/prev"
             params = {"adjusted": "true", "apikey": self.api_key}
 
             await self._rate_limit()
@@ -335,8 +389,9 @@ class PolygonDataProvider(DataProvider):
                         self._unauthorized_logged_live = set()
                     if symbol not in self._unauthorized_logged_live:
                         logger.error(
-                            f"Polygon API unauthorized for {symbol} - API key is invalid or expired. "
-                            f"Please check your POLYGON_API_KEY in .env file."
+                            f"Polygon API unauthorized for {symbol} (tried as {polygon_symbol}) - "
+                            f"API key is invalid or expired. Please check your POLYGON_API_KEY in .env file. "
+                            f"Service will fail without valid API key."
                         )
                         self._unauthorized_logged_live.add(symbol)
                     # Return None - caller should handle the error explicitly
