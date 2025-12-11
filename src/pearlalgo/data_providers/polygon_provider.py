@@ -219,7 +219,7 @@ class PolygonDataProvider(DataProvider):
                             logger.error(
                                 f"Polygon API unauthorized - API key is invalid or expired. "
                                 f"Please check your POLYGON_API_KEY in .env file. "
-                                f"Falling back to dummy data for {symbol}."
+                                f"API key invalid or expired for {symbol}. Service will fail without valid API key."
                             )
                             self._unauthorized_logged.add(symbol)
                         return pd.DataFrame()
@@ -339,7 +339,7 @@ class PolygonDataProvider(DataProvider):
                             f"Please check your POLYGON_API_KEY in .env file."
                         )
                         self._unauthorized_logged_live.add(symbol)
-                    # Return None to allow fallback to dummy data
+                    # Return None - caller should handle the error explicitly
                     return None
                 elif response.status == 403:
                     logger.debug(

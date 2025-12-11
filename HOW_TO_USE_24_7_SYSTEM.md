@@ -10,18 +10,36 @@ First, make sure everything is configured:
 cd ~/pearlalgo-dev-ai-agents
 source .venv/bin/activate
 
-# Check environment variables
+# Check environment variables (VERIFY POLYGON_API_KEY is set!)
 python scripts/debug_env.py
+
+# Verify Polygon API key works
+python3 -c "
+from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+import os
+api_key = os.getenv('POLYGON_API_KEY')
+if not api_key:
+    print('❌ POLYGON_API_KEY not set!')
+    exit(1)
+try:
+    provider = PolygonDataProvider(api_key=api_key)
+    print('✅ Polygon provider initialized successfully')
+except Exception as e:
+    print(f'❌ Polygon provider failed: {e}')
+    exit(1)
+"
 
 # Verify Telegram connection
 python scripts/test_telegram.py
 ```
 
 **Required Environment Variables:**
-- `POLYGON_API_KEY` - For market data (required)
+- `POLYGON_API_KEY` - **REQUIRED** - For market data (service will fail without it)
 - `TELEGRAM_BOT_TOKEN` - For alerts (required)
 - `TELEGRAM_CHAT_ID` - For alerts (required)
 - `GROQ_API_KEY` - Optional, for LLM reasoning
+
+**⚠️ Important:** The system no longer falls back to dummy data. A valid `POLYGON_API_KEY` is **mandatory**. The service will fail to start if the API key is missing or invalid.
 
 ### 2. Configure the System
 
@@ -59,12 +77,16 @@ python -m pearlalgo.monitoring.continuous_service \
 ```
 
 **What happens:**
-1. Service initializes worker pool
-2. Backfills historical data buffers (30 days)
-3. Starts futures worker (scans NQ/ES every 60 seconds)
-4. Starts options worker (scans equities every 15 minutes)
-5. Starts health check server on port 8080
-6. Begins continuous scanning
+1. Service validates POLYGON_API_KEY (will fail if missing/invalid)
+2. Service initializes Polygon data provider
+3. Service initializes worker pool
+4. Backfills historical data buffers (30 days) from Polygon
+5. Starts futures worker (scans NQ/ES every 60 seconds)
+6. Starts options worker (scans equities every 15 minutes)
+7. Starts health check server on port 8080
+8. Begins continuous scanning
+
+**⚠️ If you see errors about missing API key or unauthorized access, the service will stop. Fix your POLYGON_API_KEY and restart.**
 
 #### Option B: Systemd Service (Production)
 
@@ -301,33 +323,97 @@ exit_signals = generator.generate_exit_signals(state)
 
 #### Service Won't Start
 
-```bash
-# Check configuration
-python -c "import yaml; print(yaml.safe_load(open('config/config.yaml')))"
+**Common Causes:**
 
-# Check environment
-python scripts/debug_env.py
+1. **Missing or Invalid POLYGON_API_KEY:**
+   ```bash
+   # Check if API key is set
+   echo $POLYGON_API_KEY
+   
+   # Test Polygon API key
+   python3 -c "
+   from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+   import os
+   api_key = os.getenv('POLYGON_API_KEY')
+   if not api_key:
+       print('❌ POLYGON_API_KEY not set in environment')
+   else:
+       try:
+           provider = PolygonDataProvider(api_key=api_key)
+           print('✅ API key is valid')
+       except Exception as e:
+           print(f'❌ API key invalid: {e}')
+   "
+   ```
 
-# Check logs
-tail -50 logs/continuous_service.log
-```
+2. **Configuration Errors:**
+   ```bash
+   # Check configuration
+   python -c "import yaml; print(yaml.safe_load(open('config/config.yaml')))"
+   ```
+
+3. **Environment Issues:**
+   ```bash
+   # Check environment
+   python scripts/debug_env.py
+   
+   # Verify virtual environment is activated
+   which python
+   ```
+
+4. **Check Logs:**
+   ```bash
+   # Check logs for specific errors
+   tail -50 logs/continuous_service.log
+   
+   # Look for Polygon API errors
+   grep -i "polygon\|api key\|unauthorized" logs/continuous_service.log | tail -20
+   ```
+
+**Error Messages to Watch For:**
+- `"POLYGON_API_KEY is required"` - API key not set
+- `"Cannot initialize Polygon data provider"` - API key invalid or network issue
+- `"Polygon API unauthorized"` - API key expired or invalid
 
 #### No Signals Generated
 
-1. **Check market hours:**
+1. **Check data provider status:**
+   ```bash
+   # Check if Polygon provider is working
+   curl http://localhost:8080/healthz | jq '.components.data_provider'
+   
+   # Look for data provider errors in logs
+   grep -i "data provider\|polygon\|fetch" logs/continuous_service.log | tail -20
+   ```
+
+2. **Check market hours:**
    ```python
    from pearlalgo.utils.market_hours import is_market_open
    print(is_market_open())
    ```
 
-2. **Check data availability:**
-   ```bash
-   curl http://localhost:8080/healthz | jq '.components.data_provider'
+3. **Verify Polygon API is returning data:**
+   ```python
+   from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+   import os
+   import asyncio
+   
+   async def test_polygon():
+       provider = PolygonDataProvider(api_key=os.getenv('POLYGON_API_KEY'))
+       data = await provider.get_latest_bar('ES')
+       if data:
+           print(f"✅ Got data for ES: ${data['close']:.2f}")
+       else:
+           print("❌ No data returned")
+       await provider.close()
+   
+   asyncio.run(test_polygon())
    ```
 
-3. **Check strategy parameters:**
+4. **Check strategy parameters:**
    - Review strategy config in `config/config.yaml`
    - Verify symbols are correct
+   - Check if strategy filters are too strict
 
 #### Workers Failing
 
@@ -492,16 +578,38 @@ sudo systemctl disable pearlalgo-continuous-service.service
 ### Workflow 1: Start Fresh
 
 ```bash
-# 1. Configure
+# 1. Verify environment setup
+source .venv/bin/activate
+
+# 2. Verify POLYGON_API_KEY is set and valid
+echo "Checking POLYGON_API_KEY..."
+if [ -z "$POLYGON_API_KEY" ]; then
+    echo "❌ POLYGON_API_KEY not set! Add it to .env file"
+    exit 1
+fi
+
+# Test Polygon API key
+python3 -c "
+from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+import os
+try:
+    provider = PolygonDataProvider(api_key=os.getenv('POLYGON_API_KEY'))
+    print('✅ Polygon API key is valid')
+except Exception as e:
+    print(f'❌ Polygon API key invalid: {e}')
+    exit(1)
+"
+
+# 3. Configure
 nano config/config.yaml
 
-# 2. Test Telegram
+# 4. Test Telegram
 python scripts/test_telegram.py
 
-# 3. Start service
+# 5. Start service
 python -m pearlalgo.monitoring.continuous_service --config config/config.yaml
 
-# 4. Monitor
+# 6. Monitor
 tail -f logs/continuous_service.log
 ```
 
@@ -538,11 +646,21 @@ tail -f logs/continuous_service.log | grep "signal"
 ### Key Commands
 
 ```bash
+# Verify setup first
+source .venv/bin/activate
+python scripts/debug_env.py
+
+# Test Polygon API key
+python3 -c "from pearlalgo.data_providers.polygon_provider import PolygonDataProvider; import os; PolygonDataProvider(api_key=os.getenv('POLYGON_API_KEY'))"
+
+# Quick test
+python3 quick_test.py
+
 # Start service
-python -m pearlalgo.monitoring.continuous_service --config config/config.yaml
+python3 -m pearlalgo.monitoring.continuous_service --config config/config.yaml
 
 # Check health
-curl http://localhost:8080/healthz
+curl http://localhost:8080/healthz | jq
 
 # View logs
 tail -f logs/continuous_service.log
@@ -575,7 +693,68 @@ tail -20 data/performance/futures_decisions.csv
 4. **Monitor**: Check health and logs regularly
 5. **Iterate**: Refine based on signal quality
 
+## Testing the System
+
+### Quick Test (Before Running Full Service)
+
+```bash
+# Run quick verification test
+python3 quick_test.py
+
+# This tests:
+# - Signal tracker persistence
+# - Exit signal generation
+# - Price validation
+# - Signal lifecycle
+```
+
+### Full Test Suite
+
+```bash
+# Run all signal-related tests
+pytest tests/test_exit_signals.py tests/test_signal_lifecycle.py tests/test_error_recovery.py -v
+
+# Run all tests
+pytest tests/ -v
+
+# Run with coverage
+pytest tests/ --cov=src/pearlalgo --cov-report=html
+```
+
+### Test Data Provider
+
+```bash
+# Test Polygon provider directly
+python3 << 'EOF'
+import asyncio
+import os
+from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+
+async def test():
+    api_key = os.getenv('POLYGON_API_KEY')
+    if not api_key:
+        print("❌ POLYGON_API_KEY not set")
+        return
+    
+    provider = PolygonDataProvider(api_key=api_key)
+    try:
+        # Test fetching data for ES
+        data = await provider.get_latest_bar('ES')
+        if data:
+            print(f"✅ Successfully fetched ES data: ${data['close']:.2f}")
+        else:
+            print("❌ No data returned")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+    finally:
+        await provider.close()
+
+asyncio.run(test())
+EOF
+```
+
 For detailed information, see:
 - `docs/24_7_OPERATIONS_GUIDE.md` - Operations and troubleshooting
 - `docs/OPTIONS_SCANNING_GUIDE.md` - Options-specific configuration
-- `UPGRADE_IMPLEMENTATION_SUMMARY.md` - Implementation details
+- `START_HERE.md` - Quick start guide
+- `TEST_AND_RUN_GUIDE.md` - Comprehensive testing guide

@@ -82,13 +82,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         
         # Check 4: Data provider availability
         try:
-            from pearlalgo.data_providers.dummy_provider import DummyDataProvider
-            dummy_provider = DummyDataProvider(symbols=["ES"])
-            checks["dummy_provider"] = "ok"
-        except Exception as e:
-            checks["dummy_provider"] = "failed"
-            errors.append(f"Dummy provider error: {e}")
-            # Don't fail overall health for dummy provider
+            # Dummy provider removed - health check only validates real data providers
         
         # Check 5: Agent initialization
         try:

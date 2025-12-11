@@ -4,7 +4,7 @@ Market Data Agent - Streams live market data via WebSockets with REST fallback.
 This agent is responsible for:
 - WebSocket streaming for OHLCV, order book, funding rates (crypto), OI
 - Polygon.io primary provider for US futures
-- Dummy data provider for testing/development
+- Requires valid POLYGON_API_KEY - no dummy data fallback
 - Real-time data aggregation and normalization
 """
 
@@ -27,7 +27,7 @@ from pearlalgo.agents.langgraph_state import (
     add_agent_reasoning,
 )
 from pearlalgo.config.settings import get_settings
-from pearlalgo.data_providers.dummy_provider import DummyDataProvider
+# DummyDataProvider removed - system requires real data providers
 from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
 from pearlalgo.data_providers.buffer_manager import BufferManager
 # WebSocket provider removed - system uses Polygon REST API only
@@ -54,7 +54,7 @@ class MarketDataAgent:
 
         # Initialize data providers
         self.polygon_provider: Optional[PolygonDataProvider] = None
-        self.dummy_provider: Optional[DummyDataProvider] = None
+        # Dummy provider removed - system requires real data
 
         # Data buffers (for caching normalized data)
         self.data_buffers: Dict[str, List[MarketData]] = {symbol: [] for symbol in symbols}
@@ -93,24 +93,7 @@ class MarketDataAgent:
             else:
                 logger.warning("Polygon API key not found - Polygon provider disabled. Set POLYGON_API_KEY environment variable.")
 
-            # Initialize dummy provider as fallback (enabled by default for testing)
-            dummy_mode_env = os.getenv("PEARLALGO_DUMMY_MODE", "").lower()
-            if dummy_mode_env in ("true", "1", "yes"):
-                dummy_mode = True
-            elif dummy_mode_env in ("false", "0", "no"):
-                dummy_mode = False
-            else:
-                # Default to True if not explicitly set (allows testing without API keys)
-                dummy_mode = True
-            
-            if dummy_mode:
-                try:
-                    self.dummy_provider = DummyDataProvider(symbols=self.symbols)
-                    logger.info("Dummy data provider initialized (for testing/development)")
-                except Exception as e:
-                    logger.warning(f"Dummy provider initialization failed: {e}")
-            else:
-                logger.debug("Dummy provider disabled (dummy_mode=False)")
+            # Dummy provider removed - system will fail explicitly if data providers are unavailable
 
         except Exception as e:
             logger.error(f"Error initializing providers: {e}", exc_info=True)
@@ -194,48 +177,34 @@ class MarketDataAgent:
 
     async def _fetch_symbol_data(self, symbol: str) -> Optional[MarketData]:
         """
-        Fetch data for a single symbol.
-        Tries Polygon first, then Dummy provider as fallback.
+        Fetch data for a single symbol from Polygon provider.
         
         Raises:
-            Exception: If all providers fail and no data can be retrieved
+            RuntimeError: If Polygon provider fails or is unavailable
         """
-        errors = []
+        if not self.polygon_provider:
+            raise RuntimeError(
+                f"Cannot fetch data for {symbol}: Polygon provider is not initialized. "
+                f"Please check your POLYGON_API_KEY configuration."
+            )
         
-        # Try Polygon provider (primary data source)
-        if self.polygon_provider:
-            try:
-                data = await self.polygon_provider.get_latest_bar(symbol)
-                if data:
-                    logger.debug(f"Successfully fetched Polygon data for {symbol}")
-                    return self._convert_to_market_data(symbol, data)
-            except Exception as e:
-                error_msg = f"Polygon fetch failed for {symbol}: {e}"
-                logger.warning(error_msg, exc_info=True)
-                errors.append(error_msg)
-
-        # Final fallback: Dummy provider (for testing/development)
-        if self.dummy_provider:
-            try:
-                data = self.dummy_provider.get_latest_bar(symbol)
-                if data:
-                    logger.info(f"Using dummy data for {symbol} (all real sources failed or unavailable)")
-                    return self._convert_to_market_data(symbol, data)
-            except Exception as e:
-                error_msg = f"Dummy provider failed for {symbol}: {e}"
-                logger.warning(error_msg, exc_info=True)
-                errors.append(error_msg)
-
-        # If we get here, all providers failed
-        error_summary = f"All data sources failed for {symbol}. Tried: Polygon, Dummy."
-        if errors:
-            error_summary += f" Errors: {'; '.join(errors)}"
-        error_summary += (
-            f" To enable dummy data for testing, set PEARLALGO_DUMMY_MODE=true in .env. "
-            f"To use Polygon, set POLYGON_API_KEY in .env."
-        )
-        logger.error(error_summary)
-        raise RuntimeError(error_summary)
+        try:
+            data = await self.polygon_provider.get_latest_bar(symbol)
+            if data:
+                logger.debug(f"Successfully fetched Polygon data for {symbol}")
+                return self._convert_to_market_data(symbol, data)
+            else:
+                raise RuntimeError(
+                    f"Polygon provider returned no data for {symbol}. "
+                    f"This may indicate an API issue or invalid symbol."
+                )
+        except Exception as e:
+            error_msg = (
+                f"Failed to fetch data for {symbol} from Polygon provider: {e}. "
+                f"Please check your POLYGON_API_KEY and network connection."
+            )
+            logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg) from e
 
     def _convert_dataframe_to_market_data(
         self, symbol: str, df: pd.DataFrame

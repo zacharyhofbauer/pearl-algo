@@ -93,10 +93,22 @@ class TelegramAlerts:
                     # Don't retry on 404 - it won't work
                     return False
                 
-                # Markdown parsing errors - try sending as plain text
+                # Markdown parsing errors - try sending as plain text immediately
                 if "parse entities" in error_msg.lower() or "can't parse" in error_msg.lower():
                     logger.warning(f"Markdown parsing error, retrying as plain text: {e}")
-                    if attempt == max_retries - 1:
+                    # Try sending as plain text on next attempt
+                    if attempt < max_retries - 1:
+                        try:
+                            await self.bot.send_message(
+                                chat_id=self.chat_id,
+                                text=message,
+                                parse_mode=None,  # Plain text
+                            )
+                            return True
+                        except Exception as e2:
+                            logger.debug(f"Plain text send also failed: {e2}")
+                            # Continue to retry loop
+                    elif attempt == max_retries - 1:
                         # Last attempt - try without Markdown
                         try:
                             await self.bot.send_message(

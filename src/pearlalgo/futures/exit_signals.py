@@ -92,7 +92,7 @@ class ExitSignalGenerator:
     
     def _validate_price(self, price: Optional[float], symbol: str, context: str = "") -> bool:
         """
-        Validate price value for reasonableness.
+        Validate price value for reasonableness with symbol-specific ranges.
         
         Args:
             price: Price to validate
@@ -121,6 +121,30 @@ class ExitSignalGenerator:
             logger.warning(f"Price validation failed for {symbol}: unreasonably high price ${price:.2f} {context}")
             self.price_validation_failures += 1
             return False
+        
+        # Symbol-specific price range validation for common futures
+        symbol_ranges = {
+            "ES": (3000.0, 7000.0),  # E-mini S&P 500
+            "MES": (3000.0, 7000.0),  # Micro E-mini S&P 500
+            "NQ": (10000.0, 25000.0),  # E-mini Nasdaq
+            "MNQ": (10000.0, 25000.0),  # Micro E-mini Nasdaq
+            "YM": (30000.0, 45000.0),  # E-mini Dow
+            "MYM": (30000.0, 45000.0),  # Micro E-mini Dow
+            "RTY": (1500.0, 3000.0),  # E-mini Russell 2000
+            "M2K": (1500.0, 3000.0),  # Micro E-mini Russell 2000
+        }
+        
+        # Check symbol-specific range
+        base_symbol = symbol.split()[0] if " " in symbol else symbol
+        if base_symbol in symbol_ranges:
+            min_price, max_price = symbol_ranges[base_symbol]
+            if price < min_price or price > max_price:
+                logger.warning(
+                    f"Price validation failed for {symbol}: price ${price:.2f} outside expected range "
+                    f"${min_price:.2f}-${max_price:.2f} {context}"
+                )
+                self.price_validation_failures += 1
+                return False
         
         return True
     
@@ -443,6 +467,12 @@ class ExitSignalGenerator:
                             f"Fetched fallback price for {symbol}: ${price:.2f} "
                             f"from {type(provider).__name__} (attempt {attempt + 1})"
                         )
+                        # Log if price seems suspicious for futures
+                        if symbol in ["ES", "MES", "NQ", "MNQ"] and price < 100:
+                            logger.warning(
+                                f"Suspiciously low price ${price:.2f} for {symbol} from {type(provider).__name__}. "
+                                f"This may indicate incorrect data source or symbol format."
+                            )
                         return price
                 except Exception as e:
                     logger.debug(f"Attempt {attempt + 1} failed for {symbol} from {type(provider).__name__}: {e}")

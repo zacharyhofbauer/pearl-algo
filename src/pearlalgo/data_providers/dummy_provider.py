@@ -104,6 +104,15 @@ class DummyDataProvider(DataProvider):
         
         Returns a dict with OHLCV data similar to real providers.
         """
+        # Extract base symbol (remove month/year suffix if present)
+        base_symbol = symbol.split()[0] if " " in symbol else symbol
+        
+        # Initialize price if not in history
+        if symbol not in self.price_history:
+            # Use BASE_PRICES if available, otherwise default
+            base_price = self.BASE_PRICES.get(base_symbol, 1000.0)
+            self.price_history[symbol] = base_price + random.uniform(-50, 50)
+        
         base_price = self.price_history.get(symbol, 1000.0)
         
         # Small random walk

@@ -32,6 +32,13 @@ from pearlalgo.data_providers.buffer_manager import BufferManager
 from pearlalgo.utils.market_hours import is_market_open
 from pearlalgo.utils.telegram_alerts import TelegramAlerts
 
+# Load .env file early so environment variables are available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not required, but helpful
+
 
 class ContinuousService:
     """
@@ -296,7 +303,6 @@ class ContinuousService:
         """Initialize data provider and feed manager."""
         try:
             from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
-            from pearlalgo.data_providers.dummy_provider import DummyDataProvider
             import os
 
             polygon_api_key = (
@@ -306,73 +312,42 @@ class ContinuousService:
                 .get("api_key")
             ) or os.getenv("POLYGON_API_KEY")
 
-            provider = None
-            use_dummy = False
-
-            if polygon_api_key:
-                try:
-                    # Initialize Polygon provider
-                    provider = PolygonDataProvider(api_key=polygon_api_key)
-                    logger.info("Polygon provider initialized (will validate on first request)")
-                except Exception as e:
-                    logger.warning(f"Failed to initialize Polygon provider: {e}, using dummy provider")
-                    use_dummy = True
-            else:
-                logger.info("No Polygon API key found, using dummy data provider")
-                use_dummy = True
-
-            # Fall back to dummy provider if needed
-            if use_dummy:
-                # Get symbols from config for dummy provider
-                futures_symbols = (
-                    self.config.get("monitoring", {})
-                    .get("workers", {})
-                    .get("futures", {})
-                    .get("symbols", [])
+            if not polygon_api_key:
+                raise ValueError(
+                    "POLYGON_API_KEY is required. Please set it in your .env file or config."
                 )
-                all_symbols = futures_symbols or ["NQ"]
-                provider = DummyDataProvider(symbols=all_symbols)
-                logger.info("Using DummyDataProvider (for testing/development)")
 
-            if provider:
-                self.data_feed_manager = DataFeedManager(
-                    data_provider=provider,
-                    rate_limit=self.config.get("monitoring", {})
-                    .get("data_feeds", {})
-                    .get("polygon", {})
-                    .get("rate_limit", 5),
-                    reconnect_delay=self.config.get("monitoring", {})
-                    .get("data_feeds", {})
-                    .get("polygon", {})
-                    .get("reconnect_delay", 5.0),
-                )
-                self.buffer_manager.data_provider = provider
-                self.health_checker.data_feed_manager = self.data_feed_manager
-                logger.info("Data provider initialized")
-            else:
-                logger.error("Failed to initialize any data provider")
-        except Exception as e:
-            logger.error(f"Error initializing data provider: {e}", exc_info=True)
-            # Last resort: use dummy provider
+            # Initialize Polygon provider - fail explicitly if it doesn't work
             try:
-                from pearlalgo.data_providers.dummy_provider import DummyDataProvider
-                futures_symbols = (
-                    self.config.get("monitoring", {})
-                    .get("workers", {})
-                    .get("futures", {})
-                    .get("symbols", [])
-                )
-                all_symbols = futures_symbols or ["NQ"]
-                provider = DummyDataProvider(symbols=all_symbols)
-                self.data_feed_manager = DataFeedManager(
-                    data_provider=provider,
-                    rate_limit=5,
-                    reconnect_delay=5.0,
-                )
-                self.buffer_manager.data_provider = provider
-                logger.warning("Using DummyDataProvider as fallback")
-            except Exception as fallback_error:
-                logger.error(f"Even fallback provider failed: {fallback_error}")
+                provider = PolygonDataProvider(api_key=polygon_api_key)
+                logger.info("Polygon provider initialized (will validate on first request)")
+            except Exception as e:
+                logger.error(f"Failed to initialize Polygon provider: {e}")
+                raise ValueError(
+                    f"Cannot initialize Polygon data provider: {e}. "
+                    f"Please check your POLYGON_API_KEY and network connection."
+                ) from e
+
+            self.data_feed_manager = DataFeedManager(
+                data_provider=provider,
+                rate_limit=self.config.get("monitoring", {})
+                .get("data_feeds", {})
+                .get("polygon", {})
+                .get("rate_limit", 5),
+                reconnect_delay=self.config.get("monitoring", {})
+                .get("data_feeds", {})
+                .get("polygon", {})
+                .get("reconnect_delay", 5.0),
+            )
+            self.buffer_manager.data_provider = provider
+            self.health_checker.data_feed_manager = self.data_feed_manager
+            logger.info("Data provider initialized successfully")
+        except Exception as e:
+            logger.error(f"CRITICAL: Failed to initialize data provider: {e}", exc_info=True)
+            raise RuntimeError(
+                f"Cannot start service without a working data provider. "
+                f"Error: {e}. Please check your POLYGON_API_KEY configuration."
+            ) from e
 
     async def _futures_worker(
         self, symbols: List[str], strategy: str, interval: int
@@ -547,12 +522,7 @@ def main():
     import yaml
     from pathlib import Path
     
-    # Load .env file to get environment variables
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ImportError:
-        pass  # dotenv not required, but helpful
+    # .env file is now loaded at module level (see imports above)
 
     parser = argparse.ArgumentParser(
         description="24/7 Continuous Trading Service",
