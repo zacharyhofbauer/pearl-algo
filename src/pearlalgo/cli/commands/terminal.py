@@ -17,9 +17,8 @@ from rich.table import Table
 from rich.text import Text
 from rich import box
 
-from pearlalgo.futures.performance import load_performance, DEFAULT_PERF_PATH
-from pearlalgo.futures.config import load_profile
-from pearlalgo.futures.risk import compute_risk_state
+# Futures modules removed - CLI will be updated for options
+# TODO: Create options-specific performance and risk tracking
 # IBKR broker removed - system is data-only
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.config.settings import get_settings

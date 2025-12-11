@@ -1,0 +1,64 @@
+# Underliers Configuration
+# Configuration-driven underlier lists for intraday and swing options trading
+
+underliers:
+  # Intraday trading (0-7 days to expiration)
+  intraday:
+    - symbol: "QQQ"
+      options_dte_range: [0, 7]  # Days to expiration
+      min_volume: 1000
+      min_open_interest: 5000
+      strike_proximity_pct: 0.10  # Within 10% of current price
+      description: "NASDAQ-100 ETF - High liquidity, tight spreads"
+    
+    - symbol: "SPY"
+      options_dte_range: [0, 7]
+      min_volume: 2000
+      min_open_interest: 10000
+      strike_proximity_pct: 0.10
+      description: "S&P 500 ETF - Highest liquidity, tightest spreads"
+  
+  # Swing trading (7-45 days to expiration)
+  swing:
+    - symbol: "QQQ"
+      options_dte_range: [7, 45]
+      min_volume: 500
+      min_open_interest: 2000
+      strike_proximity_pct: 0.15  # Within 15% of current price
+      description: "NASDAQ-100 ETF - Swing trades with longer DTE"
+    
+    - symbol: "SPY"
+      options_dte_range: [7, 45]
+      min_volume: 1000
+      min_open_interest: 5000
+      strike_proximity_pct: 0.15
+      description: "S&P 500 ETF - Swing trades with longer DTE"
+
+# Strategy-specific parameters
+strategy_params:
+  momentum:
+    momentum_threshold: 0.01  # 1% price change
+    volume_threshold: 1.5  # 50% volume increase
+  
+  volatility:
+    compression_threshold: 0.20  # 20% spread threshold
+  
+  unusual_flow:
+    unusual_volume_threshold: 1000
+    unusual_oi_threshold: 5000
+  
+  compression_breakout:
+    compression_days: 5
+    breakout_threshold: 0.02  # 2% breakout
+    volume_multiplier: 1.5  # 50% above average
+    compression_threshold: 0.03  # 3% price range
+  
+  trend_continuation:
+    lookback_days: 10
+    min_trend_strength: 0.05  # 5% move
+
+# Notes:
+# - To add more underliers, simply add entries to the appropriate list
+# - Parameters can be overridden per-symbol if needed
+# - DTE ranges ensure appropriate option selection for trading style
+# - Volume/OI thresholds filter for liquid contracts only

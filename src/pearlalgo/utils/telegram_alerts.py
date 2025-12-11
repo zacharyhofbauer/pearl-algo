@@ -205,28 +205,68 @@ class TelegramAlerts:
         stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
         reasoning: Optional[str] = None,
+        # Options-specific parameters
+        option_symbol: Optional[str] = None,
+        strike: Optional[float] = None,
+        expiration: Optional[str] = None,
+        option_type: Optional[str] = None,  # "call" or "put"
+        underlying_price: Optional[float] = None,
+        delta: Optional[float] = None,
+        gamma: Optional[float] = None,
+        theta: Optional[float] = None,
+        dte: Optional[int] = None,
     ) -> None:
         """
         Notify about a new trading signal with rich formatting.
+        Supports both stock/futures and options signals.
 
         Args:
-            symbol: Trading symbol
+            symbol: Trading symbol (underlying for options)
             side: "long" or "short"
-            price: Current market price
+            price: Current market price (option premium for options)
             strategy: Strategy name
             confidence: Signal confidence (0-1)
             entry_price: Entry price
             stop_loss: Stop loss price
             take_profit: Take profit price
             reasoning: LLM reasoning (optional)
+            option_symbol: Option contract symbol (e.g., "QQQ240119C00450")
+            strike: Strike price
+            expiration: Expiration date (YYYY-MM-DD)
+            option_type: "call" or "put"
+            underlying_price: Current underlying price
+            delta: Option delta (if available)
+            gamma: Option gamma (if available)
+            theta: Option theta (if available)
+            dte: Days to expiration
         """
         side_emoji = "🟢" if side.lower() == "long" else "🔴"
         side_text = side.upper()
         
-        message = f"{side_emoji} *NEW SIGNAL*\n\n"
-        message += f"*Symbol:* {symbol}\n"
-        message += f"*Direction:* {side_text}\n"
-        message += f"*Price:* ${price:,.2f}\n"
+        # Check if this is an options signal
+        is_options = option_symbol is not None or option_type is not None
+        
+        if is_options:
+            message = f"{side_emoji} *NEW OPTIONS SIGNAL*\n\n"
+            message += f"*Underlier:* {symbol}\n"
+            if option_symbol:
+                message += f"*Contract:* `{option_symbol}`\n"
+            if option_type:
+                option_emoji = "📞" if option_type.lower() == "call" else "📉"
+                message += f"*Type:* {option_emoji} {option_type.upper()}\n"
+            if strike:
+                message += f"*Strike:* ${strike:,.2f}\n"
+            if expiration:
+                message += f"*Expiration:* {expiration}\n"
+            if dte is not None:
+                message += f"*DTE:* {dte} days\n"
+            if underlying_price:
+                message += f"*Underlying Price:* ${underlying_price:,.2f}\n"
+        else:
+            message = f"{side_emoji} *NEW SIGNAL*\n\n"
+            message += f"*Symbol:* {symbol}\n"
+            message += f"*Direction:* {side_text}\n"
+        
         message += f"*Strategy:* {strategy}\n"
         
         if confidence is not None:
@@ -234,16 +274,42 @@ class TelegramAlerts:
             confidence_bar = "█" * int(confidence_pct / 10) + "░" * (10 - int(confidence_pct / 10))
             message += f"*Confidence:* {confidence_pct:.0f}% {confidence_bar}\n"
         
-        if entry_price:
-            message += f"*Entry:* ${entry_price:,.2f}\n"
-        
-        if stop_loss:
-            stop_pct = ((stop_loss - price) / price * 100) if side.lower() == "long" else ((price - stop_loss) / price * 100)
-            message += f"*Stop Loss:* ${stop_loss:,.2f} ({stop_pct:.2f}%)\n"
-        
-        if take_profit:
-            tp_pct = ((take_profit - price) / price * 100) if side.lower() == "long" else ((price - take_profit) / price * 100)
-            message += f"*Take Profit:* ${take_profit:,.2f} ({tp_pct:.2f}%)\n"
+        if is_options:
+            # For options, price is the option premium
+            if entry_price:
+                message += f"*Entry Premium:* ${entry_price:,.2f}\n"
+            elif price:
+                message += f"*Current Premium:* ${price:,.2f}\n"
+            
+            # Greeks
+            if delta is not None:
+                message += f"*Delta:* {delta:.3f}\n"
+            if gamma is not None:
+                message += f"*Gamma:* {gamma:.4f}\n"
+            if theta is not None:
+                message += f"*Theta:* ${theta:.2f}/day\n"
+            
+            # Stop/target in underlying terms for options
+            if stop_loss and underlying_price:
+                stop_pct = abs((stop_loss - underlying_price) / underlying_price * 100)
+                message += f"*Stop (Underlying):* ${stop_loss:,.2f} ({stop_pct:.2f}%)\n"
+            if take_profit and underlying_price:
+                tp_pct = abs((take_profit - underlying_price) / underlying_price * 100)
+                message += f"*Target (Underlying):* ${take_profit:,.2f} ({tp_pct:.2f}%)\n"
+        else:
+            # For stocks/futures
+            if entry_price:
+                message += f"*Entry:* ${entry_price:,.2f}\n"
+            elif price:
+                message += f"*Price:* ${price:,.2f}\n"
+            
+            if stop_loss:
+                stop_pct = ((stop_loss - price) / price * 100) if side.lower() == "long" else ((price - stop_loss) / price * 100)
+                message += f"*Stop Loss:* ${stop_loss:,.2f} ({stop_pct:.2f}%)\n"
+            
+            if take_profit:
+                tp_pct = ((take_profit - price) / price * 100) if side.lower() == "long" else ((price - take_profit) / price * 100)
+                message += f"*Take Profit:* ${take_profit:,.2f} ({tp_pct:.2f}%)\n"
         
         if reasoning:
             # Truncate reasoning if too long

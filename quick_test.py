@@ -13,8 +13,10 @@ def test_imports():
     """Test that all modules can be imported."""
     print("1️⃣  Testing imports...")
     try:
-        from pearlalgo.futures.signal_tracker import SignalTracker, TrackedSignal, SignalLifecycleState
-        from pearlalgo.futures.exit_signals import ExitSignalGenerator
+        # Futures modules removed - will use options signal tracker
+        # from pearlalgo.futures.signal_tracker import SignalTracker, TrackedSignal, SignalLifecycleState
+        # from pearlalgo.futures.exit_signals import ExitSignalGenerator
+        from pearlalgo.options.signal_tracker import OptionsSignalTracker, TrackedOptionsSignal
         from pearlalgo.agents.langgraph_state import TradingState, MarketData
         print("   ✅ All imports successful")
         return True
@@ -33,15 +35,21 @@ def test_signal_persistence():
         test_path.parent.mkdir(exist_ok=True)
         
         # Create tracker and add signal
-        tracker1 = SignalTracker(persistence_path=test_path)
-        success = tracker1.add_signal(
-            symbol="ES",
+        # Updated for options - using options signal tracker
+        from datetime import timedelta
+        tracker1 = OptionsSignalTracker(persistence_path=test_path)
+        expiration = datetime.now(timezone.utc) + timedelta(days=7)
+        signal = tracker1.add_signal(
+            underlying_symbol="QQQ",
+            option_symbol="QQQ240119C00400",
+            strike=400.0,
+            expiration=expiration,
+            option_type="call",
             direction="long",
-            entry_price=4500.0,
-            size=1,
-            stop_loss=4490.0,
-            take_profit=4520.0,
+            entry_premium=2.55,
+            quantity=1,
         )
+        success = signal is not None
         
         if not success:
             print("   ❌ Failed to add signal")

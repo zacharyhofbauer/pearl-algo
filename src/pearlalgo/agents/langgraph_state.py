@@ -12,7 +12,8 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from pearlalgo.core.portfolio import Portfolio
-from pearlalgo.futures.risk import RiskState as FuturesRiskState
+# Futures risk state removed - will be replaced with options-specific risk state
+# TODO: Create OptionsRiskState
 
 
 class MarketData(BaseModel):
@@ -152,8 +153,8 @@ class TradingState(BaseModel):
     # Signals (by symbol)
     signals: Dict[str, Signal] = Field(default_factory=dict)
 
-    # Risk state
-    risk_state: Optional[FuturesRiskState] = None
+    # Risk state - TODO: Replace with OptionsRiskState
+    risk_state: Optional[object] = None
 
     # Portfolio state
     portfolio: Optional[Portfolio] = None

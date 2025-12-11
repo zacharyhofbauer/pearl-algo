@@ -20,7 +20,7 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 from pearlalgo.agents.langgraph_state import Signal, TradingState
-from pearlalgo.futures.signal_deduplicator import SignalDeduplicator
+# Signal deduplication will be implemented for options
 
 
 class SignalRouter:
@@ -28,44 +28,23 @@ class SignalRouter:
     Routes signals to appropriate handlers based on asset type.
 
     Handles:
-    - Futures signals → Futures execution engine
     - Options signals → Options execution engine
-    - Unified deduplication
+    - Signal deduplication
     """
-
-    # Futures symbols (common)
-    FUTURES_SYMBOLS = ["ES", "NQ", "MES", "MNQ", "CL", "GC", "ZN", "ZB"]
 
     def __init__(
         self,
-        deduplicator: Optional[SignalDeduplicator] = None,
-        futures_symbols: Optional[List[str]] = None,
+        deduplicator: Optional[object] = None,  # Will be replaced with options-specific deduplicator
     ):
         """
         Initialize signal router.
 
         Args:
-            deduplicator: SignalDeduplicator instance (optional)
-            futures_symbols: List of futures symbols (default: common futures)
+            deduplicator: Signal deduplicator instance (optional, will be options-specific)
         """
-        self.deduplicator = deduplicator or SignalDeduplicator()
-        self.futures_symbols = futures_symbols or self.FUTURES_SYMBOLS
+        self.deduplicator = deduplicator
 
         logger.info("SignalRouter initialized")
-
-    def is_futures(self, symbol: str) -> bool:
-        """
-        Check if symbol is a futures contract.
-
-        Args:
-            symbol: Trading symbol
-
-        Returns:
-            True if futures, False if options/equity
-        """
-        # Simple check: futures symbols are typically short (2-4 chars)
-        # and match known futures list
-        return symbol in self.futures_symbols or len(symbol) <= 4
 
     def is_options(self, symbol: str) -> bool:
         """
@@ -95,9 +74,7 @@ class SignalRouter:
         Returns:
             Handler type: "futures" or "options"
         """
-        if self.is_futures(signal.symbol):
-            return "futures"
-        elif self.is_options(signal.symbol):
+        if self.is_options(signal.symbol):
             return "options"
         else:
             # Default: assume equity/options

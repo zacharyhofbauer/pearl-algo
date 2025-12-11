@@ -45,6 +45,9 @@ class HealthChecker:
         telegram_alerts=None,
         signal_tracker=None,
         exit_signal_generator=None,
+        options_intraday_scanner=None,
+        options_swing_scanner=None,
+        options_signal_tracker=None,
     ):
         """
         Initialize health checker.
@@ -53,14 +56,20 @@ class HealthChecker:
             worker_pool: WorkerPool instance (optional)
             data_feed_manager: DataFeedManager instance (optional)
             telegram_alerts: TelegramAlerts instance (optional)
-            signal_tracker: SignalTracker instance (optional)
-            exit_signal_generator: ExitSignalGenerator instance (optional)
+            signal_tracker: SignalTracker instance (optional, legacy)
+            exit_signal_generator: ExitSignalGenerator instance (optional, legacy)
+            options_intraday_scanner: OptionsIntradayScanner instance (optional)
+            options_swing_scanner: OptionsSwingScanner instance (optional)
+            options_signal_tracker: OptionsSignalTracker instance (optional)
         """
         self.worker_pool = worker_pool
         self.data_feed_manager = data_feed_manager
         self.telegram_alerts = telegram_alerts
         self.signal_tracker = signal_tracker
         self.exit_signal_generator = exit_signal_generator
+        self.options_intraday_scanner = options_intraday_scanner
+        self.options_swing_scanner = options_swing_scanner
+        self.options_signal_tracker = options_signal_tracker
 
         logger.info("HealthChecker initialized")
 
@@ -320,8 +329,153 @@ class HealthChecker:
             checks["components"]["exit_signal_generator"] = exit_generator_health
             if exit_generator_health.get("status") not in ["healthy", "unknown"]:
                 checks["overall_status"] = "degraded"
+        
+        # Check options scanners
+        if self.options_intraday_scanner:
+            intraday_scanner_health = await self.check_options_intraday_scanner()
+            checks["components"]["options_intraday_scanner"] = intraday_scanner_health
+            if intraday_scanner_health.get("status") not in ["healthy", "unknown"]:
+                checks["overall_status"] = "degraded"
+        
+        if self.options_swing_scanner:
+            swing_scanner_health = await self.check_options_swing_scanner()
+            checks["components"]["options_swing_scanner"] = swing_scanner_health
+            if swing_scanner_health.get("status") not in ["healthy", "unknown"]:
+                checks["overall_status"] = "degraded"
+        
+        # Check options signal tracker
+        if self.options_signal_tracker:
+            options_tracker_health = await self.check_options_signal_tracker()
+            checks["components"]["options_signal_tracker"] = options_tracker_health
+            if options_tracker_health.get("status") not in ["healthy", "unknown"]:
+                checks["overall_status"] = "degraded"
 
         return checks
+    
+    async def check_options_intraday_scanner(self) -> Dict:
+        """Check options intraday scanner health."""
+        if not self.options_intraday_scanner:
+            return {"status": "unknown", "message": "Options intraday scanner not configured"}
+        
+        try:
+            # Check if scanner has data provider
+            has_data_provider = self.options_intraday_scanner.data_provider is not None
+            
+            # Check if scanner has buffer manager
+            has_buffer = self.options_intraday_scanner.buffer_manager is not None
+            
+            # Get symbols being scanned
+            symbols = getattr(self.options_intraday_scanner, 'symbols', [])
+            
+            # Check buffer status for symbols
+            buffer_status = {}
+            if has_buffer:
+                for symbol in symbols:
+                    if self.options_intraday_scanner.buffer_manager.has_buffer(symbol):
+                        buffer_size = len(self.options_intraday_scanner.buffer_manager.get_buffer(symbol))
+                        buffer_status[symbol] = buffer_size
+            
+            is_healthy = has_data_provider
+            
+            return {
+                "status": "healthy" if is_healthy else "unhealthy",
+                "has_data_provider": has_data_provider,
+                "has_buffer_manager": has_buffer,
+                "symbols": symbols,
+                "buffer_status": buffer_status,
+                "strategy": getattr(self.options_intraday_scanner, 'strategy', 'unknown'),
+            }
+        except Exception as e:
+            logger.error(f"Error checking options intraday scanner health: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+            }
+    
+    async def check_options_swing_scanner(self) -> Dict:
+        """Check options swing scanner health."""
+        if not self.options_swing_scanner:
+            return {"status": "unknown", "message": "Options swing scanner not configured"}
+        
+        try:
+            # Check if scanner has data provider
+            has_data_provider = self.options_swing_scanner.data_provider is not None
+            
+            # Check if scanner has buffer manager
+            has_buffer = self.options_swing_scanner.buffer_manager is not None
+            
+            # Get universe size
+            universe_size = 0
+            if hasattr(self.options_swing_scanner, 'universe'):
+                universe_size = self.options_swing_scanner.universe.get_universe_size()
+            
+            is_healthy = has_data_provider
+            
+            return {
+                "status": "healthy" if is_healthy else "unhealthy",
+                "has_data_provider": has_data_provider,
+                "has_buffer_manager": has_buffer,
+                "universe_size": universe_size,
+                "strategy": getattr(self.options_swing_scanner, 'strategy_name', 'unknown'),
+            }
+        except Exception as e:
+            logger.error(f"Error checking options swing scanner health: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+            }
+    
+    async def check_options_signal_tracker(self) -> Dict:
+        """Check options signal tracker health."""
+        if not self.options_signal_tracker:
+            return {"status": "unknown", "message": "Options signal tracker not configured"}
+        
+        try:
+            stats = self.options_signal_tracker.get_statistics()
+            
+            # Check for issues
+            is_healthy = True
+            issues = []
+            
+            # Check persistence file
+            persistence_file_healthy = True
+            persistence_file_size = 0
+            if hasattr(self.options_signal_tracker, 'persistence_path'):
+                persistence_path = self.options_signal_tracker.persistence_path
+                if persistence_path.exists():
+                    persistence_file_size = persistence_path.stat().st_size
+                    # Check if file is too large (potential issue)
+                    if persistence_file_size > 10 * 1024 * 1024:  # 10MB
+                        persistence_file_healthy = False
+                        issues.append(f"Persistence file too large: {persistence_file_size / 1024 / 1024:.1f}MB")
+                else:
+                    # File doesn't exist yet is OK (no signals yet)
+                    pass
+            
+            # Check for expired options that haven't been cleaned up
+            expired_count = len(self.options_signal_tracker.get_expired_signals())
+            if expired_count > 10:
+                issues.append(f"Many expired options not cleaned up: {expired_count}")
+            
+            return {
+                "status": "healthy" if (is_healthy and persistence_file_healthy) else "unhealthy",
+                "total_signals": stats.get("total_signals", 0),
+                "active_signals": stats.get("active_signals", 0),
+                "expired_signals": stats.get("expired_signals", 0),
+                "total_unrealized_pnl": stats.get("total_unrealized_pnl", 0.0),
+                "active_unrealized_pnl": stats.get("active_unrealized_pnl", 0.0),
+                "persistence": {
+                    "file_size_bytes": persistence_file_size,
+                    "file_healthy": persistence_file_healthy,
+                },
+                "issues": issues,
+            }
+        except Exception as e:
+            logger.error(f"Error checking options signal tracker health: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+            }
 
 
 async def health_handler(request) -> Response:

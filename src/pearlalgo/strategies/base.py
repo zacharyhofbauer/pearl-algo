@@ -85,7 +85,8 @@ def create_strategy_signal(
 
     # Fall back to signals.generate_signal for built-in strategies (ma_cross, sr, breakout, etc.)
     # Import here to avoid circular import
-    from pearlalgo.futures.signals import generate_signal as _generate_signal
+    # Futures signal generation removed - will be replaced with options-specific signal generation
+    # TODO: Implement options signal generation
 
     return _generate_signal(symbol, df, strategy_name=name, **params)
 

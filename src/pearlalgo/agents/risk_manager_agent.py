@@ -34,10 +34,9 @@ from pearlalgo.agents.langgraph_state import (
     TradingState,
     add_agent_reasoning,
 )
-from pearlalgo.futures.risk import RiskState
+# Futures risk modules removed - will be replaced with options-specific risk management
 from pearlalgo.core.portfolio import Portfolio
-from pearlalgo.futures.config import PropProfile, load_profile
-from pearlalgo.futures.risk import compute_position_size, compute_risk_state
+# TODO: Create options-specific risk state and position sizing
 from pearlalgo.utils.telegram_alerts import TelegramAlerts
 from pearlalgo.risk.options_risk import OptionsRiskCalculator
 from pearlalgo.core.signal_router import SignalRouter
@@ -184,11 +183,12 @@ class RiskManagerAgent:
         if current_equity > self.peak_equity:
             self.peak_equity = current_equity
 
-        # Compute risk state using existing function
-        risk_state = compute_risk_state(
-            self.profile,
-            day_start_equity=self.day_start_equity,
-            realized_pnl=realized_pnl,
+        # Compute risk state - TODO: Replace with options-specific risk state
+        risk_state = None  # TODO: Implement options risk state computation
+        # risk_state = compute_risk_state(
+        #     self.profile,
+        #     day_start_equity=self.day_start_equity,
+        #     realized_pnl=realized_pnl,
             unrealized_pnl=unrealized_pnl,
             trades_today=self.trades_today,
             max_trades=self.profile.max_trades,
@@ -366,10 +366,10 @@ class RiskManagerAgent:
         symbol: str,
         signal: Signal,
         price: float,
-        risk_state: RiskState,
+        risk_state: Optional[object],  # TODO: Replace with OptionsRiskState
         current_equity: float,
         market_data_history: Optional[Dict[str, MarketData]] = None,
-        is_futures: bool = True,
+        is_options: bool = True,  # Changed from is_futures
         is_options: bool = False,
         max_risk: float = None,
     ) -> int:
@@ -379,10 +379,11 @@ class RiskManagerAgent:
         Uses ATR or realized volatility for volatility-targeted position sizing.
         Falls back to fixed risk percentage if volatility data unavailable.
         """
-        # Use existing function as base
-        base_size = compute_position_size(
-            symbol, signal.side, self.profile, risk_state, price=price
-        )
+        # Position sizing - TODO: Replace with options-specific position sizing
+        base_size = 1  # Placeholder - will be replaced with options position sizing
+        # base_size = compute_position_size(
+        #     symbol, signal.side, self.profile, risk_state, price=price
+        # )
 
         # Calculate volatility-targeted size if market data available
         volatility_size = None

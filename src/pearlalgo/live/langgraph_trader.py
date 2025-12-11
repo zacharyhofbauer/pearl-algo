@@ -32,7 +32,8 @@ except ImportError:
 
 from pearlalgo.agents.langgraph_workflow import TradingWorkflow
 from pearlalgo.core.portfolio import Portfolio
-from pearlalgo.futures.config import load_profile
+# Futures config removed - will use options-specific config
+# TODO: Create options-specific config loader
 
 logger = logging.getLogger(__name__)
 

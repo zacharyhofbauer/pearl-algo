@@ -136,9 +136,7 @@ class MassiveDataProvider(DataProvider):
             expected_exception=Exception,
         )
         
-        # Contract cache for futures
-        self._contract_cache: Dict[str, tuple[str, datetime]] = {}  # symbol -> (contract_code, expiration)
-        self._contract_cache_ttl = timedelta(hours=4)
+        # Contract cache removed - no longer needed for futures
 
     async def _rate_limit(self) -> None:
         """Enforce rate limiting using token bucket."""
@@ -151,85 +149,8 @@ class MassiveDataProvider(DataProvider):
 
     async def close(self) -> None:
         """Close client connections."""
-        # RESTClient doesn't have explicit close, but we can clear cache
-        self._contract_cache.clear()
-
-    async def _resolve_contract(self, symbol: str) -> str:
-        """
-        Resolve base symbol (ES, NQ) to active contract (ESU5, NQU5).
-        
-        Args:
-            symbol: Base futures symbol (e.g., 'ES', 'NQ')
-            
-        Returns:
-            Active contract code (e.g., 'ESU5', 'NQU5')
-        """
-        # Check cache first
-        if symbol in self._contract_cache:
-            contract_code, expiration = self._contract_cache[symbol]
-            if datetime.now(timezone.utc) < expiration:
-                return contract_code
-        
-        # Query Massive API for active contracts
-        try:
-            await self._rate_limit()
-            
-            # Use list_futures_contracts method (returns iterator, sync call)
-            # GET /futures/vX/contracts?product_code=ES&active=true
-            contracts = []
-            try:
-                # Run sync call in executor to avoid blocking
-                loop = asyncio.get_event_loop()
-                contract_iter = await loop.run_in_executor(
-                    None,
-                    lambda: self.client.list_futures_contracts(
-                        product_code=symbol,
-                        active="true",  # String "true" not boolean
-                        limit=100,
-                        sort="expiration_date"
-                    )
-                )
-                # Iterate over results
-                for contract in contract_iter:
-                    contracts.append(contract)
-                    # Only need first few, break after getting some
-                    if len(contracts) >= 10:
-                        break
-            except Exception as e:
-                logger.warning(f"Error iterating contracts for {symbol}: {e}")
-            
-            if contracts:
-                # Find contract with nearest expiration (first one since sorted)
-                active_contract = contracts[0]
-                # Contract object has attributes, not dict keys
-                contract_code = getattr(active_contract, 'ticker', symbol)
-                expiration_str = getattr(active_contract, 'expiration_date', None)
-                
-                # Parse expiration and cache
-                if expiration_str:
-                    try:
-                        if isinstance(expiration_str, str):
-                            expiration_date = datetime.fromisoformat(expiration_str.replace("Z", "+00:00"))
-                        else:
-                            expiration_date = expiration_str
-                        # Cache until 4 hours before expiration
-                        cache_expiration = expiration_date - timedelta(hours=4)
-                        self._contract_cache[symbol] = (contract_code, cache_expiration)
-                        logger.debug(f"Resolved {symbol} to contract {contract_code}")
-                        return contract_code
-                    except Exception as e:
-                        logger.warning(f"Could not parse expiration for {contract_code}: {e}")
-                        return contract_code
-                else:
-                    return contract_code
-            
-            # Fallback: return symbol as-is if contract discovery fails
-            logger.warning(f"Could not resolve contract for {symbol}, using symbol as-is")
-            return symbol
-            
-        except Exception as e:
-            logger.warning(f"Error resolving contract for {symbol}: {e}, using symbol as-is")
-            return symbol
+        # RESTClient doesn't have explicit close
+        pass
 
     def fetch_historical(
         self,
@@ -287,15 +208,12 @@ class MassiveDataProvider(DataProvider):
         
         resolution = resolution_map.get(timeframe.lower() if timeframe else "1d", "1day")
 
-        # For futures, resolve to active contract
-        if symbol in ["ES", "NQ", "MES", "MNQ", "YM", "RTY"]:
-            symbol = await self._resolve_contract(symbol)
+        # Futures contract resolution removed - system now focuses on stocks/options
 
         all_results = []
         
-        # Massive API uses futures/vX/aggs/{ticker} for futures
-        # For stocks, use v2/aggs/ticker/{ticker}/range
-        is_futures = any(symbol.startswith(prefix) for prefix in ["ES", "NQ", "MES", "MNQ", "YM", "RTY"])
+        # System now focuses on stocks/options only
+        # Use stocks endpoint for all symbols
         
         # Chunk requests for large date ranges
         chunk_days = 30
@@ -310,106 +228,61 @@ class MassiveDataProvider(DataProvider):
             try:
                 await self._rate_limit()
                 
-                if is_futures:
-                    # Use list_futures_aggregates (returns iterator, sync call)
-                    bars = []
-                    try:
-                        # Run sync call in executor
-                        loop = asyncio.get_event_loop()
-                        bars_iter = await loop.run_in_executor(
-                            None,
-                            lambda: self.client.list_futures_aggregates(
-                                ticker=symbol,
-                                resolution=resolution,
-                                window_start=current_start.isoformat(),
-                                limit=50000
-                            )
+                # Use list_aggs for stocks/options (returns iterator, sync call)
+                bars = []
+                try:
+                    # Convert resolution to multiplier and timespan
+                    resolution_parts = resolution.replace("min", "").replace("s", "").replace("hour", "h")
+                    if "min" in resolution:
+                        multiplier = int(resolution_parts.replace("min", ""))
+                        timespan = "minute"
+                    elif "hour" in resolution or "h" in resolution:
+                        multiplier = int(resolution_parts.replace("h", "").replace("hour", ""))
+                        timespan = "hour"
+                    else:
+                        multiplier = 1
+                        timespan = "day"
+                    
+                    # Run sync call in executor
+                    loop = asyncio.get_event_loop()
+                    bars_iter = await loop.run_in_executor(
+                        None,
+                        lambda: self.client.list_aggs(
+                            ticker=symbol,
+                            multiplier=multiplier,
+                            timespan=timespan,
+                            from_=current_start.strftime("%Y-%m-%d"),
+                            to=chunk_end.strftime("%Y-%m-%d"),
+                            limit=50000
                         )
-                        for bar in bars_iter:
-                            bars.append(bar)
-                            # Limit to reasonable size
-                            if len(bars) >= 50000:
-                                break
-                        
-                        if bars:
-                            chunk_count = len(bars)
-                            logger.debug(
-                                f"Retrieved {chunk_count} bars for {symbol} "
-                                f"({current_start.date()} to {chunk_end.date()})"
-                            )
-                            for bar in bars:
-                                # Bar is an object with attributes
-                                timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
-                                all_results.append(
-                                    {
-                                        "timestamp": datetime.fromtimestamp(
-                                            timestamp_ms / 1000, tz=timezone.utc
-                                        ),
-                                        "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
-                                        "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
-                                        "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
-                                        "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
-                                        "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
-                                    }
-                                )
-                    except Exception as e:
-                        logger.warning(f"Error fetching futures aggregates for {symbol}: {e}")
-                else:
-                    # Use list_aggs for stocks (returns iterator, sync call)
-                    bars = []
-                    try:
-                        # Convert resolution to multiplier and timespan
-                        resolution_parts = resolution.replace("min", "").replace("s", "").replace("hour", "h")
-                        if "min" in resolution:
-                            multiplier = int(resolution_parts.replace("min", ""))
-                            timespan = "minute"
-                        elif "hour" in resolution or "h" in resolution:
-                            multiplier = int(resolution_parts.replace("h", "").replace("hour", ""))
-                            timespan = "hour"
-                        else:
-                            multiplier = 1
-                            timespan = "day"
-                        
-                        # Run sync call in executor
-                        loop = asyncio.get_event_loop()
-                        bars_iter = await loop.run_in_executor(
-                            None,
-                            lambda: self.client.list_aggs(
-                                ticker=symbol,
-                                multiplier=multiplier,
-                                timespan=timespan,
-                                from_=current_start.strftime("%Y-%m-%d"),
-                                to=chunk_end.strftime("%Y-%m-%d"),
-                                limit=50000
-                            )
+                    )
+                    for bar in bars_iter:
+                        bars.append(bar)
+                        if len(bars) >= 50000:
+                            break
+                    
+                    if bars:
+                        chunk_count = len(bars)
+                        logger.debug(
+                            f"Retrieved {chunk_count} bars for {symbol} "
+                            f"({current_start.date()} to {chunk_end.date()})"
                         )
-                        for bar in bars_iter:
-                            bars.append(bar)
-                            if len(bars) >= 50000:
-                                break
-                        
-                        if bars:
-                            chunk_count = len(bars)
-                            logger.debug(
-                                f"Retrieved {chunk_count} bars for {symbol} "
-                                f"({current_start.date()} to {chunk_end.date()})"
+                        for bar in bars:
+                            timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
+                            all_results.append(
+                                {
+                                    "timestamp": datetime.fromtimestamp(
+                                        timestamp_ms / 1000, tz=timezone.utc
+                                    ),
+                                    "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
+                                    "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
+                                    "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
+                                    "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
+                                    "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
+                                }
                             )
-                            for bar in bars:
-                                timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
-                                all_results.append(
-                                    {
-                                        "timestamp": datetime.fromtimestamp(
-                                            timestamp_ms / 1000, tz=timezone.utc
-                                        ),
-                                        "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
-                                        "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
-                                        "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
-                                        "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
-                                        "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
-                                    }
-                                )
-                    except Exception as e:
-                        logger.warning(f"Error fetching stock aggregates for {symbol}: {e}")
+                except Exception as e:
+                    logger.warning(f"Error fetching stock aggregates for {symbol}: {e}")
                 
             except Exception as e:
                 logger.error(
@@ -429,8 +302,7 @@ class MassiveDataProvider(DataProvider):
         if not all_results:
             logger.warning(
                 f"No data retrieved for {symbol} in date range. "
-                f"⚠️  Massive.com FREE TIER may not include futures data. "
-                f"Futures data requires a paid subscription."
+                f"Please check your API key and symbol validity."
             )
             return pd.DataFrame()
 
@@ -471,68 +343,17 @@ class MassiveDataProvider(DataProvider):
     async def _get_latest_bar_impl(self, symbol: str) -> Optional[Dict]:
         """Internal implementation of get_latest_bar."""
         try:
-            # For futures, resolve to active contract
+            # #region agent log
+            import json
+            with open('/home/pearlalgo/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"massive_provider.py:545","message":"get_latest_bar entry","data":{"original_symbol":symbol},"timestamp":int(__import__('time').time()*1000)}) + '\n')
+            # #endregion
+            # Futures contract resolution removed - system now focuses on stocks/options
             original_symbol = symbol
-            if symbol in ["ES", "NQ", "MES", "MNQ", "YM", "RTY"]:
-                symbol = await self._resolve_contract(symbol)
 
             await self._rate_limit()
             
-            # Use appropriate endpoint based on symbol type
-            is_futures = any(symbol.startswith(prefix) for prefix in ["ES", "NQ", "MES", "MNQ", "YM", "RTY"])
-            
-            if is_futures:
-                # Get latest futures aggregates (returns iterator, sync call)
-                bars = []
-                try:
-                    # Run sync call in executor
-                    loop = asyncio.get_event_loop()
-                    bars_iter = await loop.run_in_executor(
-                        None,
-                        lambda: self.client.list_futures_aggregates(
-                            ticker=symbol,
-                            resolution="1min",
-                            limit=1
-                        )
-                    )
-                    for bar in bars_iter:
-                        bars.append(bar)
-                        break  # Only need one
-                    
-                    if bars:
-                        bar = bars[0]
-                        price = getattr(bar, 'close', 0) or getattr(bar, 'c', 0)
-                        
-                        # Validate price for futures
-                        if original_symbol in ["ES", "MES"] and not (3000 <= price <= 7000):
-                            logger.warning(
-                                f"Massive returned invalid price ${price:.2f} for {original_symbol} "
-                                f"(expected $3000-7000). Rejecting - likely free tier limitation."
-                            )
-                            return None
-                        elif original_symbol in ["NQ", "MNQ"] and not (10000 <= price <= 25000):
-                            logger.warning(
-                                f"Massive returned invalid price ${price:.2f} for {original_symbol} "
-                                f"(expected $10000-25000). Rejecting - likely free tier limitation."
-                            )
-                            return None
-                        
-                        timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
-                        return {
-                            "timestamp": datetime.fromtimestamp(
-                                timestamp_ms / 1000, tz=timezone.utc
-                            ),
-                            "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
-                            "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
-                            "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
-                            "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
-                            "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
-                            "vwap": getattr(bar, 'vwap', None) or getattr(bar, 'vw', None),
-                        }
-                except Exception as e:
-                    logger.warning(f"Error fetching latest futures bar for {symbol}: {e}")
-            else:
-                # Get latest stock aggregates using get_previous_close_agg or list_aggs
+            # Get latest stock aggregates using get_previous_close_agg or list_aggs
                 try:
                     # Try get_previous_close_agg first (simpler for latest, sync call)
                     loop = asyncio.get_event_loop()
@@ -596,14 +417,28 @@ class MassiveDataProvider(DataProvider):
             raise
 
     async def get_options_chain(
-        self, underlying_symbol: str, expiration_date: Optional[str] = None
+        self, 
+        underlying_symbol: str, 
+        expiration_date: Optional[str] = None,
+        min_dte: Optional[int] = None,
+        max_dte: Optional[int] = None,
+        strike_proximity_pct: Optional[float] = None,
+        min_volume: Optional[int] = None,
+        min_open_interest: Optional[int] = None,
+        underlying_price: Optional[float] = None,
     ) -> List[Dict]:
         """
-        Get options chain for an underlying symbol.
+        Get options chain for an underlying symbol with filtering.
 
         Args:
             underlying_symbol: Underlying ticker (e.g., 'AAPL', 'QQQ')
             expiration_date: Expiration date in YYYY-MM-DD format (optional)
+            min_dte: Minimum days to expiration (optional)
+            max_dte: Maximum days to expiration (optional)
+            strike_proximity_pct: Filter strikes within X% of current price (optional, e.g., 0.10 for 10%)
+            min_volume: Minimum volume threshold (optional)
+            min_open_interest: Minimum open interest threshold (optional)
+            underlying_price: Current underlying price for strike proximity filtering (optional)
 
         Returns:
             List of option contracts with strike, expiration, type (call/put)
@@ -620,6 +455,11 @@ class MassiveDataProvider(DataProvider):
                     None,
                     lambda: self.client.list_snapshot_options_chain(underlying_asset=underlying_symbol)
                 )
+                
+                # Get current date for DTE calculation
+                from datetime import date
+                today = date.today()
+                
                 for option in options_iter:
                     # Option is an object with attributes
                     details = getattr(option, 'details', None) or option
@@ -627,22 +467,86 @@ class MassiveDataProvider(DataProvider):
                     last_trade = getattr(option, 'last_trade', None) or {}
                     session = getattr(option, 'session', None) or {}
                     
-                    options.append(
-                        {
-                            "symbol": getattr(details, 'ticker', None) if hasattr(details, 'ticker') else getattr(option, 'ticker', None),
-                            "strike": getattr(details, 'strike_price', None) if hasattr(details, 'strike_price') else getattr(option, 'strike_price', None),
-                            "expiration": getattr(details, 'expiration_date', None) if hasattr(details, 'expiration_date') else getattr(option, 'expiration_date', None),
-                            "option_type": getattr(details, 'contract_type', None) if hasattr(details, 'contract_type') else getattr(option, 'contract_type', None),
-                            "bid": getattr(last_quote, 'bid', None) if hasattr(last_quote, 'bid') else None,
-                            "ask": getattr(last_quote, 'ask', None) if hasattr(last_quote, 'ask') else None,
-                            "last_price": getattr(last_trade, 'price', None) if hasattr(last_trade, 'price') else None,
-                            "volume": getattr(session, 'volume', None) if hasattr(session, 'volume') else None,
-                            "open_interest": getattr(session, 'open_interest', None) if hasattr(session, 'open_interest') else None,
-                        }
-                    )
+                    # Extract option data
+                    strike = getattr(details, 'strike_price', None) if hasattr(details, 'strike_price') else getattr(option, 'strike_price', None)
+                    expiration_str = getattr(details, 'expiration_date', None) if hasattr(details, 'expiration_date') else getattr(option, 'expiration_date', None)
+                    volume = getattr(session, 'volume', None) if hasattr(session, 'volume', None) else None
+                    open_interest = getattr(session, 'open_interest', None) if hasattr(session, 'open_interest', None) else None
+                    
+                    # Filter by volume
+                    if min_volume is not None and (volume is None or volume < min_volume):
+                        continue
+                    
+                    # Filter by open interest
+                    if min_open_interest is not None and (open_interest is None or open_interest < min_open_interest):
+                        continue
+                    
+                    # Filter by expiration date
+                    if expiration_str:
+                        try:
+                            if isinstance(expiration_str, str):
+                                exp_date = datetime.fromisoformat(expiration_str.replace("Z", "+00:00")).date()
+                            else:
+                                exp_date = expiration_str.date() if hasattr(expiration_str, 'date') else expiration_str
+                            
+                            dte = (exp_date - today).days
+                            
+                            # Filter by DTE range
+                            if min_dte is not None and dte < min_dte:
+                                continue
+                            if max_dte is not None and dte > max_dte:
+                                continue
+                            
+                            # Filter by expiration date if specified
+                            if expiration_date:
+                                exp_date_str = exp_date.strftime("%Y-%m-%d")
+                                if exp_date_str != expiration_date:
+                                    continue
+                        except Exception as e:
+                            logger.debug(f"Error parsing expiration date {expiration_str}: {e}")
+                            continue
+                    
+                    # Filter by strike proximity
+                    if strike_proximity_pct is not None and underlying_price is not None and strike is not None:
+                        strike_diff_pct = abs(strike - underlying_price) / underlying_price
+                        if strike_diff_pct > strike_proximity_pct:
+                            continue
+                    
+                    option_dict = {
+                        "symbol": getattr(details, 'ticker', None) if hasattr(details, 'ticker') else getattr(option, 'ticker', None),
+                        "strike": strike,
+                        "expiration": expiration_str,
+                        "option_type": getattr(details, 'contract_type', None) if hasattr(details, 'contract_type') else getattr(option, 'contract_type', None),
+                        "bid": getattr(last_quote, 'bid', None) if hasattr(last_quote, 'bid') else None,
+                        "ask": getattr(last_quote, 'ask', None) if hasattr(last_quote, 'ask') else None,
+                        "last_price": getattr(last_trade, 'price', None) if hasattr(last_trade, 'price', None) else None,
+                        "volume": volume,
+                        "open_interest": open_interest,
+                    }
+                    
+                    # Add DTE if we calculated it
+                    if expiration_str:
+                        try:
+                            if isinstance(expiration_str, str):
+                                exp_date = datetime.fromisoformat(expiration_str.replace("Z", "+00:00")).date()
+                            else:
+                                exp_date = expiration_str.date() if hasattr(expiration_str, 'date') else expiration_str
+                            dte = (exp_date - today).days
+                            option_dict["dte"] = dte
+                        except:
+                            pass
+                    
+                    options.append(option_dict)
+                    
                     # Limit results
                     if len(options) >= 1000:
                         break
+                
+                logger.debug(
+                    f"Retrieved {len(options)} options for {underlying_symbol} "
+                    f"(filters: min_dte={min_dte}, max_dte={max_dte}, "
+                    f"min_volume={min_volume}, min_oi={min_open_interest})"
+                )
                 
                 return options
             except Exception as e:
@@ -656,6 +560,50 @@ class MassiveDataProvider(DataProvider):
             )
 
         return []
+    
+    async def get_options_chain_filtered(
+        self,
+        underlying_symbol: str,
+        mode: str = "intraday",  # "intraday" or "swing"
+        underlying_price: Optional[float] = None,
+    ) -> List[Dict]:
+        """
+        Get filtered options chain based on trading mode.
+        
+        Args:
+            underlying_symbol: Underlying ticker
+            mode: "intraday" (0-7 DTE) or "swing" (7-45 DTE)
+            underlying_price: Current underlying price for strike filtering
+            
+        Returns:
+            Filtered list of option contracts
+        """
+        if mode == "intraday":
+            return await self.get_options_chain(
+                underlying_symbol=underlying_symbol,
+                min_dte=0,
+                max_dte=7,
+                strike_proximity_pct=0.10,  # Within 10% of current price
+                min_volume=100,
+                min_open_interest=500,
+                underlying_price=underlying_price,
+            )
+        elif mode == "swing":
+            return await self.get_options_chain(
+                underlying_symbol=underlying_symbol,
+                min_dte=7,
+                max_dte=45,
+                strike_proximity_pct=0.15,  # Within 15% of current price
+                min_volume=50,
+                min_open_interest=200,
+                underlying_price=underlying_price,
+            )
+        else:
+            logger.warning(f"Unknown mode: {mode}, using default filtering")
+            return await self.get_options_chain(
+                underlying_symbol=underlying_symbol,
+                underlying_price=underlying_price,
+            )
 
     async def get_real_time_quote(self, symbol: str) -> Optional[Dict]:
         """

@@ -30,6 +30,7 @@ class OptionsSignalGenerator:
         universe: EquityUniverse,
         strategy: OptionsStrategy,
         data_provider=None,  # MassiveDataProvider
+        buffer_manager=None,  # BufferManager for historical data
     ):
         """
         Initialize signal generator.
@@ -38,10 +39,12 @@ class OptionsSignalGenerator:
             universe: EquityUniverse instance
             strategy: OptionsStrategy instance
             data_provider: Data provider for fetching options chains
+            buffer_manager: BufferManager for historical price data (optional)
         """
         self.universe = universe
         self.strategy = strategy
         self.data_provider = data_provider
+        self.buffer_manager = buffer_manager
         
         logger.info(
             f"OptionsSignalGenerator initialized: "
@@ -92,15 +95,32 @@ class OptionsSignalGenerator:
             if not options_chain:
                 return None
             
-            # Get underlying price
-            latest_bar = await self.data_provider.get_latest_bar(symbol)
-            if not latest_bar:
+            # Underlying price already fetched above
+            if not latest_bar or underlying_price <= 0:
                 return None
             
-            underlying_price = latest_bar.get("close", 0)
+            # Get historical data for multi-day pattern detection
+            historical_data = None
+            if self.buffer_manager and self.buffer_manager.has_buffer(symbol):
+                buffer = self.buffer_manager.get_buffer(symbol)
+                # Convert buffer to list of dicts for strategy
+                historical_data = [
+                    {
+                        "timestamp": bar.get("timestamp"),
+                        "open": bar.get("open", 0),
+                        "high": bar.get("high", 0),
+                        "low": bar.get("low", 0),
+                        "close": bar.get("close", 0),
+                        "volume": bar.get("volume", 0),
+                    }
+                    for bar in buffer
+                ]
             
-            # Analyze with strategy
-            signal = self.strategy.analyze(options_chain, underlying_price)
+            # Analyze with strategy (pass historical data if strategy supports it)
+            if hasattr(self.strategy, 'analyze') and 'historical_data' in self.strategy.analyze.__code__.co_varnames:
+                signal = self.strategy.analyze(options_chain, underlying_price, historical_data=historical_data)
+            else:
+                signal = self.strategy.analyze(options_chain, underlying_price)
             
             # Add symbol and metadata
             if signal.get("side") != "flat":

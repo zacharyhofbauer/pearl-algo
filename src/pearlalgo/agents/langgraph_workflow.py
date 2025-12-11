@@ -31,8 +31,7 @@ from pearlalgo.agents.quant_research_agent import QuantResearchAgent
 from pearlalgo.agents.risk_manager_agent import RiskManagerAgent
 from pearlalgo.core.portfolio import Portfolio
 from pearlalgo.utils.telegram_alerts import TelegramAlerts
-from pearlalgo.futures.signal_tracker import SignalTracker
-from pearlalgo.futures.exit_signals import ExitSignalGenerator
+# SignalTracker and ExitSignalGenerator will be replaced with options-specific versions
 
 logger = logging.getLogger(__name__)
 
@@ -125,19 +124,9 @@ class TradingWorkflow:
             telegram_alerts=self.telegram_alerts,
         )
 
-        # Initialize signal tracker and exit signal generator
-        self.signal_tracker = SignalTracker()
-        # Get data provider from market_data_agent for fallback price fetching
-        data_provider = self.market_data_agent.massive_provider
-        if not data_provider:
-            raise RuntimeError(
-                "Massive data provider is required but not initialized. "
-                "Please check your MASSIVE_API_KEY configuration."
-            )
-        self.exit_signal_generator = ExitSignalGenerator(
-            signal_tracker=self.signal_tracker,
-            data_provider=data_provider
-        )
+        # Signal tracker and exit signal generator will be initialized when options modules are ready
+        self.signal_tracker = None
+        self.exit_signal_generator = None
 
         # Build workflow graph
         self.workflow = self._build_workflow()
@@ -194,22 +183,24 @@ class TradingWorkflow:
         state.current_step = "portfolio_execution"
         result_state = await self.portfolio_execution_agent.execute_decisions(state)
         
-        # Track new signals in signal tracker
-        for symbol, decision in result_state.position_decisions.items():
-            if decision.status == "logged" and decision.action in ["enter_long", "enter_short"]:
-                signal = result_state.signals.get(symbol)
-                if signal:
-                    direction = "long" if decision.action == "enter_long" else "short"
-                    self.signal_tracker.add_signal(
-                        symbol=symbol,
-                        direction=direction,
-                        entry_price=decision.entry_price,
-                        size=abs(decision.size),
-                        stop_loss=decision.stop_loss,
-                        take_profit=decision.take_profit,
-                        strategy_name=signal.strategy_name,
-                        reasoning=signal.reasoning,
-                    )
+        # Track new signals in signal tracker (will be implemented with options-specific tracker)
+        # TODO: Implement options signal tracking
+        if self.signal_tracker:
+            for symbol, decision in result_state.position_decisions.items():
+                if decision.status == "logged" and decision.action in ["enter_long", "enter_short"]:
+                    signal = result_state.signals.get(symbol)
+                    if signal:
+                        direction = "long" if decision.action == "enter_long" else "short"
+                        self.signal_tracker.add_signal(
+                            symbol=symbol,
+                            direction=direction,
+                            entry_price=decision.entry_price,
+                            size=abs(decision.size),
+                            stop_loss=decision.stop_loss,
+                            take_profit=decision.take_profit,
+                            strategy_name=signal.strategy_name,
+                            reasoning=signal.reasoning,
+                        )
         
         return result_state
 
@@ -217,6 +208,11 @@ class TradingWorkflow:
         """Exit Signals node - checks for stop/target/time exits."""
         logger.debug("Workflow: Exit Signals")
         state.current_step = "exit_signals"
+        
+        # Exit signal generation will be implemented with options-specific generator
+        # TODO: Implement options exit signal generation
+        if not self.exit_signal_generator or not self.signal_tracker:
+            return state
         
         # Update PnL for all tracked signals
         self.exit_signal_generator.update_tracked_pnl(state)

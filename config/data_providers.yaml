@@ -104,12 +104,11 @@ symbols:
     - "NVDA"
     - "MSFT"
   
-  # Futures symbols
-  futures_symbols:
-    - "ES"
-    - "NQ"
-    - "MES"
-    - "MNQ"
+  # Futures symbols removed - system now focuses on options and stock-equity trading
+  # Options underliers
+  options_underliers:
+    - "QQQ"
+    - "SPY"
     - "CL"
     - "GC"
 

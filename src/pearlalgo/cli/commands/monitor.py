@@ -178,10 +178,8 @@ def create_agentic_thinking_panel(recent_decisions: list[dict]) -> Panel:
 
 def create_live_monitor() -> Layout:
     """Create live trading monitor layout."""
-    from pearlalgo.futures.performance import DEFAULT_PERF_PATH
-    from pearlalgo.futures.config import load_profile
-    from pearlalgo.futures.risk import compute_risk_state
-    from pearlalgo.futures.performance import load_performance
+    # Futures modules removed - CLI will be updated for options
+    # TODO: Create options-specific performance and risk tracking
 
     layout = Layout()
     layout.split_column(

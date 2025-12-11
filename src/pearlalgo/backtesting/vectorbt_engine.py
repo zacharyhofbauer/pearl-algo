@@ -20,7 +20,8 @@ try:
 except ImportError:
     logger = logging.getLogger(__name__)
 
-from pearlalgo.futures.signals import generate_signal
+# Futures signal generation removed - will be replaced with options-specific signal generation
+# TODO: Implement options signal generation for backtesting
 
 logger = logging.getLogger(__name__)
 

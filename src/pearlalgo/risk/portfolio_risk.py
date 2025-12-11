@@ -10,7 +10,7 @@ import logging
 from typing import Dict, Optional
 
 from pearlalgo.core.portfolio import Portfolio
-from pearlalgo.risk.futures_risk import FuturesRiskCalculator
+# Futures risk calculator removed - system now focuses on options only
 from pearlalgo.risk.options_risk import OptionsRiskCalculator
 
 logger = logging.getLogger(__name__)
@@ -25,11 +25,9 @@ class PortfolioRiskAggregator:
 
     def __init__(
         self,
-        futures_calculator: Optional[FuturesRiskCalculator] = None,
         options_calculator: Optional[OptionsRiskCalculator] = None,
     ):
         """Initialize portfolio risk aggregator."""
-        self.futures_calculator = futures_calculator or FuturesRiskCalculator()
         self.options_calculator = options_calculator or OptionsRiskCalculator()
 
     def calculate_total_margin(
@@ -52,36 +50,15 @@ class PortfolioRiskAggregator:
         prices = prices or {}
         options_data = options_data or {}
 
-        futures_positions = {}
         options_positions = {}
 
-        # Separate futures and options positions
+        # All positions are options now
         for symbol, position in portfolio.positions.items():
             if position.size == 0:
                 continue
+            options_positions[symbol] = position.size
 
-            # Simple heuristic: futures don't have underscores typically
-            if "_" not in symbol or symbol.split("_")[0] in [
-                "ES",
-                "NQ",
-                "MES",
-                "MNQ",
-                "CL",
-                "GC",
-            ]:
-                futures_positions[symbol] = position.size
-            else:
-                options_positions[symbol] = position.size
-
-        # Calculate futures margin
-        futures_margin = 0.0
-        if futures_positions:
-            futures_margin_req = self.futures_calculator.calculate_portfolio_margin(
-                positions=futures_positions, prices=prices
-            )
-            futures_margin = futures_margin_req["total_margin"]
-
-        # Calculate options margin (simplified)
+        # Calculate options margin
         options_margin = 0.0
         for symbol, quantity in options_positions.items():
             if symbol in options_data:
@@ -96,11 +73,10 @@ class PortfolioRiskAggregator:
                 )
                 options_margin += margin_req["total_required"]
 
-        total_margin = futures_margin + options_margin
+        total_margin = options_margin
 
         return {
             "total_margin": total_margin,
-            "futures_margin": futures_margin,
             "options_margin": options_margin,
             "available_margin": max(0.0, portfolio.cash - total_margin),
         }

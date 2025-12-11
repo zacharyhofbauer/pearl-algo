@@ -37,6 +37,7 @@ class OptionsSwingScanner:
         strategy: str = "swing_momentum",
         config: Optional[Dict] = None,
         data_provider=None,  # MassiveDataProvider
+        buffer_manager=None,  # BufferManager for historical data
     ):
         """
         Initialize options swing scanner.
@@ -46,21 +47,24 @@ class OptionsSwingScanner:
             strategy: Strategy name (default: "swing_momentum")
             config: Configuration dictionary
             data_provider: Data provider for fetching options chains
+            buffer_manager: BufferManager for historical price data (optional)
         """
         self.universe = universe
         self.strategy_name = strategy
         self.config = config or {}
         self.data_provider = data_provider
+        self.buffer_manager = buffer_manager
         
         # Create strategy instance
         strategy_params = self.config.get("strategy_params", {})
         self.strategy = create_strategy(strategy, strategy_params)
         
-        # Create signal generator
+        # Create signal generator with buffer manager for historical context
         self.signal_generator = OptionsSignalGenerator(
             universe=universe,
             strategy=self.strategy,
             data_provider=data_provider,
+            buffer_manager=buffer_manager,
         )
         
         logger.info(
@@ -114,6 +118,17 @@ class OptionsSwingScanner:
             f"universe_size={self.universe.get_universe_size()}, "
             f"interval={interval}s"
         )
+        
+        # Backfill buffers on startup for historical context
+        if self.buffer_manager and self.data_provider:
+            symbols = self.universe.get_optionable_symbols()
+            logger.info(f"Backfilling buffers for {len(symbols)} symbols...")
+            await self.buffer_manager.backfill_multiple(
+                symbols,
+                timeframe="15m",
+                days=30,
+                data_provider=self.data_provider,
+            )
         
         cycle_count = 0
         

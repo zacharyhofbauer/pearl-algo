@@ -30,7 +30,8 @@ from pearlalgo.agents.langgraph_state import (
 # Broker dependencies removed - system is data-only
 from pearlalgo.core.events import OrderEvent
 from pearlalgo.core.portfolio import Portfolio
-from pearlalgo.futures.performance import PerformanceRow, log_performance_row
+# Futures performance tracking removed - will be replaced with options-specific performance tracking
+# TODO: Create OptionsPerformanceRow and log_performance_row for options
 from pearlalgo.utils.retry import CircuitBreaker, retry_with_backoff
 from pearlalgo.utils.telegram_alerts import TelegramAlerts
 

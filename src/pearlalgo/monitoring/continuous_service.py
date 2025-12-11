@@ -100,7 +100,10 @@ class ContinuousService:
             persistence_dir=Path("data/buffers"),
         )
 
-        # Health checker
+        # Options signal tracker (will be initialized when scanners are created)
+        self.options_signal_tracker = None
+        
+        # Health checker (will be updated with scanner references)
         self.health_checker = HealthChecker(
             worker_pool=self.worker_pool,
             data_feed_manager=self.data_feed_manager,
@@ -195,13 +198,13 @@ class ContinuousService:
         try:
             logger.debug(f"Sending startup notification to chat_id: {self.telegram_alerts.chat_id}")
             workers_config = self.config.get("monitoring", {}).get("workers", {})
-            futures_config = workers_config.get("futures", {})
-            symbols = futures_config.get("symbols", ["NQ", "ES"])
-            strategy = futures_config.get("strategy", "intraday_swing")
-            interval = futures_config.get("interval", 60)
+            options_config = workers_config.get("options", {})
+            universe = options_config.get("universe", ["QQQ", "SPY"])
+            strategy = options_config.get("strategy", "swing_momentum")
+            interval = options_config.get("interval", 900)
             
             # Format message - use simple formatting to avoid Markdown parsing issues
-            symbols_str = ', '.join(symbols)
+            symbols_str = ', '.join(universe)
             message = (
                 "🚀 *Service Started*\n\n"
                 "*Status:* Monitoring Active\n"
@@ -240,7 +243,11 @@ class ContinuousService:
             # Get buffer status
             buffer_status = {}
             if self.buffer_manager:
-                for symbol in ["NQ", "ES"]:
+                # Get symbols from options config
+                workers_config = self.config.get("monitoring", {}).get("workers", {})
+                options_config = workers_config.get("options", {})
+                symbols = options_config.get("universe", ["QQQ", "SPY"])
+                for symbol in symbols:
                     if self.buffer_manager.has_buffer(symbol):
                         buffer_size = len(self.buffer_manager.get_buffer(symbol))
                         buffer_status[symbol] = buffer_size
@@ -378,65 +385,7 @@ class ContinuousService:
                 f"Error: {e}. Please check your MASSIVE_API_KEY configuration."
             ) from e
 
-    async def _futures_worker(
-        self, symbols: List[str], strategy: str, interval: int
-    ) -> None:
-        """
-        Worker for futures intraday scanning.
-
-        Args:
-            symbols: List of futures symbols (e.g., ["NQ", "ES"])
-            strategy: Strategy name
-            interval: Scan interval in seconds
-        """
-        logger.info(
-            f"Futures worker started: symbols={symbols}, strategy={strategy}, "
-            f"interval={interval}s"
-        )
-
-        # Initialize trader for futures
-        trader = LangGraphTrader(
-            symbols=symbols,
-            strategy=strategy,
-            mode="paper",
-            config_path=None,
-        )
-        trader.config = self.config
-
-        # Pass buffer manager to agents
-        if self.buffer_manager:
-            trader.workflow.market_data_agent.buffer_manager = self.buffer_manager
-            trader.workflow.quant_research_agent.buffer_manager = self.buffer_manager
-
-        # Backfill buffers on startup
-        if self.data_feed_manager and self.buffer_manager:
-            logger.info(f"Backfilling buffers for {symbols}...")
-            await self.buffer_manager.backfill_multiple(
-                symbols,
-                timeframe="15m",
-                days=30,
-                data_provider=self.data_feed_manager.data_provider,
-            )
-
-        while not self.shutdown_requested:
-            try:
-                # Check market hours
-                if not is_market_open():
-                    logger.debug("Market closed, waiting...")
-                    await asyncio.sleep(60)  # Check every minute
-                    continue
-
-                # Run trading cycle
-                logger.info(f"Running futures cycle for {symbols}")
-                await trader.workflow.run_cycle()
-                self.cycle_count += 1
-
-                # Wait for next cycle
-                await asyncio.sleep(interval)
-
-            except Exception as e:
-                logger.error(f"Error in futures worker: {e}", exc_info=True)
-                await asyncio.sleep(interval)  # Wait before retry
+    # Futures worker removed - system now focuses on options trading only
 
     async def _options_worker(
         self, universe: List[str], strategy: str, interval: int
@@ -445,7 +394,7 @@ class ContinuousService:
         Worker for options swing scanning.
 
         Args:
-            universe: List of equity symbols (e.g., ["SPY", "QQQ", "AAPL"])
+            universe: List of equity symbols (e.g., ["SPY", "QQQ"])
             strategy: Strategy name
             interval: Scan interval in seconds
         """
@@ -460,12 +409,13 @@ class ContinuousService:
         # Initialize options universe
         options_universe = EquityUniverse(symbols=universe)
 
-        # Initialize options scanner
+        # Initialize options scanner with buffer manager for historical context
         scanner = OptionsSwingScanner(
             universe=options_universe,
             strategy=strategy,
             config=self.config,
             data_provider=self.data_feed_manager.data_provider if self.data_feed_manager else None,
+            buffer_manager=self.buffer_manager,
         )
 
         while not self.shutdown_requested:
@@ -484,7 +434,7 @@ class ContinuousService:
                     signals = results.get("signals", [])
                     if signals:
                         logger.info(f"Generated {len(signals)} options signals")
-                        # TODO: Send signals to Telegram or signal tracker
+                        # TODO: Send signals to Telegram and track in options signal tracker
                 
                 self.cycle_count += 1
 
@@ -493,6 +443,61 @@ class ContinuousService:
 
             except Exception as e:
                 logger.error(f"Error in options worker: {e}", exc_info=True)
+                await asyncio.sleep(interval)  # Wait before retry
+    
+    async def _options_intraday_worker(
+        self, symbols: List[str], strategy: str, interval: int
+    ) -> None:
+        """
+        Worker for options intraday scanning.
+
+        Args:
+            symbols: List of underlying symbols (e.g., ["QQQ", "SPY"])
+            strategy: Strategy name
+            interval: Scan interval in seconds
+        """
+        logger.info(
+            f"Options intraday worker started: symbols={symbols}, strategy={strategy}, "
+            f"interval={interval}s"
+        )
+
+        from pearlalgo.options.intraday_scanner import OptionsIntradayScanner
+
+        # Initialize intraday scanner
+        scanner = OptionsIntradayScanner(
+            symbols=symbols,
+            strategy=strategy,
+            config=self.config,
+            data_feed_manager=self.data_feed_manager,
+            buffer_manager=self.buffer_manager,
+            data_provider=self.data_feed_manager.data_provider if self.data_feed_manager else None,
+        )
+
+        while not self.shutdown_requested:
+            try:
+                # Check market hours
+                if not is_market_open():
+                    logger.debug("Market closed, waiting...")
+                    await asyncio.sleep(60)  # Check every minute
+                    continue
+
+                # Run intraday scan
+                logger.info(f"Running options intraday scan for {symbols}")
+                results = await scanner.scan()
+                
+                if results.get("status") == "success":
+                    signals = results.get("signals", [])
+                    if signals:
+                        logger.info(f"Generated {len(signals)} intraday options signals")
+                        # TODO: Send signals to Telegram and track in options signal tracker
+                
+                self.cycle_count += 1
+
+                # Wait for next cycle
+                await asyncio.sleep(interval)
+
+            except Exception as e:
+                logger.error(f"Error in options intraday worker: {e}", exc_info=True)
                 await asyncio.sleep(interval)  # Wait before retry
 
     async def start(self) -> None:
@@ -516,26 +521,10 @@ class ContinuousService:
         # Start worker pool health checks
         await self.worker_pool.start_health_checks()
 
-        # Register futures worker from config
+        # Register workers from config
         workers_config = self.config.get("monitoring", {}).get("workers", {})
 
-        # Futures worker
-        futures_config = workers_config.get("futures", {})
-        if futures_config.get("enabled", False):
-            symbols = futures_config.get("symbols", ["NQ", "ES"])
-            strategy = futures_config.get("strategy", "intraday_swing")
-            interval = futures_config.get("interval", 60)
-
-            self.worker_pool.register_worker(
-                "futures_scanner",
-                "futures",
-                self._futures_worker,
-                symbols=symbols,
-                strategy=strategy,
-                interval=interval,
-            )
-
-        # Options worker
+        # Options swing worker
         options_config = workers_config.get("options", {})
         if options_config.get("enabled", False):
             universe = options_config.get("universe", ["SPY", "QQQ"])
@@ -543,10 +532,26 @@ class ContinuousService:
             interval = options_config.get("interval", 900)  # Default 15 minutes
 
             self.worker_pool.register_worker(
-                "options_scanner",
+                "options_swing_scanner",
                 "options",
                 self._options_worker,
                 universe=universe,
+                strategy=strategy,
+                interval=interval,
+            )
+        
+        # Options intraday worker
+        options_intraday_config = workers_config.get("options_intraday", {})
+        if options_intraday_config.get("enabled", False):
+            symbols = options_intraday_config.get("symbols", ["QQQ", "SPY"])
+            strategy = options_intraday_config.get("strategy", "momentum")
+            interval = options_intraday_config.get("interval", 60)  # Default 1 minute
+
+            self.worker_pool.register_worker(
+                "options_intraday_scanner",
+                "options",
+                self._options_intraday_worker,
+                symbols=symbols,
                 strategy=strategy,
                 interval=interval,
             )

@@ -30,7 +30,7 @@ from pearlalgo.agents.langgraph_state import (
     TradingState,
     add_agent_reasoning,
 )
-from pearlalgo.futures.signals import generate_signal
+# Signal generation will be handled by options strategies
 from pearlalgo.utils.retry import CircuitBreaker, async_retry_with_backoff
 from pearlalgo.utils.telegram_alerts import TelegramAlerts
 from pearlalgo.data_providers.buffer_manager import BufferManager
@@ -281,10 +281,14 @@ class QuantResearchAgent:
                 # Get strategy parameters from config
                 strategy_params = self._get_strategy_params(symbol)
                 
-                # Generate base signal using futures strategy
-                signal_dict = generate_signal(
-                    symbol, df, strategy_name=self.strategy, **strategy_params
-                )
+                # Generate base signal - will be replaced with options-specific signal generation
+                # TODO: Implement options signal generation
+                signal_dict = {
+                    "side": "flat",
+                    "confidence": 0.0,
+                    "strategy_name": self.strategy,
+                }
+                logger.warning(f"Signal generation for {symbol} not yet implemented - using placeholder")
 
                 # Detect regime
                 regime = None

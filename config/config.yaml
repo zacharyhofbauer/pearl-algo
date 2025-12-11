@@ -3,50 +3,8 @@
 
 # Trading Symbols
 symbols:
-  # Micro futures contracts (MES, MNQ, MCL, MGC) - Lower risk, smaller size
-  micro_futures:
-    - symbol: "MES"
-      exchange: "CME"
-      sec_type: "FUT"
-      tick_value: 1.25
-      contract_size: 5
-    - symbol: "MNQ"
-      exchange: "CME"
-      sec_type: "FUT"
-      tick_value: 2.0
-      contract_size: 2
-    - symbol: "MCL"
-      exchange: "NYMEX"
-      sec_type: "FUT"
-      tick_value: 1.0
-      contract_size: 100
-    - symbol: "MGC"
-      exchange: "NYMEX"
-      sec_type: "FUT"
-      tick_value: 1.0
-      contract_size: 10
-  # Standard futures contracts (ES, NQ, CL, GC)
-  futures:
-    - symbol: "ES"
-      exchange: "CME"
-      sec_type: "FUT"
-      tick_value: 12.5
-      contract_size: 50
-    - symbol: "NQ"
-      exchange: "CME"
-      sec_type: "FUT"
-      tick_value: 20.0
-      contract_size: 20
-    - symbol: "CL"
-      exchange: "NYMEX"
-      sec_type: "FUT"
-      tick_value: 10.0
-      contract_size: 1000
-    - symbol: "GC"
-      exchange: "NYMEX"
-      sec_type: "FUT"
-      tick_value: 10.0
-      contract_size: 100
+  # Micro futures removed - system now focuses on options and stock-equity trading
+  # Futures removed - system now focuses on options and stock-equity trading
   
   # Crypto perpetuals (Bybit equivalents)
   crypto_perps:
@@ -277,11 +235,21 @@ monitoring:
   buffer_size: 1000  # Number of bars per symbol
   
   workers:
-    futures:
+    # Futures worker removed - system now focuses on options trading
+    
+    # Options swing scanner (multi-day patterns)
+    options:
       enabled: true
-      symbols: ["NQ", "ES"]
+      universe: ["QQQ", "SPY"]
+      interval: 900  # seconds (15 minutes)
+      strategy: "swing_momentum"
+    
+    # Options intraday scanner (high-frequency, 0-7 DTE)
+    options_intraday:
+      enabled: true
+      symbols: ["QQQ", "SPY"]
       interval: 60  # seconds (1 minute)
-      strategy: "intraday_swing"
+      strategy: "momentum"  # Options: "momentum", "volatility", "unusual_flow"
   
   data_feeds:
     massive:
