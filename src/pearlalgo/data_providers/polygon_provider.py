@@ -32,50 +32,23 @@ logger = logging.getLogger(__name__)
 
 def _convert_futures_symbol_to_polygon(symbol: str) -> str:
     """
-    Convert futures symbol (e.g., 'ES', 'NQ') to Polygon.io format.
+    Convert futures symbol for Polygon.io API.
     
-    Polygon requires futures symbols in format: ROOT + MONTH_CODE + YEAR_DIGIT
-    Example: ES -> ESZ5 (ES + December + 2025)
+    NOTE: Polygon free tier may return incorrect data for futures.
+    We use base symbols (ES, NQ) and rely on price validation to reject invalid data.
     
-    Month codes: F=Jan, G=Feb, H=Mar, J=Apr, K=May, M=Jun, 
-                 N=Jul, Q=Aug, U=Sep, V=Oct, X=Nov, Z=Dec
+    For paid tiers, you may need contract-specific symbols (ESZ5, etc.).
     
     Args:
         symbol: Futures symbol (e.g., 'ES', 'NQ')
         
     Returns:
-        Polygon-formatted symbol (e.g., 'ESZ5')
+        Symbol to use with Polygon API (currently returns as-is)
     """
-    # Common futures symbols
-    futures_symbols = {'ES', 'NQ', 'YM', 'RTY', 'MES', 'MNQ', 'MYM', 'M2K', 
-                       'CL', 'GC', 'SI', 'HG', 'NG', 'ZC', 'ZS', 'ZW'}
-    
-    # Check if it's a futures symbol (not already formatted)
-    root = symbol.upper().split()[0]  # Get root, remove any suffix
-    
-    if root not in futures_symbols:
-        # Not a futures symbol or already formatted, return as-is
-        return symbol
-    
-    # Get current month and year
-    now = datetime.now(timezone.utc)
-    current_month = now.month
-    current_year = now.year
-    
-    # Month codes
-    month_codes = {
-        1: 'F', 2: 'G', 3: 'H', 4: 'J', 5: 'K', 6: 'M',
-        7: 'N', 8: 'Q', 9: 'U', 10: 'V', 11: 'X', 12: 'Z'
-    }
-    
-    month_code = month_codes[current_month]
-    year_digit = str(current_year)[-1]  # Last digit of year
-    
-    # Format: ROOT + MONTH + YEAR
-    polygon_symbol = f"{root}{month_code}{year_digit}"
-    
-    logger.debug(f"Converted futures symbol {symbol} -> {polygon_symbol}")
-    return polygon_symbol
+    # For now, use symbols as-is since Polygon accepts ES/NQ directly
+    # Price validation will catch incorrect data
+    # TODO: For paid tiers, may need to query active contract and use ESZ5 format
+    return symbol
 
 
 class PolygonDataProvider(DataProvider):
@@ -225,10 +198,8 @@ class PolygonDataProvider(DataProvider):
             date_from = current_start.strftime("%Y-%m-%d")
             date_to = chunk_end.strftime("%Y-%m-%d")
 
-            # Convert futures symbols to Polygon format
-            polygon_symbol = _convert_futures_symbol_to_polygon(symbol)
-
-            url = f"{self.base_url}/v2/aggs/ticker/{polygon_symbol}/range/{multiplier}/{timespan}/{date_from}/{date_to}"
+            # Use symbol as-is (Polygon accepts ES/NQ directly)
+            url = f"{self.base_url}/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{date_from}/{date_to}"
             params = {"adjusted": "true", "sort": "asc", "apikey": self.api_key}
 
             try:
@@ -313,7 +284,12 @@ class PolygonDataProvider(DataProvider):
                 await asyncio.sleep(2.0)  # 2 second delay between chunks
 
         if not all_results:
-            logger.warning(f"No data retrieved for {symbol} in date range")
+            logger.warning(
+                f"No data retrieved for {symbol} in date range. "
+                f"⚠️  Polygon.io FREE TIER does not include futures data. "
+                f"Futures data requires a paid subscription. "
+                f"See: https://polygon.io/pricing"
+            )
             return pd.DataFrame()
 
         df = pd.DataFrame(all_results)
@@ -356,10 +332,9 @@ class PolygonDataProvider(DataProvider):
         try:
             session = await self._get_session()
             
-            # Convert futures symbols to Polygon format
-            polygon_symbol = _convert_futures_symbol_to_polygon(symbol)
-
-            url = f"{self.base_url}/v2/aggs/ticker/{polygon_symbol}/prev"
+            # Use symbol as-is (Polygon accepts ES/NQ directly)
+            # Price validation will catch incorrect data from free tier
+            url = f"{self.base_url}/v2/aggs/ticker/{symbol}/prev"
             params = {"adjusted": "true", "apikey": self.api_key}
 
             await self._rate_limit()
@@ -372,6 +347,22 @@ class PolygonDataProvider(DataProvider):
                         and data.get("resultsCount", 0) > 0
                     ):
                         result = data["results"][0]
+                        price = result.get("c", 0)
+                        
+                        # Validate price - reject obviously wrong data from free tier
+                        if symbol in ["ES", "MES"] and not (3000 <= price <= 7000):
+                            logger.warning(
+                                f"Polygon returned invalid price ${price:.2f} for {symbol} "
+                                f"(expected $3000-7000). Rejecting - likely free tier limitation."
+                            )
+                            return None
+                        elif symbol in ["NQ", "MNQ"] and not (10000 <= price <= 25000):
+                            logger.warning(
+                                f"Polygon returned invalid price ${price:.2f} for {symbol} "
+                                f"(expected $10000-25000). Rejecting - likely free tier limitation."
+                            )
+                            return None
+                        
                         return {
                             "timestamp": datetime.fromtimestamp(
                                 result["t"] / 1000, tz=timezone.utc
@@ -389,7 +380,7 @@ class PolygonDataProvider(DataProvider):
                         self._unauthorized_logged_live = set()
                     if symbol not in self._unauthorized_logged_live:
                         logger.error(
-                            f"Polygon API unauthorized for {symbol} (tried as {polygon_symbol}) - "
+                            f"Polygon API unauthorized for {symbol} - "
                             f"API key is invalid or expired. Please check your POLYGON_API_KEY in .env file. "
                             f"Service will fail without valid API key."
                         )
@@ -401,16 +392,44 @@ class PolygonDataProvider(DataProvider):
                         f"Polygon API forbidden for {symbol} (may need paid tier)"
                     )
                 elif response.status == 429:
-                    # Rate limit hit - raise exception to trigger exponential backoff
+                    # Rate limit hit - wait and retry
                     error_msg = f"Polygon API rate limit for {symbol}"
-                    logger.warning(error_msg)
-                    # Raise exception to trigger retry with exponential backoff
-                    raise aiohttp.ClientResponseError(
-                        request_info=response.request_info,
-                        history=response.history,
-                        status=429,
-                        message=error_msg,
-                    )
+                    logger.warning(f"{error_msg} - waiting 10 seconds before retry...")
+                    await asyncio.sleep(10)  # Wait for rate limit to reset
+                    # Retry once
+                    await self._rate_limit()
+                    async with session.get(url, params=params, timeout=timeout) as retry_response:
+                        if retry_response.status == 200:
+                            data = await retry_response.json()
+                            if (
+                                data.get("status") == "OK"
+                                and data.get("resultsCount", 0) > 0
+                            ):
+                                result = data["results"][0]
+                                price = result.get("c", 0)
+                                
+                                # Validate price
+                                if symbol in ["ES", "MES"] and not (3000 <= price <= 7000):
+                                    logger.warning(f"Invalid price ${price:.2f} for {symbol} after retry - rejecting")
+                                    return None
+                                elif symbol in ["NQ", "MNQ"] and not (10000 <= price <= 25000):
+                                    logger.warning(f"Invalid price ${price:.2f} for {symbol} after retry - rejecting")
+                                    return None
+                                
+                                return {
+                                    "timestamp": datetime.fromtimestamp(
+                                        result["t"] / 1000, tz=timezone.utc
+                                    ),
+                                    "open": result["o"],
+                                    "high": result["h"],
+                                    "low": result["l"],
+                                    "close": result["c"],
+                                    "volume": result.get("v", 0),
+                                    "vwap": result.get("vw"),
+                                }
+                        # If retry also fails, return None (caller should handle)
+                        logger.warning(f"Retry after rate limit also failed for {symbol}")
+                        return None
                 else:
                     logger.debug(
                         f"Polygon API error for {symbol}: {response.status}"

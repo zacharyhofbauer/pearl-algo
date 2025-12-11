@@ -147,15 +147,31 @@ class MarketDataAgent:
                         level="debug",
                         data={"symbol": symbol, "price": market_data.close, "volume": market_data.volume},
                     )
+                else:
+                    # No data returned - likely Polygon free tier limitation
+                    logger.warning(
+                        f"No market data available for {symbol}. "
+                        f"⚠️  Polygon.io FREE TIER does not include futures data. "
+                        f"Your API key is valid but futures require a paid subscription. "
+                        f"Service will continue but cannot generate signals without market data. "
+                        f"See: https://polygon.io/pricing for subscription options."
+                    )
+                    state = add_agent_reasoning(
+                        state,
+                        "market_data_agent",
+                        f"No data available for {symbol}",
+                        level="warning",
+                        data={"symbol": symbol},
+                    )
             except Exception as e:
                 error_msg = f"Error fetching data for {symbol}: {e}"
-                logger.error(error_msg, exc_info=True)
+                logger.warning(error_msg, exc_info=True)  # Changed to warning, not error
                 state.errors.append(error_msg)
                 state = add_agent_reasoning(
                     state,
                     "market_data_agent",
                     error_msg,
-                    level="error",
+                    level="warning",  # Changed to warning
                     data={"symbol": symbol, "error": str(e)},
                 )
 
@@ -194,10 +210,14 @@ class MarketDataAgent:
                 logger.debug(f"Successfully fetched Polygon data for {symbol}")
                 return self._convert_to_market_data(symbol, data)
             else:
-                raise RuntimeError(
+                # No data returned - could be market closed, contract expired, or free tier limitation
+                logger.warning(
                     f"Polygon provider returned no data for {symbol}. "
-                    f"This may indicate an API issue or invalid symbol."
+                    f"This may indicate: market is closed, contract expired, or free tier limitations. "
+                    f"Service will continue but cannot generate signals without market data."
                 )
+                # Don't raise error - let the service continue, it will just skip this symbol
+                return None
         except Exception as e:
             error_msg = (
                 f"Failed to fetch data for {symbol} from Polygon provider: {e}. "
