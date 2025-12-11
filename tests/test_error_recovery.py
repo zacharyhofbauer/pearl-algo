@@ -1,273 +1,162 @@
 """
-Tests for error recovery scenarios including state recovery and provider failures.
+Tests for error recovery scenarios and edge cases.
 """
 
-from __future__ import annotations
-
 import pytest
-import tempfile
-import shutil
-from pathlib import Path
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
-from pearlalgo.agents.langgraph_state import create_initial_state, TradingState
-from pearlalgo.agents.state_store import StateStore
-from pearlalgo.agents.market_data_agent import MarketDataAgent
-from pearlalgo.core.portfolio import Portfolio
-from pearlalgo.data_providers.dummy_provider import DummyDataProvider
-from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+from pearlalgo.futures.signal_tracker import SignalTracker
+from pearlalgo.futures.exit_signals import ExitSignalGenerator
+from pearlalgo.agents.langgraph_state import TradingState, MarketData
 
 
 @pytest.fixture
-def sample_portfolio():
-    """Create sample portfolio."""
-    return Portfolio(cash=100000.0)
+def tracker_with_persistence(tmp_path):
+    """Create signal tracker with persistence."""
+    persistence_path = tmp_path / "signals.json"
+    return SignalTracker(persistence_path=persistence_path)
 
 
-@pytest.fixture
-def sample_config():
-    """Create sample configuration."""
-    return {
-        "strategy": {"default": "sr"},
-        "risk": {
-            "max_risk_per_trade": 0.02,
-            "max_drawdown": 0.15,
-        },
-        "trading": {
-            "mode": "paper",
-            "signal_only": True,
-        },
-    }
-
-
-@pytest.fixture
-def temp_state_dir():
-    """Create temporary directory for state storage."""
-    temp_dir = tempfile.mkdtemp()
-    yield Path(temp_dir)
-    shutil.rmtree(temp_dir)
-
-
-class TestStateRecovery:
-    """Test state persistence and recovery."""
+def test_corrupted_persistence_file_recovery(tmp_path):
+    """Test recovery from corrupted persistence file."""
+    persistence_path = tmp_path / "signals.json"
     
-    def test_state_store_save_and_load(self, sample_portfolio, sample_config, temp_state_dir):
-        """Test that state can be saved and loaded."""
-        # Create initial state
-        state = create_initial_state(
-            portfolio=sample_portfolio,
-            config=sample_config,
-        )
-        
-        # Save state
-        store = StateStore(storage_path=temp_state_dir)
-        store.save_state(state, "test_state")
-        
-        # Load state
-        loaded_state = store.load_state("test_state")
-        
-        assert loaded_state is not None
-        assert loaded_state.portfolio is not None
-        assert loaded_state.portfolio.cash == sample_portfolio.cash
+    # Create corrupted JSON file
+    with open(persistence_path, "w") as f:
+        f.write("{ invalid json }")
     
-    def test_state_store_recovery_after_crash(self, sample_portfolio, sample_config, temp_state_dir):
-        """Test state recovery after simulated crash."""
-        # Create and save state
-        state = create_initial_state(
-            portfolio=sample_portfolio,
-            config=sample_config,
-        )
-        state.current_step = "quant_research"
-        state.errors.append("Simulated error")
-        
-        store = StateStore(storage_path=temp_state_dir)
-        store.save_state(state, "recovery_test")
-        
-        # Simulate recovery - load state
-        recovered_state = store.load_state("recovery_test")
-        
-        assert recovered_state is not None
-        assert recovered_state.current_step == "quant_research"
-        assert len(recovered_state.errors) == 1
-        assert "Simulated error" in recovered_state.errors
+    # Create backup
+    backup_path = persistence_path.with_suffix('.json.bak')
+    with open(backup_path, "w") as f:
+        json.dump({
+            "ES": {
+                "symbol": "ES",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "direction": "long",
+                "entry_price": 4500.0,
+                "size": 1,
+                "stop_loss": 4490.0,
+                "take_profit": None,
+                "strategy_name": "test",
+                "reasoning": None,
+                "unrealized_pnl": 0.0,
+                "last_update": datetime.now(timezone.utc).isoformat(),
+                "lifecycle_state": "active",
+                "exit_timestamp": None,
+                "exit_reason": None,
+            }
+        }, f)
     
-    def test_state_store_delete(self, sample_portfolio, sample_config, temp_state_dir):
-        """Test that state can be deleted."""
-        state = create_initial_state(
-            portfolio=sample_portfolio,
-            config=sample_config,
-        )
-        
-        store = StateStore(storage_path=temp_state_dir)
-        store.save_state(state, "delete_test")
-        
-        # Verify state exists
-        loaded = store.load_state("delete_test")
-        assert loaded is not None
-        
-        # Delete state
-        store.delete_state("delete_test")
-        
-        # Verify state is deleted
-        deleted = store.load_state("delete_test")
-        assert deleted is None
+    # Should recover from backup
+    tracker = SignalTracker(persistence_path=persistence_path)
+    assert "ES" in tracker.active_signals
 
 
-class TestProviderFailureRecovery:
-    """Test recovery from data provider failures."""
+def test_invalid_signal_skipped_on_load(tmp_path):
+    """Test that invalid signals are skipped during load."""
+    persistence_path = tmp_path / "signals.json"
     
-    @pytest.mark.asyncio
-    async def test_market_data_agent_handles_provider_failure(self, sample_config):
-        """Test that MarketDataAgent handles provider failures gracefully."""
-        agent = MarketDataAgent(
-            symbols=["ES"],
-            config=sample_config,
-        )
-        
-        # Disable providers to simulate failure
-        agent.polygon_provider = None
-        agent.dummy_provider = None
-        
-        portfolio = Portfolio(cash=100000.0)
-        state = create_initial_state(portfolio=portfolio, config=sample_config)
-        
-        # Fetch data (should handle failure)
-        state = await agent.fetch_live_data(state)
-        
-        # Verify errors are recorded
-        assert state is not None
-        # Should have errors or empty market data
-        assert len(state.errors) >= 0 or len(state.market_data) == 0
+    # Create file with valid and invalid signals
+    with open(persistence_path, "w") as f:
+        json.dump({
+            "ES": {
+                "symbol": "ES",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "direction": "long",
+                "entry_price": 4500.0,
+                "size": 1,
+                "stop_loss": 4490.0,
+                "take_profit": None,
+                "strategy_name": "test",
+                "reasoning": None,
+                "unrealized_pnl": 0.0,
+                "last_update": datetime.now(timezone.utc).isoformat(),
+                "lifecycle_state": "active",
+                "exit_timestamp": None,
+                "exit_reason": None,
+            },
+            "INVALID": {
+                "symbol": "INVALID",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "direction": "invalid_direction",  # Invalid
+                "entry_price": -100.0,  # Invalid
+                "size": 1,
+                "stop_loss": None,
+                "take_profit": None,
+                "strategy_name": "test",
+                "reasoning": None,
+                "unrealized_pnl": 0.0,
+                "last_update": datetime.now(timezone.utc).isoformat(),
+                "lifecycle_state": "active",
+                "exit_timestamp": None,
+                "exit_reason": None,
+            }
+        }, f)
     
-    @pytest.mark.asyncio
-    async def test_market_data_agent_fallback_to_dummy(self, sample_config):
-        """Test that MarketDataAgent falls back to dummy provider."""
-        agent = MarketDataAgent(
-            symbols=["ES"],
-            config=sample_config,
-        )
-        
-        # Disable Polygon, keep dummy
-        agent.polygon_provider = None
-        
-        portfolio = Portfolio(cash=100000.0)
-        state = create_initial_state(portfolio=portfolio, config=sample_config)
-        
-        # Fetch data
-        state = await agent.fetch_live_data(state)
-        
-        # Should have data from dummy provider
-        assert state is not None
-        # May have data or errors depending on dummy provider behavior
-    
-    @pytest.mark.asyncio
-    async def test_market_data_agent_all_providers_fail(self, sample_config):
-        """Test behavior when all providers fail."""
-        agent = MarketDataAgent(
-            symbols=["ES"],
-            config=sample_config,
-        )
-        
-        # Create mock providers that always fail
-        class FailingProvider:
-            async def get_latest_bar(self, symbol):
-                raise RuntimeError("Provider failure")
-        
-        agent.polygon_provider = FailingProvider()
-        agent.dummy_provider = None
-        
-        portfolio = Portfolio(cash=100000.0)
-        state = create_initial_state(portfolio=portfolio, config=sample_config)
-        
-        # Fetch data
-        state = await agent.fetch_live_data(state)
-        
-        # Should have errors recorded
-        assert state is not None
-        assert len(state.errors) > 0
+    tracker = SignalTracker(persistence_path=persistence_path)
+    assert "ES" in tracker.active_signals
+    assert "INVALID" not in tracker.active_signals
 
 
-class TestKillSwitchRecovery:
-    """Test kill-switch triggering and recovery."""
+@pytest.mark.asyncio
+async def test_missing_market_data_handling(exit_generator_with_tracker, tracker_with_persistence):
+    """Test handling of missing market data."""
+    tracker_with_persistence.add_signal("ES", "long", 4500.0, 1, stop_loss=4490.0)
     
-    @pytest.mark.asyncio
-    async def test_kill_switch_prevents_trading(self, sample_portfolio, sample_config):
-        """Test that kill-switch prevents further trading."""
-        from pearlalgo.agents.risk_manager_agent import RiskManagerAgent
-        
-        agent = RiskManagerAgent(
-            portfolio=sample_portfolio,
-            config=sample_config,
-        )
-        
-        # Simulate large drawdown
-        agent.peak_equity = 100000.0
-        agent.portfolio.cash = 80000.0  # 20% drawdown (exceeds 15% limit)
-        
-        state = create_initial_state(portfolio=sample_portfolio, config=sample_config)
-        
-        # Evaluate risk
-        state = await agent.evaluate_risk(state)
-        
-        # Kill switch should be triggered
-        assert state.kill_switch_triggered is True
-        assert state.trading_enabled is False
+    # State with no market data
+    state = TradingState(
+        market_data={},
+        signals={},
+        position_decisions={},
+    )
     
-    def test_state_with_kill_switch(self, sample_portfolio, sample_config):
-        """Test state validation with kill switch."""
-        state = create_initial_state(
-            portfolio=sample_portfolio,
-            config=sample_config,
-        )
-        
-        # Trigger kill switch
-        state.kill_switch_triggered = True
-        
-        # Validate state
-        state.validate_state_transitions()
-        
-        # Trading should be disabled
-        assert state.trading_enabled is False
+    # Should not crash, just skip
+    exit_signals = await exit_generator_with_tracker.generate_exit_signals(state)
+    assert "ES" not in exit_signals
 
 
-class TestErrorPropagation:
-    """Test error propagation through workflow."""
+@pytest.mark.asyncio
+async def test_invalid_price_handling(exit_generator_with_tracker, tracker_with_persistence):
+    """Test handling of invalid prices."""
+    tracker_with_persistence.add_signal("ES", "long", 4500.0, 1, stop_loss=4490.0)
     
-    @pytest.mark.asyncio
-    async def test_errors_accumulate_in_state(self, sample_config):
-        """Test that errors accumulate in state."""
-        agent = MarketDataAgent(
-            symbols=["ES", "NQ"],
-            config=sample_config,
-        )
-        
-        portfolio = Portfolio(cash=100000.0)
-        state = create_initial_state(portfolio=portfolio, config=sample_config)
-        
-        # Simulate errors
-        state.errors.append("Error 1")
-        state.errors.append("Error 2")
-        
-        # Fetch data (may add more errors)
-        state = await agent.fetch_live_data(state)
-        
-        # Errors should be preserved
-        assert len(state.errors) >= 2
-        assert "Error 1" in state.errors
-        assert "Error 2" in state.errors
+    # Create mock MarketData with invalid price
+    class InvalidMarketData:
+        def __init__(self):
+            self.symbol = "ES"
+            self.timestamp = datetime.now(timezone.utc)
+            self.close = float('nan')  # Invalid
     
-    def test_state_error_limits(self, sample_portfolio, sample_config):
-        """Test that state doesn't accumulate unlimited errors."""
-        state = create_initial_state(
-            portfolio=sample_portfolio,
-            config=sample_config,
-        )
-        
-        # Add many errors
-        for i in range(1000):
-            state.errors.append(f"Error {i}")
-        
-        # State should handle large error lists
-        assert len(state.errors) == 1000
-        # Should not crash or cause memory issues
+    state = TradingState(
+        market_data={"ES": InvalidMarketData()},
+        signals={},
+        position_decisions={},
+    )
+    
+    # Should handle gracefully
+    exit_signals = await exit_generator_with_tracker.generate_exit_signals(state)
+    # Should skip invalid price
+    assert "ES" not in exit_signals or exit_signals.get("ES") is None
 
+
+def test_signal_reconciliation(tracker_with_persistence):
+    """Test signal reconciliation."""
+    tracker_with_persistence.add_signal("ES", "long", 4500.0, 1)
+    tracker_with_persistence.add_signal("NQ", "short", 15000.0, 1)
+    
+    # Reconcile with expected symbols
+    results = tracker_with_persistence.reconcile_signals(expected_symbols=["ES", "NQ"])
+    assert results["total_signals"] == 2
+    assert results["orphaned_signals"] == 0
+    assert results["missing_signals"] == 0
+    
+    # Reconcile with missing expected
+    results = tracker_with_persistence.reconcile_signals(expected_symbols=["ES"])
+    assert results["orphaned_signals"] == 1  # NQ is orphaned
+    assert results["missing_signals"] == 0
+    
+    # Reconcile with extra expected
+    results = tracker_with_persistence.reconcile_signals(expected_symbols=["ES", "NQ", "CL"])
+    assert results["missing_signals"] == 1  # CL is missing

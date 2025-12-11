@@ -43,6 +43,8 @@ class HealthChecker:
         worker_pool=None,
         data_feed_manager=None,
         telegram_alerts=None,
+        signal_tracker=None,
+        exit_signal_generator=None,
     ):
         """
         Initialize health checker.
@@ -51,10 +53,14 @@ class HealthChecker:
             worker_pool: WorkerPool instance (optional)
             data_feed_manager: DataFeedManager instance (optional)
             telegram_alerts: TelegramAlerts instance (optional)
+            signal_tracker: SignalTracker instance (optional)
+            exit_signal_generator: ExitSignalGenerator instance (optional)
         """
         self.worker_pool = worker_pool
         self.data_feed_manager = data_feed_manager
         self.telegram_alerts = telegram_alerts
+        self.signal_tracker = signal_tracker
+        self.exit_signal_generator = exit_signal_generator
 
         logger.info("HealthChecker initialized")
 
@@ -118,6 +124,127 @@ class HealthChecker:
                 "status": "unhealthy",
                 "error": str(e),
             }
+    
+    async def check_signal_tracker(self) -> Dict:
+        """Check signal tracker health."""
+        if not self.signal_tracker:
+            return {"status": "unknown", "message": "Signal tracker not configured"}
+        
+        try:
+            metrics = self.signal_tracker.get_metrics()
+            persistence = metrics.get("persistence_operations", {})
+            success_rate = persistence.get("success_rate", 1.0)
+            
+            # Check for issues
+            is_healthy = True
+            issues = []
+            
+            if success_rate < 0.95:
+                is_healthy = False
+                issues.append(f"Low persistence success rate: {success_rate:.2%}")
+            
+            if metrics.get("validation_errors", 0) > 10:
+                is_healthy = False
+                issues.append(f"High validation errors: {metrics['validation_errors']}")
+            
+            # Check persistence file
+            persistence_file_healthy = True
+            persistence_file_size = 0
+            if hasattr(self.signal_tracker, 'persistence_path'):
+                persistence_path = self.signal_tracker.persistence_path
+                if persistence_path.exists():
+                    persistence_file_size = persistence_path.stat().st_size
+                    # Check if file is too large (potential issue)
+                    if persistence_file_size > 10 * 1024 * 1024:  # 10MB
+                        persistence_file_healthy = False
+                        issues.append(f"Persistence file too large: {persistence_file_size / 1024 / 1024:.1f}MB")
+                else:
+                    persistence_file_healthy = False
+                    issues.append("Persistence file missing")
+            
+            return {
+                "status": "healthy" if (is_healthy and persistence_file_healthy) else "unhealthy",
+                "active_signals": metrics.get("active_signals_count", 0),
+                "total_pnl": metrics.get("total_pnl", 0.0),
+                "persistence": {
+                    "success_rate": success_rate,
+                    "save_count": persistence.get("save_count", 0),
+                    "load_count": persistence.get("load_count", 0),
+                    "error_count": persistence.get("error_count", 0),
+                    "file_size_bytes": persistence_file_size,
+                    "file_healthy": persistence_file_healthy,
+                },
+                "validation_errors": metrics.get("validation_errors", 0),
+                "issues": issues,
+                "metrics": metrics,
+            }
+        except Exception as e:
+            logger.error(f"Error checking signal tracker health: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+            }
+    
+    async def check_exit_signal_generator(self) -> Dict:
+        """Check exit signal generator health."""
+        if not self.exit_signal_generator:
+            return {"status": "unknown", "message": "Exit signal generator not configured"}
+        
+        try:
+            metrics = self.exit_signal_generator.get_exit_metrics()
+            exit_gen = metrics.get("exit_generation", {})
+            fallback = metrics.get("fallback_fetching", {})
+            data_quality = metrics.get("data_quality", {})
+            
+            is_healthy = True
+            issues = []
+            
+            # Check exit generation success rate
+            exit_success_rate = exit_gen.get("success_rate", 0.0)
+            if exit_gen.get("total_attempts", 0) > 0 and exit_success_rate < 0.5:
+                is_healthy = False
+                issues.append(f"Low exit generation success rate: {exit_success_rate:.2%}")
+            
+            # Check fallback fetch success rate
+            fallback_success_rate = fallback.get("success_rate", 0.0)
+            if fallback.get("total_attempts", 0) > 10 and fallback_success_rate < 0.3:
+                is_healthy = False
+                issues.append(f"Low fallback fetch success rate: {fallback_success_rate:.2%}")
+            
+            # Check data quality issues
+            if data_quality.get("price_validation_failures", 0) > 20:
+                is_healthy = False
+                issues.append(f"High price validation failures: {data_quality['price_validation_failures']}")
+            
+            if data_quality.get("stale_data_warnings", 0) > 50:
+                is_healthy = False
+                issues.append(f"High stale data warnings: {data_quality['stale_data_warnings']}")
+            
+            return {
+                "status": "healthy" if is_healthy else "unhealthy",
+                "exit_generation": {
+                    "total_attempts": exit_gen.get("total_attempts", 0),
+                    "successful_exits": exit_gen.get("successful_exits", 0),
+                    "success_rate": exit_success_rate,
+                },
+                "fallback_fetching": {
+                    "total_attempts": fallback.get("total_attempts", 0),
+                    "successful_fetches": fallback.get("successful_fetches", 0),
+                    "success_rate": fallback_success_rate,
+                },
+                "data_quality": {
+                    "price_validation_failures": data_quality.get("price_validation_failures", 0),
+                    "stale_data_warnings": data_quality.get("stale_data_warnings", 0),
+                },
+                "issues": issues,
+                "metrics": metrics,
+            }
+        except Exception as e:
+            logger.error(f"Error checking exit signal generator health: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+            }
 
     async def check_system_resources(self) -> Dict:
         """Check system resource usage."""
@@ -179,6 +306,20 @@ class HealthChecker:
 
         system_resources = await self.check_system_resources()
         checks["components"]["system_resources"] = system_resources
+        
+        # Check signal tracker
+        if self.signal_tracker:
+            signal_tracker_health = await self.check_signal_tracker()
+            checks["components"]["signal_tracker"] = signal_tracker_health
+            if signal_tracker_health.get("status") not in ["healthy", "unknown"]:
+                checks["overall_status"] = "degraded"
+        
+        # Check exit signal generator
+        if self.exit_signal_generator:
+            exit_generator_health = await self.check_exit_signal_generator()
+            checks["components"]["exit_signal_generator"] = exit_generator_health
+            if exit_generator_health.get("status") not in ["healthy", "unknown"]:
+                checks["overall_status"] = "degraded"
 
         return checks
 
