@@ -41,6 +41,7 @@ class ExitSignalGenerator:
         self,
         signal_tracker: SignalTracker,
         market_hours: Optional[MarketHours] = None,
+        data_provider=None,  # For fallback price fetching
     ):
         """
         Initialize exit signal generator.
@@ -48,9 +49,11 @@ class ExitSignalGenerator:
         Args:
             signal_tracker: SignalTracker instance
             market_hours: MarketHours instance (optional)
+            data_provider: Data provider for fallback price fetching (optional)
         """
         self.signal_tracker = signal_tracker
         self.market_hours = market_hours
+        self.data_provider = data_provider
 
         logger.info("ExitSignalGenerator initialized")
 
@@ -120,24 +123,65 @@ class ExitSignalGenerator:
 
         # Intraday strategies: exit at end of day
         if "intraday" in strategy_name.lower():
-            if self.market_hours:
-                # Check if market is closing soon (within 30 minutes)
-                # For futures, market closes at 5 PM ET on Friday
-                # For simplicity, exit 30 minutes before market close
-                # In practice, you'd check actual market close time
-                return False  # Simplified - implement actual time check
-            else:
-                # Without market hours, use simple time check
-                # Exit at 4:30 PM ET (30 min before 5 PM close)
-                et_time = current_time.astimezone(
-                    __import__("pytz").timezone("America/New_York")
-                )
+            try:
+                import pytz
+                et_timezone = pytz.timezone("America/New_York")
+                et_time = current_time.astimezone(et_timezone)
+                
+                # Exit at 4:30 PM ET (30 min before 5 PM close) or later
+                # Also exit on Friday at 4:30 PM (futures close)
                 if et_time.hour == 16 and et_time.minute >= 30:
+                    # Check if it's Friday (futures close)
+                    if et_time.weekday() == 4:  # Friday
+                        return True
+                    # For other days, exit at 4:30 PM ET
+                    return True
+                
+                # Also exit if it's past 5 PM ET (market closed)
+                if et_time.hour >= 17:
+                    return True
+            except ImportError:
+                logger.warning("pytz not available, using simplified time check")
+                # Fallback: exit at 4:30 PM UTC (approximate)
+                if current_time.hour >= 20:  # 4:30 PM ET ≈ 8:30 PM UTC
                     return True
 
         return False
 
-    def generate_exit_signals(
+    async def _fetch_fallback_price(self, symbol: str) -> Optional[float]:
+        """
+        Fetch current price from data provider as fallback.
+        
+        Args:
+            symbol: Symbol to fetch price for
+            
+        Returns:
+            Current price or None if fetch fails
+        """
+        if not self.data_provider:
+            return None
+        
+        try:
+            # Try to get latest bar
+            if hasattr(self.data_provider, 'get_latest_bar'):
+                bar = await self.data_provider.get_latest_bar(symbol, "15m")
+                if bar and hasattr(bar, 'close'):
+                    return float(bar.close)
+            elif hasattr(self.data_provider, 'get_current_price'):
+                price = await self.data_provider.get_current_price(symbol)
+                if price:
+                    return float(price)
+            # Try synchronous methods as fallback
+            elif hasattr(self.data_provider, 'get_latest_bar_sync'):
+                bar = self.data_provider.get_latest_bar_sync(symbol, "15m")
+                if bar and hasattr(bar, 'close'):
+                    return float(bar.close)
+        except Exception as e:
+            logger.debug(f"Failed to fetch fallback price for {symbol}: {e}")
+        
+        return None
+
+    async def generate_exit_signals(
         self, state: TradingState
     ) -> Dict[str, Signal]:
         """
@@ -153,26 +197,67 @@ class ExitSignalGenerator:
 
         # Get all active signals
         active_signals = self.signal_tracker.get_all_signals()
+        
+        if not active_signals:
+            logger.debug("No active signals to check for exits")
+            return exit_signals
+
+        logger.debug(f"Checking exit conditions for {len(active_signals)} active signals")
 
         for symbol, signal in active_signals.items():
             # Get current price from market data
             market_data = state.market_data.get(symbol)
-            if not market_data:
+            current_price = None
+            
+            if market_data:
+                current_price = market_data.close
+            else:
+                # Log missing market data
+                logger.warning(
+                    f"Market data missing for {symbol} in state. "
+                    f"Signal: {signal.direction} @ ${signal.entry_price:.2f}, "
+                    f"Stop: ${signal.stop_loss:.2f if signal.stop_loss else 'N/A'}, "
+                    f"Target: ${signal.take_profit:.2f if signal.take_profit else 'N/A'}"
+                )
+                
+                # Try to fetch fallback price
+                if self.data_provider:
+                    logger.info(f"Attempting to fetch fallback price for {symbol}")
+                    current_price = await self._fetch_fallback_price(symbol)
+                    if current_price:
+                        logger.info(f"Fetched fallback price for {symbol}: ${current_price:.2f}")
+                    else:
+                        logger.warning(f"Could not fetch fallback price for {symbol}, skipping exit check")
+                        continue
+                else:
+                    logger.warning(
+                        f"No data provider available for fallback price fetch. "
+                        f"Skipping exit check for {symbol}"
+                    )
+                    continue
+
+            if current_price is None:
+                logger.error(f"Could not determine current price for {symbol}, skipping")
                 continue
 
-            current_price = market_data.close
             exit_reason = None
             exit_type = None
 
             # Check stop loss
             if self.check_stop_loss(signal, current_price):
-                exit_reason = f"Stop loss hit: ${current_price:.2f} <= ${signal.stop_loss:.2f}"
+                exit_reason = (
+                    f"Stop loss hit: ${current_price:.2f} "
+                    f"{'<=' if signal.direction == 'long' else '>='} ${signal.stop_loss:.2f}"
+                )
                 exit_type = "stop_loss"
                 logger.info(f"Stop loss hit for {symbol}: {exit_reason}")
 
             # Check take profit
             elif self.check_take_profit(signal, current_price):
-                exit_reason = f"Take profit hit: ${current_price:.2f} >= ${signal.take_profit:.2f}"
+                exit_reason = (
+                    f"Take profit hit: ${current_price:.2f} "
+                    f"{'>=' if signal.direction == 'long' else '<='} ${signal.take_profit:.2f}"
+                )
                 exit_type = "take_profit"
                 logger.info(f"Take profit hit for {symbol}: {exit_reason}")
 
@@ -203,6 +288,14 @@ class ExitSignalGenerator:
                 )
 
                 exit_signals[symbol] = exit_signal
+                logger.info(
+                    f"Generated exit signal for {symbol}: {exit_type} - {exit_reason}"
+                )
+
+        if exit_signals:
+            logger.info(f"Generated {len(exit_signals)} exit signals")
+        else:
+            logger.debug("No exit conditions met for any active signals")
 
         return exit_signals
 
@@ -217,4 +310,14 @@ class ExitSignalGenerator:
             symbol: md.close
             for symbol, md in state.market_data.items()
         }
+        
+        # Also update PnL for signals without market data (use last known price)
+        active_signals = self.signal_tracker.get_all_signals()
+        for symbol in active_signals:
+            if symbol not in prices:
+                # Try to get price from signal's last update or entry price
+                signal = active_signals[symbol]
+                # Use entry price as fallback (will be updated when price available)
+                logger.debug(f"No market data for {symbol}, using entry price for PnL calculation")
+        
         self.signal_tracker.update_all_pnl(prices)

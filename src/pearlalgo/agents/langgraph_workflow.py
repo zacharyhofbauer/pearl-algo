@@ -127,8 +127,14 @@ class TradingWorkflow:
 
         # Initialize signal tracker and exit signal generator
         self.signal_tracker = SignalTracker()
+        # Get data provider from market_data_agent for fallback price fetching
+        data_provider = (
+            self.market_data_agent.polygon_provider 
+            or self.market_data_agent.dummy_provider
+        )
         self.exit_signal_generator = ExitSignalGenerator(
-            signal_tracker=self.signal_tracker
+            signal_tracker=self.signal_tracker,
+            data_provider=data_provider
         )
 
         # Build workflow graph
@@ -213,8 +219,8 @@ class TradingWorkflow:
         # Update PnL for all tracked signals
         self.exit_signal_generator.update_tracked_pnl(state)
         
-        # Generate exit signals
-        exit_signals = self.exit_signal_generator.generate_exit_signals(state)
+        # Generate exit signals (now async)
+        exit_signals = await self.exit_signal_generator.generate_exit_signals(state)
         
         # Add exit signals to state and send Telegram alerts
         for symbol, exit_signal in exit_signals.items():
