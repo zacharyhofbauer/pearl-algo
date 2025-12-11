@@ -108,44 +108,57 @@ class ContractDiscovery:
             Active contract code
         """
         try:
-            # Use futures contracts endpoint
-            # GET /futures/vX/contracts?product_code=ES&active=true
-            response = self.client.futures.get_contracts(
-                product_code=symbol,
-                active=True
-            )
-            
-            if response and response.get("status") == "OK":
-                results = response.get("results", [])
-                if results:
-                    # Find contract with nearest expiration
-                    contracts = sorted(
-                        results,
-                        key=lambda x: x.get("expiration_date", ""),
+            # Use list_futures_contracts (returns iterator, sync call)
+            contracts = []
+            try:
+                # Run in executor since we're in async context
+                import asyncio
+                loop = asyncio.get_event_loop()
+                contracts_iter = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.list_futures_contracts(
+                        product_code=symbol,
+                        active="true",  # String "true" not boolean
+                        limit=100,
+                        sort="expiration_date"
                     )
-                    active_contract = contracts[0]
-                    contract_code = active_contract.get("ticker", symbol)
-                    
-                    # Parse expiration date
-                    expiration_str = active_contract.get("expiration_date", "")
-                    if expiration_str:
-                        try:
+                )
+                for contract in contracts_iter:
+                    contracts.append(contract)
+                    # Only need first few
+                    if len(contracts) >= 10:
+                        break
+            except Exception as e:
+                logger.warning(f"Error iterating contracts for {symbol}: {e}")
+            
+            if contracts:
+                # First contract has nearest expiration (sorted)
+                active_contract = contracts[0]
+                contract_code = getattr(active_contract, 'ticker', symbol)
+                
+                # Parse expiration date
+                expiration_str = getattr(active_contract, 'expiration_date', None)
+                if expiration_str:
+                    try:
+                        if isinstance(expiration_str, str):
                             expiration_date = datetime.fromisoformat(
                                 expiration_str.replace("Z", "+00:00")
                             )
-                            # Cache until 4 hours before expiration
-                            cache_expiration = expiration_date - timedelta(hours=4)
-                            # Use earlier of cache TTL or contract expiration
-                            now = datetime.now(timezone.utc)
-                            final_expiration = min(
-                                now + self.cache_ttl,
-                                cache_expiration
-                            )
-                            self._cache[symbol] = (contract_code, final_expiration)
-                        except Exception as e:
-                            logger.warning(f"Could not parse expiration for {contract_code}: {e}")
-                    
-                    return contract_code
+                        else:
+                            expiration_date = expiration_str
+                        # Cache until 4 hours before expiration
+                        cache_expiration = expiration_date - timedelta(hours=4)
+                        # Use earlier of cache TTL or contract expiration
+                        now = datetime.now(timezone.utc)
+                        final_expiration = min(
+                            now + self.cache_ttl,
+                            cache_expiration
+                        )
+                        self._cache[symbol] = (contract_code, final_expiration)
+                    except Exception as e:
+                        logger.warning(f"Could not parse expiration for {contract_code}: {e}")
+                
+                return contract_code
             
             # No active contracts found
             logger.warning(f"No active contracts found for {symbol}, using symbol as-is")

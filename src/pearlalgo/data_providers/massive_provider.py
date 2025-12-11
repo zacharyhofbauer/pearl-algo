@@ -174,29 +174,44 @@ class MassiveDataProvider(DataProvider):
         try:
             await self._rate_limit()
             
-            # Use futures contracts endpoint
-            # Note: The exact API method may vary - this is based on the plan's specification
+            # Use list_futures_contracts method (returns iterator, sync call)
             # GET /futures/vX/contracts?product_code=ES&active=true
-            response = self.client.futures.get_contracts(
-                product_code=symbol,
-                active=True
-            )
-            
-            if response and response.get("status") == "OK":
-                results = response.get("results", [])
-                if results:
-                    # Find contract with nearest expiration
-                    contracts = sorted(
-                        results,
-                        key=lambda x: x.get("expiration_date", ""),
+            contracts = []
+            try:
+                # Run sync call in executor to avoid blocking
+                loop = asyncio.get_event_loop()
+                contract_iter = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.list_futures_contracts(
+                        product_code=symbol,
+                        active="true",  # String "true" not boolean
+                        limit=100,
+                        sort="expiration_date"
                     )
-                    active_contract = contracts[0]
-                    contract_code = active_contract.get("ticker", symbol)
-                    expiration_str = active_contract.get("expiration_date", "")
-                    
-                    # Parse expiration and cache
+                )
+                # Iterate over results
+                for contract in contract_iter:
+                    contracts.append(contract)
+                    # Only need first few, break after getting some
+                    if len(contracts) >= 10:
+                        break
+            except Exception as e:
+                logger.warning(f"Error iterating contracts for {symbol}: {e}")
+            
+            if contracts:
+                # Find contract with nearest expiration (first one since sorted)
+                active_contract = contracts[0]
+                # Contract object has attributes, not dict keys
+                contract_code = getattr(active_contract, 'ticker', symbol)
+                expiration_str = getattr(active_contract, 'expiration_date', None)
+                
+                # Parse expiration and cache
+                if expiration_str:
                     try:
-                        expiration_date = datetime.fromisoformat(expiration_str.replace("Z", "+00:00"))
+                        if isinstance(expiration_str, str):
+                            expiration_date = datetime.fromisoformat(expiration_str.replace("Z", "+00:00"))
+                        else:
+                            expiration_date = expiration_str
                         # Cache until 4 hours before expiration
                         cache_expiration = expiration_date - timedelta(hours=4)
                         self._contract_cache[symbol] = (contract_code, cache_expiration)
@@ -205,6 +220,8 @@ class MassiveDataProvider(DataProvider):
                     except Exception as e:
                         logger.warning(f"Could not parse expiration for {contract_code}: {e}")
                         return contract_code
+                else:
+                    return contract_code
             
             # Fallback: return symbol as-is if contract discovery fails
             logger.warning(f"Could not resolve contract for {symbol}, using symbol as-is")
@@ -294,49 +311,105 @@ class MassiveDataProvider(DataProvider):
                 await self._rate_limit()
                 
                 if is_futures:
-                    # Use futures aggregates endpoint
-                    response = self.client.futures.get_aggregates(
-                        ticker=symbol,
-                        resolution=resolution,
-                        window_start=current_start.isoformat(),
-                        limit=50000  # Max limit
-                    )
-                else:
-                    # Use stocks aggregates endpoint
-                    response = self.client.stocks.get_aggregates(
-                        ticker=symbol,
-                        resolution=resolution,
-                        window_start=current_start.isoformat(),
-                        limit=50000
-                    )
-                
-                if response and response.get("status") == "OK":
-                    results = response.get("results", [])
-                    if results:
-                        chunk_count = len(results)
-                        logger.debug(
-                            f"Retrieved {chunk_count} bars for {symbol} "
-                            f"({current_start.date()} to {chunk_end.date()})"
-                        )
-                        for result in results:
-                            all_results.append(
-                                {
-                                    "timestamp": datetime.fromtimestamp(
-                                        result["t"] / 1000, tz=timezone.utc
-                                    ),
-                                    "open": result["o"],
-                                    "high": result["h"],
-                                    "low": result["l"],
-                                    "close": result["c"],
-                                    "volume": result.get("v", 0),
-                                }
+                    # Use list_futures_aggregates (returns iterator, sync call)
+                    bars = []
+                    try:
+                        # Run sync call in executor
+                        loop = asyncio.get_event_loop()
+                        bars_iter = await loop.run_in_executor(
+                            None,
+                            lambda: self.client.list_futures_aggregates(
+                                ticker=symbol,
+                                resolution=resolution,
+                                window_start=current_start.isoformat(),
+                                limit=50000
                             )
-                    
-                    # Handle pagination via next_url
-                    next_url = response.get("next_url")
-                    if next_url:
-                        logger.debug(f"More data available via next_url for {symbol}")
-                        # For simplicity, we'll fetch in chunks - could implement full pagination
+                        )
+                        for bar in bars_iter:
+                            bars.append(bar)
+                            # Limit to reasonable size
+                            if len(bars) >= 50000:
+                                break
+                        
+                        if bars:
+                            chunk_count = len(bars)
+                            logger.debug(
+                                f"Retrieved {chunk_count} bars for {symbol} "
+                                f"({current_start.date()} to {chunk_end.date()})"
+                            )
+                            for bar in bars:
+                                # Bar is an object with attributes
+                                timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
+                                all_results.append(
+                                    {
+                                        "timestamp": datetime.fromtimestamp(
+                                            timestamp_ms / 1000, tz=timezone.utc
+                                        ),
+                                        "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
+                                        "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
+                                        "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
+                                        "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
+                                        "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
+                                    }
+                                )
+                    except Exception as e:
+                        logger.warning(f"Error fetching futures aggregates for {symbol}: {e}")
+                else:
+                    # Use list_aggs for stocks (returns iterator, sync call)
+                    bars = []
+                    try:
+                        # Convert resolution to multiplier and timespan
+                        resolution_parts = resolution.replace("min", "").replace("s", "").replace("hour", "h")
+                        if "min" in resolution:
+                            multiplier = int(resolution_parts.replace("min", ""))
+                            timespan = "minute"
+                        elif "hour" in resolution or "h" in resolution:
+                            multiplier = int(resolution_parts.replace("h", "").replace("hour", ""))
+                            timespan = "hour"
+                        else:
+                            multiplier = 1
+                            timespan = "day"
+                        
+                        # Run sync call in executor
+                        loop = asyncio.get_event_loop()
+                        bars_iter = await loop.run_in_executor(
+                            None,
+                            lambda: self.client.list_aggs(
+                                ticker=symbol,
+                                multiplier=multiplier,
+                                timespan=timespan,
+                                from_=current_start.strftime("%Y-%m-%d"),
+                                to=chunk_end.strftime("%Y-%m-%d"),
+                                limit=50000
+                            )
+                        )
+                        for bar in bars_iter:
+                            bars.append(bar)
+                            if len(bars) >= 50000:
+                                break
+                        
+                        if bars:
+                            chunk_count = len(bars)
+                            logger.debug(
+                                f"Retrieved {chunk_count} bars for {symbol} "
+                                f"({current_start.date()} to {chunk_end.date()})"
+                            )
+                            for bar in bars:
+                                timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
+                                all_results.append(
+                                    {
+                                        "timestamp": datetime.fromtimestamp(
+                                            timestamp_ms / 1000, tz=timezone.utc
+                                        ),
+                                        "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
+                                        "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
+                                        "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
+                                        "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
+                                        "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
+                                    }
+                                )
+                    except Exception as e:
+                        logger.warning(f"Error fetching stock aggregates for {symbol}: {e}")
                 
             except Exception as e:
                 logger.error(
@@ -409,51 +482,112 @@ class MassiveDataProvider(DataProvider):
             is_futures = any(symbol.startswith(prefix) for prefix in ["ES", "NQ", "MES", "MNQ", "YM", "RTY"])
             
             if is_futures:
-                # Get latest futures aggregates
-                response = self.client.futures.get_aggregates(
-                    ticker=symbol,
-                    resolution="1min",
-                    limit=1
-                )
+                # Get latest futures aggregates (returns iterator, sync call)
+                bars = []
+                try:
+                    # Run sync call in executor
+                    loop = asyncio.get_event_loop()
+                    bars_iter = await loop.run_in_executor(
+                        None,
+                        lambda: self.client.list_futures_aggregates(
+                            ticker=symbol,
+                            resolution="1min",
+                            limit=1
+                        )
+                    )
+                    for bar in bars_iter:
+                        bars.append(bar)
+                        break  # Only need one
+                    
+                    if bars:
+                        bar = bars[0]
+                        price = getattr(bar, 'close', 0) or getattr(bar, 'c', 0)
+                        
+                        # Validate price for futures
+                        if original_symbol in ["ES", "MES"] and not (3000 <= price <= 7000):
+                            logger.warning(
+                                f"Massive returned invalid price ${price:.2f} for {original_symbol} "
+                                f"(expected $3000-7000). Rejecting - likely free tier limitation."
+                            )
+                            return None
+                        elif original_symbol in ["NQ", "MNQ"] and not (10000 <= price <= 25000):
+                            logger.warning(
+                                f"Massive returned invalid price ${price:.2f} for {original_symbol} "
+                                f"(expected $10000-25000). Rejecting - likely free tier limitation."
+                            )
+                            return None
+                        
+                        timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
+                        return {
+                            "timestamp": datetime.fromtimestamp(
+                                timestamp_ms / 1000, tz=timezone.utc
+                            ),
+                            "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
+                            "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
+                            "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
+                            "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
+                            "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
+                            "vwap": getattr(bar, 'vwap', None) or getattr(bar, 'vw', None),
+                        }
+                except Exception as e:
+                    logger.warning(f"Error fetching latest futures bar for {symbol}: {e}")
             else:
-                # Get latest stock aggregates
-                response = self.client.stocks.get_aggregates(
-                    ticker=symbol,
-                    resolution="1min",
-                    limit=1
-                )
-            
-            if response and response.get("status") == "OK":
-                results = response.get("results", [])
-                if results and len(results) > 0:
-                    result = results[-1]  # Get most recent
-                    price = result.get("c", 0)
-                    
-                    # Validate price for futures
-                    if original_symbol in ["ES", "MES"] and not (3000 <= price <= 7000):
-                        logger.warning(
-                            f"Massive returned invalid price ${price:.2f} for {original_symbol} "
-                            f"(expected $3000-7000). Rejecting - likely free tier limitation."
+                # Get latest stock aggregates using get_previous_close_agg or list_aggs
+                try:
+                    # Try get_previous_close_agg first (simpler for latest, sync call)
+                    loop = asyncio.get_event_loop()
+                    bar = await loop.run_in_executor(
+                        None,
+                        lambda: self.client.get_previous_close_agg(ticker=symbol)
+                    )
+                    if bar:
+                        price = getattr(bar, 'close', 0) or getattr(bar, 'c', 0)
+                        timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
+                        return {
+                            "timestamp": datetime.fromtimestamp(
+                                timestamp_ms / 1000, tz=timezone.utc
+                            ),
+                            "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
+                            "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
+                            "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
+                            "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
+                            "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
+                            "vwap": getattr(bar, 'vwap', None) or getattr(bar, 'vw', None),
+                        }
+                except Exception as e:
+                    logger.debug(f"get_previous_close_agg failed for {symbol}, trying list_aggs: {e}")
+                    # Fallback to list_aggs (sync call)
+                    bars = []
+                    loop = asyncio.get_event_loop()
+                    bars_iter = await loop.run_in_executor(
+                        None,
+                        lambda: self.client.list_aggs(
+                            ticker=symbol,
+                            multiplier=1,
+                            timespan="minute",
+                            from_=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                            to=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                            limit=1
                         )
-                        return None
-                    elif original_symbol in ["NQ", "MNQ"] and not (10000 <= price <= 25000):
-                        logger.warning(
-                            f"Massive returned invalid price ${price:.2f} for {original_symbol} "
-                            f"(expected $10000-25000). Rejecting - likely free tier limitation."
-                        )
-                        return None
+                    )
+                    for bar in bars_iter:
+                        bars.append(bar)
+                        break
                     
-                    return {
-                        "timestamp": datetime.fromtimestamp(
-                            result["t"] / 1000, tz=timezone.utc
-                        ),
-                        "open": result["o"],
-                        "high": result["h"],
-                        "low": result["l"],
-                        "close": result["c"],
-                        "volume": result.get("v", 0),
-                        "vwap": result.get("vw"),
-                    }
+                    if bars:
+                        bar = bars[0]
+                        timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
+                        return {
+                            "timestamp": datetime.fromtimestamp(
+                                timestamp_ms / 1000, tz=timezone.utc
+                            ),
+                            "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
+                            "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
+                            "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
+                            "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
+                            "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
+                            "vwap": getattr(bar, 'vwap', None) or getattr(bar, 'vw', None),
+                        }
             
             return None
 
@@ -477,34 +611,48 @@ class MassiveDataProvider(DataProvider):
         try:
             await self._rate_limit()
             
-            # Use Massive options snapshot endpoint
-            response = self.client.options.get_snapshot(
-                underlying=underlying_symbol,
-                expiration_date=expiration_date
-            )
-            
-            if response and response.get("status") == "OK":
-                results = response.get("results", [])
-                options = []
-                for result in results:
+            # Use list_snapshot_options_chain (returns iterator, sync call)
+            options = []
+            try:
+                # Run sync call in executor
+                loop = asyncio.get_event_loop()
+                options_iter = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.list_snapshot_options_chain(underlying_asset=underlying_symbol)
+                )
+                for option in options_iter:
+                    # Option is an object with attributes
+                    details = getattr(option, 'details', None) or option
+                    last_quote = getattr(option, 'last_quote', None) or {}
+                    last_trade = getattr(option, 'last_trade', None) or {}
+                    session = getattr(option, 'session', None) or {}
+                    
                     options.append(
                         {
-                            "symbol": result.get("details", {}).get("ticker"),
-                            "strike": result.get("details", {}).get("strike_price"),
-                            "expiration": result.get("details", {}).get("expiration_date"),
-                            "option_type": result.get("details", {}).get("contract_type"),
-                            "bid": result.get("last_quote", {}).get("bid"),
-                            "ask": result.get("last_quote", {}).get("ask"),
-                            "last_price": result.get("last_trade", {}).get("price"),
-                            "volume": result.get("session", {}).get("volume"),
-                            "open_interest": result.get("session", {}).get("open_interest"),
+                            "symbol": getattr(details, 'ticker', None) if hasattr(details, 'ticker') else getattr(option, 'ticker', None),
+                            "strike": getattr(details, 'strike_price', None) if hasattr(details, 'strike_price') else getattr(option, 'strike_price', None),
+                            "expiration": getattr(details, 'expiration_date', None) if hasattr(details, 'expiration_date') else getattr(option, 'expiration_date', None),
+                            "option_type": getattr(details, 'contract_type', None) if hasattr(details, 'contract_type') else getattr(option, 'contract_type', None),
+                            "bid": getattr(last_quote, 'bid', None) if hasattr(last_quote, 'bid') else None,
+                            "ask": getattr(last_quote, 'ask', None) if hasattr(last_quote, 'ask') else None,
+                            "last_price": getattr(last_trade, 'price', None) if hasattr(last_trade, 'price') else None,
+                            "volume": getattr(session, 'volume', None) if hasattr(session, 'volume') else None,
+                            "open_interest": getattr(session, 'open_interest', None) if hasattr(session, 'open_interest') else None,
                         }
                     )
+                    # Limit results
+                    if len(options) >= 1000:
+                        break
+                
                 return options
+            except Exception as e:
+                logger.error(
+                    f"Error fetching options chain for {underlying_symbol}: {e}"
+                )
 
         except Exception as e:
             logger.error(
-                f"Error fetching options chain for {underlying_symbol}: {e}"
+                f"Error in options chain fetch for {underlying_symbol}: {e}"
             )
 
         return []
@@ -522,31 +670,45 @@ class MassiveDataProvider(DataProvider):
         try:
             await self._rate_limit()
             
-            # Use Massive last trade endpoint
-            response = self.client.stocks.get_last_trade(ticker=symbol)
-            
-            if response and response.get("status") == "OK":
-                result = response.get("results", {})
-                return {
-                    "last_price": result.get("p"),
-                    "timestamp": datetime.fromtimestamp(
-                        result.get("t", 0) / 1000000, tz=timezone.utc
-                    ),
-                }
+            # Use get_last_trade (returns LastTrade object, sync call)
+            try:
+                loop = asyncio.get_event_loop()
+                trade = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.get_last_trade(ticker=symbol)
+                )
+                if trade:
+                    price = getattr(trade, 'price', None) or getattr(trade, 'p', 0)
+                    timestamp_ns = getattr(trade, 'timestamp', None) or getattr(trade, 't', 0)
+                    return {
+                        "last_price": price,
+                        "timestamp": datetime.fromtimestamp(
+                            timestamp_ns / 1000000, tz=timezone.utc
+                        ) if timestamp_ns else datetime.now(timezone.utc),
+                    }
+            except Exception as e:
+                logger.debug(f"get_last_trade failed for {symbol}: {e}")
 
-            # Get quote (bid/ask)
-            response = self.client.stocks.get_last_quote(ticker=symbol)
-            if response and response.get("status") == "OK":
-                result = response.get("results", {})
-                return {
-                    "bid": result.get("b"),
-                    "ask": result.get("a"),
-                    "bid_size": result.get("x"),
-                    "ask_size": result.get("y"),
-                    "timestamp": datetime.fromtimestamp(
-                        result.get("t", 0) / 1000000, tz=timezone.utc
-                    ),
-                }
+            # Get quote (bid/ask) using get_last_quote (sync call)
+            try:
+                loop = asyncio.get_event_loop()
+                quote = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.get_last_quote(ticker=symbol)
+                )
+                if quote:
+                    timestamp_ns = getattr(quote, 'timestamp', None) or getattr(quote, 't', 0)
+                    return {
+                        "bid": getattr(quote, 'bid', None) or getattr(quote, 'b', None),
+                        "ask": getattr(quote, 'ask', None) or getattr(quote, 'a', None),
+                        "bid_size": getattr(quote, 'bid_size', None) or getattr(quote, 'x', None),
+                        "ask_size": getattr(quote, 'ask_size', None) or getattr(quote, 'y', None),
+                        "timestamp": datetime.fromtimestamp(
+                            timestamp_ns / 1000000, tz=timezone.utc
+                        ) if timestamp_ns else datetime.now(timezone.utc),
+                    }
+            except Exception as e:
+                logger.debug(f"get_last_quote failed for {symbol}: {e}")
 
         except Exception as e:
             logger.error(f"Error fetching real-time quote for {symbol}: {e}")
