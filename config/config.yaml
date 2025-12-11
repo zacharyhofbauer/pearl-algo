@@ -126,9 +126,7 @@ llm:
 data_sources:
   # Live trading data (options and stocks)
   live:
-    provider: "massive"
-    api_key: "${MASSIVE_API_KEY}"
-    base_url: "https://api.massive.com"
+    provider: "ibkr"
     symbols:
       options_underliers: ["QQQ", "SPY"]
     intervals:
@@ -137,7 +135,7 @@ data_sources:
   
   # Backtesting data (historical ES/NQ for correlation)
   backtesting:
-    provider: "massive_historical"
+    provider: "ibkr"
     symbols: ["ES", "NQ"]  # Futures symbols for backtesting correlation
     data_dir: "data/backtesting"
     cache_enabled: true
@@ -145,10 +143,10 @@ data_sources:
 
 # Rate Limiting
 rate_limits:
-  massive:
-    requests_per_minute: 200  # Massive API rate limit
-    burst_limit: 10  # Burst capacity
-    delay_between_requests: 0.25  # seconds
+  ibkr:
+    requests_per_minute: 100  # IBKR rate limit (conservative)
+    burst_limit: 20  # Burst capacity
+    delay_between_requests: 0.1  # seconds
 
 # Data Sources
 data:
@@ -157,9 +155,10 @@ data:
   
   # Fallback data sources
   fallback:
-    massive:
-      api_key: "${MASSIVE_API_KEY}"
-      free_tier: true  # Use free tier limits
+    ibkr:
+      host: "${IBKR_HOST:-127.0.0.1}"
+      port: "${IBKR_PORT:-4002}"
+      client_id: "${IBKR_DATA_CLIENT_ID:-11}"
   
   # WebSocket streaming
   websocket:
@@ -280,9 +279,9 @@ monitoring:
       strategy: "momentum"  # Options: "momentum", "volatility", "unusual_flow"
   
   data_feeds:
-    massive:
+    ibkr:
       websocket_enabled: false  # Start with REST, add WebSocket later
-      rate_limit: 5  # calls per second
+      rate_limit: 10  # calls per second
       reconnect_delay: 5.0  # seconds
       max_reconnect_attempts: 10
     

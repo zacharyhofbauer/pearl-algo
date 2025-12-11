@@ -29,7 +29,7 @@ class OptionsSignalGenerator:
         self,
         universe: EquityUniverse,
         strategy: OptionsStrategy,
-        data_provider=None,  # MassiveDataProvider
+        data_provider=None,  # IBKRDataProvider
         buffer_manager=None,  # BufferManager for historical data
     ):
         """

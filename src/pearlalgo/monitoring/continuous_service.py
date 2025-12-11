@@ -321,61 +321,46 @@ class ContinuousService:
     async def _initialize_data_provider(self):
         """Initialize data provider and feed manager."""
         try:
-            from pearlalgo.data_providers.massive_provider import MassiveDataProvider
-            import os
+            from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+            from pearlalgo.config.settings import get_settings
 
-            # Get API key from config or environment
-            config_api_key = (
-                self.config.get("data", {})
-                .get("fallback", {})
-                .get("massive", {})
-                .get("api_key")
+            # Get IBKR settings from config or environment
+            settings = get_settings()
+            
+            # Get IBKR connection settings from config if available
+            ibkr_config = self.config.get("data", {}).get("fallback", {}).get("ibkr", {})
+            host = ibkr_config.get("host") or settings.ib_host
+            port = ibkr_config.get("port") or settings.ib_port
+            client_id = ibkr_config.get("client_id") or settings.ib_data_client_id or settings.ib_client_id
+
+            logger.info(
+                f"Initializing IBKR data provider: host={host}, port={port}, client_id={client_id}"
             )
-            
-            # If config has template variable like ${MASSIVE_API_KEY}, expand it
-            if config_api_key and config_api_key.startswith("${") and config_api_key.endswith("}"):
-                var_name = config_api_key[2:-1]  # Remove ${ and }
-                massive_api_key = os.getenv(var_name)
-                logger.debug(f"Expanded config template {config_api_key} -> environment variable {var_name}")
-            elif config_api_key:
-                massive_api_key = config_api_key
-            else:
-                massive_api_key = os.getenv("MASSIVE_API_KEY")
-            
-            # Strip whitespace in case .env file has extra spaces
-            if massive_api_key:
-                massive_api_key = massive_api_key.strip()
-            
-            # Debug logging (only first few chars for security)
-            if massive_api_key:
-                logger.debug(f"Massive API key loaded: {massive_api_key[:10]}... (length: {len(massive_api_key)})")
-            else:
-                logger.error("MASSIVE_API_KEY not found in config or environment")
 
-            if not massive_api_key:
-                raise ValueError(
-                    "MASSIVE_API_KEY is required. Please set it in your .env file or config."
-                )
-
-            # Initialize Massive provider - fail explicitly if it doesn't work
+            # Initialize IBKR provider
             try:
-                provider = MassiveDataProvider(api_key=massive_api_key)
-                logger.info("Massive provider initialized (will validate on first request)")
+                provider = IBKRDataProvider(
+                    settings=settings,
+                    host=host,
+                    port=port,
+                    client_id=client_id,
+                )
+                logger.info("IBKR provider initialized (will connect on first request)")
             except Exception as e:
-                logger.error(f"Failed to initialize Massive provider: {e}")
+                logger.error(f"Failed to initialize IBKR provider: {e}")
                 raise ValueError(
-                    f"Cannot initialize Massive data provider: {e}. "
-                    f"Please check your MASSIVE_API_KEY and network connection."
+                    f"Cannot initialize IBKR data provider: {e}. "
+                    f"Please check your IBKR Gateway connection settings and ensure IB Gateway/TWS is running."
                 ) from e
 
-            # Get massive config for rate limits
+            # Get IBKR config for rate limits
             data_feeds_config = self.config.get("monitoring", {}).get("data_feeds", {})
-            massive_config = data_feeds_config.get("massive", {})
+            ibkr_config = data_feeds_config.get("ibkr", {})
             
             self.data_feed_manager = DataFeedManager(
                 data_provider=provider,
-                rate_limit=massive_config.get("rate_limit", 5),
-                reconnect_delay=massive_config.get("reconnect_delay", 5.0),
+                rate_limit=ibkr_config.get("rate_limit", 10),  # IBKR allows more requests
+                reconnect_delay=ibkr_config.get("reconnect_delay", 5.0),
             )
             self.buffer_manager.data_provider = provider
             self.health_checker.data_feed_manager = self.data_feed_manager
@@ -384,7 +369,7 @@ class ContinuousService:
             logger.error(f"CRITICAL: Failed to initialize data provider: {e}", exc_info=True)
             raise RuntimeError(
                 f"Cannot start service without a working data provider. "
-                f"Error: {e}. Please check your MASSIVE_API_KEY configuration."
+                f"Error: {e}. Please check your IBKR Gateway connection settings."
             ) from e
 
     # Futures worker removed - system now focuses on options trading only
@@ -557,7 +542,7 @@ class ContinuousService:
                                         option_type=signal.get("option_type", "call"),
                                         direction=signal.get("side", "long"),
                                         entry_premium=signal.get("entry_price", 0),
-                                        quantity=1,
+                                        quantity=signal.get("position_size", 1),
                                         strategy_name=signal.get("strategy_name", strategy),
                                         reasoning=signal.get("reasoning"),
                                     )
@@ -571,11 +556,14 @@ class ContinuousService:
                                         strategy=signal.get("strategy_name", strategy),
                                         confidence=signal.get("confidence"),
                                         entry_price=signal.get("entry_price"),
+                                        stop_loss=signal.get("stop_loss"),
+                                        take_profit=signal.get("take_profit"),
                                         option_symbol=signal.get("option_symbol"),
                                         strike=signal.get("strike"),
                                         expiration=signal.get("expiration"),
                                         option_type=signal.get("option_type"),
                                         underlying_price=signal.get("underlying_price"),
+                                        delta=signal.get("delta"),
                                         dte=signal.get("dte"),
                                         reasoning=signal.get("reasoning"),
                                     )
@@ -630,6 +618,9 @@ class ContinuousService:
                 strategy=strategy,
                 interval=interval,
             )
+            
+            # Add small delay before starting next worker to avoid API burst
+            await asyncio.sleep(2.0)
         
         # Options intraday worker
         options_intraday_config = workers_config.get("options_intraday", {})

@@ -1,10 +1,10 @@
 """
-Market Data Agent - Streams live market data via WebSockets with REST fallback.
+Market Data Agent - Streams live market data via IBKR Gateway.
 
 This agent is responsible for:
-- WebSocket streaming for OHLCV, order book, funding rates (crypto), OI
-- Massive.com primary provider for US futures
-- Requires valid MASSIVE_API_KEY - no dummy data fallback
+- Real-time data streaming for OHLCV, order book, OI
+- IBKR Gateway primary provider for US stocks, futures, and options
+- Requires IB Gateway/TWS running with API enabled
 - Real-time data aggregation and normalization
 """
 
@@ -27,10 +27,8 @@ from pearlalgo.agents.langgraph_state import (
     add_agent_reasoning,
 )
 from pearlalgo.config.settings import get_settings
-# DummyDataProvider removed - system requires real data providers
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
+from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
 from pearlalgo.data_providers.buffer_manager import BufferManager
-# WebSocket provider removed - system uses Massive REST API only
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +38,7 @@ class MarketDataAgent:
     Market Data Agent for LangGraph workflow.
 
     Fetches and streams real-time market data for all configured symbols.
-    Uses WebSocket when available, falls back to REST APIs.
+    Uses IBKR Gateway for live data.
     """
 
     def __init__(
@@ -53,8 +51,7 @@ class MarketDataAgent:
         self.config = config or {}
 
         # Initialize data providers
-        self.massive_provider: Optional[MassiveDataProvider] = None
-        # Dummy provider removed - system requires real data
+        self.ibkr_provider: Optional[IBKRDataProvider] = None
 
         # Data buffers (for caching normalized data)
         self.data_buffers: Dict[str, List[MarketData]] = {symbol: [] for symbol in symbols}
@@ -62,38 +59,25 @@ class MarketDataAgent:
         # Historical data buffer manager
         self.buffer_manager = buffer_manager
 
-        # Initialize Massive provider
+        # Initialize IBKR provider
         self._initialize_providers()
 
         logger.info(f"MarketDataAgent initialized: symbols={symbols}")
 
     def _initialize_providers(self) -> None:
-        """Initialize Massive data provider."""
+        """Initialize IBKR data provider."""
         try:
-            import os
+            from pearlalgo.config.settings import get_settings
             
-            # Initialize Massive provider (primary data source)
-            # Try to get API key from config or environment
-            massive_api_key = (
-                self.config.get("data", {})
-                .get("fallback", {})
-                .get("massive", {})
-                .get("api_key")
-            )
-            if not massive_api_key:
-                # Try environment variable
-                massive_api_key = os.getenv("MASSIVE_API_KEY")
+            settings = get_settings()
             
-            if massive_api_key:
-                try:
-                    self.massive_provider = MassiveDataProvider(api_key=massive_api_key)
-                    logger.info("Massive.com provider initialized")
-                except Exception as e:
-                    logger.warning(f"Massive provider initialization failed: {e}")
-            else:
-                logger.warning("Massive API key not found - Massive provider disabled. Set MASSIVE_API_KEY environment variable.")
-
-            # Dummy provider removed - system will fail explicitly if data providers are unavailable
+            # Initialize IBKR provider (primary data source)
+            try:
+                self.ibkr_provider = IBKRDataProvider(settings=settings)
+                logger.info("IBKR provider initialized")
+            except Exception as e:
+                logger.warning(f"IBKR provider initialization failed: {e}")
+                logger.warning("Ensure IB Gateway/TWS is running with API enabled")
 
         except Exception as e:
             logger.error(f"Error initializing providers: {e}", exc_info=True)
@@ -148,13 +132,12 @@ class MarketDataAgent:
                         data={"symbol": symbol, "price": market_data.close, "volume": market_data.volume},
                     )
                 else:
-                    # No data returned - likely Massive free tier limitation
+                    # No data returned - likely IB Gateway connection issue
                     logger.warning(
                         f"No market data available for {symbol}. "
-                        f"⚠️  Massive.com FREE TIER may not include futures data. "
-                        f"Your API key is valid but futures may require a paid subscription. "
+                        f"⚠️  IB Gateway may not be connected or market data subscription may be required. "
                         f"Service will continue but cannot generate signals without market data. "
-                        f"See: https://massive.com/pricing for subscription options."
+                        f"Ensure IB Gateway/TWS is running with API enabled."
                     )
                     state = add_agent_reasoning(
                         state,
@@ -180,12 +163,12 @@ class MarketDataAgent:
 
         logger.info(f"MarketDataAgent: Updated {len(state.market_data)} symbols")
 
-        # Cleanup: Close Massive provider session if it exists
-        if self.massive_provider:
+        # Cleanup: Close IBKR provider session if it exists
+        if self.ibkr_provider:
             try:
-                await self.massive_provider.close()
+                await self.ibkr_provider.close()
             except Exception as e:
-                error_msg = f"Error closing Massive provider: {e}"
+                error_msg = f"Error closing IBKR provider: {e}"
                 logger.warning(error_msg, exc_info=True)
                 # Don't add to state.errors as this is cleanup, not critical
 
@@ -193,35 +176,35 @@ class MarketDataAgent:
 
     async def _fetch_symbol_data(self, symbol: str) -> Optional[MarketData]:
         """
-        Fetch data for a single symbol from Massive provider.
+        Fetch data for a single symbol from IBKR provider.
         
         Raises:
-            RuntimeError: If Massive provider fails or is unavailable
+            RuntimeError: If IBKR provider fails or is unavailable
         """
-        if not self.massive_provider:
+        if not self.ibkr_provider:
             raise RuntimeError(
-                f"Cannot fetch data for {symbol}: Massive provider is not initialized. "
-                f"Please check your MASSIVE_API_KEY configuration."
+                f"Cannot fetch data for {symbol}: IBKR provider is not initialized. "
+                f"Please check your IB Gateway connection settings."
             )
         
         try:
-            data = await self.massive_provider.get_latest_bar(symbol)
+            data = await self.ibkr_provider.get_latest_bar(symbol)
             if data:
-                logger.debug(f"Successfully fetched Massive data for {symbol}")
+                logger.debug(f"Successfully fetched IBKR data for {symbol}")
                 return self._convert_to_market_data(symbol, data)
             else:
-                # No data returned - could be market closed, contract expired, or free tier limitation
+                # No data returned - could be market closed, contract expired, or connection issue
                 logger.warning(
-                    f"Massive provider returned no data for {symbol}. "
-                    f"This may indicate: market is closed, contract expired, or free tier limitations. "
+                    f"IBKR provider returned no data for {symbol}. "
+                    f"This may indicate: market is closed, contract expired, or IB Gateway connection issue. "
                     f"Service will continue but cannot generate signals without market data."
                 )
                 # Don't raise error - let the service continue, it will just skip this symbol
                 return None
         except Exception as e:
             error_msg = (
-                f"Failed to fetch data for {symbol} from Massive provider: {e}. "
-                f"Please check your MASSIVE_API_KEY and network connection."
+                f"Failed to fetch data for {symbol} from IBKR provider: {e}. "
+                f"Please check your IB Gateway connection and ensure it's running with API enabled."
             )
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
@@ -286,7 +269,7 @@ class MarketDataAgent:
             metadata=data.get("metadata", {}),
         )
 
-    # WebSocket methods removed - system uses Massive REST API only
+    # WebSocket methods removed - system uses IBKR Gateway API only
 
     def get_latest_data(self, symbol: str) -> Optional[MarketData]:
         """

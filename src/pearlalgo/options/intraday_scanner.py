@@ -44,7 +44,7 @@ class OptionsIntradayScanner:
         config: Optional[Dict] = None,
         data_feed_manager: Optional[DataFeedManager] = None,
         buffer_manager: Optional[BufferManager] = None,
-        data_provider=None,  # MassiveDataProvider
+        data_provider=None,  # IBKRDataProvider
     ):
         """
         Initialize options intraday scanner.
@@ -127,15 +127,27 @@ class OptionsIntradayScanner:
 
             for symbol in self.symbols:
                 try:
-                    # Fetch latest stock price
-                    latest_bar = await self.data_provider.get_latest_bar(symbol)
+                    # Add small delay between symbols to avoid rate limit bursts
+                    if symbol != self.symbols[0]:
+                        await asyncio.sleep(1.0)  # 1 second delay between symbols
+                    
+                    # Fetch latest stock price with retry
+                    latest_bar = None
+                    for retry in range(3):
+                        latest_bar = await self.data_provider.get_latest_bar(symbol)
+                        if latest_bar and latest_bar.get("close", 0) > 0:
+                            break
+                        if retry < 2:
+                            logger.debug(f"Retrying price fetch for {symbol} (attempt {retry + 1}/3)")
+                            await asyncio.sleep(2.0 * (retry + 1))  # Exponential backoff
+                    
                     if not latest_bar:
-                        logger.warning(f"No price data for {symbol}")
+                        logger.warning(f"No price data for {symbol} after retries")
                         continue
 
                     underlying_price = latest_bar.get("close", 0)
                     if underlying_price <= 0:
-                        logger.warning(f"Invalid price for {symbol}: {underlying_price}")
+                        logger.warning(f"Invalid price for {symbol}: {underlying_price} (skipping)")
                         continue
 
                     # Fetch options chain filtered for intraday (0-7 DTE)

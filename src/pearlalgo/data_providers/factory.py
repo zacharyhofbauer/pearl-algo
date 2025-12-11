@@ -14,16 +14,16 @@ from typing import Dict, Optional, Type
 from pearlalgo.config.settings import Settings, get_settings
 
 from .base import DataProvider
+from .ibkr_data_provider import IBKRDataProvider
 from .local_csv_provider import LocalCSVProvider
 from .local_parquet_provider import LocalParquetProvider
-from .massive_provider import MassiveDataProvider
 from .tradier_provider import TradierDataProvider
 
 logger = logging.getLogger(__name__)
 
 # Registry of available providers
 _PROVIDER_REGISTRY: Dict[str, Type[DataProvider]] = {
-    "massive": MassiveDataProvider,
+    "ibkr": IBKRDataProvider,
     "tradier": TradierDataProvider,
     "local_csv": LocalCSVProvider,
     "local_parquet": LocalParquetProvider,
@@ -39,7 +39,7 @@ def create_data_provider(
     Create a data provider instance.
 
     Args:
-        provider_name: Name of provider ('massive', 'tradier', 'local_csv', 'local_parquet')
+        provider_name: Name of provider ('ibkr', 'tradier', 'local_csv', 'local_parquet')
         settings: Settings instance (optional, will use get_settings() if not provided)
         **kwargs: Additional provider-specific arguments
 
@@ -60,17 +60,14 @@ def create_data_provider(
     provider_class = _PROVIDER_REGISTRY[provider_name]
 
     try:
-        if provider_name == "massive":
-            api_key = (
-                kwargs.pop("api_key", None) 
-                or os.getenv("MASSIVE_API_KEY") 
-                or settings.data_api_key
+        if provider_name == "ibkr":
+            # IBKR provider uses settings for connection info
+            return provider_class(
+                settings=settings,
+                host=kwargs.pop("host", None),
+                port=kwargs.pop("port", None),
+                client_id=kwargs.pop("client_id", None),
             )
-            if not api_key:
-                raise ValueError(
-                    "Massive API key required. Set MASSIVE_API_KEY env var or pass api_key."
-                )
-            return provider_class(api_key=api_key, **kwargs)
 
         elif provider_name == "tradier":
             api_key = kwargs.get("api_key") or settings.data_api_key

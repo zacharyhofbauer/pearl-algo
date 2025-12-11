@@ -37,7 +37,7 @@ class OptionsSwingScanner:
         universe: EquityUniverse,
         strategy: str = "swing_momentum",
         config: Optional[Dict] = None,
-        data_provider=None,  # MassiveDataProvider
+        data_provider=None,  # IBKRDataProvider
         buffer_manager=None,  # BufferManager for historical data
     ):
         """

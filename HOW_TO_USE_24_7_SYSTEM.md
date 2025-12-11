@@ -10,22 +10,20 @@ First, make sure everything is configured:
 cd ~/pearlalgo-dev-ai-agents
 source .venv/bin/activate
 
-# Check environment variables (VERIFY MASSIVE_API_KEY is set!)
+# Check environment variables (VERIFY IBKR settings are configured!)
 python scripts/debug_env.py
 
-# Verify Massive API key works
+# Verify IBKR Gateway connection
 python3 -c "
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
-import os
-api_key = os.getenv('MASSIVE_API_KEY')
-if not api_key:
-    print('❌ MASSIVE_API_KEY not set!')
-    exit(1)
+from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+from pearlalgo.config.settings import get_settings
 try:
-    provider = MassiveDataProvider(api_key=api_key)
-    print('✅ Massive provider initialized successfully')
+    settings = get_settings()
+    provider = IBKRDataProvider(settings=settings)
+    print('✅ IBKR provider initialized successfully')
+    print('⚠️  Note: Connection will be established on first data request')
 except Exception as e:
-    print(f'❌ Massive provider failed: {e}')
+    print(f'❌ IBKR provider failed: {e}')
     exit(1)
 "
 
@@ -34,12 +32,14 @@ python scripts/test_telegram.py
 ```
 
 **Required Environment Variables:**
-- `MASSIVE_API_KEY` - **REQUIRED** - For market data (service will fail without it)
+- `IBKR_HOST` - IB Gateway host (default: 127.0.0.1)
+- `IBKR_PORT` - IB Gateway port (default: 4002 for paper, 7497 for live)
+- `IBKR_DATA_CLIENT_ID` - Client ID for data connections (default: 11)
 - `TELEGRAM_BOT_TOKEN` - For alerts (required)
 - `TELEGRAM_CHAT_ID` - For alerts (required)
 - `GROQ_API_KEY` - Optional, for LLM reasoning
 
-**⚠️ Important:** The system now focuses exclusively on equity options (QQQ, SPY). Futures trading has been disabled while Massive's futures API is unavailable.
+**⚠️ Important:** The system uses IBKR Gateway for live data. Ensure IB Gateway/TWS is running with API enabled before starting the service.
 
 ### 2. Configure the System
 
@@ -79,15 +79,15 @@ python -m pearlalgo.monitoring.continuous_service \
 ```
 
 **What happens:**
-1. Service validates MASSIVE_API_KEY (will fail if missing/invalid)
-2. Service initializes Massive data provider
+1. Service validates IBKR Gateway connection settings
+2. Service initializes IBKR data provider
 3. Service initializes worker pool
 4. Starts options swing worker (scans QQQ/SPY every 15 minutes)
 5. Starts options intraday worker (scans QQQ/SPY every 60 seconds)
 6. Starts health check server on port 8080
 7. Begins continuous scanning
 
-**⚠️ If you see errors about missing API key or unauthorized access, the service will stop. Fix your MASSIVE_API_KEY and restart.**
+**⚠️ If you see errors about IB Gateway connection, ensure IB Gateway/TWS is running with API enabled.**
 
 #### Option B: Systemd Service (Production)
 
@@ -326,24 +326,23 @@ exit_signals = generator.generate_exit_signals(state)
 
 **Common Causes:**
 
-1. **Missing or Invalid MASSIVE_API_KEY:**
+1. **Missing or Invalid IBKR Gateway Connection:**
    ```bash
-   # Check if API key is set
-   echo $MASSIVE_API_KEY
+   # Check if IBKR settings are configured
+   echo $IBKR_HOST
+   echo $IBKR_PORT
+   echo $IBKR_DATA_CLIENT_ID
    
-   # Test Massive API key
+   # Test IBKR connection
    python3 -c "
-   from pearlalgo.data_providers.massive_provider import MassiveDataProvider
-   import os
-   api_key = os.getenv('MASSIVE_API_KEY')
-   if not api_key:
-       print('❌ MASSIVE_API_KEY not set in environment')
-   else:
-       try:
-           provider = MassiveDataProvider(api_key=api_key)
-           print('✅ API key is valid')
-       except Exception as e:
-           print(f'❌ API key invalid: {e}')
+   from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+   from pearlalgo.config.settings import get_settings
+   settings = get_settings()
+   try:
+       provider = IBKRDataProvider(settings=settings)
+       print('✅ IBKR provider initialized')
+   except Exception as e:
+       print(f'❌ IBKR connection failed: {e}')
    "
    ```
 
@@ -367,24 +366,24 @@ exit_signals = generator.generate_exit_signals(state)
    # Check logs for specific errors
    tail -50 logs/continuous_service.log
    
-   # Look for Massive API errors
-   grep -i "massive\|api key\|unauthorized" logs/continuous_service.log | tail -20
+   # Look for IBKR connection errors
+   grep -i "ibkr\|ib gateway\|connection" logs/continuous_service.log | tail -20
    ```
 
 **Error Messages to Watch For:**
-- `"MASSIVE_API_KEY is required"` - API key not set
-- `"Cannot initialize Massive data provider"` - API key invalid or network issue
-- `"Massive API unauthorized"` - API key expired or invalid
+- `"IBKR Gateway connection failed"` - IB Gateway not running or API not enabled
+- `"Cannot initialize IBKR data provider"` - Connection settings invalid
+- `"IB Gateway unauthorized"` - API access not enabled in IB Gateway/TWS
 
 #### No Signals Generated
 
 1. **Check data provider status:**
    ```bash
-   # Check if Massive provider is working
+   # Check if IBKR provider is working
    curl http://localhost:8080/healthz | jq '.components.data_provider'
    
    # Look for data provider errors in logs
-   grep -i "data provider\|massive\|polygon\|fetch" logs/continuous_service.log | tail -20
+   grep -i "data provider\|ibkr\|ib gateway\|fetch" logs/continuous_service.log | tail -20
    ```
 
 2. **Check market hours:**
@@ -393,23 +392,23 @@ exit_signals = generator.generate_exit_signals(state)
    print(is_market_open())
    ```
 
-3. **Verify Massive API is returning data:**
+3. **Verify IBKR Gateway is returning data:**
    ```python
-   from pearlalgo.data_providers.massive_provider import MassiveDataProvider
-   import os
+   from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+   from pearlalgo.config.settings import get_settings
    import asyncio
    
-   async def test_massive():
-       api_key = os.getenv('MASSIVE_API_KEY')
-       provider = MassiveDataProvider(api_key=api_key)
-       data = await provider.get_latest_bar('ES')
+   async def test_ibkr():
+       settings = get_settings()
+       provider = IBKRDataProvider(settings=settings)
+       data = await provider.get_latest_bar('SPY')
        if data:
-           print(f"✅ Got data for ES: ${data['close']:.2f}")
+           print(f"✅ Got data for SPY: ${data['close']:.2f}")
        else:
            print("❌ No data returned")
        await provider.close()
    
-   asyncio.run(test_massive())
+   asyncio.run(test_ibkr())
    ```
 
 4. **Check strategy parameters:**
@@ -583,23 +582,26 @@ sudo systemctl disable pearlalgo-continuous-service.service
 # 1. Verify environment setup
 source .venv/bin/activate
 
-# 2. Verify MASSIVE_API_KEY is set and valid
-echo "Checking MASSIVE_API_KEY..."
-if [ -z "$MASSIVE_API_KEY" ]; then
-    echo "❌ MASSIVE_API_KEY not set! Add it to .env file"
-    exit 1
+# 2. Verify IBKR Gateway settings are configured
+echo "Checking IBKR settings..."
+if [ -z "$IBKR_HOST" ]; then
+    echo "⚠️  IBKR_HOST not set, using default: 127.0.0.1"
+fi
+if [ -z "$IBKR_PORT" ]; then
+    echo "⚠️  IBKR_PORT not set, using default: 4002"
 fi
 
-# Test Massive API key
+# Test IBKR connection
 python3 -c "
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
-import os
-api_key = os.getenv('MASSIVE_API_KEY')
+from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+from pearlalgo.config.settings import get_settings
 try:
-    provider = MassiveDataProvider(api_key=api_key)
-    print('✅ Massive API key is valid')
+    settings = get_settings()
+    provider = IBKRDataProvider(settings=settings)
+    print('✅ IBKR provider initialized')
+    print('⚠️  Ensure IB Gateway/TWS is running with API enabled')
 except Exception as e:
-    print(f'❌ Massive API key invalid: {e}')
+    print(f'❌ IBKR connection failed: {e}')
     exit(1)
 "
 
@@ -653,8 +655,8 @@ tail -f logs/continuous_service.log | grep "signal"
 source .venv/bin/activate
 python scripts/debug_env.py
 
-# Test Massive API key
-python3 -c "from pearlalgo.data_providers.massive_provider import MassiveDataProvider; import os; api_key = os.getenv('MASSIVE_API_KEY'); MassiveDataProvider(api_key=api_key)"
+# Test IBKR connection
+python3 -c "from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider; from pearlalgo.config.settings import get_settings; settings = get_settings(); IBKRDataProvider(settings=settings)"
 
 # Quick test
 python3 quick_test.py
@@ -727,19 +729,19 @@ pytest tests/ --cov=src/pearlalgo --cov-report=html
 ### Test Data Provider
 
 ```bash
-# Test Massive provider directly
+# Test IBKR provider directly
 python3 << 'EOF'
 import asyncio
-import os
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
+from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+from pearlalgo.config.settings import get_settings
 
 async def test():
-    api_key = os.getenv('MASSIVE_API_KEY')
-    if not api_key:
-        print("❌ MASSIVE_API_KEY not set")
+    settings = get_settings()
+    if not settings:
+        print("❌ Settings not available")
         return
     
-    provider = MassiveDataProvider(api_key=api_key)
+    provider = IBKRDataProvider(settings=settings)
     try:
         # Test fetching data for ES (will auto-resolve to active contract)
         data = await provider.get_latest_bar('ES')

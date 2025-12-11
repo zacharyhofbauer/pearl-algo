@@ -20,7 +20,6 @@ dependencies = [
     "langchain>=0.3.0",
     "langchain-core>=0.3.0",
     "ccxt>=4.0.0",
-    "massive>=1.0.0",
     "vectorbt>=0.25.0",
     "streamlit>=1.28.0",
     "python-telegram-bot>=20.0",

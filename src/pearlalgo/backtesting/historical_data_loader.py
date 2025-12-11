@@ -1,7 +1,7 @@
 """
 Historical Futures Data Loader
 
-Loads historical ES/NQ data from Massive API for backtesting purposes.
+Loads historical ES/NQ data from IBKR Gateway for backtesting purposes.
 Handles contract rolls and timestamp alignment.
 """
 
@@ -23,7 +23,7 @@ except ImportError:
 
 class HistoricalFuturesDataLoader:
     """
-    Loader for historical ES/NQ futures data from Massive API.
+    Loader for historical ES/NQ futures data from IBKR Gateway.
     
     Features:
     - Loads historical bars for ES and NQ
@@ -35,14 +35,14 @@ class HistoricalFuturesDataLoader:
     
     def __init__(
         self,
-        data_provider,  # MassiveDataProvider
+        data_provider,  # IBKRDataProvider
         cache_dir: str = "data/backtesting",
     ):
         """
         Initialize historical data loader.
         
         Args:
-            data_provider: MassiveDataProvider instance
+            data_provider: IBKRDataProvider instance
             cache_dir: Directory for caching historical data
         """
         self.data_provider = data_provider
@@ -81,7 +81,7 @@ class HistoricalFuturesDataLoader:
             except Exception as e:
                 logger.warning(f"Error loading cache, fetching fresh data: {e}")
         
-        # Fetch from Massive API
+        # Fetch from IBKR Gateway
         df = self.data_provider.fetch_historical(
             symbol="ES",
             start=start_date,
@@ -138,7 +138,7 @@ class HistoricalFuturesDataLoader:
             except Exception as e:
                 logger.warning(f"Error loading cache, fetching fresh data: {e}")
         
-        # Fetch from Massive API
+        # Fetch from IBKR Gateway
         df = self.data_provider.fetch_historical(
             symbol="NQ",
             start=start_date,

@@ -7,14 +7,14 @@ from pearlalgo.data_providers.factory import (
     list_available_providers,
     register_provider,
 )
+from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
 from pearlalgo.data_providers.local_csv_provider import LocalCSVProvider
 from pearlalgo.data_providers.local_parquet_provider import LocalParquetProvider
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
 from pearlalgo.data_providers.tradier_provider import TradierDataProvider
 
 __all__ = [
     "DataProvider",
-    "MassiveDataProvider",
+    "IBKRDataProvider",
     "TradierDataProvider",
     "LocalCSVProvider",
     "LocalParquetProvider",
