@@ -494,6 +494,9 @@ class IBKRDataProvider(DataProvider):
                             except Exception as e:
                                 logger.debug(f"Error fetching data for option {option}: {e}")
                                 continue
+                except Exception as e:
+                    logger.debug(f"Error parsing expiration {expiration_str}: {e}")
+                    continue
                                 
             logger.info(f"Retrieved {len(all_options)} options for {underlying_symbol}")
             return all_options
