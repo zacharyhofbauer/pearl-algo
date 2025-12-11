@@ -323,15 +323,47 @@ class ContinuousService:
         try:
             from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
             from pearlalgo.config.settings import get_settings
+            import os
 
             # Get IBKR settings from config or environment
             settings = get_settings()
             
             # Get IBKR connection settings from config if available
             ibkr_config = self.config.get("data", {}).get("fallback", {}).get("ibkr", {})
-            host = ibkr_config.get("host") or settings.ib_host
-            port = ibkr_config.get("port") or settings.ib_port
-            client_id = ibkr_config.get("client_id") or settings.ib_data_client_id or settings.ib_client_id
+            
+            # Expand template variables like ${IBKR_HOST:-127.0.0.1}
+            def expand_template(value):
+                """Expand template variables like ${VAR:-default}"""
+                if not isinstance(value, str) or not value.startswith("${"):
+                    return value
+                
+                # Remove ${ and }
+                var_expr = value[2:-1]
+                
+                # Handle ${VAR:-default} format
+                if ":-" in var_expr:
+                    var_name, default = var_expr.split(":-", 1)
+                    return os.getenv(var_name, default)
+                else:
+                    # Just ${VAR}
+                    return os.getenv(var_expr, "")
+            
+            host = expand_template(ibkr_config.get("host")) if ibkr_config.get("host") else settings.ib_host
+            port_str = expand_template(ibkr_config.get("port")) if ibkr_config.get("port") else str(settings.ib_port)
+            client_id_str = expand_template(ibkr_config.get("client_id")) if ibkr_config.get("client_id") else str(settings.ib_data_client_id or settings.ib_client_id)
+            
+            # Convert to proper types
+            try:
+                port = int(port_str) if port_str else settings.ib_port
+            except (ValueError, TypeError):
+                port = settings.ib_port
+                logger.warning(f"Invalid port value '{port_str}', using default: {port}")
+            
+            try:
+                client_id = int(client_id_str) if client_id_str else (settings.ib_data_client_id or settings.ib_client_id)
+            except (ValueError, TypeError):
+                client_id = settings.ib_data_client_id or settings.ib_client_id
+                logger.warning(f"Invalid client_id value '{client_id_str}', using default: {client_id}")
 
             logger.info(
                 f"Initializing IBKR data provider: host={host}, port={port}, client_id={client_id}"
