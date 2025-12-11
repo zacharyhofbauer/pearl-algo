@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import threading
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
@@ -70,6 +71,8 @@ class IBKRDataProvider(DataProvider):
         self.ib: Optional[IB] = None
         self._connected = False
         self._connection_lock = asyncio.Lock()
+        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop_thread: Optional[threading.Thread] = None
         
         # Rate limiting
         self._last_request_time: float = 0.0
@@ -78,6 +81,9 @@ class IBKRDataProvider(DataProvider):
         logger.info(
             f"IBKRDataProvider initialized: host={self.host}, port={self.port}, client_id={self.client_id}"
         )
+        
+        # Start event loop in background thread for thread-safe operations
+        self._start_event_loop()
 
     async def _ensure_connected(self) -> None:
         """Ensure IB connection is established."""
@@ -91,12 +97,26 @@ class IBKRDataProvider(DataProvider):
             try:
                 if not self.ib.isConnected():
                     logger.info(f"Connecting to IB Gateway at {self.host}:{self.port}")
-                    await self.ib.connectAsync(
-                        self.host,
-                        self.port,
-                        clientId=self.client_id,
-                        timeout=10
-                    )
+                    # ib_insync connectAsync needs to run in proper async context
+                    # Use sync connect in thread if needed
+                    try:
+                        await self.ib.connectAsync(
+                            self.host,
+                            self.port,
+                            clientId=self.client_id,
+                            timeout=10
+                        )
+                    except RuntimeError as e:
+                        if "no current event loop" in str(e).lower():
+                            # Fallback: use sync connect in thread
+                            await asyncio.to_thread(
+                                self.ib.connect,
+                                self.host,
+                                self.port,
+                                clientId=self.client_id
+                            )
+                        else:
+                            raise
                     self._connected = True
                     logger.info("Connected to IB Gateway successfully")
             except Exception as e:
@@ -106,6 +126,31 @@ class IBKRDataProvider(DataProvider):
                     f"Cannot connect to IB Gateway at {self.host}:{self.port}. "
                     f"Ensure IB Gateway/TWS is running with API enabled. Error: {e}"
                 ) from e
+
+    def _start_event_loop(self) -> None:
+        """Start a dedicated event loop in a background thread for thread-safe operations."""
+        def run_loop():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._main_loop = loop
+            loop.run_forever()
+        
+        self._loop_thread = threading.Thread(target=run_loop, daemon=True)
+        self._loop_thread.start()
+        # Wait a moment for loop to start
+        time.sleep(0.1)
+    
+    def _run_in_loop(self, coro):
+        """Run a coroutine in the dedicated event loop thread."""
+        if self._main_loop is None:
+            # Fallback to current loop if main loop not ready
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            return asyncio.run_coroutine_threadsafe(coro, loop).result()
+        return asyncio.run_coroutine_threadsafe(coro, self._main_loop).result()
 
     async def _rate_limit(self) -> None:
         """Enforce rate limiting."""
@@ -247,16 +292,33 @@ class IBKRDataProvider(DataProvider):
             else:
                 contract = self._create_stock_contract(symbol)
             
-            # Request historical data
-            bars = await self.ib.reqHistoricalDataAsync(
-                contract,
-                endDateTime=end,
-                durationStr=duration_str,
-                barSizeSetting=bar_size,
-                whatToShow="TRADES",
-                useRTH=False,
-                formatDate=1,
-            )
+            # Request historical data (ib_insync sync methods, run in executor)
+            if self._main_loop:
+                future = asyncio.run_coroutine_threadsafe(
+                    asyncio.to_thread(
+                        self.ib.reqHistoricalData,
+                        contract,
+                        endDateTime=end,
+                        durationStr=duration_str,
+                        barSizeSetting=bar_size,
+                        whatToShow="TRADES",
+                        useRTH=False,
+                        formatDate=1,
+                    ),
+                    self._main_loop
+                )
+                bars = await asyncio.wrap_future(future)
+            else:
+                bars = await asyncio.to_thread(
+                    self.ib.reqHistoricalData,
+                    contract,
+                    endDateTime=end,
+                    durationStr=duration_str,
+                    barSizeSetting=bar_size,
+                    whatToShow="TRADES",
+                    useRTH=False,
+                    formatDate=1,
+                )
             
             if not bars:
                 logger.warning(f"No historical data returned for {symbol}")
@@ -325,8 +387,17 @@ class IBKRDataProvider(DataProvider):
             else:
                 contract = self._create_stock_contract(symbol)
             
-            # Request market data
-            ticker = await self.ib.reqMktDataAsync(contract, "", False, False)
+            # Request market data (ib_insync sync methods are thread-safe)
+            # Use the background event loop for thread-safe execution
+            if self._main_loop:
+                future = asyncio.run_coroutine_threadsafe(
+                    asyncio.to_thread(self.ib.reqMktData, contract, "", False, False),
+                    self._main_loop
+                )
+                ticker = await asyncio.wrap_future(future)
+            else:
+                # Fallback: use to_thread directly (requires running loop)
+                ticker = await asyncio.to_thread(self.ib.reqMktData, contract, "", False, False)
             
             # Wait a moment for data to arrive
             await asyncio.sleep(0.5)
@@ -400,15 +471,27 @@ class IBKRDataProvider(DataProvider):
             # Create stock contract for underlying
             stock = self._create_stock_contract(underlying_symbol)
             
-            # Request option chains
-            # IB requires us to request chains for specific expirations
-            # First, get available expirations
-            chains = await self.ib.reqSecDefOptParamsAsync(
-                stock.symbol,
-                "",
-                stock.secType,
-                stock.conId
-            )
+            # Request option chains (ib_insync sync methods, run in executor)
+            if self._main_loop:
+                future = asyncio.run_coroutine_threadsafe(
+                    asyncio.to_thread(
+                        self.ib.reqSecDefOptParams,
+                        stock.symbol,
+                        "",
+                        stock.secType,
+                        stock.conId
+                    ),
+                    self._main_loop
+                )
+                chains = await asyncio.wrap_future(future)
+            else:
+                chains = await asyncio.to_thread(
+                    self.ib.reqSecDefOptParams,
+                    stock.symbol,
+                    "",
+                    stock.secType,
+                    stock.conId
+                )
             
             if not chains:
                 logger.warning(f"No option chains found for {underlying_symbol}")
@@ -457,9 +540,20 @@ class IBKRDataProvider(DataProvider):
                             )
                             
                             try:
-                                # Request market data for this option
+                                # Request market data for this option (sync method in executor)
                                 await self._rate_limit()
-                                ticker = await self.ib.reqMktDataAsync(option, "", False, False)
+                                if self._main_loop:
+                                    future = asyncio.run_coroutine_threadsafe(
+                                        asyncio.to_thread(
+                                            self.ib.reqMktData, option, "", False, False
+                                        ),
+                                        self._main_loop
+                                    )
+                                    ticker = await asyncio.wrap_future(future)
+                                else:
+                                    ticker = await asyncio.to_thread(
+                                        self.ib.reqMktData, option, "", False, False
+                                    )
                                 await asyncio.sleep(0.1)  # Brief wait for data
                                 
                                 # Get option data

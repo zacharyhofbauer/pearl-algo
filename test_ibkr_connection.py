@@ -25,7 +25,8 @@ async def main():
         print(f"   Connection status: {ib.isConnected()}")
         
         # Try a simple request
-        contract = ib.Stock('SPY', 'SMART', 'USD')
+        from ib_insync import Stock
+        contract = Stock('SPY', 'SMART', 'USD')
         contracts = await ib.reqContractDetailsAsync(contract)
         if contracts:
             print(f"✅ Data access working! Found contract for SPY")
