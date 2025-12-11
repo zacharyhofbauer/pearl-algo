@@ -354,61 +354,61 @@ class MassiveDataProvider(DataProvider):
             await self._rate_limit()
             
             # Get latest stock aggregates using get_previous_close_agg or list_aggs
-                try:
-                    # Try get_previous_close_agg first (simpler for latest, sync call)
-                    loop = asyncio.get_event_loop()
-                    bar = await loop.run_in_executor(
-                        None,
-                        lambda: self.client.get_previous_close_agg(ticker=symbol)
+            try:
+                # Try get_previous_close_agg first (simpler for latest, sync call)
+                loop = asyncio.get_event_loop()
+                bar = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.get_previous_close_agg(ticker=symbol)
+                )
+                if bar:
+                    price = getattr(bar, 'close', 0) or getattr(bar, 'c', 0)
+                    timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
+                    return {
+                        "timestamp": datetime.fromtimestamp(
+                            timestamp_ms / 1000, tz=timezone.utc
+                        ),
+                        "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
+                        "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
+                        "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
+                        "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
+                        "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
+                        "vwap": getattr(bar, 'vwap', None) or getattr(bar, 'vw', None),
+                    }
+            except Exception as e:
+                logger.debug(f"get_previous_close_agg failed for {symbol}, trying list_aggs: {e}")
+                # Fallback to list_aggs (sync call)
+                bars = []
+                loop = asyncio.get_event_loop()
+                bars_iter = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.list_aggs(
+                        ticker=symbol,
+                        multiplier=1,
+                        timespan="minute",
+                        from_=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                        to=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                        limit=1
                     )
-                    if bar:
-                        price = getattr(bar, 'close', 0) or getattr(bar, 'c', 0)
-                        timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
-                        return {
-                            "timestamp": datetime.fromtimestamp(
-                                timestamp_ms / 1000, tz=timezone.utc
-                            ),
-                            "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
-                            "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
-                            "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
-                            "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
-                            "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
-                            "vwap": getattr(bar, 'vwap', None) or getattr(bar, 'vw', None),
-                        }
-                except Exception as e:
-                    logger.debug(f"get_previous_close_agg failed for {symbol}, trying list_aggs: {e}")
-                    # Fallback to list_aggs (sync call)
-                    bars = []
-                    loop = asyncio.get_event_loop()
-                    bars_iter = await loop.run_in_executor(
-                        None,
-                        lambda: self.client.list_aggs(
-                            ticker=symbol,
-                            multiplier=1,
-                            timespan="minute",
-                            from_=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                            to=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                            limit=1
-                        )
-                    )
-                    for bar in bars_iter:
-                        bars.append(bar)
-                        break
-                    
-                    if bars:
-                        bar = bars[0]
-                        timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
-                        return {
-                            "timestamp": datetime.fromtimestamp(
-                                timestamp_ms / 1000, tz=timezone.utc
-                            ),
-                            "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
-                            "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
-                            "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
-                            "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
-                            "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
-                            "vwap": getattr(bar, 'vwap', None) or getattr(bar, 'vw', None),
-                        }
+                )
+                for bar in bars_iter:
+                    bars.append(bar)
+                    break
+                
+                if bars:
+                    bar = bars[0]
+                    timestamp_ms = getattr(bar, 'timestamp', None) or getattr(bar, 't', 0)
+                    return {
+                        "timestamp": datetime.fromtimestamp(
+                            timestamp_ms / 1000, tz=timezone.utc
+                        ),
+                        "open": getattr(bar, 'open', 0) or getattr(bar, 'o', 0),
+                        "high": getattr(bar, 'high', 0) or getattr(bar, 'h', 0),
+                        "low": getattr(bar, 'low', 0) or getattr(bar, 'l', 0),
+                        "close": getattr(bar, 'close', 0) or getattr(bar, 'c', 0),
+                        "volume": getattr(bar, 'volume', 0) or getattr(bar, 'v', 0),
+                        "vwap": getattr(bar, 'vwap', None) or getattr(bar, 'vw', None),
+                    }
             
             return None
 

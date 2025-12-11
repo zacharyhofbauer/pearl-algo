@@ -100,13 +100,15 @@ class ContinuousService:
             persistence_dir=Path("data/buffers"),
         )
 
-        # Options signal tracker (will be initialized when scanners are created)
-        self.options_signal_tracker = None
+        # Options signal tracker
+        from pearlalgo.options.signal_tracker import OptionsSignalTracker
+        self.options_signal_tracker = OptionsSignalTracker()
         
-        # Health checker (will be updated with scanner references)
+        # Health checker (will be updated with scanner references after workers start)
         self.health_checker = HealthChecker(
             worker_pool=self.worker_pool,
             data_feed_manager=self.data_feed_manager,
+            options_signal_tracker=self.options_signal_tracker,
         )
 
         # Health server task
@@ -399,12 +401,13 @@ class ContinuousService:
             interval: Scan interval in seconds
         """
         logger.info(
-            f"Options worker started: universe_size={len(universe)}, strategy={strategy}, "
+            f"Options swing worker started: universe_size={len(universe)}, strategy={strategy}, "
             f"interval={interval}s"
         )
 
         from pearlalgo.options.universe import EquityUniverse
         from pearlalgo.options.swing_scanner import OptionsSwingScanner
+        from pearlalgo.utils.telegram_alerts import TelegramAlerts
 
         # Initialize options universe
         options_universe = EquityUniverse(symbols=universe)
@@ -417,6 +420,9 @@ class ContinuousService:
             data_provider=self.data_feed_manager.data_provider if self.data_feed_manager else None,
             buffer_manager=self.buffer_manager,
         )
+        
+        # Update health checker with scanner reference
+        self.health_checker.options_swing_scanner = scanner
 
         while not self.shutdown_requested:
             try:
@@ -427,14 +433,55 @@ class ContinuousService:
                     continue
 
                 # Run options scan
-                logger.info(f"Running options scan for {len(universe)} symbols")
+                logger.info(f"Running options swing scan for {len(universe)} symbols")
                 results = await scanner.scan()
                 
                 if results.get("status") == "success":
                     signals = results.get("signals", [])
                     if signals:
-                        logger.info(f"Generated {len(signals)} options signals")
-                        # TODO: Send signals to Telegram and track in options signal tracker
+                        logger.info(f"Generated {len(signals)} options swing signals")
+                        
+                        # Process signals: track and send Telegram alerts
+                        for signal in signals:
+                            try:
+                                # Add to options signal tracker
+                                if signal.get("option_symbol") and signal.get("expiration"):
+                                    from datetime import datetime
+                                    expiration = datetime.fromisoformat(
+                                        signal["expiration"].replace("Z", "+00:00")
+                                    )
+                                    self.options_signal_tracker.add_signal(
+                                        underlying_symbol=signal.get("symbol"),
+                                        option_symbol=signal.get("option_symbol"),
+                                        strike=signal.get("strike", 0),
+                                        expiration=expiration,
+                                        option_type=signal.get("option_type", "call"),
+                                        direction=signal.get("side", "long"),
+                                        entry_premium=signal.get("entry_price", 0),
+                                        quantity=1,
+                                        strategy_name=signal.get("strategy_name", strategy),
+                                        reasoning=signal.get("reasoning"),
+                                    )
+                                
+                                # Send Telegram alert
+                                if self.telegram_alerts:
+                                    await self.telegram_alerts.notify_signal(
+                                        symbol=signal.get("symbol"),
+                                        side=signal.get("side", "long"),
+                                        price=signal.get("entry_price", 0),
+                                        strategy=signal.get("strategy_name", strategy),
+                                        confidence=signal.get("confidence"),
+                                        entry_price=signal.get("entry_price"),
+                                        option_symbol=signal.get("option_symbol"),
+                                        strike=signal.get("strike"),
+                                        expiration=signal.get("expiration"),
+                                        option_type=signal.get("option_type"),
+                                        underlying_price=signal.get("underlying_price"),
+                                        dte=signal.get("dte"),
+                                        reasoning=signal.get("reasoning"),
+                                    )
+                            except Exception as e:
+                                logger.error(f"Error processing signal: {e}", exc_info=True)
                 
                 self.cycle_count += 1
 
@@ -472,6 +519,9 @@ class ContinuousService:
             buffer_manager=self.buffer_manager,
             data_provider=self.data_feed_manager.data_provider if self.data_feed_manager else None,
         )
+        
+        # Update health checker with scanner reference
+        self.health_checker.options_intraday_scanner = scanner
 
         while not self.shutdown_requested:
             try:
@@ -489,7 +539,48 @@ class ContinuousService:
                     signals = results.get("signals", [])
                     if signals:
                         logger.info(f"Generated {len(signals)} intraday options signals")
-                        # TODO: Send signals to Telegram and track in options signal tracker
+                        
+                        # Process signals: track and send Telegram alerts
+                        for signal in signals:
+                            try:
+                                # Add to options signal tracker
+                                if signal.get("option_symbol") and signal.get("expiration"):
+                                    from datetime import datetime
+                                    expiration = datetime.fromisoformat(
+                                        signal["expiration"].replace("Z", "+00:00")
+                                    )
+                                    self.options_signal_tracker.add_signal(
+                                        underlying_symbol=signal.get("symbol"),
+                                        option_symbol=signal.get("option_symbol"),
+                                        strike=signal.get("strike", 0),
+                                        expiration=expiration,
+                                        option_type=signal.get("option_type", "call"),
+                                        direction=signal.get("side", "long"),
+                                        entry_premium=signal.get("entry_price", 0),
+                                        quantity=1,
+                                        strategy_name=signal.get("strategy_name", strategy),
+                                        reasoning=signal.get("reasoning"),
+                                    )
+                                
+                                # Send Telegram alert
+                                if self.telegram_alerts:
+                                    await self.telegram_alerts.notify_signal(
+                                        symbol=signal.get("symbol"),
+                                        side=signal.get("side", "long"),
+                                        price=signal.get("entry_price", 0),
+                                        strategy=signal.get("strategy_name", strategy),
+                                        confidence=signal.get("confidence"),
+                                        entry_price=signal.get("entry_price"),
+                                        option_symbol=signal.get("option_symbol"),
+                                        strike=signal.get("strike"),
+                                        expiration=signal.get("expiration"),
+                                        option_type=signal.get("option_type"),
+                                        underlying_price=signal.get("underlying_price"),
+                                        dte=signal.get("dte"),
+                                        reasoning=signal.get("reasoning"),
+                                    )
+                            except Exception as e:
+                                logger.error(f"Error processing signal: {e}", exc_info=True)
                 
                 self.cycle_count += 1
 
@@ -555,6 +646,9 @@ class ContinuousService:
                 strategy=strategy,
                 interval=interval,
             )
+        
+        # Update health checker with scanner references after workers are registered
+        # (scanners are created inside workers, so we'll update health checker dynamically)
 
         logger.info(f"Registered {len(self.worker_pool.workers)} workers")
 

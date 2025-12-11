@@ -189,11 +189,11 @@ class RiskManagerAgent:
         #     self.profile,
         #     day_start_equity=self.day_start_equity,
         #     realized_pnl=realized_pnl,
-            unrealized_pnl=unrealized_pnl,
-            trades_today=self.trades_today,
-            max_trades=self.profile.max_trades,
-            now=datetime.now(timezone.utc),
-        )
+        #     unrealized_pnl=unrealized_pnl,
+        #     trades_today=self.trades_today,
+        #     max_trades=self.profile.max_trades,
+        #     now=datetime.now(timezone.utc),
+        # )
 
         state.risk_state = risk_state
 
@@ -370,7 +370,6 @@ class RiskManagerAgent:
         current_equity: float,
         market_data_history: Optional[Dict[str, MarketData]] = None,
         is_options: bool = True,  # Changed from is_futures
-        is_options: bool = False,
         max_risk: float = None,
     ) -> int:
         """

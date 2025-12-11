@@ -5,8 +5,10 @@
 signal_generation:
   enabled: true
   interval_seconds: 300  # 5 minutes (adjust based on Massive rate limits)
-  symbols: ["ES", "NQ", "MES", "MNQ"]
-  strategy: "sr"
+  # Futures symbols removed - system now focuses on options trading
+  # Options underliers are configured in config.yaml and underliers.yaml
+  symbols: ["QQQ", "SPY"]  # Options underliers
+  strategy: "momentum"  # Options strategy
   
   # Signal deduplication
   deduplication:
