@@ -430,6 +430,12 @@ class MassiveDataProvider(DataProvider):
         """
         Get options chain for an underlying symbol with filtering.
 
+        Enhanced with:
+        - Retry logic for rate limits (429 errors)
+        - Pagination support
+        - Better error handling and logging
+        - Timestamp conversion
+
         Args:
             underlying_symbol: Underlying ticker (e.g., 'AAPL', 'QQQ')
             expiration_date: Expiration date in YYYY-MM-DD format (optional)
@@ -443,121 +449,168 @@ class MassiveDataProvider(DataProvider):
         Returns:
             List of option contracts with strike, expiration, type (call/put)
         """
-        try:
-            await self._rate_limit()
-            
-            # Use list_snapshot_options_chain (returns iterator, sync call)
-            options = []
+        max_retries = 3
+        retry_delay = 2.0
+        
+        for attempt in range(max_retries):
             try:
-                # Run sync call in executor
-                loop = asyncio.get_event_loop()
-                options_iter = await loop.run_in_executor(
-                    None,
-                    lambda: self.client.list_snapshot_options_chain(underlying_asset=underlying_symbol)
-                )
+                await self._rate_limit()
                 
-                # Get current date for DTE calculation
-                from datetime import date
-                today = date.today()
-                
-                for option in options_iter:
-                    # Option is an object with attributes
-                    details = getattr(option, 'details', None) or option
-                    last_quote = getattr(option, 'last_quote', None) or {}
-                    last_trade = getattr(option, 'last_trade', None) or {}
-                    session = getattr(option, 'session', None) or {}
+                # Use list_snapshot_options_chain (returns iterator, sync call)
+                options = []
+                try:
+                    # Run sync call in executor
+                    loop = asyncio.get_event_loop()
+                    options_iter = await loop.run_in_executor(
+                        None,
+                        lambda: self.client.list_snapshot_options_chain(underlying_asset=underlying_symbol)
+                    )
                     
-                    # Extract option data
-                    strike = getattr(details, 'strike_price', None) if hasattr(details, 'strike_price') else getattr(option, 'strike_price', None)
-                    expiration_str = getattr(details, 'expiration_date', None) if hasattr(details, 'expiration_date') else getattr(option, 'expiration_date', None)
-                    volume = getattr(session, 'volume', None) if hasattr(session, 'volume', None) else None
-                    open_interest = getattr(session, 'open_interest', None) if hasattr(session, 'open_interest', None) else None
+                    # Get current date for DTE calculation
+                    from datetime import date
+                    today = date.today()
                     
-                    # Filter by volume
-                    if min_volume is not None and (volume is None or volume < min_volume):
-                        continue
+                    # Process options with pagination support
+                    page_size = 1000  # Limit per page
+                    processed_count = 0
                     
-                    # Filter by open interest
-                    if min_open_interest is not None and (open_interest is None or open_interest < min_open_interest):
-                        continue
-                    
-                    # Filter by expiration date
-                    if expiration_str:
+                    for option in options_iter:
                         try:
-                            if isinstance(expiration_str, str):
-                                exp_date = datetime.fromisoformat(expiration_str.replace("Z", "+00:00")).date()
-                            else:
-                                exp_date = expiration_str.date() if hasattr(expiration_str, 'date') else expiration_str
+                            # Option is an object with attributes
+                            details = getattr(option, 'details', None) or option
+                            last_quote = getattr(option, 'last_quote', None) or {}
+                            last_trade = getattr(option, 'last_trade', None) or {}
+                            session = getattr(option, 'session', None) or {}
                             
-                            dte = (exp_date - today).days
+                            # Extract option data with error handling
+                            strike = getattr(details, 'strike_price', None) if hasattr(details, 'strike_price') else getattr(option, 'strike_price', None)
+                            expiration_str = getattr(details, 'expiration_date', None) if hasattr(details, 'expiration_date') else getattr(option, 'expiration_date', None)
+                            volume = getattr(session, 'volume', None) if hasattr(session, 'volume', None) else None
+                            open_interest = getattr(session, 'open_interest', None) if hasattr(session, 'open_interest', None) else None
                             
-                            # Filter by DTE range
-                            if min_dte is not None and dte < min_dte:
+                            # Filter by volume
+                            if min_volume is not None and (volume is None or volume < min_volume):
                                 continue
-                            if max_dte is not None and dte > max_dte:
+                            
+                            # Filter by open interest
+                            if min_open_interest is not None and (open_interest is None or open_interest < min_open_interest):
                                 continue
                             
-                            # Filter by expiration date if specified
-                            if expiration_date:
-                                exp_date_str = exp_date.strftime("%Y-%m-%d")
-                                if exp_date_str != expiration_date:
+                            # Filter by expiration date
+                            if expiration_str:
+                                try:
+                                    # Convert timestamp to date
+                                    if isinstance(expiration_str, str):
+                                        # Handle ISO format with or without timezone
+                                        if "T" in expiration_str:
+                                            exp_date = datetime.fromisoformat(expiration_str.replace("Z", "+00:00")).date()
+                                        else:
+                                            exp_date = datetime.strptime(expiration_str, "%Y-%m-%d").date()
+                                    else:
+                                        exp_date = expiration_str.date() if hasattr(expiration_str, 'date') else expiration_str
+                                    
+                                    dte = (exp_date - today).days
+                                    
+                                    # Filter by DTE range
+                                    if min_dte is not None and dte < min_dte:
+                                        continue
+                                    if max_dte is not None and dte > max_dte:
+                                        continue
+                                    
+                                    # Filter by expiration date if specified
+                                    if expiration_date:
+                                        exp_date_str = exp_date.strftime("%Y-%m-%d")
+                                        if exp_date_str != expiration_date:
+                                            continue
+                                except Exception as e:
+                                    logger.debug(f"Error parsing expiration date {expiration_str}: {e}")
                                     continue
+                            
+                            # Filter by strike proximity
+                            if strike_proximity_pct is not None and underlying_price is not None and strike is not None:
+                                strike_diff_pct = abs(strike - underlying_price) / underlying_price
+                                if strike_diff_pct > strike_proximity_pct:
+                                    continue
+                            
+                            option_dict = {
+                                "symbol": getattr(details, 'ticker', None) if hasattr(details, 'ticker') else getattr(option, 'ticker', None),
+                                "strike": strike,
+                                "expiration": expiration_str,
+                                "option_type": getattr(details, 'contract_type', None) if hasattr(details, 'contract_type') else getattr(option, 'contract_type', None),
+                                "bid": getattr(last_quote, 'bid', None) if hasattr(last_quote, 'bid') else None,
+                                "ask": getattr(last_quote, 'ask', None) if hasattr(last_quote, 'ask') else None,
+                                "last_price": getattr(last_trade, 'price', None) if hasattr(last_trade, 'price', None) else None,
+                                "volume": volume,
+                                "open_interest": open_interest,
+                            }
+                            
+                            # Add DTE if we calculated it
+                            if expiration_str:
+                                try:
+                                    if isinstance(expiration_str, str):
+                                        if "T" in expiration_str:
+                                            exp_date = datetime.fromisoformat(expiration_str.replace("Z", "+00:00")).date()
+                                        else:
+                                            exp_date = datetime.strptime(expiration_str, "%Y-%m-%d").date()
+                                    else:
+                                        exp_date = expiration_str.date() if hasattr(expiration_str, 'date') else expiration_str
+                                    dte = (exp_date - today).days
+                                    option_dict["dte"] = dte
+                                except:
+                                    pass
+                            
+                            options.append(option_dict)
+                            processed_count += 1
+                            
+                            # Limit results per page
+                            if processed_count >= page_size:
+                                logger.debug(f"Reached page size limit ({page_size}) for {underlying_symbol}")
+                                break
+                                
                         except Exception as e:
-                            logger.debug(f"Error parsing expiration date {expiration_str}: {e}")
+                            logger.warning(f"Error processing option: {e}, continuing...")
                             continue
                     
-                    # Filter by strike proximity
-                    if strike_proximity_pct is not None and underlying_price is not None and strike is not None:
-                        strike_diff_pct = abs(strike - underlying_price) / underlying_price
-                        if strike_diff_pct > strike_proximity_pct:
+                    logger.debug(
+                        f"Retrieved {len(options)} options for {underlying_symbol} "
+                        f"(filters: min_dte={min_dte}, max_dte={max_dte}, "
+                        f"min_volume={min_volume}, min_oi={min_open_interest})"
+                    )
+                    
+                    return options
+                    
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    # Check for rate limit errors (429)
+                    if "429" in error_msg or "rate limit" in error_msg or "too many requests" in error_msg:
+                        if attempt < max_retries - 1:
+                            wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                            logger.warning(
+                                f"Rate limit hit for {underlying_symbol}, retrying in {wait_time}s "
+                                f"(attempt {attempt + 1}/{max_retries})"
+                            )
+                            await asyncio.sleep(wait_time)
                             continue
-                    
-                    option_dict = {
-                        "symbol": getattr(details, 'ticker', None) if hasattr(details, 'ticker') else getattr(option, 'ticker', None),
-                        "strike": strike,
-                        "expiration": expiration_str,
-                        "option_type": getattr(details, 'contract_type', None) if hasattr(details, 'contract_type') else getattr(option, 'contract_type', None),
-                        "bid": getattr(last_quote, 'bid', None) if hasattr(last_quote, 'bid') else None,
-                        "ask": getattr(last_quote, 'ask', None) if hasattr(last_quote, 'ask') else None,
-                        "last_price": getattr(last_trade, 'price', None) if hasattr(last_trade, 'price', None) else None,
-                        "volume": volume,
-                        "open_interest": open_interest,
-                    }
-                    
-                    # Add DTE if we calculated it
-                    if expiration_str:
-                        try:
-                            if isinstance(expiration_str, str):
-                                exp_date = datetime.fromisoformat(expiration_str.replace("Z", "+00:00")).date()
-                            else:
-                                exp_date = expiration_str.date() if hasattr(expiration_str, 'date') else expiration_str
-                            dte = (exp_date - today).days
-                            option_dict["dte"] = dte
-                        except:
-                            pass
-                    
-                    options.append(option_dict)
-                    
-                    # Limit results
-                    if len(options) >= 1000:
-                        break
-                
-                logger.debug(
-                    f"Retrieved {len(options)} options for {underlying_symbol} "
-                    f"(filters: min_dte={min_dte}, max_dte={max_dte}, "
-                    f"min_volume={min_volume}, min_oi={min_open_interest})"
-                )
-                
-                return options
-            except Exception as e:
-                logger.error(
-                    f"Error fetching options chain for {underlying_symbol}: {e}"
-                )
+                        else:
+                            logger.error(f"Rate limit exceeded for {underlying_symbol} after {max_retries} attempts")
+                            raise
+                    else:
+                        # Other errors - log and re-raise
+                        logger.error(f"Error fetching options chain for {underlying_symbol}: {e}")
+                        raise
 
-        except Exception as e:
-            logger.error(
-                f"Error in options chain fetch for {underlying_symbol}: {e}"
-            )
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(
+                        f"Error fetching options chain for {underlying_symbol}, retrying in {wait_time}s "
+                        f"(attempt {attempt + 1}/{max_retries}): {e}"
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(
+                        f"Error in options chain fetch for {underlying_symbol} after {max_retries} attempts: {e}"
+                    )
 
         return []
     

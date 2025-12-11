@@ -112,6 +112,17 @@ class DataFeedManager:
         self.total_requests = 0
         self.successful_requests = 0
         self.failed_requests = 0
+        
+        # Data freshness tracking
+        self.last_data_update: Dict[str, datetime] = {}  # symbol -> last update time
+        self.data_freshness_threshold = 300  # 5 minutes default
+        
+        # Circuit breaker
+        self.circuit_breaker_open = False
+        self.circuit_breaker_failures = 0
+        self.circuit_breaker_threshold = 10  # Open after 10 consecutive failures
+        self.circuit_breaker_reset_time: Optional[datetime] = None
+        self.circuit_breaker_reset_duration = 300  # 5 minutes
 
         logger.info(
             f"DataFeedManager initialized: rate_limit={rate_limit}/s, "
@@ -220,12 +231,30 @@ class DataFeedManager:
             self.successful_requests += 1
             self.last_success_time = datetime.now(timezone.utc)
             self.last_error = None
-
+            
+            # Update data freshness
+            self.last_data_update[symbol] = datetime.now(timezone.utc)
+            
+            # Reset circuit breaker on success
+            if self.circuit_breaker_open:
+                self.circuit_breaker_open = False
+                self.circuit_breaker_failures = 0
+                logger.info("Circuit breaker reset after successful request")
+            
             return result
 
         except Exception as e:
             self.failed_requests += 1
             self.last_error = str(e)
+            self.circuit_breaker_failures += 1
+            
+            # Check circuit breaker
+            if self.circuit_breaker_failures >= self.circuit_breaker_threshold:
+                if not self.circuit_breaker_open:
+                    self.circuit_breaker_open = True
+                    self.circuit_breaker_reset_time = datetime.now(timezone.utc) + timedelta(seconds=self.circuit_breaker_reset_duration)
+                    logger.error(f"Circuit breaker OPEN: {self.circuit_breaker_failures} consecutive failures")
+            
             logger.error(f"Error fetching data for {symbol}: {e}", exc_info=True)
 
             # Check if connection lost
@@ -262,6 +291,24 @@ class DataFeedManager:
             if self.total_requests > 0
             else 0.0
         )
+        
+        # Calculate data freshness
+        data_freshness = {}
+        now = datetime.now(timezone.utc)
+        for symbol, last_update in self.last_data_update.items():
+            age_seconds = (now - last_update).total_seconds()
+            data_freshness[symbol] = {
+                "last_update": last_update.isoformat(),
+                "age_seconds": age_seconds,
+                "is_fresh": age_seconds < self.data_freshness_threshold,
+            }
+        
+        # Calculate error rate
+        error_rate = (
+            self.failed_requests / self.total_requests
+            if self.total_requests > 0
+            else 0.0
+        )
 
         return {
             "connected": self.connected,
@@ -281,6 +328,17 @@ class DataFeedManager:
             "successful_requests": self.successful_requests,
             "failed_requests": self.failed_requests,
             "success_rate": success_rate,
+            "error_rate": error_rate,
+            "data_freshness": data_freshness,
+            "circuit_breaker": {
+                "open": self.circuit_breaker_open,
+                "failures": self.circuit_breaker_failures,
+                "reset_time": (
+                    self.circuit_breaker_reset_time.isoformat()
+                    if self.circuit_breaker_reset_time
+                    else None
+                ),
+            },
         }
 
     def reset_statistics(self) -> None:

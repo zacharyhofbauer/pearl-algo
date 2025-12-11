@@ -26,6 +26,7 @@ except ImportError:
 from pearlalgo.data_providers.buffer_manager import BufferManager
 from pearlalgo.monitoring.data_feed_manager import DataFeedManager
 from pearlalgo.utils.market_hours import is_market_open
+from pearlalgo.options.features import OptionsFeatureComputer
 
 
 class OptionsIntradayScanner:
@@ -66,6 +67,37 @@ class OptionsIntradayScanner:
         # Get data provider from feed manager if not provided
         if not self.data_provider and self.data_feed_manager:
             self.data_provider = self.data_feed_manager.data_provider
+        
+        # Initialize feature computer
+        self.feature_computer = OptionsFeatureComputer(config=self.config.get("features", {}))
+        
+        # Load strategy parameters from config (separated from core logic)
+        strategy_config = self.config.get("strategies", {}).get(strategy, {})
+        self.strategy_params = {
+            "momentum_threshold": strategy_config.get("momentum_threshold", 0.01),  # 1%
+            "volume_threshold": strategy_config.get("volume_threshold", 1.5),  # 50% increase
+            "compression_threshold": strategy_config.get("compression_threshold", 0.20),  # 20%
+            "unusual_volume_threshold": strategy_config.get("unusual_volume_threshold", 1000),
+            "unusual_oi_threshold": strategy_config.get("unusual_oi_threshold", 5000),
+        }
+        
+        # Position sizing parameters
+        position_config = self.config.get("position_sizing", {})
+        self.position_params = {
+            "max_position_size": position_config.get("max_position_size", 10),  # Max contracts
+            "base_position_size": position_config.get("base_position_size", 1),  # Base contracts
+            "risk_per_trade": position_config.get("risk_per_trade", 0.01),  # 1% of account
+        }
+        
+        # Stop loss and exit parameters
+        exit_config = self.config.get("exits", {})
+        self.exit_params = {
+            "stop_loss_pct": exit_config.get("stop_loss_pct", 0.20),  # 20% stop loss
+            "take_profit_pct": exit_config.get("take_profit_pct", 0.50),  # 50% take profit
+            "time_exit_hours": exit_config.get("time_exit_hours", 4),  # Exit after 4 hours
+            "trailing_stop": exit_config.get("trailing_stop", False),
+            "trailing_stop_pct": exit_config.get("trailing_stop_pct", 0.10),  # 10% trailing stop
+        }
 
         logger.info(
             f"OptionsIntradayScanner initialized: symbols={symbols}, "
@@ -126,10 +158,17 @@ class OptionsIntradayScanner:
                     )
 
                     if signal and signal.get("side") != "flat":
+                        # Add position sizing
+                        signal = self._add_position_sizing(signal, underlying_price)
+                        
+                        # Add stop loss and take profit
+                        signal = self._add_stops_and_targets(signal, underlying_price)
+                        
                         signals.append(signal)
                         logger.info(
                             f"Generated {signal.get('side')} signal for {symbol}: "
-                            f"{signal.get('option_symbol')} @ {signal.get('entry_price')}"
+                            f"{signal.get('option_symbol')} @ {signal.get('entry_price')}, "
+                            f"size={signal.get('position_size')}, stop={signal.get('stop_loss')}, target={signal.get('take_profit')}"
                         )
 
                     # Check for exit conditions (will be implemented with signal tracker)
@@ -216,9 +255,9 @@ class OptionsIntradayScanner:
                 sum(recent_volumes[-5:]) / max(sum(recent_volumes[-10:-5]), 1) - 1
             )
 
-            # Momentum threshold from config
-            momentum_threshold = self.config.get("momentum_threshold", 0.01)  # 1%
-            volume_threshold = self.config.get("volume_threshold", 1.5)  # 50% increase
+            # Momentum threshold from config (separated from core logic)
+            momentum_threshold = self.strategy_params.get("momentum_threshold", 0.01)  # 1%
+            volume_threshold = self.strategy_params.get("volume_threshold", 1.5)  # 50% increase
 
             if price_change > momentum_threshold and volume_surge > volume_threshold:
                 # Bullish momentum - look for call options
@@ -342,8 +381,8 @@ class OptionsIntradayScanner:
         Detects volume/OI spikes that may indicate smart money activity.
         """
         # Find options with unusually high volume or OI
-        volume_threshold = self.config.get("unusual_volume_threshold", 1000)
-        oi_threshold = self.config.get("unusual_oi_threshold", 5000)
+        volume_threshold = self.strategy_params.get("unusual_volume_threshold", 1000)
+        oi_threshold = self.strategy_params.get("unusual_oi_threshold", 5000)
 
         unusual_options = [
             opt
@@ -378,6 +417,77 @@ class OptionsIntradayScanner:
             }
 
         return None
+    
+    def _add_position_sizing(self, signal: Dict, underlying_price: float) -> Dict:
+        """
+        Add position sizing to signal based on risk parameters.
+        
+        Args:
+            signal: Signal dictionary
+            underlying_price: Current underlying price
+            
+        Returns:
+            Signal with position_size added
+        """
+        entry_price = signal.get("entry_price", 0)
+        if entry_price <= 0:
+            signal["position_size"] = self.position_params.get("base_position_size", 1)
+            return signal
+        
+        # Calculate position size based on risk per trade
+        # For options, we use a fixed base size with max limit
+        base_size = self.position_params.get("base_position_size", 1)
+        max_size = self.position_params.get("max_position_size", 10)
+        
+        # Adjust size based on confidence
+        confidence = signal.get("confidence", 0.5)
+        size_multiplier = 1.0 + (confidence - 0.5) * 2.0  # 0.5 conf = 1x, 1.0 conf = 2x
+        
+        position_size = int(base_size * size_multiplier)
+        position_size = min(position_size, max_size)
+        position_size = max(position_size, 1)  # At least 1 contract
+        
+        signal["position_size"] = position_size
+        signal["risk_amount"] = entry_price * position_size * self.position_params.get("risk_per_trade", 0.01)
+        
+        return signal
+    
+    def _add_stops_and_targets(self, signal: Dict, underlying_price: float) -> Dict:
+        """
+        Add stop loss and take profit to signal.
+        
+        Args:
+            signal: Signal dictionary
+            underlying_price: Current underlying price
+            
+        Returns:
+            Signal with stop_loss and take_profit added
+        """
+        entry_price = signal.get("entry_price", 0)
+        if entry_price <= 0:
+            return signal
+        
+        # Calculate stop loss and take profit as percentage of entry price
+        stop_loss_pct = self.exit_params.get("stop_loss_pct", 0.20)  # 20% stop
+        take_profit_pct = self.exit_params.get("take_profit_pct", 0.50)  # 50% target
+        
+        stop_loss = entry_price * (1 - stop_loss_pct)
+        take_profit = entry_price * (1 + take_profit_pct)
+        
+        signal["stop_loss"] = stop_loss
+        signal["take_profit"] = take_profit
+        signal["stop_loss_pct"] = stop_loss_pct
+        signal["take_profit_pct"] = take_profit_pct
+        
+        # Add time-based exit
+        signal["time_exit_hours"] = self.exit_params.get("time_exit_hours", 4)
+        
+        # Add trailing stop if enabled
+        if self.exit_params.get("trailing_stop", False):
+            signal["trailing_stop"] = True
+            signal["trailing_stop_pct"] = self.exit_params.get("trailing_stop_pct", 0.10)
+        
+        return signal
 
     async def scan_continuous(
         self, interval: int = 60, shutdown_check: Optional[callable] = None

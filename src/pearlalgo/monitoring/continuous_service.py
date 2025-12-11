@@ -52,10 +52,10 @@ except Exception as e:
 
 class ContinuousService:
     """
-    Enhanced 24/7 continuous service for futures trading.
-
+    Enhanced 24/7 continuous service for options trading.
+    
     Manages:
-    - Futures worker for continuous NQ/ES monitoring
+    - Options workers for continuous QQQ/SPY monitoring
     - Data feed management
     - Health monitoring
     - Graceful shutdown

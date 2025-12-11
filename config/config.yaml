@@ -86,9 +86,9 @@ risk:
     cooldown_minutes: 30
     max_trades_per_day: 50
   
-  # No martingale, no averaging down (enforced in code)
-  allow_martingale: false
-  allow_averaging_down: false
+  # Options-only risk rules (futures disabled)
+  options:
+    max_risk_per_trade: 0.01  # 1% for options (lower due to leverage)
 
 # LLM Configuration (for Quant Research Agent reasoning)
 llm:
@@ -121,6 +121,34 @@ llm:
     model: "gpt-4o-mini"  # Use format: "openai/gpt-4o" or "anthropic/claude-3-opus-20240229"
     temperature: 0.3
     max_tokens: 1000
+
+# Data Sources Configuration
+data_sources:
+  # Live trading data (options and stocks)
+  live:
+    provider: "massive"
+    api_key: "${MASSIVE_API_KEY}"
+    base_url: "https://api.massive.com"
+    symbols:
+      options_underliers: ["QQQ", "SPY"]
+    intervals:
+      intraday: "1m"  # For intraday options scanning
+      swing: "15m"    # For swing options scanning
+  
+  # Backtesting data (historical ES/NQ for correlation)
+  backtesting:
+    provider: "massive_historical"
+    symbols: ["ES", "NQ"]  # Futures symbols for backtesting correlation
+    data_dir: "data/backtesting"
+    cache_enabled: true
+    timeframes: ["1m", "5m", "15m", "1h", "1d"]  # Supported timeframes
+
+# Rate Limiting
+rate_limits:
+  massive:
+    requests_per_minute: 200  # Massive API rate limit
+    burst_limit: 10  # Burst capacity
+    delay_between_requests: 0.25  # seconds
 
 # Data Sources
 data:

@@ -2,7 +2,7 @@
 Signal Router - Route signals to appropriate handlers with unified deduplication.
 
 Provides:
-- Route futures vs options signals
+- Route options signals (futures routing disabled while Massive futures API unavailable)
 - Unified risk evaluation before routing
 - Signal deduplication
 """
@@ -63,6 +63,22 @@ class SignalRouter:
             or len(symbol) > 10
             or any(x in symbol for x in ["C", "P", "Call", "Put"])
         )
+    
+    def is_futures(self, symbol: str) -> bool:
+        """
+        Check if symbol is a futures contract.
+        
+        DISABLED: Futures trading is disabled while Massive futures API is unavailable.
+        This method always returns False.
+
+        Args:
+            symbol: Trading symbol
+
+        Returns:
+            False (futures disabled)
+        """
+        # Futures trading disabled - always return False
+        return False
 
     def route_signal(self, signal: Signal) -> str:
         """
@@ -72,13 +88,11 @@ class SignalRouter:
             signal: Signal to route
 
         Returns:
-            Handler type: "futures" or "options"
+            Handler type: "options" (futures routing disabled)
         """
-        if self.is_options(signal.symbol):
-            return "options"
-        else:
-            # Default: assume equity/options
-            return "options"
+        # All signals routed to options handler while futures API unavailable
+        # Futures routing will be re-enabled when Massive futures API is available
+        return "options"
 
     def route_signals(
         self, state: TradingState
@@ -90,13 +104,13 @@ class SignalRouter:
             state: TradingState with signals
 
         Returns:
-            Dictionary: {"futures": {symbol: signal}, "options": {symbol: signal}}
+            Dictionary: {"futures": {} (disabled), "options": {symbol: signal}}
         """
         routed = {"futures": {}, "options": {}}
 
         for symbol, signal in state.signals.items():
             # Check deduplication
-            if not self.deduplicator.should_generate_signal(
+            if self.deduplicator and not self.deduplicator.should_generate_signal(
                 symbol, signal.side, signal.entry_price or 0.0
             ):
                 logger.debug(
@@ -104,18 +118,19 @@ class SignalRouter:
                 )
                 continue
 
-            # Route signal
+            # Route signal (all to options while futures API unavailable)
             handler_type = self.route_signal(signal)
             routed[handler_type][symbol] = signal
 
             # Record in deduplicator
-            self.deduplicator.record_signal(
-                symbol, signal.side, signal.entry_price or 0.0
-            )
+            if self.deduplicator:
+                self.deduplicator.record_signal(
+                    symbol, signal.side, signal.entry_price or 0.0
+                )
 
         logger.info(
-            f"Routed {len(routed['futures'])} futures signals, "
-            f"{len(routed['options'])} options signals"
+            f"Routed {len(routed['options'])} options signals "
+            f"(futures routing disabled - Massive futures API unavailable)"
         )
 
         return routed

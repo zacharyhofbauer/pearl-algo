@@ -1,4 +1,4 @@
-# How to Use the 24/7 Multi-Asset Trading System
+# How to Use the 24/7 Options Trading System
 
 ## Quick Start Guide
 
@@ -39,26 +39,28 @@ python scripts/test_telegram.py
 - `TELEGRAM_CHAT_ID` - For alerts (required)
 - `GROQ_API_KEY` - Optional, for LLM reasoning
 
-**⚠️ Important:** The system no longer falls back to dummy data. A valid `MASSIVE_API_KEY` is **mandatory**. The service will fail to start if the API key is missing or invalid.
+**⚠️ Important:** The system now focuses exclusively on equity options (QQQ, SPY). Futures trading has been disabled while Massive's futures API is unavailable.
 
 ### 2. Configure the System
 
-Edit `config/config.yaml` to set up your scanning:
+Edit `config/config.yaml` to set up your options scanning:
 
 ```yaml
 monitoring:
   workers:
-    futures:
-      enabled: true
-      symbols: ["NQ", "ES"]  # Change to your preferred futures
-      interval: 60  # Scan every 60 seconds (1 minute)
-      strategy: "intraday_swing"
-    
+    # Options swing scanner (multi-day patterns)
     options:
       enabled: true
-      universe: ["SPY", "QQQ", "AAPL", "MSFT"]  # Start small, expand later
+      universe: ["QQQ", "SPY"]
       interval: 900  # Scan every 900 seconds (15 minutes)
       strategy: "swing_momentum"
+    
+    # Options intraday scanner (high-frequency, 0-7 DTE)
+    options_intraday:
+      enabled: true
+      symbols: ["QQQ", "SPY"]
+      interval: 60  # Scan every 60 seconds (1 minute)
+      strategy: "momentum"
 ```
 
 ### 3. Start the 24/7 Service
@@ -80,12 +82,10 @@ python -m pearlalgo.monitoring.continuous_service \
 1. Service validates MASSIVE_API_KEY (will fail if missing/invalid)
 2. Service initializes Massive data provider
 3. Service initializes worker pool
-4. Discovers active futures contracts (ESU5, NQU5, etc.)
-5. Backfills historical data buffers (30 days) from Massive
-6. Starts futures worker (scans NQ/ES every 60 seconds)
-7. Starts options worker (scans equities every 15 minutes)
-8. Starts health check server on port 8080
-9. Begins continuous scanning
+4. Starts options swing worker (scans QQQ/SPY every 15 minutes)
+5. Starts options intraday worker (scans QQQ/SPY every 60 seconds)
+6. Starts health check server on port 8080
+7. Begins continuous scanning
 
 **⚠️ If you see errors about missing API key or unauthorized access, the service will stop. Fix your MASSIVE_API_KEY and restart.**
 
