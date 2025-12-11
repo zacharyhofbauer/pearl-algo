@@ -98,6 +98,7 @@ class SignalTracker:
         persistence_path: Optional[Path] = None,
         max_signal_age_days: int = 7,
         enable_backup: bool = True,
+        telegram_alerts=None,  # Optional TelegramAlerts instance
     ):
         """
         Initialize signal tracker.
@@ -106,11 +107,13 @@ class SignalTracker:
             persistence_path: Path to JSON file for persistence (optional)
             max_signal_age_days: Maximum age in days before signal is considered stale (default: 7)
             enable_backup: Enable backup of persistence file before writes (default: True)
+            telegram_alerts: Optional TelegramAlerts instance for sending notifications
         """
         self.active_signals: Dict[str, TrackedSignal] = {}
         self.persistence_path = persistence_path or Path("data/active_signals.json")
         self.max_signal_age_days = max_signal_age_days
         self.enable_backup = enable_backup
+        self.telegram_alerts = telegram_alerts
         
         # Metrics tracking
         self.persistence_save_count = 0
@@ -560,6 +563,46 @@ class SignalTracker:
         self.active_signals[symbol] = signal
         self._save_signals(immediate=False)  # Use debounced write
         logger.info(f"Added signal to tracker: {symbol} {direction} @ ${entry_price:.2f}")
+        
+        # Send Telegram alert for new signal
+        if self.telegram_alerts:
+            try:
+                # Use asyncio to send alert (non-blocking)
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If loop is running, schedule as task
+                    asyncio.create_task(
+                        self.telegram_alerts.notify_signal(
+                            symbol=symbol,
+                            side=direction,
+                            price=entry_price,
+                            strategy=strategy_name,
+                            confidence=None,  # Could add confidence if available
+                            entry_price=entry_price,
+                            stop_loss=stop_loss,
+                            take_profit=take_profit,
+                            reasoning=reasoning,
+                        )
+                    )
+                else:
+                    # If no loop running, run directly
+                    asyncio.run(
+                        self.telegram_alerts.notify_signal(
+                            symbol=symbol,
+                            side=direction,
+                            price=entry_price,
+                            strategy=strategy_name,
+                            confidence=None,
+                            entry_price=entry_price,
+                            stop_loss=stop_loss,
+                            take_profit=take_profit,
+                            reasoning=reasoning,
+                        )
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to send Telegram alert for new signal: {e}")
+        
         return True
     
     def update_pnl(self, symbol: str, current_price: float) -> Optional[float]:

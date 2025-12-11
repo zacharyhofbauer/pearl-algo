@@ -4,7 +4,7 @@ Data Feed Manager - Manages data feed connections with reconnection logic.
 Provides:
 - WebSocket connection management
 - Automatic reconnection with exponential backoff
-- Rate-limit queuing (respect Polygon limits: 5 calls/sec free tier)
+- Rate-limit queuing (respect Massive limits: 5 calls/sec free tier)
 - Data buffer management
 - Health monitoring per data source
 """
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -78,14 +79,14 @@ class DataFeedManager:
         data_provider,
         rate_limit: int = 5,
         reconnect_delay: float = 5.0,
-        max_reconnect_attempts: int = 10,
+        max_reconnect_attempts: int = 20,
         exponential_backoff: bool = True,
     ):
         """
         Initialize data feed manager.
 
         Args:
-            data_provider: Data provider instance (Polygon, etc.)
+            data_provider: Data provider instance (Massive, etc.)
             rate_limit: Maximum API calls per second
             reconnect_delay: Initial delay before reconnection (seconds)
             max_reconnect_attempts: Maximum reconnection attempts
@@ -153,14 +154,17 @@ class DataFeedManager:
                 )
 
                 if attempt < self.max_reconnect_attempts - 1:
-                    # Calculate backoff delay
+                    # Calculate backoff delay with jitter
                     if self.exponential_backoff:
-                        delay = self.reconnect_delay * (2 ** attempt)
+                        base_delay = self.reconnect_delay * (2 ** attempt)
+                        # Add jitter: random(0, 1) seconds
+                        jitter = random.uniform(0, 1)
+                        delay = base_delay + jitter
                     else:
-                        delay = self.reconnect_delay
+                        delay = self.reconnect_delay + random.uniform(0, 1)
 
                     delay = min(delay, 300)  # Cap at 5 minutes
-                    logger.info(f"Retrying connection in {delay:.1f}s...")
+                    logger.info(f"Retrying connection in {delay:.2f}s (with jitter)...")
                     await asyncio.sleep(delay)
 
         logger.error("Failed to connect to data feed after all attempts")

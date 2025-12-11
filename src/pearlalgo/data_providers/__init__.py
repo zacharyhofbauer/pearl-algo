@@ -9,12 +9,12 @@ from pearlalgo.data_providers.factory import (
 )
 from pearlalgo.data_providers.local_csv_provider import LocalCSVProvider
 from pearlalgo.data_providers.local_parquet_provider import LocalParquetProvider
-from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+from pearlalgo.data_providers.massive_provider import MassiveDataProvider
 from pearlalgo.data_providers.tradier_provider import TradierDataProvider
 
 __all__ = [
     "DataProvider",
-    "PolygonDataProvider",
+    "MassiveDataProvider",
     "TradierDataProvider",
     "LocalCSVProvider",
     "LocalParquetProvider",

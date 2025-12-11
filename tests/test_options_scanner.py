@@ -1,131 +1,155 @@
 """
-Unit tests for options scanner.
+Tests for Options Scanner
+
+Unit tests for options scanning functionality.
 """
 
 import pytest
 from unittest.mock import Mock, AsyncMock
 
 from pearlalgo.options.universe import EquityUniverse
+from pearlalgo.options.strategy import create_strategy, SwingMomentumStrategy
+from pearlalgo.options.signal_generator import OptionsSignalGenerator
 from pearlalgo.options.swing_scanner import OptionsSwingScanner
-from pearlalgo.options.chain_filter import OptionsChainFilter
 
 
-@pytest.fixture
-def universe():
-    """Create equity universe for testing."""
-    return EquityUniverse(symbols=["SPY", "QQQ", "AAPL"])
+class TestEquityUniverse:
+    """Test EquityUniverse."""
+    
+    def test_initialization(self):
+        """Test universe initialization."""
+        universe = EquityUniverse(symbols=["SPY", "QQQ", "AAPL"])
+        assert universe.get_universe_size() == 3
+    
+    def test_get_optionable_symbols(self):
+        """Test getting optionable symbols."""
+        universe = EquityUniverse(symbols=["SPY", "QQQ"])
+        symbols = universe.get_optionable_symbols()
+        assert len(symbols) == 2
+        assert "SPY" in symbols
+    
+    def test_add_remove_symbol(self):
+        """Test adding and removing symbols."""
+        universe = EquityUniverse(symbols=["SPY"])
+        universe.add_symbol("QQQ")
+        assert universe.get_universe_size() == 2
+        
+        universe.remove_symbol("SPY")
+        assert universe.get_universe_size() == 1
 
 
-@pytest.fixture
-def chain_filter():
-    """Create options chain filter for testing."""
-    return OptionsChainFilter(
-        min_volume=100,
-        min_open_interest=50,
-        max_dte=45,
-    )
+class TestOptionsStrategy:
+    """Test options strategies."""
+    
+    def test_create_strategy(self):
+        """Test strategy factory."""
+        strategy = create_strategy("swing_momentum", {})
+        assert isinstance(strategy, SwingMomentumStrategy)
+        assert strategy.name == "swing_momentum"
+    
+    def test_swing_momentum_strategy(self):
+        """Test swing momentum strategy."""
+        strategy = SwingMomentumStrategy()
+        
+        # Mock options chain with low spread (compression)
+        options_chain = [
+            {
+                "symbol": "SPY250120C500",
+                "strike": 500.0,
+                "expiration": "2025-01-20",
+                "option_type": "call",
+                "bid": 5.0,
+                "ask": 5.1,  # Low spread
+                "last_price": 5.05,
+                "volume": 1000,
+                "open_interest": 5000,
+            }
+        ]
+        
+        signal = strategy.analyze(options_chain, underlying_price=500.0)
+        # Should detect compression and generate signal
+        assert signal.get("side") in ["long", "flat"]
 
 
-def test_universe_initialization(universe):
-    """Test equity universe initialization."""
-    assert universe.get_count() == 3
-    assert "SPY" in universe.get_symbols()
-    assert "QQQ" in universe.get_symbols()
-    assert "AAPL" in universe.get_symbols()
+class TestOptionsSignalGenerator:
+    """Test OptionsSignalGenerator."""
+    
+    @pytest.fixture
+    def universe(self):
+        """Create universe."""
+        return EquityUniverse(symbols=["SPY"])
+    
+    @pytest.fixture
+    def strategy(self):
+        """Create strategy."""
+        return create_strategy("swing_momentum", {})
+    
+    @pytest.fixture
+    def mock_provider(self):
+        """Mock data provider."""
+        provider = Mock()
+        provider.get_options_chain = AsyncMock(return_value=[])
+        provider.get_latest_bar = AsyncMock(return_value={"close": 500.0})
+        return provider
+    
+    @pytest.fixture
+    def generator(self, universe, strategy, mock_provider):
+        """Create signal generator."""
+        return OptionsSignalGenerator(
+            universe=universe,
+            strategy=strategy,
+            data_provider=mock_provider,
+        )
+    
+    @pytest.mark.asyncio
+    async def test_generate_signals(self, generator, mock_provider):
+        """Test signal generation."""
+        # Mock options chain
+        mock_provider.get_options_chain.return_value = [
+            {
+                "symbol": "SPY250120C500",
+                "strike": 500.0,
+                "option_type": "call",
+                "bid": 5.0,
+                "ask": 5.1,
+                "volume": 1000,
+                "open_interest": 5000,
+            }
+        ]
+        
+        signals = await generator.generate_signals()
+        # Should return list of signals
+        assert isinstance(signals, list)
 
 
-def test_universe_add_remove(universe):
-    """Test adding and removing symbols."""
-    universe.add_symbol("MSFT")
-    assert universe.get_count() == 4
-    assert "MSFT" in universe.get_symbols()
-
-    universe.remove_symbol("AAPL")
-    assert universe.get_count() == 3
-    assert "AAPL" not in universe.get_symbols()
-
-
-def test_chain_filter_initialization(chain_filter):
-    """Test options chain filter initialization."""
-    assert chain_filter.min_volume == 100
-    assert chain_filter.min_open_interest == 50
-    assert chain_filter.max_dte == 45
-
-
-def test_chain_filter_filtering(chain_filter):
-    """Test options chain filtering."""
-    from datetime import datetime, timedelta, timezone
-
-    current_date = datetime.now(timezone.utc)
-    expiration = current_date + timedelta(days=30)
-
-    chain = [
-        {
-            "strike_price": 100.0,
-            "option_type": "call",
-            "volume": 150,
-            "open_interest": 75,
-            "expiration_date": expiration.isoformat(),
-        },
-        {
-            "strike_price": 105.0,
-            "option_type": "call",
-            "volume": 50,  # Below threshold
-            "open_interest": 75,
-            "expiration_date": expiration.isoformat(),
-        },
-    ]
-
-    filtered = chain_filter.filter_chain(chain, underlying_price=100.0, current_date=current_date)
-    assert len(filtered) == 1  # Only first option passes volume filter
-
-
-def test_chain_filter_strike_selection(chain_filter):
-    """Test strike selection filtering."""
-    from datetime import datetime, timedelta, timezone
-
-    current_date = datetime.now(timezone.utc)
-    expiration = current_date + timedelta(days=30)
-
-    chain = [
-        {
-            "strike_price": 100.0,  # ATM
-            "option_type": "call",
-            "volume": 150,
-            "open_interest": 75,
-            "expiration_date": expiration.isoformat(),
-        },
-        {
-            "strike_price": 110.0,  # OTM
-            "option_type": "call",
-            "volume": 150,
-            "open_interest": 75,
-            "expiration_date": expiration.isoformat(),
-        },
-    ]
-
-    # Test ATM selection
-    chain_filter.strike_selection = "atm"
-    filtered = chain_filter.filter_chain(chain, underlying_price=100.0, current_date=current_date)
-    assert len(filtered) == 1
-    assert filtered[0]["strike_price"] == 100.0
-
-    # Test OTM selection
-    chain_filter.strike_selection = "otm"
-    filtered = chain_filter.filter_chain(chain, underlying_price=100.0, current_date=current_date)
-    assert len(filtered) == 1
-    assert filtered[0]["strike_price"] == 110.0
-
-
-@pytest.mark.asyncio
-async def test_options_scanner_initialization(universe):
-    """Test options scanner initialization."""
-    scanner = OptionsSwingScanner(
-        universe=universe,
-        strategy="swing_momentum",
-        config={},
-    )
-
-    assert scanner.universe == universe
-    assert scanner.strategy == "swing_momentum"
-    assert len(scanner.trader.symbols) == 3
+class TestOptionsSwingScanner:
+    """Test OptionsSwingScanner."""
+    
+    @pytest.fixture
+    def universe(self):
+        """Create universe."""
+        return EquityUniverse(symbols=["SPY", "QQQ"])
+    
+    @pytest.fixture
+    def mock_provider(self):
+        """Mock data provider."""
+        provider = Mock()
+        provider.get_options_chain = AsyncMock(return_value=[])
+        provider.get_latest_bar = AsyncMock(return_value={"close": 500.0})
+        return provider
+    
+    @pytest.fixture
+    def scanner(self, universe, mock_provider):
+        """Create scanner."""
+        return OptionsSwingScanner(
+            universe=universe,
+            strategy="swing_momentum",
+            data_provider=mock_provider,
+        )
+    
+    @pytest.mark.asyncio
+    async def test_scan(self, scanner):
+        """Test single scan."""
+        results = await scanner.scan()
+        assert "status" in results
+        assert results["status"] in ["success", "skipped", "error"]

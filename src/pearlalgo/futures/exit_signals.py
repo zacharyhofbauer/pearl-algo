@@ -50,6 +50,7 @@ class ExitSignalGenerator:
         price_fetch_timeout: float = 5.0,  # Timeout for price fetching in seconds
         max_stale_data_minutes: int = 15,  # Max age for market data to be considered fresh
         enable_deduplication: bool = True,  # Enable exit signal deduplication
+        telegram_alerts=None,  # Optional TelegramAlerts instance
     ):
         """
         Initialize exit signal generator.
@@ -62,6 +63,7 @@ class ExitSignalGenerator:
             price_fetch_timeout: Timeout for async price fetching in seconds (default: 5.0)
             max_stale_data_minutes: Maximum age in minutes for market data to be considered fresh (default: 15)
             enable_deduplication: Enable exit signal deduplication (default: True)
+            telegram_alerts: Optional TelegramAlerts instance for sending notifications
         """
         self.signal_tracker = signal_tracker
         self.market_hours = market_hours
@@ -69,6 +71,7 @@ class ExitSignalGenerator:
         self.fallback_providers = fallback_providers or []
         self.price_fetch_timeout = price_fetch_timeout
         self.max_stale_data_minutes = max_stale_data_minutes
+        self.telegram_alerts = telegram_alerts
         
         # Exit signal deduplication
         self.exit_deduplicator = SignalDeduplicator(window_minutes=5) if enable_deduplication else None
@@ -687,6 +690,53 @@ class ExitSignalGenerator:
                     f"Generated exit signal for {symbol}: {exit_type} - {exit_reason} "
                     f"(price from {price_source})"
                 )
+                
+                # Send Telegram alert for exit
+                if self.telegram_alerts:
+                    try:
+                        # Calculate realized P&L
+                        direction_multiplier = 1 if signal.direction == "long" else -1
+                        realized_pnl = direction_multiplier * signal.size * (current_price - signal.entry_price)
+                        
+                        # Calculate hold duration
+                        hold_duration = None
+                        if signal.timestamp:
+                            duration = datetime.now(timezone.utc) - signal.timestamp
+                            hours = int(duration.total_seconds() // 3600)
+                            minutes = int((duration.total_seconds() % 3600) // 60)
+                            hold_duration = f"{hours}:{minutes:02d}:00" if hours > 0 else f"{minutes}:00"
+                        
+                        # Use asyncio to send alert
+                        import asyncio
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            asyncio.create_task(
+                                self.telegram_alerts.notify_exit(
+                                    symbol=symbol,
+                                    direction=signal.direction,
+                                    entry_price=signal.entry_price,
+                                    exit_price=current_price,
+                                    size=signal.size,
+                                    realized_pnl=realized_pnl,
+                                    hold_duration=hold_duration,
+                                    exit_reason=exit_reason,
+                                )
+                            )
+                        else:
+                            asyncio.run(
+                                self.telegram_alerts.notify_exit(
+                                    symbol=symbol,
+                                    direction=signal.direction,
+                                    entry_price=signal.entry_price,
+                                    exit_price=current_price,
+                                    size=signal.size,
+                                    realized_pnl=realized_pnl,
+                                    hold_duration=hold_duration,
+                                    exit_reason=exit_reason,
+                                )
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to send Telegram alert for exit: {e}")
 
         if exit_signals:
             logger.info(f"Generated {len(exit_signals)} exit signals")

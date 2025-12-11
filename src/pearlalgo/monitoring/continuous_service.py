@@ -312,63 +312,61 @@ class ContinuousService:
     async def _initialize_data_provider(self):
         """Initialize data provider and feed manager."""
         try:
-            from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+            from pearlalgo.data_providers.massive_provider import MassiveDataProvider
             import os
 
             # Get API key from config or environment
             config_api_key = (
                 self.config.get("data", {})
                 .get("fallback", {})
-                .get("polygon", {})
+                .get("massive", {})
                 .get("api_key")
             )
             
-            # If config has template variable like ${POLYGON_API_KEY}, expand it
+            # If config has template variable like ${MASSIVE_API_KEY}, expand it
             if config_api_key and config_api_key.startswith("${") and config_api_key.endswith("}"):
                 var_name = config_api_key[2:-1]  # Remove ${ and }
-                polygon_api_key = os.getenv(var_name)
+                massive_api_key = os.getenv(var_name)
                 logger.debug(f"Expanded config template {config_api_key} -> environment variable {var_name}")
             elif config_api_key:
-                polygon_api_key = config_api_key
+                massive_api_key = config_api_key
             else:
-                polygon_api_key = os.getenv("POLYGON_API_KEY")
+                massive_api_key = os.getenv("MASSIVE_API_KEY")
             
             # Strip whitespace in case .env file has extra spaces
-            if polygon_api_key:
-                polygon_api_key = polygon_api_key.strip()
+            if massive_api_key:
+                massive_api_key = massive_api_key.strip()
             
             # Debug logging (only first few chars for security)
-            if polygon_api_key:
-                logger.debug(f"Polygon API key loaded: {polygon_api_key[:10]}... (length: {len(polygon_api_key)})")
+            if massive_api_key:
+                logger.debug(f"Massive API key loaded: {massive_api_key[:10]}... (length: {len(massive_api_key)})")
             else:
-                logger.error("POLYGON_API_KEY not found in config or environment")
+                logger.error("MASSIVE_API_KEY not found in config or environment")
 
-            if not polygon_api_key:
+            if not massive_api_key:
                 raise ValueError(
-                    "POLYGON_API_KEY is required. Please set it in your .env file or config."
+                    "MASSIVE_API_KEY is required. Please set it in your .env file or config."
                 )
 
-            # Initialize Polygon provider - fail explicitly if it doesn't work
+            # Initialize Massive provider - fail explicitly if it doesn't work
             try:
-                provider = PolygonDataProvider(api_key=polygon_api_key)
-                logger.info("Polygon provider initialized (will validate on first request)")
+                provider = MassiveDataProvider(api_key=massive_api_key)
+                logger.info("Massive provider initialized (will validate on first request)")
             except Exception as e:
-                logger.error(f"Failed to initialize Polygon provider: {e}")
+                logger.error(f"Failed to initialize Massive provider: {e}")
                 raise ValueError(
-                    f"Cannot initialize Polygon data provider: {e}. "
-                    f"Please check your POLYGON_API_KEY and network connection."
+                    f"Cannot initialize Massive data provider: {e}. "
+                    f"Please check your MASSIVE_API_KEY and network connection."
                 ) from e
 
+            # Get massive config for rate limits
+            data_feeds_config = self.config.get("monitoring", {}).get("data_feeds", {})
+            massive_config = data_feeds_config.get("massive", {})
+            
             self.data_feed_manager = DataFeedManager(
                 data_provider=provider,
-                rate_limit=self.config.get("monitoring", {})
-                .get("data_feeds", {})
-                .get("polygon", {})
-                .get("rate_limit", 5),
-                reconnect_delay=self.config.get("monitoring", {})
-                .get("data_feeds", {})
-                .get("polygon", {})
-                .get("reconnect_delay", 5.0),
+                rate_limit=massive_config.get("rate_limit", 5),
+                reconnect_delay=massive_config.get("reconnect_delay", 5.0),
             )
             self.buffer_manager.data_provider = provider
             self.health_checker.data_feed_manager = self.data_feed_manager
@@ -377,7 +375,7 @@ class ContinuousService:
             logger.error(f"CRITICAL: Failed to initialize data provider: {e}", exc_info=True)
             raise RuntimeError(
                 f"Cannot start service without a working data provider. "
-                f"Error: {e}. Please check your POLYGON_API_KEY configuration."
+                f"Error: {e}. Please check your MASSIVE_API_KEY configuration."
             ) from e
 
     async def _futures_worker(
@@ -440,6 +438,63 @@ class ContinuousService:
                 logger.error(f"Error in futures worker: {e}", exc_info=True)
                 await asyncio.sleep(interval)  # Wait before retry
 
+    async def _options_worker(
+        self, universe: List[str], strategy: str, interval: int
+    ) -> None:
+        """
+        Worker for options swing scanning.
+
+        Args:
+            universe: List of equity symbols (e.g., ["SPY", "QQQ", "AAPL"])
+            strategy: Strategy name
+            interval: Scan interval in seconds
+        """
+        logger.info(
+            f"Options worker started: universe_size={len(universe)}, strategy={strategy}, "
+            f"interval={interval}s"
+        )
+
+        from pearlalgo.options.universe import EquityUniverse
+        from pearlalgo.options.swing_scanner import OptionsSwingScanner
+
+        # Initialize options universe
+        options_universe = EquityUniverse(symbols=universe)
+
+        # Initialize options scanner
+        scanner = OptionsSwingScanner(
+            universe=options_universe,
+            strategy=strategy,
+            config=self.config,
+            data_provider=self.data_feed_manager.data_provider if self.data_feed_manager else None,
+        )
+
+        while not self.shutdown_requested:
+            try:
+                # Check market hours
+                if not is_market_open():
+                    logger.debug("Market closed, waiting...")
+                    await asyncio.sleep(60)  # Check every minute
+                    continue
+
+                # Run options scan
+                logger.info(f"Running options scan for {len(universe)} symbols")
+                results = await scanner.scan()
+                
+                if results.get("status") == "success":
+                    signals = results.get("signals", [])
+                    if signals:
+                        logger.info(f"Generated {len(signals)} options signals")
+                        # TODO: Send signals to Telegram or signal tracker
+                
+                self.cycle_count += 1
+
+                # Wait for next cycle
+                await asyncio.sleep(interval)
+
+            except Exception as e:
+                logger.error(f"Error in options worker: {e}", exc_info=True)
+                await asyncio.sleep(interval)  # Wait before retry
+
     async def start(self) -> None:
         """Start the continuous service."""
         logger.info("=" * 60)
@@ -476,6 +531,22 @@ class ContinuousService:
                 "futures",
                 self._futures_worker,
                 symbols=symbols,
+                strategy=strategy,
+                interval=interval,
+            )
+
+        # Options worker
+        options_config = workers_config.get("options", {})
+        if options_config.get("enabled", False):
+            universe = options_config.get("universe", ["SPY", "QQQ"])
+            strategy = options_config.get("strategy", "swing_momentum")
+            interval = options_config.get("interval", 900)  # Default 15 minutes
+
+            self.worker_pool.register_worker(
+                "options_scanner",
+                "options",
+                self._options_worker,
+                universe=universe,
                 strategy=strategy,
                 interval=interval,
             )

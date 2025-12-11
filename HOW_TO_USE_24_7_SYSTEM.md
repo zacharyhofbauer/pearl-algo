@@ -10,22 +10,22 @@ First, make sure everything is configured:
 cd ~/pearlalgo-dev-ai-agents
 source .venv/bin/activate
 
-# Check environment variables (VERIFY POLYGON_API_KEY is set!)
+# Check environment variables (VERIFY MASSIVE_API_KEY is set!)
 python scripts/debug_env.py
 
-# Verify Polygon API key works
+# Verify Massive API key works
 python3 -c "
-from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+from pearlalgo.data_providers.massive_provider import MassiveDataProvider
 import os
-api_key = os.getenv('POLYGON_API_KEY')
+api_key = os.getenv('MASSIVE_API_KEY')
 if not api_key:
-    print('❌ POLYGON_API_KEY not set!')
+    print('❌ MASSIVE_API_KEY not set!')
     exit(1)
 try:
-    provider = PolygonDataProvider(api_key=api_key)
-    print('✅ Polygon provider initialized successfully')
+    provider = MassiveDataProvider(api_key=api_key)
+    print('✅ Massive provider initialized successfully')
 except Exception as e:
-    print(f'❌ Polygon provider failed: {e}')
+    print(f'❌ Massive provider failed: {e}')
     exit(1)
 "
 
@@ -34,12 +34,12 @@ python scripts/test_telegram.py
 ```
 
 **Required Environment Variables:**
-- `POLYGON_API_KEY` - **REQUIRED** - For market data (service will fail without it)
+- `MASSIVE_API_KEY` - **REQUIRED** - For market data (service will fail without it)
 - `TELEGRAM_BOT_TOKEN` - For alerts (required)
 - `TELEGRAM_CHAT_ID` - For alerts (required)
 - `GROQ_API_KEY` - Optional, for LLM reasoning
 
-**⚠️ Important:** The system no longer falls back to dummy data. A valid `POLYGON_API_KEY` is **mandatory**. The service will fail to start if the API key is missing or invalid.
+**⚠️ Important:** The system no longer falls back to dummy data. A valid `MASSIVE_API_KEY` is **mandatory**. The service will fail to start if the API key is missing or invalid.
 
 ### 2. Configure the System
 
@@ -77,16 +77,17 @@ python -m pearlalgo.monitoring.continuous_service \
 ```
 
 **What happens:**
-1. Service validates POLYGON_API_KEY (will fail if missing/invalid)
-2. Service initializes Polygon data provider
+1. Service validates MASSIVE_API_KEY (will fail if missing/invalid)
+2. Service initializes Massive data provider
 3. Service initializes worker pool
-4. Backfills historical data buffers (30 days) from Polygon
-5. Starts futures worker (scans NQ/ES every 60 seconds)
-6. Starts options worker (scans equities every 15 minutes)
-7. Starts health check server on port 8080
-8. Begins continuous scanning
+4. Discovers active futures contracts (ESU5, NQU5, etc.)
+5. Backfills historical data buffers (30 days) from Massive
+6. Starts futures worker (scans NQ/ES every 60 seconds)
+7. Starts options worker (scans equities every 15 minutes)
+8. Starts health check server on port 8080
+9. Begins continuous scanning
 
-**⚠️ If you see errors about missing API key or unauthorized access, the service will stop. Fix your POLYGON_API_KEY and restart.**
+**⚠️ If you see errors about missing API key or unauthorized access, the service will stop. Fix your MASSIVE_API_KEY and restart.**
 
 #### Option B: Systemd Service (Production)
 
@@ -325,21 +326,21 @@ exit_signals = generator.generate_exit_signals(state)
 
 **Common Causes:**
 
-1. **Missing or Invalid POLYGON_API_KEY:**
+1. **Missing or Invalid MASSIVE_API_KEY:**
    ```bash
    # Check if API key is set
-   echo $POLYGON_API_KEY
+   echo $MASSIVE_API_KEY
    
-   # Test Polygon API key
+   # Test Massive API key
    python3 -c "
-   from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+   from pearlalgo.data_providers.massive_provider import MassiveDataProvider
    import os
-   api_key = os.getenv('POLYGON_API_KEY')
+   api_key = os.getenv('MASSIVE_API_KEY')
    if not api_key:
-       print('❌ POLYGON_API_KEY not set in environment')
+       print('❌ MASSIVE_API_KEY not set in environment')
    else:
        try:
-           provider = PolygonDataProvider(api_key=api_key)
+           provider = MassiveDataProvider(api_key=api_key)
            print('✅ API key is valid')
        except Exception as e:
            print(f'❌ API key invalid: {e}')
@@ -366,24 +367,24 @@ exit_signals = generator.generate_exit_signals(state)
    # Check logs for specific errors
    tail -50 logs/continuous_service.log
    
-   # Look for Polygon API errors
-   grep -i "polygon\|api key\|unauthorized" logs/continuous_service.log | tail -20
+   # Look for Massive API errors
+   grep -i "massive\|api key\|unauthorized" logs/continuous_service.log | tail -20
    ```
 
 **Error Messages to Watch For:**
-- `"POLYGON_API_KEY is required"` - API key not set
-- `"Cannot initialize Polygon data provider"` - API key invalid or network issue
-- `"Polygon API unauthorized"` - API key expired or invalid
+- `"MASSIVE_API_KEY is required"` - API key not set
+- `"Cannot initialize Massive data provider"` - API key invalid or network issue
+- `"Massive API unauthorized"` - API key expired or invalid
 
 #### No Signals Generated
 
 1. **Check data provider status:**
    ```bash
-   # Check if Polygon provider is working
+   # Check if Massive provider is working
    curl http://localhost:8080/healthz | jq '.components.data_provider'
    
    # Look for data provider errors in logs
-   grep -i "data provider\|polygon\|fetch" logs/continuous_service.log | tail -20
+   grep -i "data provider\|massive\|polygon\|fetch" logs/continuous_service.log | tail -20
    ```
 
 2. **Check market hours:**
@@ -392,14 +393,15 @@ exit_signals = generator.generate_exit_signals(state)
    print(is_market_open())
    ```
 
-3. **Verify Polygon API is returning data:**
+3. **Verify Massive API is returning data:**
    ```python
-   from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+   from pearlalgo.data_providers.massive_provider import MassiveDataProvider
    import os
    import asyncio
    
-   async def test_polygon():
-       provider = PolygonDataProvider(api_key=os.getenv('POLYGON_API_KEY'))
+   async def test_massive():
+       api_key = os.getenv('MASSIVE_API_KEY')
+       provider = MassiveDataProvider(api_key=api_key)
        data = await provider.get_latest_bar('ES')
        if data:
            print(f"✅ Got data for ES: ${data['close']:.2f}")
@@ -407,7 +409,7 @@ exit_signals = generator.generate_exit_signals(state)
            print("❌ No data returned")
        await provider.close()
    
-   asyncio.run(test_polygon())
+   asyncio.run(test_massive())
    ```
 
 4. **Check strategy parameters:**
@@ -581,22 +583,23 @@ sudo systemctl disable pearlalgo-continuous-service.service
 # 1. Verify environment setup
 source .venv/bin/activate
 
-# 2. Verify POLYGON_API_KEY is set and valid
-echo "Checking POLYGON_API_KEY..."
-if [ -z "$POLYGON_API_KEY" ]; then
-    echo "❌ POLYGON_API_KEY not set! Add it to .env file"
+# 2. Verify MASSIVE_API_KEY is set and valid
+echo "Checking MASSIVE_API_KEY..."
+if [ -z "$MASSIVE_API_KEY" ]; then
+    echo "❌ MASSIVE_API_KEY not set! Add it to .env file"
     exit 1
 fi
 
-# Test Polygon API key
+# Test Massive API key
 python3 -c "
-from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+from pearlalgo.data_providers.massive_provider import MassiveDataProvider
 import os
+api_key = os.getenv('MASSIVE_API_KEY')
 try:
-    provider = PolygonDataProvider(api_key=os.getenv('POLYGON_API_KEY'))
-    print('✅ Polygon API key is valid')
+    provider = MassiveDataProvider(api_key=api_key)
+    print('✅ Massive API key is valid')
 except Exception as e:
-    print(f'❌ Polygon API key invalid: {e}')
+    print(f'❌ Massive API key invalid: {e}')
     exit(1)
 "
 
@@ -650,8 +653,8 @@ tail -f logs/continuous_service.log | grep "signal"
 source .venv/bin/activate
 python scripts/debug_env.py
 
-# Test Polygon API key
-python3 -c "from pearlalgo.data_providers.polygon_provider import PolygonDataProvider; import os; PolygonDataProvider(api_key=os.getenv('POLYGON_API_KEY'))"
+# Test Massive API key
+python3 -c "from pearlalgo.data_providers.massive_provider import MassiveDataProvider; import os; api_key = os.getenv('MASSIVE_API_KEY'); MassiveDataProvider(api_key=api_key)"
 
 # Quick test
 python3 quick_test.py
@@ -724,21 +727,21 @@ pytest tests/ --cov=src/pearlalgo --cov-report=html
 ### Test Data Provider
 
 ```bash
-# Test Polygon provider directly
+# Test Massive provider directly
 python3 << 'EOF'
 import asyncio
 import os
-from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+from pearlalgo.data_providers.massive_provider import MassiveDataProvider
 
 async def test():
-    api_key = os.getenv('POLYGON_API_KEY')
+    api_key = os.getenv('MASSIVE_API_KEY')
     if not api_key:
-        print("❌ POLYGON_API_KEY not set")
+        print("❌ MASSIVE_API_KEY not set")
         return
     
-    provider = PolygonDataProvider(api_key=api_key)
+    provider = MassiveDataProvider(api_key=api_key)
     try:
-        # Test fetching data for ES
+        # Test fetching data for ES (will auto-resolve to active contract)
         data = await provider.get_latest_bar('ES')
         if data:
             print(f"✅ Successfully fetched ES data: ${data['close']:.2f}")

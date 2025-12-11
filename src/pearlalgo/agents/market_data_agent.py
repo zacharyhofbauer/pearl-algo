@@ -3,8 +3,8 @@ Market Data Agent - Streams live market data via WebSockets with REST fallback.
 
 This agent is responsible for:
 - WebSocket streaming for OHLCV, order book, funding rates (crypto), OI
-- Polygon.io primary provider for US futures
-- Requires valid POLYGON_API_KEY - no dummy data fallback
+- Massive.com primary provider for US futures
+- Requires valid MASSIVE_API_KEY - no dummy data fallback
 - Real-time data aggregation and normalization
 """
 
@@ -28,9 +28,9 @@ from pearlalgo.agents.langgraph_state import (
 )
 from pearlalgo.config.settings import get_settings
 # DummyDataProvider removed - system requires real data providers
-from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+from pearlalgo.data_providers.massive_provider import MassiveDataProvider
 from pearlalgo.data_providers.buffer_manager import BufferManager
-# WebSocket provider removed - system uses Polygon REST API only
+# WebSocket provider removed - system uses Massive REST API only
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class MarketDataAgent:
         self.config = config or {}
 
         # Initialize data providers
-        self.polygon_provider: Optional[PolygonDataProvider] = None
+        self.massive_provider: Optional[MassiveDataProvider] = None
         # Dummy provider removed - system requires real data
 
         # Data buffers (for caching normalized data)
@@ -62,36 +62,36 @@ class MarketDataAgent:
         # Historical data buffer manager
         self.buffer_manager = buffer_manager
 
-        # Initialize Polygon provider
+        # Initialize Massive provider
         self._initialize_providers()
 
         logger.info(f"MarketDataAgent initialized: symbols={symbols}")
 
     def _initialize_providers(self) -> None:
-        """Initialize Polygon data provider."""
+        """Initialize Massive data provider."""
         try:
             import os
             
-            # Initialize Polygon provider (primary data source)
+            # Initialize Massive provider (primary data source)
             # Try to get API key from config or environment
-            polygon_api_key = (
+            massive_api_key = (
                 self.config.get("data", {})
                 .get("fallback", {})
-                .get("polygon", {})
+                .get("massive", {})
                 .get("api_key")
             )
-            if not polygon_api_key:
+            if not massive_api_key:
                 # Try environment variable
-                polygon_api_key = os.getenv("POLYGON_API_KEY")
+                massive_api_key = os.getenv("MASSIVE_API_KEY")
             
-            if polygon_api_key:
+            if massive_api_key:
                 try:
-                    self.polygon_provider = PolygonDataProvider(api_key=polygon_api_key)
-                    logger.info("Polygon.io provider initialized")
+                    self.massive_provider = MassiveDataProvider(api_key=massive_api_key)
+                    logger.info("Massive.com provider initialized")
                 except Exception as e:
-                    logger.warning(f"Polygon provider initialization failed: {e}")
+                    logger.warning(f"Massive provider initialization failed: {e}")
             else:
-                logger.warning("Polygon API key not found - Polygon provider disabled. Set POLYGON_API_KEY environment variable.")
+                logger.warning("Massive API key not found - Massive provider disabled. Set MASSIVE_API_KEY environment variable.")
 
             # Dummy provider removed - system will fail explicitly if data providers are unavailable
 
