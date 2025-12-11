@@ -111,7 +111,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         # Check 7: Environment variables (optional)
         import os
         env_checks = {}
-        optional_vars = ["POLYGON_API_KEY", "TELEGRAM_BOT_TOKEN", "GROQ_API_KEY"]
+        optional_vars = ["MASSIVE_API_KEY", "TELEGRAM_BOT_TOKEN", "GROQ_API_KEY"]
         for var in optional_vars:
             env_checks[var] = "set" if os.getenv(var) else "not_set"
         checks["environment_variables"] = env_checks

@@ -148,13 +148,13 @@ class MarketDataAgent:
                         data={"symbol": symbol, "price": market_data.close, "volume": market_data.volume},
                     )
                 else:
-                    # No data returned - likely Polygon free tier limitation
+                    # No data returned - likely Massive free tier limitation
                     logger.warning(
                         f"No market data available for {symbol}. "
-                        f"⚠️  Polygon.io FREE TIER does not include futures data. "
-                        f"Your API key is valid but futures require a paid subscription. "
+                        f"⚠️  Massive.com FREE TIER may not include futures data. "
+                        f"Your API key is valid but futures may require a paid subscription. "
                         f"Service will continue but cannot generate signals without market data. "
-                        f"See: https://polygon.io/pricing for subscription options."
+                        f"See: https://massive.com/pricing for subscription options."
                     )
                     state = add_agent_reasoning(
                         state,
@@ -180,12 +180,12 @@ class MarketDataAgent:
 
         logger.info(f"MarketDataAgent: Updated {len(state.market_data)} symbols")
 
-        # Cleanup: Close Polygon provider session if it exists
-        if self.polygon_provider:
+        # Cleanup: Close Massive provider session if it exists
+        if self.massive_provider:
             try:
-                await self.polygon_provider.close()
+                await self.massive_provider.close()
             except Exception as e:
-                error_msg = f"Error closing Polygon provider: {e}"
+                error_msg = f"Error closing Massive provider: {e}"
                 logger.warning(error_msg, exc_info=True)
                 # Don't add to state.errors as this is cleanup, not critical
 
@@ -193,26 +193,26 @@ class MarketDataAgent:
 
     async def _fetch_symbol_data(self, symbol: str) -> Optional[MarketData]:
         """
-        Fetch data for a single symbol from Polygon provider.
+        Fetch data for a single symbol from Massive provider.
         
         Raises:
-            RuntimeError: If Polygon provider fails or is unavailable
+            RuntimeError: If Massive provider fails or is unavailable
         """
-        if not self.polygon_provider:
+        if not self.massive_provider:
             raise RuntimeError(
-                f"Cannot fetch data for {symbol}: Polygon provider is not initialized. "
-                f"Please check your POLYGON_API_KEY configuration."
+                f"Cannot fetch data for {symbol}: Massive provider is not initialized. "
+                f"Please check your MASSIVE_API_KEY configuration."
             )
         
         try:
-            data = await self.polygon_provider.get_latest_bar(symbol)
+            data = await self.massive_provider.get_latest_bar(symbol)
             if data:
-                logger.debug(f"Successfully fetched Polygon data for {symbol}")
+                logger.debug(f"Successfully fetched Massive data for {symbol}")
                 return self._convert_to_market_data(symbol, data)
             else:
                 # No data returned - could be market closed, contract expired, or free tier limitation
                 logger.warning(
-                    f"Polygon provider returned no data for {symbol}. "
+                    f"Massive provider returned no data for {symbol}. "
                     f"This may indicate: market is closed, contract expired, or free tier limitations. "
                     f"Service will continue but cannot generate signals without market data."
                 )
@@ -220,8 +220,8 @@ class MarketDataAgent:
                 return None
         except Exception as e:
             error_msg = (
-                f"Failed to fetch data for {symbol} from Polygon provider: {e}. "
-                f"Please check your POLYGON_API_KEY and network connection."
+                f"Failed to fetch data for {symbol} from Massive provider: {e}. "
+                f"Please check your MASSIVE_API_KEY and network connection."
             )
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
@@ -286,7 +286,7 @@ class MarketDataAgent:
             metadata=data.get("metadata", {}),
         )
 
-    # WebSocket methods removed - system uses Polygon REST API only
+    # WebSocket methods removed - system uses Massive REST API only
 
     def get_latest_data(self, symbol: str) -> Optional[MarketData]:
         """

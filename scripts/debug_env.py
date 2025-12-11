@@ -156,7 +156,7 @@ def main() -> int:
         "GROQ_API_KEY": os.getenv("GROQ_API_KEY"),
         "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
         "ANTHROPIC_API_KEY": os.getenv("ANTHROPIC_API_KEY"),
-        "POLYGON_API_KEY": os.getenv("POLYGON_API_KEY"),
+        "MASSIVE_API_KEY": os.getenv("MASSIVE_API_KEY"),
     }
     
     for key, value in optional_keys.items():

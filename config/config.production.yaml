@@ -4,7 +4,7 @@
 # Signal Generation Settings
 signal_generation:
   enabled: true
-  interval_seconds: 300  # 5 minutes (adjust based on Polygon rate limits)
+  interval_seconds: 300  # 5 minutes (adjust based on Massive rate limits)
   symbols: ["ES", "NQ", "MES", "MNQ"]
   strategy: "sr"
   
@@ -18,8 +18,8 @@ signal_generation:
     enabled: true
     skip_during_close: true  # Skip signal generation when market is closed
   
-  # Polygon API settings
-  polygon:
+  # Massive API settings
+  massive:
     rate_limit_delay: 0.25  # 4 calls/second (free tier: 5/min, paid: 200/min)
     max_retries: 3
     circuit_breaker_threshold: 5

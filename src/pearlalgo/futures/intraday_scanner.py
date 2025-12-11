@@ -4,7 +4,7 @@ Futures Intraday Scanner - High-frequency scanning for NQ and ES futures.
 Provides:
 - Dedicated scanner for NQ and ES
 - High-frequency scanning (1-5 minute intervals)
-- Real-time data ingestion from Polygon
+- Real-time data ingestion from Massive
 - Strategy execution: intraday_swing, sr, ma_cross
 - Signal generation with entry/exit logic
 """

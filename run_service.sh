@@ -35,8 +35,8 @@ mkdir -p data
 
 # Check environment variables
 echo -e "${YELLOW}📋 Checking environment...${NC}"
-if [ -z "$POLYGON_API_KEY" ]; then
-    echo -e "${RED}❌ POLYGON_API_KEY not set - service will fail without it${NC}"
+if [ -z "$MASSIVE_API_KEY" ]; then
+    echo -e "${RED}❌ MASSIVE_API_KEY not set - service will fail without it${NC}"
 fi
 
 if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then

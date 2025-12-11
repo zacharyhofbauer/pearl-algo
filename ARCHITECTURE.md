@@ -12,7 +12,7 @@ PearlAlgo is a professional-grade, vendor-agnostic quantitative trading platform
 ┌─────────────────────────────────────────────────────────────┐
 │                    Market Data Layer                         │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
-│  │ Polygon  │  │  Tradier │  │  Local   │  │  Yahoo   │   │
+│  │ Massive  │  │  Tradier │  │  Local   │  │  Yahoo   │   │
 │  │   API    │  │   API    │  │  Parquet │  │ (Fallback)│   │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
 └─────────────────────────────────────────────────────────────┘
@@ -83,9 +83,10 @@ PearlAlgo is a professional-grade, vendor-agnostic quantitative trading platform
 
 **Vendor-Agnostic Data Providers:**
 
-- **Polygon.io** (Primary)
+- **Massive.com** (Primary)
   - Real-time and historical data
   - Options chains support
+  - Futures contract discovery
   - Developer tier: $99/mo
 
 - **Tradier API** (Options-focused)

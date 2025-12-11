@@ -35,7 +35,7 @@ fi
 if [ ! -f "$PROJECT_ROOT/.env" ]; then
     echo "⚠️  .env file not found"
     echo "   Please create .env file with:"
-    echo "   - POLYGON_API_KEY"
+    echo "   - MASSIVE_API_KEY"
     echo "   - TELEGRAM_BOT_TOKEN"
     echo "   - TELEGRAM_CHAT_ID"
     read -p "Continue anyway? (y/N) " -n 1 -r

@@ -357,7 +357,7 @@ class ExitSignalGenerator:
                     if bar:
                         # Handle different return types
                         if isinstance(bar, dict):
-                            # Polygon returns dict with 'close' or 'c' key
+                            # Massive returns dict with 'close' or 'c' key
                             price = float(bar.get('close', bar.get('c', 0)))
                         elif hasattr(bar, 'close'):
                             price = float(bar.close)

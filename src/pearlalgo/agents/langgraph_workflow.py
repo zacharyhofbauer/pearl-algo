@@ -128,11 +128,11 @@ class TradingWorkflow:
         # Initialize signal tracker and exit signal generator
         self.signal_tracker = SignalTracker()
         # Get data provider from market_data_agent for fallback price fetching
-        data_provider = self.market_data_agent.polygon_provider
+        data_provider = self.market_data_agent.massive_provider
         if not data_provider:
             raise RuntimeError(
-                "Polygon data provider is required but not initialized. "
-                "Please check your POLYGON_API_KEY configuration."
+                "Massive data provider is required but not initialized. "
+                "Please check your MASSIVE_API_KEY configuration."
             )
         self.exit_signal_generator = ExitSignalGenerator(
             signal_tracker=self.signal_tracker,
