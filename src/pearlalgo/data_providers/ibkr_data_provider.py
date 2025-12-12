@@ -13,13 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
-import threading
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
-from ib_insync import IB, Contract, Future, Option, Stock, util
+from ib_insync import util
 
 try:
     from loguru import logger as loguru_logger
@@ -30,6 +29,12 @@ except ImportError:
 
 from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.config.settings import Settings, get_settings
+from pearlalgo.data_providers.ibkr_executor import (
+    GetHistoricalDataTask,
+    GetLatestBarTask,
+    GetOptionsChainTask,
+    IBKRExecutor,
+)
 from pearlalgo.utils.retry import async_retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -67,148 +72,27 @@ class IBKRDataProvider(DataProvider):
         self.port = port or self.settings.ib_port
         self.client_id = client_id or self.settings.ib_data_client_id or self.settings.ib_client_id
         
-        # IB connection instance
-        self.ib: Optional[IB] = None
-        self._connected = False
-        self._connection_lock = asyncio.Lock()
-        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
-        self._loop_thread: Optional[threading.Thread] = None
+        # Futures symbols for contract type detection
+        self.futures_symbols = {"ES", "NQ", "YM", "RTY", "CL", "GC", "SI", "NG", "ZB", "ZN", "ZF", "ZT"}
         
-        # Rate limiting
-        self._last_request_time: float = 0.0
-        self._min_request_interval = 0.1  # 100ms between requests
+        # Initialize executor (dedicated thread for IBKR calls)
+        self._executor = IBKRExecutor(
+            host=self.host,
+            port=self.port,
+            client_id=self.client_id,
+        )
+        self._executor.start()
         
         logger.info(
             f"IBKRDataProvider initialized: host={self.host}, port={self.port}, client_id={self.client_id}"
         )
-        
-        # Start event loop in background thread for thread-safe operations
-        self._start_event_loop()
-
-    async def _ensure_connected(self) -> None:
-        """Ensure IB connection is established."""
-        async with self._connection_lock:
-            if self._connected and self.ib and self.ib.isConnected():
-                return
-            
-            if self.ib is None:
-                self.ib = IB()
-            
-            try:
-                if not self.ib.isConnected():
-                    logger.info(f"Connecting to IB Gateway at {self.host}:{self.port}")
-                    # ib_insync connectAsync needs to run in proper async context
-                    # Use sync connect in thread if needed
-                    try:
-                        await self.ib.connectAsync(
-                            self.host,
-                            self.port,
-                            clientId=self.client_id,
-                            timeout=10
-                        )
-                    except RuntimeError as e:
-                        if "no current event loop" in str(e).lower():
-                            # Fallback: use sync connect in thread
-                            await asyncio.to_thread(
-                                self.ib.connect,
-                                self.host,
-                                self.port,
-                                clientId=self.client_id
-                            )
-                        else:
-                            raise
-                    self._connected = True
-                    logger.info("Connected to IB Gateway successfully")
-            except Exception as e:
-                self._connected = False
-                logger.error(f"Failed to connect to IB Gateway: {e}")
-                raise RuntimeError(
-                    f"Cannot connect to IB Gateway at {self.host}:{self.port}. "
-                    f"Ensure IB Gateway/TWS is running with API enabled. Error: {e}"
-                ) from e
-
-    def _start_event_loop(self) -> None:
-        """Start a dedicated event loop in a background thread for thread-safe operations."""
-        def run_loop():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            self._main_loop = loop
-            loop.run_forever()
-        
-        self._loop_thread = threading.Thread(target=run_loop, daemon=True)
-        self._loop_thread.start()
-        # Wait a moment for loop to start
-        time.sleep(0.1)
-    
-    def _run_in_loop(self, coro):
-        """Run a coroutine in the dedicated event loop thread."""
-        if self._main_loop is None:
-            # Fallback to current loop if main loop not ready
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            return asyncio.run_coroutine_threadsafe(coro, loop).result()
-        return asyncio.run_coroutine_threadsafe(coro, self._main_loop).result()
-
-    async def _rate_limit(self) -> None:
-        """Enforce rate limiting."""
-        elapsed = time.time() - self._last_request_time
-        if elapsed < self._min_request_interval:
-            await asyncio.sleep(self._min_request_interval - elapsed)
-        self._last_request_time = time.time()
 
     async def close(self) -> None:
-        """Close IB connection."""
-        if self.ib and self.ib.isConnected():
-            try:
-                self.ib.disconnect()
-                logger.info("Disconnected from IB Gateway")
-            except Exception as e:
-                logger.warning(f"Error disconnecting from IB Gateway: {e}")
-        self._connected = False
+        """Close IB connection and stop executor."""
+        logger.info("Closing IBKRDataProvider...")
+        self._executor.stop(timeout=10.0)
+        logger.info("IBKRDataProvider closed")
 
-    def _create_stock_contract(self, symbol: str) -> Stock:
-        """Create stock contract."""
-        return Stock(symbol, "SMART", "USD")
-
-    def _create_futures_contract(self, symbol: str, exchange: str = "GLOBEX") -> Future:
-        """
-        Create futures contract.
-        
-        For symbols like ES, NQ, we need to resolve to active contract.
-        IB requires format like ESU5 (ES, Sep 2025) or we can use generic and let IB resolve.
-        """
-        # For now, use generic contract - IB will resolve to front month
-        # For production, you may want to query active contracts first
-        return Future(symbol, exchange, "USD")
-
-    def _create_option_contract(
-        self,
-        underlying_symbol: str,
-        strike: float,
-        expiration: str,
-        option_type: str,
-    ) -> Option:
-        """
-        Create option contract.
-        
-        Args:
-            underlying_symbol: Underlying symbol (e.g., 'QQQ')
-            strike: Strike price
-            expiration: Expiration date in YYYYMMDD format
-            option_type: 'C' for call, 'P' for put
-        """
-        stock = Stock(underlying_symbol, "SMART", "USD")
-        option = Option(
-            underlying_symbol,
-            expiration,
-            strike,
-            option_type,
-            "SMART"
-        )
-        return option
 
     def fetch_historical(
         self,
@@ -246,79 +130,29 @@ class IBKRDataProvider(DataProvider):
         end: Optional[datetime] = None,
         timeframe: Optional[str] = None,
     ) -> pd.DataFrame:
-        """Async implementation of fetch_historical."""
-        await self._ensure_connected()
-        
+        """Async implementation of fetch_historical using executor."""
         if start is None:
             start = datetime.now(timezone.utc) - timedelta(days=365)
         if end is None:
             end = datetime.now(timezone.utc)
         
-        # Convert timeframe to IB bar size format
-        bar_size_map = {
-            "1m": "1 min",
-            "5m": "5 mins",
-            "15m": "15 mins",
-            "30m": "30 mins",
-            "1h": "1 hour",
-            "1d": "1 day",
-        }
-        bar_size = bar_size_map.get(timeframe.lower() if timeframe else "1d", "1 day")
-        
-        # Calculate duration string for IB
-        duration_days = (end - start).days
-        if duration_days <= 1:
-            duration_str = "1 D"
-        elif duration_days <= 7:
-            duration_str = "1 W"
-        elif duration_days <= 30:
-            duration_str = "1 M"
-        elif duration_days <= 365:
-            duration_str = "1 Y"
-        else:
-            duration_str = f"{duration_days} D"
-        
         # Determine if symbol is futures or stock
-        # Simple heuristic: if symbol is 2-3 letters and common futures, treat as futures
-        futures_symbols = {"ES", "NQ", "YM", "RTY", "CL", "GC", "SI", "NG", "ZB", "ZN", "ZF", "ZT"}
-        is_futures = symbol.upper() in futures_symbols
+        is_futures = symbol.upper() in self.futures_symbols
         
         try:
-            await self._rate_limit()
+            # Submit task to executor
+            task_id = str(uuid.uuid4())
+            task = GetHistoricalDataTask(
+                task_id=task_id,
+                symbol=symbol,
+                start=start,
+                end=end,
+                timeframe=timeframe,
+                is_futures=is_futures,
+            )
             
-            # Create contract
-            if is_futures:
-                contract = self._create_futures_contract(symbol)
-            else:
-                contract = self._create_stock_contract(symbol)
-            
-            # Request historical data (ib_insync sync methods, run in executor)
-            if self._main_loop:
-                future = asyncio.run_coroutine_threadsafe(
-                    asyncio.to_thread(
-                        self.ib.reqHistoricalData,
-                        contract,
-                        endDateTime=end,
-                        durationStr=duration_str,
-                        barSizeSetting=bar_size,
-                        whatToShow="TRADES",
-                        useRTH=False,
-                        formatDate=1,
-                    ),
-                    self._main_loop
-                )
-                bars = await asyncio.wrap_future(future)
-            else:
-                bars = await asyncio.to_thread(
-                    self.ib.reqHistoricalData,
-                    contract,
-                    endDateTime=end,
-                    durationStr=duration_str,
-                    barSizeSetting=bar_size,
-                    whatToShow="TRADES",
-                    useRTH=False,
-                    formatDate=1,
-                )
+            future = self._executor.submit_task(task)
+            bars = await asyncio.wrap_future(future)
             
             if not bars:
                 logger.warning(f"No historical data returned for {symbol}")
@@ -374,51 +208,21 @@ class IBKRDataProvider(DataProvider):
             Dict with timestamp, open, high, low, close, volume, or None if unavailable
         """
         try:
-            await self._ensure_connected()
-            await self._rate_limit()
-            
             # Determine if futures or stock
-            futures_symbols = {"ES", "NQ", "YM", "RTY", "CL", "GC", "SI", "NG", "ZB", "ZN", "ZF", "ZT"}
-            is_futures = symbol.upper() in futures_symbols
+            is_futures = symbol.upper() in self.futures_symbols
             
-            # Create contract
-            if is_futures:
-                contract = self._create_futures_contract(symbol)
-            else:
-                contract = self._create_stock_contract(symbol)
+            # Submit task to executor
+            task_id = str(uuid.uuid4())
+            task = GetLatestBarTask(
+                task_id=task_id,
+                symbol=symbol,
+                is_futures=is_futures,
+            )
             
-            # Request market data (ib_insync sync methods are thread-safe)
-            # Use the background event loop for thread-safe execution
-            if self._main_loop:
-                future = asyncio.run_coroutine_threadsafe(
-                    asyncio.to_thread(self.ib.reqMktData, contract, "", False, False),
-                    self._main_loop
-                )
-                ticker = await asyncio.wrap_future(future)
-            else:
-                # Fallback: use to_thread directly (requires running loop)
-                ticker = await asyncio.to_thread(self.ib.reqMktData, contract, "", False, False)
+            future = self._executor.submit_task(task)
+            result = await asyncio.wrap_future(future)
             
-            # Wait a moment for data to arrive
-            await asyncio.sleep(0.5)
-            
-            # Get last price
-            last_price = ticker.last if ticker.last else ticker.close
-            
-            if last_price and last_price > 0:
-                return {
-                    "timestamp": datetime.now(timezone.utc),
-                    "open": ticker.open if ticker.open else last_price,
-                    "high": ticker.high if ticker.high else last_price,
-                    "low": ticker.low if ticker.low else last_price,
-                    "close": last_price,
-                    "volume": ticker.volume if ticker.volume else 0,
-                    "bid": ticker.bid if ticker.bid else None,
-                    "ask": ticker.ask if ticker.ask else None,
-                }
-            
-            logger.warning(f"No price data available for {symbol}")
-            return None
+            return result
             
         except Exception as e:
             logger.error(f"Error fetching latest bar for {symbol}: {e}")
@@ -452,9 +256,6 @@ class IBKRDataProvider(DataProvider):
             List of option contracts with strike, expiration, type (call/put)
         """
         try:
-            await self._ensure_connected()
-            await self._rate_limit()
-            
             # Get underlying price if not provided
             if underlying_price is None:
                 latest_bar = await self.get_latest_bar(underlying_symbol)
@@ -468,130 +269,23 @@ class IBKRDataProvider(DataProvider):
                 logger.warning(f"Invalid underlying price for {underlying_symbol}: {underlying_price}")
                 return []
             
-            # Create stock contract for underlying
-            stock = self._create_stock_contract(underlying_symbol)
+            # Submit task to executor
+            task_id = str(uuid.uuid4())
+            task = GetOptionsChainTask(
+                task_id=task_id,
+                underlying_symbol=underlying_symbol,
+                expiration_date=expiration_date,
+                min_dte=min_dte,
+                max_dte=max_dte,
+                strike_proximity_pct=strike_proximity_pct,
+                min_volume=min_volume,
+                min_open_interest=min_open_interest,
+                underlying_price=underlying_price,
+            )
             
-            # Request option chains (ib_insync sync methods, run in executor)
-            if self._main_loop:
-                future = asyncio.run_coroutine_threadsafe(
-                    asyncio.to_thread(
-                        self.ib.reqSecDefOptParams,
-                        stock.symbol,
-                        "",
-                        stock.secType,
-                        stock.conId
-                    ),
-                    self._main_loop
-                )
-                chains = await asyncio.wrap_future(future)
-            else:
-                chains = await asyncio.to_thread(
-                    self.ib.reqSecDefOptParams,
-                    stock.symbol,
-                    "",
-                    stock.secType,
-                    stock.conId
-                )
+            future = self._executor.submit_task(task)
+            all_options = await asyncio.wrap_future(future)
             
-            if not chains:
-                logger.warning(f"No option chains found for {underlying_symbol}")
-                return []
-            
-            # Get today's date for DTE calculation
-            today = date.today()
-            all_options = []
-            
-            # Process each chain (each chain represents an expiration)
-            for chain in chains:
-                expiration_str = chain.expirations[0] if chain.expirations else None
-                if not expiration_str:
-                    continue
-                
-                # Parse expiration date
-                try:
-                    # IB returns expiration as YYYYMMDD string
-                    exp_date = datetime.strptime(expiration_str, "%Y%m%d").date()
-                    dte = (exp_date - today).days
-                    
-                    # Filter by DTE
-                    if min_dte is not None and dte < min_dte:
-                        continue
-                    if max_dte is not None and dte > max_dte:
-                        continue
-                    if expiration_date and expiration_str != expiration_date:
-                        continue
-                    
-                    # Process strikes for this expiration
-                    for strike in chain.strikes:
-                        # Filter by strike proximity
-                        if strike_proximity_pct and underlying_price > 0:
-                            strike_pct = abs(strike - underlying_price) / underlying_price
-                            if strike_pct > strike_proximity_pct:
-                                continue
-                        
-                        # Get option contracts for call and put
-                        for option_type in ["C", "P"]:
-                            option = Option(
-                                underlying_symbol,
-                                expiration_str,
-                                strike,
-                                option_type,
-                                "SMART"
-                            )
-                            
-                            try:
-                                # Request market data for this option (sync method in executor)
-                                await self._rate_limit()
-                                if self._main_loop:
-                                    future = asyncio.run_coroutine_threadsafe(
-                                        asyncio.to_thread(
-                                            self.ib.reqMktData, option, "", False, False
-                                        ),
-                                        self._main_loop
-                                    )
-                                    ticker = await asyncio.wrap_future(future)
-                                else:
-                                    ticker = await asyncio.to_thread(
-                                        self.ib.reqMktData, option, "", False, False
-                                    )
-                                await asyncio.sleep(0.1)  # Brief wait for data
-                                
-                                # Get option data
-                                volume = ticker.volume if ticker.volume else 0
-                                open_interest = ticker.openInterest if hasattr(ticker, 'openInterest') else 0
-                                
-                                # Filter by volume and OI
-                                if min_volume is not None and volume < min_volume:
-                                    continue
-                                if min_open_interest is not None and open_interest < min_open_interest:
-                                    continue
-                                
-                                # Build option dict
-                                option_dict = {
-                                    "symbol": f"{underlying_symbol} {expiration_str} {strike} {option_type}",
-                                    "underlying_symbol": underlying_symbol,
-                                    "strike": strike,
-                                    "expiration": expiration_str,
-                                    "expiration_date": exp_date.isoformat(),
-                                    "dte": dte,
-                                    "option_type": "call" if option_type == "C" else "put",
-                                    "bid": ticker.bid if ticker.bid else None,
-                                    "ask": ticker.ask if ticker.ask else None,
-                                    "last_price": ticker.last if ticker.last else (ticker.bid + ticker.ask) / 2 if ticker.bid and ticker.ask else None,
-                                    "volume": volume,
-                                    "open_interest": open_interest,
-                                    "iv": ticker.impliedVolatility if hasattr(ticker, 'impliedVolatility') else None,
-                                }
-                                
-                                all_options.append(option_dict)
-                                
-                            except Exception as e:
-                                logger.debug(f"Error fetching data for option {option}: {e}")
-                                continue
-                except Exception as e:
-                    logger.debug(f"Error parsing expiration {expiration_str}: {e}")
-                    continue
-                                
             logger.info(f"Retrieved {len(all_options)} options for {underlying_symbol}")
             return all_options
             

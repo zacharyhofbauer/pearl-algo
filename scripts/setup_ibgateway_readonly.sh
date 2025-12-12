@@ -32,16 +32,19 @@ sleep 2
 
 cd ~/Jts/ibgateway/1041 || exit 1
 
-# Try to start with xvfb
-if command -v xvfb-run >/dev/null 2>&1; then
-    echo "   Starting with xvfb-run (headless)..."
-    DISPLAY=:99 xvfb-run -a -s "-screen 0 1024x768x24" ./ibgateway1 > /tmp/ibgateway.log 2>&1 &
-    GATEWAY_PID=$!
-else
-    echo "   Starting directly..."
-    ./ibgateway1 > /tmp/ibgateway.log 2>&1 &
-    GATEWAY_PID=$!
+# Ensure Xvfb is running
+echo "   Ensuring Xvfb virtual display is running..."
+source ~/ibc/start_xvfb.sh
+if [ $? -ne 0 ]; then
+    echo "   ❌ Failed to start Xvfb"
+    exit 1
 fi
+
+# Start with DISPLAY set
+echo "   Starting IB Gateway with DISPLAY=:99..."
+export DISPLAY=:99
+./ibgateway1 > /tmp/ibgateway.log 2>&1 &
+GATEWAY_PID=$!
 
 echo "   Process ID: $GATEWAY_PID"
 echo "   Log file: /tmp/ibgateway.log"

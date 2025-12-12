@@ -20,10 +20,20 @@ if [ ! -f ~/ibc/config-auto.ini ]; then
     exit 1
 fi
 
+# Ensure Xvfb is running for headless operation
+echo "Ensuring Xvfb virtual display is running..."
+source ~/ibc/start_xvfb.sh
+if [ $? -ne 0 ]; then
+    echo "❌ Failed to start Xvfb. Cannot start IB Gateway."
+    exit 1
+fi
+
 # Start IBC
 echo "Starting IB Gateway..."
 cd ~/ibc
 
+# Use headless version that ensures DISPLAY is set
+export DISPLAY=:99
 # Start in background with logging
 nohup ./gatewaystart.sh -inline > logs/gateway_$(date +%Y%m%d_%H%M%S).log 2>&1 &
 IBC_PID=$!
