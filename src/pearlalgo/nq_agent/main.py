@@ -35,9 +35,9 @@ async def main():
     config = NQIntradayConfig()
     
     # Create data provider (use factory to get appropriate provider)
-    # Default to local_parquet if no provider specified via env var
+    # Default to IBKR if no provider specified via env var
     import os
-    provider_name = os.getenv("PEARLALGO_DATA_PROVIDER", "local_parquet")
+    provider_name = os.getenv("PEARLALGO_DATA_PROVIDER", "ibkr")
     
     try:
         data_provider = create_data_provider(provider_name)
