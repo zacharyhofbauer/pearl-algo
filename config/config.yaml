@@ -1,21 +1,24 @@
 # LangGraph Multi-Agent Trading System Configuration
+# IBKR-only configuration
 # All API keys should be set via environment variables for security
 
 # Trading Symbols
 symbols:
-  # Micro futures removed - system now focuses on options and stock-equity trading
-  # Futures removed - system now focuses on options and stock-equity trading
+  # IBKR futures and options symbols
+  futures:
+    - "ES"  # E-mini S&P 500
+    - "NQ"  # E-mini NASDAQ-100
+    - "CL"  # Crude Oil
+    - "GC"  # Gold
   
-  # Crypto perpetuals (Bybit equivalents)
-  crypto_perps:
-    - symbol: "BTCUSDT"
-      exchange: "bybit"
-      tick_value: 0.01
-      contract_size: 1
-    - symbol: "ETHUSDT"
-      exchange: "bybit"
-      tick_value: 0.01
-      contract_size: 1
+  # Options underliers
+  options_underliers:
+    - "QQQ"
+    - "SPY"
+    - "AAPL"
+    - "META"
+    - "NVDA"
+    - "MSFT"
 
 # Timeframes
 timeframes:
@@ -262,7 +265,12 @@ monitoring:
   buffer_size: 1000  # Number of bars per symbol
   
   workers:
-    # Futures worker removed - system now focuses on options trading
+    # Futures worker for ES/NQ intraday trading
+    futures:
+      enabled: true
+      symbols: ["ES", "NQ"]
+      interval: 60  # seconds (1 minute)
+      strategy: "sr"  # Support/Resistance strategy
     
     # Options swing scanner (multi-day patterns)
     options:

@@ -1,32 +1,25 @@
 """
 Data Provider Factory for creating and managing data providers.
 
-Supports multiple data providers with configuration-based selection
-and automatic fallback mechanisms.
+IBKR-only data provider factory for live/paper trading.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from typing import Dict, Optional, Type
 
 from pearlalgo.config.settings import Settings, get_settings
 
 from .base import DataProvider
 from .ibkr.ibkr_provider import IBKRProvider
-from .local_csv_provider import LocalCSVProvider
-from .local_parquet_provider import LocalParquetProvider
 
 logger = logging.getLogger(__name__)
 
 # Registry of available providers
-# IBKR is the primary provider for live/paper trading
-# Local providers are for backtesting only
+# IBKR is the only provider for live/paper trading
 _PROVIDER_REGISTRY: Dict[str, Type[DataProvider]] = {
     "ibkr": IBKRProvider,
-    "local_csv": LocalCSVProvider,
-    "local_parquet": LocalParquetProvider,
 }
 
 
@@ -39,7 +32,7 @@ def create_data_provider(
     Create a data provider instance.
 
     Args:
-        provider_name: Name of provider ('ibkr' for live/paper trading, 'local_csv'/'local_parquet' for backtesting)
+        provider_name: Name of provider ('ibkr' for live/paper trading)
         settings: Settings instance (optional, will use get_settings() if not provided)
         **kwargs: Additional provider-specific arguments
 
@@ -60,7 +53,7 @@ def create_data_provider(
     provider_class = _PROVIDER_REGISTRY[provider_name]
 
     try:
-        elif provider_name == "ibkr":
+        if provider_name == "ibkr":
             # IBKR provider uses settings for connection info
             return provider_class(
                 settings=settings,
@@ -68,21 +61,8 @@ def create_data_provider(
                 port=kwargs.pop("port", None),
                 client_id=kwargs.pop("client_id", None),
             )
-
-        elif provider_name == "local_csv":
-            root_dir = kwargs.get("root_dir") or settings.data_dir
-            return provider_class(root_dir=root_dir)
-
-        elif provider_name == "local_parquet":
-            root_dir = kwargs.get("root_dir") or (
-                settings.data_dir / "historical"
-                if hasattr(settings.data_dir, "__truediv__")
-                else f"{settings.data_dir}/historical"
-            )
-            return provider_class(root_dir=root_dir)
-
         else:
-            # Fallback for other providers
+            # Fallback for other providers (if any are registered)
             return provider_class(**kwargs)
 
     except Exception as e:

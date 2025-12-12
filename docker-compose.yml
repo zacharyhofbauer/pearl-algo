@@ -37,29 +37,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Redis for optional state persistence
-  redis:
-    image: redis:7-alpine
-    container_name: langgraph-redis
-    restart: unless-stopped
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis-data:/data
-    networks:
-      - trading-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    command: redis-server --appendonly yes
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256M
-
   trading-bot:
     build:
       context: .
@@ -69,14 +46,7 @@ services:
     depends_on:
       ib-gateway:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     environment:
-      # Redis configuration (optional - falls back to file-based if not available)
-      - REDIS_HOST=${REDIS_HOST:-redis}
-      - REDIS_PORT=${REDIS_PORT:-6379}
-      - REDIS_DB=${REDIS_DB:-0}
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       # IBKR configuration (connect to ib-gateway container)
       - IBKR_HOST=${IBKR_HOST:-ib-gateway}
       - IBKR_PORT=${IBKR_PORT:-4002}
@@ -84,23 +54,11 @@ services:
       - IBKR_DATA_CLIENT_ID=${IBKR_DATA_CLIENT_ID:-2}
       - IBKR_ACCOUNT_TYPE=${IBKR_ACCOUNT_TYPE:-paper}
       
-      # Bybit (if using)
-      - BYBIT_API_KEY=${BYBIT_API_KEY:-}
-      - BYBIT_API_SECRET=${BYBIT_API_SECRET:-}
-      
-      # Alpaca (if using)
-      - ALPACA_API_KEY=${ALPACA_API_KEY:-}
-      - ALPACA_API_SECRET=${ALPACA_API_SECRET:-}
-      - ALPACA_BASE_URL=${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}
-      
-      # Data providers
-      - POLYGON_API_KEY=${POLYGON_API_KEY:-}
-      
-      # LLM
+      # LLM (optional)
       - GROQ_API_KEY=${GROQ_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       
-      # Alerts
+      # Alerts (optional)
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
@@ -144,62 +102,10 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Streamlit Dashboard (optional)
-  dashboard:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: langgraph-dashboard
-    restart: unless-stopped
-    command: streamlit run scripts/streamlit_dashboard.py --server.port=8501 --server.address=0.0.0.0
-    ports:
-      - "8501:8501"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app
-    volumes:
-      - ./logs:/app/logs
-      - ./data:/app/data
-      - ./signals:/app/signals
-      - ./reports:/app/reports
-      - ./state_cache:/app/state_cache
-      - ./telemetry:/app/telemetry
-      - ./config:/app/config
-    networks:
-      - trading-network
-    depends_on:
-      - trading-bot
-
-  # Health check endpoint service (optional - for external monitoring)
-  healthz:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: langgraph-healthz
-    restart: unless-stopped
-    command: python -m pearlalgo.utils.health --port 8080
-    ports:
-      - "8080:8080"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app
-    networks:
-      - trading-network
-    depends_on:
-      - trading-bot
-      - redis
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
 networks:
   trading-network:
     driver: bridge
 
 volumes:
-  redis-data:
-    driver: local
   ib-gateway-data:
     driver: local
