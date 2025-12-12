@@ -22,10 +22,13 @@ fi
 
 # Ensure Xvfb is running for headless operation
 echo "Ensuring Xvfb virtual display is running..."
-source ~/pearlalgo-dev-ai-agents/ibkr/ibc/start_xvfb.sh
-if [ $? -ne 0 ]; then
-    echo "❌ Failed to start Xvfb. Cannot start IB Gateway."
-    exit 1
+if ! pgrep -f "Xvfb :99" > /dev/null; then
+    Xvfb :99 -screen 0 1024x768x24 &
+    sleep 2
+    export DISPLAY=:99
+else
+    export DISPLAY=:99
+    echo "Xvfb already running on DISPLAY=:99"
 fi
 
 # Start IBC
@@ -35,42 +38,63 @@ cd ~/pearlalgo-dev-ai-agents/ibkr/ibc
 # Use headless version that ensures DISPLAY is set
 export DISPLAY=:99
 # Start in background with logging
-nohup ./gatewaystart.sh -inline > logs/gateway_$(date +%Y%m%d_%H%M%S).log 2>&1 &
+LOG_FILE="logs/gateway_$(date +%Y%m%d_%H%M%S).log"
+nohup ./gatewaystart.sh -inline > "$LOG_FILE" 2>&1 &
 IBC_PID=$!
 
 echo "IB Gateway starting (PID: $IBC_PID)"
-echo "Log file: ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway_*.log"
+echo "Log file: ~/pearlalgo-dev-ai-agents/ibkr/ibc/$LOG_FILE"
 echo ""
 
-# Wait a bit and check
-sleep 5
-
-if ps -p $IBC_PID > /dev/null 2>&1; then
-    echo "✅ IB Gateway process is running"
-else
-    echo "⚠️  Process may have exited - check logs"
-    tail -20 ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway_*.log 2>/dev/null | tail -10
-fi
-
-# Check API port
-echo ""
-echo "Waiting for API to become available..."
+# Wait for Gateway to start and authenticate
+echo "Waiting for Gateway to start and authenticate..."
 sleep 10
 
-if ss -tuln | grep -q ":4002"; then
-    echo "✅ API port 4002 is listening!"
+# Check if process is still running
+if ! ps -p $IBC_PID > /dev/null 2>&1; then
+    echo "⚠️  Process exited - checking logs..."
+    tail -30 "$LOG_FILE" 2>/dev/null | tail -15
     echo ""
-    echo "=== IB Gateway is ready for data access ==="
-    echo ""
-    echo "Test connection:"
-    echo "  cd ~/pearlalgo-dev-ai-agents"
-    echo "  python3 test_ibkr_connection.py"
-else
-    echo "⚠️  Port 4002 not listening yet"
-    echo "   IB Gateway may still be starting up or logging in"
-    echo "   Check status: ss -tuln | grep 4002"
-    echo "   View logs: tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway_*.log"
+    echo "Check full log: tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/$LOG_FILE"
+    exit 1
 fi
+
+echo "✅ IB Gateway process is running"
+
+# Wait longer for authentication and API to become available
+echo "Waiting for authentication and API to become available..."
+for i in {1..12}; do
+    sleep 5
+    if ss -tuln | grep -q ":4002"; then
+        echo "✅ API port 4002 is listening!"
+        echo ""
+        echo "=== IB Gateway is ready for data access ==="
+        echo ""
+        echo "Gateway is running and authenticated."
+        echo "It will stay running until you stop it."
+        echo ""
+        echo "To stop Gateway: ~/pearlalgo-dev-ai-agents/ibkr/ibc/stop.sh"
+        echo "To view logs: tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/$LOG_FILE"
+        echo ""
+        echo "Test connection:"
+        echo "  cd ~/pearlalgo-dev-ai-agents"
+        echo "  python3 test_ibkr_connection.py"
+        exit 0
+    fi
+    echo "  Still waiting... ($i/12)"
+done
+
+# If we get here, port still not listening
+echo "⚠️  Port 4002 not listening after 60 seconds"
+echo "   Gateway may still be authenticating or there may be an issue"
+echo ""
+echo "Check status:"
+echo "  ps aux | grep -E '(java.*IBC|IBC.jar)' | grep -v grep"
+echo "  ss -tuln | grep 4002"
+echo ""
+echo "View logs:"
+echo "  tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/$LOG_FILE"
+echo "  tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/ibc-3.23.0_GATEWAY-1041_*.txt"
 
 echo ""
     echo "To stop IB Gateway: ~/pearlalgo-dev-ai-agents/ibkr/ibc/stop.sh"

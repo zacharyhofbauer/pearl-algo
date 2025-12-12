@@ -56,3 +56,5 @@ else
     echo "   vncpasswd"
     exit 1
 fi
+
+
