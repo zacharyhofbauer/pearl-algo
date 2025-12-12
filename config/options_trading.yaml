@@ -1,0 +1,47 @@
+# Options Trading Configuration
+
+# Underlying symbols to trade
+underliers:
+  - SPY
+  - QQQ
+
+# Expiration filters
+expirations:
+  intraday:
+    min_dte: 0
+    max_dte: 7
+  swing:
+    min_dte: 7
+    max_dte: 45
+
+# Option filters
+filters:
+  delta_range: [0.2, 0.8]  # Delta range for option selection
+  min_iv: 0.15  # Minimum implied volatility (15%)
+  min_volume: 100  # Minimum daily volume
+  min_open_interest: 500  # Minimum open interest
+
+# Strategy configuration
+strategies:
+  intraday:
+    enabled: true
+    scan_interval: 300  # 5 minutes
+    strategy: "momentum"
+  swing:
+    enabled: true
+    scan_interval: 3600  # 1 hour
+    strategy: "swing_momentum"
+
+# Position sizing
+position_sizing:
+  max_position_size: 10  # Maximum contracts per position
+  base_position_size: 1  # Base number of contracts
+  risk_per_trade: 0.01  # 1% of account per trade
+
+# Exit parameters
+exits:
+  stop_loss_pct: 0.20  # 20% stop loss
+  take_profit_pct: 0.50  # 50% take profit
+  time_exit_hours: 4  # Exit after 4 hours (intraday)
+  trailing_stop: false
+  trailing_stop_pct: 0.10  # 10% trailing stop if enabled

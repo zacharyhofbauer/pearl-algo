@@ -28,6 +28,7 @@ from pearlalgo.live.langgraph_trader import LangGraphTrader
 from pearlalgo.monitoring.worker_pool import WorkerPool, WorkerStatus
 from pearlalgo.monitoring.data_feed_manager import DataFeedManager
 from pearlalgo.monitoring.health import HealthChecker, run_health_server
+from pearlalgo.monitoring.data_quality import DataQualityMonitor
 from pearlalgo.data_providers.buffer_manager import BufferManager
 from pearlalgo.utils.market_hours import is_market_open
 from pearlalgo.utils.telegram_alerts import TelegramAlerts
@@ -98,6 +99,12 @@ class ContinuousService:
         self.buffer_manager = BufferManager(
             max_bars=config.get("monitoring", {}).get("buffer_size", 1000),
             persistence_dir=Path("data/buffers"),
+        )
+
+        # Data quality monitor
+        self.data_quality_monitor = DataQualityMonitor(
+            stale_threshold=config.get("monitoring", {}).get("data_quality", {}).get("stale_threshold", 30.0),
+            frozen_threshold=config.get("monitoring", {}).get("data_quality", {}).get("frozen_threshold", 300.0),
         )
 
         # Options signal tracker
@@ -321,7 +328,7 @@ class ContinuousService:
     async def _initialize_data_provider(self):
         """Initialize data provider and feed manager."""
         try:
-            from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+            from pearlalgo.data_providers.factory import create_data_provider
             from pearlalgo.config.settings import get_settings
             import os
 
@@ -369,9 +376,10 @@ class ContinuousService:
                 f"Initializing IBKR data provider: host={host}, port={port}, client_id={client_id}"
             )
 
-            # Initialize IBKR provider
+            # Initialize IBKR provider using factory
             try:
-                provider = IBKRDataProvider(
+                provider = create_data_provider(
+                    "ibkr",
                     settings=settings,
                     host=host,
                     port=port,
@@ -619,6 +627,28 @@ class ContinuousService:
 
         # Initialize data provider
         await self._initialize_data_provider()
+
+        # Run startup validation
+        if self.config.get("monitoring", {}).get("startup_validation", {}).get("enabled", True):
+            from pearlalgo.utils.startup_validation import StartupValidator
+            
+            logger.info("Running startup validation...")
+            validator = StartupValidator(self.data_feed_manager.data_provider)
+            
+            # Get test symbols from config
+            test_symbols = self.config.get("monitoring", {}).get("startup_validation", {}).get("test_symbols", ["SPY", "QQQ"])
+            
+            validation_passed = await validator.validate_all(test_symbols=test_symbols)
+            
+            if not validation_passed:
+                error_msg = "Startup validation failed. Please fix the issues above before starting trading."
+                logger.error(error_msg)
+                
+                # Optionally raise exception to prevent startup
+                if self.config.get("monitoring", {}).get("startup_validation", {}).get("fail_on_error", True):
+                    raise RuntimeError(error_msg)
+                else:
+                    logger.warning("Continuing despite validation failures (fail_on_error=False)")
 
         # Start health check server
         if self.config.get("monitoring", {}).get("health", {}).get("enabled", True):
