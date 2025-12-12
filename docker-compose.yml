@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
   # IB Gateway - Headless IBKR API gateway
   ib-gateway:
-    image: ghcr.io/ib-controller/ib-gateway:latest
+    image: unusualalpha/ib-gateway-docker:latest
     container_name: ib-gateway
     restart: unless-stopped
     environment:
@@ -22,7 +20,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 120s
     volumes:
       - ib-gateway-data:/root/Jts
     deploy:

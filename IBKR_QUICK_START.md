@@ -27,11 +27,20 @@ IBKR_PORT=4002
 ```
 
 ### 3. Start IB Gateway
+
+**First, fix Docker permissions (one-time):**
 ```bash
-docker-compose up -d ib-gateway
+sudo usermod -aG docker $USER
+# Then log out and back in, OR run:
+newgrp docker
+```
+
+**Then start Gateway:**
+```bash
+docker compose up -d ib-gateway
 
 # Check logs
-docker-compose logs -f ib-gateway
+docker compose logs -f ib-gateway
 ```
 
 ### 4. Test Connection
@@ -42,16 +51,16 @@ python scripts/validate_setup.py
 ### 5. Start Trading System
 ```bash
 # Start all services
-docker-compose up -d
+docker compose up -d
 
 # Or just trading bot (Gateway must be running)
-docker-compose up -d trading-bot
+docker compose up -d trading-bot
 ```
 
 ## Common Issues
 
 **"Connection refused"**
-→ Gateway not running. Run `docker-compose up -d ib-gateway`
+→ Gateway not running. Run `docker compose up -d ib-gateway`
 
 **"Authentication failed"**
 → Check credentials in `.env` file and Gateway logs
@@ -60,7 +69,10 @@ docker-compose up -d trading-bot
 → Enable in IBKR Account Management → API Settings
 
 **"Container keeps restarting"**
-→ Check logs: `docker-compose logs ib-gateway`
+→ Check logs: `docker compose logs ib-gateway`
+
+**"Permission denied" (Docker)**
+→ Run: `sudo usermod -aG docker $USER` then log out/in or run `newgrp docker`
 
 ## Full Guide
 
