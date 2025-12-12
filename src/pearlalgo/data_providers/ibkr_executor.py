@@ -73,9 +73,24 @@ class GetLatestBarTask(Task):
         """Fetch latest bar data."""
         # Create contract
         if self.is_futures:
-            contract = Future(self.symbol, "GLOBEX", "USD")
+            # For futures, use reqContractDetails to get all contracts, then select front month
+            contract = Future(self.symbol, exchange="CME", currency="USD")
+            try:
+                # Request contract details which returns all available contracts
+                contracts = ib.reqContractDetails(contract)
+                if contracts:
+                    # Select the front month (nearest expiration)
+                    contract_details = min(contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
+                    contract = contract_details.contract
+                    logger.debug(f"Selected front month contract: {contract.localSymbol} (exp: {contract.lastTradeDateOrContractMonth})")
+                else:
+                    logger.warning(f"No contract details found for {self.symbol}")
+                    return None
+            except Exception as e:
+                logger.warning(f"Error getting contract details for {self.symbol}: {e}")
+                return None
         else:
-            contract = Stock(self.symbol, "SMART", "USD")
+            contract = Stock(self.symbol, exchange="SMART", currency="USD")
 
         # Request market data
         ticker = ib.reqMktData(contract, "", False, False)
@@ -148,9 +163,24 @@ class GetHistoricalDataTask(Task):
 
         # Create contract
         if self.is_futures:
-            contract = Future(self.symbol, "GLOBEX", "USD")
+            # For futures, use reqContractDetails to get all contracts, then select front month
+            contract = Future(self.symbol, exchange="CME", currency="USD")
+            try:
+                # Request contract details which returns all available contracts
+                contracts = ib.reqContractDetails(contract)
+                if contracts:
+                    # Select the front month (nearest expiration)
+                    contract_details = min(contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
+                    contract = contract_details.contract
+                    logger.debug(f"Selected front month contract: {contract.localSymbol} (exp: {contract.lastTradeDateOrContractMonth})")
+                else:
+                    logger.warning(f"No contract details found for {self.symbol}")
+                    return []
+            except Exception as e:
+                logger.warning(f"Error getting contract details for {self.symbol}: {e}")
+                return []
         else:
-            contract = Stock(self.symbol, "SMART", "USD")
+            contract = Stock(self.symbol, exchange="SMART", currency="USD")
 
         # Request historical data
         bars = ib.reqHistoricalData(
@@ -406,6 +436,10 @@ class IBKRExecutor:
 
     def _run_executor(self) -> None:
         """Main executor loop (runs in dedicated thread)."""
+        # Create event loop for this thread (required by ib_insync)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
         logger.info("IBKRExecutor thread started")
 
         # Initialize IB connection
@@ -473,6 +507,14 @@ class IBKRExecutor:
                 self.ib.disconnect()
             except Exception as e:
                 logger.warning(f"Error disconnecting: {e}")
+        
+        # Cleanup event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop and not loop.is_closed():
+                loop.close()
+        except Exception as e:
+            logger.debug(f"Error closing event loop: {e}")
 
         logger.info("IBKRExecutor thread stopped")
 

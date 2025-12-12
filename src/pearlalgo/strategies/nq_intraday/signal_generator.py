@@ -96,8 +96,9 @@ class NQSignalGenerator:
         Returns:
             True if signal is valid
         """
-        # Check confidence threshold
-        if signal.get("confidence", 0) < 0.5:
+        # Check confidence threshold (higher threshold for better quality)
+        confidence = signal.get("confidence", 0)
+        if confidence < 0.55:  # Require at least 55% confidence
             return False
         
         # Check entry price is valid
@@ -120,6 +121,20 @@ class NQSignalGenerator:
             if take_profit and take_profit >= entry_price:
                 return False
         
+        # Validate risk/reward ratio meets minimum
+        if stop_loss and take_profit:
+            if signal["direction"] == "long":
+                risk = entry_price - stop_loss
+                reward = take_profit - entry_price
+            else:
+                risk = stop_loss - entry_price
+                reward = entry_price - take_profit
+            
+            if risk > 0:
+                risk_reward = reward / risk
+                if risk_reward < 1.5:  # Require at least 1.5:1 R/R
+                    return False
+        
         return True
     
     def _format_signal(self, signal: Dict, market_data: Dict) -> Dict:
@@ -141,14 +156,40 @@ class NQSignalGenerator:
         formatted["strategy"] = "nq_intraday"
         formatted["timeframe"] = self.config.timeframe
         
+        # Calculate risk amount and expected hold time
+        entry_price = signal.get("entry_price", 0)
+        stop_loss = signal.get("stop_loss")
+        take_profit = signal.get("take_profit")
+        
+        if entry_price > 0 and stop_loss:
+            if signal["direction"] == "long":
+                risk_amount = abs(entry_price - stop_loss) * self.config.max_position_size * 20  # NQ tick value
+            else:
+                risk_amount = abs(stop_loss - entry_price) * self.config.max_position_size * 20
+            formatted["risk_amount"] = risk_amount
+        
+        # Expected hold time (intraday signals typically 15-60 minutes)
+        formatted["expected_hold_minutes"] = 30
+        
         # Add market context
         latest_bar = market_data.get("latest_bar")
+        df = market_data.get("df")
         if latest_bar:
             formatted["market_data"] = {
                 "price": latest_bar.get("close"),
                 "volume": latest_bar.get("volume"),
                 "bid": latest_bar.get("bid"),
                 "ask": latest_bar.get("ask"),
+            }
+        
+        # Add indicator values for context
+        if df is not None and not df.empty:
+            latest = df.iloc[-1]
+            formatted["indicators"] = {
+                "rsi": float(latest.get("rsi", 0)) if "rsi" in latest else None,
+                "atr": float(latest.get("atr", 0)) if "atr" in latest else None,
+                "volume_ratio": float(latest.get("volume_ratio", 0)) if "volume_ratio" in latest else None,
+                "macd_histogram": float(latest.get("macd_histogram", 0)) if "macd_histogram" in latest else None,
             }
         
         return formatted
@@ -163,18 +204,26 @@ class NQSignalGenerator:
         Returns:
             True if duplicate
         """
-        signal_time = datetime.fromisoformat(signal["timestamp"].replace("Z", "+00:00"))
+        signal_time = datetime.fromisoformat(signal.get("timestamp", datetime.now(timezone.utc).isoformat()).replace("Z", "+00:00"))
+        signal_entry = signal.get("entry_price", 0)
         
         for recent in self._recent_signals:
-            recent_time = datetime.fromisoformat(recent["timestamp"].replace("Z", "+00:00"))
+            recent_time = datetime.fromisoformat(recent.get("timestamp", "").replace("Z", "+00:00"))
             time_diff = (signal_time - recent_time).total_seconds()
+            recent_entry = recent.get("entry_price", 0)
             
-            # Same type and direction within time window
-            if (
-                recent["type"] == signal["type"]
-                and recent["direction"] == signal["direction"]
-                and time_diff < self._signal_window_seconds
-            ):
+            # Check if same type and direction within time window
+            same_type = recent.get("type") == signal.get("type")
+            same_direction = recent.get("direction") == signal.get("direction")
+            within_time_window = time_diff < self._signal_window_seconds
+            
+            # Also check if price is too close (within 0.5% for same signal)
+            price_close = False
+            if recent_entry > 0 and signal_entry > 0:
+                price_diff_pct = abs(signal_entry - recent_entry) / recent_entry
+                price_close = price_diff_pct < 0.005  # 0.5%
+            
+            if same_type and same_direction and (within_time_window or price_close):
                 return True
         
         return False

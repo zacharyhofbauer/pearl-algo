@@ -192,7 +192,7 @@ class IBKRDataProvider(DataProvider):
             return pd.DataFrame()
 
     @async_retry_with_backoff(
-        max_attempts=3,
+        max_retries=3,
         initial_delay=1.0,
         max_delay=5.0,
         exponential_base=2.0,

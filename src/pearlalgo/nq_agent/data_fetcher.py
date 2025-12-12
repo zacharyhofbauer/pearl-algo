@@ -64,23 +64,34 @@ class NQAgentDataFetcher:
             end = datetime.now(timezone.utc)
             start = end - timedelta(hours=2)  # Last 2 hours for intraday
             
-            if hasattr(self.data_provider, 'fetch_historical_async'):
-                df = await self.data_provider.fetch_historical_async(
+            # Use sync method (data providers use sync interface)
+            # Run in executor to avoid blocking the event loop
+            import asyncio
+            loop = asyncio.get_event_loop()
+            df = await loop.run_in_executor(
+                None,
+                lambda: self.data_provider.fetch_historical(
                     self.config.symbol,
                     start=start,
                     end=end,
                     timeframe=self.config.timeframe,
                 )
-            else:
-                # Fallback to sync method
-                df = self.data_provider.fetch_historical(
-                    self.config.symbol,
-                    start=start,
-                    end=end,
-                    timeframe=self.config.timeframe,
-                )
+            )
             
             if not df.empty:
+                # Data quality checks
+                # Check for missing values
+                if df.isnull().any().any():
+                    logger.warning(f"Data contains missing values: {df.isnull().sum().to_dict()}")
+                
+                # Check for stale data (if timestamp column exists)
+                if "timestamp" in df.columns:
+                    latest_timestamp = df["timestamp"].max()
+                    if isinstance(latest_timestamp, pd.Timestamp):
+                        age_minutes = (datetime.now(timezone.utc) - latest_timestamp.to_pydatetime().replace(tzinfo=timezone.utc)).total_seconds() / 60
+                        if age_minutes > 10:
+                            logger.warning(f"Data may be stale: latest bar is {age_minutes:.1f} minutes old")
+                
                 self._data_buffer = df.tail(self._buffer_size).reset_index(drop=True)
             
             # Fetch latest bar if method available
@@ -89,22 +100,46 @@ class NQAgentDataFetcher:
                 if asyncio.iscoroutinefunction(self.data_provider.get_latest_bar):
                     latest_bar = await self.data_provider.get_latest_bar(self.config.symbol)
                 else:
-                    latest_bar = self.data_provider.get_latest_bar(self.config.symbol)
+                    # Run sync method in executor
+                    loop = asyncio.get_event_loop()
+                    latest_bar = await loop.run_in_executor(
+                        None,
+                        lambda: self.data_provider.get_latest_bar(self.config.symbol)
+                    )
             
             # If no latest_bar from provider, use last row from historical data
             if latest_bar is None and not df.empty:
                 latest_row = df.iloc[-1]
-                timestamp = latest_row.name if hasattr(latest_row, 'name') and hasattr(latest_row.name, 'to_pydatetime') else datetime.now(timezone.utc)
+                timestamp = latest_row.name if hasattr(latest_row, 'name') else datetime.now(timezone.utc)
                 if hasattr(timestamp, 'to_pydatetime'):
                     timestamp = timestamp.to_pydatetime()
+                elif isinstance(timestamp, pd.Timestamp):
+                    timestamp = timestamp.to_pydatetime()
+                
+                # Extract values from Series/DataFrame row
+                if hasattr(latest_row, 'get'):
+                    open_val = latest_row.get("open", 0)
+                    high_val = latest_row.get("high", 0)
+                    low_val = latest_row.get("low", 0)
+                    close_val = latest_row.get("close", 0)
+                    volume_val = latest_row.get("volume", 0)
+                else:
+                    # DataFrame row access
+                    open_val = latest_row["open"] if "open" in latest_row.index else 0
+                    high_val = latest_row["high"] if "high" in latest_row.index else 0
+                    low_val = latest_row["low"] if "low" in latest_row.index else 0
+                    close_val = latest_row["close"] if "close" in latest_row.index else 0
+                    volume_val = latest_row["volume"] if "volume" in latest_row.index else 0
+                
                 latest_bar = {
-                    "timestamp": timestamp,
-                    "open": float(latest_row.get("open", 0)),
-                    "high": float(latest_row.get("high", 0)),
-                    "low": float(latest_row.get("low", 0)),
-                    "close": float(latest_row.get("close", 0)),
-                    "volume": int(latest_row.get("volume", 0)),
+                    "timestamp": timestamp if isinstance(timestamp, datetime) else datetime.now(timezone.utc),
+                    "open": float(open_val),
+                    "high": float(high_val),
+                    "low": float(low_val),
+                    "close": float(close_val),
+                    "volume": int(volume_val),
                 }
+                logger.debug(f"Using last bar from historical data as latest_bar for {self.config.symbol}")
             
             if latest_bar is None:
                 logger.warning(f"No latest bar available for {self.config.symbol}")
@@ -141,6 +176,7 @@ class NQAgentDataFetcher:
             
         except Exception as e:
             logger.error(f"Error fetching latest data: {e}", exc_info=True)
+            # Return empty data instead of raising to allow graceful degradation
             return {"df": pd.DataFrame(), "latest_bar": None}
     
     def get_buffer_size(self) -> int:

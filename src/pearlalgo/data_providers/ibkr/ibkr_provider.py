@@ -1,8 +1,8 @@
 """
-IBKR Provider - Production-ready IBKR data provider implementing MarketDataProvider interface.
+IBKR Provider - Production-ready IBKR data provider.
 
 Uses IB Gateway via ib_insync for live and historical data.
-Implements the MarketDataProvider interface for provider-agnostic strategy code.
+Implements the DataProvider interface for provider-agnostic strategy code.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ except ImportError:
 
 from pearlalgo.config.settings import Settings, get_settings
 from pearlalgo.data_providers.base import DataProvider
-from pearlalgo.data_providers.market_data_provider import MarketDataProvider
 from pearlalgo.data_providers.ibkr_executor import (
     GetHistoricalDataTask,
     GetLatestBarTask,
@@ -37,12 +36,12 @@ from pearlalgo.utils.retry import async_retry_with_backoff
 logger = logging.getLogger(__name__)
 
 
-class IBKRProvider(MarketDataProvider, DataProvider):
+class IBKRProvider(DataProvider):
     """
-    Production-ready IBKR data provider implementing MarketDataProvider interface.
+    Production-ready IBKR data provider implementing DataProvider interface.
     
     Features:
-    - Implements MarketDataProvider for provider-agnostic strategies
+    - Implements DataProvider for provider-agnostic strategies
     - Connection lifecycle management with automatic reconnection
     - Market data entitlement validation
     - Stale data detection
@@ -151,7 +150,7 @@ class IBKRProvider(MarketDataProvider, DataProvider):
             filters: Optional filter dictionary (see MarketDataProvider interface)
             
         Returns:
-            List of option contracts (see MarketDataProvider interface for format)
+            List of option contracts
         """
         if not await self.validate_connection():
             raise ConnectionError("Not connected to IB Gateway")
@@ -186,8 +185,8 @@ class IBKRProvider(MarketDataProvider, DataProvider):
             underlying_price=underlying_price,
         )
 
-            future = self._executor.submit_task(task)
-            options = await asyncio.wrap_future(future)
+        future = self._executor.submit_task(task)
+        options = await asyncio.wrap_future(future)
 
         logger.info(f"Retrieved {len(options)} options for {symbol}")
         return options
@@ -396,7 +395,7 @@ class IBKRProvider(MarketDataProvider, DataProvider):
             return pd.DataFrame()
 
     @async_retry_with_backoff(
-        max_attempts=3,
+        max_retries=3,
         initial_delay=1.0,
         max_delay=5.0,
         exponential_base=2.0,
