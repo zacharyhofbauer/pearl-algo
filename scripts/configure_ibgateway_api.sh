@@ -2,9 +2,9 @@
 # This file configures IB Gateway to enable API access for data only (no trading)
 
 # Create jts.ini with API enabled for read-only access
-mkdir -p ~/Jts
+mkdir -p ~/pearlalgo-dev-ai-agents/ibkr/Jts
 
-cat > ~/Jts/jts.ini << 'EOF'
+cat > ~/pearlalgo-dev-ai-agents/ibkr/Jts/jts.ini << 'EOF'
 [Logon]
 # API Settings
 ApiOnly=true
@@ -18,7 +18,7 @@ EnableReadOnlyAPI=true
 UseSSL=false
 EOF
 
-echo "✅ Created ~/Jts/jts.ini with read-only API enabled"
+echo "✅ Created ~/pearlalgo-dev-ai-agents/ibkr/Jts/jts.ini with read-only API enabled"
 echo ""
 echo "Configuration:"
 echo "  - API Only mode: Enabled"
@@ -27,5 +27,5 @@ echo "  - Socket Port: 4002 (paper trading port)"
 echo "  - Trusted IPs: 127.0.0.1 (localhost only)"
 echo ""
 echo "Now start IB Gateway:"
-echo "  cd ~/Jts/ibgateway/1041"
+echo "  cd ~/pearlalgo-dev-ai-agents/ibkr/Jts/ibgateway/1041"
 echo "  xvfb-run -a ./ibgateway1 &"

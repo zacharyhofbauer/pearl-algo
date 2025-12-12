@@ -150,13 +150,13 @@ await scanner.scan_continuous(interval=900)  # 15 minutes
 
 ## Data Requirements
 
-### Polygon API
+### 
 
-Options chain data requires Polygon API:
+Options chain data requires 
 - Free tier: Limited options data
 - Paid tier: Full options chains with Greeks
 
-**Note**: Confirm Polygon free tier supports options chains. If not, use Tradier API (already in codebase).
+**Note**: Confirm . If not, use Tradier API (already in codebase).
 
 ### Historical Data
 
@@ -166,7 +166,7 @@ Options chain data requires Polygon API:
 
 ## Rate Limits
 
-### Polygon API
+### 
 
 - Free tier: 5 calls/second
 - With 500 symbols × 1 scan/15min = 33 scans/min = manageable
@@ -181,20 +181,20 @@ Options chain data requires Polygon API:
 
 ### No Options Data
 
-1. Check Polygon API key:
+1. Check 
    ```bash
    echo $POLYGON_API_KEY
    ```
 
 2. Test options chain API:
    ```python
-   from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
-   provider = PolygonDataProvider(api_key="your_key")
+   from pearlalgo.data_providers.
+   provider = 
    chain = await provider.get_options_chain("SPY")
    print(chain)
    ```
 
-3. Check Polygon tier:
+3. Check 
    - Free tier may not support options
    - Consider Tradier API alternative
 

@@ -1,7 +1,7 @@
 # IB Controller Configuration for Read-Only Data Access
 # This configures IBC to run IB Gateway in read-only mode (data only, no trading)
 
-cd ~/ibc
+cd ~/pearlalgo-dev-ai-agents/ibkr/ibc
 
 # Backup existing config
 cp config-auto.ini config-auto.ini.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null
@@ -19,7 +19,7 @@ ReadOnlyApi=yes
 EnableAPI=yes
 
 # IB Directory (where Gateway settings are stored)
-IbDir=~/Jts
+IbDir=/home/pearlalgo/pearlalgo-dev-ai-agents/ibkr/Jts
 
 # Auto-restart settings (optional - keeps Gateway running)
 AutoRestart=yes
@@ -39,8 +39,8 @@ echo "  - Read-Only API: enabled"
 echo "  - API Enabled: yes"
 echo ""
 echo "To start IB Gateway with IBC:"
-echo "  cd ~/ibc"
+echo "  cd ~/pearlalgo-dev-ai-agents/ibkr/ibc"
 echo "  ./gatewaystart.sh -inline"
 echo ""
 echo "Or run in background:"
-echo "  nohup ~/ibc/gatewaystart.sh -inline > ~/ibc/logs/gateway.log 2>&1 &"
+echo "  nohup ~/pearlalgo-dev-ai-agents/ibkr/ibc/gatewaystart.sh -inline > ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway.log 2>&1 &"

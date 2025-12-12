@@ -79,7 +79,7 @@ async def download_symbol_data(
 
         # Get API key from environment if needed
         api_key = None
-        if provider_name == "polygon":
+        if provider_name == "
             api_key = os.getenv("POLYGON_API_KEY")
         elif provider_name == "tradier":
             api_key = os.getenv("TRADIER_API_KEY")
@@ -243,8 +243,8 @@ def main():
     )
     parser.add_argument(
         "--provider",
-        default="polygon",
-        help="Data provider (polygon, tradier, etc.)",
+        default="
+        help="Data provider (.)",
     )
     parser.add_argument(
         "--start-date",

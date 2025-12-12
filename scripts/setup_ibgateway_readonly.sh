@@ -6,12 +6,12 @@ echo ""
 
 # 1. Configure jts.ini
 echo "1. Configuring jts.ini..."
-mkdir -p ~/Jts
+mkdir -p ~/pearlalgo-dev-ai-agents/ibkr/Jts
 
 # Check if SocketPort already exists
-if ! grep -q "SocketPort" ~/Jts/jts.ini 2>/dev/null; then
+if ! grep -q "SocketPort" ~/pearlalgo-dev-ai-agents/ibkr/Jts/jts.ini 2>/dev/null; then
     echo "   Adding API port settings..."
-    cat >> ~/Jts/jts.ini << 'EOF'
+    cat >> ~/pearlalgo-dev-ai-agents/ibkr/Jts/jts.ini << 'EOF'
 
 # API Configuration for Read-Only Data Access (added automatically)
 SocketPort=4002
@@ -30,11 +30,11 @@ echo "2. Starting IB Gateway..."
 pkill -f ibgateway 2>/dev/null
 sleep 2
 
-cd ~/Jts/ibgateway/1041 || exit 1
+cd ~/pearlalgo-dev-ai-agents/ibkr/Jts/ibgateway/1041 || exit 1
 
 # Ensure Xvfb is running
 echo "   Ensuring Xvfb virtual display is running..."
-source ~/ibc/start_xvfb.sh
+source ~/pearlalgo-dev-ai-agents/ibkr/ibc/start_xvfb.sh
 if [ $? -ne 0 ]; then
     echo "   ❌ Failed to start Xvfb"
     exit 1

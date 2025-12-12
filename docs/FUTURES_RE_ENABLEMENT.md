@@ -1,16 +1,16 @@
 # Futures Re-enablement Guide
 
-This guide documents the steps to re-enable futures trading when Massive's futures API becomes available.
+This guide documents the steps to re-enable futures trading when .
 
 ## Overview
 
-The futures module has been disabled and moved to `src/pearlalgo/futures/__init__.py` while Massive's futures API is unavailable. The system currently focuses exclusively on equity options (QQQ, SPY) for intraday and swing trading.
+The futures module has been disabled and moved to `src/pearlalgo/futures/__init__.py` while . The system currently focuses exclusively on equity options (QQQ, SPY) for intraday and swing trading.
 
 ## Re-enablement Checklist
 
-### 1. Verify Massive Futures API Availability
+### 1. Verify 
 
-- [ ] Confirm Massive API supports futures data (ES, NQ)
+- [ ] Confirm 
 - [ ] Test API endpoints for futures contracts
 - [ ] Verify contract resolution (ESU5, NQU5, etc.)
 - [ ] Test historical futures data access
@@ -69,7 +69,7 @@ The futures module has been disabled and moved to `src/pearlalgo/futures/__init_
 
 ### 7. Update Data Provider
 
-**File:** `src/pearlalgo/data_providers/massive_provider.py`
+**File:** `src/pearlalgo/data_providers/.py`
 
 - [ ] Re-enable futures contract resolution (currently removed)
 - [ ] Test `get_latest_bar()` for futures symbols
@@ -94,7 +94,7 @@ The futures module has been disabled and moved to `src/pearlalgo/futures/__init_
 
 ### Contract Resolution
 
-Futures contracts need to be resolved from symbols (ES, NQ) to active contracts (ESU5, NQU5). The disabled module contains placeholder logic that needs to be implemented using Massive's futures API.
+Futures contracts need to be resolved from symbols (ES, NQ) to active contracts (ESU5, NQU5). The disabled module contains placeholder logic that needs to be implemented using .
 
 ### Risk Management
 
@@ -116,7 +116,7 @@ Futures data structure is similar to stocks but requires:
 3. `src/pearlalgo/agents/risk_manager_agent.py` - Removed futures-specific risk logic
 4. `src/pearlalgo/monitoring/continuous_service.py` - Removed futures worker
 5. `config/config.yaml` - Removed futures worker configuration
-6. `src/pearlalgo/data_providers/massive_provider.py` - Removed futures contract resolution
+6. `src/pearlalgo/data_providers/.py` - Removed futures contract resolution
 
 ## Rollback Plan
 
@@ -130,6 +130,6 @@ If re-enablement causes issues:
 ## Support
 
 For questions or issues during re-enablement, refer to:
-- Massive API documentation for futures endpoints
+- 
 - Original futures implementation (if available in git history)
 - Options implementation as reference for similar patterns

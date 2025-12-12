@@ -1,4 +1,4 @@
-# Troubleshooting Massive API Issues
+# Troubleshooting 
 
 ## Common Issues and Solutions
 
@@ -6,7 +6,7 @@
 
 **Symptoms:**
 ```
-Error fetching Massive data for SPY: ... too many 429 error responses
+Error fetching ... too many 429 error responses
 ```
 
 **Causes:**
@@ -26,7 +26,7 @@ Error fetching Massive data for SPY: ... too many 429 error responses
 2. **Increase rate limit delay** in `config/config.yaml`:
    ```yaml
    rate_limits:
-     massive:
+     
        requests_per_minute: 150  # Reduce from 200
        delay_between_requests: 0.5  # Increase from 0.25
    ```
@@ -79,11 +79,11 @@ Generated 0 options signals
 1. **Test API directly:**
    ```python
    import asyncio
-   from pearlalgo.data_providers.massive_provider import MassiveDataProvider
+   from pearlalgo.data_providers.
    import os
    
    async def test():
-       provider = MassiveDataProvider(api_key=os.getenv('MASSIVE_API_KEY'))
+       provider = .getenv('MASSIVE_API_KEY'))
        data = await provider.get_latest_bar('QQQ')
        print(f"QQQ data: {data}")
        await provider.close()
@@ -149,7 +149,7 @@ monitoring:
 python3 << 'EOF'
 import asyncio
 import os
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
+from pearlalgo.data_providers.
 
 async def test():
     api_key = os.getenv('MASSIVE_API_KEY')
@@ -157,7 +157,7 @@ async def test():
         print("❌ MASSIVE_API_KEY not set")
         return
     
-    provider = MassiveDataProvider(api_key=api_key)
+    provider = 
     
     # Test QQQ
     print("Testing QQQ...")
@@ -215,8 +215,8 @@ Look for:
 
 ## If Problems Persist
 
-1. **Check Massive API status:**
-   - Visit Massive API documentation
+1. **Check 
+   - Visit 
    - Check if there are known issues
    - Verify your API key hasn't expired
 

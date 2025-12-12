@@ -23,21 +23,21 @@ python scripts/debug_env.py
 - `TELEGRAM_BOT_TOKEN` - For receiving alerts
 - `TELEGRAM_CHAT_ID` - Your Telegram chat ID
 
-### 1.2 Test Massive API Connection
+### 1.2 Test 
 
 ```bash
 python3 -c "
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
+from pearlalgo.data_providers.
 import os
 api_key = os.getenv('MASSIVE_API_KEY')
 if not api_key:
     print('❌ MASSIVE_API_KEY not set!')
     exit(1)
 try:
-    provider = MassiveDataProvider(api_key=api_key)
-    print('✅ Massive provider initialized successfully')
+    provider = 
+    print('✅ 
 except Exception as e:
-    print(f'❌ Massive provider failed: {e}')
+    print(f'❌ 
     exit(1)
 "
 ```
@@ -129,7 +129,7 @@ python -m pearlalgo.monitoring.continuous_service \
 
 **What you'll see:**
 1. Service validates MASSIVE_API_KEY
-2. Initializes Massive data provider
+2. Initializes 
 3. Starts options swing worker (scans QQQ/SPY every 15 minutes)
 4. Starts options intraday worker (scans QQQ/SPY every 60 seconds)
 5. Starts health check server on port 8080
@@ -284,13 +284,13 @@ Exit Reason: Take profit hit
 ```python
 from pearlalgo.backtesting.options_backtest_engine import OptionsBacktestEngine
 from pearlalgo.backtesting.historical_data_loader import HistoricalFuturesDataLoader
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
+from pearlalgo.data_providers.
 from datetime import datetime
 import os
 
 # Initialize components
 api_key = os.getenv('MASSIVE_API_KEY')
-data_provider = MassiveDataProvider(api_key=api_key)
+data_provider = 
 loader = HistoricalFuturesDataLoader(data_provider)
 engine = OptionsBacktestEngine(initial_cash=100000.0)
 
@@ -458,14 +458,14 @@ exits:
 ```bash
 echo $MASSIVE_API_KEY
 python3 -c "
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
+from pearlalgo.data_providers.
 import os
 api_key = os.getenv('MASSIVE_API_KEY')
 if not api_key:
     print('❌ MASSIVE_API_KEY not set')
 else:
     try:
-        provider = MassiveDataProvider(api_key=api_key)
+        provider = 
         print('✅ API key is valid')
     except Exception as e:
         print(f'❌ API key invalid: {e}')
@@ -499,12 +499,12 @@ print(is_market_open())
 **Test Data Fetching:**
 ```python
 import asyncio
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
+from pearlalgo.data_providers.
 import os
 
 async def test():
     api_key = os.getenv('MASSIVE_API_KEY')
-    provider = MassiveDataProvider(api_key=api_key)
+    provider = 
     data = await provider.get_latest_bar('QQQ')
     if data:
         print(f"✅ Got data for QQQ: ${data['close']:.2f}")
@@ -631,8 +631,8 @@ data = loader.load_multiple_symbols(
 source .venv/bin/activate
 python scripts/debug_env.py
 
-# 2. Test Massive API
-python3 -c "from pearlalgo.data_providers.massive_provider import MassiveDataProvider; import os; MassiveDataProvider(api_key=os.getenv('MASSIVE_API_KEY'))"
+# 2. Test 
+python3 -c "from pearlalgo.data_providers..getenv('MASSIVE_API_KEY'))"
 
 # 3. Test Telegram
 python scripts/test_telegram.py
@@ -726,7 +726,7 @@ python scripts/debug_env.py
 ## Important Notes
 
 1. **Market Hours**: The system only scans during market hours (9:30 AM - 4:00 PM ET)
-2. **API Limits**: Massive API has rate limits (200 requests/minute) - the system handles this automatically
+2. **API Limits**: 
 3. **Data Freshness**: Check health endpoint to ensure data is fresh (< 5 minutes old)
 4. **Signal Quality**: Not all signals are trades - review confidence and reasoning
 5. **Risk Management**: Position sizing and stops are automatically calculated based on your config

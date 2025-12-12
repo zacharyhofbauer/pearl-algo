@@ -28,7 +28,7 @@ def config():
                 },
             },
             "data_feeds": {
-                "polygon": {
+                "
                     "rate_limit": 5,
                     "reconnect_delay": 5.0,
                 },

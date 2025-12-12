@@ -1,12 +1,12 @@
 """
 DISABLED FUTURES MODULE
 
-This module contains futures-related code that has been disabled while Massive's
+This module contains futures-related code that has been disabled while 
 futures API is unavailable. The system now focuses exclusively on equity options
 (QQQ, SPY) for intraday and swing trading.
 
 RE-ENABLEMENT PROCESS:
-When Massive's futures API becomes available:
+When 
 1. Review this module for any updates needed
 2. Re-enable futures worker in continuous_service.py
 3. Update signal_router.py to route futures signals
@@ -46,7 +46,7 @@ class FuturesIntradayScanner:
     DISABLED: Futures intraday scanner.
     
     This class would scan futures contracts (ES, NQ) for intraday trading
-    opportunities. Currently disabled while Massive futures API is unavailable.
+    opportunities. Currently disabled while .
     """
     pass
 
@@ -56,7 +56,7 @@ class FuturesSignalTracker:
     DISABLED: Futures signal tracker.
     
     This class would track active futures positions and generate exit signals.
-    Currently disabled while Massive futures API is unavailable.
+    Currently disabled while .
     """
     pass
 
@@ -67,7 +67,7 @@ class FuturesExitSignalGenerator:
     
     This class would generate exit signals for futures positions based on
     stop loss, take profit, and time-based exits.
-    Currently disabled while Massive futures API is unavailable.
+    Currently disabled while .
     """
     pass
 
@@ -82,11 +82,11 @@ def get_active_futures_contract(symbol: str) -> str:
     Returns:
         Active contract symbol (e.g., "ESU5")
         
-    Note: This function is disabled while Massive futures API is unavailable.
+    Note: This function is disabled while .
     """
     raise NotImplementedError(
         "Futures contract resolution is disabled. "
-        "Re-enable when Massive futures API is available."
+        "Re-enable when ."
     )
 
 
@@ -100,6 +100,6 @@ def is_futures_symbol(symbol: str) -> bool:
     Returns:
         True if futures, False otherwise
         
-    Note: This function is disabled while Massive futures API is unavailable.
+    Note: This function is disabled while .
     """
     return False  # Always return False while disabled

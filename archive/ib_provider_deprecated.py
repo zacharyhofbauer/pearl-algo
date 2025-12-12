@@ -4,7 +4,7 @@ DEPRECATED: IBKR Data Provider
 ⚠️  WARNING: This provider is DEPRECATED and will be removed in a future version.
 
 The system now operates independently of IBKR using:
-- Polygon.io (primary data provider)
+- .io (primary data provider)
 - Tradier (options-focused)
 - Local Parquet/CSV storage
 - Dummy provider (for testing)
@@ -12,7 +12,7 @@ The system now operates independently of IBKR using:
 Migration Guide: See IBKR_DEPRECATION_NOTICE.md
 
 This code is kept for backward compatibility only. New code should use
-PolygonDataProvider or other non-IBKR providers.
+.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ class IBDataProvider(DataProvider):
     """
     DEPRECATED: Thin ib_insync wrapper for pulling historical bars from IBKR Gateway/TWS.
 
-    ⚠️  This provider is DEPRECATED. Use PolygonDataProvider or other providers instead.
+    ⚠️  This provider is DEPRECATED. Use .
     
     This is read-only for research/backtesting. It does NOT place orders.
     
@@ -48,7 +48,7 @@ class IBDataProvider(DataProvider):
     ):
         warnings.warn(
             "IBDataProvider is DEPRECATED and will be removed in a future version. "
-            "Use PolygonDataProvider or other non-IBKR providers instead. "
+            "Use . "
             "See IBKR_DEPRECATION_NOTICE.md for migration guide.",
             DeprecationWarning,
             stacklevel=2,

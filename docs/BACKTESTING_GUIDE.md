@@ -18,10 +18,10 @@ The backtesting framework supports:
 from pearlalgo.backtesting.options_backtest_engine import OptionsBacktestEngine
 from pearlalgo.backtesting.historical_data_loader import HistoricalFuturesDataLoader
 from datetime import datetime, timedelta
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
+from pearlalgo.data_providers.
 
 # Initialize components
-data_provider = MassiveDataProvider(api_key="your_key")
+data_provider = 
 loader = HistoricalFuturesDataLoader(data_provider)
 engine = OptionsBacktestEngine(initial_cash=100000.0)
 
@@ -203,7 +203,7 @@ for timestamp in aligned["ES"].index:
 
 ### No Data Returned
 
-- Check Massive API key validity
+- Check 
 - Verify date range is within available data
 - Check symbol format (ES, NQ not ESU5, NQU5)
 

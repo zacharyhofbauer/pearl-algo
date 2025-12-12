@@ -4,7 +4,7 @@ Data Feed Manager - Manages data feed connections with reconnection logic.
 Provides:
 - WebSocket connection management
 - Automatic reconnection with exponential backoff
-- Rate-limit queuing (respect Massive limits: 5 calls/sec free tier)
+- Rate-limit queuing (respect 
 - Data buffer management
 - Health monitoring per data source
 """
@@ -86,7 +86,7 @@ class DataFeedManager:
         Initialize data feed manager.
 
         Args:
-            data_provider: Data provider instance (Massive, etc.)
+            data_provider: Data provider instance (Tradier, IBKR, local, etc.)
             rate_limit: Maximum API calls per second
             reconnect_delay: Initial delay before reconnection (seconds)
             max_reconnect_attempts: Maximum reconnection attempts

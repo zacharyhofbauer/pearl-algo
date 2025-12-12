@@ -7,7 +7,7 @@ This directory contains deprecated, obsolete, or experimental code that has been
 ### ib_provider_deprecated.py
 - **Deprecated Date**: 2025-12-12
 - **Reason**: Duplicate of ibkr_data_provider.py, marked as deprecated
-- **Replacement**: Use `ibkr_data_provider.py` or move to non-IBKR providers (Polygon, Tradier, etc.)
+- **Replacement**: Use `ibkr_data_provider.py` or move to non-IBKR providers (.)
 
 ## Notes
 

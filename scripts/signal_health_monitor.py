@@ -147,27 +147,27 @@ class SignalHealthMonitor:
         except Exception as e:
             return False, f"Error checking log file: {e}"
 
-    def check_polygon_api(self) -> tuple[bool, str]:
+    def check_
         """
-        Check Polygon API connectivity.
+        Check .
 
         Returns:
             Tuple of (is_healthy, status_message)
         """
         try:
             import os
-            from pearlalgo.data_providers.polygon_provider import PolygonDataProvider
+            from pearlalgo.data_providers.
 
             api_key = os.getenv("POLYGON_API_KEY")
             if not api_key:
                 return False, "POLYGON_API_KEY not set"
 
             # Try to create provider (doesn't make API call)
-            provider = PolygonDataProvider(api_key=api_key)
-            return True, "Polygon API key configured"
+            provider = 
+            return True, "
 
         except Exception as e:
-            return False, f"Polygon API check failed: {e}"
+            return False, f"
 
     def check_telegram_config(self) -> tuple[bool, str]:
         """
@@ -230,9 +230,9 @@ class SignalHealthMonitor:
         )
         checks["activity"] = {"healthy": has_activity, "message": activity_msg}
 
-        # Check Polygon API
-        polygon_ok, polygon_msg = self.check_polygon_api()
-        checks["polygon"] = {"healthy": polygon_ok, "message": polygon_msg}
+        # Check 
+        .check_
+        checks["
 
         # Check Telegram
         telegram_ok, telegram_msg = self.check_telegram_config()

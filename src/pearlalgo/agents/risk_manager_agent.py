@@ -88,7 +88,7 @@ class RiskManagerAgent:
         self.volatility_target_min = risk_config.get("volatility_target", {}).get("min", self.VOLATILITY_TARGET_MIN)
         self.volatility_target_max = risk_config.get("volatility_target", {}).get("max", self.VOLATILITY_TARGET_MAX)
         
-        # Options-only risk rules (futures disabled while Massive futures API unavailable)
+        # Options-only risk rules (futures disabled while 
         # Options typically use lower risk per trade due to leverage
         self.options_max_risk = risk_config.get("options", {}).get("max_risk_per_trade", self.max_risk_per_trade * 0.5)  # Options: 50% of base risk
         # Futures risk disabled - futures_max_risk removed

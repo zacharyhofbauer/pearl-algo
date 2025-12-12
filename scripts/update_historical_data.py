@@ -202,8 +202,8 @@ def main():
     )
     parser.add_argument(
         "--provider",
-        default="polygon",
-        help="Data provider (polygon, tradier, etc.)",
+        default="
+        help="Data provider (.)",
     )
     parser.add_argument(
         "--timeframe",

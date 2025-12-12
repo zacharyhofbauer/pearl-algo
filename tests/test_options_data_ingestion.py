@@ -6,12 +6,12 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone, date
 
-from pearlalgo.data_providers.massive_provider import MassiveDataProvider
+from pearlalgo.data_providers.
 
 
 @pytest.fixture
-def mock_massive_client():
-    """Mock Massive REST client."""
+def mock_
+    """Mock ."""
     client = MagicMock()
     
     # Mock options chain iterator
@@ -36,10 +36,10 @@ def mock_massive_client():
 
 
 @pytest.mark.asyncio
-async def test_get_options_chain_basic(mock_massive_client):
+async def test_get_options_chain_basic(mock_
     """Test basic options chain retrieval."""
-    provider = MassiveDataProvider(api_key="test_key")
-    provider.client = mock_massive_client
+    provider = 
+    provider.client = mock_
     
     options = await provider.get_options_chain("QQQ")
     
@@ -49,10 +49,10 @@ async def test_get_options_chain_basic(mock_massive_client):
 
 
 @pytest.mark.asyncio
-async def test_get_options_chain_filtered_by_dte(mock_massive_client):
+async def test_get_options_chain_filtered_by_dte(mock_
     """Test options chain filtering by DTE."""
-    provider = MassiveDataProvider(api_key="test_key")
-    provider.client = mock_massive_client
+    provider = 
+    provider.client = mock_
     
     # Test intraday filtering (0-7 DTE)
     options = await provider.get_options_chain(
@@ -68,10 +68,10 @@ async def test_get_options_chain_filtered_by_dte(mock_massive_client):
 
 
 @pytest.mark.asyncio
-async def test_get_options_chain_filtered_by_volume(mock_massive_client):
+async def test_get_options_chain_filtered_by_volume(mock_
     """Test options chain filtering by volume."""
-    provider = MassiveDataProvider(api_key="test_key")
-    provider.client = mock_massive_client
+    provider = 
+    provider.client = mock_
     
     options = await provider.get_options_chain(
         "QQQ",
@@ -84,10 +84,10 @@ async def test_get_options_chain_filtered_by_volume(mock_massive_client):
 
 
 @pytest.mark.asyncio
-async def test_get_options_chain_filtered_by_strike(mock_massive_client):
+async def test_get_options_chain_filtered_by_strike(mock_
     """Test options chain filtering by strike proximity."""
-    provider = MassiveDataProvider(api_key="test_key")
-    provider.client = mock_massive_client
+    provider = 
+    provider.client = mock_
     
     underlying_price = 400.0
     
@@ -105,10 +105,10 @@ async def test_get_options_chain_filtered_by_strike(mock_massive_client):
 
 
 @pytest.mark.asyncio
-async def test_get_options_chain_filtered_intraday(mock_massive_client):
+async def test_get_options_chain_filtered_intraday(mock_
     """Test get_options_chain_filtered for intraday mode."""
-    provider = MassiveDataProvider(api_key="test_key")
-    provider.client = mock_massive_client
+    provider = 
+    provider.client = mock_
     
     options = await provider.get_options_chain_filtered(
         "QQQ",
@@ -121,10 +121,10 @@ async def test_get_options_chain_filtered_intraday(mock_massive_client):
 
 
 @pytest.mark.asyncio
-async def test_get_options_chain_filtered_swing(mock_massive_client):
+async def test_get_options_chain_filtered_swing(mock_
     """Test get_options_chain_filtered for swing mode."""
-    provider = MassiveDataProvider(api_key="test_key")
-    provider.client = mock_massive_client
+    provider = 
+    provider.client = mock_
     
     options = await provider.get_options_chain_filtered(
         "QQQ",
@@ -137,7 +137,7 @@ async def test_get_options_chain_filtered_swing(mock_massive_client):
 
 
 @pytest.mark.asyncio
-async def test_get_stock_data(mock_massive_client):
+async def test_get_stock_data(mock_
     """Test stock data retrieval."""
     # Mock stock aggregates
     mock_bar = MagicMock()
@@ -148,10 +148,10 @@ async def test_get_stock_data(mock_massive_client):
     mock_bar.volume = 1000000
     mock_bar.timestamp = int(datetime.now(timezone.utc).timestamp() * 1000)
     
-    mock_massive_client.get_previous_close_agg = MagicMock(return_value=mock_bar)
+    mock_.get_previous_close_agg = MagicMock(return_value=mock_bar)
     
-    provider = MassiveDataProvider(api_key="test_key")
-    provider.client = mock_massive_client
+    provider = 
+    provider.client = mock_
     
     bar = await provider.get_latest_bar("QQQ")
     

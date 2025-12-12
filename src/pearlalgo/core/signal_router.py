@@ -2,7 +2,7 @@
 Signal Router - Route signals to appropriate handlers with unified deduplication.
 
 Provides:
-- Route options signals (futures routing disabled while Massive futures API unavailable)
+- Route options signals
 - Unified risk evaluation before routing
 - Signal deduplication
 """
@@ -68,7 +68,7 @@ class SignalRouter:
         """
         Check if symbol is a futures contract.
         
-        DISABLED: Futures trading is disabled while Massive futures API is unavailable.
+        DISABLED: Futures trading is disabled while .
         This method always returns False.
 
         Args:
@@ -91,7 +91,7 @@ class SignalRouter:
             Handler type: "options" (futures routing disabled)
         """
         # All signals routed to options handler while futures API unavailable
-        # Futures routing will be re-enabled when Massive futures API is available
+        # Futures routing will be re-enabled when 
         return "options"
 
     def route_signals(
@@ -130,7 +130,7 @@ class SignalRouter:
 
         logger.info(
             f"Routed {len(routed['options'])} options signals "
-            f"(futures routing disabled - Massive futures API unavailable)"
+            f"(futures routing disabled - 
         )
 
         return routed

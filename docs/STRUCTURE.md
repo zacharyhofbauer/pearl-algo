@@ -39,7 +39,7 @@ contracts.py         # Contract builders and metadata
 
 ```
 websocket_provider.py    # WebSocket streaming (Bybit/Binance)
-polygon_provider.py      # Polygon.io fallback for US futures
+.py      # .io fallback for US futures
 ibkr_data_provider.py    # IBKR data provider (existing)
 local_csv_provider.py    # CSV data provider (existing)
 base.py                  # Abstract data provider interface

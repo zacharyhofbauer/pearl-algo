@@ -56,34 +56,8 @@ class APIConfig:
     
     def _load_from_environment(self) -> None:
         """Load configuration from environment variables."""
-        # Massive provider (primary)
-        massive_api_key = os.getenv("MASSIVE_API_KEY", "").strip()
-        if massive_api_key:
-            self.providers["massive"] = ProviderConfig(
-                name="massive",
-                api_key=massive_api_key,
-                base_url="https://api.massive.dev",
-                rate_limit_per_minute=200,  # Developer tier
-                rate_limit_per_second=3.33,
-                timeout_seconds=30,
-                max_retries=3,
-                enabled=True,
-            )
-        
-        # Add other providers as needed
-        # Polygon
-        polygon_api_key = os.getenv("POLYGON_API_KEY", "").strip()
-        if polygon_api_key:
-            self.providers["polygon"] = ProviderConfig(
-                name="polygon",
-                api_key=polygon_api_key,
-                base_url="https://api.polygon.io",
-                rate_limit_per_minute=5,  # Free tier
-                rate_limit_per_second=0.083,
-                timeout_seconds=30,
-                max_retries=3,
-                enabled=False,  # Disabled by default, enable if needed
-            )
+        # No default providers - add as needed
+        pass
     
     def _load_from_dict(self, config_dict: Dict) -> None:
         """Load configuration from dictionary."""
@@ -94,7 +68,7 @@ class APIConfig:
                     f"{provider_name.upper()}_API_KEY", ""
                 ).strip()
                 
-                # Handle template variables like ${MASSIVE_API_KEY}
+                # Handle template variables like ${TRADIER_API_KEY}
                 if api_key and api_key.startswith("${") and api_key.endswith("}"):
                     var_name = api_key[2:-1]
                     api_key = os.getenv(var_name, "").strip()
@@ -116,7 +90,7 @@ class APIConfig:
         Get configuration for a specific provider.
         
         Args:
-            name: Provider name (e.g., "massive", "polygon")
+            name: Provider name (e.g., "tradier", "ibkr")
             
         Returns:
             ProviderConfig or None if not found

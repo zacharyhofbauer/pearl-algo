@@ -35,7 +35,7 @@ ALPACA_API_SECRET=your_alpaca_api_secret
 ALPACA_BASE_URL=https://paper-api.alpaca.markets
 
 # Data Providers
-POLYGON_API_KEY=your_polygon_api_key
+POLYGON_API_KEY=your_
 
 # LLM Configuration
 GROQ_API_KEY=your_groq_api_key

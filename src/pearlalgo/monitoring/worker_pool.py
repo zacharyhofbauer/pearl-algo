@@ -64,7 +64,7 @@ class WorkerPool:
     Workers can be:
     - Futures intraday scanning (NQ, ES)
     - Options swing scanning (equity universe)
-    - Data ingestion (Massive WebSocket + REST fallback)
+    - Data ingestion (
     """
 
     def __init__(

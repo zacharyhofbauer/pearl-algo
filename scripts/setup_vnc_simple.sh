@@ -57,7 +57,7 @@ if ss -tuln | grep -q ":5901"; then
     echo ""
     echo "  3. In VNC, run IB Gateway:"
     echo "     export DISPLAY=:1"
-    echo "     cd ~/ibc"
+    echo "     cd ~/pearlalgo-dev-ai-agents/ibkr/ibc"
     echo "     ./gatewaystart.sh"
 else
     echo ""

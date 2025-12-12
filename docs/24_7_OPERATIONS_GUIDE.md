@@ -19,7 +19,7 @@ The system consists of:
    - Health monitoring
 
 3. **Data Feed Manager** (`src/pearlalgo/monitoring/data_feed_manager.py`)
-   - Massive API connection management
+   - 
    - Rate limiting (5 calls/sec free tier)
    - Automatic reconnection
 
@@ -80,7 +80,7 @@ monitoring:
 ```yaml
 monitoring:
   data_feeds:
-    massive:
+    
       rate_limit: 5  # calls per second
       reconnect_delay: 5.0  # seconds
       max_reconnect_attempts: 10
@@ -174,7 +174,7 @@ The service tracks:
 
 ### Data Feed Issues
 
-1. Check Massive API key:
+1. Check 
    ```bash
    echo $MASSIVE_API_KEY
    ```

@@ -1,7 +1,7 @@
 """
-Tests for data providers (Polygon, Tradier, Local Parquet).
+Tests for data providers (.
 
-Note: Comprehensive Polygon tests are in test_polygon_provider.py
+Note: Comprehensive .py
 """
 
 import pytest

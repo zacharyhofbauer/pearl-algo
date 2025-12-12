@@ -4,7 +4,7 @@ Options Intraday Scanner - High-frequency scanning for QQQ and SPY options.
 Provides:
 - Dedicated scanner for QQQ and SPY options
 - High-frequency scanning (1-5 minute intervals)
-- Real-time data ingestion from Massive
+- Real-time data ingestion
 - Signal detection: momentum, volatility compression, unusual option flow
 - Entry and exit signal generation
 """

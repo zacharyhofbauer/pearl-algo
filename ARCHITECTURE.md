@@ -12,8 +12,8 @@ PearlAlgo is a professional-grade, vendor-agnostic quantitative trading platform
 ┌─────────────────────────────────────────────────────────────┐
 │                    Market Data Layer                         │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
-│  │ Massive  │  │  Tradier │  │  Local   │  │  Yahoo   │   │
-│  │   API    │  │   API    │  │  Parquet │  │ (Fallback)│   │
+│  │ Tradier  │  │   Local  │  │  Parquet │  │ (Fallback)│   │
+│  │   API    │  │   CSV    │  │          │  │           │   │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
 └─────────────────────────────────────────────────────────────┘
                             │
@@ -83,12 +83,6 @@ PearlAlgo is a professional-grade, vendor-agnostic quantitative trading platform
 
 **Vendor-Agnostic Data Providers:**
 
-- **Massive.com** (Primary)
-  - Real-time and historical data
-  - Options chains support
-  - Futures contract discovery
-  - Developer tier: $99/mo
-
 - **Tradier API** (Options-focused)
   - Free with trading account
   - Options chains with Greeks
@@ -99,9 +93,9 @@ PearlAlgo is a professional-grade, vendor-agnostic quantitative trading platform
   - Deterministic backtesting
   - Efficient compression
 
-- **Yahoo Finance** (Fallback only)
-  - Emergency backup
-  - Unreliable, use sparingly
+- **Local CSV Storage**
+  - Simple CSV file support
+  - Easy to import historical data
 
 **Data Provider Factory:**
 - Unified creation interface
@@ -236,9 +230,9 @@ PearlAlgo is a professional-grade, vendor-agnostic quantitative trading platform
 ### Data Providers (`config/data_providers.yaml`)
 
 ```yaml
-primary: "polygon"
+primary: "
 providers:
-  polygon:
+  
     enabled: true
     api_key: "${POLYGON_API_KEY}"
   local_parquet:

@@ -13,10 +13,10 @@ from unittest.mock import Mock, AsyncMock, patch
 async def test_options_scanning_end_to_end():
     """Test full options scanning flow."""
     from pearlalgo.options.intraday_scanner import OptionsIntradayScanner
-    from pearlalgo.data_providers.massive_provider import MassiveDataProvider
+    from pearlalgo.data_providers.
     
     # Mock data provider
-    mock_provider = Mock(spec=MassiveDataProvider)
+    mock_provider = Mock(spec=
     mock_provider.get_latest_bar = AsyncMock(return_value={
         'close': 100.0,
         'timestamp': datetime.now(timezone.utc),

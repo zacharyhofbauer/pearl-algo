@@ -9,12 +9,12 @@ if pgrep -f "java.*IBC.jar" > /dev/null; then
     echo "⚠️  IB Gateway is already running!"
     ps aux | grep "IBC.jar" | grep -v grep
     echo ""
-    echo "To stop it: ~/ibc/stop.sh"
+    echo "To stop it: ~/pearlalgo-dev-ai-agents/ibkr/ibc/stop.sh"
     exit 1
 fi
 
 # Check if IBC is configured
-if [ ! -f ~/ibc/config-auto.ini ]; then
+if [ ! -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/config-auto.ini ]; then
     echo "❌ IBC not configured. Run:"
     echo "   ~/pearlalgo-dev-ai-agents/scripts/configure_ibc_readonly.sh"
     exit 1
@@ -22,7 +22,7 @@ fi
 
 # Ensure Xvfb is running for headless operation
 echo "Ensuring Xvfb virtual display is running..."
-source ~/ibc/start_xvfb.sh
+source ~/pearlalgo-dev-ai-agents/ibkr/ibc/start_xvfb.sh
 if [ $? -ne 0 ]; then
     echo "❌ Failed to start Xvfb. Cannot start IB Gateway."
     exit 1
@@ -30,7 +30,7 @@ fi
 
 # Start IBC
 echo "Starting IB Gateway..."
-cd ~/ibc
+cd ~/pearlalgo-dev-ai-agents/ibkr/ibc
 
 # Use headless version that ensures DISPLAY is set
 export DISPLAY=:99
@@ -39,7 +39,7 @@ nohup ./gatewaystart.sh -inline > logs/gateway_$(date +%Y%m%d_%H%M%S).log 2>&1 &
 IBC_PID=$!
 
 echo "IB Gateway starting (PID: $IBC_PID)"
-echo "Log file: ~/ibc/logs/gateway_*.log"
+echo "Log file: ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway_*.log"
 echo ""
 
 # Wait a bit and check
@@ -49,7 +49,7 @@ if ps -p $IBC_PID > /dev/null 2>&1; then
     echo "✅ IB Gateway process is running"
 else
     echo "⚠️  Process may have exited - check logs"
-    tail -20 ~/ibc/logs/gateway_*.log 2>/dev/null | tail -10
+    tail -20 ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway_*.log 2>/dev/null | tail -10
 fi
 
 # Check API port
@@ -69,9 +69,9 @@ else
     echo "⚠️  Port 4002 not listening yet"
     echo "   IB Gateway may still be starting up or logging in"
     echo "   Check status: ss -tuln | grep 4002"
-    echo "   View logs: tail -f ~/ibc/logs/gateway_*.log"
+    echo "   View logs: tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway_*.log"
 fi
 
 echo ""
-echo "To stop IB Gateway: ~/ibc/stop.sh"
-echo "To view logs: tail -f ~/ibc/logs/gateway_*.log"
+    echo "To stop IB Gateway: ~/pearlalgo-dev-ai-agents/ibkr/ibc/stop.sh"
+    echo "To view logs: tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway_*.log"

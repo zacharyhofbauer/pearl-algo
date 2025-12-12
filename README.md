@@ -1,6 +1,6 @@
 # pearlalgo-dev-ai-agents
 
-**Professional-grade, vendor-agnostic quantitative trading platform** using LangGraph multi-agent architecture. Operates independently with Massive.com/Tradier data providers and internal paper trading engines. Supports futures, options, and crypto via multiple brokers.
+**Professional-grade, vendor-agnostic quantitative trading platform** using LangGraph multi-agent architecture. Operates independently with Tradier data providers and internal paper trading engines. Supports futures, options, and crypto via multiple brokers.
 
 ## ⚠️ RISK WARNINGS
 
@@ -33,7 +33,7 @@ This system implements a professional quant/agentic trading architecture:
 - Real-time PnL tracking and risk monitoring
 
 ### Data & Execution
-- **Vendor-Agnostic Data Layer**: Massive.com, Tradier, Local Parquet (IBKR optional/deprecated)
+- **Vendor-Agnostic Data Layer**: Tradier, Local Parquet (IBKR optional/deprecated)
 - **Professional Paper Trading**: Realistic futures/options simulation with slippage and margin
 - **Multi-Broker Support**: Paper (internal), IBKR (deprecated), Bybit, Alpaca
 - **Complete Audit Trail**: SQLite trade ledger for immutable record-keeping
@@ -88,7 +88,7 @@ For a quick 5-minute setup, see [QUICK_START_V2.md](QUICK_START_V2.md)
 
 ### Prerequisites
 - Python 3.12+
-- Massive.com API key (recommended) or Tradier API key for market data
+- Tradier API key for market data (optional, for live data)
 - Bybit/Alpaca API keys (optional, for live trading)
 - Groq API key (optional, for LLM reasoning)
 - Telegram bot token (optional, for alerts)
@@ -379,7 +379,7 @@ src/pearlalgo/
     
   data_providers/
     websocket_provider.py         # WebSocket streaming provider
-    massive_provider.py           # Massive.com data provider
+    .py           # .com data provider
     ibkr_data_provider.py         # IBKR data provider
     local_csv_provider.py         # CSV data provider
     base.py                       # Abstract data provider
