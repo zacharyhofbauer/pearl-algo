@@ -18,8 +18,8 @@ cd /home/pearlalgo/pearlalgo-dev-ai-agents
 nano .env
 
 # Add these lines:
-IBKR_USERNAME=   
-IBKR_PASSWORD=your_ibkr_password
+IBKR_USERNAME=zachofbauer  
+IBKR_PASSWORD=Zqfa89HqDsr9jy
 IBKR_ACCOUNT_TYPE=paper
 IBKR_READ_ONLY_API=true
 IBKR_HOST=ib-gateway
