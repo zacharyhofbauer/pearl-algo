@@ -50,27 +50,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         overall_status = "healthy"
         errors = []
         
-        # Check 1: Core imports
-        try:
-            from pearlalgo.agents.langgraph_state import TradingState
-            from pearlalgo.core.portfolio import Portfolio
-            checks["imports"] = "ok"
-        except Exception as e:
-            checks["imports"] = "failed"
-            errors.append(f"Import error: {e}")
-            overall_status = "unhealthy"
-        
-        # Check 2: State creation
-        try:
-            portfolio = Portfolio(cash=100000.0)
-            state = TradingState(portfolio=portfolio)
-            checks["state_creation"] = "ok"
-        except Exception as e:
-            checks["state_creation"] = "failed"
-            errors.append(f"State creation error: {e}")
-            overall_status = "unhealthy"
-        
-        # Check 3: Configuration loading
+        # Check 1: Configuration loading
         try:
             from pearlalgo.config.settings import get_settings
             settings = get_settings()
@@ -80,38 +60,30 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             errors.append(f"Config loading error: {e}")
             overall_status = "unhealthy"
         
-        # Check 4: Data provider availability
+        # Check 2: Data provider availability
         try:
-            # Dummy provider removed - health check only validates real data providers
-        
-        # Check 5: Agent initialization
-        try:
-            from pearlalgo.agents.market_data_agent import MarketDataAgent
-            agent = MarketDataAgent(symbols=["ES"], config={})
-            checks["agent_initialization"] = "ok"
+            from pearlalgo.data_providers.factory import create_data_provider
+            # Just check if we can import, don't actually create (requires IBKR connection)
+            checks["data_provider_import"] = "ok"
         except Exception as e:
-            checks["agent_initialization"] = "failed"
-            errors.append(f"Agent initialization error: {e}")
+            checks["data_provider_import"] = "failed"
+            errors.append(f"Data provider import error: {e}")
             overall_status = "unhealthy"
         
-        # Check 6: State persistence
+        # Check 3: NQ agent imports
         try:
-            from pearlalgo.agents.state_store import StateStore
-            import tempfile
-            temp_dir = tempfile.mkdtemp()
-            store = StateStore(storage_path=temp_dir)
-            checks["state_persistence"] = "ok"
-            import shutil
-            shutil.rmtree(temp_dir)
+            from pearlalgo.nq_agent.service import NQAgentService
+            from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
+            checks["nq_agent_import"] = "ok"
         except Exception as e:
-            checks["state_persistence"] = "failed"
-            errors.append(f"State persistence error: {e}")
-            # Don't fail overall health for state persistence
+            checks["nq_agent_import"] = "failed"
+            errors.append(f"NQ agent import error: {e}")
+            overall_status = "unhealthy"
         
-        # Check 7: Environment variables (optional)
+        # Check 4: Environment variables (optional)
         import os
         env_checks = {}
-        optional_vars = ["MASSIVE_API_KEY", "TELEGRAM_BOT_TOKEN", "GROQ_API_KEY"]
+        optional_vars = ["TELEGRAM_BOT_TOKEN", "IBKR_HOST", "IBKR_PORT"]
         for var in optional_vars:
             env_checks[var] = "set" if os.getenv(var) else "not_set"
         checks["environment_variables"] = env_checks
@@ -150,7 +122,7 @@ def run_health_server(port: int = 8080, host: str = "0.0.0.0"):
 
 def main():
     """Main entry point for health check server."""
-    parser = argparse.ArgumentParser(description="Health check server for PearlAlgo trading system")
+    parser = argparse.ArgumentParser(description="Health check server for PearlAlgo NQ trading agent")
     parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
     
@@ -167,4 +139,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

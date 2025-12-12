@@ -1,311 +1,45 @@
-# LangGraph Multi-Agent Trading System Configuration
-# IBKR-only configuration
-# All API keys should be set via environment variables for security
+# NQ Trading Agent Configuration
+# Simple configuration for NQ futures trading with IBKR and Telegram
 
-# Trading Symbols
-symbols:
-  # IBKR futures and options symbols
-  futures:
-    - "ES"  # E-mini S&P 500
-    - "NQ"  # E-mini NASDAQ-100
-    - "CL"  # Crude Oil
-    - "GC"  # Gold
-  
-  # Options underliers
-  options_underliers:
-    - "QQQ"
-    - "SPY"
-    - "AAPL"
-    - "META"
-    - "NVDA"
-    - "MSFT"
+# Trading Symbol
+symbol: "NQ"  # E-mini NASDAQ-100 futures
 
-# Timeframes
-timeframes:
-  primary: "15m"  # Primary timeframe for signals
-  secondary: "5m"  # Secondary for entry/exit
-  backtest: "15m"  # For backtesting
+# Timeframe
+timeframe: "1m"  # 1-minute bars for intraday trading
 
-# Strategy Parameters
-strategy:
-  # Default strategy
-  default: "sr"  # Options: "sr", "ma_cross", "breakout", "mean_reversion"
-  
-  # Strategy-specific parameters
-  sr:
-    fast: 20  # Fast EMA period
-    slow: 50  # Slow MA period
-    tolerance: 0.002  # Support/resistance tolerance (0.2%)
-  
-  ma_cross:
-    fast: 20
-    slow: 50
-  
-  breakout:
-    lookback: 20
-    volume_multiplier: 1.5
-    min_breakout_pct: 0.001
-  
-  mean_reversion:
-    bb_period: 20
-    bb_std: 2.0
-    rsi_period: 14
-    rsi_oversold: 30.0
-    rsi_overbought: 70.0
+# Scan Interval (seconds)
+scan_interval: 60  # Check for signals every 60 seconds
 
-# Risk Management Rules (HARDCODED - DO NOT MODIFY)
+# IBKR Connection
+ibkr:
+  host: "${IBKR_HOST:-127.0.0.1}"
+  port: "${IBKR_PORT:-4002}"
+  client_id: "${IBKR_CLIENT_ID:-10}"
+  data_client_id: "${IBKR_DATA_CLIENT_ID:-11}"
+
+# Telegram Notifications
+telegram:
+  enabled: true
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+  notify_on:
+    - "signal"
+    - "entry"
+    - "exit"
+    - "error"
+
+# Risk Management
 risk:
-  # Maximum risk per trade (2% as specified)
-  max_risk_per_trade: 0.02  # 2%
-  
-  # Volatility targeting (0.5-1% daily vol)
-  volatility_target:
-    min: 0.005  # 0.5%
-    max: 0.01   # 1.0%
-  
-  # Maximum account drawdown kill-switch (15% as specified)
-  max_drawdown: 0.15  # 15%
-  
-  # Position sizing
-  position_sizing:
-    method: "volatility_target"  # or "fixed_percent"
-    base_size: 1  # Base contract size
-  
-  # Stop loss and take profit
-  stop_loss:
-    method: "atr"  # or "fixed_percent", "support_resistance"
-    atr_multiplier: 2.0
-    fixed_percent: 0.01  # 1% if using fixed
-  
-  take_profit:
-    method: "risk_reward"  # or "fixed_percent"
-    risk_reward_ratio: 2.0  # 2:1 R/R
-    fixed_percent: 0.02  # 2% if using fixed
-  
-  # Circuit breakers
-  circuit_breakers:
-    max_daily_loss: 2500.0  # Hard stop in dollars
-    max_consecutive_losses: 5
-    cooldown_minutes: 30
-    max_trades_per_day: 50
-  
-  # Options-only risk rules (futures disabled)
-  options:
-    max_risk_per_trade: 0.01  # 1% for options (lower due to leverage)
-
-# LLM Configuration (for Quant Research Agent reasoning)
-llm:
-  provider: "groq"  # Options: "groq", "openai", "anthropic", "litellm"
-  
-  # Groq (Direct integration - Recommended for free tier)
-  groq:
-    api_key: "${GROQ_API_KEY}"
-    model: "llama-3.1-70b-versatile"  # Current model (mixtral-8x7b-32768 was decommissioned) - Alternative: "llama-3-70b-8192"
-    temperature: 0.3
-    max_tokens: 1000
-  
-  # OpenAI (Via LiteLLM)
-  openai:
-    api_key: "${OPENAI_API_KEY}"
-    model: "gpt-4o"  # or "gpt-4-turbo", "gpt-4o-mini"
-    temperature: 0.3
-    max_tokens: 1000
-  
-  # Anthropic Claude (Via LiteLLM)
-  anthropic:
-    api_key: "${ANTHROPIC_API_KEY}"
-    model: "claude-3-5-sonnet-20241022"  # Current model - Alternative: "claude-3-opus" or "claude-3-5-haiku-20241022"
-    temperature: 0.3
-    max_tokens: 1000
-  
-  # LiteLLM (Generic - for other providers or custom models)
-  litellm:
-    api_key: "${OPENAI_API_KEY}"  # or other provider key
-    model: "gpt-4o-mini"  # Use format: "openai/gpt-4o" or "anthropic/claude-3-opus-20240229"
-    temperature: 0.3
-    max_tokens: 1000
-
-# Data Sources Configuration
-data_sources:
-  # Live trading data (options and stocks)
-  live:
-    provider: "ibkr"
-    symbols:
-      options_underliers: ["QQQ", "SPY"]
-    intervals:
-      intraday: "1m"  # For intraday options scanning
-      swing: "15m"    # For swing options scanning
-  
-  # Backtesting data (historical ES/NQ for correlation)
-  backtesting:
-    provider: "ibkr"
-    symbols: ["ES", "NQ"]  # Futures symbols for backtesting correlation
-    data_dir: "data/backtesting"
-    cache_enabled: true
-    timeframes: ["1m", "5m", "15m", "1h", "1d"]  # Supported timeframes
-
-# Rate Limiting
-rate_limits:
-  ibkr:
-    requests_per_minute: 100  # IBKR rate limit (conservative)
-    burst_limit: 20  # Burst capacity
-    delay_between_requests: 0.1  # seconds
-
-# Data Sources
-data:
-  # Primary data source
-  primary: "broker"  # Uses broker's data feed
-  
-  # Fallback data sources
-  fallback:
-    ibkr:
-      host: "${IBKR_HOST:-127.0.0.1}"
-      port: "${IBKR_PORT:-4002}"
-      client_id: "${IBKR_DATA_CLIENT_ID:-11}"
-  
-  # WebSocket streaming
-  websocket:
-    enabled: true
-    reconnect_delay: 5  # seconds
-    max_reconnect_attempts: 10
-
-# Trading Mode
-trading:
-  # Default mode: "paper" or "live"
-  mode: "paper"
-  
-  # Signal-only mode: Generate signals and track PnL without executing trades
-  signal_only: true
-  
-  # Data-only system settings
-  paper:
-    starting_balance: 50000.0
-    commission: 0.0  # No commission in data-only mode
+  max_risk_per_trade: 0.02  # 2% max risk per trade
+  max_drawdown: 0.15  # 15% account drawdown limit
+  stop_loss_atr_multiplier: 2.0
+  take_profit_risk_reward: 2.0  # 2:1 R/R ratio
 
 # Logging
 logging:
   level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  file: "logs/langgraph_trading.log"
+  file: "logs/nq_agent.log"
   console: true
-  structured: true  # Use loguru structured logging
 
-# Alerts
-alerts:
-  # Telegram
-  telegram:
-    enabled: true
-    bot_token: "${TELEGRAM_BOT_TOKEN}"
-    chat_id: "${TELEGRAM_CHAT_ID}"
-    notify_on:
-      - "signal"
-      - "trade"
-      - "risk_warning"
-      - "daily_summary"
-      - "pnl_update"
-  
-  # Discord
-  discord:
-    enabled: false
-    webhook_url: "${DISCORD_WEBHOOK_URL}"
-    notify_on:
-      - "trade"
-      - "risk_warning"
-      - "daily_summary"
-
-# Backtesting
-backtesting:
-  engine: "vectorbt"  # Options: "vectorbt", "backtesting", "backtrader"
-  start_date: "2024-01-01"
-  end_date: null  # null = today
-  initial_cash: 100000.0
-  commission: 0.85
-
-# Dashboard
-dashboard:
-  streamlit:
-    enabled: true
-    port: 8501
-    host: "0.0.0.0"
-    refresh_interval: 5  # seconds
-
-# Agent Configuration
-agents:
-  # Market Data Agent
-  market_data:
-    update_interval: 1  # seconds
-    buffer_size: 1000  # Number of bars to keep in memory
-  
-  # Quant Research Agent
-  quant_research:
-    use_llm_reasoning: true
-    regime_detection: true
-    ml_models: false  # Set to true to enable lightweight ML
-  
-  # Risk Manager Agent
-  risk_manager:
-    check_interval: 1  # seconds
-    enforce_strict: true  # Strict enforcement of all risk rules
-  
-  # Portfolio/Execution Agent
-  portfolio_execution:
-    execution_delay: 0.5  # seconds between order submission
-    max_order_retries: 3
-
-# Health Checks
-health:
-  enabled: true
-  check_interval: 60  # seconds
-  max_consecutive_errors: 5
-  auto_restart: true
-
-# 24/7 Monitoring Configuration
-monitoring:
-  max_workers: 10
-  max_restarts: 10
-  buffer_size: 1000  # Number of bars per symbol
-  
-  workers:
-    # Futures worker for ES/NQ intraday trading
-    futures:
-      enabled: true
-      symbols: ["ES", "NQ"]
-      interval: 60  # seconds (1 minute)
-      strategy: "sr"  # Support/Resistance strategy
-    
-    # Options swing scanner (multi-day patterns)
-    options:
-      enabled: true
-      universe: ["QQQ", "SPY"]
-      interval: 900  # seconds (15 minutes)
-      strategy: "swing_momentum"
-    
-    # Options intraday scanner (high-frequency, 0-7 DTE)
-    options_intraday:
-      enabled: true
-      symbols: ["QQQ", "SPY"]
-      interval: 60  # seconds (1 minute)
-      strategy: "momentum"  # Options: "momentum", "volatility", "unusual_flow"
-  
-  data_feeds:
-    ibkr:
-      websocket_enabled: false  # Start with REST, add WebSocket later
-      rate_limit: 10  # calls per second
-      reconnect_delay: 5.0  # seconds
-      max_reconnect_attempts: 10
-    
-  health:
-    enabled: true
-    port: 8080
-    check_interval: 60  # seconds
-  
-  # Status update notifications (Telegram)
-  status_update_interval: 600  # seconds (10 minutes) - Send periodic status updates
-
-# Enhanced Telegram Configuration
-telegram:
-  exit_alerts:
-    enabled: true
-    notify_on_stop: true
-    notify_on_target: true
-    notify_on_time_exit: true
-    mark_to_market_interval: 300  # 5 minutes
+# Data Provider
+data_provider: "ibkr"  # Use IBKR for market data
