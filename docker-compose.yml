@@ -1,6 +1,44 @@
 version: '3.8'
 
 services:
+  # IB Gateway - Headless IBKR API gateway
+  ib-gateway:
+    image: ghcr.io/ib-controller/ib-gateway:latest
+    container_name: ib-gateway
+    restart: unless-stopped
+    environment:
+      - IBKR_ACCOUNT_TYPE=${IBKR_ACCOUNT_TYPE:-paper}
+      - IBKR_USERNAME=${IBKR_USERNAME:-}
+      - IBKR_PASSWORD=${IBKR_PASSWORD:-}
+      - IBKR_READ_ONLY_API=${IBKR_READ_ONLY_API:-true}
+      - IBKR_SOCKET_PORT=${IBKR_SOCKET_PORT:-4002}
+      - TZ=${TZ:-America/New_York}
+    ports:
+      - "${IBKR_SOCKET_PORT:-4002}:4002"
+    networks:
+      - trading-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "4002"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    volumes:
+      - ib-gateway-data:/root/Jts
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # Redis for optional state persistence
   redis:
     image: redis:7-alpine
@@ -31,6 +69,8 @@ services:
     container_name: langgraph-trading-bot
     restart: unless-stopped
     depends_on:
+      ib-gateway:
+        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
@@ -39,11 +79,12 @@ services:
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_DB=${REDIS_DB:-0}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      # Broker configuration
-      - IBKR_HOST=${IBKR_HOST:-127.0.0.1}
-      - IBKR_PORT=${IBKR_PORT:-7497}
+      # IBKR configuration (connect to ib-gateway container)
+      - IBKR_HOST=${IBKR_HOST:-ib-gateway}
+      - IBKR_PORT=${IBKR_PORT:-4002}
       - IBKR_CLIENT_ID=${IBKR_CLIENT_ID:-1}
       - IBKR_DATA_CLIENT_ID=${IBKR_DATA_CLIENT_ID:-2}
+      - IBKR_ACCOUNT_TYPE=${IBKR_ACCOUNT_TYPE:-paper}
       
       # Bybit (if using)
       - BYBIT_API_KEY=${BYBIT_API_KEY:-}
@@ -161,4 +202,6 @@ networks:
 
 volumes:
   redis-data:
+    driver: local
+  ib-gateway-data:
     driver: local
