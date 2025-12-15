@@ -7,6 +7,7 @@ Sends signals and status updates to Telegram.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 try:
@@ -23,7 +24,14 @@ except ImportError:
     TELEGRAM_AVAILABLE = False
     logger.warning("python-telegram-bot not installed, Telegram notifications disabled")
 
-from pearlalgo.utils.telegram_alerts import TelegramAlerts
+from pearlalgo.utils.market_hours import get_market_hours
+from pearlalgo.utils.telegram_alerts import (
+    TelegramAlerts,
+    _format_separator,
+    _format_uptime,
+    _format_currency,
+    _format_percentage,
+)
 
 
 class NQAgentTelegramNotifier:
@@ -225,41 +233,360 @@ class NQAgentTelegramNotifier:
             return False
         
         try:
-            message = "📊 *NQ Agent Status*\n\n"
+            message = f"📊 *NQ Agent Status*\n\n"
             
-            # Service status
-            if "running" in status:
-                status_emoji = "🟢" if status.get("running") else "🔴"
-                pause_status = " ⏸️ PAUSED" if status.get("paused") else ""
-                message += f"{status_emoji} Status: {'RUNNING' if status.get('running') else 'STOPPED'}{pause_status}\n"
-            
-            # Uptime
+            # Service and market status
+            status_emoji = "🟢" if status.get("running") else "🔴"
+            pause_status = " ⏸️ PAUSED" if status.get("paused") else ""
+            uptime_str = ""
             if "uptime" in status and status["uptime"]:
-                uptime = status["uptime"]
-                message += f"⏱️ Uptime: {uptime.get('hours', 0)}h {uptime.get('minutes', 0)}m\n"
+                uptime_str = f" ({_format_uptime(status['uptime'])})"
             
-            # Counts
-            message += f"🔄 Cycles: {status.get('cycle_count', 0)}\n"
-            message += f"🔔 Signals: {status.get('signal_count', 0)}\n"
-            message += f"⚠️ Errors: {status.get('error_count', 0)}\n"
-            message += f"📊 Buffer: {status.get('buffer_size', 0)} bars\n"
+            try:
+                market_hours = get_market_hours()
+                is_market_open = market_hours.is_market_open()
+                market_emoji = "🟢" if is_market_open else "🔴"
+                market_text = "OPEN" if is_market_open else "CLOSED"
+            except Exception:
+                market_emoji = "⚪"
+                market_text = "UNKNOWN"
             
-            # Performance metrics
+            message += f"{status_emoji} *Service:* RUNNING{pause_status}{uptime_str}\n"
+            message += f"{market_emoji} *Market:* {market_text}\n"
+            
+            # Activity section
+            cycles = status.get('cycle_count', 0)
+            signals = status.get('signal_count', 0)
+            errors = status.get('error_count', 0)
+            buffer = status.get('buffer_size', 0)
+            message += f"\n*Activity:*\n"
+            message += f"🔄 {cycles:,} cycles\n"
+            message += f"🔔 {signals} signals\n"
+            message += f"📊 {buffer} bars\n"
+            message += f"⚠️ {errors} errors\n"
+            
+            # Performance section
             performance = status.get("performance", {})
             if performance:
-                message += "\n*Performance (7 days):*\n"
                 exited = performance.get("exited_signals", 0)
                 if exited > 0:
-                    message += f"✅ Wins: {performance.get('wins', 0)}\n"
-                    message += f"❌ Losses: {performance.get('losses', 0)}\n"
-                    message += f"📈 Win Rate: {performance.get('win_rate', 0) * 100:.1f}%\n"
-                    message += f"💰 Total P&L: ${performance.get('total_pnl', 0):,.2f}\n"
-                    message += f"📊 Avg P&L: ${performance.get('avg_pnl', 0):,.2f}\n"
+                    wins = performance.get('wins', 0)
+                    losses = performance.get('losses', 0)
+                    win_rate = performance.get('win_rate', 0) * 100
+                    total_pnl = performance.get('total_pnl', 0)
+                    avg_pnl = performance.get('avg_pnl', 0)
+                    
+                    message += f"\n*Performance (7d):*\n"
+                    message += f"✅ {wins}W  ❌ {losses}L\n"
+                    message += f"📈 {_format_percentage(win_rate)} WR\n"
+                    message += f"💰 {_format_currency(total_pnl)}\n"
+                    message += f"📊 {_format_currency(avg_pnl)} avg\n"
                 else:
-                    message += "No completed trades yet\n"
+                    message += f"\n*Performance (7d):*\n"
+                    message += "⏳ No completed trades yet\n"
             
             await self.telegram.send_message(message)
             return True
         except Exception as e:
             logger.error(f"Error sending enhanced status: {e}", exc_info=True)
+            return False
+    
+    async def send_heartbeat(self, status: Dict) -> bool:
+        """
+        Send periodic heartbeat message.
+        
+        Args:
+            status: Status dictionary with service information
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+        
+        try:
+            market_hours = get_market_hours()
+            is_market_open = market_hours.is_market_open()
+            
+            # Format uptime
+            uptime_str = ""
+            if "uptime" in status and status["uptime"]:
+                uptime_str = _format_uptime(status["uptime"])
+            
+            message = f"💓 *Heartbeat*\n*{uptime_str} uptime*\n\n"
+            
+            # Status line
+            market_emoji = "🟢" if is_market_open else "🔴"
+            message += f"🟢 *Service:* RUNNING\n"
+            message += f"{market_emoji} *Market:* {'OPEN' if is_market_open else 'CLOSED'}\n"
+            
+            # Activity (mobile-friendly, one per line)
+            cycles = status.get('cycle_count', 0)
+            signals = status.get('signal_count', 0)
+            errors = status.get('error_count', 0)
+            buffer = status.get('buffer_size', 0)
+            message += f"\n*Activity:*\n"
+            message += f"🔄 {cycles:,} cycles\n"
+            message += f"🔔 {signals} signals\n"
+            message += f"📊 {buffer} bars\n"
+            message += f"⚠️ {errors} errors\n"
+            
+            await self.telegram.send_message(message)
+            return True
+        except Exception as e:
+            logger.error(f"Error sending heartbeat: {e}", exc_info=True)
+            return False
+    
+    async def send_data_quality_alert(
+        self,
+        alert_type: str,
+        message: str,
+        details: Optional[Dict] = None,
+    ) -> bool:
+        """
+        Send data quality alert.
+        
+        Args:
+            alert_type: Type of alert (stale_data, data_gap, fetch_failure, buffer_issue)
+            message: Alert message
+            details: Additional details dictionary
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+        
+        try:
+            emoji_map = {
+                "stale_data": "⏰",
+                "data_gap": "📉",
+                "fetch_failure": "❌",
+                "buffer_issue": "⚠️",
+            }
+            
+            emoji = emoji_map.get(alert_type, "⚠️")
+            alert_message = f"{emoji} *Data Quality Alert*\n\n"
+            alert_message += f"*Type:* {alert_type.replace('_', ' ').title()}\n"
+            alert_message += f"*Message:* {message}\n"
+            
+            if details:
+                if "age_minutes" in details:
+                    alert_message += f"*Age:* {details['age_minutes']:.1f} minutes\n"
+                if "consecutive_failures" in details:
+                    alert_message += f"*Failures:* {details['consecutive_failures']}\n"
+                if "buffer_size" in details:
+                    alert_message += f"*Buffer:* {details['buffer_size']} bars\n"
+            
+            await self.telegram.notify_risk_warning(alert_message, risk_status="DATA_QUALITY")
+            return True
+        except Exception as e:
+            logger.error(f"Error sending data quality alert: {e}", exc_info=True)
+            return False
+    
+    async def send_startup_notification(self, config: Dict) -> bool:
+        """
+        Send service startup notification with configuration.
+        
+        Args:
+            config: Configuration dictionary
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+        
+        try:
+            message = f"🚀 *NQ Agent Started*\n\n"
+            
+            # Compact config (mobile-friendly)
+            symbol = config.get('symbol', 'NQ')
+            timeframe = config.get('timeframe', '1m')
+            scan_interval = config.get('scan_interval', 60)
+            max_risk = config.get('max_risk_per_trade', 0.02) * 100
+            rr_ratio = config.get('take_profit_risk_reward', 2.0)
+            
+            message += f"*Config:*\n"
+            message += f"• Symbol: {symbol}\n"
+            message += f"• Timeframe: {timeframe}\n"
+            message += f"• Scan: {scan_interval}s\n"
+            message += f"• Risk: {max_risk:.1f}%\n"
+            message += f"• R:R: {rr_ratio:.1f}:1\n"
+            
+            # Market status
+            market_hours = get_market_hours()
+            is_market_open = market_hours.is_market_open()
+            market_emoji = "🟢" if is_market_open else "🔴"
+            message += f"\n{market_emoji} *Market:* {'OPEN' if is_market_open else 'CLOSED'}\n"
+            
+            await self.telegram.send_message(message)
+            return True
+        except Exception as e:
+            logger.error(f"Error sending startup notification: {e}", exc_info=True)
+            return False
+    
+    async def send_shutdown_notification(self, summary: Dict) -> bool:
+        """
+        Send service shutdown notification with summary.
+        
+        Args:
+            summary: Summary dictionary with service statistics
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+        
+        try:
+            message = f"🛑 *NQ Agent Stopped*\n\n"
+            
+            # Session summary (mobile-friendly)
+            uptime_h = summary.get('uptime_hours', 0)
+            uptime_m = summary.get('uptime_minutes', 0)
+            cycles = summary.get('cycle_count', 0)
+            signals = summary.get('signal_count', 0)
+            errors = summary.get('error_count', 0)
+            
+            message += f"*Session Summary:*\n"
+            message += f"⏱️ Uptime: {uptime_h:.0f}h {uptime_m:.0f}m\n"
+            message += f"🔄 {cycles:,} cycles\n"
+            message += f"🔔 {signals} signals\n"
+            message += f"⚠️ {errors} errors\n"
+            
+            # Performance if available
+            if summary.get('signal_count', 0) > 0:
+                wins = summary.get('wins', 0)
+                losses = summary.get('losses', 0)
+                total_pnl = summary.get('total_pnl', 0)
+                
+                if wins > 0 or losses > 0:
+                    message += f"\n*Performance:*\n"
+                    message += f"✅ {wins}W  ❌ {losses}L\n"
+                
+                if total_pnl is not None:
+                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                    message += f"{pnl_emoji} *P&L:* {_format_currency(total_pnl)}\n"
+            
+            await self.telegram.send_message(message)
+            return True
+        except Exception as e:
+            logger.error(f"Error sending shutdown notification: {e}", exc_info=True)
+            return False
+    
+    async def send_weekly_summary(self, performance_metrics: Dict) -> bool:
+        """
+        Send weekly performance summary.
+        
+        Args:
+            performance_metrics: Performance metrics dictionary
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+        
+        try:
+            message = f"📅 *Weekly Performance Summary*\n\n"
+            
+            total_signals = performance_metrics.get("total_signals", 0)
+            exited_signals = performance_metrics.get("exited_signals", 0)
+            wins = performance_metrics.get("wins", 0)
+            losses = performance_metrics.get("losses", 0)
+            win_rate = performance_metrics.get("win_rate", 0) * 100
+            total_pnl = performance_metrics.get("total_pnl", 0)
+            avg_pnl = performance_metrics.get("avg_pnl", 0)
+            avg_hold = performance_metrics.get("avg_hold_minutes", 0)
+            
+            # Signal statistics (mobile-friendly)
+            message += f"*Signals:*\n"
+            message += f"• Total: {total_signals}\n"
+            message += f"• Exited: {exited_signals}\n"
+            if total_signals > 0:
+                exit_rate = (exited_signals / total_signals) * 100
+                message += f"• Exit Rate: {_format_percentage(exit_rate)}\n"
+            
+            if exited_signals > 0:
+                message += f"\n*Trade Performance:*\n"
+                message += f"✅ {wins}W  ❌ {losses}L\n"
+                message += f"📈 {_format_percentage(win_rate)} WR\n"
+                message += f"💰 {_format_currency(total_pnl)}\n"
+                message += f"📊 {_format_currency(avg_pnl)} avg\n"
+                message += f"⏱️ {avg_hold:.1f}m avg hold\n"
+                
+                # Performance trend
+                if total_pnl > 0:
+                    message += f"\n📈 *Trend:* ↗️ Profitable week\n"
+                elif total_pnl < 0:
+                    message += f"\n📉 *Trend:* ↘️ Loss week\n"
+                else:
+                    message += f"\n➡️ *Trend:* ➡️ Break even\n"
+            else:
+                message += "\n⏳ *No completed trades this week*\n"
+            
+            await self.telegram.send_message(message)
+            return True
+        except Exception as e:
+            logger.error(f"Error sending weekly summary: {e}", exc_info=True)
+            return False
+    
+    async def send_circuit_breaker_alert(self, reason: str, details: Optional[Dict] = None) -> bool:
+        """
+        Send circuit breaker activation alert.
+        
+        Args:
+            reason: Reason for circuit breaker activation
+            details: Additional details
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+        
+        try:
+            message = f"🛑 *Circuit Breaker Activated*\n\n"
+            message += f"*Reason:* {reason}\n"
+            
+            if details:
+                if "consecutive_errors" in details:
+                    message += f"*Errors:* {details['consecutive_errors']} consecutive\n"
+                if "error_type" in details:
+                    message += f"*Type:* {details['error_type']}\n"
+                if "action_taken" in details:
+                    message += f"*Action:* {details['action_taken']}\n"
+            
+            message += "\n⚠️ *Service paused. Manual intervention required.*\n"
+            
+            await self.telegram.notify_risk_warning(message, risk_status="CRITICAL")
+            return True
+        except Exception as e:
+            logger.error(f"Error sending circuit breaker alert: {e}", exc_info=True)
+            return False
+    
+    async def send_recovery_notification(self, recovery_info: Dict) -> bool:
+        """
+        Send recovery notification after errors.
+        
+        Args:
+            recovery_info: Recovery information dictionary
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+        
+        try:
+            message = f"✅ *Service Recovered*\n\n"
+            message += f"*Issue:* {recovery_info.get('issue', 'Unknown')}\n"
+            message += f"*Time:* {recovery_info.get('recovery_time_seconds', 0):.0f}s\n"
+            message += f"*Status:* Normal operation\n"
+            
+            await self.telegram.send_message(message)
+            return True
+        except Exception as e:
+            logger.error(f"Error sending recovery notification: {e}", exc_info=True)
             return False

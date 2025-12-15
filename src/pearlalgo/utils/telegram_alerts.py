@@ -25,6 +25,44 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _format_separator(length: int = 25) -> str:
+    """Create a visual separator line (mobile-friendly)."""
+    # Use blank line instead of long separator for mobile compatibility
+    return ""
+
+
+def _format_uptime(uptime: dict) -> str:
+    """Format uptime compactly."""
+    hours = uptime.get('hours', 0)
+    minutes = uptime.get('minutes', 0)
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def _format_number(value: float, decimals: int = 2, show_sign: bool = False) -> str:
+    """Format number with commas and optional sign."""
+    if value is None:
+        return "N/A"
+    sign = "+" if show_sign and value >= 0 else ""
+    return f"{sign}{value:,.{decimals}f}"
+
+
+def _format_currency(value: float, show_sign: bool = False) -> str:
+    """Format currency value."""
+    if value is None:
+        return "$0.00"
+    sign = "+" if show_sign and value >= 0 else ""
+    return f"{sign}${value:,.2f}"
+
+
+def _format_percentage(value: float, decimals: int = 1) -> str:
+    """Format percentage."""
+    if value is None:
+        return "0%"
+    return f"{value:.{decimals}f}%"
+
+
 class TelegramAlerts:
     """Telegram alert sender for trading notifications."""
 
@@ -164,10 +202,10 @@ class TelegramAlerts:
         message: str,
         risk_status: Optional[str] = None,
     ) -> None:
-        """Notify about a risk warning."""
+        """Notify about a risk warning (mobile-friendly)."""
         alert = f"⚠️ *Risk Warning*\n\n{message}"
         if risk_status:
-            alert += f"\nRisk Status: {risk_status}"
+            alert += f"\n\n*Status:* {risk_status}"
 
         await self.send_message(alert)
 
@@ -177,16 +215,21 @@ class TelegramAlerts:
         total_trades: int,
         win_rate: Optional[float] = None,
     ) -> None:
-        """Send daily trading summary."""
+        """Send daily trading summary (mobile-friendly)."""
         pnl_emoji = "📈" if daily_pnl >= 0 else "📉"
-        message = (
-            f"{pnl_emoji} *Daily Summary*\n\n"
-            f"P&L: ${daily_pnl:,.2f}\n"
-            f"Trades: {total_trades}\n"
-        )
+        trend_emoji = "↗️" if daily_pnl >= 0 else "↘️"
+        trend_text = "Profitable" if daily_pnl >= 0 else "Loss"
+        
+        message = f"{pnl_emoji} *Daily Summary*\n\n"
+        message += f"💰 *P&L:* {_format_currency(daily_pnl)}\n"
+        
         if win_rate is not None:
-            message += f"Win Rate: {win_rate * 100:.1f}%"
-
+            message += f"📊 *Trades:* {total_trades} ({_format_percentage(win_rate * 100)} WR)\n"
+        else:
+            message += f"📊 *Trades:* {total_trades}\n"
+        
+        message += f"📈 *Trend:* {trend_emoji} {trend_text}\n"
+        
         await self.send_message(message)
 
     async def notify_kill_switch(self, reason: str) -> None:
@@ -242,80 +285,91 @@ class TelegramAlerts:
         """
         side_emoji = "🟢" if side.lower() == "long" else "🔴"
         side_text = side.upper()
+        sep = _format_separator(25)
         
         # Check if this is an options signal
         is_options = option_symbol is not None or option_type is not None
         
+        # Header (mobile-friendly, no long separators)
         if is_options:
-            message = f"{side_emoji} *NEW OPTIONS SIGNAL*\n\n"
-            message += f"*Underlier:* {symbol}\n"
-            if option_symbol:
-                message += f"*Contract:* `{option_symbol}`\n"
-            if option_type:
-                option_emoji = "📞" if option_type.lower() == "call" else "📉"
-                message += f"*Type:* {option_emoji} {option_type.upper()}\n"
-            if strike:
-                message += f"*Strike:* ${strike:,.2f}\n"
-            if expiration:
-                message += f"*Expiration:* {expiration}\n"
-            if dte is not None:
-                message += f"*DTE:* {dte} days\n"
-            if underlying_price:
-                message += f"*Underlying Price:* ${underlying_price:,.2f}\n"
+            message = f"{side_emoji} *NEW OPTIONS SIGNAL*\n*{symbol} {side_text}*\n\n"
         else:
-            message = f"{side_emoji} *NEW SIGNAL*\n\n"
-            message += f"*Symbol:* {symbol}\n"
-            message += f"*Direction:* {side_text}\n"
+            message = f"{side_emoji} *NEW SIGNAL*\n*{symbol} {side_text}*\n\n"
         
-        message += f"*Strategy:* {strategy}\n"
+        # Entry/Stop/Target section with better alignment
+        entry = entry_price if entry_price else price
+        if entry:
+            # Calculate all values first for alignment
+            stop_pct_str = ""
+            tp_pct_str = ""
+            rr_ratio = None
+            
+            if stop_loss and entry:
+                if side.lower() == "long":
+                    stop_pct = ((stop_loss - entry) / entry) * 100
+                else:
+                    stop_pct = ((entry - stop_loss) / entry) * 100
+                stop_pct_str = f" ({stop_pct:+.2f}%)"
+            
+            if take_profit and entry:
+                if side.lower() == "long":
+                    tp_pct = ((take_profit - entry) / entry) * 100
+                else:
+                    tp_pct = ((entry - take_profit) / entry) * 100
+                tp_pct_str = f" ({tp_pct:+.2f}%)"
+            
+            # Calculate R:R if we have both stop and target
+            if stop_loss and take_profit and entry:
+                if side.lower() == "long":
+                    risk = abs(entry - stop_loss)
+                    reward = abs(take_profit - entry)
+                else:
+                    risk = abs(entry - stop_loss)
+                    reward = abs(entry - take_profit)
+                if risk > 0:
+                    rr_ratio = reward / risk
+            
+            # Format with consistent alignment
+            message += f"Entry:    {_format_currency(entry)}\n"
+            if stop_loss:
+                message += f"Stop:     {_format_currency(stop_loss)}{stop_pct_str}\n"
+            if take_profit:
+                # Include R:R on target line if available
+                if rr_ratio is not None:
+                    message += f"Target:   {_format_currency(take_profit)}{tp_pct_str}  R:R {rr_ratio:.1f}:1\n"
+                else:
+                    message += f"Target:   {_format_currency(take_profit)}{tp_pct_str}\n"
         
+        # Confidence bar
         if confidence is not None:
             confidence_pct = confidence * 100
             confidence_bar = "█" * int(confidence_pct / 10) + "░" * (10 - int(confidence_pct / 10))
-            message += f"*Confidence:* {confidence_pct:.0f}% {confidence_bar}\n"
+            message += f"\n*Confidence:* {confidence_pct:.0f}% {confidence_bar}\n"
         
-        if is_options:
-            # For options, price is the option premium
-            if entry_price:
-                message += f"*Entry Premium:* ${entry_price:,.2f}\n"
-            elif price:
-                message += f"*Current Premium:* ${price:,.2f}\n"
-            
-            # Greeks
-            if delta is not None:
-                message += f"*Delta:* {delta:.3f}\n"
-            if gamma is not None:
-                message += f"*Gamma:* {gamma:.4f}\n"
-            if theta is not None:
-                message += f"*Theta:* ${theta:.2f}/day\n"
-            
-            # Stop/target in underlying terms for options
-            if stop_loss and underlying_price:
-                stop_pct = abs((stop_loss - underlying_price) / underlying_price * 100)
-                message += f"*Stop (Underlying):* ${stop_loss:,.2f} ({stop_pct:.2f}%)\n"
-            if take_profit and underlying_price:
-                tp_pct = abs((take_profit - underlying_price) / underlying_price * 100)
-                message += f"*Target (Underlying):* ${take_profit:,.2f} ({tp_pct:.2f}%)\n"
-        else:
-            # For stocks/futures
-            if entry_price:
-                message += f"*Entry:* ${entry_price:,.2f}\n"
-            elif price:
-                message += f"*Price:* ${price:,.2f}\n"
-            
-            if stop_loss:
-                stop_pct = ((stop_loss - price) / price * 100) if side.lower() == "long" else ((price - stop_loss) / price * 100)
-                message += f"*Stop Loss:* ${stop_loss:,.2f} ({stop_pct:.2f}%)\n"
-            
-            if take_profit:
-                tp_pct = ((take_profit - price) / price * 100) if side.lower() == "long" else ((price - take_profit) / price * 100)
-                message += f"*Take Profit:* ${take_profit:,.2f} ({tp_pct:.2f}%)\n"
+        # Strategy and reasoning
+        message += f"\n*Strategy:* {strategy}\n"
         
         if reasoning:
-            # Truncate reasoning if too long
-            if len(reasoning) > 200:
-                reasoning = reasoning[:200] + "..."
-            message += f"\n*Reasoning:*\n{reasoning}\n"
+            # Truncate reasoning intelligently for mobile
+            if len(reasoning) > 120:
+                reasoning = reasoning[:117] + "..."
+            message += f"\n*Reason:*\n{reasoning}\n"
+        
+        # Options-specific info
+        if is_options:
+            if option_symbol:
+                message += f"\nContract: `{option_symbol}`\n"
+            if option_type:
+                option_emoji = "📞" if option_type.lower() == "call" else "📉"
+                message += f"Type: {option_emoji} {option_type.upper()}\n"
+            if strike:
+                message += f"Strike: {_format_currency(strike)}\n"
+            if expiration:
+                message += f"Expiry: {expiration}\n"
+            if dte is not None:
+                message += f"DTE: {dte} days\n"
+            if delta is not None:
+                message += f"Delta: {delta:.3f}\n"
         
         await self.send_message(message)
 

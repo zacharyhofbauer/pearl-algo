@@ -21,6 +21,7 @@ except ImportError:
 
 from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
+from pearlalgo.nq_agent.health_monitor import HealthMonitor
 from pearlalgo.nq_agent.performance_tracker import PerformanceTracker
 from pearlalgo.nq_agent.state_manager import NQAgentStateManager
 from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
@@ -62,6 +63,7 @@ class NQAgentService:
             bot_token=telegram_bot_token,
             chat_id=telegram_chat_id,
         )
+        self.health_monitor = HealthMonitor(state_dir=state_dir)
         
         self.running = False
         self.shutdown_requested = False
@@ -72,10 +74,15 @@ class NQAgentService:
         self.error_count = 0
         self.last_status_update: Optional[datetime] = None
         self.status_update_interval = 1800  # 30 minutes in seconds
+        self.last_heartbeat: Optional[datetime] = None
+        self.heartbeat_interval = 3600  # 1 hour in seconds (more frequent during off-hours)
         self.consecutive_errors = 0
         self.max_consecutive_errors = 10  # Circuit breaker threshold
         self.data_fetch_errors = 0
         self.max_data_fetch_errors = 5
+        self.last_successful_cycle: Optional[datetime] = None
+        self.last_data_quality_alert: Optional[datetime] = None
+        self.data_quality_alert_interval = 300  # 5 minutes between data quality alerts
         
         logger.info("NQAgentService initialized")
     
@@ -95,6 +102,20 @@ class NQAgentService:
         
         logger.info("NQ Agent Service starting...")
         
+        # Send startup notification
+        try:
+            config_dict = {
+                "symbol": self.config.symbol,
+                "timeframe": self.config.timeframe,
+                "scan_interval": self.config.scan_interval,
+                "stop_loss_atr_multiplier": self.config.stop_loss_atr_multiplier,
+                "take_profit_risk_reward": self.config.take_profit_risk_reward,
+                "max_risk_per_trade": self.config.max_risk_per_trade,
+            }
+            await self.telegram_notifier.send_startup_notification(config_dict)
+        except Exception as e:
+            logger.warning(f"Could not send startup notification: {e}")
+        
         try:
             await self._run_loop()
         except Exception as e:
@@ -112,6 +133,30 @@ class NQAgentService:
         
         # Save final state
         self._save_state()
+        
+        # Send shutdown notification
+        try:
+            uptime_delta = datetime.now(timezone.utc) - self.start_time if self.start_time else None
+            summary = {
+                "uptime_hours": int(uptime_delta.total_seconds() / 3600) if uptime_delta else 0,
+                "uptime_minutes": int((uptime_delta.total_seconds() % 3600) / 60) if uptime_delta else 0,
+                "cycle_count": self.cycle_count,
+                "signal_count": self.signal_count,
+                "error_count": self.error_count,
+            }
+            
+            # Add performance metrics if available
+            try:
+                performance = self.performance_tracker.get_performance_metrics(days=7)
+                summary["wins"] = performance.get("wins", 0)
+                summary["losses"] = performance.get("losses", 0)
+                summary["total_pnl"] = performance.get("total_pnl", 0)
+            except Exception:
+                pass
+            
+            await self.telegram_notifier.send_shutdown_notification(summary)
+        except Exception as e:
+            logger.warning(f"Could not send shutdown notification: {e}")
         
         self.running = False
         logger.info("NQ Agent Service stopped")
@@ -131,10 +176,22 @@ class NQAgentService:
                 try:
                     market_data = await self.data_fetcher.fetch_latest_data()
                     self.data_fetch_errors = 0  # Reset on success
+                    self.last_successful_cycle = datetime.now(timezone.utc)
+                    
+                    # Check data quality
+                    await self._check_data_quality(market_data)
                 except Exception as e:
                     logger.error(f"Error fetching market data: {e}", exc_info=True)
                     self.data_fetch_errors += 1
                     self.error_count += 1
+                    
+                    # Alert on consecutive fetch failures
+                    if self.data_fetch_errors >= 3:
+                        await self.telegram_notifier.send_data_quality_alert(
+                            "fetch_failure",
+                            f"Consecutive data fetch failures: {self.data_fetch_errors}",
+                            {"consecutive_failures": self.data_fetch_errors},
+                        )
                     
                     # Circuit breaker: if too many data fetch errors, wait longer
                     if self.data_fetch_errors >= self.max_data_fetch_errors:
@@ -163,6 +220,9 @@ class NQAgentService:
                 # Send periodic status updates
                 await self._check_status_update()
                 
+                # Send periodic heartbeats
+                await self._check_heartbeat()
+                
                 # Save state periodically
                 if self.cycle_count % 10 == 0:
                     self._save_state()
@@ -186,16 +246,31 @@ class NQAgentService:
                         f"Too many consecutive errors ({self.consecutive_errors}), "
                         "pausing service. Manual intervention required."
                     )
-                    await self._notify_error(
-                        "Service paused due to errors",
-                        f"{self.consecutive_errors} consecutive errors detected"
+                    await self.telegram_notifier.send_circuit_breaker_alert(
+                        "Too many consecutive errors",
+                        {
+                            "consecutive_errors": self.consecutive_errors,
+                            "error_type": "general",
+                            "action_taken": "Service paused",
+                        }
                     )
                     self.paused = True
                 
                 await asyncio.sleep(self.config.scan_interval)
             else:
                 # Reset consecutive errors on successful cycle
+                had_errors = self.consecutive_errors > 0
                 self.consecutive_errors = 0
+                
+                # Send recovery notification if we had errors and now recovered
+                if had_errors:
+                    try:
+                        await self.telegram_notifier.send_recovery_notification({
+                            "issue": "Consecutive errors resolved",
+                            "recovery_time_seconds": 0,
+                        })
+                    except Exception as e:
+                        logger.warning(f"Could not send recovery notification: {e}")
     
     async def _process_signal(self, signal: Dict) -> None:
         """
@@ -281,6 +356,15 @@ class NQAgentService:
         # Get performance metrics
         performance = self.performance_tracker.get_performance_metrics(days=7)
         
+        # Get health status
+        health = self.health_monitor.get_overall_health(
+            data_provider=self.data_fetcher.data_provider,
+            telegram_notifier=self.telegram_notifier,
+        )
+        
+        # Extract data source health
+        data_source_health = health.get("components", {}).get("data_provider", {})
+        
         return {
             "running": self.running,
             "paused": self.paused,
@@ -291,6 +375,10 @@ class NQAgentService:
             "error_count": self.error_count,
             "buffer_size": self.data_fetcher.get_buffer_size(),
             "performance": performance,
+            "data_source_health": data_source_health,
+            "last_successful_cycle": (
+                self.last_successful_cycle.isoformat() if self.last_successful_cycle else None
+            ),
             "config": {
                 "symbol": self.config.symbol,
                 "timeframe": self.config.timeframe,
@@ -313,6 +401,74 @@ class NQAgentService:
             },
         }
         self.state_manager.save_state(state)
+    
+    async def _check_heartbeat(self) -> None:
+        """Send periodic heartbeat messages."""
+        now = datetime.now(timezone.utc)
+        
+        # Check if it's time for a heartbeat
+        if (
+            self.last_heartbeat is None
+            or (now - self.last_heartbeat).total_seconds() >= self.heartbeat_interval
+        ):
+            status = self.get_status()
+            status["last_successful_cycle"] = (
+                self.last_successful_cycle.isoformat() if self.last_successful_cycle else None
+            )
+            await self.telegram_notifier.send_heartbeat(status)
+            self.last_heartbeat = now
+    
+    async def _check_data_quality(self, market_data: Dict) -> None:
+        """Check data quality and send alerts if needed."""
+        now = datetime.now(timezone.utc)
+        
+        # Check if we should send data quality alerts (throttle)
+        if (
+            self.last_data_quality_alert is not None
+            and (now - self.last_data_quality_alert).total_seconds() < self.data_quality_alert_interval
+        ):
+            return
+        
+        df = market_data.get("df")
+        latest_bar = market_data.get("latest_bar")
+        
+        # Check for stale data
+        if latest_bar and "timestamp" in latest_bar:
+            timestamp = latest_bar["timestamp"]
+            if isinstance(timestamp, str):
+                from datetime import datetime
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            
+            if isinstance(timestamp, datetime):
+                age_minutes = (now - timestamp.replace(tzinfo=timezone.utc)).total_seconds() / 60
+                if age_minutes > 10:
+                    await self.telegram_notifier.send_data_quality_alert(
+                        "stale_data",
+                        f"Data is {age_minutes:.1f} minutes old",
+                        {"age_minutes": age_minutes},
+                    )
+                    self.last_data_quality_alert = now
+                    return
+        
+        # Check for empty data
+        if df is not None and df.empty:
+            await self.telegram_notifier.send_data_quality_alert(
+                "data_gap",
+                "No market data available",
+                {},
+            )
+            self.last_data_quality_alert = now
+            return
+        
+        # Check buffer size
+        buffer_size = self.data_fetcher.get_buffer_size()
+        if buffer_size < 10:
+            await self.telegram_notifier.send_data_quality_alert(
+                "buffer_issue",
+                f"Buffer size is low: {buffer_size} bars",
+                {"buffer_size": buffer_size},
+            )
+            self.last_data_quality_alert = now
     
     def _signal_handler(self, signum, frame) -> None:
         """Handle shutdown signals."""

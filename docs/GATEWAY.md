@@ -1,4 +1,4 @@
-# IBKR Gateway & VNC - Quick Reference
+# IBKR Gateway Guide
 
 ## 🚀 Start Gateway (Headless)
 
