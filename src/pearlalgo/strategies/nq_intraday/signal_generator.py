@@ -96,9 +96,9 @@ class NQSignalGenerator:
         Returns:
             True if signal is valid
         """
-        # Check confidence threshold (higher threshold for better quality)
+        # Check confidence threshold (balanced threshold for quality signals)
         confidence = signal.get("confidence", 0)
-        if confidence < 0.55:  # Require at least 55% confidence
+        if confidence < 0.50:  # Require at least 50% confidence (lowered from 55% to allow more signals)
             return False
         
         # Check entry price is valid

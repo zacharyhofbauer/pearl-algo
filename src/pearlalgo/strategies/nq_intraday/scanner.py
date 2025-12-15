@@ -12,6 +12,19 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+# Timezone handling - use zoneinfo (Python 3.9+) or pytz as fallback
+try:
+    from zoneinfo import ZoneInfo
+    ET_TIMEZONE = ZoneInfo("America/New_York")
+except ImportError:
+    try:
+        import pytz
+        ET_TIMEZONE = pytz.timezone("America/New_York")
+    except ImportError:
+        # Fallback if neither available (shouldn't happen in Python 3.9+)
+        logger.warning("No timezone library available, using simplified timezone handling")
+        ET_TIMEZONE = None
+
 try:
     from loguru import logger as loguru_logger
     logger = loguru_logger
@@ -43,27 +56,50 @@ class NQScanner:
     
     def is_market_hours(self, dt: Optional[datetime] = None) -> bool:
         """
-        Check if current time is within market hours.
+        Check if current time is within market hours (ET timezone).
         
         Args:
-            dt: Datetime to check (default: now)
+            dt: Datetime to check in UTC (default: now)
             
         Returns:
-            True if within market hours
+            True if within market hours (09:30-16:00 ET)
         """
         if dt is None:
             dt = datetime.now(timezone.utc)
         
-        # Convert to ET (simplified - in production use proper timezone handling)
-        # ET is UTC-5 (EST) or UTC-4 (EDT)
-        et_offset = -5  # Simplified: assume EST
-        et_time = dt.replace(tzinfo=None).replace(hour=dt.hour + et_offset)
+        # Ensure dt has timezone info (assume UTC if naive)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
         
+        # Convert UTC to Eastern Time (handles EST/EDT automatically)
+        if ET_TIMEZONE is not None:
+            # Ensure dt is in UTC
+            if dt.tzinfo != timezone.utc:
+                dt_utc = dt.astimezone(timezone.utc)
+            else:
+                dt_utc = dt
+            
+            # Convert to ET
+            et_dt = dt_utc.astimezone(ET_TIMEZONE)
+        else:
+            # Fallback to simplified conversion (shouldn't happen)
+            logger.warning("Using simplified timezone conversion")
+            from datetime import timedelta
+            et_offset = timedelta(hours=-5)  # EST offset (doesn't handle DST)
+            et_dt = dt + et_offset
+        
+        # Get ET time components
+        et_time = et_dt.time()
+        
+        # Parse start and end times from config
         start = time.fromisoformat(self.config.start_time)
         end = time.fromisoformat(self.config.end_time)
         
-        current_time = et_time.time()
-        return start <= current_time <= end
+        # Check if current time is within market hours
+        # Also check if it's a weekday (market closed on weekends)
+        is_weekday = et_dt.weekday() < 5  # Monday=0, Friday=4
+        
+        return is_weekday and start <= et_time <= end
     
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -189,40 +225,40 @@ class NQScanner:
         
         def calculate_signal_score(signal_type: str, latest: pd.Series, df: pd.DataFrame) -> float:
             """Calculate signal quality score (0-1)."""
-            score = 0.5  # Base score
+            score = 0.45  # Base score (slightly lower to allow more signals)
             
-            # Volume confirmation
+            # Volume confirmation (adjusted weights)
             volume_ratio = latest.get("volume_ratio", 1.0)
             if volume_ratio > 1.5:
-                score += 0.15
+                score += 0.20  # Strong volume gets more weight
             elif volume_ratio > 1.2:
-                score += 0.1
+                score += 0.12  # Moderate volume confirmation
             
-            # Volatility (ATR)
+            # Volatility (ATR) - good volatility is important
             atr_pct = (latest.get("atr", 0) / latest["close"]) if latest["close"] > 0 else 0
-            if 0.001 <= atr_pct <= 0.01:  # Good volatility range
-                score += 0.1
+            if 0.001 <= atr_pct <= 0.015:  # Slightly wider volatility range
+                score += 0.12
             
-            # RSI confirmation
+            # RSI confirmation (adjusted thresholds)
             rsi = latest.get("rsi", 50)
-            if signal_type == "momentum_long" and 40 < rsi < 70:
-                score += 0.1
-            elif signal_type == "mean_reversion_long" and rsi < 30:
-                score += 0.15
-            elif signal_type == "breakout_long" and rsi > 50:
-                score += 0.1
+            if signal_type == "momentum_long" and 35 < rsi < 75:  # Wider range
+                score += 0.12
+            elif signal_type == "mean_reversion_long" and rsi < 35:  # Slightly higher threshold
+                score += 0.18  # Strong confirmation for mean reversion
+            elif signal_type == "breakout_long" and rsi > 45:  # Lower threshold
+                score += 0.12
             
             # MACD confirmation
             if "macd_histogram" in latest:
                 macd_hist = latest.get("macd_histogram", 0)
                 if signal_type == "momentum_long" and macd_hist > 0:
-                    score += 0.1
+                    score += 0.12
                 elif signal_type == "mean_reversion_long" and macd_hist < 0:
-                    score += 0.1
+                    score += 0.12
             
-            # Price position relative to MAs
+            # Price position relative to MAs (trend filter)
             if "sma_50" in latest and latest["close"] > latest.get("sma_50", 0):
-                score += 0.05
+                score += 0.08  # Slightly more weight for trend alignment
             
             return min(score, 1.0)
         
@@ -252,7 +288,7 @@ class NQScanner:
         # Mean reversion signal (RSI oversold with multiple confirmations)
         if self.config.enable_mean_reversion:
             if (
-                latest.get("rsi", 50) < 30
+                latest.get("rsi", 50) < 35  # Slightly higher threshold (was 30)
                 and latest["close"] < latest.get("bb_lower", current_price)
                 and latest.get("volume_ratio", 0) > 1.0
             ):
@@ -279,8 +315,8 @@ class NQScanner:
                 recent_high = df["high"].tail(5).max()
                 if (
                     latest["close"] > recent_high
-                    and latest.get("volume_ratio", 0) > 1.5
-                    and latest.get("rsi", 50) > 50  # Not oversold
+                    and latest.get("volume_ratio", 0) > 1.3  # Slightly lower threshold (was 1.5)
+                    and latest.get("rsi", 50) > 45  # Not oversold (was 50)
                     and latest.get("macd_histogram", 0) > 0  # MACD bullish
                 ):
                     stop_loss, take_profit = calculate_stop_take("long", current_price, atr)

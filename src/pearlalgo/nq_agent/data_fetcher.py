@@ -7,7 +7,6 @@ Fetches market data from data providers for NQ strategy.
 from __future__ import annotations
 
 import asyncio
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
@@ -78,37 +77,52 @@ class NQAgentDataFetcher:
                 )
             )
             
-            if not df.empty:
-                # Data quality checks
-                # Check for missing values
-                if df.isnull().any().any():
-                    logger.warning(f"Data contains missing values: {df.isnull().sum().to_dict()}")
-                
-                # Check for stale data (if timestamp column exists)
-                if "timestamp" in df.columns:
-                    latest_timestamp = df["timestamp"].max()
-                    if isinstance(latest_timestamp, pd.Timestamp):
-                        age_minutes = (datetime.now(timezone.utc) - latest_timestamp.to_pydatetime().replace(tzinfo=timezone.utc)).total_seconds() / 60
-                        if age_minutes > 10:
-                            logger.warning(f"Data may be stale: latest bar is {age_minutes:.1f} minutes old")
+            if df.empty:
+                logger.warning(f"No historical data available for {self.config.symbol}")
+                return {"df": pd.DataFrame(), "latest_bar": None}
+            
+            # Data quality checks
+            # Check for missing values
+            if df.isnull().any().any():
+                missing = df.isnull().sum()
+                missing_dict = {col: missing[col] for col in missing.index if missing[col] > 0}
+                logger.warning(f"Data contains missing values: {missing_dict}")
+            
+            # Check for stale data (if timestamp column exists)
+            data_freshness_warning = False
+            if "timestamp" in df.columns:
+                latest_timestamp = df["timestamp"].max()
+                if isinstance(latest_timestamp, pd.Timestamp):
+                    age_minutes = (datetime.now(timezone.utc) - latest_timestamp.to_pydatetime().replace(tzinfo=timezone.utc)).total_seconds() / 60
+                    if age_minutes > 10:
+                        logger.warning(f"Data may be stale: latest historical bar is {age_minutes:.1f} minutes old (market may be closed or data subscription issue)")
+                        data_freshness_warning = True
+            
+            # Log data freshness status
+            if not data_freshness_warning and not df.empty:
+                logger.debug(f"Data is fresh: {len(df)} bars retrieved for {self.config.symbol}")
                 
                 self._data_buffer = df.tail(self._buffer_size).reset_index(drop=True)
             
             # Fetch latest bar if method available
             latest_bar = None
             if hasattr(self.data_provider, 'get_latest_bar'):
-                if asyncio.iscoroutinefunction(self.data_provider.get_latest_bar):
-                    latest_bar = await self.data_provider.get_latest_bar(self.config.symbol)
-                else:
-                    # Run sync method in executor
-                    loop = asyncio.get_event_loop()
-                    latest_bar = await loop.run_in_executor(
-                        None,
-                        lambda: self.data_provider.get_latest_bar(self.config.symbol)
-                    )
+                try:
+                    if asyncio.iscoroutinefunction(self.data_provider.get_latest_bar):
+                        latest_bar = await self.data_provider.get_latest_bar(self.config.symbol)
+                    else:
+                        # Run sync method in executor
+                        loop = asyncio.get_event_loop()
+                        latest_bar = await loop.run_in_executor(
+                            None,
+                            lambda: self.data_provider.get_latest_bar(self.config.symbol)
+                        )
+                except Exception as e:
+                    logger.warning(f"Could not fetch latest bar from provider: {e}. Will use historical data fallback.")
             
             # If no latest_bar from provider, use last row from historical data
             if latest_bar is None and not df.empty:
+                logger.info(f"Using historical data fallback for latest bar (real-time subscription may not be available)")
                 latest_row = df.iloc[-1]
                 timestamp = latest_row.name if hasattr(latest_row, 'name') else datetime.now(timezone.utc)
                 if hasattr(timestamp, 'to_pydatetime'):

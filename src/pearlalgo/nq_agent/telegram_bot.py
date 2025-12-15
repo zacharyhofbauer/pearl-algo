@@ -75,6 +75,7 @@ class NQAgentTelegramBot:
             self.application.add_handler(CommandHandler("start", self._cmd_start))
             self.application.add_handler(CommandHandler("status", self._cmd_status))
             self.application.add_handler(CommandHandler("signals", self._cmd_signals))
+            self.application.add_handler(CommandHandler("history", self._cmd_history))
             self.application.add_handler(CommandHandler("performance", self._cmd_performance))
             self.application.add_handler(CommandHandler("config", self._cmd_config))
             self.application.add_handler(CommandHandler("pause", self._cmd_pause))
@@ -101,7 +102,8 @@ class NQAgentTelegramBot:
             "🤖 *NQ Agent Bot*\n\n"
             "Available commands:\n"
             "/status - Get service status\n"
-            "/signals - Get recent signals\n"
+            "/signals - Get recent signals (last 10)\n"
+            "/history - Get signal history (last 20)\n"
             "/performance - Get performance metrics\n"
             "/config - Get configuration\n"
             "/pause - Pause service\n"
@@ -134,61 +136,144 @@ class NQAgentTelegramBot:
             await update.message.reply_text("❌ Service instance not available")
     
     async def _cmd_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /signals command."""
+        """Handle /signals command - shows last 10 signals."""
         try:
             from pearlalgo.nq_agent.state_manager import NQAgentStateManager
+            from datetime import datetime
             
             state_manager = NQAgentStateManager(state_dir=self.state_dir)
             recent_signals = state_manager.get_recent_signals(limit=10)
             
             if not recent_signals:
-                await update.message.reply_text("No signals found")
+                await update.message.reply_text("📭 No signals found yet")
                 return
             
-            message = "🔔 *Recent Signals*\n\n"
+            message = "🔔 *Recent Signals (Last 10)*\n\n"
             for i, signal in enumerate(recent_signals[-10:], 1):
-                signal_type = signal.get("type", "unknown")
+                signal_type = signal.get("type", "unknown").replace("_", " ").title()
                 direction = signal.get("direction", "").upper()
+                direction_emoji = "📈" if direction == "LONG" else "📉"
                 confidence = signal.get("confidence", 0)
                 entry_price = signal.get("entry_price", 0)
+                timestamp = signal.get("timestamp", "")
+                
+                # Format timestamp
+                time_str = ""
+                if timestamp:
+                    try:
+                        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                        time_str = dt.strftime("%H:%M:%S")
+                    except:
+                        pass
                 
                 message += (
-                    f"{i}. {signal_type} {direction}\n"
-                    f"   Entry: ${entry_price:.2f}\n"
-                    f"   Confidence: {confidence:.0%}\n\n"
+                    f"{i}. {direction_emoji} *{signal_type} {direction}*\n"
+                    f"   💰 Entry: ${entry_price:.2f}\n"
+                    f"   🎯 Confidence: {confidence:.0%}\n"
                 )
+                if time_str:
+                    message += f"   🕐 Time: {time_str}\n"
+                message += "\n"
             
             await update.message.reply_text(message, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Error getting signals: {e}")
-            await update.message.reply_text(f"Error: {e}")
+            await update.message.reply_text(f"❌ Error: {e}")
+    
+    async def _cmd_history(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /history command - shows last 20 signals with timestamps."""
+        try:
+            from pearlalgo.nq_agent.state_manager import NQAgentStateManager
+            from datetime import datetime
+            
+            state_manager = NQAgentStateManager(state_dir=self.state_dir)
+            recent_signals = state_manager.get_recent_signals(limit=20)
+            
+            if not recent_signals:
+                await update.message.reply_text("📭 No signal history found yet")
+                return
+            
+            message = "📜 *Signal History (Last 20)*\n\n"
+            for i, signal in enumerate(recent_signals[-20:], 1):
+                signal_type = signal.get("type", "unknown").replace("_", " ").title()
+                direction = signal.get("direction", "").upper()
+                direction_emoji = "📈" if direction == "LONG" else "📉"
+                confidence = signal.get("confidence", 0)
+                entry_price = signal.get("entry_price", 0)
+                timestamp = signal.get("timestamp", "")
+                
+                # Format timestamp
+                date_time_str = ""
+                if timestamp:
+                    try:
+                        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                        date_time_str = dt.strftime("%m/%d %H:%M")
+                    except:
+                        date_time_str = timestamp[:16] if len(timestamp) > 16 else timestamp
+                
+                message += (
+                    f"{i}. {direction_emoji} {signal_type} {direction}\n"
+                    f"   💰 ${entry_price:.2f} | 🎯 {confidence:.0%}"
+                )
+                if date_time_str:
+                    message += f" | 🕐 {date_time_str}"
+                message += "\n"
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error getting history: {e}")
+            await update.message.reply_text(f"❌ Error: {e}")
     
     async def _cmd_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /performance command."""
+        """Handle /performance command - shows formatted performance metrics."""
         try:
             from pearlalgo.nq_agent.performance_tracker import PerformanceTracker
             
             tracker = PerformanceTracker(state_dir=self.state_dir)
             metrics = tracker.get_performance_metrics(days=7)
             
-            message = "📈 *Performance Metrics (7 days)*\n\n"
-            message += f"Total Signals: {metrics.get('total_signals', 0)}\n"
-            message += f"Exited Signals: {metrics.get('exited_signals', 0)}\n"
+            message = "📈 *Performance Metrics (Last 7 Days)*\n\n"
             
-            if metrics.get("exited_signals", 0) > 0:
-                message += f"✅ Wins: {metrics.get('wins', 0)}\n"
-                message += f"❌ Losses: {metrics.get('losses', 0)}\n"
-                message += f"📊 Win Rate: {metrics.get('win_rate', 0) * 100:.1f}%\n"
-                message += f"💰 Total P&L: ${metrics.get('total_pnl', 0):,.2f}\n"
-                message += f"📊 Avg P&L: ${metrics.get('avg_pnl', 0):,.2f}\n"
-                message += f"⏱️ Avg Hold: {metrics.get('avg_hold_minutes', 0):.1f} min\n"
+            # Signal Statistics
+            total_signals = metrics.get('total_signals', 0)
+            exited_signals = metrics.get('exited_signals', 0)
+            
+            message += "📊 *Signal Statistics*\n"
+            message += f"Total Signals: {total_signals}\n"
+            message += f"Exited Signals: {exited_signals}\n"
+            if total_signals > 0:
+                exit_rate = (exited_signals / total_signals) * 100
+                message += f"Exit Rate: {exit_rate:.1f}%\n"
+            message += "\n"
+            
+            # Trade Performance (if any completed trades)
+            if exited_signals > 0:
+                wins = metrics.get('wins', 0)
+                losses = metrics.get('losses', 0)
+                win_rate = metrics.get('win_rate', 0) * 100
+                total_pnl = metrics.get('total_pnl', 0)
+                avg_pnl = metrics.get('avg_pnl', 0)
+                avg_hold = metrics.get('avg_hold_minutes', 0)
+                
+                message += "💰 *Trade Performance*\n"
+                message += f"✅ Wins: {wins}\n"
+                message += f"❌ Losses: {losses}\n"
+                message += f"📊 Win Rate: {win_rate:.1f}%\n\n"
+                
+                message += "💵 *P&L Summary*\n"
+                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                message += f"{pnl_emoji} Total P&L: ${total_pnl:,.2f}\n"
+                avg_emoji = "🟢" if avg_pnl >= 0 else "🔴"
+                message += f"{avg_emoji} Avg P&L: ${avg_pnl:,.2f}\n"
+                message += f"⏱️ Avg Hold Time: {avg_hold:.1f} min\n"
             else:
-                message += "No completed trades yet"
+                message += "⏳ *No completed trades yet*\n"
+                message += "Waiting for signal exits..."
             
             await update.message.reply_text(message, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Error getting performance: {e}")
-            await update.message.reply_text(f"Error: {e}")
+            await update.message.reply_text(f"❌ Error: {e}")
     
     async def _cmd_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /config command."""
