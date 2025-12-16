@@ -63,7 +63,7 @@ def test_signal_generation():
     print("Creating mock data provider...")
     print("⚠️  NOTE: Using synthetic mock data - prices are NOT real market data")
     mock_provider = MockDataProvider(
-        base_price=17500.0,  # Realistic NQ futures price (Dec 2024 range)
+        base_price=17500.0,  # Realistic NQ futures price (typical range: ~17,000-20,000)
         volatility=50.0,  # Higher volatility for signal generation
         trend=1.0,  # Uptrend to potentially generate signals
     )

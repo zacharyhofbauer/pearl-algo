@@ -85,7 +85,7 @@ class TelegramAlerts:
         self, message: str, parse_mode: str = "Markdown", max_retries: int = 3
     ) -> bool:
         """
-        Send a message to Telegram with retry logic.
+        Send a message to Telegram with retry logic and deduplication.
 
         Args:
             message: Message text
@@ -99,6 +99,23 @@ class TelegramAlerts:
             return False
 
         import asyncio
+        import hashlib
+        import time
+
+        # Simple deduplication: track last message hash and timestamp
+        # Prevent sending same message within 2 seconds (handles retry duplicates)
+        message_hash = hashlib.md5(message.encode()).hexdigest()
+        current_time = time.time()
+        
+        if not hasattr(self, '_last_message_hash'):
+            self._last_message_hash = None
+            self._last_message_time = 0
+        
+        # Skip if same message sent within last 2 seconds
+        if (self._last_message_hash == message_hash and 
+            current_time - self._last_message_time < 2.0):
+            logger.debug(f"Skipping duplicate message (sent {current_time - self._last_message_time:.1f}s ago)")
+            return True  # Return True since message was already sent
 
         for attempt in range(max_retries):
             try:
@@ -107,6 +124,9 @@ class TelegramAlerts:
                     text=message,
                     parse_mode=parse_mode,
                 )
+                # Mark as sent successfully
+                self._last_message_hash = message_hash
+                self._last_message_time = current_time
                 return True
             except TelegramError as e:
                 error_msg = str(e)

@@ -79,7 +79,16 @@ async def main():
 
     try:
         data_provider = create_data_provider(provider_name)
-        logger.info(f"Data provider: {type(data_provider).__name__} (provider={provider_name})")
+        provider_type = type(data_provider).__name__
+        logger.info(f"Data provider: {provider_type} (provider={provider_name})")
+        
+        # Warn if using mock data in production
+        if "Mock" in provider_type or "mock" in provider_type.lower():
+            logger.warning(
+                "⚠️  WARNING: Using MOCK data provider! "
+                "This generates synthetic prices (~17,500) and is for testing only.\n"
+                "For real market data, ensure PEARLALGO_DATA_PROVIDER=ibkr and IBKR Gateway is running."
+            )
     except Exception as e:
         logger.error(f"Failed to create data provider '{provider_name}': {e}")
         return

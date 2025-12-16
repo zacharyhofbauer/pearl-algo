@@ -79,7 +79,7 @@ async def test_service_with_mock():
     print("Creating mock data provider...")
     print("⚠️  NOTE: Using synthetic mock data - prices are NOT real market data")
     mock_provider = MockDataProvider(
-        base_price=17500.0,  # Realistic NQ futures price (Dec 2024 range)
+        base_price=17500.0,  # Realistic NQ futures price (typical range: ~17,000-20,000)
         volatility=25.0,  # Realistic intraday volatility
         trend=0.5,  # Slight uptrend
     )

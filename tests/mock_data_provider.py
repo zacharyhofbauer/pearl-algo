@@ -25,7 +25,7 @@ class MockDataProvider(DataProvider):
     
     def __init__(
         self,
-        base_price: float = 17500.0,  # Realistic NQ futures price (Dec 2024 range: ~17,000-20,000)
+        base_price: float = 17500.0,  # Realistic NQ futures price (typical range: ~17,000-20,000)
         volatility: float = 25.0,  # Realistic intraday volatility for NQ (points per bar)
         trend: float = 0.0,  # Price trend per bar (positive = uptrend, negative = downtrend)
         simulate_delayed_data: bool = True,  # Simulate IBKR delayed data (5-15 second delay)

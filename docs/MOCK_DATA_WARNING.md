@@ -23,7 +23,7 @@ All test scripts (`test_signal_generation.py`, `test_nq_agent_with_mock.py`, `va
 
 ### Default Parameters
 
-- **Base Price:** ~17,500 (realistic NQ futures range for Dec 2024)
+- **Base Price:** ~17,500 (realistic NQ futures typical range: ~17,000-20,000)
 - **Volatility:** 25-50 points per bar (synthetic movement)
 - **Trend:** Configurable (for testing different scenarios)
 
