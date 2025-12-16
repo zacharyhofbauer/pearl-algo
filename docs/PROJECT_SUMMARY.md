@@ -1,8 +1,9 @@
-# Project Summary - PearlAlgo NQ Trading Agent
+# Project Summary - PearlAlgo MNQ Trading Agent
 
-**Version:** 0.1.0  
-**Last Updated:** 2025-12-12  
-**Status:** Production-Ready
+**Version:** 0.2.0  
+**Last Updated:** 2025-12-16  
+**Status:** Production-Ready  
+**Trading Style:** Prop Firm - Intraday Swings & Quick Scalps
 
 ---
 
@@ -27,15 +28,17 @@
 
 ## Executive Summary
 
-**PearlAlgo NQ Trading Agent** is an automated, production-ready trading system designed for E-mini NASDAQ-100 (NQ) futures. The system operates 24/7, automatically scanning market data, generating trading signals, and sending notifications via Telegram. It's built with a modular architecture that separates data providers, strategies, and execution logic, making it easy to extend and maintain.
+**PearlAlgo MNQ Trading Agent** is an automated, production-ready trading system optimized for **prop firm style trading** with **Mini NQ (MNQ)** futures. The system operates 24/7, automatically scanning market data, generating trading signals for intraday swings and quick scalps, and sending notifications via Telegram. It's built with a modular architecture that separates data providers, strategies, and execution logic, making it easy to extend and maintain.
 
 ### Key Highlights
 
 - ✅ **Fully Automated**: Runs 24/7 with minimal intervention
+- ✅ **Prop Firm Optimized**: MNQ contracts (5-15 per trade), 1% risk per trade, 10% max drawdown
+- ✅ **Scalping Focus**: 30-second scan interval, tighter stops (1.5x ATR), quick profits (1.5:1 R:R)
 - ✅ **Real-time Data**: Connects to Interactive Brokers (IBKR) Gateway for live market data
 - ✅ **Intelligent Signals**: Uses technical analysis to generate high-confidence trading signals
 - ✅ **Mobile-Friendly Notifications**: Rich Telegram notifications optimized for mobile viewing
-- ✅ **Robust Error Handling**: Circuit breakers, automatic recovery, and comprehensive error tracking
+- ✅ **Robust Error Handling**: Circuit breakers, connection monitoring, automatic recovery
 - ✅ **Performance Tracking**: Built-in performance metrics and signal tracking
 - ✅ **Production-Ready**: Comprehensive testing, logging, and monitoring
 
@@ -45,27 +48,29 @@
 
 ### Purpose
 
-The NQ Trading Agent is designed to:
-1. **Monitor** NQ futures market data in real-time
+The MNQ Trading Agent is designed to:
+1. **Monitor** Mini NQ (MNQ) futures market data in real-time
 2. **Analyze** market conditions using technical indicators
-3. **Generate** trading signals with entry, stop-loss, and take-profit levels
+3. **Generate** trading signals optimized for prop firm trading (intraday swings & quick scalps)
 4. **Notify** users via Telegram with mobile-optimized messages
 5. **Track** performance and maintain state across restarts
 
 ### Target Market
 
-- **Symbol**: E-mini NASDAQ-100 Futures (NQ)
-- **Timeframe**: 1-minute bars for intraday trading
-- **Trading Hours**: 09:30 - 16:00 ET (configurable)
+- **Symbol**: Mini E-mini NASDAQ-100 Futures (MNQ) - 1/10th size of NQ
+- **Timeframe**: 1-minute bars for intraday scalping/swings
+- **Trading Hours**: 09:30 - 16:00 ET (avoids lunch lull 11:30-13:00)
 - **Market**: CME Group futures exchange
+- **Trading Style**: Prop firm - 5-15 contracts per trade, 1% risk, quick scalps
 
 ### Design Philosophy
 
-- **Simplicity**: Focused on NQ futures only (can be extended)
-- **Reliability**: Robust error handling and automatic recovery
+- **Simplicity**: Focused on MNQ futures (prop firm friendly, can be extended)
+- **Reliability**: Robust error handling, connection monitoring, and automatic recovery
 - **Transparency**: Comprehensive logging and Telegram notifications
 - **Modularity**: Clean separation of concerns (data, strategy, execution)
 - **Testability**: Mock data providers for testing without live market data
+- **Prop Firm Focus**: Conservative risk (1% per trade), position sizing (5-15 contracts), quick scalps
 
 ---
 
@@ -75,7 +80,7 @@ The NQ Trading Agent is designed to:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    NQ Agent Service                          │
+│                    MNQ Agent Service                         │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
 │  │ Data Fetcher │→ │   Strategy   │→ │ Signal Proc. │      │
 │  └──────────────┘  └──────────────┘  └──────────────┘      │
@@ -94,11 +99,12 @@ The NQ Trading Agent is designed to:
 
 ### Component Interaction Flow
 
-1. **Service Loop** (every 60 seconds by default):
+1. **Service Loop** (every 30 seconds for scalping, configurable):
    - Fetches latest market data via Data Fetcher
+   - Monitors IB Gateway connection status
    - Analyzes data using Strategy
-   - Generates signals if conditions are met
-   - Processes signals (save, track, notify)
+   - Generates signals if conditions are met (prop firm optimized)
+   - Processes signals (save, track, notify with position sizing)
    - Updates state and sends periodic status updates
 
 2. **Data Flow**:
@@ -115,11 +121,13 @@ The NQ Trading Agent is designed to:
 ### 1. NQ Agent Service (`src/pearlalgo/nq_agent/`)
 
 **Main Service** (`service.py`):
-- 24/7 service loop with configurable scan interval
+- 24/7 service loop with configurable scan interval (30s default for scalping)
 - Circuit breaker (pauses after 10 consecutive errors)
+- Connection failure detection and alerts
 - Automatic recovery and error handling
 - Periodic status updates and heartbeats
 - Data quality monitoring
+- IB Gateway connection status tracking
 
 **Data Fetcher** (`data_fetcher.py`):
 - Fetches historical and latest bar data
@@ -184,13 +192,16 @@ The NQ Trading Agent is designed to:
 
 **Signal Generator** (`signal_generator.py`):
 - Validates scanner results
-- Filters signals by confidence threshold (minimum 55%)
+- Filters signals by confidence threshold (minimum 50% for prop firm)
 - Calculates entry, stop-loss, and take-profit levels
-- Risk/reward ratio validation (minimum 2:1)
+- Risk/reward ratio validation (minimum 1.5:1 for quick scalps)
+- Position sizing calculation (5-15 MNQ contracts)
+- Risk amount calculation (MNQ tick value: $2/point)
 - Duplicate signal prevention (5-minute window)
 
 **Config** (`config.py`):
-- Strategy configuration (symbol, timeframe, risk parameters)
+- Strategy configuration (symbol: MNQ, timeframe, risk parameters)
+- Prop firm defaults: 1% risk, 1.5x ATR stops, 1.5:1 R:R, 5-15 contracts
 - Loads from `config/config.yaml` or uses defaults
 
 ### 3. Data Providers (`src/pearlalgo/data_providers/`)
@@ -275,7 +286,7 @@ Create NQAgentService
 Start Service Loop
 ```
 
-### 2. Main Service Loop (Every 60 seconds)
+### 2. Main Service Loop (Every 30 seconds for scalping)
 
 ```
 Service Loop
@@ -367,7 +378,7 @@ Signal Count Incremented
 ```
 pearlalgo-dev-ai-agents/
 ├── src/pearlalgo/              # Main source code
-│   ├── nq_agent/               # NQ Agent Service (6 files)
+│   ├── nq_agent/               # MNQ Agent Service (6 files)
 │   │   ├── main.py             # Entry point
 │   │   ├── service.py          # Main service loop
 │   │   ├── data_fetcher.py     # Data fetching logic
@@ -375,7 +386,7 @@ pearlalgo-dev-ai-agents/
 │   │   ├── performance_tracker.py  # Performance metrics
 │   │   ├── telegram_notifier.py    # Telegram notifications
 │   │   └── health_monitor.py       # Health monitoring
-│   ├── strategies/nq_intraday/ # NQ Strategy (5 files)
+│   ├── strategies/nq_intraday/ # MNQ Strategy (prop firm optimized)
 │   │   ├── strategy.py         # Main strategy class
 │   │   ├── scanner.py          # Market scanning
 │   │   ├── signal_generator.py # Signal generation
@@ -405,6 +416,7 @@ pearlalgo-dev-ai-agents/
 │   ├── start_nq_agent_service.sh    # Start service (background)
 │   ├── stop_nq_agent_service.sh     # Stop service
 │   ├── check_nq_agent_status.sh      # Check status
+│   ├── validate_strategy.py          # Comprehensive validation
 │   ├── start_ibgateway_ibc.sh       # Start IB Gateway
 │   ├── check_gateway_status.sh       # Check Gateway status
 │   ├── test_telegram_notifications.py  # Test notifications
@@ -423,9 +435,11 @@ pearlalgo-dev-ai-agents/
 │
 ├── docs/                        # Documentation
 │   ├── PROJECT_SUMMARY.md      # This file
-│   ├── NQ_AGENT_GUIDE.md       # Complete NQ Agent guide
-│   ├── GATEWAY.md              # IBKR Gateway guide
-│   └── TESTING.md               # Testing guide
+│   ├── NQ_AGENT_GUIDE.md       # Complete MNQ Agent guide (includes prop firm config)
+│   ├── STRATEGY_TESTING_GUIDE.md  # Strategy validation guide
+│   ├── TESTING_GUIDE.md        # Testing procedures
+│   ├── MOCK_DATA_WARNING.md    # Mock data testing notes
+│   └── GATEWAY.md              # IBKR Gateway guide
 │
 ├── data/                        # Data storage
 │   ├── nq_agent_state/         # Service state
@@ -477,14 +491,14 @@ PEARLALGO_LOG_LEVEL=INFO
 ### Configuration File (`config/config.yaml`)
 
 ```yaml
-# Trading Symbol
-symbol: "NQ"
+# Trading Symbol (Prop Firm Style)
+symbol: "MNQ"  # Mini NQ (1/10th size of NQ, better for prop firms)
 
 # Timeframe
-timeframe: "1m"
+timeframe: "1m"  # 1-minute bars for scalping/swings
 
 # Scan Interval (seconds)
-scan_interval: 60
+scan_interval: 30  # Faster for scalping (was 60)
 
 # IBKR Connection
 ibkr:
@@ -499,12 +513,14 @@ telegram:
   bot_token: "${TELEGRAM_BOT_TOKEN}"
   chat_id: "${TELEGRAM_CHAT_ID}"
 
-# Risk Management
+# Risk Management (Prop Firm Style)
 risk:
-  max_risk_per_trade: 0.02      # 2% max risk per trade
-  max_drawdown: 0.15             # 15% account drawdown limit
-  stop_loss_atr_multiplier: 2.0
-  take_profit_risk_reward: 2.0   # 2:1 R/R ratio
+  max_risk_per_trade: 0.01      # 1% max risk per trade (prop firm conservative)
+  max_drawdown: 0.10             # 10% account drawdown limit (prop firm typical)
+  stop_loss_atr_multiplier: 1.5  # Tighter stops for scalping (was 2.0)
+  take_profit_risk_reward: 1.5   # 1.5:1 R/R for quick profits (was 2.0)
+  min_position_size: 5           # Minimum contracts per trade
+  max_position_size: 15          # Maximum contracts per trade
 
 # Logging
 logging:
@@ -520,13 +536,15 @@ data_provider: "ibkr"
 
 ## Key Features
 
-### 1. Automated Trading Signal Generation
+### 1. Automated Trading Signal Generation (Prop Firm Optimized)
 
-- **Real-time Analysis**: Scans market data every 60 seconds
-- **Technical Indicators**: RSI, MACD, ATR, EMA, Bollinger Bands
+- **Real-time Analysis**: Scans market data every 30 seconds (faster for scalping)
+- **Technical Indicators**: RSI, MACD, ATR, EMA, Bollinger Bands, VWAP, Volume Profile
 - **Pattern Detection**: Momentum, mean reversion, breakout signals
-- **Confidence Filtering**: Minimum 55% confidence threshold
-- **Risk/Reward Validation**: Minimum 2:1 R/R ratio
+- **Confidence Filtering**: Minimum 50% confidence threshold (prop firm adjusted)
+- **Risk/Reward Validation**: Minimum 1.5:1 R/R ratio (quick scalps)
+- **Position Sizing**: 5-15 MNQ contracts per trade
+- **Session Filters**: Avoids lunch lull (11:30 AM - 1:00 PM ET)
 
 ### 2. Mobile-Optimized Telegram Notifications
 
@@ -540,6 +558,8 @@ data_provider: "ibkr"
 ### 3. Robust Error Handling
 
 - **Circuit Breaker**: Pauses service after 10 consecutive errors
+- **Connection Monitoring**: Detects IB Gateway connection failures
+- **Connection Alerts**: Sends Telegram alerts when gateway is down
 - **Automatic Recovery**: Resumes after errors are resolved
 - **Data Fetch Error Handling**: Retries with exponential backoff
 - **Connection Management**: Automatic reconnection to IB Gateway
@@ -622,10 +642,11 @@ pytest tests/
 ### Mock Data Provider
 
 The `tests/mock_data_provider.py` provides:
-- Realistic OHLCV data generation
+- Realistic OHLCV data generation (MNQ price range: ~17,500)
 - Configurable volatility and trend
 - No external dependencies
 - Fast and reliable testing
+- **Note**: Uses synthetic data - prices are NOT real market data
 
 ---
 
@@ -831,7 +852,7 @@ cat data/nq_agent_state/performance.json | jq
    - Signals require specific market conditions
 
 3. **Single Symbol**:
-   - Currently focused on NQ futures only
+   - Currently focused on MNQ futures (prop firm optimized)
    - **Future**: Multi-symbol support planned
 
 4. **No Automatic Execution**:
@@ -859,14 +880,17 @@ cat data/nq_agent_state/performance.json | jq
 # Check Gateway Status
 ./scripts/check_gateway_status.sh
 
-# Start NQ Agent Service
+# Start MNQ Agent Service
 ./scripts/start_nq_agent_service.sh
 
-# Stop NQ Agent Service
+# Stop MNQ Agent Service
 ./scripts/stop_nq_agent_service.sh
 
 # Check Service Status
 ./scripts/check_nq_agent_status.sh
+
+# Validate Strategy
+python3 scripts/validate_strategy.py
 
 # View Logs
 tail -f logs/nq_agent.log
@@ -886,34 +910,73 @@ tail -f logs/nq_agent.log
 
 ### Documentation
 
-- **Complete Guide**: `docs/NQ_AGENT_GUIDE.md`
+- **Complete Guide**: `docs/NQ_AGENT_GUIDE.md` (includes prop firm configuration)
+- **Strategy Testing**: `docs/STRATEGY_TESTING_GUIDE.md`
+- **Testing Guide**: `docs/TESTING_GUIDE.md`
 - **Gateway Setup**: `docs/GATEWAY.md`
-- **Testing Guide**: `docs/TESTING.md`
 - **Project Summary**: `docs/PROJECT_SUMMARY.md` (this file)
 
 ---
 
+## Prop Firm Trading Configuration
+
+### MNQ vs NQ
+
+- **MNQ (Mini NQ)**: $2 per point, 1/10th size of NQ
+- **NQ**: $20 per point
+- **Benefits**: Lower margin, better position sizing (5-15 contracts), prop firm friendly
+
+### Position Sizing
+
+- **Range**: 5-15 MNQ contracts per trade
+- **Default**: 10 contracts
+- **Risk Calculation**: Stop Loss Points × $2 (MNQ tick value) × Contracts
+
+### Risk Parameters
+
+- **Max Risk/Trade**: 1% of account (prop firm conservative)
+- **Max Drawdown**: 10% daily (prop firm typical)
+- **Stop Loss**: 1.5x ATR (tighter for scalping)
+- **Take Profit**: 1.5:1 R:R (quick profits)
+- **Scan Interval**: 30 seconds (faster for scalping)
+
+### Example Trade
+
+```
+Entry: $17,500.00
+Stop: $17,496.25 (3.75 points)
+Target: $17,505.50 (5.5 points)
+Position: 10 MNQ contracts
+
+Risk: 3.75 × $2 × 10 = $75 (0.15% of $50k account)
+Reward: 5.5 × $2 × 10 = $110
+R:R: 1.47:1
+```
+
 ## Conclusion
 
-The **PearlAlgo NQ Trading Agent** is a production-ready, automated trading system that provides:
+The **PearlAlgo MNQ Trading Agent** is a production-ready, automated trading system optimized for **prop firm style trading** that provides:
 
-- ✅ **Reliable Operation**: 24/7 service with robust error handling
-- ✅ **Intelligent Signals**: Technical analysis-based signal generation
-- ✅ **Mobile-Friendly Notifications**: Rich Telegram notifications
+- ✅ **Reliable Operation**: 24/7 service with robust error handling and connection monitoring
+- ✅ **Prop Firm Optimized**: MNQ contracts, 5-15 position sizing, 1% risk, quick scalps
+- ✅ **Intelligent Signals**: Technical analysis-based signal generation with multi-timeframe confirmation
+- ✅ **Mobile-Friendly Notifications**: Rich Telegram notifications with position sizing and risk calculations
 - ✅ **Performance Tracking**: Comprehensive metrics and tracking
 - ✅ **Easy Testing**: Mock data providers for testing without live data
 - ✅ **Extensible Architecture**: Modular design for easy extension
 
-The system is ready for production use and can be extended with additional features as outlined in the roadmap.
+The system is ready for production use and optimized for prop firm trading with MNQ futures.
 
 ---
 
 **For detailed guides, see:**
-- `docs/NQ_AGENT_GUIDE.md` - Complete NQ Agent guide
+- `docs/NQ_AGENT_GUIDE.md` - Complete MNQ Agent guide (includes prop firm configuration)
+- `docs/STRATEGY_TESTING_GUIDE.md` - Strategy validation guide
+- `docs/TESTING_GUIDE.md` - Testing procedures
 - `docs/GATEWAY.md` - IBKR Gateway setup
-- `docs/TESTING.md` - Testing guide
 
-**Last Updated:** 2025-12-12
+**Last Updated:** 2025-12-16  
+**Current Configuration:** MNQ (Mini NQ) - Prop Firm Style Trading
 
 
 
