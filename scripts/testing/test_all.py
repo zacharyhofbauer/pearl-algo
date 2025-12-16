@@ -61,8 +61,7 @@ from pearlalgo.nq_agent.service import NQAgentService
 from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
-from pearlalgo.utils.logging import setup_logging
-from pearlalgo.utils.logging import setup_logging
+from pearlalgo.utils.logging_config import setup_logging
 
 
 async def test_telegram_notifications():

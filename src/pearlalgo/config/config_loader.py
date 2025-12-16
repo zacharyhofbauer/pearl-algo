@@ -4,11 +4,18 @@ Service-level configuration loader.
 Loads configuration from config.yaml for service intervals, circuit breaker,
 alerts, data settings, signals, and performance tracking.
 
+**Purpose**: This module handles service behavior configuration (how the service operates).
+
 **When to use `load_service_config()`:**
 - For service-level settings (intervals, circuit breaker, alerts)
 - For data fetching configuration (buffer sizes, thresholds)
 - For signal generation settings (duplicate windows, thresholds)
 - For performance tracking configuration
+
+**When to use `settings.py` instead:**
+- For infrastructure configuration (IBKR connection settings, environment variables)
+- For deployment-specific settings (hosts, ports, API keys)
+- For Pydantic-validated environment-based configuration
 
 **When to use strategy config (`strategies/nq_intraday/config.py`):**
 - For strategy-specific parameters (symbol, timeframe, risk parameters)

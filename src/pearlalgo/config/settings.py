@@ -1,3 +1,37 @@
+"""
+Infrastructure and environment-based configuration.
+
+This module provides Pydantic-validated settings loaded from environment variables
+and optional config files. It handles infrastructure configuration such as IBKR
+connection settings, API keys, and deployment-specific values.
+
+**Purpose**: This module handles infrastructure configuration (how the system connects to external services).
+
+**When to use `Settings` or `get_settings()`:**
+- For infrastructure configuration (IBKR connection settings, environment variables)
+- For deployment-specific settings (hosts, ports, API keys)
+- For Pydantic-validated environment-based configuration
+- For settings that vary by environment (development, staging, production)
+
+**When to use `config_loader.py` instead:**
+- For service behavior configuration (intervals, circuit breaker, alerts)
+- For data fetching configuration (buffer sizes, thresholds)
+- For signal generation settings (duplicate windows, thresholds)
+- For performance tracking configuration
+
+**When to use strategy config (`strategies/nq_intraday/config.py`):**
+- For strategy-specific parameters (symbol, timeframe, risk parameters)
+- For strategy behavior configuration (ATR multipliers, R:R ratios)
+
+**Example usage:**
+    ```python
+    from pearlalgo.config.settings import get_settings
+    
+    settings = get_settings()
+    ibkr_host = settings.ib_host
+    ibkr_port = settings.ib_port
+    ```
+"""
 from __future__ import annotations
 
 import json

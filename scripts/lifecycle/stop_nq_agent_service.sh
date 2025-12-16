@@ -3,7 +3,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-PID_FILE="$PROJECT_DIR/scripts/logs/nq_agent.pid"
+PID_FILE="$PROJECT_DIR/logs/nq_agent.pid"
 
 cd "$PROJECT_DIR"
 

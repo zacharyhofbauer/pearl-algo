@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.paths import (
+    ensure_state_dir,
+    get_performance_file,
+    get_signals_file,
+)
 
 
 class SignalQualityScorer:
@@ -38,14 +43,9 @@ class SignalQualityScorer:
             state_dir: Directory for storing performance data
             min_edge_threshold: Minimum expected win rate (default: 55%)
         """
-        if state_dir is None:
-            state_dir = Path("data/nq_agent_state")
-
-        self.state_dir = Path(state_dir)
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-
-        self.performance_file = self.state_dir / "performance.json"
-        self.signals_file = self.state_dir / "signals.jsonl"
+        self.state_dir = ensure_state_dir(state_dir)
+        self.performance_file = get_performance_file(self.state_dir)
+        self.signals_file = get_signals_file(self.state_dir)
 
         self.min_edge_threshold = min_edge_threshold
 

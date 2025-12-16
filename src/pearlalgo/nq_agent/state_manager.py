@@ -7,11 +7,16 @@ Manages state persistence for the NQ agent service.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.paths import (
+    ensure_state_dir,
+    get_signals_file,
+    get_state_file,
+    get_utc_timestamp,
+)
 
 
 class NQAgentStateManager:
@@ -28,14 +33,9 @@ class NQAgentStateManager:
         Args:
             state_dir: Directory for state files (default: ./data/nq_agent_state)
         """
-        if state_dir is None:
-            state_dir = Path("data/nq_agent_state")
-
-        self.state_dir = Path(state_dir)
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-
-        self.signals_file = self.state_dir / "signals.jsonl"
-        self.state_file = self.state_dir / "state.json"
+        self.state_dir = ensure_state_dir(state_dir)
+        self.signals_file = get_signals_file(self.state_dir)
+        self.state_file = get_state_file(self.state_dir)
 
         logger.info(f"NQAgentStateManager initialized: state_dir={self.state_dir}")
 
@@ -89,7 +89,7 @@ class NQAgentStateManager:
             state: State dictionary
         """
         try:
-            state["last_updated"] = datetime.now(timezone.utc).isoformat()
+            state["last_updated"] = get_utc_timestamp()
             with open(self.state_file, "w") as f:
                 json.dump(state, f, indent=2)
         except Exception as e:

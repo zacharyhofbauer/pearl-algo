@@ -31,7 +31,7 @@ except Exception as e:
 from pearlalgo.data_providers.factory import create_data_provider
 from pearlalgo.nq_agent.service import NQAgentService
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
-from pearlalgo.utils.logging import setup_logging
+from pearlalgo.utils.logging_config import setup_logging
 
 
 async def main():

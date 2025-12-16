@@ -32,27 +32,18 @@ if ! python3 -c "import pearlalgo" 2>/dev/null; then
     fi
 fi
 
-# Run tests
+# Run tests using unified test runner
 echo "=" * 60
-echo "Running Tests"
+echo "Running Tests (Unified Test Runner)"
 echo "=" * 60
 echo ""
-
-# Test 1: Telegram Notifications
-echo "Test 1: Telegram Notifications..."
-python3 scripts/test_telegram_notifications.py
+echo "Note: This script uses the unified test runner (test_all.py)"
+echo "For individual test modes, run: python3 scripts/testing/test_all.py [mode]"
 echo ""
 
-# Test 2: Signal Generation
-echo "Test 2: Signal Generation..."
-python3 scripts/test_signal_generation.py
-echo ""
+python3 scripts/testing/test_all.py
 
-# Test 3: Full Service
-echo "Test 3: Full Service (2 minutes)..."
-python3 scripts/test_nq_agent_with_mock.py
 echo ""
-
 echo "=" * 60
 echo "✅ All tests completed"
 echo "=" * 60

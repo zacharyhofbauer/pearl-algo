@@ -13,6 +13,13 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.paths import (
+    ensure_state_dir,
+    get_performance_file,
+    get_signals_file,
+    get_utc_timestamp,
+    parse_utc_timestamp,
+)
 
 if TYPE_CHECKING:
     from pearlalgo.nq_agent.state_manager import NQAgentStateManager
@@ -41,16 +48,12 @@ class PerformanceTracker:
             state_dir: Directory for state files (default: ./data/nq_agent_state)
             state_manager: State manager instance for signal persistence (optional)
         """
-        if state_dir is None:
-            state_dir = Path("data/nq_agent_state")
-
-        self.state_dir = Path(state_dir)
-        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.state_dir = ensure_state_dir(state_dir)
 
         # State manager for signal persistence (delegation)
         self.state_manager = state_manager
-        self.signals_file = self.state_dir / "signals.jsonl"
-        self.performance_file = self.state_dir / "performance.json"
+        self.signals_file = get_signals_file(self.state_dir)
+        self.performance_file = get_performance_file(self.state_dir)
 
         # Load performance configuration
         service_config = load_service_config()
@@ -87,7 +90,7 @@ class PerformanceTracker:
             # Fallback: direct file write (for backward compatibility)
             signal_record = {
                 "signal_id": signal_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": get_utc_timestamp(),
                 "status": "generated",
                 "signal": signal,
             }
@@ -173,7 +176,7 @@ class PerformanceTracker:
         # Calculate hold time
         entry_time_str = signal_record.get("entry_time")
         if entry_time_str:
-            entry_time = datetime.fromisoformat(entry_time_str.replace("Z", "+00:00"))
+            entry_time = parse_utc_timestamp(entry_time_str)
             hold_duration = (exit_time - entry_time).total_seconds() / 60  # minutes
         else:
             hold_duration = None
@@ -231,11 +234,11 @@ class PerformanceTracker:
                     for line in f:
                         try:
                             record = json.loads(line.strip())
-                            timestamp = datetime.fromisoformat(
-                                record.get("timestamp", "").replace("Z", "+00:00")
-                            ).timestamp()
-                            if timestamp >= cutoff_time:
-                                signals.append(record)
+                            timestamp_str = record.get("timestamp", "")
+                            if timestamp_str:
+                                timestamp = parse_utc_timestamp(timestamp_str).timestamp()
+                                if timestamp >= cutoff_time:
+                                    signals.append(record)
                         except (json.JSONDecodeError, ValueError):
                             continue
             except Exception as e:

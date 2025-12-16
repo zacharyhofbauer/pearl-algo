@@ -110,7 +110,7 @@ For detailed gateway setup, see [GATEWAY.md](GATEWAY.md).
 pkill -f "pearlalgo.nq_agent.main"
 
 # Or using PID file:
-kill $(cat scripts/logs/nq_agent.pid) 2>/dev/null || true
+kill $(cat logs/nq_agent.pid) 2>/dev/null || true
 ```
 
 ### Check Service Status
@@ -382,7 +382,7 @@ tail -f data/nq_agent_state/signals.jsonl | jq
 - `.env` - Environment variables (not in git)
 
 **Process Management:**
-- `scripts/logs/nq_agent.pid` - Process ID file (for background mode)
+- `logs/nq_agent.pid` - Process ID file (for background mode)
 
 **State & Data:**
 - `data/nq_agent_state/state.json` - Current service state

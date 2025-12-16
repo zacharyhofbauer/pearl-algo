@@ -1,5 +1,18 @@
 """
-Structured logging with correlation IDs and timing metrics.
+Logging configuration and setup utilities.
+
+This module provides structured logging setup with correlation IDs and timing metrics.
+It is separate from `logger.py` which provides the logger instance used throughout the codebase.
+
+**When to use this module:**
+- For initial logging setup (e.g., in main.py)
+- For structured logging configuration
+- For correlation ID management
+- For timing decorators
+
+**When to use `logger.py` instead:**
+- For actual logging calls in production code
+- For simple logger instance access
 """
 from __future__ import annotations
 
