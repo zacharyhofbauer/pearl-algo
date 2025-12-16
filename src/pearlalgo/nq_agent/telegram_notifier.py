@@ -576,31 +576,33 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
-            # Format message EXACTLY like startup/heartbeat messages
-            # Use same structure and ensure valid Markdown (no parsing errors)
-            formatted_message = "⚠️ *Risk Warning*\n\n"
+            # Format message EXACTLY like startup message - copy the exact pattern
+            # Startup uses: title, \n\n, key-value pairs, \n\n, section header, items, \n\n, status
+            # Use 'msg' to avoid conflict with parameter 'message'
+            msg = "⚠️ *Risk Warning*\n\n"
             
-            # Add alert type (bold title, like other message titles)
+            # Add alert type (same as startup's title format)
             if alert_type == "stale_data":
-                formatted_message += "⏰ *Stale Data*\n"
+                msg += "⏰ *Stale Data*\n"
             elif alert_type == "data_gap":
-                formatted_message += "📉 *Data Gap*\n"
+                msg += "📉 *Data Gap*\n"
             elif alert_type == "fetch_failure":
-                formatted_message += "❌ *Fetch Failure*\n"
+                msg += "❌ *Fetch Failure*\n"
             elif alert_type == "buffer_issue":
-                formatted_message += "⚠️ *Buffer Issue*\n"
+                msg += "⚠️ *Buffer Issue*\n"
             else:
                 title_text = alert_type.replace('_', ' ').title()
-                formatted_message += f"⚠️ *{title_text}*\n"
+                msg += f"⚠️ *{title_text}*\n"
             
-            # Add details - match startup format exactly: emoji + *Key:* value
+            # Add details - EXACT same format as startup: emoji + *Key:* value (no extra spaces)
+            # Use 🕐 (clock) instead of ⏱️ (stopwatch) to avoid Markdown parsing issues with variation selector
             if alert_type == "stale_data" and details and "age_minutes" in details:
                 age_val = details['age_minutes']
-                formatted_message += f"⏱️ *Age:* {age_val:.1f} minutes\n"
-            elif message:
-                formatted_message += f"{message}\n"
+                msg += f"🕐 *Age:* {age_val:.1f} minutes\n"
+            elif message and alert_type != "stale_data":
+                msg += f"{message}\n"
             
-            # Add other details if present
+            # Add other details if present (same format)
             if details:
                 detail_lines = []
                 if "consecutive_failures" in details:
@@ -615,13 +617,14 @@ class NQAgentTelegramNotifier:
                     detail_lines.append(f"💡 *Suggestion:* {details['suggestion']}")
                 
                 if detail_lines:
-                    formatted_message += "\n" + "\n".join(detail_lines) + "\n"
+                    msg += "\n" + "\n".join(detail_lines) + "\n"
             
-            # Add status (same format as *Config:* in startup message)
-            formatted_message += "\n*Status:* DATA_QUALITY"
+            # Add status - EXACT same format as startup's *Config:* section
+            # Escape underscore in DATA_QUALITY to prevent Markdown italic parsing
+            msg += "\n*Status:* DATA\\_QUALITY"
             
-            # Send using send_message (same as startup/heartbeat)
-            await self.telegram.send_message(formatted_message)
+            # Send using send_message - EXACTLY like startup does
+            await self.telegram.send_message(msg)
             return True
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_data_quality_alert")
