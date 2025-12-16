@@ -89,12 +89,52 @@ if [ -f .venv/bin/python3 ]; then
     PYTHON_CMD=".venv/bin/python3"
 fi
 
-# Run in foreground - output goes directly to terminal
+# Cleanup function
+cleanup() {
+    # If process is still running, try to kill it
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            # Try graceful kill first
+            kill "$PID" 2>/dev/null
+            sleep 1
+            # Force kill if still running
+            if ps -p "$PID" > /dev/null 2>&1; then
+                kill -9 "$PID" 2>/dev/null
+            fi
+        fi
+        rm -f "$PID_FILE"
+    fi
+}
+
+# Handle Ctrl+C - send signal to Python process and cleanup
+handle_interrupt() {
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat "$PID_FILE")
+        # Send SIGINT to Python process (same as Ctrl+C)
+        kill -INT "$PID" 2>/dev/null
+        # Wait a moment for graceful shutdown
+        sleep 2
+        # Force kill if still running
+        if ps -p "$PID" > /dev/null 2>&1; then
+            echo ""
+            echo "⚠️  Process didn't exit gracefully, force killing..."
+            kill -9 "$PID" 2>/dev/null
+        fi
+    fi
+    cleanup
+    exit 0
+}
+
+# Set up signal handlers
+trap handle_interrupt INT TERM
+trap cleanup EXIT
+
+# Run in background to get PID, then wait for it
 "$PYTHON_CMD" -m pearlalgo.nq_agent.main &
 SERVICE_PID=$!
 echo $SERVICE_PID > "$PID_FILE"
 
-# Wait for the process and cleanup on exit
-trap "kill $SERVICE_PID 2>/dev/null; rm -f $PID_FILE; exit" INT TERM
+# Wait for the process - Ctrl+C will trigger handle_interrupt
 wait $SERVICE_PID
 
