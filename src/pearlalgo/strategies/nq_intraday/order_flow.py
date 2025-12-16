@@ -16,9 +16,10 @@ from pearlalgo.utils.logger import logger
 
 class OrderFlowApproximator:
     """
-    Approximates order flow from bar characteristics.
+    Analyzes order flow from bar characteristics and real order book data.
     
-    Uses:
+    When Level 2 data is available, uses real order book depth.
+    Otherwise, approximates from bar characteristics:
     - Close vs Open (up bars = buying, down bars = selling)
     - High vs previous high (breakout = buying pressure)
     - Low vs previous low (breakdown = selling pressure)
@@ -218,6 +219,185 @@ class OrderFlowApproximator:
         # Unknown direction
         return (True, 0.0)
 
+    def analyze_order_book(self, order_book: Dict) -> Dict:
+        """
+        Analyze real Level 2 order book data.
+        
+        Args:
+            order_book: Dictionary with order book data from latest_bar:
+                {
+                    "bids": [{"price": float, "size": int}, ...],
+                    "asks": [{"price": float, "size": int}, ...],
+                    "bid_depth": int,
+                    "ask_depth": int,
+                    "imbalance": float,
+                    "weighted_mid": float,
+                }
+            
+        Returns:
+            Dictionary with enhanced order flow analysis:
+            {
+                "buying_pressure": float (0-1),
+                "selling_pressure": float (0-1),
+                "net_pressure": float (-1 to 1),
+                "cumulative_delta": float,
+                "recent_trend": "buying" | "selling" | "neutral",
+                "order_book_imbalance": float,  # From order book
+                "support_levels": [float, ...],  # Key bid levels
+                "resistance_levels": [float, ...],  # Key ask levels
+                "large_orders_detected": bool,  # Iceberg orders
+            }
+        """
+        if not order_book or not order_book.get("bids") and not order_book.get("asks"):
+            return self._default_flow()
+        
+        bids = order_book.get("bids", [])
+        asks = order_book.get("asks", [])
+        bid_depth = order_book.get("bid_depth", 0)
+        ask_depth = order_book.get("ask_depth", 0)
+        imbalance = order_book.get("imbalance", 0.0)
+        
+        # Calculate buying/selling pressure from order book imbalance
+        # Positive imbalance = more bids = buying pressure
+        if imbalance > 0.2:
+            buying_pressure = 0.5 + (imbalance * 0.5)  # Scale to 0.5-1.0
+            selling_pressure = 0.5 - (imbalance * 0.5)  # Scale to 0.0-0.5
+        elif imbalance < -0.2:
+            buying_pressure = 0.5 + (imbalance * 0.5)  # Scale to 0.0-0.5
+            selling_pressure = 0.5 - (imbalance * 0.5)  # Scale to 0.5-1.0
+        else:
+            # Near balance
+            buying_pressure = 0.5 + (imbalance * 0.3)
+            selling_pressure = 0.5 - (imbalance * 0.3)
+        
+        buying_pressure = max(0.0, min(1.0, buying_pressure))
+        selling_pressure = max(0.0, min(1.0, selling_pressure))
+        
+        # Net pressure
+        net_pressure = buying_pressure - selling_pressure
+        
+        # Recent trend from imbalance
+        if imbalance > 0.15:
+            recent_trend = "buying"
+        elif imbalance < -0.15:
+            recent_trend = "selling"
+        else:
+            recent_trend = "neutral"
+        
+        # Identify support/resistance levels from order book
+        support_levels = self._extract_key_levels(bids, min_size_ratio=0.15)
+        resistance_levels = self._extract_key_levels(asks, min_size_ratio=0.15)
+        
+        # Detect large orders (iceberg orders - unusually large size at a level)
+        large_orders_detected = self._detect_large_orders(bids, asks)
+        
+        return {
+            "buying_pressure": float(buying_pressure),
+            "selling_pressure": float(selling_pressure),
+            "net_pressure": float(net_pressure),
+            "cumulative_delta": float(imbalance),  # Use imbalance as delta proxy
+            "recent_trend": recent_trend,
+            "order_book_imbalance": float(imbalance),
+            "support_levels": support_levels,
+            "resistance_levels": resistance_levels,
+            "large_orders_detected": large_orders_detected,
+        }
+
+    def get_order_book_levels(self, order_book: Dict, num_levels: int = 5) -> Dict:
+        """
+        Extract key support/resistance levels from order book.
+        
+        Args:
+            order_book: Dictionary with order book data
+            num_levels: Number of key levels to extract
+            
+        Returns:
+            Dictionary with support and resistance levels:
+            {
+                "support": [float, ...],  # Key bid levels (sorted descending)
+                "resistance": [float, ...],  # Key ask levels (sorted ascending)
+            }
+        """
+        if not order_book:
+            return {"support": [], "resistance": []}
+        
+        bids = order_book.get("bids", [])
+        asks = order_book.get("asks", [])
+        
+        # Extract support levels (bids) - sorted by price descending
+        support_levels = self._extract_key_levels(bids, num_levels=num_levels)
+        support_levels.sort(reverse=True)  # Highest to lowest
+        
+        # Extract resistance levels (asks) - sorted by price ascending
+        resistance_levels = self._extract_key_levels(asks, num_levels=num_levels)
+        resistance_levels.sort()  # Lowest to highest
+        
+        return {
+            "support": support_levels[:num_levels],
+            "resistance": resistance_levels[:num_levels],
+        }
+
+    def _extract_key_levels(self, levels: List[Dict], num_levels: int = 5, min_size_ratio: float = 0.1) -> List[float]:
+        """
+        Extract key price levels with significant volume.
+        
+        Args:
+            levels: List of level dictionaries with "price" and "size"
+            num_levels: Maximum number of levels to return
+            min_size_ratio: Minimum size relative to total volume
+            
+        Returns:
+            List of price levels
+        """
+        if not levels:
+            return []
+        
+        total_volume = sum(level.get("size", 0) for level in levels)
+        if total_volume == 0:
+            return [level.get("price", 0) for level in levels[:num_levels]]
+        
+        # Filter levels by minimum size
+        significant_levels = [
+            level for level in levels
+            if level.get("size", 0) >= (total_volume * min_size_ratio)
+        ]
+        
+        # Sort by size (largest first) and take top N
+        significant_levels.sort(key=lambda x: x.get("size", 0), reverse=True)
+        
+        return [float(level.get("price", 0)) for level in significant_levels[:num_levels]]
+
+    def _detect_large_orders(self, bids: List[Dict], asks: List[Dict], threshold_ratio: float = 0.3) -> bool:
+        """
+        Detect unusually large orders (potential iceberg orders).
+        
+        Args:
+            bids: List of bid levels
+            asks: List of ask levels
+            threshold_ratio: Ratio threshold for large order detection
+            
+        Returns:
+            True if large orders detected
+        """
+        if not bids and not asks:
+            return False
+        
+        all_levels = bids + asks
+        if not all_levels:
+            return False
+        
+        total_volume = sum(level.get("size", 0) for level in all_levels)
+        if total_volume == 0:
+            return False
+        
+        # Check if any single level has unusually large volume
+        for level in all_levels:
+            size = level.get("size", 0)
+            if size > 0 and (size / total_volume) > threshold_ratio:
+                return True
+        
+        return False
+
     def _default_flow(self) -> Dict:
         """Return default order flow when data is insufficient."""
         return {
@@ -226,6 +406,10 @@ class OrderFlowApproximator:
             "net_pressure": 0.0,
             "cumulative_delta": 0.0,
             "recent_trend": "neutral",
+            "order_book_imbalance": 0.0,
+            "support_levels": [],
+            "resistance_levels": [],
+            "large_orders_detected": False,
         }
 
 

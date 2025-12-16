@@ -72,6 +72,9 @@ def load_service_config(config_path: Optional[Path] = None) -> Dict:
             "historical_hours": 2,
             "multitimeframe_5m_hours": 4,
             "multitimeframe_15m_hours": 12,
+            "use_level2_data": True,
+            "order_book_depth": 10,
+            "order_book_analysis": True,
         },
         "signals": {
             "duplicate_window_seconds": 300,

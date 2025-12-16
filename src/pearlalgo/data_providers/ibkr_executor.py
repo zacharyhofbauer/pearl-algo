@@ -20,7 +20,73 @@ from typing import Any, Dict, List, Optional
 
 from ib_insync import IB, Future, Option, Stock, util
 
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.utils.logger import logger
+
+
+def _calculate_order_book_metrics(bids: List[Any], asks: List[Any]) -> Dict[str, Any]:
+    """
+    Calculate order book metrics from bid/ask levels.
+    
+    Args:
+        bids: List of bid levels (from ticker.domBids)
+        asks: List of ask levels (from ticker.domAsks)
+        
+    Returns:
+        Dictionary with order book metrics
+    """
+    if not bids and not asks:
+        return {
+            "order_book": {"bids": [], "asks": []},
+            "bid_depth": 0,
+            "ask_depth": 0,
+            "imbalance": 0.0,
+            "weighted_mid": None,
+        }
+    
+    # Extract bid/ask data
+    bid_levels = [{"price": float(level.price), "size": int(level.size)} for level in bids]
+    ask_levels = [{"price": float(level.price), "size": int(level.size)} for level in asks]
+    
+    # Calculate total depth
+    bid_depth = sum(level["size"] for level in bid_levels)
+    ask_depth = sum(level["size"] for level in ask_levels)
+    
+    # Calculate imbalance (-1 to +1, positive = more bids)
+    total_depth = bid_depth + ask_depth
+    if total_depth > 0:
+        imbalance = (bid_depth - ask_depth) / total_depth
+    else:
+        imbalance = 0.0
+    
+    # Calculate volume-weighted mid-price
+    weighted_mid = None
+    if bid_levels and ask_levels:
+        # Weighted average of best bid and ask, weighted by their sizes
+        best_bid = bid_levels[0]
+        best_ask = ask_levels[0]
+        bid_weight = best_bid["size"]
+        ask_weight = best_ask["size"]
+        total_weight = bid_weight + ask_weight
+        
+        if total_weight > 0:
+            weighted_mid = (
+                (best_bid["price"] * bid_weight + best_ask["price"] * ask_weight) / total_weight
+            )
+        else:
+            # Fallback to simple mid if no volume
+            weighted_mid = (best_bid["price"] + best_ask["price"]) / 2.0
+    
+    return {
+        "order_book": {
+            "bids": bid_levels,
+            "asks": ask_levels,
+        },
+        "bid_depth": bid_depth,
+        "ask_depth": ask_depth,
+        "imbalance": float(imbalance),
+        "weighted_mid": float(weighted_mid) if weighted_mid is not None else None,
+    }
 
 
 @dataclass
@@ -62,7 +128,13 @@ class GetLatestBarTask(Task):
     is_futures: bool = False
 
     def execute(self, ib: IB) -> Optional[Dict]:
-        """Fetch latest bar data."""
+        """Fetch latest bar data with Level 2 support."""
+        # Load configuration
+        service_config = load_service_config()
+        data_settings = service_config.get("data", {})
+        use_level2 = data_settings.get("use_level2_data", True)
+        order_book_depth = data_settings.get("order_book_depth", 10)
+        
         # Create contract
         if self.is_futures:
             # For futures, use reqContractDetails to get all contracts, then select front month
@@ -84,9 +156,100 @@ class GetLatestBarTask(Task):
         else:
             contract = Stock(self.symbol, exchange="SMART", currency="USD")
 
-        # Try to get real-time market data first
+        # Try Level 2 (order book depth) first if enabled
+        if use_level2:
+            depth_ticker = None
+            try:
+                logger.debug(f"Requesting Level 2 market depth for {self.symbol} (depth: {order_book_depth} levels)")
+                depth_ticker = ib.reqMktDepth(contract, numRows=order_book_depth, isSmartDepth=False)
+                
+                # Wait for order book data to populate
+                time.sleep(1.5)
+                
+                # Check if we have order book data
+                if depth_ticker and (depth_ticker.domBids or depth_ticker.domAsks):
+                    # Extract order book
+                    bids = list(depth_ticker.domBids) if depth_ticker.domBids else []
+                    asks = list(depth_ticker.domAsks) if depth_ticker.domAsks else []
+                    
+                    # Calculate order book metrics
+                    order_book_metrics = _calculate_order_book_metrics(bids, asks)
+                    
+                    # Get price from order book (use weighted mid or best bid/ask)
+                    if order_book_metrics["weighted_mid"]:
+                        price = order_book_metrics["weighted_mid"]
+                    elif bids and asks:
+                        price = (bids[0].price + asks[0].price) / 2.0
+                    elif bids:
+                        price = float(bids[0].price)
+                    elif asks:
+                        price = float(asks[0].price)
+                    else:
+                        price = None
+                    
+                    if price and price > 0:
+                        # Also get Level 1 data for OHLCV
+                        level1_ticker = None
+                        try:
+                            level1_ticker = ib.reqMktData(contract, "", False, False)
+                            time.sleep(0.5)  # Shorter wait since we already have order book
+                            
+                            last_price = price
+                            if level1_ticker and (level1_ticker.last or level1_ticker.close):
+                                last_price = level1_ticker.last if level1_ticker.last else level1_ticker.close
+                            
+                            result = {
+                                "timestamp": datetime.now(timezone.utc),
+                                "open": level1_ticker.open if level1_ticker and level1_ticker.open else last_price,
+                                "high": level1_ticker.high if level1_ticker and level1_ticker.high else last_price,
+                                "low": level1_ticker.low if level1_ticker and level1_ticker.low else last_price,
+                                "close": last_price,
+                                "volume": level1_ticker.volume if level1_ticker and level1_ticker.volume else 0,
+                                "bid": float(bids[0].price) if bids else None,
+                                "ask": float(asks[0].price) if asks else None,
+                                "_data_level": "level2",  # Metadata
+                            }
+                            # Add order book metrics
+                            result.update(order_book_metrics)
+                            
+                            # Cleanup
+                            ib.cancelMktDepth(contract)
+                            if level1_ticker:
+                                ib.cancelMktData(contract)
+                            
+                            logger.debug(f"Got Level 2 data for {self.symbol}: ${last_price:.2f}, imbalance={order_book_metrics['imbalance']:.2f}")
+                            return result
+                        except Exception as e:
+                            if level1_ticker:
+                                try:
+                                    ib.cancelMktData(contract)
+                                except Exception:
+                                    pass
+                            logger.debug(f"Level 1 data fetch failed, using order book price only: {e}")
+                    
+                    # Cleanup depth ticker
+                    ib.cancelMktDepth(contract)
+                    depth_ticker = None
+                else:
+                    logger.debug(f"Level 2 data request for {self.symbol} returned no order book data, falling back to Level 1")
+                    if depth_ticker:
+                        ib.cancelMktDepth(contract)
+            except Exception as e:
+                error_str = str(e).lower()
+                if "354" in str(e) or "subscription" in error_str:
+                    logger.debug(f"Level 2 subscription not available for {self.symbol}, falling back to Level 1")
+                else:
+                    logger.debug(f"Level 2 data request failed for {self.symbol}: {e}, falling back to Level 1")
+                if depth_ticker:
+                    try:
+                        ib.cancelMktDepth(contract)
+                    except Exception:
+                        pass
+
+        # Fallback to Level 1 (top bid/ask only)
         ticker = None
         try:
+            logger.debug(f"Requesting Level 1 market data for {self.symbol}")
             # Request market data (may fail with Error 354 if no subscription)
             ticker = ib.reqMktData(contract, "", False, False)
             
@@ -114,9 +277,18 @@ class GetLatestBarTask(Task):
                             "volume": ticker.volume if ticker.volume else 0,
                             "bid": ticker.bid if ticker.bid else None,
                             "ask": ticker.ask if ticker.ask else None,
+                            "_data_level": "level1",  # Metadata
                         }
+                        # Add empty order book structure for consistency
+                        result.update({
+                            "order_book": {"bids": [], "asks": []},
+                            "bid_depth": 0,
+                            "ask_depth": 0,
+                            "imbalance": 0.0,
+                            "weighted_mid": None,
+                        })
                         ib.cancelMktData(contract)
-                        logger.debug(f"Got real-time data for {self.symbol}: ${last_price:.2f}")
+                        logger.debug(f"Got Level 1 data for {self.symbol}: ${last_price:.2f}")
                         return result
             
             # Check if we got data but it's not valid
@@ -172,7 +344,7 @@ class GetLatestBarTask(Task):
                 else:
                     logger.debug(f"Historical fallback data for {self.symbol} is {age_minutes:.1f} minutes old (acceptable)")
                 
-                return {
+                result = {
                     "timestamp": bar_timestamp,
                     "open": float(latest_bar.open),
                     "high": float(latest_bar.high),
@@ -181,7 +353,17 @@ class GetLatestBarTask(Task):
                     "volume": int(latest_bar.volume),
                     "bid": None,  # Not available from historical data
                     "ask": None,  # Not available from historical data
+                    "_data_level": "historical",  # Metadata
                 }
+                # Add empty order book structure for consistency
+                result.update({
+                    "order_book": {"bids": [], "asks": []},
+                    "bid_depth": 0,
+                    "ask_depth": 0,
+                    "imbalance": 0.0,
+                    "weighted_mid": None,
+                })
+                return result
             else:
                 logger.warning(f"No historical bars returned for {self.symbol}")
         except Exception as e:

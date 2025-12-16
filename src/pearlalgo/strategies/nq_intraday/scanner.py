@@ -178,6 +178,7 @@ class NQScanner:
         df: pd.DataFrame,
         df_5m: Optional[pd.DataFrame] = None,
         df_15m: Optional[pd.DataFrame] = None,
+        market_data: Optional[Dict] = None,
     ) -> List[Dict]:
         """
         Scan market data for trading signals.
@@ -186,6 +187,7 @@ class NQScanner:
             df: DataFrame with OHLCV data and indicators (1m)
             df_5m: Optional DataFrame with 5m bars for multi-timeframe analysis
             df_15m: Optional DataFrame with 15m bars for multi-timeframe analysis
+            market_data: Optional market data dictionary with latest_bar (for order book access)
             
         Returns:
             List of signal dictionaries
@@ -250,9 +252,17 @@ class NQScanner:
         volume_profile_data = self.volume_profile.calculate_profile(df)
         logger.debug(f"Volume Profile POC: {volume_profile_data.get('poc', 0):.2f}")
 
-        # Analyze order flow
-        order_flow_data = self.order_flow.analyze_order_flow(df)
-        logger.debug(f"Order Flow: {order_flow_data.get('recent_trend')} (net: {order_flow_data.get('net_pressure', 0):.2f})")
+        # Analyze order flow - use real order book if available, otherwise approximate
+        order_flow_data = None
+        latest_bar = market_data.get("latest_bar") if market_data else None
+        if latest_bar and latest_bar.get("order_book") and latest_bar["order_book"].get("bids"):
+            # Use real Level 2 order book data
+            order_flow_data = self.order_flow.analyze_order_book(latest_bar)
+            logger.debug(f"Order Flow (Level 2): {order_flow_data.get('recent_trend')} (imbalance: {order_flow_data.get('order_book_imbalance', 0):.2f})")
+        else:
+            # Fall back to approximation from bar characteristics
+            order_flow_data = self.order_flow.analyze_order_flow(df)
+            logger.debug(f"Order Flow (approximated): {order_flow_data.get('recent_trend')} (net: {order_flow_data.get('net_pressure', 0):.2f})")
 
         # Check volume threshold (lower for MNQ scalping)
         min_volume = self.config.min_volume

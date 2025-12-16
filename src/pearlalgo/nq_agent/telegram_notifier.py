@@ -192,6 +192,44 @@ class NQAgentTelegramNotifier:
 
         # Confidence and edge
         message += f"*CONFIDENCE:* {conf_emoji} {confidence:.0%} ({conf_tier})\n"
+        
+        # Order book context (Level 2 data)
+        order_book = signal.get("order_book", {})
+        if order_book:
+            imbalance = order_book.get("imbalance", 0.0)
+            bid_depth = order_book.get("bid_depth", 0)
+            ask_depth = order_book.get("ask_depth", 0)
+            data_level = order_book.get("data_level", "unknown")
+            
+            # Format imbalance with emoji
+            if imbalance > 0.2:
+                imbalance_emoji = "🟢"
+                imbalance_text = f"Strong Bid Pressure ({imbalance:+.2f})"
+            elif imbalance > 0.1:
+                imbalance_emoji = "🟡"
+                imbalance_text = f"Moderate Bid Pressure ({imbalance:+.2f})"
+            elif imbalance < -0.2:
+                imbalance_emoji = "🔴"
+                imbalance_text = f"Strong Ask Pressure ({imbalance:+.2f})"
+            elif imbalance < -0.1:
+                imbalance_emoji = "🟠"
+                imbalance_text = f"Moderate Ask Pressure ({imbalance:+.2f})"
+            else:
+                imbalance_emoji = "⚪"
+                imbalance_text = f"Balanced ({imbalance:+.2f})"
+            
+            # Data level indicator
+            if data_level == "level2":
+                level_indicator = "📊 L2"
+            elif data_level == "level1":
+                level_indicator = "📈 L1"
+            else:
+                level_indicator = "📉 Hist"
+            
+            message += f"*ORDER BOOK:* {level_indicator} {imbalance_emoji} {imbalance_text}\n"
+            if bid_depth > 0 or ask_depth > 0:
+                message += f"  Bid Depth: {bid_depth:,} | Ask Depth: {ask_depth:,}\n"
+        
         # TODO: Add historical edge when available
         # message += f"*EDGE:* {historical_wr:.0%} Historical WR\n\n"
         message += "\n"
@@ -222,6 +260,28 @@ class NQAgentTelegramNotifier:
             else:
                 vol_text = f"Volume: {volume_ratio:.1f}x avg"
             message += f"• 📊 {vol_text}\n"
+        
+        # Order book alignment context (if Level 2 available)
+        order_book = signal.get("order_book", {})
+        if order_book and order_book.get("imbalance") is not None:
+            imbalance = order_book.get("imbalance", 0.0)
+            signal_direction_lower = direction.lower()
+            
+            # Check if order book aligns with signal
+            if signal_direction_lower == "long":
+                if imbalance > 0.15:
+                    message += f"• ✅ Order Book: Aligned (bid pressure supports long)\n"
+                elif imbalance < -0.15:
+                    message += f"• ⚠️ Order Book: Opposing (ask pressure against long)\n"
+                else:
+                    message += f"• ⚪ Order Book: Neutral\n"
+            elif signal_direction_lower == "short":
+                if imbalance < -0.15:
+                    message += f"• ✅ Order Book: Aligned (ask pressure supports short)\n"
+                elif imbalance > 0.15:
+                    message += f"• ⚠️ Order Book: Opposing (bid pressure against short)\n"
+                else:
+                    message += f"• ⚪ Order Book: Neutral\n"
 
         # ATR/Volatility
         atr = indicators.get("atr", 0)
@@ -451,6 +511,39 @@ class NQAgentTelegramNotifier:
             message += f"🔔 {signals} signals\n"
             message += f"📊 {buffer} bars\n"
             message += f"⚠️ {errors} errors\n"
+            
+            # Data quality section (order book info)
+            latest_bar = status.get('latest_bar')
+            if latest_bar:
+                data_level = latest_bar.get('_data_level', 'unknown')
+                if data_level == 'level2':
+                    data_emoji = "📊"
+                    data_text = "Level 2 (Order Book)"
+                    imbalance = latest_bar.get('imbalance', 0.0)
+                    bid_depth = latest_bar.get('bid_depth', 0)
+                    ask_depth = latest_bar.get('ask_depth', 0)
+                    message += f"\n*Market Data:*\n"
+                    message += f"{data_emoji} {data_text}\n"
+                    if imbalance is not None:
+                        imbalance_pct = imbalance * 100
+                        if imbalance > 0.1:
+                            message += f"🟢 Bid Pressure: {imbalance_pct:+.1f}%\n"
+                        elif imbalance < -0.1:
+                            message += f"🔴 Ask Pressure: {imbalance_pct:+.1f}%\n"
+                        else:
+                            message += f"⚪ Balanced: {imbalance_pct:+.1f}%\n"
+                    if bid_depth > 0 or ask_depth > 0:
+                        message += f"📈 Bid: {bid_depth:,} | Ask: {ask_depth:,}\n"
+                elif data_level == 'level1':
+                    data_emoji = "📈"
+                    data_text = "Level 1 (Top of Book)"
+                    message += f"\n*Market Data:*\n"
+                    message += f"{data_emoji} {data_text}\n"
+                else:
+                    data_emoji = "📉"
+                    data_text = "Historical (Delayed)"
+                    message += f"\n*Market Data:*\n"
+                    message += f"{data_emoji} {data_text}\n"
 
             # Performance section
             performance = status.get("performance", {})
@@ -537,6 +630,30 @@ class NQAgentTelegramNotifier:
             market_emoji = "🟢" if is_market_open else "🔴"
             message += f"🟢 *Service:* RUNNING\n"
             message += f"{market_emoji} *Market:* {'OPEN' if is_market_open else 'CLOSED'}\n"
+
+            # Order book info (if available)
+            latest_bar = status.get('latest_bar')
+            if latest_bar and isinstance(latest_bar, dict):
+                data_level = latest_bar.get('_data_level', 'unknown')
+                imbalance = latest_bar.get('imbalance')
+                
+                if data_level == 'level2' and imbalance is not None:
+                    imbalance_pct = imbalance * 100
+                    if imbalance > 0.15:
+                        ob_emoji = "🟢"
+                        ob_text = f"Bid Pressure: {imbalance_pct:+.1f}%"
+                    elif imbalance < -0.15:
+                        ob_emoji = "🔴"
+                        ob_text = f"Ask Pressure: {imbalance_pct:+.1f}%"
+                    else:
+                        ob_emoji = "⚪"
+                        ob_text = f"Balanced: {imbalance_pct:+.1f}%"
+                    message += f"\n*Order Book:*\n"
+                    message += f"{ob_emoji} {ob_text}\n"
+                elif data_level == 'level1':
+                    message += f"\n*Data:* 📈 Level 1\n"
+                elif data_level == 'historical':
+                    message += f"\n*Data:* 📉 Historical\n"
 
             # Activity (mobile-friendly, one per line)
             cycles = status.get('cycle_count', 0)

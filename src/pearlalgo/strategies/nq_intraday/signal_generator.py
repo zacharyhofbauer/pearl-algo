@@ -49,6 +49,7 @@ class NQSignalGenerator:
         self._signal_window_seconds = signal_settings.get("duplicate_window_seconds", 300)
         self._min_confidence = signal_settings.get("min_confidence", 0.50)
         self._min_risk_reward = signal_settings.get("min_risk_reward", 1.5)
+        self._duplicate_price_threshold_pct = signal_settings.get("duplicate_price_threshold_pct", 0.5) / 100.0
 
         logger.info("NQSignalGenerator initialized")
 
@@ -74,8 +75,8 @@ class NQSignalGenerator:
         df_5m = market_data.get("df_5m")
         df_15m = market_data.get("df_15m")
 
-        # Scan for signals with MTF context
-        raw_signals = self.scanner.scan(df, df_5m=df_5m, df_15m=df_15m)
+        # Scan for signals with MTF context and order book data
+        raw_signals = self.scanner.scan(df, df_5m=df_5m, df_15m=df_15m, market_data=market_data)
         
         # Log raw signal count at INFO level for observability
         logger.info(f"Raw signals from scanner: {len(raw_signals)}")
@@ -91,11 +92,62 @@ class NQSignalGenerator:
                     f"entry={raw_signal.get('entry_price', 0):.2f}"
                 )
 
+        # Get order book data for signal filtering
+        latest_bar = market_data.get("latest_bar")
+        order_book_available = (
+            latest_bar
+            and latest_bar.get("order_book")
+            and latest_bar["order_book"].get("bids")
+        )
+        
         # Validate and filter signals
         validated_signals = []
         for signal in raw_signals:
+            # Apply order book filter if Level 2 data available
+            if order_book_available:
+                order_book_imbalance = latest_bar.get("imbalance", 0.0)
+                signal_direction = signal.get("direction", "")
+                
+                # Filter signals based on order book alignment
+                # Long signals need positive imbalance (more bids), short need negative (more asks)
+                if signal_direction == "long" and order_book_imbalance < -0.2:
+                    logger.debug(
+                        f"Signal filtered by order book: long signal rejected "
+                        f"(imbalance: {order_book_imbalance:.2f}, strong ask pressure)"
+                    )
+                    continue
+                elif signal_direction == "short" and order_book_imbalance > 0.2:
+                    logger.debug(
+                        f"Signal filtered by order book: short signal rejected "
+                        f"(imbalance: {order_book_imbalance:.2f}, strong bid pressure)"
+                    )
+                    continue
+            
             if self._validate_signal(signal):
                 validated_signal = self._format_signal(signal, market_data)
+                
+                # Apply order book confidence adjustment if available
+                if order_book_available:
+                    order_book_imbalance = latest_bar.get("imbalance", 0.0)
+                    signal_direction = validated_signal.get("direction", "")
+                    current_confidence = validated_signal.get("confidence", 0.5)
+                    
+                    # Boost confidence when order book aligns with signal
+                    if signal_direction == "long" and order_book_imbalance > 0.15:
+                        confidence_boost = min(0.10, order_book_imbalance * 0.3)
+                        validated_signal["confidence"] = min(1.0, current_confidence + confidence_boost)
+                        logger.debug(
+                            f"Order book confidence boost: +{confidence_boost:.3f} "
+                            f"(imbalance: {order_book_imbalance:.2f})"
+                        )
+                    elif signal_direction == "short" and order_book_imbalance < -0.15:
+                        confidence_boost = min(0.10, abs(order_book_imbalance) * 0.3)
+                        validated_signal["confidence"] = min(1.0, current_confidence + confidence_boost)
+                        logger.debug(
+                            f"Order book confidence boost: +{confidence_boost:.3f} "
+                            f"(imbalance: {order_book_imbalance:.2f})"
+                        )
+                
                 if not self._is_duplicate(validated_signal):
                     logger.debug(
                         f"Signal passed validation: type={validated_signal.get('type')}, "
@@ -308,6 +360,15 @@ class NQSignalGenerator:
                 "bid": latest_bar.get("bid"),
                 "ask": latest_bar.get("ask"),
             }
+            # Add order book metrics if available
+            if latest_bar.get("order_book") and latest_bar["order_book"].get("bids"):
+                formatted["order_book"] = {
+                    "imbalance": latest_bar.get("imbalance", 0.0),
+                    "bid_depth": latest_bar.get("bid_depth", 0),
+                    "ask_depth": latest_bar.get("ask_depth", 0),
+                    "weighted_mid": latest_bar.get("weighted_mid"),
+                    "data_level": latest_bar.get("_data_level", "unknown"),
+                }
 
         # Add indicator values for context
         if df is not None and not df.empty:
@@ -346,10 +407,9 @@ class NQSignalGenerator:
 
             # Also check if price is too close (within threshold for same signal)
             price_close = False
-            duplicate_price_threshold_pct = signal_settings.get("duplicate_price_threshold_pct", 0.5) / 100.0  # Convert to decimal
             if recent_entry > 0 and signal_entry > 0:
                 price_diff_pct = abs(signal_entry - recent_entry) / recent_entry
-                price_close = price_diff_pct < duplicate_price_threshold_pct
+                price_close = price_diff_pct < self._duplicate_price_threshold_pct
 
             if same_type and same_direction and (within_time_window or price_close):
                 return True

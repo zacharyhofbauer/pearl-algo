@@ -490,6 +490,18 @@ class NQAgentService:
         except Exception:
             pass
 
+        # Get latest bar for order book info
+        latest_bar = None
+        try:
+            # Try to get latest market data (non-blocking)
+            if hasattr(self, 'data_fetcher'):
+                # Get the last fetched market data if available
+                if hasattr(self.data_fetcher, '_last_market_data'):
+                    market_data = self.data_fetcher._last_market_data
+                    latest_bar = market_data.get("latest_bar")
+        except Exception:
+            pass  # Ignore errors when getting latest bar for status
+
         return {
             "running": self.running,
             "paused": self.paused,
@@ -497,6 +509,7 @@ class NQAgentService:
             "uptime": uptime,
             "cycle_count": self.cycle_count,
             "signal_count": self.signal_count,
+            "latest_bar": latest_bar,  # Include for order book transparency
             "error_count": self.error_count,
             "connection_failures": self.connection_failures,
             "connection_status": connection_status,
@@ -547,13 +560,15 @@ class NQAgentService:
             status["current_time"] = now
             status["symbol"] = self.config.symbol
             
-            # Try to get latest price
+            # Try to get latest price and order book info
             try:
                 market_data = await self.data_fetcher.fetch_latest_data()
                 if market_data.get("latest_bar"):
                     latest_bar = market_data["latest_bar"]
                     if isinstance(latest_bar, dict) and "close" in latest_bar:
                         status["latest_price"] = latest_bar["close"]
+                        # Include latest_bar for order book transparency in heartbeat
+                        status["latest_bar"] = latest_bar
             except Exception as e:
                 logger.debug(f"Could not fetch price for heartbeat: {e}")
             

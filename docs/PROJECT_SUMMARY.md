@@ -856,7 +856,8 @@ cat data/nq_agent_state/performance.json | jq
    - Real-time market data subscription not available (Error 354)
    - Using delayed/historical data instead
    - **Workaround**: Using last bar from historical data (working)
-   - **Solution**: Subscribe to market data in IBKR account
+   - **Solution**: Subscribe to CME Real-Time (Level 1) - $1.25/month
+   - **Guide**: See [MARKET_DATA_SUBSCRIPTION.md](MARKET_DATA_SUBSCRIPTION.md) for detailed instructions
 
 2. **Signal Generation**:
    - Only generates signals during market hours (09:30-16:00 ET)
@@ -991,6 +992,7 @@ The system is ready for production use and optimized for prop firm trading with 
 - `docs/NQ_AGENT_GUIDE.md` - Operational guide (how to run and operate)
 - `docs/TESTING_GUIDE.md` - Complete testing guide (all testing procedures)
 - `docs/GATEWAY.md` - IBKR Gateway setup
+- `docs/MARKET_DATA_SUBSCRIPTION.md` - How to get live market data (fix Error 354)
 
 **Last Updated:** 2025-12-16  
 **Current Configuration:** MNQ (Mini NQ) - Prop Firm Style Trading

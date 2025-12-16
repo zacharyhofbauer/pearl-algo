@@ -65,6 +65,9 @@ class NQAgentDataFetcher:
         # Multi-timeframe buffers
         self._data_buffer_5m: Optional[pd.DataFrame] = None
         self._data_buffer_15m: Optional[pd.DataFrame] = None
+        
+        # Store last market data for status updates
+        self._last_market_data: Optional[Dict] = None
 
         logger.info(f"NQAgentDataFetcher initialized with provider={type(data_provider).__name__}")
 
@@ -102,7 +105,9 @@ class NQAgentDataFetcher:
 
             if df.empty:
                 logger.warning(f"No historical data available for {self.config.symbol}")
-                return {"df": pd.DataFrame(), "latest_bar": None}
+                market_data = {"df": pd.DataFrame(), "latest_bar": None}
+                self._last_market_data = market_data
+                return market_data
 
             # Data quality checks
             # Check for missing values
@@ -251,7 +256,9 @@ class NQAgentDataFetcher:
 
             if latest_bar is None:
                 logger.warning(f"No latest bar available for {self.config.symbol}")
-                return {"df": pd.DataFrame(), "latest_bar": None}
+                market_data = {"df": pd.DataFrame(), "latest_bar": None}
+                self._last_market_data = market_data
+                return market_data
             
             # Add data source metadata to latest_bar for tracking
             latest_bar["_data_source"] = data_source
@@ -283,12 +290,16 @@ class NQAgentDataFetcher:
             # Fetch multi-timeframe data
             df_5m, df_15m = await self._fetch_multitimeframe_data(end)
 
-            return {
+            # Store market data for status updates
+            market_data = {
                 "df": self._data_buffer.copy(),
                 "latest_bar": latest_bar,
                 "df_5m": df_5m,
                 "df_15m": df_15m,
             }
+            self._last_market_data = market_data
+
+            return market_data
 
         except Exception as e:
             # Use ErrorHandler for standardized error handling
@@ -297,12 +308,14 @@ class NQAgentDataFetcher:
                 context={"symbol": self.config.symbol, "timeframe": self.config.timeframe},
             )
             # Return empty data instead of raising to allow graceful degradation
-            return {
+            market_data = {
                 "df": pd.DataFrame(),
                 "latest_bar": None,
                 "df_5m": pd.DataFrame(),
                 "df_15m": pd.DataFrame(),
             }
+            self._last_market_data = market_data
+            return market_data
 
     async def _fetch_multitimeframe_data(self, end: datetime) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
