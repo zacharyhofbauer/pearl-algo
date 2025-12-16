@@ -160,17 +160,44 @@ class GetLatestBarTask(Task):
         if use_level2:
             depth_ticker = None
             try:
-                logger.debug(f"Requesting Level 2 market depth for {self.symbol} (depth: {order_book_depth} levels)")
+                logger.info(f"Attempting Level 2 market depth for {self.symbol} (depth: {order_book_depth} levels)")
                 depth_ticker = ib.reqMktDepth(contract, numRows=order_book_depth, isSmartDepth=False)
                 
-                # Wait for order book data to populate
-                time.sleep(1.5)
+                # Wait for order book data to populate and errors to arrive
+                # IBKR errors (354, 310) are logged but we need to check if we got data
+                time.sleep(2.5)  # Increased wait time for errors to propagate and data to arrive
+                
+                # Check if we have order book data - if not, likely an error occurred
+                # IBKR errors are logged to stderr but don't raise exceptions
+                # The ticker object might exist but be empty if there's an error
+                has_order_book_data = False
+                if depth_ticker:
+                    # Check if we actually got order book data
+                    bids_list = list(depth_ticker.domBids) if depth_ticker.domBids else []
+                    asks_list = list(depth_ticker.domAsks) if depth_ticker.domAsks else []
+                    has_order_book_data = len(bids_list) > 0 or len(asks_list) > 0
+                    
+                    # If no data after waiting, likely an error (354 or 310)
+                    if not has_order_book_data:
+                        logger.warning(
+                            f"⚠️  Level 2 request for {self.symbol} returned no order book data after 2.5s wait. "
+                            f"This indicates Error 354 (subscription not available) or Error 310 (market depth not found). "
+                            f"Check your IBKR Market Data Subscription Manager to ensure 'CME Real-Time (NP,L2)' is active for API access. "
+                            f"Falling back to Level 1."
+                        )
+                        try:
+                            ib.cancelMktDepth(contract)
+                        except Exception:
+                            pass
+                        depth_ticker = None
                 
                 # Check if we have order book data
-                if depth_ticker and (depth_ticker.domBids or depth_ticker.domAsks):
+                if depth_ticker and has_order_book_data:
                     # Extract order book
                     bids = list(depth_ticker.domBids) if depth_ticker.domBids else []
                     asks = list(depth_ticker.domAsks) if depth_ticker.domAsks else []
+                    
+                    logger.debug(f"Level 2 data received for {self.symbol}: {len(bids)} bid levels, {len(asks)} ask levels")
                     
                     # Calculate order book metrics
                     order_book_metrics = _calculate_order_book_metrics(bids, asks)
@@ -217,7 +244,7 @@ class GetLatestBarTask(Task):
                             if level1_ticker:
                                 ib.cancelMktData(contract)
                             
-                            logger.debug(f"Got Level 2 data for {self.symbol}: ${last_price:.2f}, imbalance={order_book_metrics['imbalance']:.2f}")
+                            logger.info(f"✅ Successfully retrieved Level 2 data for {self.symbol}: ${last_price:.2f}, imbalance={order_book_metrics['imbalance']:.2f}, bid_depth={order_book_metrics['bid_depth']}, ask_depth={order_book_metrics['ask_depth']}")
                             return result
                         except Exception as e:
                             if level1_ticker:
@@ -230,14 +257,12 @@ class GetLatestBarTask(Task):
                     # Cleanup depth ticker
                     ib.cancelMktDepth(contract)
                     depth_ticker = None
-                else:
-                    logger.debug(f"Level 2 data request for {self.symbol} returned no order book data, falling back to Level 1")
-                    if depth_ticker:
-                        ib.cancelMktDepth(contract)
+                # If we get here, Level 2 didn't work (no data or error)
+                # The depth_ticker cleanup is already handled above
             except Exception as e:
                 error_str = str(e).lower()
-                if "354" in str(e) or "subscription" in error_str:
-                    logger.debug(f"Level 2 subscription not available for {self.symbol}, falling back to Level 1")
+                if "354" in str(e) or "310" in str(e) or "subscription" in error_str:
+                    logger.info(f"Level 2 subscription not available for {self.symbol} (Error 354/310), falling back to Level 1")
                 else:
                     logger.debug(f"Level 2 data request failed for {self.symbol}: {e}, falling back to Level 1")
                 if depth_ticker:
@@ -316,15 +341,39 @@ class GetLatestBarTask(Task):
             logger.info(f"Using historical data fallback for {self.symbol} (real-time subscription not available)")
             # IBKR requires duration format: integer{SPACE}unit where unit is S|D|W|M|Y
             # For 5 minutes, use "300 S" (300 seconds) since "M" is for months, not minutes
-            bars = ib.reqHistoricalData(
-                contract,
-                endDateTime="",
-                durationStr="300 S",  # 300 seconds = 5 minutes (IBKR format: integer{SPACE}unit)
-                barSizeSetting="1 min",
-                whatToShow="TRADES",
-                useRTH=True,  # Use regular trading hours only for more accurate data
-                formatDate=1,
-            )
+            # Try with useRTH=False first if market might be closed
+            bars = None
+            try:
+                bars = ib.reqHistoricalData(
+                    contract,
+                    endDateTime="",
+                    durationStr="300 S",  # 300 seconds = 5 minutes (IBKR format: integer{SPACE}unit)
+                    barSizeSetting="1 min",
+                    whatToShow="TRADES",
+                    useRTH=True,  # Use regular trading hours only for more accurate data
+                    formatDate=1,
+                )
+            except Exception as hist_e:
+                error_str = str(hist_e).lower()
+                # Error 162 often means market is closed or no data available
+                if "162" in str(hist_e) or "hmds" in error_str or "no data" in error_str:
+                    logger.warning(f"Historical data request failed (Error 162) - market may be closed or contract expired. Trying with useRTH=False...")
+                    # Try again without RTH restriction
+                    try:
+                        bars = ib.reqHistoricalData(
+                            contract,
+                            endDateTime="",
+                            durationStr="1 D",  # Try 1 day instead
+                            barSizeSetting="1 min",
+                            whatToShow="TRADES",
+                            useRTH=False,  # Allow after-hours data
+                            formatDate=1,
+                        )
+                    except Exception as hist_e2:
+                        logger.warning(f"Historical data fallback also failed: {hist_e2}")
+                        bars = None
+                else:
+                    raise
             
             if bars:
                 # Get the most recent bar
@@ -367,7 +416,16 @@ class GetLatestBarTask(Task):
             else:
                 logger.warning(f"No historical bars returned for {self.symbol}")
         except Exception as e:
-            logger.warning(f"Error fetching historical data fallback for {self.symbol}: {e}")
+            error_str = str(e).lower()
+            # Error 162 often means market is closed, contract expired, or no data available
+            if "162" in str(e) or "hmds" in error_str or "no data" in error_str:
+                logger.warning(
+                    f"Historical data unavailable for {self.symbol} (Error 162): "
+                    f"Market may be closed, contract may have expired, or no data available. "
+                    f"Error: {e}"
+                )
+            else:
+                logger.warning(f"Error fetching historical data fallback for {self.symbol}: {e}")
         
         return None
 

@@ -47,8 +47,24 @@ else
     else
         echo "Found service processes: $PIDS"
         for PID in $PIDS; do
-            kill "$PID" 2>/dev/null && echo "Stopped PID: $PID"
+            echo "Stopping PID: $PID..."
+            kill "$PID" 2>/dev/null
         done
+        
+        # Wait for graceful shutdown
+        sleep 2
+        
+        # Check if any processes are still running and force kill
+        REMAINING=$(pgrep -f "pearlalgo.nq_agent.main")
+        if [ -n "$REMAINING" ]; then
+            echo "⚠️  Some processes didn't stop gracefully, force killing..."
+            for PID in $REMAINING; do
+                kill -9 "$PID" 2>/dev/null && echo "Force killed PID: $PID"
+            done
+        fi
+        
+        # Clean up PID file if it exists
+        rm -f "$PID_FILE"
         echo "✅ Service stopped"
     fi
 fi

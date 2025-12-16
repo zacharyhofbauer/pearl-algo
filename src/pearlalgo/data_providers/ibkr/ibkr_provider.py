@@ -346,8 +346,21 @@ class IBKRProvider(DataProvider):
             )
 
             future = self._executor.submit_task(task)
-            bars = await asyncio.wrap_future(future)
-
+            try:
+                bars = await asyncio.wrap_future(future)
+            except Exception as e:
+                error_str = str(e).lower()
+                # Check for Error 162: TWS session conflict
+                if "162" in str(e) or "tws session" in error_str or "different ip" in error_str:
+                    logger.error(
+                        f"❌ IBKR Error 162: TWS session conflict detected for {symbol}\n"
+                        f"   This error occurs when Trader Workstation (TWS) is connected from a different IP address.\n"
+                        f"   You cannot use both TWS and Gateway simultaneously from different IPs.\n"
+                        f"   Solution: Close TWS or disconnect it, then restart the Gateway.\n"
+                        f"   Original error: {e}"
+                    )
+                raise
+            
             if not bars:
                 logger.warning(f"No historical data returned for {symbol}")
                 return pd.DataFrame()

@@ -373,6 +373,73 @@ tail -f data/nq_agent_state/signals.jsonl | jq
    - If running in foreground, check terminal output for warnings
    - Review service state: `cat data/nq_agent_state/state.json | jq`
 
+### IBKR Error 162: TWS Session Conflict
+
+**Symptom:** Error message: `Error 162: Trading TWS session is connected from a different IP address`
+
+**Cause:** Trader Workstation (TWS) is connected from a different IP address while Gateway is also trying to connect. IBKR doesn't allow both TWS and Gateway to be connected simultaneously from different IPs.
+
+**Solution:**
+1. **Check for TWS/Gateway conflicts:**
+   ```bash
+   ./scripts/gateway/check_tws_conflict.sh
+   ```
+
+2. **Close TWS or disconnect it:**
+   - If TWS is running on another machine, close it
+   - If TWS is running locally, close the application
+   - Or disconnect TWS from IBKR account
+
+3. **Restart Gateway:**
+   ```bash
+   ./scripts/gateway/stop_ibgateway_ibc.sh
+   ./scripts/gateway/start_ibgateway_ibc.sh
+   ```
+
+4. **Restart NQ Agent Service:**
+   ```bash
+   ./scripts/lifecycle/stop_nq_agent_service.sh
+   ./scripts/lifecycle/start_nq_agent_service.sh
+   ```
+
+**Prevention:** Only use Gateway (not TWS) when running the automated service. If you need TWS for manual trading, disconnect Gateway first.
+
+### Multiple Service Processes Running
+
+**Symptom:** `check_nq_agent_status.sh` shows multiple PIDs running
+
+**Cause:** Service didn't stop cleanly, leaving orphaned processes
+
+**Solution:**
+1. **Stop all service processes:**
+   ```bash
+   ./scripts/lifecycle/stop_nq_agent_service.sh
+   ```
+
+2. **Verify all processes are stopped:**
+   ```bash
+   ./scripts/lifecycle/check_nq_agent_status.sh
+   ```
+
+3. **If processes persist, manually kill them:**
+   ```bash
+   # Find all processes
+   pgrep -f "pearlalgo.nq_agent.main"
+   
+   # Kill each PID
+   kill -9 <PID>
+   ```
+
+4. **Clean up PID file:**
+   ```bash
+   rm -f logs/nq_agent.pid
+   ```
+
+5. **Restart service:**
+   ```bash
+   ./scripts/lifecycle/start_nq_agent_service.sh
+   ```
+
 ---
 
 ## 📁 File Locations
