@@ -2,9 +2,8 @@
 # Check NQ Agent Service Status
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LOG_DIR="$PROJECT_DIR/logs"
-PID_FILE="$LOG_DIR/nq_agent.pid"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PID_FILE="$PROJECT_DIR/scripts/logs/nq_agent.pid"
 STATE_FILE="$PROJECT_DIR/data/nq_agent_state/state.json"
 
 cd "$PROJECT_DIR"
@@ -56,19 +55,6 @@ if [ -f "$STATE_FILE" ]; then
     fi
 else
     echo "📊 Service State: No state file found (service may not have run yet)"
-fi
-
-echo ""
-
-# Check recent logs
-LOG_FILE="$LOG_DIR/nq_agent.log"
-if [ -f "$LOG_FILE" ]; then
-    echo "📄 Latest Log Entry:"
-    tail -1 "$LOG_FILE" 2>/dev/null | head -c 100
-    echo ""
-    echo "   Log file: $LOG_FILE"
-else
-    echo "📄 Logs: No log file found"
 fi
 
 echo ""

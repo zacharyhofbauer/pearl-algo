@@ -42,10 +42,10 @@ To test with **real market data**, you need to:
 1. **Use IB Gateway with Live Data**
    ```bash
    # Start IB Gateway
-   ./scripts/start_ibgateway_ibc.sh
+   ./scripts/gateway/start_ibgateway_ibc.sh
    
    # Start agent with real data provider
-   ./scripts/start_nq_agent_service.sh
+   ./scripts/lifecycle/start_nq_agent_service.sh
    ```
 
 2. **Monitor Real Signals**

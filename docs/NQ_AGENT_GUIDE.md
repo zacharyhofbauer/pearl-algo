@@ -26,15 +26,14 @@ cd ~/pearlalgo-dev-ai-agents
 # 1. Ensure IBKR Gateway is running
 ./scripts/gateway/check_gateway_status.sh
 
-# 2. Start MNQ Agent Service
+# 2. Start MNQ Agent Service (foreground - shows live logs in terminal)
 ./scripts/lifecycle/start_nq_agent_service.sh
 
-# 3. Check status
+# 3. Check status (in another terminal)
 ./scripts/lifecycle/check_nq_agent_status.sh
-
-# 4. View logs
-tail -f logs/nq_agent.log
 ```
+
+**Note:** The service runs in foreground mode by default, showing all logs directly in your terminal. Press `Ctrl+C` to stop. To run in background (no terminal output), use `--background` flag.
 
 ---
 
@@ -91,16 +90,17 @@ For detailed gateway setup, see [GATEWAY.md](GATEWAY.md).
 
 ## ⚙️ Service Management
 
-### Start Service (Background)
+### Start Service (Foreground - Default)
 ```bash
 ./scripts/lifecycle/start_nq_agent_service.sh
 ```
+**Default behavior:** Service runs in foreground with live terminal output. All logs appear in your terminal. Press `Ctrl+C` to stop.
 
-### Start Service (Foreground)
+### Start Service (Background)
 ```bash
-cd ~/pearlalgo-dev-ai-agents
-python3 -m pearlalgo.nq_agent.main
+./scripts/lifecycle/start_nq_agent_service.sh --background
 ```
+**Background mode:** Service runs in background with no terminal output. Use this if you want to run the service detached from your terminal session.
 
 ### Stop Service
 ```bash
@@ -110,7 +110,7 @@ python3 -m pearlalgo.nq_agent.main
 pkill -f "pearlalgo.nq_agent.main"
 
 # Or using PID file:
-kill $(cat logs/nq_agent.pid) 2>/dev/null || true
+kill $(cat scripts/logs/nq_agent.pid) 2>/dev/null || true
 ```
 
 ### Check Service Status
@@ -122,9 +122,9 @@ ps aux | grep "pearlalgo.nq_agent.main"
 ```
 
 ### View Logs
-```bash
-tail -f logs/nq_agent.log
-```
+**Foreground mode (default):** Logs appear directly in your terminal - no file needed.
+
+**Background mode:** No log files are created. To see output, run in foreground mode or check Telegram notifications for status updates.
 
 ---
 
@@ -222,10 +222,10 @@ R:R: 1.47:1
    ./scripts/lifecycle/check_nq_agent_status.sh
    ```
 
-3. **Review Overnight Logs:**
-   ```bash
-   tail -100 logs/nq_agent.log
-   ```
+3. **Review Overnight Activity:**
+   - Check Telegram for overnight notifications
+   - Review service state: `cat data/nq_agent_state/state.json | jq`
+   - Check recent signals: `tail -20 data/nq_agent_state/signals.jsonl | jq`
 
 ### During Trading Hours
 - Monitor Telegram for signals
@@ -274,7 +274,8 @@ cat data/nq_agent_state/performance.json | jq
 
 **View Real-time Logs:**
 ```bash
-tail -f logs/nq_agent.log
+# Run service in foreground to see live logs:
+./scripts/lifecycle/start_nq_agent_service.sh
 ```
 
 **View Real-time Signals:**
@@ -303,10 +304,10 @@ tail -f data/nq_agent_state/signals.jsonl | jq
    echo $TELEGRAM_CHAT_ID
    ```
 
-3. **Check logs for errors:**
-   ```bash
-   tail -50 logs/nq_agent.log
-   ```
+3. **Check for errors:**
+   - If running in foreground, check terminal output
+   - Check Telegram for error notifications
+   - Review service state: `cat data/nq_agent_state/state.json | jq .error_count`
 
 4. **Verify configuration:**
    ```bash
@@ -349,10 +350,10 @@ tail -f data/nq_agent_state/signals.jsonl | jq
    ```
 
 2. **Service auto-pauses after 10 consecutive errors** (circuit breaker)
-3. **Check logs for details:**
-   ```bash
-   tail -100 logs/nq_agent.log | grep ERROR
-   ```
+3. **Check for error details:**
+   - If running in foreground, check terminal output for ERROR messages
+   - Check Telegram for error notifications
+   - Review service state: `cat data/nq_agent_state/state.json | jq`
 
 4. **Check connection failures:**
    ```bash
@@ -367,10 +368,10 @@ tail -f data/nq_agent_state/signals.jsonl | jq
    ./scripts/gateway/check_gateway_status.sh
    ```
 3. **Check buffer size** (should be > 10 bars)
-4. **Review data quality alerts** in logs:
-   ```bash
-   tail -100 logs/nq_agent.log | grep -i "data quality\|stale\|buffer"
-   ```
+4. **Review data quality alerts:**
+   - Check Telegram for data quality warnings
+   - If running in foreground, check terminal output for warnings
+   - Review service state: `cat data/nq_agent_state/state.json | jq`
 
 ---
 
@@ -380,9 +381,8 @@ tail -f data/nq_agent_state/signals.jsonl | jq
 - `config/config.yaml` - Main configuration file
 - `.env` - Environment variables (not in git)
 
-**Logs:**
-- `logs/nq_agent.log` - Service logs
-- `logs/nq_agent.pid` - Process ID file
+**Process Management:**
+- `scripts/logs/nq_agent.pid` - Process ID file (for background mode)
 
 **State & Data:**
 - `data/nq_agent_state/state.json` - Current service state

@@ -4,7 +4,7 @@
 
 ```bash
 cd ~/pearlalgo-dev-ai-agents
-./scripts/start_ibgateway_ibc.sh
+./scripts/gateway/start_ibgateway_ibc.sh
 ```
 
 **What happens:**
@@ -23,7 +23,7 @@ pkill -f "java.*IBC.jar"
 
 ```bash
 cd ~/pearlalgo-dev-ai-agents
-./scripts/check_gateway_status.sh
+./scripts/gateway/check_gateway_status.sh
 ```
 
 **Shows:**
@@ -101,7 +101,7 @@ ss -tuln | grep 5901 && echo "✅ VNC running" || echo "❌ Not running"
 pkill -9 -f "java.*IBC.jar"
 pkill -9 -f "ibcstart.sh"
 sleep 3
-./scripts/start_ibgateway_ibc.sh
+./scripts/gateway/start_ibgateway_ibc.sh
 ```
 
 ### Gateway running but API not ready
@@ -119,14 +119,14 @@ find ~/pearlalgo-dev-ai-agents/ibkr/Jts -name "autorestart" -type f -delete
 ### Start Gateway
 ```bash
 cd ~/pearlalgo-dev-ai-agents
-./scripts/start_ibgateway_ibc.sh
-./scripts/check_gateway_status.sh
+./scripts/gateway/start_ibgateway_ibc.sh
+./scripts/gateway/check_gateway_status.sh
 ```
 
 ### Stop Gateway
 ```bash
 pkill -f "java.*IBC.jar"
-./scripts/check_gateway_status.sh
+./scripts/gateway/check_gateway_status.sh
 ```
 
 ### Restart Gateway
@@ -134,7 +134,7 @@ pkill -f "java.*IBC.jar"
 pkill -f "java.*IBC.jar"
 sleep 5
 cd ~/pearlalgo-dev-ai-agents
-./scripts/start_ibgateway_ibc.sh
+./scripts/gateway/start_ibgateway_ibc.sh
 ```
 
 ---

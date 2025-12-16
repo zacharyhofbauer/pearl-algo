@@ -679,17 +679,22 @@ pip install -e .
 # Add IBKR_HOST, IBKR_PORT, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 # 4. Start IBKR Gateway
-./scripts/start_ibgateway_ibc.sh
+./scripts/gateway/start_ibgateway_ibc.sh
 
 # 5. Verify Gateway
-./scripts/check_gateway_status.sh
+./scripts/gateway/check_gateway_status.sh
 ```
 
 ### Running the Service
 
+**Start Service (Foreground - default)**:
+```bash
+./scripts/lifecycle/start_nq_agent_service.sh
+```
+
 **Start Service (Background)**:
 ```bash
-./scripts/start_nq_agent_service.sh
+./scripts/lifecycle/start_nq_agent_service.sh --background
 ```
 
 **Stop Service**:
