@@ -349,8 +349,10 @@ class RegimeDetector:
             if "breakout" in signal_type:
                 adjusted += 0.05
         elif volatility == "high":
-            # High vol: wider stops, lower confidence (exhaustion risk)
-            adjusted -= 0.05
+            # High vol: check if this is expansion (opportunity) vs sustained high vol (exhaustion)
+            # For now, reduce penalty from -0.05 to -0.02 during high volatility
+            # Expansion detection happens in scanner, which boosts base confidence
+            adjusted -= 0.02  # Reduced penalty (was -0.05) - expansion days are opportunities
 
         # Session-based adjustments
         session = regime.get("session", "afternoon")

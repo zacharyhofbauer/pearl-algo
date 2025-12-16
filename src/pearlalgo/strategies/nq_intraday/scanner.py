@@ -271,7 +271,24 @@ class NQScanner:
 
         def calculate_signal_score(signal_type: str, latest: pd.Series, df: pd.DataFrame) -> float:
             """Calculate signal quality score (0-1)."""
-            score = 0.45  # Base score (slightly lower to allow more signals)
+            # Detect volatility expansion (ATR increased >20% in last 5 bars)
+            atr_expansion = False
+            current_atr = latest.get("atr", 0)
+            atr_5bars_ago = current_atr
+            if len(df) >= 5 and "atr" in df.columns:
+                current_atr = latest.get("atr", 0)
+                atr_5bars_ago = df.iloc[-5].get("atr", 0) if len(df) >= 5 else current_atr
+                if atr_5bars_ago > 0:
+                    atr_expansion_ratio = current_atr / atr_5bars_ago
+                    atr_expansion = atr_expansion_ratio > 1.20  # 20% increase
+            
+            # Base score: boost during volatility expansion
+            if atr_expansion and regime.get("volatility") == "high":
+                score = 0.55  # Boosted base score for volatility expansion
+                expansion_pct = ((current_atr / atr_5bars_ago - 1) * 100) if atr_5bars_ago > 0 else 0
+                logger.debug(f"Volatility expansion detected (ATR +{expansion_pct:.1f}%), boosting base confidence to 0.55")
+            else:
+                score = 0.45  # Base score (slightly lower to allow more signals)
 
             # Volume confirmation (adjusted weights)
             volume_ratio = latest.get("volume_ratio", 1.0)
@@ -287,8 +304,20 @@ class NQScanner:
 
             # RSI confirmation (adjusted thresholds)
             rsi = latest.get("rsi", 50)
-            if signal_type == "momentum_long" and 35 < rsi < 75:  # Wider range
-                score += 0.12
+            
+            # For momentum signals: check relative RSI movement OR absolute level
+            # During fast moves, RSI oscillates - relative movement captures momentum better
+            if signal_type == "momentum_long":
+                rsi_momentum = False
+                if len(df) >= 3 and "rsi" in df.columns:
+                    rsi_3bars_ago = df.iloc[-3].get("rsi", rsi) if len(df) >= 3 else rsi
+                    rsi_momentum = (rsi - rsi_3bars_ago) > 5  # RSI increased >5 points in 3 bars
+                
+                # Accept if RSI momentum OR absolute level in range
+                if rsi_momentum or (35 < rsi < 75):
+                    score += 0.12
+                    if rsi_momentum:
+                        logger.debug(f"RSI momentum detected (+{rsi - rsi_3bars_ago:.1f} points in 3 bars), using relative movement")
             elif signal_type == "mean_reversion_long" and rsi < 35:  # Slightly higher threshold
                 score += 0.18  # Strong confirmation for mean reversion
             elif signal_type == "breakout_long" and rsi > 45:  # Lower threshold
@@ -434,8 +463,16 @@ class NQScanner:
                     )
 
                     # Mean reversion can work against order flow (it's counter-trend)
+                    # During high volatility, order flow may lag reversals - relax threshold
+                    if regime.get("volatility") == "high":
+                        # High volatility: allow mean reversion even if order flow adjustment >= -0.20
+                        flow_threshold = -0.20
+                    else:
+                        # Normal volatility: reject if order flow adjustment < -0.12
+                        flow_threshold = -0.12
+
                     # Only reject if very strong conflict
-                    if is_flow_aligned or flow_adjustment >= -0.12:
+                    if is_flow_aligned or flow_adjustment >= flow_threshold:
                         confidence = max(0.0, min(1.0, confidence + flow_adjustment * 0.5))  # Less weight for mean reversion
 
                         signals.append({
@@ -474,6 +511,9 @@ class NQScanner:
                     stop_loss = min(stop_loss, float(recent_high) - (atr * 0.5))
                     confidence = calculate_signal_score("breakout_long", latest, df)
 
+                    # Structure-first gate: check if this is a fresh breakout (within 0.3% of level)
+                    is_fresh_breakout = abs(current_price - recent_high) / recent_high < 0.003
+                    
                     # Adjust confidence based on regime
                     confidence = self.regime_detector.adjust_confidence_by_regime(
                         "breakout_long", confidence, regime
@@ -497,8 +537,17 @@ class NQScanner:
                         # Breaking 5m resistance - boost confidence
                         mtf_adjustment += 0.10
 
-                    # Reject if strongly conflicting
-                    if is_aligned or mtf_adjustment >= -0.20:
+                    # Structure-first: allow fresh breakouts even with MTF conflicts
+                    # Fresh breakouts are structure-based, not indicator-based
+                    if is_fresh_breakout:
+                        # For fresh breakouts, allow even if MTF adjustment >= -0.25 (was -0.20)
+                        mtf_threshold = -0.25
+                        logger.debug(f"Fresh breakout detected (within 0.3% of level), applying structure-first gate")
+                    else:
+                        mtf_threshold = -0.20
+
+                    # Reject if strongly conflicting (unless fresh breakout)
+                    if is_aligned or mtf_adjustment >= mtf_threshold:
                         confidence = max(0.0, min(1.0, confidence + mtf_adjustment))
 
                         # Adjust confidence based on VWAP position (breakouts benefit from VWAP support)
@@ -519,8 +568,15 @@ class NQScanner:
                             "long", order_flow_data
                         )
 
-                        # Reject if order flow strongly conflicts
-                        if is_flow_aligned or flow_adjustment >= -0.12:
+                        # Structure-first: for fresh breakouts, relax order flow conflict threshold
+                        if is_fresh_breakout:
+                            # Allow fresh breakouts even if order flow adjustment >= -0.20 (was -0.12)
+                            flow_threshold = -0.20
+                        else:
+                            flow_threshold = -0.12
+
+                        # Reject if order flow strongly conflicts (unless fresh breakout)
+                        if is_flow_aligned or flow_adjustment >= flow_threshold:
                             confidence = max(0.0, min(1.0, confidence + flow_adjustment))
 
                             signals.append({

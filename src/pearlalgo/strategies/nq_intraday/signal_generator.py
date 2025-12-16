@@ -76,6 +76,17 @@ class NQSignalGenerator:
 
         # Scan for signals with MTF context
         raw_signals = self.scanner.scan(df, df_5m=df_5m, df_15m=df_15m)
+        
+        # Diagnostic logging: log raw signals
+        if raw_signals:
+            logger.debug(f"Raw signals generated: {len(raw_signals)}")
+            for raw_signal in raw_signals:
+                logger.debug(
+                    f"Raw signal: type={raw_signal.get('type')}, "
+                    f"direction={raw_signal.get('direction')}, "
+                    f"confidence={raw_signal.get('confidence', 0):.3f}, "
+                    f"entry={raw_signal.get('entry_price', 0):.2f}"
+                )
 
         # Validate and filter signals
         validated_signals = []
@@ -83,6 +94,11 @@ class NQSignalGenerator:
             if self._validate_signal(signal):
                 validated_signal = self._format_signal(signal, market_data)
                 if not self._is_duplicate(validated_signal):
+                    logger.debug(
+                        f"Signal passed validation: type={validated_signal.get('type')}, "
+                        f"confidence={validated_signal.get('confidence', 0):.3f}, "
+                        f"entry={validated_signal.get('entry_price', 0):.2f}"
+                    )
                     # Score signal quality
                     quality_score = self.quality_scorer.score_signal(validated_signal)
 
@@ -96,8 +112,11 @@ class NQSignalGenerator:
                         logger.debug(
                             f"Signal filtered by quality scorer: "
                             f"type={validated_signal.get('type')}, "
+                            f"confidence={validated_signal.get('confidence', 0):.3f}, "
                             f"historical_wr={quality_score.get('historical_wr', 0):.0%}, "
-                            f"meets_threshold={quality_score.get('meets_threshold', False)}"
+                            f"meets_threshold={quality_score.get('meets_threshold', False)}, "
+                            f"information_ratio={quality_score.get('information_ratio', 0):.3f}, "
+                            f"should_send={quality_score.get('should_send', False)}"
                         )
 
         # Clean up old signals from recent list
@@ -246,6 +265,33 @@ class NQSignalGenerator:
         for recent in self._recent_signals:
             recent_time = datetime.fromisoformat(recent.get("timestamp", "").replace("Z", "+00:00"))
             time_diff = (signal_time - recent_time).total_seconds()
+            recent_entry = recent.get("entry_price", 0)
+
+            # Check if same type and direction within time window
+            same_type = recent.get("type") == signal.get("type")
+            same_direction = recent.get("direction") == signal.get("direction")
+            within_time_window = time_diff < self._signal_window_seconds
+
+            # Also check if price is too close (within 0.5% for same signal)
+            price_close = False
+            if recent_entry > 0 and signal_entry > 0:
+                price_diff_pct = abs(signal_entry - recent_entry) / recent_entry
+                price_close = price_diff_pct < 0.005  # 0.5%
+
+            if same_type and same_direction and (within_time_window or price_close):
+                return True
+
+        return False
+
+    def _cleanup_recent_signals(self) -> None:
+        """Remove old signals from recent signals list."""
+        now = datetime.now(timezone.utc)
+        self._recent_signals = [
+            s for s in self._recent_signals
+            if (now - datetime.fromisoformat(s["timestamp"].replace("Z", "+00:00"))).total_seconds()
+            < self._signal_window_seconds
+        ]
+signal_time - recent_time).total_seconds()
             recent_entry = recent.get("entry_price", 0)
 
             # Check if same type and direction within time window

@@ -102,8 +102,29 @@ class SignalQualityScorer:
         # Check if meets threshold
         meets_threshold = historical_wr >= self.min_edge_threshold
 
-        # Should send if meets threshold and has positive information ratio
-        should_send = meets_threshold and information_ratio > 0
+        # Volatility-aware bypass: if confidence >0.55 and volatility="high", allow signal
+        # even if historical WR is slightly below threshold (expansion days are opportunities)
+        signal_confidence = signal.get("confidence", 0)
+        volatility_bypass = (
+            volatility == "high" 
+            and signal_confidence > 0.55 
+            and historical_wr >= 0.52  # Still require minimum 52% expected WR
+        )
+
+        # Should send if meets threshold and has positive information ratio, OR volatility bypass
+        should_send = (meets_threshold and information_ratio > 0) or volatility_bypass
+
+        # Diagnostic logging: log quality scorer decisions when signal is rejected
+        if not should_send:
+            logger.debug(
+                f"Quality scorer rejected signal: type={signal_type}, "
+                f"confidence={signal_confidence:.3f}, "
+                f"historical_wr={historical_wr:.0%}, "
+                f"meets_threshold={meets_threshold}, "
+                f"information_ratio={information_ratio:.3f}, "
+                f"volatility={volatility}, "
+                f"volatility_bypass={volatility_bypass}"
+            )
 
         return {
             "quality_score": float(quality_score),
@@ -151,7 +172,7 @@ class SignalQualityScorer:
             performance_data: Performance data dictionary
             
         Returns:
-            Historical win rate (0-1), defaults to 0.5 if no data
+            Historical win rate (0-1), defaults to 0.5 if no data (0.52 for high volatility)
         """
         # Try to find matching historical data
         # Look for signal type + regime combination
@@ -183,6 +204,12 @@ class SignalQualityScorer:
             if total > 0:
                 return wins / total
 
+        # Volatility-aware default: high volatility expansion days are rare but high-value
+        # Use 0.52 instead of 0.5 to allow signals during expansion when no historical data exists
+        if volatility == "high":
+            logger.debug(f"No historical data for {signal_type} in {regime_type}/{volatility}, using volatility-aware default 0.52")
+            return 0.52
+        
         # Default to 0.5 (no edge) if no historical data
         return 0.5
 
