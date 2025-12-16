@@ -49,6 +49,10 @@ class NQAgentDataFetcher:
         self._data_buffer: Optional[pd.DataFrame] = None
         self._buffer_size = 100  # Keep last 100 bars
         
+        # Multi-timeframe buffers
+        self._data_buffer_5m: Optional[pd.DataFrame] = None
+        self._data_buffer_15m: Optional[pd.DataFrame] = None
+        
         logger.info(f"NQAgentDataFetcher initialized with provider={type(data_provider).__name__}")
     
     async def fetch_latest_data(self) -> Dict:
@@ -183,15 +187,79 @@ class NQAgentDataFetcher:
                 if len(self._data_buffer) > self._buffer_size:
                     self._data_buffer = self._data_buffer.tail(self._buffer_size).reset_index(drop=True)
             
+            # Fetch multi-timeframe data
+            df_5m, df_15m = await self._fetch_multitimeframe_data(end)
+            
             return {
                 "df": self._data_buffer.copy(),
                 "latest_bar": latest_bar,
+                "df_5m": df_5m,
+                "df_15m": df_15m,
             }
             
         except Exception as e:
             logger.error(f"Error fetching latest data: {e}", exc_info=True)
             # Return empty data instead of raising to allow graceful degradation
-            return {"df": pd.DataFrame(), "latest_bar": None}
+            return {
+                "df": pd.DataFrame(),
+                "latest_bar": None,
+                "df_5m": pd.DataFrame(),
+                "df_15m": pd.DataFrame(),
+            }
+    
+    async def _fetch_multitimeframe_data(self, end: datetime) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """
+        Fetch 5m and 15m timeframe data for multi-timeframe analysis.
+        
+        Args:
+            end: End datetime for data fetch
+            
+        Returns:
+            Tuple of (df_5m, df_15m)
+        """
+        try:
+            # Calculate start time (need more history for higher timeframes)
+            start_5m = end - timedelta(hours=4)  # 4 hours for 5m (48 bars)
+            start_15m = end - timedelta(hours=12)  # 12 hours for 15m (48 bars)
+            
+            loop = asyncio.get_event_loop()
+            
+            # Fetch 5m data
+            df_5m = await loop.run_in_executor(
+                None,
+                lambda: self.data_provider.fetch_historical(
+                    self.config.symbol,
+                    start=start_5m,
+                    end=end,
+                    timeframe="5m",
+                )
+            )
+            
+            # Fetch 15m data
+            df_15m = await loop.run_in_executor(
+                None,
+                lambda: self.data_provider.fetch_historical(
+                    self.config.symbol,
+                    start=start_15m,
+                    end=end,
+                    timeframe="15m",
+                )
+            )
+            
+            # Update buffers
+            if not df_5m.empty:
+                self._data_buffer_5m = df_5m.tail(50).reset_index(drop=True)
+            if not df_15m.empty:
+                self._data_buffer_15m = df_15m.tail(50).reset_index(drop=True)
+            
+            return (
+                self._data_buffer_5m.copy() if self._data_buffer_5m is not None else pd.DataFrame(),
+                self._data_buffer_15m.copy() if self._data_buffer_15m is not None else pd.DataFrame(),
+            )
+            
+        except Exception as e:
+            logger.warning(f"Error fetching multi-timeframe data: {e}")
+            return (pd.DataFrame(), pd.DataFrame())
     
     def get_buffer_size(self) -> int:
         """Get current buffer size."""

@@ -203,3 +203,5 @@ async def test_fetcher_get_buffer_size(fetcher):
     size = fetcher.get_buffer_size()
     assert size > 0
 
+
+

@@ -264,3 +264,5 @@ async def test_service_state_persistence(mock_data_provider, config, state_dir):
     
     await service2.stop()
 
+
+

@@ -165,3 +165,5 @@ def test_concurrent_access_simulation(state_manager):
     saved_signals = state_manager.get_recent_signals(limit=20)
     assert len(saved_signals) >= 10
 
+
+

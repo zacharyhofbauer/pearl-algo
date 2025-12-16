@@ -32,6 +32,11 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.strategies.nq_intraday.regime_detector import RegimeDetector
+from pearlalgo.strategies.nq_intraday.mtf_analyzer import MTFAnalyzer
+from pearlalgo.strategies.nq_intraday.volume_profile import VolumeProfile
+from pearlalgo.strategies.nq_intraday.order_flow import OrderFlowApproximator
+from pearlalgo.utils.vwap import VWAPCalculator
 
 
 class NQScanner:
@@ -52,6 +57,11 @@ class NQScanner:
             config: Configuration instance (optional)
         """
         self.config = config or NQIntradayConfig()
+        self.regime_detector = RegimeDetector()
+        self.mtf_analyzer = MTFAnalyzer()
+        self.vwap_calculator = VWAPCalculator()
+        self.volume_profile = VolumeProfile()
+        self.order_flow = OrderFlowApproximator(lookback_periods=self.config.lookback_periods)
         logger.info(f"NQScanner initialized with symbol={self.config.symbol}, timeframe={self.config.timeframe}")
     
     def is_market_hours(self, dt: Optional[datetime] = None) -> bool:
@@ -127,6 +137,9 @@ class NQScanner:
         df["sma_slow"] = df["close"].rolling(window=21).mean()
         df["sma_50"] = df["close"].rolling(window=50).mean()
         
+        # EMA for regime detection
+        df["ema_20"] = df["close"].ewm(span=20, adjust=False).mean()
+        
         # RSI
         delta = df["close"].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -165,12 +178,19 @@ class NQScanner:
         
         return df
     
-    def scan(self, df: pd.DataFrame) -> List[Dict]:
+    def scan(
+        self,
+        df: pd.DataFrame,
+        df_5m: Optional[pd.DataFrame] = None,
+        df_15m: Optional[pd.DataFrame] = None,
+    ) -> List[Dict]:
         """
         Scan market data for trading signals.
         
         Args:
-            df: DataFrame with OHLCV data and indicators
+            df: DataFrame with OHLCV data and indicators (1m)
+            df_5m: Optional DataFrame with 5m bars for multi-timeframe analysis
+            df_15m: Optional DataFrame with 15m bars for multi-timeframe analysis
             
         Returns:
             List of signal dictionaries
@@ -187,8 +207,29 @@ class NQScanner:
         if df.empty or len(df) < self.config.lookback_periods:
             return signals
         
+        # Detect market regime
+        regime = self.regime_detector.detect_regime(df)
+        logger.debug(f"Market regime: {regime}")
+        
         # Get latest bar
         latest = df.iloc[-1]
+        
+        # Analyze multi-timeframe structure
+        mtf_analysis = self.mtf_analyzer.analyze(df_5m, df_15m)
+        logger.debug(f"MTF alignment: {mtf_analysis.get('alignment')} (score: {mtf_analysis.get('alignment_score', 0):.2f})")
+        
+        # Calculate VWAP
+        atr = latest.get("atr", 0) if "atr" in df.columns else 0
+        vwap_data = self.vwap_calculator.calculate_vwap(df, atr=atr)
+        logger.debug(f"VWAP: {vwap_data.get('vwap', 0):.2f}, Distance: {vwap_data.get('distance_pct', 0):.2f}%")
+        
+        # Calculate volume profile
+        volume_profile_data = self.volume_profile.calculate_profile(df)
+        logger.debug(f"Volume Profile POC: {volume_profile_data.get('poc', 0):.2f}")
+        
+        # Analyze order flow
+        order_flow_data = self.order_flow.analyze_order_flow(df)
+        logger.debug(f"Order Flow: {order_flow_data.get('recent_trend')} (net: {order_flow_data.get('net_pressure', 0):.2f})")
         
         # Check volume threshold
         if latest.get("volume", 0) < self.config.min_volume:
@@ -262,8 +303,12 @@ class NQScanner:
             
             return min(score, 1.0)
         
+        # Session-based filters
+        session = regime.get("session", "afternoon")
+        
         # Momentum signal (fast MA crosses above slow MA with MACD confirmation)
-        if self.config.enable_momentum:
+        # Disable momentum during lunch lull (low volume, choppy)
+        if self.config.enable_momentum and session != "lunch_lull":
             if len(df) >= 2:
                 prev = df.iloc[-2]
                 if (
@@ -275,6 +320,48 @@ class NQScanner:
                     stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
                     confidence = calculate_signal_score("momentum_long", latest, df)
                     
+                    # Adjust confidence based on regime
+                    confidence = self.regime_detector.adjust_confidence_by_regime(
+                        "momentum_long", confidence, regime
+                    )
+                    
+                    # Check MTF alignment
+                    is_aligned, mtf_adjustment = self.mtf_analyzer.check_signal_alignment(
+                        "long", mtf_analysis
+                    )
+                    
+                    if not is_aligned:
+                        # Reject signal if MTF is strongly conflicting
+                        logger.debug("Momentum long signal rejected due to MTF conflict")
+                        continue
+                    
+                    confidence = max(0.0, min(1.0, confidence + mtf_adjustment))
+                    
+                    # Adjust confidence based on VWAP position
+                    confidence = self.vwap_calculator.adjust_confidence_by_vwap(
+                        "long", confidence, vwap_data
+                    )
+                    
+                    # Adjust confidence based on volume profile proximity
+                    proximity = self.volume_profile.get_proximity_to_key_levels(
+                        current_price, volume_profile_data
+                    )
+                    confidence = self.volume_profile.adjust_confidence_by_proximity(
+                        confidence, proximity
+                    )
+                    
+                    # Check order flow alignment
+                    is_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
+                        "long", order_flow_data
+                    )
+                    
+                    if not is_aligned:
+                        # Reject if order flow strongly conflicts
+                        logger.debug("Momentum long signal rejected due to order flow conflict")
+                        continue
+                    
+                    confidence = max(0.0, min(1.0, confidence + flow_adjustment))
+                    
                     signals.append({
                         "type": "momentum_long",
                         "direction": "long",
@@ -283,10 +370,15 @@ class NQScanner:
                         "stop_loss": stop_loss,
                         "take_profit": take_profit,
                         "reason": "Fast MA crossed above slow MA with volume and MACD confirmation",
+                        "regime": regime,  # Include regime context
+                        "mtf_analysis": mtf_analysis,  # Include MTF context
+                        "vwap_data": vwap_data,  # Include VWAP context
+                        "volume_profile": volume_profile_data,  # Include volume profile context
+                        "order_flow": order_flow_data,  # Include order flow context
                     })
         
         # Mean reversion signal (RSI oversold with multiple confirmations)
-        if self.config.enable_mean_reversion:
+        if self.config.enable_mean_reversion and session != "opening":
             if (
                 latest.get("rsi", 50) < 35  # Slightly higher threshold (was 30)
                 and latest["close"] < latest.get("bb_lower", current_price)
@@ -299,6 +391,50 @@ class NQScanner:
                     stop_loss = float(latest.get("bb_lower", stop_loss)) - (atr * 0.5)
                 confidence = calculate_signal_score("mean_reversion_long", latest, df)
                 
+                # Adjust confidence based on regime
+                confidence = self.regime_detector.adjust_confidence_by_regime(
+                    "mean_reversion_long", confidence, regime
+                )
+                
+                # Check MTF alignment (mean reversion less strict on MTF)
+                is_aligned, mtf_adjustment = self.mtf_analyzer.check_signal_alignment(
+                    "long", mtf_analysis
+                )
+                
+                # Allow mean reversion even with partial MTF conflict (it's counter-trend by nature)
+                if not is_aligned and mtf_adjustment < -0.25:
+                    # Only reject if strongly conflicting
+                    logger.debug("Mean reversion long signal rejected due to strong MTF conflict")
+                    continue
+                
+                confidence = max(0.0, min(1.0, confidence + mtf_adjustment * 0.5))  # Less weight for mean reversion
+                
+                # Adjust confidence based on VWAP position (mean reversion less sensitive to VWAP)
+                confidence = self.vwap_calculator.adjust_confidence_by_vwap(
+                    "long", confidence, vwap_data
+                ) * 0.9  # Slightly reduce VWAP impact for mean reversion
+                
+                # Adjust confidence based on volume profile proximity
+                proximity = self.volume_profile.get_proximity_to_key_levels(
+                    current_price, volume_profile_data
+                )
+                confidence = self.volume_profile.adjust_confidence_by_proximity(
+                    confidence, proximity
+                )
+                
+                # Check order flow alignment (mean reversion less strict)
+                is_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
+                    "long", order_flow_data
+                )
+                
+                # Mean reversion can work against order flow (it's counter-trend)
+                if not is_aligned and flow_adjustment < -0.12:
+                    # Only reject if very strong conflict
+                    logger.debug("Mean reversion long signal rejected due to strong order flow conflict")
+                    continue
+                
+                confidence = max(0.0, min(1.0, confidence + flow_adjustment * 0.5))  # Less weight for mean reversion
+                
                 signals.append({
                     "type": "mean_reversion_long",
                     "direction": "long",
@@ -307,6 +443,11 @@ class NQScanner:
                     "stop_loss": stop_loss,
                     "take_profit": float(latest.get("bb_middle", take_profit)),
                     "reason": "RSI oversold with price at lower Bollinger Band and volume confirmation",
+                    "regime": regime,  # Include regime context
+                    "mtf_analysis": mtf_analysis,  # Include MTF context
+                    "vwap_data": vwap_data,  # Include VWAP context
+                    "volume_profile": volume_profile_data,  # Include volume profile context
+                    "order_flow": order_flow_data,  # Include order flow context
                 })
         
         # Breakout signal (price breaks above recent high with volume)
@@ -324,6 +465,61 @@ class NQScanner:
                     stop_loss = min(stop_loss, float(recent_high) - (atr * 0.5))
                     confidence = calculate_signal_score("breakout_long", latest, df)
                     
+                    # Adjust confidence based on regime
+                    confidence = self.regime_detector.adjust_confidence_by_regime(
+                        "breakout_long", confidence, regime
+                    )
+                    
+                    # Check MTF alignment (breakouts need strong MTF confirmation)
+                    is_aligned, mtf_adjustment = self.mtf_analyzer.check_signal_alignment(
+                        "long", mtf_analysis
+                    )
+                    
+                    # For breakouts, check if we're breaking 5m/15m resistance
+                    breakout_levels = self.mtf_analyzer.get_breakout_levels(mtf_analysis)
+                    resistance_5m = breakout_levels.get("resistance_5m")
+                    resistance_15m = breakout_levels.get("resistance_15m")
+                    
+                    # Breakout should break higher timeframe resistance
+                    if resistance_5m and current_price < resistance_5m:
+                        # Not breaking 5m resistance - reduce confidence
+                        mtf_adjustment -= 0.15
+                    elif resistance_5m and current_price > resistance_5m:
+                        # Breaking 5m resistance - boost confidence
+                        mtf_adjustment += 0.10
+                    
+                    if not is_aligned and mtf_adjustment < -0.20:
+                        # Reject if strongly conflicting
+                        logger.debug("Breakout long signal rejected due to MTF conflict")
+                        continue
+                    
+                    confidence = max(0.0, min(1.0, confidence + mtf_adjustment))
+                    
+                    # Adjust confidence based on VWAP position (breakouts benefit from VWAP support)
+                    confidence = self.vwap_calculator.adjust_confidence_by_vwap(
+                        "long", confidence, vwap_data
+                    )
+                    
+                    # Adjust confidence based on volume profile proximity
+                    proximity = self.volume_profile.get_proximity_to_key_levels(
+                        current_price, volume_profile_data
+                    )
+                    confidence = self.volume_profile.adjust_confidence_by_proximity(
+                        confidence, proximity
+                    )
+                    
+                    # Check order flow alignment (breakouts need strong order flow)
+                    is_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
+                        "long", order_flow_data
+                    )
+                    
+                    if not is_aligned and flow_adjustment < -0.12:
+                        # Reject if order flow strongly conflicts
+                        logger.debug("Breakout long signal rejected due to order flow conflict")
+                        continue
+                    
+                    confidence = max(0.0, min(1.0, confidence + flow_adjustment))
+                    
                     signals.append({
                         "type": "breakout_long",
                         "direction": "long",
@@ -332,6 +528,11 @@ class NQScanner:
                         "stop_loss": stop_loss,
                         "take_profit": take_profit,
                         "reason": f"Price broke above recent high ({recent_high:.2f}) with strong volume and MACD confirmation",
+                        "regime": regime,  # Include regime context
+                        "mtf_analysis": mtf_analysis,  # Include MTF context
+                        "vwap_data": vwap_data,  # Include VWAP context
+                        "volume_profile": volume_profile_data,  # Include volume profile context
+                        "order_flow": order_flow_data,  # Include order flow context
                     })
         
         return signals

@@ -251,3 +251,5 @@ async def test_service_empty_data_handling(service, mock_data_provider):
     except Exception as e:
         pytest.fail(f"Service should handle empty data gracefully: {e}")
 
+
+

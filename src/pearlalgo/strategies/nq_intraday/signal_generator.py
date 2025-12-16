@@ -18,6 +18,7 @@ except ImportError:
 
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner
+from pearlalgo.strategies.nq_intraday.signal_quality import SignalQualityScorer
 
 
 class NQSignalGenerator:
@@ -41,6 +42,7 @@ class NQSignalGenerator:
         """
         self.config = config or NQIntradayConfig()
         self.scanner = scanner or NQScanner(config=self.config)
+        self.quality_scorer = SignalQualityScorer(min_edge_threshold=0.55)
         
         # Track recent signals to avoid duplicates
         self._recent_signals: List[Dict] = []
@@ -66,8 +68,12 @@ class NQSignalGenerator:
         if not self.scanner.is_market_hours():
             return []
         
-        # Scan for signals
-        raw_signals = self.scanner.scan(df)
+        # Get multi-timeframe data
+        df_5m = market_data.get("df_5m")
+        df_15m = market_data.get("df_15m")
+        
+        # Scan for signals with MTF context
+        raw_signals = self.scanner.scan(df, df_5m=df_5m, df_15m=df_15m)
         
         # Validate and filter signals
         validated_signals = []
@@ -75,8 +81,22 @@ class NQSignalGenerator:
             if self._validate_signal(signal):
                 validated_signal = self._format_signal(signal, market_data)
                 if not self._is_duplicate(validated_signal):
-                    validated_signals.append(validated_signal)
-                    self._recent_signals.append(validated_signal)
+                    # Score signal quality
+                    quality_score = self.quality_scorer.score_signal(validated_signal)
+                    
+                    # Only send if meets quality threshold
+                    if quality_score.get("should_send", True):
+                        # Add quality score to signal
+                        validated_signal["quality_score"] = quality_score
+                        validated_signals.append(validated_signal)
+                        self._recent_signals.append(validated_signal)
+                    else:
+                        logger.debug(
+                            f"Signal filtered by quality scorer: "
+                            f"type={validated_signal.get('type')}, "
+                            f"historical_wr={quality_score.get('historical_wr', 0):.0%}, "
+                            f"meets_threshold={quality_score.get('meets_threshold', False)}"
+                        )
         
         # Clean up old signals from recent list
         self._cleanup_recent_signals()

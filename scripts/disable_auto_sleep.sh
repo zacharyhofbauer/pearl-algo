@@ -87,3 +87,5 @@ echo "   If the system still sleeps after this script, try rebooting."
 echo ""
 echo "🔄 To re-enable sleep in the future, run: scripts/enable_auto_sleep.sh"
 
+
+

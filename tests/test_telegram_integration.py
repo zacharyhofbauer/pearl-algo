@@ -234,3 +234,5 @@ async def test_telegram_alerts_rate_limiting():
         result = await alerts.send_message("Test message")
         assert call_count >= 1  # Should have attempted
 
+
+
