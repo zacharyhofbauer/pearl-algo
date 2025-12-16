@@ -62,33 +62,56 @@ class ErrorHandler:
         """
         Check if empty data is due to connection error vs normal market closure.
         
+        Only checks for IBKR-specific connection issues. For mock data providers
+        or other providers, returns False (empty data is not a connection error).
+        
         Args:
             market_data: Market data dictionary
             data_provider: Data provider instance (optional)
             last_successful_cycle: Last successful cycle timestamp (optional)
             
         Returns:
-            True if this appears to be a connection error
+            True if this appears to be an IBKR connection error
         """
-        # Check if data provider executor is connected
+        # Only check for IBKR connection errors - skip for mock/test providers
         try:
-            if data_provider and hasattr(data_provider, '_executor'):
-                executor = data_provider._executor
-                if hasattr(executor, 'is_connected'):
-                    if not executor.is_connected():
-                        return True
+            if data_provider:
+                # Check if this is a mock provider (should not trigger IBKR connection errors)
+                provider_type = type(data_provider).__name__
+                if "Mock" in provider_type or "mock" in provider_type.lower():
+                    return False  # Mock providers don't have connection issues
+                
+                # Only check IBKR-specific connection status
+                if hasattr(data_provider, '_executor'):
+                    executor = data_provider._executor
+                    if hasattr(executor, 'is_connected'):
+                        if not executor.is_connected():
+                            return True  # IBKR executor is disconnected
         except Exception:
-            pass  # If we can't check, assume it might be a connection issue
+            pass  # If we can't check, don't assume connection issue
 
-        # If data is empty and we have no latest_bar, likely a connection issue
-        if market_data.get("df") is not None and market_data["df"].empty:
-            if market_data.get("latest_bar") is None:
-                # If we've had recent successful cycles but now getting empty data,
-                # it's likely a connection issue (not just market closed)
-                if last_successful_cycle:
-                    time_since_success = (datetime.now(timezone.utc) - last_successful_cycle).total_seconds()
-                    if time_since_success < 600:  # Had data within last 10 minutes
-                        return True
+        # For IBKR providers: If data is empty and we have no latest_bar, 
+        # and we've had recent successful cycles, likely a connection issue
+        # Skip this check for non-IBKR providers
+        try:
+            if data_provider:
+                provider_type = type(data_provider).__name__
+                if "Mock" in provider_type or "mock" in provider_type.lower():
+                    return False  # Don't check connection for mock providers
+                
+                # Only for IBKR providers: check if empty data indicates connection issue
+                if "IBKR" in provider_type or "ibkr" in provider_type.lower():
+                    if market_data.get("df") is not None and market_data["df"].empty:
+                        if market_data.get("latest_bar") is None:
+                            # If we've had recent successful cycles but now getting empty data,
+                            # it's likely a connection issue (not just market closed)
+                            if last_successful_cycle:
+                                time_since_success = (datetime.now(timezone.utc) - last_successful_cycle).total_seconds()
+                                if time_since_success < 600:  # Had data within last 10 minutes
+                                    return True
+        except Exception:
+            pass  # If check fails, don't assume connection issue
+        
         return False
 
     @staticmethod

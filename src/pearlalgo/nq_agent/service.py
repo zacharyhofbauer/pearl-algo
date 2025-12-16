@@ -296,7 +296,6 @@ class NQAgentService:
                     latest_bar_time = market_data["latest_bar"].get("timestamp")
                     if latest_bar_time:
                         if isinstance(latest_bar_time, str):
-                            from datetime import datetime
                             latest_bar_time = datetime.fromisoformat(latest_bar_time.replace("Z", "+00:00"))
                         age_seconds = (datetime.now(timezone.utc) - latest_bar_time.replace(tzinfo=timezone.utc)).total_seconds()
                         stale_threshold_seconds = self.stale_data_threshold_minutes * 60

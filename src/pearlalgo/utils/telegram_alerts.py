@@ -193,8 +193,19 @@ class TelegramAlerts:
         message: str,
         risk_status: Optional[str] = None,
     ) -> None:
-        """Notify about a risk warning (mobile-friendly)."""
-        alert = f"⚠️ *Risk Warning*\n\n{message}"
+        """
+        Notify about a risk warning (mobile-friendly).
+        
+        Args:
+            message: Alert message (should already be formatted with emoji and title)
+            risk_status: Optional status string (e.g., "DATA_QUALITY", "CRITICAL")
+        """
+        # Message should already be formatted, just add Risk Warning header if not present
+        if "Risk Warning" not in message and "*Risk Warning*" not in message:
+            alert = f"⚠️ *Risk Warning*\n\n{message}"
+        else:
+            alert = message
+        
         if risk_status:
             alert += f"\n\n*Status:* {risk_status}"
 

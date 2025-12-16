@@ -84,27 +84,82 @@ class GetLatestBarTask(Task):
         else:
             contract = Stock(self.symbol, exchange="SMART", currency="USD")
 
-        # Request market data
-        ticker = ib.reqMktData(contract, "", False, False)
+        # Try to get real-time market data first
+        ticker = None
+        try:
+            # Request market data (may fail with Error 354 if no subscription)
+            ticker = ib.reqMktData(contract, "", False, False)
+            
+            # Wait a moment for data to arrive
+            time.sleep(0.5)
+            
+            # Check for market data errors
+            if hasattr(ticker, 'modelOption') and ticker.modelOption:
+                # Check if there's an error message
+                error_msg = str(ticker.modelOption) if ticker.modelOption else ""
+                if "354" in error_msg or "subscription" in error_msg.lower():
+                    logger.debug(f"Market data subscription not available for {self.symbol}, will use historical data fallback")
+                    ib.cancelMktData(contract)
+                    ticker = None  # Will fall back to historical data
+                elif ticker.last or ticker.close:
+                    # Got valid data
+                    last_price = ticker.last if ticker.last else ticker.close
+                    if last_price and last_price > 0:
+                        result = {
+                            "timestamp": datetime.now(timezone.utc),
+                            "open": ticker.open if ticker.open else last_price,
+                            "high": ticker.high if ticker.high else last_price,
+                            "low": ticker.low if ticker.low else last_price,
+                            "close": last_price,
+                            "volume": ticker.volume if ticker.volume else 0,
+                            "bid": ticker.bid if ticker.bid else None,
+                            "ask": ticker.ask if ticker.ask else None,
+                        }
+                        ib.cancelMktData(contract)
+                        return result
+        except Exception as e:
+            error_str = str(e).lower()
+            if "354" in str(e) or "subscription" in error_str:
+                logger.debug(f"Market data subscription error for {self.symbol}: {e}. Will use historical data fallback.")
+            else:
+                logger.warning(f"Error requesting market data for {self.symbol}: {e}")
+            if ticker:
+                try:
+                    ib.cancelMktData(contract)
+                except Exception:
+                    pass
+            ticker = None  # Will fall back to historical data
 
-        # Wait a moment for data to arrive
-        time.sleep(0.5)
-
-        # Get last price
-        last_price = ticker.last if ticker.last else ticker.close
-
-        if last_price and last_price > 0:
-            return {
-                "timestamp": datetime.now(timezone.utc),
-                "open": ticker.open if ticker.open else last_price,
-                "high": ticker.high if ticker.high else last_price,
-                "low": ticker.low if ticker.low else last_price,
-                "close": last_price,
-                "volume": ticker.volume if ticker.volume else 0,
-                "bid": ticker.bid if ticker.bid else None,
-                "ask": ticker.ask if ticker.ask else None,
-            }
-
+        # Fallback: Use latest historical bar if real-time data not available
+        # This handles Error 354 (market data subscription not available)
+        try:
+            logger.debug(f"Using historical data fallback for latest bar (real-time subscription may not be available)")
+            bars = ib.reqHistoricalData(
+                contract,
+                endDateTime="",
+                durationStr="1 D",
+                barSizeSetting="1 min",
+                whatToShow="TRADES",
+                useRTH=False,
+                formatDate=1,
+            )
+            
+            if bars:
+                # Get the most recent bar
+                latest_bar = bars[-1]
+                return {
+                    "timestamp": latest_bar.date.replace(tzinfo=timezone.utc) if latest_bar.date.tzinfo is None else latest_bar.date,
+                    "open": float(latest_bar.open),
+                    "high": float(latest_bar.high),
+                    "low": float(latest_bar.low),
+                    "close": float(latest_bar.close),
+                    "volume": int(latest_bar.volume),
+                    "bid": None,  # Not available from historical data
+                    "ask": None,  # Not available from historical data
+                }
+        except Exception as e:
+            logger.warning(f"Error fetching historical data fallback for {self.symbol}: {e}")
+        
         return None
 
 

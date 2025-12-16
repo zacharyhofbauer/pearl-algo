@@ -75,6 +75,15 @@ def load_service_config(config_path: Optional[Path] = None) -> Dict:
             "max_records": 1000,
             "default_lookback_days": 7,
         },
+        "prop_firm": {
+            "mnq_tick_value": 2.0,
+            "nq_tick_value": 20.0,
+            "min_contracts": 5,
+            "max_contracts": 15,
+            "default_contracts": 10,
+            "max_risk_per_trade_pct": 1.0,
+            "max_drawdown_pct": 10.0,
+        },
     }
     
     if config_path and config_path.exists():

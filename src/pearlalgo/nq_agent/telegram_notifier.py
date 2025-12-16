@@ -589,18 +589,31 @@ class NQAgentTelegramNotifier:
             }
 
             emoji = emoji_map.get(alert_type, "⚠️")
-            alert_message = f"{emoji} *Data Quality Alert*\n\n"
-            alert_message += f"*Type:* {alert_type.replace('_', ' ').title()}\n"
-            alert_message += f"*Message:* {message}\n"
+            
+            # Format alert message (clean format - notify_risk_warning adds "⚠️ *Risk Warning*" header)
+            # Format: emoji + title, then message, then details
+            alert_message = f"{emoji} *{alert_type.replace('_', ' ').title()}*\n\n{message}"
 
             if details:
+                detail_lines = []
                 if "age_minutes" in details:
-                    alert_message += f"*Age:* {details['age_minutes']:.1f} minutes\n"
+                    detail_lines.append(f"*Age:* {details['age_minutes']:.1f} minutes")
                 if "consecutive_failures" in details:
-                    alert_message += f"*Failures:* {details['consecutive_failures']}\n"
+                    detail_lines.append(f"*Failures:* {details['consecutive_failures']}")
+                if "connection_failures" in details:
+                    detail_lines.append(f"*Connection Failures:* {details['connection_failures']}")
                 if "buffer_size" in details:
-                    alert_message += f"*Buffer:* {details['buffer_size']} bars\n"
+                    detail_lines.append(f"*Buffer:* {details['buffer_size']} bars")
+                if "error_type" in details:
+                    detail_lines.append(f"*Error Type:* {details['error_type']}")
+                if "suggestion" in details:
+                    detail_lines.append(f"*Suggestion:* {details['suggestion']}")
+                
+                if detail_lines:
+                    alert_message += "\n\n" + "\n".join(detail_lines)
 
+            # Send with DATA_QUALITY status
+            # notify_risk_warning will add "⚠️ *Risk Warning*\n\n" prefix and "*Status: DATA_QUALITY" suffix
             await self.telegram.notify_risk_warning(alert_message, risk_status="DATA_QUALITY")
             return True
         except Exception as e:
@@ -782,18 +795,21 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
+            # Format message (without Risk Warning prefix - notify_risk_warning adds it)
             message = f"🛑 *Circuit Breaker Activated*\n\n"
             message += f"*Reason:* {reason}\n"
 
             if details:
                 if "consecutive_errors" in details:
-                    message += f"*Errors:* {details['consecutive_errors']} consecutive\n"
+                    message += f"\n*Errors:* {details['consecutive_errors']} consecutive"
+                if "connection_failures" in details:
+                    message += f"\n*Connection Failures:* {details['connection_failures']}"
                 if "error_type" in details:
-                    message += f"*Type:* {details['error_type']}\n"
+                    message += f"\n*Type:* {details['error_type']}"
                 if "action_taken" in details:
-                    message += f"*Action:* {details['action_taken']}\n"
+                    message += f"\n*Action:* {details['action_taken']}"
 
-            message += "\n⚠️ *Service paused. Manual intervention required.*\n"
+            message += "\n\n⚠️ *Service paused. Manual intervention required.*"
 
             await self.telegram.notify_risk_warning(message, risk_status="CRITICAL")
             return True
