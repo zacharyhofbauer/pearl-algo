@@ -2,12 +2,23 @@
 Centralized error handling utilities.
 
 Provides standardized error detection and handling patterns.
+
+Example usage:
+    ```python
+    try:
+        data = await fetch_data()
+    except Exception as e:
+        error_info = ErrorHandler.handle_data_fetch_error(e, context={"symbol": "MNQ"})
+        if error_info.get("is_connection_error"):
+            # Handle connection error
+            pass
+    ```
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from pearlalgo.utils.logger import logger
 

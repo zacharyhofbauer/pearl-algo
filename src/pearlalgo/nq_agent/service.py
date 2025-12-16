@@ -23,6 +23,7 @@ from pearlalgo.nq_agent.state_manager import NQAgentStateManager
 from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
+from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
 
 
@@ -70,6 +71,7 @@ class NQAgentService:
         service_settings = service_config.get("service", {})
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
         alert_settings = service_config.get("alerts", {})
+        data_settings = service_config.get("data", {})
 
         self.running = False
         self.shutdown_requested = False
@@ -94,6 +96,13 @@ class NQAgentService:
         self.last_successful_cycle: Optional[datetime] = None
         self.last_data_quality_alert: Optional[datetime] = None
         self.data_quality_alert_interval = alert_settings.get("data_quality_interval", 300)
+        self.stale_data_threshold_minutes = data_settings.get("stale_data_threshold_minutes", 10)
+        self.connection_timeout_minutes = data_settings.get("connection_timeout_minutes", 30)
+        
+        # Initialize data quality checker
+        self.data_quality_checker = DataQualityChecker(
+            stale_data_threshold_minutes=self.stale_data_threshold_minutes
+        )
 
         logger.info("NQAgentService initialized")
 
@@ -269,8 +278,9 @@ class NQAgentService:
                     # Check if we've had recent successful cycles
                     if self.last_successful_cycle:
                         time_since_success = (datetime.now(timezone.utc) - self.last_successful_cycle).total_seconds()
-                        if time_since_success > 1800:  # 30 minutes without data
-                            logger.warning("No market data for 30+ minutes - possible connection issue")
+                        timeout_seconds = self.connection_timeout_minutes * 60
+                        if time_since_success > timeout_seconds:
+                            logger.warning(f"No market data for {self.connection_timeout_minutes}+ minutes - possible connection issue")
                             await self._handle_connection_failure()
 
                     logger.debug("No market data available, waiting...")
@@ -289,7 +299,8 @@ class NQAgentService:
                             from datetime import datetime
                             latest_bar_time = datetime.fromisoformat(latest_bar_time.replace("Z", "+00:00"))
                         age_seconds = (datetime.now(timezone.utc) - latest_bar_time.replace(tzinfo=timezone.utc)).total_seconds()
-                        data_fresh = age_seconds < 600  # 10 minutes
+                        stale_threshold_seconds = self.stale_data_threshold_minutes * 60
+                        data_fresh = age_seconds < stale_threshold_seconds
                 
                 market_open = self.strategy.scanner.is_market_hours()
                 regime_info = "unknown"
@@ -527,27 +538,22 @@ class NQAgentService:
         ):
             return
 
-        df = market_data.get("df")
-        latest_bar = market_data.get("latest_bar")
+        # Use DataQualityChecker for validation
+        validation = self.data_quality_checker.validate_market_data(market_data)
 
         # Check for stale data
-        if latest_bar and "timestamp" in latest_bar:
-            timestamp = latest_bar["timestamp"]
-            if isinstance(timestamp, str):
-                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-
-            if isinstance(timestamp, datetime):
-                age_minutes = (now - timestamp.replace(tzinfo=timezone.utc)).total_seconds() / 60
-                if age_minutes > 10:
-                    await self.telegram_notifier.send_data_quality_alert(
-                        "stale_data",
-                        f"Data is {age_minutes:.1f} minutes old",
-                        {"age_minutes": age_minutes},
-                    )
-                    self.last_data_quality_alert = now
-                    return
+        if not validation["freshness"]["is_fresh"]:
+            age_minutes = validation["freshness"]["age_minutes"]
+            await self.telegram_notifier.send_data_quality_alert(
+                "stale_data",
+                f"Data is {age_minutes:.1f} minutes old",
+                {"age_minutes": age_minutes},
+            )
+            self.last_data_quality_alert = now
+            return
 
         # Check for empty data
+        df = market_data.get("df")
         if df is not None and df.empty:
             await self.telegram_notifier.send_data_quality_alert(
                 "data_gap",
@@ -558,8 +564,8 @@ class NQAgentService:
             return
 
         # Check buffer size
-        buffer_size = self.data_fetcher.get_buffer_size()
-        if buffer_size < 10:
+        if not validation["buffer_size"]["is_adequate"]:
+            buffer_size = validation["buffer_size"]["buffer_size"]
             await self.telegram_notifier.send_data_quality_alert(
                 "buffer_issue",
                 f"Buffer size is low: {buffer_size} bars",

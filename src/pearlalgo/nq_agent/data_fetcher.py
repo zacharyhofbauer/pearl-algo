@@ -17,6 +17,7 @@ from pearlalgo.utils.logger import logger
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.retry import async_retry_with_backoff
 
@@ -53,6 +54,12 @@ class NQAgentDataFetcher:
         self._historical_hours = data_settings.get("historical_hours", 2)
         self._multitimeframe_5m_hours = data_settings.get("multitimeframe_5m_hours", 4)
         self._multitimeframe_15m_hours = data_settings.get("multitimeframe_15m_hours", 12)
+        
+        # Initialize data quality checker
+        stale_threshold_minutes = data_settings.get("stale_data_threshold_minutes", 10)
+        self.data_quality_checker = DataQualityChecker(
+            stale_data_threshold_minutes=stale_threshold_minutes
+        )
 
         # Multi-timeframe buffers
         self._data_buffer_5m: Optional[pd.DataFrame] = None
@@ -103,15 +110,12 @@ class NQAgentDataFetcher:
                 missing_dict = {col: missing[col] for col in missing.index if missing[col] > 0}
                 logger.warning(f"Data contains missing values: {missing_dict}")
 
-            # Check for stale data (if timestamp column exists)
-            data_freshness_warning = False
-            if "timestamp" in df.columns:
-                latest_timestamp = df["timestamp"].max()
-                if isinstance(latest_timestamp, pd.Timestamp):
-                    age_minutes = (datetime.now(timezone.utc) - latest_timestamp.to_pydatetime().replace(tzinfo=timezone.utc)).total_seconds() / 60
-                    if age_minutes > 10:
-                        logger.warning(f"Data may be stale: latest historical bar is {age_minutes:.1f} minutes old (market may be closed or data subscription issue)")
-                        data_freshness_warning = True
+            # Check for stale data using DataQualityChecker
+            freshness_check = self.data_quality_checker.check_data_freshness(None, df)
+            data_freshness_warning = not freshness_check["is_fresh"]
+            if data_freshness_warning:
+                age_minutes = freshness_check["age_minutes"]
+                logger.warning(f"Data may be stale: latest historical bar is {age_minutes:.1f} minutes old (market may be closed or data subscription issue)")
 
             # Log data freshness status
             if not data_freshness_warning and not df.empty:

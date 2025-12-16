@@ -2,8 +2,13 @@
 """
 Test Telegram Notifications
 
+⚠️ DEPRECATED: This script is deprecated. Use `python3 scripts/testing/test_all.py telegram` instead.
+
 Quick test script to verify all Telegram notification types work correctly.
 Tests all notification types without running the full service.
+
+This script will be removed in a future version. Please use the unified test runner:
+    python3 scripts/testing/test_all.py telegram
 """
 
 import asyncio

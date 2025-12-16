@@ -1,8 +1,27 @@
 """
-Configuration loader for service-level settings.
+Service-level configuration loader.
 
 Loads configuration from config.yaml for service intervals, circuit breaker,
-alerts, data fetching, signals, and performance tracking.
+alerts, data settings, signals, and performance tracking.
+
+**When to use `load_service_config()`:**
+- For service-level settings (intervals, circuit breaker, alerts)
+- For data fetching configuration (buffer sizes, thresholds)
+- For signal generation settings (duplicate windows, thresholds)
+- For performance tracking configuration
+
+**When to use strategy config (`strategies/nq_intraday/config.py`):**
+- For strategy-specific parameters (symbol, timeframe, risk parameters)
+- For strategy behavior configuration (ATR multipliers, R:R ratios)
+
+**Example usage:**
+    ```python
+    from pearlalgo.config.config_loader import load_service_config
+    
+    config = load_service_config()
+    service_settings = config.get("service", {})
+    scan_interval = service_settings.get("status_update_interval", 1800)
+    ```
 """
 
 from __future__ import annotations

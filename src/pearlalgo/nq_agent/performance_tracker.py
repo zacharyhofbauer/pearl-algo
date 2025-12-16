@@ -64,8 +64,12 @@ class PerformanceTracker:
         """
         Track a new signal generation.
         
-        Delegates signal persistence to state_manager if available.
-        Otherwise falls back to direct file write (for backward compatibility).
+        **Delegation Pattern**: This method delegates signal persistence to `StateManager.save_signal()`
+        if a state_manager is provided. This ensures all signal persistence goes through a single
+        interface for consistency and maintainability.
+        
+        **Fallback**: If no state_manager is provided, falls back to direct file write for backward
+        compatibility. In normal operation, state_manager should always be provided.
         
         Args:
             signal: Signal dictionary

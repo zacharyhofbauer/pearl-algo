@@ -401,6 +401,66 @@ cat data/nq_agent_state/performance.json | jq
 
 ---
 
+## 🧪 Advanced Testing Scenarios
+
+### Test 1: Market Regime Detection
+Verify strategy adapts to different market regimes:
+
+**Ranging Market:**
+- Should favor mean reversion signals
+- Momentum signals should be filtered
+
+**Trending Market:**
+- Should favor momentum signals
+- Mean reversion signals should be filtered
+
+**High Volatility:**
+- Should use wider stops
+- Should favor breakout signals
+
+**Low Volatility:**
+- Should use tighter stops
+- Should filter low-quality signals
+
+### Test 2: Multi-Timeframe Analysis
+Verify MTF alignment works:
+
+**Aligned (1m/5m/15m all bullish):**
+- Should boost confidence
+- Should generate more signals
+
+**Conflicting (1m bullish, 15m bearish):**
+- Should reduce confidence
+- Should filter signals
+
+### Test 3: VWAP Integration
+Verify VWAP-based adjustments:
+
+**Price Above VWAP:**
+- Long signals should have higher confidence
+- Short signals should be filtered
+
+**Price Below VWAP:**
+- Long signals should have lower confidence
+- Mean reversion signals may be favored
+
+### Test 4: Session-Based Filtering
+Verify session filters work:
+
+**Opening (9:30-10:00 ET):**
+- High volatility expected
+- Momentum signals may be filtered
+
+**Lunch Lull (11:30-13:00 ET):**
+- Momentum signals should be disabled
+- Mean reversion may be favored
+
+**Closing (15:30-16:00 ET):**
+- Reversal signals may be favored
+- Tight stops recommended
+
+---
+
 ## 🧪 Mock Data Provider
 
 The `tests/mock_data_provider.py` provides fake market data for testing.

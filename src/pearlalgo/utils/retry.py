@@ -1,14 +1,26 @@
 """
 Retry utility functions.
+
+Provides async retry decorator with exponential backoff.
+
+Example usage:
+    ```python
+    @async_retry_with_backoff(max_retries=3, initial_delay=1.0)
+    async def fetch_data():
+        # Your async function
+        pass
+    ```
 """
 
 from __future__ import annotations
 
 import asyncio
 import functools
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional, TypeVar
 
 from pearlalgo.utils.logger import logger
+
+T = TypeVar("T")
 
 
 def async_retry_with_backoff(
@@ -16,8 +28,8 @@ def async_retry_with_backoff(
     initial_delay: float = 1.0,
     max_delay: float = 60.0,
     exponential_base: float = 2.0,
-    exceptions: tuple = (Exception,),
-):
+    exceptions: tuple[type[Exception], ...] = (Exception,),
+) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Awaitable[T]]]:
     """
     Decorator to retry async functions with exponential backoff.
     
@@ -26,11 +38,14 @@ def async_retry_with_backoff(
         initial_delay: Initial delay in seconds
         max_delay: Maximum delay in seconds
         exponential_base: Base for exponential backoff
-        exceptions: Tuple of exceptions to catch and retry
+        exceptions: Tuple of exception types to catch and retry
+        
+    Returns:
+        Decorated async function with retry logic
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
         @functools.wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        async def wrapper(*args: Any, **kwargs: Any) -> T:
             delay = initial_delay
             last_exception = None
 
@@ -51,7 +66,9 @@ def async_retry_with_backoff(
                         )
 
             # If we get here, all retries failed
-            raise last_exception
+            if last_exception is not None:
+                raise last_exception
+            raise RuntimeError("Retry failed but no exception was captured")
 
         return wrapper
     return decorator

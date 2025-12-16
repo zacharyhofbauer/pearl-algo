@@ -344,11 +344,12 @@ class NQSignalGenerator:
             same_direction = recent.get("direction") == signal.get("direction")
             within_time_window = time_diff < self._signal_window_seconds
 
-            # Also check if price is too close (within 0.5% for same signal)
+            # Also check if price is too close (within threshold for same signal)
             price_close = False
+            duplicate_price_threshold_pct = signal_settings.get("duplicate_price_threshold_pct", 0.5) / 100.0  # Convert to decimal
             if recent_entry > 0 and signal_entry > 0:
                 price_diff_pct = abs(signal_entry - recent_entry) / recent_entry
-                price_close = price_diff_pct < 0.005  # 0.5%
+                price_close = price_diff_pct < duplicate_price_threshold_pct
 
             if same_type and same_direction and (within_time_window or price_close):
                 return True

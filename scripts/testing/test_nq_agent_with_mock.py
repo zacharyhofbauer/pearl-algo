@@ -2,8 +2,13 @@
 """
 Test NQ Agent with Mock Data
 
+⚠️ DEPRECATED: This script is deprecated. Use `python3 scripts/testing/test_all.py service` instead.
+
 Runs the NQ agent service with mock data provider for testing without live market data.
 Perfect for testing notifications, signal generation, and service behavior.
+
+This script will be removed in a future version. Please use the unified test runner:
+    python3 scripts/testing/test_all.py service
 """
 
 import asyncio

@@ -924,7 +924,7 @@ tail -f logs/nq_agent.log
 ### Documentation
 
 - **Complete Guide**: `docs/NQ_AGENT_GUIDE.md` (includes prop firm configuration)
-- **Strategy Testing**: `docs/STRATEGY_TESTING_GUIDE.md`
+- **Strategy Testing**: `docs/TESTING_GUIDE.md` (includes strategy testing)
 - **Testing Guide**: `docs/TESTING_GUIDE.md`
 - **Gateway Setup**: `docs/GATEWAY.md`
 - **Project Summary**: `docs/PROJECT_SUMMARY.md` (this file)

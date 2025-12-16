@@ -70,14 +70,38 @@ data:
   historical_hours: 2
   multitimeframe_5m_hours: 4
   multitimeframe_15m_hours: 12
+  stale_data_threshold_minutes: 10  # Alert if data is older than this
+  connection_timeout_minutes: 30  # Consider connection lost after this time without data
 
 # Signal generation
 signals:
   duplicate_window_seconds: 300  # 5 minutes
   min_confidence: 0.50
   min_risk_reward: 1.5
+  duplicate_price_threshold_pct: 0.5  # 0.5% price difference for duplicate detection
 
 # Performance tracking
 performance:
   max_records: 1000
   default_lookback_days: 7
+
+# Prop Firm Trading Assumptions
+# These values are optimized for prop firm style trading with MNQ futures
+prop_firm:
+  # MNQ (Mini NQ) is 1/10th size of NQ
+  # MNQ tick value: $2 per point
+  # NQ tick value: $20 per point
+  mnq_tick_value: 2.0  # $2 per point for MNQ
+  nq_tick_value: 20.0  # $20 per point for NQ
+  
+  # Position sizing range for prop firms
+  # Typical prop firm accounts: $25k-$100k
+  # MNQ allows better position sizing (5-15 contracts vs 1-3 for NQ)
+  min_contracts: 5
+  max_contracts: 15
+  default_contracts: 10
+  
+  # Risk management assumptions
+  # Conservative prop firm approach: 1% max risk per trade, 10% max drawdown
+  max_risk_per_trade_pct: 1.0  # 1% of account
+  max_drawdown_pct: 10.0  # 10% of account

@@ -2,7 +2,12 @@
 """
 Test Signal Generation with Mock Data
 
+⚠️ DEPRECATED: This script is deprecated. Use `python3 scripts/testing/test_all.py signals` instead.
+
 Tests signal generation logic with mock data to verify strategy works correctly.
+
+This script will be removed in a future version. Please use the unified test runner:
+    python3 scripts/testing/test_all.py signals
 """
 
 import sys
