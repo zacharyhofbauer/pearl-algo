@@ -119,37 +119,39 @@ def setup_logging(
                 retention="7 days",
                 serialize=structured,  # JSON output if structured
             )
+        # Return early when using loguru - no need for standard logging setup
+        return
+    
+    # Use standard logging (when loguru not available or json_output requested)
+    handlers = []
+    
+    if json_output:
+        # JSON formatter for structured logs
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(StructuredFormatter())
+        handlers.append(console_handler)
     else:
-        # Use standard logging
-        handlers = []
-        
-        if json_output:
-            # JSON formatter for structured logs
-            console_handler = logging.StreamHandler()
-            console_handler.setFormatter(StructuredFormatter())
-            handlers.append(console_handler)
-        else:
-            # Rich handler for console
-            handlers.append(RichHandler(rich_tracebacks=True))
+        # Rich handler for console
+        handlers.append(RichHandler(rich_tracebacks=True))
 
     if log_file:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_path)
-            if structured:
-                file_handler.setFormatter(StructuredFormatter())
-            else:
-        file_handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
+        if structured:
+            file_handler.setFormatter(StructuredFormatter())
+        else:
+            file_handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
             )
-        )
         handlers.append(file_handler)
 
     logging.basicConfig(
         level=level,
-            format="%(message)s" if not json_output else "",
+        format="%(message)s" if not json_output else "",
         datefmt="[%X]",
         handlers=handlers,
     )

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start NQ Agent Service in Background
+# Run NQ Agent Service in Foreground (with live terminal output)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -7,15 +7,12 @@ PID_FILE="$PROJECT_DIR/scripts/logs/nq_agent.pid"
 
 cd "$PROJECT_DIR"
 
-# Create logs directory if it doesn't exist (for PID file only)
-mkdir -p "$PROJECT_DIR/scripts/logs"
-
 # Check if already running
 if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")
     if ps -p "$PID" > /dev/null 2>&1; then
         echo "❌ NQ Agent Service already running (PID: $PID)"
-        echo "   Use './scripts/stop_nq_agent_service.sh' to stop it first"
+        echo "   Use './scripts/lifecycle/stop_nq_agent_service.sh' to stop it first"
         exit 1
     else
         # Stale PID file
@@ -50,51 +47,22 @@ if ! python3 -c "import pearlalgo" 2>/dev/null; then
     exit 1
 fi
 
-# Check if user wants foreground mode
-if [ "$1" == "--foreground" ] || [ "$1" == "-f" ]; then
-    echo "=== Starting NQ Agent Service (Foreground Mode) ==="
-    echo "   Press Ctrl+C to stop"
-    echo ""
-    
-    # Use the same python that can import pearlalgo
-    PYTHON_CMD=$(which python3)
-    if [ -f .venv/bin/python3 ]; then
-        PYTHON_CMD=".venv/bin/python3"
-    fi
-    
-    # Run in foreground - output goes directly to terminal
-    "$PYTHON_CMD" -m pearlalgo.nq_agent.main &
-    SERVICE_PID=$!
-    echo $SERVICE_PID > "$PID_FILE"
-    
-    # Wait for the process and cleanup on exit
-    trap "kill $SERVICE_PID 2>/dev/null; rm -f $PID_FILE; exit" INT TERM
-    wait $SERVICE_PID
-    exit $?
-fi
-
-echo "=== Starting NQ Agent Service (Background Mode) ==="
+echo "=== Starting NQ Agent Service (Foreground Mode) ==="
+echo "   Press Ctrl+C to stop"
 echo ""
 
-# Start service in background with proper environment
 # Use the same python that can import pearlalgo
 PYTHON_CMD=$(which python3)
 if [ -f .venv/bin/python3 ]; then
     PYTHON_CMD=".venv/bin/python3"
 fi
 
-nohup "$PYTHON_CMD" -m pearlalgo.nq_agent.main > "$LOG_FILE" 2>&1 &
+# Run in foreground - output goes directly to terminal
+# Save PID for cleanup on Ctrl+C
+"$PYTHON_CMD" -m pearlalgo.nq_agent.main &
 SERVICE_PID=$!
-
-# Save PID
 echo $SERVICE_PID > "$PID_FILE"
 
-echo "✅ NQ Agent Service started"
-echo "   PID: $SERVICE_PID"
-echo "   Log: $LOG_FILE"
-echo "   PID File: $PID_FILE"
-echo ""
-echo "To view logs: tail -f $LOG_FILE"
-echo "To run in foreground: ./scripts/lifecycle/start_nq_agent_service.sh --foreground"
-echo "To stop: ./scripts/lifecycle/stop_nq_agent_service.sh"
-
+# Wait for the process and cleanup on exit
+trap "kill $SERVICE_PID 2>/dev/null; rm -f $PID_FILE; exit" INT TERM
+wait $SERVICE_PID

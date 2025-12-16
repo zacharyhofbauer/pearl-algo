@@ -90,15 +90,15 @@ class GetLatestBarTask(Task):
             # Request market data (may fail with Error 354 if no subscription)
             ticker = ib.reqMktData(contract, "", False, False)
             
-            # Wait a moment for data to arrive
-            time.sleep(0.5)
+            # Wait longer for data to arrive (increased from 0.5s to 1.5s for better reliability)
+            time.sleep(1.5)
             
             # Check for market data errors
             if hasattr(ticker, 'modelOption') and ticker.modelOption:
                 # Check if there's an error message
                 error_msg = str(ticker.modelOption) if ticker.modelOption else ""
                 if "354" in error_msg or "subscription" in error_msg.lower():
-                    logger.debug(f"Market data subscription not available for {self.symbol}, will use historical data fallback")
+                    logger.info(f"Market data subscription not available for {self.symbol} (Error 354), will use historical data fallback")
                     ib.cancelMktData(contract)
                     ticker = None  # Will fall back to historical data
                 elif ticker.last or ticker.close:
@@ -116,11 +116,18 @@ class GetLatestBarTask(Task):
                             "ask": ticker.ask if ticker.ask else None,
                         }
                         ib.cancelMktData(contract)
+                        logger.debug(f"Got real-time data for {self.symbol}: ${last_price:.2f}")
                         return result
+            
+            # Check if we got data but it's not valid
+            if ticker and not (ticker.last or ticker.close):
+                logger.debug(f"Real-time data request for {self.symbol} returned no price data, will use historical fallback")
+                ib.cancelMktData(contract)
+                ticker = None
         except Exception as e:
             error_str = str(e).lower()
             if "354" in str(e) or "subscription" in error_str:
-                logger.debug(f"Market data subscription error for {self.symbol}: {e}. Will use historical data fallback.")
+                logger.info(f"Market data subscription error for {self.symbol}: {e}. Will use historical data fallback.")
             else:
                 logger.warning(f"Error requesting market data for {self.symbol}: {e}")
             if ticker:
@@ -132,23 +139,41 @@ class GetLatestBarTask(Task):
 
         # Fallback: Use latest historical bar if real-time data not available
         # This handles Error 354 (market data subscription not available)
+        # Use shorter duration (5 min) for fresher data instead of 1 D
         try:
-            logger.debug(f"Using historical data fallback for latest bar (real-time subscription may not be available)")
+            logger.info(f"Using historical data fallback for {self.symbol} (real-time subscription not available)")
+            # IBKR requires duration format: integer{SPACE}unit where unit is S|D|W|M|Y
+            # For 5 minutes, use "300 S" (300 seconds) since "M" is for months, not minutes
             bars = ib.reqHistoricalData(
                 contract,
                 endDateTime="",
-                durationStr="1 D",
+                durationStr="300 S",  # 300 seconds = 5 minutes (IBKR format: integer{SPACE}unit)
                 barSizeSetting="1 min",
                 whatToShow="TRADES",
-                useRTH=False,
+                useRTH=True,  # Use regular trading hours only for more accurate data
                 formatDate=1,
             )
             
             if bars:
                 # Get the most recent bar
                 latest_bar = bars[-1]
+                bar_timestamp = latest_bar.date.replace(tzinfo=timezone.utc) if latest_bar.date.tzinfo is None else latest_bar.date
+                
+                # Validate timestamp - ensure data is recent (within last 2 minutes)
+                now = datetime.now(timezone.utc)
+                age_seconds = (now - bar_timestamp).total_seconds()
+                age_minutes = age_seconds / 60
+                
+                if age_minutes > 2:
+                    logger.warning(
+                        f"Historical fallback data for {self.symbol} is {age_minutes:.1f} minutes old "
+                        f"(timestamp: {bar_timestamp}). This may indicate a data feed issue."
+                    )
+                else:
+                    logger.debug(f"Historical fallback data for {self.symbol} is {age_minutes:.1f} minutes old (acceptable)")
+                
                 return {
-                    "timestamp": latest_bar.date.replace(tzinfo=timezone.utc) if latest_bar.date.tzinfo is None else latest_bar.date,
+                    "timestamp": bar_timestamp,
                     "open": float(latest_bar.open),
                     "high": float(latest_bar.high),
                     "low": float(latest_bar.low),
@@ -157,6 +182,8 @@ class GetLatestBarTask(Task):
                     "bid": None,  # Not available from historical data
                     "ask": None,  # Not available from historical data
                 }
+            else:
+                logger.warning(f"No historical bars returned for {self.symbol}")
         except Exception as e:
             logger.warning(f"Error fetching historical data fallback for {self.symbol}: {e}")
         

@@ -61,6 +61,8 @@ from pearlalgo.nq_agent.service import NQAgentService
 from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
+from pearlalgo.utils.logging import setup_logging
+from pearlalgo.utils.logging import setup_logging
 
 
 async def test_telegram_notifications():
@@ -286,6 +288,9 @@ async def test_service_with_mock():
 
 async def main():
     """Main entry point."""
+    # Setup logging for consistent console output (matches production)
+    setup_logging(level="INFO")
+    
     parser = argparse.ArgumentParser(description="Unified test runner for NQ Agent")
     parser.add_argument(
         "mode",

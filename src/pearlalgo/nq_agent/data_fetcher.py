@@ -57,6 +57,7 @@ class NQAgentDataFetcher:
         
         # Initialize data quality checker
         stale_threshold_minutes = data_settings.get("stale_data_threshold_minutes", 10)
+        self.stale_data_threshold_minutes = stale_threshold_minutes  # Store for use in logging
         self.data_quality_checker = DataQualityChecker(
             stale_data_threshold_minutes=stale_threshold_minutes
         )
@@ -139,6 +140,7 @@ class NQAgentDataFetcher:
 
             # Fetch latest bar if method available
             latest_bar = None
+            data_source = "unknown"
             if hasattr(self.data_provider, 'get_latest_bar'):
                 try:
                     if asyncio.iscoroutinefunction(self.data_provider.get_latest_bar):
@@ -150,11 +152,50 @@ class NQAgentDataFetcher:
                             None,
                             lambda: self.data_provider.get_latest_bar(self.config.symbol)
                         )
+                    
+                    if latest_bar:
+                        # Determine data source based on timestamp freshness
+                        bar_timestamp = latest_bar.get("timestamp")
+                        if bar_timestamp:
+                            if isinstance(bar_timestamp, str):
+                                bar_timestamp = datetime.fromisoformat(bar_timestamp.replace("Z", "+00:00"))
+                            if isinstance(bar_timestamp, pd.Timestamp):
+                                bar_timestamp = bar_timestamp.to_pydatetime()
+                            if bar_timestamp.tzinfo is None:
+                                bar_timestamp = bar_timestamp.replace(tzinfo=timezone.utc)
+                            
+                            now = datetime.now(timezone.utc)
+                            age_seconds = (now - bar_timestamp).total_seconds()
+                            age_minutes = age_seconds / 60
+                            
+                            # If data is very fresh (< 30 seconds), likely real-time
+                            if age_seconds < 30:
+                                data_source = "real-time"
+                                logger.debug(f"Latest bar for {self.config.symbol} from real-time data (age: {age_seconds:.1f}s)")
+                            else:
+                                data_source = "historical"
+                                logger.info(
+                                    f"Latest bar for {self.config.symbol} from historical data "
+                                    f"(age: {age_minutes:.1f} minutes, price: ${latest_bar.get('close', 0):.2f})"
+                                )
+                                
+                                # Warn if data is stale
+                                if age_minutes > self.stale_data_threshold_minutes:
+                                    logger.warning(
+                                        f"⚠️  Stale data detected for {self.config.symbol}: "
+                                        f"{age_minutes:.1f} minutes old (threshold: {self.stale_data_threshold_minutes} min). "
+                                        f"Price may not match current market."
+                                    )
+                        else:
+                            data_source = "provider"
+                            logger.debug(f"Latest bar for {self.config.symbol} from provider (timestamp not available)")
                 except Exception as e:
                     logger.warning(f"Could not fetch latest bar from provider: {e}. Will use historical data fallback.")
+                    data_source = "fallback"
 
             # If no latest_bar from provider, use last row from historical data
             if latest_bar is None and not df.empty:
+                data_source = "historical_fallback"
                 logger.info(f"Using historical data fallback for latest bar (real-time subscription may not be available)")
                 latest_row = df.iloc[-1]
                 timestamp = latest_row.name if hasattr(latest_row, 'name') else datetime.now(timezone.utc)
@@ -186,11 +227,34 @@ class NQAgentDataFetcher:
                     "close": float(close_val),
                     "volume": int(volume_val),
                 }
-                logger.debug(f"Using last bar from historical data as latest_bar for {self.config.symbol}")
+                
+                # Check age of historical fallback data
+                if isinstance(timestamp, datetime):
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=timezone.utc)
+                    now = datetime.now(timezone.utc)
+                    age_seconds = (now - timestamp).total_seconds()
+                    age_minutes = age_seconds / 60
+                    
+                    logger.debug(
+                        f"Using last bar from historical data as latest_bar for {self.config.symbol} "
+                        f"(age: {age_minutes:.1f} minutes, price: ${close_val:.2f})"
+                    )
+                    
+                    # Warn if historical fallback is stale
+                    if age_minutes > self.stale_data_threshold_minutes:
+                        logger.warning(
+                            f"⚠️  Historical fallback data for {self.config.symbol} is stale: "
+                            f"{age_minutes:.1f} minutes old (threshold: {self.stale_data_threshold_minutes} min). "
+                            f"Price ${close_val:.2f} may not match current market."
+                        )
 
             if latest_bar is None:
                 logger.warning(f"No latest bar available for {self.config.symbol}")
                 return {"df": pd.DataFrame(), "latest_bar": None}
+            
+            # Add data source metadata to latest_bar for tracking
+            latest_bar["_data_source"] = data_source
 
             # Update buffer if we have new data
             if self._data_buffer is None or self._data_buffer.empty:
