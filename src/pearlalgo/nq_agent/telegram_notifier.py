@@ -502,6 +502,37 @@ class NQAgentTelegramNotifier:
 
             message = f"💓 *Heartbeat*\n*{uptime_str} uptime*\n\n"
 
+            # Current price and time
+            latest_price = status.get('latest_price')
+            current_time = status.get('current_time')
+            symbol = status.get('symbol', 'MNQ')
+            
+            if latest_price:
+                message += f"💰 *Price:* ${latest_price:,.2f} ({symbol})\n"
+            
+            if current_time:
+                try:
+                    from datetime import datetime, timezone as tz
+                    import pytz
+                    if isinstance(current_time, str):
+                        current_time = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+                    if current_time.tzinfo is None:
+                        current_time = current_time.replace(tzinfo=tz.utc)
+                    et_tz = pytz.timezone('US/Eastern')
+                    et_time = current_time.astimezone(et_tz)
+                    time_str = et_time.strftime("%I:%M:%S %p ET")
+                    message += f"🕐 *Time:* {time_str}\n"
+                except Exception:
+                    # Fallback to UTC
+                    try:
+                        if hasattr(current_time, 'strftime'):
+                            time_str = current_time.strftime("%H:%M:%S UTC")
+                            message += f"🕐 *Time:* {time_str}\n"
+                    except:
+                        pass
+            
+            message += "\n"
+
             # Status line
             market_emoji = "🟢" if is_market_open else "🔴"
             message += f"🟢 *Service:* RUNNING\n"
@@ -545,40 +576,52 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
-            emoji_map = {
-                "stale_data": "⏰",
-                "data_gap": "📉",
-                "fetch_failure": "❌",
-                "buffer_issue": "⚠️",
-            }
-
-            emoji = emoji_map.get(alert_type, "⚠️")
+            # Format message EXACTLY like startup/heartbeat messages
+            # Use same structure and ensure valid Markdown (no parsing errors)
+            formatted_message = "⚠️ *Risk Warning*\n\n"
             
-            # Format alert message (clean format - notify_risk_warning adds "⚠️ *Risk Warning*" header)
-            # Format: emoji + title, then message, then details
-            alert_message = f"{emoji} *{alert_type.replace('_', ' ').title()}*\n\n{message}"
-
+            # Add alert type (bold title, like other message titles)
+            if alert_type == "stale_data":
+                formatted_message += "⏰ *Stale Data*\n"
+            elif alert_type == "data_gap":
+                formatted_message += "📉 *Data Gap*\n"
+            elif alert_type == "fetch_failure":
+                formatted_message += "❌ *Fetch Failure*\n"
+            elif alert_type == "buffer_issue":
+                formatted_message += "⚠️ *Buffer Issue*\n"
+            else:
+                title_text = alert_type.replace('_', ' ').title()
+                formatted_message += f"⚠️ *{title_text}*\n"
+            
+            # Add details - match startup format exactly: emoji + *Key:* value
+            if alert_type == "stale_data" and details and "age_minutes" in details:
+                age_val = details['age_minutes']
+                formatted_message += f"⏱️ *Age:* {age_val:.1f} minutes\n"
+            elif message:
+                formatted_message += f"{message}\n"
+            
+            # Add other details if present
             if details:
                 detail_lines = []
-                if "age_minutes" in details:
-                    detail_lines.append(f"*Age:* {details['age_minutes']:.1f} minutes")
                 if "consecutive_failures" in details:
-                    detail_lines.append(f"*Failures:* {details['consecutive_failures']}")
+                    detail_lines.append(f"❌ *Failures:* {details['consecutive_failures']}")
                 if "connection_failures" in details:
-                    detail_lines.append(f"*Connection Failures:* {details['connection_failures']}")
+                    detail_lines.append(f"🔌 *Connection Failures:* {details['connection_failures']}")
                 if "buffer_size" in details:
-                    detail_lines.append(f"*Buffer:* {details['buffer_size']} bars")
+                    detail_lines.append(f"📊 *Buffer:* {details['buffer_size']} bars")
                 if "error_type" in details:
-                    detail_lines.append(f"*Error Type:* {details['error_type']}")
+                    detail_lines.append(f"⚠️ *Error Type:* {details['error_type']}")
                 if "suggestion" in details:
-                    detail_lines.append(f"*Suggestion:* {details['suggestion']}")
+                    detail_lines.append(f"💡 *Suggestion:* {details['suggestion']}")
                 
                 if detail_lines:
-                    alert_message += "\n\n" + "\n".join(detail_lines)
-
-            # Send with DATA_QUALITY status
-            # notify_risk_warning will add "⚠️ *Risk Warning*\n\n" prefix and "*Status: DATA_QUALITY" suffix
-            await self.telegram.notify_risk_warning(alert_message, risk_status="DATA_QUALITY")
+                    formatted_message += "\n" + "\n".join(detail_lines) + "\n"
+            
+            # Add status (same format as *Config:* in startup message)
+            formatted_message += "\n*Status:* DATA_QUALITY"
+            
+            # Send using send_message (same as startup/heartbeat)
+            await self.telegram.send_message(formatted_message)
             return True
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_data_quality_alert")
@@ -586,10 +629,10 @@ class NQAgentTelegramNotifier:
 
     async def send_startup_notification(self, config: Dict) -> bool:
         """
-        Send service startup notification with configuration.
+        Send service startup notification with configuration, current price, and time.
         
         Args:
-            config: Configuration dictionary
+            config: Configuration dictionary (may include latest_price and current_time)
             
         Returns:
             True if sent successfully
@@ -598,21 +641,57 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
+            from datetime import datetime, timezone
+            
             message = f"🚀 *NQ Agent Started*\n\n"
 
+            # Show current price and time
+            current_time = config.get('current_time')
+            if not current_time:
+                current_time = datetime.now(timezone.utc)
+            if isinstance(current_time, str):
+                # Parse if string
+                try:
+                    current_time = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+                except:
+                    current_time = datetime.now(timezone.utc)
+            
+            # Format time (ET for US market)
+            try:
+                import pytz
+                et_tz = pytz.timezone('US/Eastern')
+                if hasattr(current_time, 'astimezone'):
+                    et_time = current_time.astimezone(et_tz)
+                else:
+                    # If timezone-naive, assume UTC
+                    from datetime import timezone as tz
+                    if current_time.tzinfo is None:
+                        current_time = current_time.replace(tzinfo=tz.utc)
+                    et_time = current_time.astimezone(et_tz)
+                time_str = et_time.strftime("%I:%M:%S %p ET")
+            except Exception:
+                # Fallback to UTC if pytz not available or timezone conversion fails
+                if hasattr(current_time, 'strftime'):
+                    time_str = current_time.strftime("%H:%M:%S UTC")
+                else:
+                    time_str = str(current_time)
+            
+            latest_price = config.get('latest_price')
+            symbol = config.get('symbol', 'MNQ')
+            
+            if latest_price:
+                message += f"💰 *Price:* ${latest_price:,.2f} ({symbol})\n"
+            else:
+                message += f"📊 *Symbol:* {symbol}\n"
+            message += f"🕐 *Time:* {time_str}\n\n"
+
             # Compact config (mobile-friendly)
-            symbol = config.get('symbol', 'MNQ')  # Default to MNQ for prop firm trading
             timeframe = config.get('timeframe', '1m')
             scan_interval = config.get('scan_interval', 60)
-            max_risk = config.get('max_risk_per_trade', 0.02) * 100
-            rr_ratio = config.get('take_profit_risk_reward', 2.0)
 
             message += f"*Config:*\n"
-            message += f"• Symbol: {symbol}\n"
             message += f"• Timeframe: {timeframe}\n"
             message += f"• Scan: {scan_interval}s\n"
-            message += f"• Risk: {max_risk:.1f}%\n"
-            message += f"• R:R: {rr_ratio:.1f}:1\n"
 
             # Market status
             market_hours = get_market_hours()

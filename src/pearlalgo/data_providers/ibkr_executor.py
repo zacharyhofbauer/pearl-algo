@@ -444,6 +444,15 @@ class IBKRExecutor:
         logger.info("Shutting down IBKRExecutor...")
         self._shutdown_event.set()
 
+        # Disconnect IB connection immediately to free client_id
+        try:
+            if hasattr(self, 'ib') and self.ib and self.ib.isConnected():
+                logger.info("Disconnecting IB connection to free client_id...")
+                self.ib.disconnect()
+                logger.info("IB connection disconnected")
+        except Exception as e:
+            logger.warning(f"Error disconnecting IB connection: {e}")
+
         # Submit shutdown task
         shutdown_task = ShutdownTask(task_id="shutdown")
         self._task_queue.put(shutdown_task)

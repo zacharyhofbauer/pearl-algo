@@ -2,8 +2,8 @@
 # Start NQ Agent Service in Background
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LOG_DIR="$PROJECT_DIR/logs"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LOG_DIR="$PROJECT_DIR/scripts/logs"
 PID_FILE="$LOG_DIR/nq_agent.pid"
 LOG_FILE="$LOG_DIR/nq_agent.log"
 
@@ -39,13 +39,30 @@ fi
 # Activate virtual environment if it exists
 if [ -f .venv/bin/activate ]; then
     source .venv/bin/activate
+    echo "✅ Virtual environment activated"
+else
+    echo "⚠️  Warning: No virtual environment found at .venv/bin/activate"
+    echo "   Make sure to install dependencies: pip install -e ."
+fi
+
+# Check if package is installed
+if ! python3 -c "import pearlalgo" 2>/dev/null; then
+    echo "❌ ERROR: pearlalgo package not found!"
+    echo "   Install it with: pip install -e ."
+    exit 1
 fi
 
 echo "=== Starting NQ Agent Service ==="
 echo ""
 
-# Start service in background
-nohup python3 -m pearlalgo.nq_agent.main > "$LOG_FILE" 2>&1 &
+# Start service in background with proper environment
+# Use the same python that can import pearlalgo
+PYTHON_CMD=$(which python3)
+if [ -f .venv/bin/python3 ]; then
+    PYTHON_CMD=".venv/bin/python3"
+fi
+
+nohup "$PYTHON_CMD" -m pearlalgo.nq_agent.main > "$LOG_FILE" 2>&1 &
 SERVICE_PID=$!
 
 # Save PID

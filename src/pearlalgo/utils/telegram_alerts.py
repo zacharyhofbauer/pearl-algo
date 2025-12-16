@@ -102,18 +102,32 @@ class TelegramAlerts:
         import hashlib
         import time
 
-        # Simple deduplication: track last message hash and timestamp
-        # Prevent sending same message within 2 seconds (handles retry duplicates)
-        message_hash = hashlib.md5(message.encode()).hexdigest()
+        # Enhanced deduplication: track last message hash and timestamp
+        # Prevent sending same or very similar messages within 120 seconds (2 minutes)
+        # Normalize message for better duplicate detection (remove variable timestamps/ages)
+        import re
+        normalized_message = message
+        # Normalize variable parts that might differ slightly but are essentially the same message
+        # Remove age values in both "X.X minutes old" format and "*Age:* X.X minutes" format
+        normalized_message = re.sub(r'\d+\.\d+ minutes old', 'X.X minutes old', normalized_message)
+        normalized_message = re.sub(r'\*Age:\* \d+\.\d+ minutes', '*Age:* X.X minutes', normalized_message)
+        # Remove time stamps (e.g., "01:42:20 PM ET" -> "XX:XX:XX XM ET")
+        normalized_message = re.sub(r'\d+:\d+:\d+ [AP]M ET', 'XX:XX:XX XM ET', normalized_message)
+        # Remove percentages
+        normalized_message = re.sub(r'\d+\.\d+%', 'X.X%', normalized_message)
+        # Remove price values in stale data alerts
+        normalized_message = re.sub(r'\$\d+,\d+\.\d+', '$X,XXX.XX', normalized_message)
+        
+        message_hash = hashlib.md5(normalized_message.encode()).hexdigest()
         current_time = time.time()
         
         if not hasattr(self, '_last_message_hash'):
             self._last_message_hash = None
             self._last_message_time = 0
         
-        # Skip if same message sent within last 2 seconds
+        # Skip if same/similar message sent within last 120 seconds (2 minutes)
         if (self._last_message_hash == message_hash and 
-            current_time - self._last_message_time < 2.0):
+            current_time - self._last_message_time < 120.0):
             logger.debug(f"Skipping duplicate message (sent {current_time - self._last_message_time:.1f}s ago)")
             return True  # Return True since message was already sent
 
@@ -227,8 +241,8 @@ class TelegramAlerts:
             alert = message
         
         if risk_status:
-            alert += f"\n\n*Status:* {risk_status}"
-
+            alert += f"\n*Status:* {risk_status}"
+        
         await self.send_message(alert)
 
     async def notify_daily_summary(

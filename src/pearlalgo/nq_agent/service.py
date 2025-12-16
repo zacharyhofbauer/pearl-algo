@@ -96,6 +96,7 @@ class NQAgentService:
         self.last_successful_cycle: Optional[datetime] = None
         self.last_data_quality_alert: Optional[datetime] = None
         self.data_quality_alert_interval = alert_settings.get("data_quality_interval", 300)
+        self._last_stale_data_alert_type: Optional[str] = None  # Track last alert type to prevent duplicates
         self.stale_data_threshold_minutes = data_settings.get("stale_data_threshold_minutes", 10)
         self.connection_timeout_minutes = data_settings.get("connection_timeout_minutes", 30)
         
@@ -122,7 +123,8 @@ class NQAgentService:
 
         logger.info("NQ Agent Service starting...")
 
-        # Send startup notification
+        # Send startup notification immediately (before connection attempts)
+        # This ensures user gets notified even if connection fails
         try:
             config_dict = {
                 "symbol": self.config.symbol,
@@ -131,10 +133,27 @@ class NQAgentService:
                 "stop_loss_atr_multiplier": self.config.stop_loss_atr_multiplier,
                 "take_profit_risk_reward": self.config.take_profit_risk_reward,
                 "max_risk_per_trade": self.config.max_risk_per_trade,
+                "current_time": datetime.now(timezone.utc),
             }
+            
+            # Try to get latest price for startup message (non-blocking, timeout quickly)
+            try:
+                market_data = await asyncio.wait_for(
+                    self.data_fetcher.fetch_latest_data(),
+                    timeout=5.0
+                )
+                if market_data.get("latest_bar"):
+                    latest_bar = market_data["latest_bar"]
+                    if isinstance(latest_bar, dict) and "close" in latest_bar:
+                        config_dict["latest_price"] = latest_bar["close"]
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Could not fetch price for startup notification: {e}")
+                # Continue without price - service will still start
+            
             await self.telegram_notifier.send_startup_notification(config_dict)
+            logger.info("Startup notification sent to Telegram")
         except Exception as e:
-            logger.warning(f"Could not send startup notification: {e}")
+            logger.error(f"Could not send startup notification: {e}", exc_info=True)
 
         try:
             await self._run_loop()
@@ -523,6 +542,21 @@ class NQAgentService:
             status["last_successful_cycle"] = (
                 self.last_successful_cycle.isoformat() if self.last_successful_cycle else None
             )
+            
+            # Add current time and latest price to heartbeat
+            status["current_time"] = now
+            status["symbol"] = self.config.symbol
+            
+            # Try to get latest price
+            try:
+                market_data = await self.data_fetcher.fetch_latest_data()
+                if market_data.get("latest_bar"):
+                    latest_bar = market_data["latest_bar"]
+                    if isinstance(latest_bar, dict) and "close" in latest_bar:
+                        status["latest_price"] = latest_bar["close"]
+            except Exception as e:
+                logger.debug(f"Could not fetch price for heartbeat: {e}")
+            
             await self.telegram_notifier.send_heartbeat(status)
             self.last_heartbeat = now
 
@@ -543,34 +577,61 @@ class NQAgentService:
         # Check for stale data
         if not validation["freshness"]["is_fresh"]:
             age_minutes = validation["freshness"]["age_minutes"]
-            await self.telegram_notifier.send_data_quality_alert(
-                "stale_data",
-                f"Data is {age_minutes:.1f} minutes old",
-                {"age_minutes": age_minutes},
-            )
-            self.last_data_quality_alert = now
+            
+            # Don't alert on stale data if market is closed (expected behavior)
+            from pearlalgo.utils.market_hours import get_market_hours
+            market_hours = get_market_hours()
+            is_market_open = market_hours.is_market_open()
+            
+            # Only alert if market is open and data is stale (indicates a real problem)
+            if is_market_open:
+                # Check throttling - only send if enough time has passed since last alert
+                should_alert = (
+                    self.last_data_quality_alert is None or
+                    (now - self.last_data_quality_alert).total_seconds() >= self.data_quality_alert_interval
+                )
+                
+                if should_alert:
+                    await self.telegram_notifier.send_data_quality_alert(
+                        "stale_data",
+                        f"Data is {age_minutes:.1f} minutes old",
+                        {"age_minutes": age_minutes},
+                    )
+                    self.last_data_quality_alert = now
+                    self._last_stale_data_alert_type = "stale_data"
+            else:
+                # Market is closed - stale data is expected, just log it
+                logger.debug(f"Data is {age_minutes:.1f} minutes old but market is closed - this is expected")
             return
 
         # Check for empty data
         df = market_data.get("df")
         if df is not None and df.empty:
-            await self.telegram_notifier.send_data_quality_alert(
-                "data_gap",
-                "No market data available",
-                {},
-            )
-            self.last_data_quality_alert = now
+            if (self._last_stale_data_alert_type != "data_gap" or 
+                self.last_data_quality_alert is None or
+                (now - self.last_data_quality_alert).total_seconds() >= self.data_quality_alert_interval):
+                await self.telegram_notifier.send_data_quality_alert(
+                    "data_gap",
+                    "No market data available",
+                    {},
+                )
+                self.last_data_quality_alert = now
+                self._last_stale_data_alert_type = "data_gap"
             return
 
         # Check buffer size
         if not validation["buffer_size"]["is_adequate"]:
             buffer_size = validation["buffer_size"]["buffer_size"]
-            await self.telegram_notifier.send_data_quality_alert(
-                "buffer_issue",
-                f"Buffer size is low: {buffer_size} bars",
-                {"buffer_size": buffer_size},
-            )
-            self.last_data_quality_alert = now
+            if (self._last_stale_data_alert_type != "buffer_issue" or 
+                self.last_data_quality_alert is None or
+                (now - self.last_data_quality_alert).total_seconds() >= self.data_quality_alert_interval):
+                await self.telegram_notifier.send_data_quality_alert(
+                    "buffer_issue",
+                    f"Buffer size is low: {buffer_size} bars",
+                    {"buffer_size": buffer_size},
+                )
+                self.last_data_quality_alert = now
+                self._last_stale_data_alert_type = "buffer_issue"
 
 
     async def _handle_connection_failure(self) -> None:
