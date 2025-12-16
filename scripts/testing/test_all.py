@@ -149,7 +149,7 @@ async def test_telegram_notifications():
     return True
 
 
-def test_signal_generation():
+async def test_signal_generation():
     """Test signal generation with mock data."""
     print("=" * 60)
     print("Signal Generation Test with Mock Data")
@@ -162,6 +162,8 @@ def test_signal_generation():
         base_price=17500.0,
         volatility=50.0,
         trend=1.0,
+        simulate_timeouts=False,  # Disable for testing
+        simulate_connection_issues=False,  # Disable for testing
     )
     print("✅ Mock data provider created")
     print()
@@ -172,7 +174,8 @@ def test_signal_generation():
     df = mock_provider.fetch_historical("MNQ", start, end, "1m")
     print(f"✅ Generated {len(df)} bars")
     
-    latest_bar = asyncio.run(mock_provider.get_latest_bar("MNQ"))
+    # Get latest bar - use await since we're in async context
+    latest_bar = await mock_provider.get_latest_bar("MNQ")
     print(f"✅ Latest bar: ${latest_bar['close']:.2f}")
     print()
     
@@ -308,7 +311,7 @@ async def main():
     
     if args.mode in ["all", "signals"]:
         print("\n" + "=" * 60)
-        results["signals"] = test_signal_generation()
+        results["signals"] = await test_signal_generation()
         print()
     
     if args.mode in ["all", "service"]:

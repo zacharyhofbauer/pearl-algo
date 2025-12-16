@@ -15,8 +15,6 @@ except ImportError:
     Bot = None
     TelegramError = Exception
 
-logger = logging.getLogger(__name__)
-
 
 def _format_separator(length: int = 25) -> str:
     """Create a visual separator line (mobile-friendly)."""

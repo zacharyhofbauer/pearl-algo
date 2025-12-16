@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Add project root to path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).parent.parent.parent
 # Add project root first for tests module, then src for pearlalgo
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))

@@ -27,8 +27,6 @@ from pearlalgo.data_providers.ibkr_executor import (
 )
 from pearlalgo.utils.retry import async_retry_with_backoff
 
-logger = logging.getLogger(__name__)
-
 
 class IBKRProvider(DataProvider):
     """

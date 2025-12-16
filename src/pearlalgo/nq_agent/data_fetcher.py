@@ -116,8 +116,22 @@ class NQAgentDataFetcher:
             # Log data freshness status
             if not data_freshness_warning and not df.empty:
                 logger.debug(f"Data is fresh: {len(df)} bars retrieved for {self.config.symbol}")
-
                 self._data_buffer = df.tail(self._buffer_size).reset_index(drop=True)
+            
+            # Log data freshness at INFO level for observability
+            if "timestamp" in df.columns and not df.empty:
+                latest_timestamp = df["timestamp"].max()
+                if isinstance(latest_timestamp, pd.Timestamp):
+                    age_minutes = (datetime.now(timezone.utc) - latest_timestamp.to_pydatetime().replace(tzinfo=timezone.utc)).total_seconds() / 60
+                    logger.info(f"Data freshness: latest_bar_age={age_minutes:.1f} minutes")
+            
+            # Log buffer status
+            buffer_size = len(self._data_buffer) if self._data_buffer is not None else 0
+            if self._data_buffer is not None and not self._data_buffer.empty and "timestamp" in self._data_buffer.columns:
+                latest_buffer_time = self._data_buffer["timestamp"].max()
+                logger.info(f"Buffer: {buffer_size} bars, latest_timestamp={latest_buffer_time}")
+            else:
+                logger.info(f"Buffer: {buffer_size} bars")
 
             # Fetch latest bar if method available
             latest_bar = None

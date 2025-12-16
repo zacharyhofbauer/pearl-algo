@@ -204,7 +204,35 @@ class NQScanner:
 
         # Detect market regime
         regime = self.regime_detector.detect_regime(df)
-        logger.debug(f"Market regime: {regime}")
+        regime_type = regime.get("regime", "unknown")
+        volatility = regime.get("volatility", "unknown")
+        regime_confidence = regime.get("confidence", 0)
+        
+        # Detect ATR expansion (volatility expansion day indicator)
+        atr_expansion = False
+        if len(df) >= 5 and "atr" in df.columns:
+            current_atr = df.iloc[-1].get("atr", 0)
+            atr_5bars_ago = df.iloc[-5].get("atr", 0) if len(df) >= 5 else current_atr
+            if atr_5bars_ago > 0:
+                atr_expansion_ratio = current_atr / atr_5bars_ago
+                atr_expansion = atr_expansion_ratio > 1.20  # 20% increase
+                if atr_expansion:
+                    expansion_pct = ((current_atr / atr_5bars_ago - 1) * 100)
+                    logger.info(f"ATR expansion detected: +{expansion_pct:.1f}% (current: {current_atr:.2f}, 5 bars ago: {atr_5bars_ago:.2f})")
+        
+        # Add ATR expansion to regime dict for signal context
+        regime["atr_expansion"] = atr_expansion
+        
+        logger.info(f"Regime: {regime_type}, Volatility: {volatility}, Confidence: {regime_confidence:.2f}, ATR Expansion: {atr_expansion}")
+        
+        # Log market hours status
+        is_market_hours = self.is_market_hours()
+        if ET_TIMEZONE is not None:
+            now_utc = datetime.now(timezone.utc)
+            et_time = now_utc.astimezone(ET_TIMEZONE)
+            logger.info(f"Market hours: {is_market_hours}, Current ET time: {et_time.strftime('%H:%M:%S')}")
+        else:
+            logger.info(f"Market hours: {is_market_hours}")
 
         # Get latest bar
         latest = df.iloc[-1]
@@ -370,7 +398,17 @@ class NQScanner:
                         "long", mtf_analysis
                     )
 
-                    if is_aligned:
+                    # During volatility expansion, relax MTF conflict threshold
+                    # Higher timeframes lag during expansion, so structure breaks are valid
+                    # even if MTF hasn't caught up yet
+                    atr_expansion = regime.get("atr_expansion", False)
+                    if atr_expansion and volatility == "high":
+                        # Allow signals even if mtf_adjustment >= -0.20 (was -0.15 for momentum)
+                        mtf_threshold = -0.20
+                    else:
+                        mtf_threshold = -0.15
+
+                    if is_aligned or mtf_adjustment >= mtf_threshold:
                         confidence = max(0.0, min(1.0, confidence + mtf_adjustment))
 
                         # Adjust confidence based on VWAP position
@@ -417,11 +455,25 @@ class NQScanner:
 
         # Mean reversion signal (RSI oversold with multiple confirmations)
         if self.config.enable_mean_reversion and session != "opening":
+            # Mean reversion: check relative RSI movement OR absolute level
+            # During fast moves, RSI may not reach <35 but can drop rapidly (40→35 in 3 bars)
+            # Relative movement captures momentum shifts during fast pullbacks
+            rsi = latest.get("rsi", 50)
+            rsi_momentum_down = False
+            if len(df) >= 3 and "rsi" in df.columns:
+                rsi_3bars_ago = df.iloc[-3].get("rsi", rsi) if len(df) >= 3 else rsi
+                rsi_momentum_down = (rsi_3bars_ago - rsi) > 5  # RSI dropped >5 points in 3 bars
+            
+            # Accept if RSI momentum down OR absolute oversold
+            rsi_ok = rsi_momentum_down or rsi < 35
+            
             if (
-                latest.get("rsi", 50) < 35  # Slightly higher threshold (was 30)
+                rsi_ok  # Relative RSI movement OR absolute oversold
                 and latest["close"] < latest.get("bb_lower", current_price)
                 and latest.get("volume_ratio", 0) > 1.0
             ):
+                if rsi_momentum_down:
+                    logger.debug(f"Mean reversion: RSI momentum down detected (-{rsi_3bars_ago - rsi:.1f} points in 3 bars), using relative movement")
                 # Use lower BB as entry reference, but stop below it
                 stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
                 # Adjust stop to be below lower BB
@@ -439,9 +491,18 @@ class NQScanner:
                     "long", mtf_analysis
                 )
 
+                # During volatility expansion, relax MTF conflict threshold further
+                # Mean reversion can work against MTF (it's counter-trend by nature)
+                atr_expansion = regime.get("atr_expansion", False)
+                if atr_expansion and volatility == "high":
+                    # Allow mean reversion even if mtf_adjustment >= -0.30 (was -0.25)
+                    mtf_threshold = -0.30
+                else:
+                    mtf_threshold = -0.25
+
                 # Allow mean reversion even with partial MTF conflict (it's counter-trend by nature)
                 # Only reject if strongly conflicting
-                if is_aligned or mtf_adjustment >= -0.25:
+                if is_aligned or mtf_adjustment >= mtf_threshold:
                     confidence = max(0.0, min(1.0, confidence + mtf_adjustment * 0.5))  # Less weight for mean reversion
 
                     # Adjust confidence based on VWAP position (mean reversion less sensitive to VWAP)
@@ -500,10 +561,24 @@ class NQScanner:
         if self.config.enable_breakout:
             if len(df) >= 5:
                 recent_high = df["high"].tail(5).max()
+                
+                # Structure-first gate: check if this is a fresh breakout (within 0.3% of level)
+                # Fresh breakouts are price-action based, not indicator-based, so relax RSI requirement
+                is_fresh_breakout = False
+                if latest["close"] > recent_high:
+                    is_fresh_breakout = abs(current_price - recent_high) / recent_high < 0.003
+                
+                # For fresh breakouts, relax RSI requirement (structure breaks happen before indicators confirm)
+                rsi = latest.get("rsi", 50)
+                if is_fresh_breakout:
+                    rsi_ok = rsi > 40  # Lower threshold for fresh breakouts
+                else:
+                    rsi_ok = rsi > 45  # Original threshold for established breakouts
+                
                 if (
                     latest["close"] > recent_high
                     and latest.get("volume_ratio", 0) > 1.3  # Slightly lower threshold (was 1.5)
-                    and latest.get("rsi", 50) > 45  # Not oversold (was 50)
+                    and rsi_ok  # Conditional RSI threshold based on fresh breakout
                     and latest.get("macd_histogram", 0) > 0  # MACD bullish
                 ):
                     stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
@@ -511,8 +586,9 @@ class NQScanner:
                     stop_loss = min(stop_loss, float(recent_high) - (atr * 0.5))
                     confidence = calculate_signal_score("breakout_long", latest, df)
 
-                    # Structure-first gate: check if this is a fresh breakout (within 0.3% of level)
-                    is_fresh_breakout = abs(current_price - recent_high) / recent_high < 0.003
+                    # is_fresh_breakout already calculated above
+                    if is_fresh_breakout:
+                        logger.debug(f"Fresh breakout detected (within 0.3% of level {recent_high:.2f}), applying structure-first gate with relaxed RSI threshold")
                     
                     # Adjust confidence based on regime
                     confidence = self.regime_detector.adjust_confidence_by_regime(
@@ -539,10 +615,15 @@ class NQScanner:
 
                     # Structure-first: allow fresh breakouts even with MTF conflicts
                     # Fresh breakouts are structure-based, not indicator-based
+                    # During volatility expansion, relax threshold further
+                    atr_expansion = regime.get("atr_expansion", False)
                     if is_fresh_breakout:
-                        # For fresh breakouts, allow even if MTF adjustment >= -0.25 (was -0.20)
+                        # For fresh breakouts, allow even if MTF adjustment >= -0.25
                         mtf_threshold = -0.25
                         logger.debug(f"Fresh breakout detected (within 0.3% of level), applying structure-first gate")
+                    elif atr_expansion and volatility == "high":
+                        # During expansion, relax threshold for all breakouts
+                        mtf_threshold = -0.25
                     else:
                         mtf_threshold = -0.20
 

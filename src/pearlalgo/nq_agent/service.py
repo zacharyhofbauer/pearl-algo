@@ -279,6 +279,29 @@ class NQAgentService:
 
                 # Generate signals
                 signals = self.strategy.analyze(market_data)
+                
+                # Log cycle summary for observability
+                data_fresh = True
+                if market_data.get("latest_bar"):
+                    latest_bar_time = market_data["latest_bar"].get("timestamp")
+                    if latest_bar_time:
+                        if isinstance(latest_bar_time, str):
+                            from datetime import datetime
+                            latest_bar_time = datetime.fromisoformat(latest_bar_time.replace("Z", "+00:00"))
+                        age_seconds = (datetime.now(timezone.utc) - latest_bar_time.replace(tzinfo=timezone.utc)).total_seconds()
+                        data_fresh = age_seconds < 600  # 10 minutes
+                
+                market_open = self.strategy.scanner.is_market_hours()
+                regime_info = "unknown"
+                if hasattr(self.strategy, 'scanner') and hasattr(self.strategy.scanner, 'regime_detector'):
+                    # Try to get last detected regime (would need to store it)
+                    regime_info = "detected"
+                
+                logger.info(
+                    f"Cycle {self.cycle_count}: signals={len(signals)}, "
+                    f"data_fresh={data_fresh}, market_open={market_open}, "
+                    f"buffer_size={self.data_fetcher.get_buffer_size()}"
+                )
 
                 # Process signals
                 for signal in signals:

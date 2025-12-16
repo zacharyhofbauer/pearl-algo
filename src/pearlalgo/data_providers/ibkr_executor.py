@@ -22,8 +22,6 @@ from ib_insync import IB, Future, Option, Stock, util
 
 from pearlalgo.utils.logger import logger
 
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class Task(ABC):

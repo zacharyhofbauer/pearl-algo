@@ -105,10 +105,18 @@ class SignalQualityScorer:
         # Volatility-aware bypass: if confidence >0.55 and volatility="high", allow signal
         # even if historical WR is slightly below threshold (expansion days are opportunities)
         signal_confidence = signal.get("confidence", 0)
+        regime = signal.get("regime", {})
+        atr_expansion = regime.get("atr_expansion", False)
+        
+        # Enhanced bypass: handle first-time expansion days with no historical data
+        # If ATR expanded and confidence is high, allow even if historical WR = 0.5 (no data)
         volatility_bypass = (
             volatility == "high" 
             and signal_confidence > 0.55 
-            and historical_wr >= 0.52  # Still require minimum 52% expected WR
+            and (
+                historical_wr >= 0.52  # Normal case: require minimum 52% expected WR
+                or (atr_expansion and historical_wr >= 0.50)  # Expansion day: allow if no data (0.5) or better
+            )
         )
 
         # Should send if meets threshold and has positive information ratio, OR volatility bypass
@@ -302,6 +310,3 @@ class SignalQualityScorer:
 
         except Exception as e:
             logger.error(f"Error updating performance stats: {e}", exc_info=True)
-
-
-

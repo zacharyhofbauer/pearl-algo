@@ -77,6 +77,9 @@ class NQSignalGenerator:
         # Scan for signals with MTF context
         raw_signals = self.scanner.scan(df, df_5m=df_5m, df_15m=df_15m)
         
+        # Log raw signal count at INFO level for observability
+        logger.info(f"Raw signals from scanner: {len(raw_signals)}")
+        
         # Diagnostic logging: log raw signals
         if raw_signals:
             logger.debug(f"Raw signals generated: {len(raw_signals)}")
@@ -109,14 +112,30 @@ class NQSignalGenerator:
                         validated_signals.append(validated_signal)
                         self._recent_signals.append(validated_signal)
                     else:
+                        # Near-miss diagnostic logging: track signals that fail quality scorer
+                        signal_type = validated_signal.get("type", "unknown")
+                        signal_confidence = validated_signal.get("confidence", 0)
+                        historical_wr = quality_score.get("historical_wr", 0)
+                        meets_threshold = quality_score.get("meets_threshold", False)
+                        information_ratio = quality_score.get("information_ratio", 0)
+                        regime = validated_signal.get("regime", {})
+                        volatility = regime.get("volatility", "normal")
+                        atr_expansion = regime.get("atr_expansion", False)
+                        
+                        logger.info(
+                            f"NEAR_MISS: quality_scorer_rejection | "
+                            f"type={signal_type} | "
+                            f"confidence={signal_confidence:.3f} | "
+                            f"historical_wr={historical_wr:.0%} | "
+                            f"meets_threshold={meets_threshold} | "
+                            f"information_ratio={information_ratio:.3f} | "
+                            f"volatility={volatility} | "
+                            f"atr_expansion={atr_expansion}"
+                        )
                         logger.debug(
-                            f"Signal filtered by quality scorer: "
-                            f"type={validated_signal.get('type')}, "
-                            f"confidence={validated_signal.get('confidence', 0):.3f}, "
-                            f"historical_wr={quality_score.get('historical_wr', 0):.0%}, "
-                            f"meets_threshold={quality_score.get('meets_threshold', False)}, "
-                            f"information_ratio={quality_score.get('information_ratio', 0):.3f}, "
-                            f"should_send={quality_score.get('should_send', False)}"
+                            f"Signal context: entry={validated_signal.get('entry_price', 0):.2f}, "
+                            f"regime={regime.get('regime', 'unknown')}, "
+                            f"indicators={validated_signal.get('indicators', {})}"
                         )
 
         # Clean up old signals from recent list
@@ -137,14 +156,51 @@ class NQSignalGenerator:
         Returns:
             True if signal is valid
         """
+        # Volatility-aware confidence floor: during high volatility expansion,
+        # apply a floor to prevent valid structure-based signals from being
+        # killed by confidence stacking penalties
+        regime = signal.get("regime", {})
+        volatility = regime.get("volatility", "normal")
+        signal_confidence = signal.get("confidence", 0)
+        atr_expansion = regime.get("atr_expansion", False)
+        
+        if volatility == "high" and atr_expansion:
+            # Floor confidence at 0.48 during expansion (was 0.50 threshold)
+            # This allows signals that get penalized down to 0.42-0.49 to still pass
+            effective_confidence = max(signal_confidence, 0.48)
+            if effective_confidence > signal_confidence:
+                logger.debug(
+                    f"Volatility expansion: applying confidence floor 0.48 "
+                    f"(original: {signal_confidence:.3f}, adjusted: {effective_confidence:.3f})"
+                )
+                signal["confidence"] = effective_confidence
+                signal_confidence = effective_confidence
+        
         # Check confidence threshold
-        confidence = signal.get("confidence", 0)
+        confidence = signal_confidence
         if confidence < self._min_confidence:
+            # Near-miss diagnostic logging: track signals that fail confidence threshold
+            signal_type = signal.get("type", "unknown")
+            logger.info(
+                f"NEAR_MISS: confidence_rejection | "
+                f"type={signal_type} | "
+                f"confidence={confidence:.3f} | "
+                f"threshold={self._min_confidence:.3f} | "
+                f"gap={self._min_confidence - confidence:.3f} | "
+                f"volatility={volatility} | "
+                f"atr_expansion={atr_expansion}"
+            )
+            logger.debug(
+                f"Signal context: entry={signal.get('entry_price', 0):.2f}, "
+                f"regime={regime.get('regime', 'unknown')}, "
+                f"indicators={signal.get('indicators', {})}"
+            )
             return False
 
         # Check entry price is valid
         entry_price = signal.get("entry_price")
         if not entry_price or entry_price <= 0:
+            logger.info(f"Signal rejected: invalid entry_price {entry_price}")
             return False
 
         # Check stop loss and take profit are valid
@@ -153,13 +209,17 @@ class NQSignalGenerator:
 
         if signal["direction"] == "long":
             if stop_loss and stop_loss >= entry_price:
+                logger.info(f"Signal rejected: stop_loss {stop_loss:.2f} >= entry {entry_price:.2f} (long)")
                 return False
             if take_profit and take_profit <= entry_price:
+                logger.info(f"Signal rejected: take_profit {take_profit:.2f} <= entry {entry_price:.2f} (long)")
                 return False
         else:  # short
             if stop_loss and stop_loss <= entry_price:
+                logger.info(f"Signal rejected: stop_loss {stop_loss:.2f} <= entry {entry_price:.2f} (short)")
                 return False
             if take_profit and take_profit >= entry_price:
+                logger.info(f"Signal rejected: take_profit {take_profit:.2f} >= entry {entry_price:.2f} (short)")
                 return False
 
         # Validate risk/reward ratio meets minimum
@@ -174,6 +234,18 @@ class NQSignalGenerator:
             if risk > 0:
                 risk_reward = reward / risk
                 if risk_reward < self._min_risk_reward:
+                    # Near-miss diagnostic logging: track signals that fail R:R threshold
+                    signal_type = signal.get("type", "unknown")
+                    logger.info(
+                        f"NEAR_MISS: risk_reward_rejection | "
+                        f"type={signal_type} | "
+                        f"risk_reward={risk_reward:.2f}:1 | "
+                        f"threshold={self._min_risk_reward:.2f}:1 | "
+                        f"gap={self._min_risk_reward - risk_reward:.2f} | "
+                        f"entry={entry_price:.2f} | "
+                        f"stop={stop_loss:.2f} | "
+                        f"target={take_profit:.2f}"
+                    )
                     return False
 
         return True
@@ -265,33 +337,6 @@ class NQSignalGenerator:
         for recent in self._recent_signals:
             recent_time = datetime.fromisoformat(recent.get("timestamp", "").replace("Z", "+00:00"))
             time_diff = (signal_time - recent_time).total_seconds()
-            recent_entry = recent.get("entry_price", 0)
-
-            # Check if same type and direction within time window
-            same_type = recent.get("type") == signal.get("type")
-            same_direction = recent.get("direction") == signal.get("direction")
-            within_time_window = time_diff < self._signal_window_seconds
-
-            # Also check if price is too close (within 0.5% for same signal)
-            price_close = False
-            if recent_entry > 0 and signal_entry > 0:
-                price_diff_pct = abs(signal_entry - recent_entry) / recent_entry
-                price_close = price_diff_pct < 0.005  # 0.5%
-
-            if same_type and same_direction and (within_time_window or price_close):
-                return True
-
-        return False
-
-    def _cleanup_recent_signals(self) -> None:
-        """Remove old signals from recent signals list."""
-        now = datetime.now(timezone.utc)
-        self._recent_signals = [
-            s for s in self._recent_signals
-            if (now - datetime.fromisoformat(s["timestamp"].replace("Z", "+00:00"))).total_seconds()
-            < self._signal_window_seconds
-        ]
-signal_time - recent_time).total_seconds()
             recent_entry = recent.get("entry_price", 0)
 
             # Check if same type and direction within time window
