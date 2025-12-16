@@ -20,6 +20,7 @@ class MockDataProvider(DataProvider):
     Mock data provider that generates fake market data for testing.
     
     Simulates realistic NQ futures data with trends, volatility, and patterns.
+    Also simulates IBKR quirks: delayed data, occasional timeouts, connection issues.
     """
     
     def __init__(
@@ -27,6 +28,9 @@ class MockDataProvider(DataProvider):
         base_price: float = 17500.0,  # Realistic NQ futures price (Dec 2024 range: ~17,000-20,000)
         volatility: float = 25.0,  # Realistic intraday volatility for NQ (points per bar)
         trend: float = 0.0,  # Price trend per bar (positive = uptrend, negative = downtrend)
+        simulate_delayed_data: bool = True,  # Simulate IBKR delayed data (5-15 second delay)
+        simulate_timeouts: bool = True,  # Simulate occasional timeouts (5% chance)
+        simulate_connection_issues: bool = True,  # Simulate connection issues (2% chance)
     ):
         """
         Initialize mock data provider.
@@ -38,12 +42,19 @@ class MockDataProvider(DataProvider):
             base_price: Starting price for generated data (default ~17,500 for NQ futures)
             volatility: Price volatility in points per bar (default 25 points for realistic NQ movement)
             trend: Price trend per bar (positive = uptrend, negative = downtrend)
+            simulate_delayed_data: If True, simulates IBKR delayed data (5-15 second delay)
+            simulate_timeouts: If True, simulates occasional timeouts (5% chance per call)
+            simulate_connection_issues: If True, simulates connection issues (2% chance per call)
         """
         self.base_price = base_price
         self.volatility = volatility
         self.trend = trend
         self.current_price = base_price
         self._historical_data: List[Dict] = []
+        self.simulate_delayed_data = simulate_delayed_data
+        self.simulate_timeouts = simulate_timeouts
+        self.simulate_connection_issues = simulate_connection_issues
+        self._call_count = 0
         
     def fetch_historical(
         self,
@@ -52,6 +63,23 @@ class MockDataProvider(DataProvider):
         end: datetime,
         timeframe: str = "1m",
     ) -> pd.DataFrame:
+        """
+        Generate fake historical data with optional IBKR quirks simulation.
+        
+        Simulates:
+        - Occasional timeouts (5% chance)
+        - Connection issues (2% chance)
+        - Delayed data (timestamp offset)
+        """
+        self._call_count += 1
+        
+        # Simulate occasional timeouts (IBKR quirk)
+        if self.simulate_timeouts and random.random() < 0.05:
+            raise TimeoutError("IBKR Gateway timeout (simulated)")
+        
+        # Simulate occasional connection issues (IBKR quirk)
+        if self.simulate_connection_issues and random.random() < 0.02:
+            raise ConnectionError("IBKR Gateway connection refused (simulated)")
         """
         Generate fake historical data.
         
@@ -89,8 +117,15 @@ class MockDataProvider(DataProvider):
             close_price = price
             volume = random.randint(1000, 10000)
             
+            # Simulate delayed data (IBKR quirk: data is 5-15 seconds old)
+            if self.simulate_delayed_data:
+                delay_seconds = random.randint(5, 15)
+                timestamp = current_time - timedelta(seconds=delay_seconds)
+            else:
+                timestamp = current_time
+            
             bars.append({
-                "timestamp": current_time,
+                "timestamp": timestamp,
                 "open": round(open_price, 2),
                 "high": round(high, 2),
                 "low": round(low, 2),
@@ -109,7 +144,12 @@ class MockDataProvider(DataProvider):
     
     async def get_latest_bar(self, symbol: str) -> Optional[Dict]:
         """
-        Get fake latest bar.
+        Get fake latest bar with optional IBKR quirks simulation.
+        
+        Simulates:
+        - Occasional timeouts (5% chance)
+        - Connection issues (2% chance)
+        - Delayed data (5-15 second delay in timestamp)
         
         Args:
             symbol: Trading symbol (ignored)
@@ -117,6 +157,14 @@ class MockDataProvider(DataProvider):
         Returns:
             Latest bar dictionary
         """
+        # Simulate occasional timeouts (IBKR quirk)
+        if self.simulate_timeouts and random.random() < 0.05:
+            raise TimeoutError("IBKR Gateway timeout (simulated)")
+        
+        # Simulate occasional connection issues (IBKR quirk)
+        if self.simulate_connection_issues and random.random() < 0.02:
+            raise ConnectionError("IBKR Gateway connection refused (simulated)")
+        
         # Generate a new bar
         change = random.gauss(self.trend, self.volatility)
         self.current_price = max(self.current_price + change, 1000.0)
@@ -125,8 +173,15 @@ class MockDataProvider(DataProvider):
         low = self.current_price - abs(random.gauss(0, self.volatility * 0.3))
         open_price = self.current_price - random.gauss(0, self.volatility * 0.2)
         
+        # Simulate delayed data (IBKR quirk: data is 5-15 seconds old)
+        if self.simulate_delayed_data:
+            delay_seconds = random.randint(5, 15)
+            timestamp = datetime.now(timezone.utc) - timedelta(seconds=delay_seconds)
+        else:
+            timestamp = datetime.now(timezone.utc)
+        
         return {
-            "timestamp": datetime.now(timezone.utc),
+            "timestamp": timestamp,
             "open": round(open_price, 2),
             "high": round(high, 2),
             "low": round(low, 2),

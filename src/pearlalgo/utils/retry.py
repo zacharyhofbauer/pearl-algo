@@ -6,14 +6,9 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import logging
 from typing import Any, Callable, Optional
 
-try:
-    from loguru import logger as loguru_logger
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
 
 def async_retry_with_backoff(

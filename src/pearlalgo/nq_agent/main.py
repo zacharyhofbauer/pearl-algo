@@ -7,16 +7,10 @@ Main entry point for running the NQ agent service.
 from __future__ import annotations
 
 import asyncio
-import logging
 import sys
 from pathlib import Path
 
-try:
-    from loguru import logger as loguru_logger
-    logger = loguru_logger
-except ImportError:
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent.parent

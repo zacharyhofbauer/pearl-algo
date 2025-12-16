@@ -4,16 +4,9 @@ Telegram Alerts - Send notifications for trades and major events.
 
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
-
-try:
-    from loguru import logger as loguru_logger
-
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
 try:
     from telegram import Bot

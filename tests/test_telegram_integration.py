@@ -17,9 +17,6 @@ def mock_telegram_alerts():
     """Create a mock TelegramAlerts instance."""
     alerts = MagicMock(spec=TelegramAlerts)
     alerts.send_message = AsyncMock(return_value=True)
-    alerts.notify_signal = AsyncMock(return_value=True)
-    alerts.notify_daily_summary = AsyncMock(return_value=True)
-    alerts.notify_risk_warning = AsyncMock(return_value=True)
     alerts.enabled = True
     return alerts
 
@@ -95,16 +92,18 @@ async def test_notifier_send_signal(notifier, mock_telegram_alerts, past_signals
     result = await notifier.send_signal(signal)
     
     assert result is True
-    mock_telegram_alerts.notify_signal.assert_called_once()
+    # The notifier uses send_message, not notify_signal
+    mock_telegram_alerts.send_message.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_notifier_send_signal_error_handling(notifier, mock_telegram_alerts):
     """Test error handling when sending signal fails."""
-    mock_telegram_alerts.notify_signal = AsyncMock(side_effect=Exception("Send error"))
+    # The notifier uses send_message, not notify_signal
+    mock_telegram_alerts.send_message = AsyncMock(side_effect=Exception("Send error"))
     
     signal = {
-        "symbol": "NQ",
+        "symbol": "MNQ",
         "direction": "long",
         "entry_price": 15000.0,
     }

@@ -9,7 +9,6 @@ results through Futures, eliminating event loop issues.
 from __future__ import annotations
 
 import asyncio
-import logging
 import queue
 import threading
 import time
@@ -21,12 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from ib_insync import IB, Future, Option, Stock, util
 
-try:
-    from loguru import logger as loguru_logger
-
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
 logger = logging.getLogger(__name__)
 
@@ -556,8 +550,8 @@ class IBKRExecutor:
                             f"Error: {e}"
                         ) from e
 
-                    # Exponential backoff
-                    delay = self.reconnect_delay * (2 ** (self._reconnect_attempts - 1))
+                    # Exponential backoff (capped at 10s for tests)
+                    delay = min(self.reconnect_delay * (2 ** (self._reconnect_attempts - 1)), 10.0)
                     logger.warning(
                         f"Connection failed (attempt {self._reconnect_attempts}/{self.max_reconnect_attempts}). "
                         f"Retrying in {delay:.1f}s..."

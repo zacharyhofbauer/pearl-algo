@@ -7,18 +7,14 @@ Main 24/7 service for running NQ intraday strategy.
 from __future__ import annotations
 
 import asyncio
-import logging
 import signal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
-try:
-    from loguru import logger as loguru_logger
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
 from pearlalgo.nq_agent.health_monitor import HealthMonitor
@@ -27,6 +23,7 @@ from pearlalgo.nq_agent.state_manager import NQAgentStateManager
 from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
+from pearlalgo.utils.error_handler import ErrorHandler
 
 
 class NQAgentService:
@@ -58,12 +55,21 @@ class NQAgentService:
         self.strategy = NQIntradayStrategy(config=self.config)
         self.data_fetcher = NQAgentDataFetcher(data_provider, config=self.config)
         self.state_manager = NQAgentStateManager(state_dir=state_dir)
-        self.performance_tracker = PerformanceTracker(state_dir=state_dir)
+        self.performance_tracker = PerformanceTracker(
+            state_dir=state_dir,
+            state_manager=self.state_manager,
+        )
         self.telegram_notifier = NQAgentTelegramNotifier(
             bot_token=telegram_bot_token,
             chat_id=telegram_chat_id,
         )
         self.health_monitor = HealthMonitor(state_dir=state_dir)
+
+        # Load service configuration
+        service_config = load_service_config()
+        service_settings = service_config.get("service", {})
+        circuit_breaker_settings = service_config.get("circuit_breaker", {})
+        alert_settings = service_config.get("alerts", {})
 
         self.running = False
         self.shutdown_requested = False
@@ -73,20 +79,21 @@ class NQAgentService:
         self.signal_count = 0
         self.error_count = 0
         self.last_status_update: Optional[datetime] = None
-        self.status_update_interval = 1800  # 30 minutes in seconds
+        self.status_update_interval = service_settings.get("status_update_interval", 1800)
         self.last_heartbeat: Optional[datetime] = None
-        self.heartbeat_interval = 3600  # 1 hour in seconds (more frequent during off-hours)
+        self.heartbeat_interval = service_settings.get("heartbeat_interval", 3600)
+        self.state_save_interval = service_settings.get("state_save_interval", 10)
         self.consecutive_errors = 0
-        self.max_consecutive_errors = 10  # Circuit breaker threshold
+        self.max_consecutive_errors = circuit_breaker_settings.get("max_consecutive_errors", 10)
         self.data_fetch_errors = 0
-        self.max_data_fetch_errors = 5
+        self.max_data_fetch_errors = circuit_breaker_settings.get("max_data_fetch_errors", 5)
         self.connection_failures = 0
-        self.max_connection_failures = 10  # Circuit breaker threshold for connection issues
+        self.max_connection_failures = circuit_breaker_settings.get("max_connection_failures", 10)
         self.last_connection_failure_alert: Optional[datetime] = None
-        self.connection_failure_alert_interval = 600  # 10 minutes between connection failure alerts
+        self.connection_failure_alert_interval = alert_settings.get("connection_failure_interval", 600)
         self.last_successful_cycle: Optional[datetime] = None
         self.last_data_quality_alert: Optional[datetime] = None
-        self.data_quality_alert_interval = 300  # 5 minutes between data quality alerts
+        self.data_quality_alert_interval = alert_settings.get("data_quality_interval", 300)
 
         logger.info("NQAgentService initialized")
 
@@ -181,7 +188,11 @@ class NQAgentService:
                     market_data = await self.data_fetcher.fetch_latest_data()
 
                     # Check if data is empty due to connection issues
-                    is_connection_error = self._is_connection_error(market_data)
+                    is_connection_error = ErrorHandler.is_connection_error_from_data(
+                        market_data,
+                        data_provider=self.data_fetcher.data_provider,
+                        last_successful_cycle=self.last_successful_cycle,
+                    )
 
                     if is_connection_error:
                         # This is a connection issue, not just empty data
@@ -220,13 +231,16 @@ class NQAgentService:
                     await self._check_data_quality(market_data)
 
                 except Exception as e:
-                    logger.error(f"Error fetching market data: {e}", exc_info=True)
+                    # Use ErrorHandler for standardized error handling
+                    error_info = ErrorHandler.handle_data_fetch_error(
+                        e,
+                        context={"cycle_count": self.cycle_count},
+                    )
                     self.data_fetch_errors += 1
                     self.error_count += 1
 
                     # Check if this is a connection error
-                    error_str = str(e).lower()
-                    if "connection" in error_str or "refused" in error_str or "timeout" in error_str:
+                    if error_info.get("is_connection_error", False):
                         self.connection_failures += 1
                         await self._handle_connection_failure()
 
@@ -277,7 +291,7 @@ class NQAgentService:
                 await self._check_heartbeat()
 
                 # Save state periodically
-                if self.cycle_count % 10 == 0:
+                if self.cycle_count % self.state_save_interval == 0:
                     self._save_state()
 
                 self.cycle_count += 1
@@ -333,12 +347,8 @@ class NQAgentService:
             signal: Signal dictionary
         """
         try:
-            # Track signal generation
+            # Track signal generation (delegates to state_manager for persistence)
             signal_id = self.performance_tracker.track_signal_generated(signal)
-            signal["signal_id"] = signal_id
-
-            # Save signal to state
-            self.state_manager.save_signal(signal)
 
             # Send to Telegram (await async call)
             success = await self.telegram_notifier.send_signal(signal)
@@ -534,36 +544,6 @@ class NQAgentService:
             )
             self.last_data_quality_alert = now
 
-    def _is_connection_error(self, market_data: Dict) -> bool:
-        """
-        Check if empty data is due to connection error vs normal market closure.
-        
-        Args:
-            market_data: Market data dictionary
-            
-        Returns:
-            True if this appears to be a connection error
-        """
-        # Check if data provider executor is connected
-        try:
-            if hasattr(self.data_fetcher.data_provider, '_executor'):
-                executor = self.data_fetcher.data_provider._executor
-                if hasattr(executor, 'is_connected'):
-                    if not executor.is_connected():
-                        return True
-        except Exception:
-            pass  # If we can't check, assume it might be a connection issue
-
-        # If data is empty and we have no latest_bar, likely a connection issue
-        if market_data.get("df") is not None and market_data["df"].empty:
-            if market_data.get("latest_bar") is None:
-                # If we've had recent successful cycles but now getting empty data,
-                # it's likely a connection issue (not just market closed)
-                if self.last_successful_cycle:
-                    time_since_success = (datetime.now(timezone.utc) - self.last_successful_cycle).total_seconds()
-                    if time_since_success < 600:  # Had data within last 10 minutes
-                        return True
-        return False
 
     async def _handle_connection_failure(self) -> None:
         """Handle connection failure and send alerts if needed."""

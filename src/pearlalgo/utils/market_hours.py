@@ -7,18 +7,12 @@ Futures markets are generally 24/5 (Sunday 6pm ET - Friday 5pm ET).
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, time, timezone
 from typing import Optional
 
 import pytz
 
-try:
-    from loguru import logger as loguru_logger
-
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
 # Market timezones
 ET = pytz.timezone("America/New_York")

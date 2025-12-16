@@ -6,11 +6,12 @@ Scans NQ futures for intraday trading opportunities using real-time data.
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, time, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
+
+from pearlalgo.utils.logger import logger
 
 # Timezone handling - use zoneinfo (Python 3.9+) or pytz as fallback
 try:
@@ -24,12 +25,6 @@ except ImportError:
         # Fallback if neither available (shouldn't happen in Python 3.9+)
         logger.warning("No timezone library available, using simplified timezone handling")
         ET_TIMEZONE = None
-
-try:
-    from loguru import logger as loguru_logger
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
 
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.regime_detector import RegimeDetector

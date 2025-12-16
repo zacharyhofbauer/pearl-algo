@@ -7,18 +7,13 @@ value areas (where most trading occurred) and POC (Point of Control).
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-try:
-    from loguru import logger as loguru_logger
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
 
 class VolumeProfile:

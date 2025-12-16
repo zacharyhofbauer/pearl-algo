@@ -7,20 +7,18 @@ Fetches market data from data providers for NQ strategy.
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import pandas as pd
 
-try:
-    from loguru import logger as loguru_logger
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.utils.error_handler import ErrorHandler
+from pearlalgo.utils.retry import async_retry_with_backoff
 
 
 class NQAgentDataFetcher:
@@ -45,9 +43,16 @@ class NQAgentDataFetcher:
         self.data_provider = data_provider
         self.config = config or NQIntradayConfig()
 
+        # Load data configuration
+        service_config = load_service_config()
+        data_settings = service_config.get("data", {})
+
         # Buffer for historical data
         self._data_buffer: Optional[pd.DataFrame] = None
-        self._buffer_size = 100  # Keep last 100 bars
+        self._buffer_size = data_settings.get("buffer_size", 100)
+        self._historical_hours = data_settings.get("historical_hours", 2)
+        self._multitimeframe_5m_hours = data_settings.get("multitimeframe_5m_hours", 4)
+        self._multitimeframe_15m_hours = data_settings.get("multitimeframe_15m_hours", 12)
 
         # Multi-timeframe buffers
         self._data_buffer_5m: Optional[pd.DataFrame] = None
@@ -55,6 +60,12 @@ class NQAgentDataFetcher:
 
         logger.info(f"NQAgentDataFetcher initialized with provider={type(data_provider).__name__}")
 
+    @async_retry_with_backoff(
+        max_retries=3,
+        initial_delay=1.0,
+        max_delay=10.0,
+        exceptions=(ConnectionError, TimeoutError, Exception),
+    )
     async def fetch_latest_data(self) -> Dict:
         """
         Fetch latest market data for analysis.
@@ -65,7 +76,7 @@ class NQAgentDataFetcher:
         try:
             # Fetch historical data to populate/update buffer
             end = datetime.now(timezone.utc)
-            start = end - timedelta(hours=2)  # Last 2 hours for intraday
+            start = end - timedelta(hours=self._historical_hours)
 
             # Use sync method (data providers use sync interface)
             # Run in executor to avoid blocking the event loop
@@ -198,7 +209,11 @@ class NQAgentDataFetcher:
             }
 
         except Exception as e:
-            logger.error(f"Error fetching latest data: {e}", exc_info=True)
+            # Use ErrorHandler for standardized error handling
+            ErrorHandler.handle_data_fetch_error(
+                e,
+                context={"symbol": self.config.symbol, "timeframe": self.config.timeframe},
+            )
             # Return empty data instead of raising to allow graceful degradation
             return {
                 "df": pd.DataFrame(),
@@ -219,8 +234,8 @@ class NQAgentDataFetcher:
         """
         try:
             # Calculate start time (need more history for higher timeframes)
-            start_5m = end - timedelta(hours=4)  # 4 hours for 5m (48 bars)
-            start_15m = end - timedelta(hours=12)  # 12 hours for 15m (48 bars)
+            start_5m = end - timedelta(hours=self._multitimeframe_5m_hours)
+            start_15m = end - timedelta(hours=self._multitimeframe_15m_hours)
 
             loop = asyncio.get_event_loop()
 

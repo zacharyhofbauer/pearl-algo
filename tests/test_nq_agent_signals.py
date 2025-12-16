@@ -150,27 +150,87 @@ def test_signal_persistence(tmp_path):
 
 def test_duplicate_signal_prevention(tmp_path):
     """Test that duplicate signals can be detected."""
-    state_dir = tmp_path / "nq_agent_state"
-    state_manager = NQAgentStateManager(state_dir=state_dir)
+    from pearlalgo.strategies.nq_intraday.signal_generator import NQSignalGenerator
     
-    signal = {
+    config = NQIntradayConfig(symbol="MNQ", timeframe="1m")
+    generator = NQSignalGenerator(config=config)
+    
+    # Create first signal
+    signal1 = {
         "type": "breakout",
         "direction": "long",
-        "entry_price": 15000.0,
-        "stop_loss": 14900.0,
-        "take_profit": 15200.0,
+        "entry_price": 17500.0,
+        "stop_loss": 17450.0,
+        "take_profit": 17600.0,
         "confidence": 0.75,
         "reason": "Test signal",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     
-    # Save same signal twice
-    state_manager.save_signal(signal)
-    state_manager.save_signal(signal)
+    # Add to recent signals
+    generator._recent_signals.append(signal1)
     
-    # Both should be saved (current implementation doesn't prevent duplicates)
-    signals = state_manager.get_recent_signals(limit=10)
-    assert len(signals) >= 2
+    # Create duplicate signal (same type, direction, within time window)
+    signal2 = {
+        "type": "breakout",
+        "direction": "long",
+        "entry_price": 17501.0,  # Very close price
+        "stop_loss": 17451.0,
+        "take_profit": 17601.0,
+        "confidence": 0.75,
+        "reason": "Test signal",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    # Should be detected as duplicate
+    is_duplicate = generator._is_duplicate(signal2)
+    assert is_duplicate is True
+    
+    # Create different signal (different type)
+    signal3 = {
+        "type": "momentum_long",  # Different type
+        "direction": "long",
+        "entry_price": 17500.0,
+        "stop_loss": 17450.0,
+        "take_profit": 17600.0,
+        "confidence": 0.75,
+        "reason": "Test signal",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    # Should NOT be duplicate (different type)
+    is_duplicate = generator._is_duplicate(signal3)
+    assert is_duplicate is False
+    
+    # Create signal outside time window
+    from datetime import timedelta
+    old_signal = {
+        "type": "breakout",
+        "direction": "long",
+        "entry_price": 17500.0,
+        "stop_loss": 17450.0,
+        "take_profit": 17600.0,
+        "confidence": 0.75,
+        "reason": "Test signal",
+        "timestamp": (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(),  # 10 minutes ago
+    }
+    
+    generator._recent_signals = [old_signal]
+    
+    # New signal should NOT be duplicate (outside time window)
+    new_signal = {
+        "type": "breakout",
+        "direction": "long",
+        "entry_price": 17500.0,
+        "stop_loss": 17450.0,
+        "take_profit": 17600.0,
+        "confidence": 0.75,
+        "reason": "Test signal",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    is_duplicate = generator._is_duplicate(new_signal)
+    assert is_duplicate is False
 
 
 

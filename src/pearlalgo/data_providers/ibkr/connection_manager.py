@@ -11,19 +11,13 @@ Manages:
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from enum import Enum
 from typing import Optional
 
 from ib_insync import IB
 
-try:
-    from loguru import logger as loguru_logger
-
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
 
 class ConnectionState(Enum):

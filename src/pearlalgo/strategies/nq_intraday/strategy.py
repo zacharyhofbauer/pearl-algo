@@ -6,14 +6,9 @@ Main strategy class that coordinates scanner and signal generation.
 
 from __future__ import annotations
 
-import logging
 from typing import Dict, List, Optional
 
-try:
-    from loguru import logger as loguru_logger
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner

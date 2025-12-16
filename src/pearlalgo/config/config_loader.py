@@ -1,0 +1,78 @@
+"""
+Configuration loader for service-level settings.
+
+Loads configuration from config.yaml for service intervals, circuit breaker,
+alerts, data fetching, signals, and performance tracking.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Dict, Optional
+
+
+def load_service_config(config_path: Optional[Path] = None) -> Dict:
+    """
+    Load service configuration from config.yaml.
+    
+    Args:
+        config_path: Path to config.yaml (defaults to config/config.yaml)
+        
+    Returns:
+        Dictionary with service configuration sections
+    """
+    if config_path is None:
+        # Try to find config.yaml relative to project root
+        project_root = Path(__file__).parent.parent.parent.parent
+        config_path = project_root / "config" / "config.yaml"
+    
+    defaults = {
+        "service": {
+            "status_update_interval": 1800,
+            "heartbeat_interval": 3600,
+            "state_save_interval": 10,
+        },
+        "circuit_breaker": {
+            "max_consecutive_errors": 10,
+            "max_connection_failures": 10,
+            "max_data_fetch_errors": 5,
+        },
+        "alerts": {
+            "connection_failure_interval": 600,
+            "data_quality_interval": 300,
+        },
+        "data": {
+            "buffer_size": 100,
+            "historical_hours": 2,
+            "multitimeframe_5m_hours": 4,
+            "multitimeframe_15m_hours": 12,
+        },
+        "signals": {
+            "duplicate_window_seconds": 300,
+            "min_confidence": 0.50,
+            "min_risk_reward": 1.5,
+        },
+        "performance": {
+            "max_records": 1000,
+            "default_lookback_days": 7,
+        },
+    }
+    
+    if config_path and config_path.exists():
+        try:
+            import yaml
+            with open(config_path) as f:
+                config_data = yaml.safe_load(f) or {}
+                
+                # Merge config sections with defaults
+                result = {}
+                for section in defaults:
+                    result[section] = {**defaults[section], **config_data.get(section, {})}
+                
+                return result
+        except Exception as e:
+            from pearlalgo.utils.logger import logger
+            logger.warning(f"Could not load service config from {config_path}: {e}")
+            return defaults
+    
+    return defaults

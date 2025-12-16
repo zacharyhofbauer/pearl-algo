@@ -6,16 +6,12 @@ Generates trading signals from scanner results with validation and filtering.
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-try:
-    from loguru import logger as loguru_logger
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner
 from pearlalgo.strategies.nq_intraday.signal_quality import SignalQualityScorer
@@ -44,9 +40,15 @@ class NQSignalGenerator:
         self.scanner = scanner or NQScanner(config=self.config)
         self.quality_scorer = SignalQualityScorer(min_edge_threshold=0.55)
 
+        # Load signal configuration
+        service_config = load_service_config()
+        signal_settings = service_config.get("signals", {})
+
         # Track recent signals to avoid duplicates
         self._recent_signals: List[Dict] = []
-        self._signal_window_seconds = 300  # 5 minutes
+        self._signal_window_seconds = signal_settings.get("duplicate_window_seconds", 300)
+        self._min_confidence = signal_settings.get("min_confidence", 0.50)
+        self._min_risk_reward = signal_settings.get("min_risk_reward", 1.5)
 
         logger.info("NQSignalGenerator initialized")
 
@@ -116,9 +118,9 @@ class NQSignalGenerator:
         Returns:
             True if signal is valid
         """
-        # Check confidence threshold (balanced threshold for quality signals)
+        # Check confidence threshold
         confidence = signal.get("confidence", 0)
-        if confidence < 0.50:  # Require at least 50% confidence (lowered from 55% to allow more signals)
+        if confidence < self._min_confidence:
             return False
 
         # Check entry price is valid
@@ -152,7 +154,7 @@ class NQSignalGenerator:
 
             if risk > 0:
                 risk_reward = reward / risk
-                if risk_reward < 1.5:  # Require at least 1.5:1 R/R
+                if risk_reward < self._min_risk_reward:
                     return False
 
         return True

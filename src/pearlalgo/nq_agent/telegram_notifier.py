@@ -6,15 +6,10 @@ Sends signals and status updates to Telegram.
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-try:
-    from loguru import logger as loguru_logger
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
 try:
     import telegram
@@ -24,7 +19,9 @@ except ImportError:
     TELEGRAM_AVAILABLE = False
     logger.warning("python-telegram-bot not installed, Telegram notifications disabled")
 
+from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import get_market_hours
+from pearlalgo.utils.retry import async_retry_with_backoff
 from pearlalgo.utils.telegram_alerts import (
     TelegramAlerts,
     _format_separator,
@@ -77,6 +74,12 @@ class NQAgentTelegramNotifier:
             logger.warning("Telegram enabled but bot_token or chat_id not provided")
             self.enabled = False
 
+    @async_retry_with_backoff(
+        max_retries=2,
+        initial_delay=0.5,
+        max_delay=5.0,
+        exceptions=(Exception,),
+    )
     async def send_signal(self, signal: Dict) -> bool:
         """
         Send a trading signal to Telegram using professional desk alert format.
@@ -96,7 +99,7 @@ class NQAgentTelegramNotifier:
             await self.telegram.send_message(message)
             return True
         except Exception as e:
-            logger.error(f"Error sending signal to Telegram: {e}", exc_info=True)
+            ErrorHandler.handle_telegram_error(e, "send_signal")
             return False
 
     def _format_professional_signal(self, signal: Dict) -> str:
@@ -288,6 +291,12 @@ class NQAgentTelegramNotifier:
 
         return message
 
+    @async_retry_with_backoff(
+        max_retries=2,
+        initial_delay=0.5,
+        max_delay=5.0,
+        exceptions=(Exception,),
+    )
     async def send_status(self, status: Dict) -> bool:
         """
         Send status update to Telegram.
@@ -307,7 +316,7 @@ class NQAgentTelegramNotifier:
             await self.telegram.send_message(message)
             return True
         except Exception as e:
-            logger.error(f"Error sending status update: {e}", exc_info=True)
+            ErrorHandler.handle_telegram_error(e, "send_status")
             return False
 
     def _format_signal_message(self, signal: Dict) -> str:
@@ -369,6 +378,12 @@ class NQAgentTelegramNotifier:
 """
         return message.strip()
 
+    @async_retry_with_backoff(
+        max_retries=2,
+        initial_delay=0.5,
+        max_delay=5.0,
+        exceptions=(Exception,),
+    )
     async def send_daily_summary(self, performance_metrics: Dict) -> bool:
         """
         Send daily performance summary to Telegram.
@@ -396,9 +411,15 @@ class NQAgentTelegramNotifier:
             )
             return True
         except Exception as e:
-            logger.error(f"Error sending daily summary: {e}", exc_info=True)
+            ErrorHandler.handle_telegram_error(e, "send_daily_summary")
             return False
 
+    @async_retry_with_backoff(
+        max_retries=2,
+        initial_delay=0.5,
+        max_delay=5.0,
+        exceptions=(Exception,),
+    )
     async def send_enhanced_status(self, status: Dict) -> bool:
         """
         Send enhanced status message with performance metrics.
@@ -478,9 +499,15 @@ class NQAgentTelegramNotifier:
             await self.telegram.send_message(message)
             return True
         except Exception as e:
-            logger.error(f"Error sending enhanced status: {e}", exc_info=True)
+            ErrorHandler.handle_telegram_error(e, "send_enhanced_status")
             return False
 
+    @async_retry_with_backoff(
+        max_retries=2,
+        initial_delay=0.5,
+        max_delay=5.0,
+        exceptions=(Exception,),
+    )
     async def send_heartbeat(self, status: Dict) -> bool:
         """
         Send periodic heartbeat message.
@@ -524,9 +551,15 @@ class NQAgentTelegramNotifier:
             await self.telegram.send_message(message)
             return True
         except Exception as e:
-            logger.error(f"Error sending heartbeat: {e}", exc_info=True)
+            ErrorHandler.handle_telegram_error(e, "send_heartbeat")
             return False
 
+    @async_retry_with_backoff(
+        max_retries=2,
+        initial_delay=0.5,
+        max_delay=5.0,
+        exceptions=(Exception,),
+    )
     async def send_data_quality_alert(
         self,
         alert_type: str,
@@ -571,7 +604,7 @@ class NQAgentTelegramNotifier:
             await self.telegram.notify_risk_warning(alert_message, risk_status="DATA_QUALITY")
             return True
         except Exception as e:
-            logger.error(f"Error sending data quality alert: {e}", exc_info=True)
+            ErrorHandler.handle_telegram_error(e, "send_data_quality_alert")
             return False
 
     async def send_startup_notification(self, config: Dict) -> bool:
@@ -613,7 +646,7 @@ class NQAgentTelegramNotifier:
             await self.telegram.send_message(message)
             return True
         except Exception as e:
-            logger.error(f"Error sending startup notification: {e}", exc_info=True)
+            ErrorHandler.handle_telegram_error(e, "send_startup_notification")
             return False
 
     async def send_shutdown_notification(self, summary: Dict) -> bool:
@@ -662,9 +695,15 @@ class NQAgentTelegramNotifier:
             await self.telegram.send_message(message)
             return True
         except Exception as e:
-            logger.error(f"Error sending shutdown notification: {e}", exc_info=True)
+            ErrorHandler.handle_telegram_error(e, "send_shutdown_notification")
             return False
 
+    @async_retry_with_backoff(
+        max_retries=2,
+        initial_delay=0.5,
+        max_delay=5.0,
+        exceptions=(Exception,),
+    )
     async def send_weekly_summary(self, performance_metrics: Dict) -> bool:
         """
         Send weekly performance summary.
@@ -719,9 +758,15 @@ class NQAgentTelegramNotifier:
             await self.telegram.send_message(message)
             return True
         except Exception as e:
-            logger.error(f"Error sending weekly summary: {e}", exc_info=True)
+            ErrorHandler.handle_telegram_error(e, "send_weekly_summary")
             return False
 
+    @async_retry_with_backoff(
+        max_retries=2,
+        initial_delay=0.5,
+        max_delay=5.0,
+        exceptions=(Exception,),
+    )
     async def send_circuit_breaker_alert(self, reason: str, details: Optional[Dict] = None) -> bool:
         """
         Send circuit breaker activation alert.
@@ -753,9 +798,15 @@ class NQAgentTelegramNotifier:
             await self.telegram.notify_risk_warning(message, risk_status="CRITICAL")
             return True
         except Exception as e:
-            logger.error(f"Error sending circuit breaker alert: {e}", exc_info=True)
+            ErrorHandler.handle_telegram_error(e, "send_circuit_breaker_alert")
             return False
 
+    @async_retry_with_backoff(
+        max_retries=2,
+        initial_delay=0.5,
+        max_delay=5.0,
+        exceptions=(Exception,),
+    )
     async def send_recovery_notification(self, recovery_info: Dict) -> bool:
         """
         Send recovery notification after errors.
@@ -778,5 +829,5 @@ class NQAgentTelegramNotifier:
             await self.telegram.send_message(message)
             return True
         except Exception as e:
-            logger.error(f"Error sending recovery notification: {e}", exc_info=True)
+            ErrorHandler.handle_telegram_error(e, "send_recovery_notification")
             return False

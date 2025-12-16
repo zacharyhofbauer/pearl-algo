@@ -7,11 +7,12 @@ to enable adaptive strategy parameters.
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, time, timezone
 from typing import Dict, Optional
 
 import pandas as pd
+
+from pearlalgo.utils.logger import logger
 
 # Timezone handling
 try:
@@ -23,12 +24,6 @@ except ImportError:
         ET_TIMEZONE = pytz.timezone("America/New_York")
     except ImportError:
         ET_TIMEZONE = None
-
-try:
-    from loguru import logger as loguru_logger
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
 
 
 class RegimeDetector:

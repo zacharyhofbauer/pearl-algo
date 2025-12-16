@@ -8,44 +8,53 @@ warnings.filterwarnings(
 )
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def real_data_provider():
     """
     Create a real IBKR data provider for testing with actual market data.
     
-    Falls back gracefully if IBKR Gateway is not available.
+    Session-scoped to reuse the same connection across all tests (faster).
+    Uses actual IBKR Gateway connection - tests will use REAL market data.
+    The provider's executor already has faster retry settings (2s delay, 3 attempts).
     """
+    from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
+    from pearlalgo.config.settings import get_settings
+    import socket
+    import time
+    
+    settings = get_settings()
+    
+    # Check if IBKR Gateway is available
+    port_available = False
     try:
-        from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
-        from pearlalgo.config.settings import get_settings
-        
-        settings = get_settings()
-        provider = IBKRProvider(settings=settings)
-        
-        # Try to validate connection (non-blocking check)
-        import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If loop is running, connection will be validated during first use
-                pass
-            else:
-                # Quick connection check
-                asyncio.run(provider.validate_connection())
-        except Exception:
-            # Connection not available, but provider is still valid
-            pass
-        
-        yield provider
-        
-        # Cleanup
-        try:
-            asyncio.run(provider.close())
-        except Exception:
-            pass
-            
-    except Exception as e:
-        pytest.skip(f"Real data provider not available: {e}")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2.0)
+        result = sock.connect_ex((settings.ib_host, settings.ib_port))
+        sock.close()
+        port_available = (result == 0)
+    except Exception:
+        port_available = False
+    
+    if not port_available:
+        pytest.skip(f"IBKR Gateway not available at {settings.ib_host}:{settings.ib_port}. Start it with: ./scripts/start_ibgateway_ibc.sh")
+    
+    # Create provider (executor has faster retry settings: 2s delay, 3 attempts)
+    provider = IBKRProvider(settings=settings)
+    
+    # Give executor a moment to start (connection happens in background)
+    time.sleep(1.0)
+    
+    yield provider
+    
+    # Cleanup
+    import asyncio
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(asyncio.wait_for(provider.close(), timeout=10.0))
+        loop.close()
+    except Exception:
+        pass
 
 
 @pytest.fixture

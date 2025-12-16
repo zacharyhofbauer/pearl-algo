@@ -7,16 +7,15 @@ Tracks signal performance and calculates metrics.
 from __future__ import annotations
 
 import json
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
-try:
-    from loguru import logger as loguru_logger
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.config.config_loader import load_service_config
+from pearlalgo.utils.logger import logger
+
+if TYPE_CHECKING:
+    from pearlalgo.nq_agent.state_manager import NQAgentStateManager
 
 
 class PerformanceTracker:
@@ -30,12 +29,17 @@ class PerformanceTracker:
     - Average profit/loss
     """
 
-    def __init__(self, state_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        state_dir: Optional[Path] = None,
+        state_manager: Optional["NQAgentStateManager"] = None,
+    ):
         """
         Initialize performance tracker.
         
         Args:
             state_dir: Directory for state files (default: ./data/nq_agent_state)
+            state_manager: State manager instance for signal persistence (optional)
         """
         if state_dir is None:
             state_dir = Path("data/nq_agent_state")
@@ -43,14 +47,25 @@ class PerformanceTracker:
         self.state_dir = Path(state_dir)
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
+        # State manager for signal persistence (delegation)
+        self.state_manager = state_manager
         self.signals_file = self.state_dir / "signals.jsonl"
         self.performance_file = self.state_dir / "performance.json"
+
+        # Load performance configuration
+        service_config = load_service_config()
+        performance_settings = service_config.get("performance", {})
+        self._max_records = performance_settings.get("max_records", 1000)
+        self._default_lookback_days = performance_settings.get("default_lookback_days", 7)
 
         logger.info(f"PerformanceTracker initialized: state_dir={self.state_dir}")
 
     def track_signal_generated(self, signal: Dict) -> str:
         """
         Track a new signal generation.
+        
+        Delegates signal persistence to state_manager if available.
+        Otherwise falls back to direct file write (for backward compatibility).
         
         Args:
             signal: Signal dictionary
@@ -59,19 +74,24 @@ class PerformanceTracker:
             Signal ID for tracking
         """
         signal_id = f"{signal.get('type', 'unknown')}_{datetime.now(timezone.utc).timestamp()}"
+        signal["signal_id"] = signal_id
 
-        signal_record = {
-            "signal_id": signal_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "status": "generated",
-            "signal": signal,
-        }
-
-        try:
-            with open(self.signals_file, "a") as f:
-                f.write(json.dumps(signal_record) + "\n")
-        except Exception as e:
-            logger.error(f"Error tracking signal: {e}")
+        # Delegate to state_manager if available
+        if self.state_manager:
+            self.state_manager.save_signal(signal)
+        else:
+            # Fallback: direct file write (for backward compatibility)
+            signal_record = {
+                "signal_id": signal_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": "generated",
+                "signal": signal,
+            }
+            try:
+                with open(self.signals_file, "a") as f:
+                    f.write(json.dumps(signal_record) + "\n")
+            except Exception as e:
+                logger.error(f"Error tracking signal: {e}")
 
         return signal_id
 
@@ -185,16 +205,18 @@ class PerformanceTracker:
 
         return performance
 
-    def get_performance_metrics(self, days: int = 7) -> Dict:
+    def get_performance_metrics(self, days: Optional[int] = None) -> Dict:
         """
         Get performance metrics for the last N days.
         
         Args:
-            days: Number of days to analyze
+            days: Number of days to analyze (defaults to config value)
             
         Returns:
             Dictionary with performance metrics
         """
+        if days is None:
+            days = self._default_lookback_days
         cutoff_time = datetime.now(timezone.utc).timestamp() - (days * 24 * 60 * 60)
 
         # Load all signals
@@ -359,9 +381,9 @@ class PerformanceTracker:
 
         performances.append(performance)
 
-        # Keep only last 1000 records
-        if len(performances) > 1000:
-            performances = performances[-1000:]
+        # Keep only last N records (from config)
+        if len(performances) > self._max_records:
+            performances = performances[-self._max_records:]
 
         try:
             with open(self.performance_file, "w") as f:

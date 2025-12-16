@@ -1,20 +1,20 @@
-# MNQ Agent - Complete Guide
+# MNQ Agent - Operational Guide
 
 **Prop Firm Trading Strategy for Mini NQ (MNQ) Futures**
+
+> **Note:** For system architecture, component details, and technical deep-dives, see [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md).
 
 ## 📋 Table of Contents
 
 1. [Quick Start](#-quick-start)
 2. [Prerequisites](#-prerequisites)
-3. [Service Management](#-service-management)
-4. [Configuration](#-configuration)
-5. [Prop Firm Trading](#-prop-firm-trading)
-6. [Monitoring](#-monitoring)
-7. [Telegram Notifications](#-telegram-notifications)
+3. [Installation](#-installation)
+4. [Service Management](#-service-management)
+5. [Configuration](#-configuration)
+6. [Daily Operations](#-daily-operations)
+7. [Monitoring](#-monitoring)
 8. [Troubleshooting](#-troubleshooting)
 9. [File Locations](#-file-locations)
-10. [Daily Operations](#-daily-operations)
-11. [Advanced Usage](#-advanced-usage)
 
 ---
 
@@ -24,13 +24,13 @@
 cd ~/pearlalgo-dev-ai-agents
 
 # 1. Ensure IBKR Gateway is running
-./scripts/check_gateway_status.sh
+./scripts/gateway/check_gateway_status.sh
 
 # 2. Start MNQ Agent Service
-./scripts/start_nq_agent_service.sh
+./scripts/lifecycle/start_nq_agent_service.sh
 
 # 3. Check status
-./scripts/check_nq_agent_status.sh
+./scripts/lifecycle/check_nq_agent_status.sh
 
 # 4. View logs
 tail -f logs/nq_agent.log
@@ -40,28 +40,52 @@ tail -f logs/nq_agent.log
 
 ## 📋 Prerequisites
 
-### 1. IBKR Gateway Running
-```bash
-./scripts/check_gateway_status.sh
-```
+- **IBKR Account**: Active Interactive Brokers account
+- **IBKR Gateway**: Installed and configured (see [GATEWAY.md](GATEWAY.md))
+- **Python 3.12+**: Installed on system
+- **Telegram Bot**: Created and configured (bot token and chat ID)
 
-### 2. Environment Variables
-Set in `.env` file or export:
-```bash
-export TELEGRAM_BOT_TOKEN="your_bot_token"
-export TELEGRAM_CHAT_ID="your_chat_id"
-export PEARLALGO_DATA_PROVIDER="ibkr"
+## 🔧 Installation
 
-# IBKR Connection
-export IBKR_HOST="127.0.0.1"
-export IBKR_PORT="4002"
-export IBKR_CLIENT_ID="10"
-```
-
-### 3. Python Dependencies
+### 1. Install Dependencies
 ```bash
+cd ~/pearlalgo-dev-ai-agents
 pip install -e .
 ```
+
+### 2. Configure Environment Variables
+Create `.env` file in project root:
+```bash
+# Telegram
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+
+# IBKR Connection
+IBKR_HOST=127.0.0.1
+IBKR_PORT=4002
+IBKR_CLIENT_ID=10
+IBKR_DATA_CLIENT_ID=11
+
+# Data Provider
+PEARLALGO_DATA_PROVIDER=ibkr
+
+# Optional: Logging
+PEARLALGO_LOG_LEVEL=INFO
+```
+
+### 3. Setup IBKR Gateway
+```bash
+# Complete gateway setup (configures API, IBC, etc.)
+./scripts/gateway/setup_ibgateway.sh
+
+# Start gateway
+./scripts/gateway/start_ibgateway_ibc.sh
+
+# Verify gateway is running
+./scripts/gateway/check_gateway_status.sh
+```
+
+For detailed gateway setup, see [GATEWAY.md](GATEWAY.md).
 
 ---
 
@@ -69,28 +93,18 @@ pip install -e .
 
 ### Start Service (Background)
 ```bash
-./scripts/start_nq_agent_service.sh
+./scripts/lifecycle/start_nq_agent_service.sh
 ```
 
-Or manually:
+### Start Service (Foreground)
 ```bash
 cd ~/pearlalgo-dev-ai-agents
 python3 -m pearlalgo.nq_agent.main
 ```
 
-### Run in Background (with nohup)
-```bash
-cd ~/pearlalgo-dev-ai-agents
-nohup python3 -m pearlalgo.nq_agent.main > logs/nq_agent.log 2>&1 &
-echo $! > logs/nq_agent.pid
-```
-
 ### Stop Service
 ```bash
-# If running in foreground: Ctrl+C
-
-# If running in background:
-./scripts/stop_nq_agent_service.sh
+./scripts/lifecycle/stop_nq_agent_service.sh
 
 # Or manually:
 pkill -f "pearlalgo.nq_agent.main"
@@ -101,7 +115,7 @@ kill $(cat logs/nq_agent.pid) 2>/dev/null || true
 
 ### Check Service Status
 ```bash
-./scripts/check_nq_agent_status.sh
+./scripts/lifecycle/check_nq_agent_status.sh
 
 # Or manually:
 ps aux | grep "pearlalgo.nq_agent.main"
@@ -116,196 +130,72 @@ tail -f logs/nq_agent.log
 
 ## 🔧 Configuration
 
-### Edit Configuration
-Edit `config/config.yaml`:
+### Main Configuration File
+Edit `config/config.yaml` to customize behavior:
 
 ```yaml
-# Prop Firm Style: MNQ (Mini NQ) - 5-15 contracts per trade
+# Trading Symbol
 symbol: "MNQ"  # Mini NQ (1/10th size of NQ, better for prop firms)
-timeframe: "1m"
-scan_interval: 30  # Faster for scalping
+timeframe: "1m"  # 1-minute bars for scalping/swings
+scan_interval: 30  # Check for signals every 30 seconds
 
+# Risk Management (Prop Firm Style)
 risk:
-  max_risk_per_trade: 0.01  # 1% (prop firm conservative)
-  max_drawdown: 0.10  # 10%
+  max_risk_per_trade: 0.01  # 1% max risk per trade
+  max_drawdown: 0.10  # 10% account drawdown limit
   stop_loss_atr_multiplier: 1.5  # Tighter stops for scalping
-  take_profit_risk_reward: 1.5  # 1.5:1 for quick profits
-  min_position_size: 5  # Minimum contracts
-  max_position_size: 15  # Maximum contracts
+  take_profit_risk_reward: 1.5  # 1.5:1 R/R for quick scalps
+  min_position_size: 5  # Minimum contracts per trade
+  max_position_size: 15  # Maximum contracts per trade
 
+# Service Intervals
+service:
+  status_update_interval: 1800  # 30 minutes
+  heartbeat_interval: 3600  # 1 hour
+  state_save_interval: 10  # cycles
+
+# Circuit Breaker
+circuit_breaker:
+  max_consecutive_errors: 10
+  max_connection_failures: 10
+  max_data_fetch_errors: 5
+
+# Telegram Notifications
 telegram:
   enabled: true
   bot_token: "${TELEGRAM_BOT_TOKEN}"
   chat_id: "${TELEGRAM_CHAT_ID}"
 ```
 
-### Key Settings
-- `symbol`: Trading symbol (default: "MNQ" for prop firm trading)
-- `timeframe`: Bar timeframe (default: "1m" for scalping)
-- `scan_interval`: Scan frequency in seconds (default: 30 for faster signals)
-- `risk.max_risk_per_trade`: Max risk per trade (default: 0.01 = 1%)
-- `risk.stop_loss_atr_multiplier`: ATR multiplier (default: 1.5 for tighter stops)
-- `risk.take_profit_risk_reward`: Risk/reward ratio (default: 1.5:1 for quick profits)
-- `risk.min_position_size`: Minimum contracts (default: 5)
-- `risk.max_position_size`: Maximum contracts (default: 15)
+### Key Configuration Sections
 
-### Prop Firm Trading (MNQ)
-**Optimized for intraday swings and quick scalps:**
-- **MNQ Benefits:** 1/10th size of NQ ($2/point vs $20/point), better for prop firm accounts
+**Trading Settings:**
+- `symbol`: Trading symbol (MNQ for prop firm trading)
+- `timeframe`: Bar timeframe (1m for scalping)
+- `scan_interval`: Scan frequency in seconds (30 for faster signals)
+
+**Risk Management:**
+- `risk.max_risk_per_trade`: Max risk per trade (0.01 = 1%)
+- `risk.stop_loss_atr_multiplier`: ATR multiplier for stops (1.5 for tighter stops)
+- `risk.take_profit_risk_reward`: Risk/reward ratio (1.5:1 for quick profits)
+- `risk.min_position_size` / `max_position_size`: Contract range (5-15)
+
+**Service Behavior:**
+- `service.status_update_interval`: Status update frequency (seconds)
+- `service.heartbeat_interval`: Heartbeat message frequency (seconds)
+- `circuit_breaker.*`: Error threshold settings
+
+For complete configuration reference, see [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md#configuration).
+
+### Prop Firm Trading Configuration
+
+The system is optimized for **prop firm style trading** with MNQ:
+- **MNQ Benefits:** 1/10th size of NQ ($2/point vs $20/point), better position sizing
 - **Position Sizing:** 5-15 contracts per trade (default: 10)
 - **Risk Management:** 1% max risk per trade, 10% max drawdown
 - **Scalping Focus:** Tighter stops (1.5x ATR), quicker profits (1.5:1 R:R), faster scanning (30s)
-- **Example Trade:** 10 MNQ @ $17,500, Stop: 3.75 pts ($75 risk), Target: 5.5 pts ($110 reward)
 
-### Run with Custom Config
-```bash
-# Modify config/config.yaml first
-python3 -m pearlalgo.nq_agent.main
-```
-
-### Debug Mode
-```bash
-# Set log level to DEBUG
-export PEARLALGO_LOG_LEVEL=DEBUG
-python3 -m pearlalgo.nq_agent.main
-```
-
----
-
-## 📊 Monitoring
-
-### Automatic Monitoring
-- **Heartbeat messages**: Every 1 hour with service status
-- **Status updates**: Every 30 minutes with performance metrics
-- **Data quality alerts**: When data issues detected
-- **Daily summary**: At market close
-- **Weekly summary**: Sunday evening
-
-### Manual Monitoring
-
-#### Check if Running
-```bash
-ps aux | grep "pearlalgo.nq_agent.main"
-```
-
-#### View Service State
-```bash
-cat data/nq_agent_state/state.json | jq
-```
-
-#### View Recent Signals
-```bash
-tail -20 data/nq_agent_state/signals.jsonl | jq
-```
-
-#### View Performance
-```bash
-cat data/nq_agent_state/performance.json | jq
-```
-
-#### View Real-time Signals
-```bash
-tail -f data/nq_agent_state/signals.jsonl | jq
-```
-
----
-
-## 📱 Telegram Notifications
-
-All notifications are automatic - no bot commands needed. You'll receive:
-
-### Notification Types
-- **Heartbeat messages**: Every hour with service status
-- **Status updates**: Every 30 minutes with performance metrics
-- **Signal notifications**: When trading signals are generated
-- **Data quality alerts**: When data issues are detected
-- **Performance summaries**: Daily/weekly statistics
-- **Service notifications**: Startup/shutdown/recovery alerts
-
-### What You'll See
-- Service health status
-- Market status (open/closed)
-- Cycle and signal counts
-- Buffer size and error counts
-- Performance metrics (win rate, P&L, etc.)
-- Trading signals with entry, stop, and target prices
-
----
-
-## 🔍 Troubleshooting
-
-### Service Won't Start
-
-1. **Check IBKR Gateway:**
-   ```bash
-   ./scripts/check_gateway_status.sh
-   ```
-
-2. **Check Telegram credentials:**
-   ```bash
-   echo $TELEGRAM_BOT_TOKEN
-   echo $TELEGRAM_CHAT_ID
-   ```
-
-3. **Check logs:**
-   ```bash
-   tail -50 logs/nq_agent.log
-   ```
-
-### No Signals Generated
-
-1. **Check market hours** (signals only during 09:30-16:00 ET)
-2. **Check buffer size:**
-   ```bash
-   cat data/nq_agent_state/state.json | jq .buffer_size
-   ```
-3. **Check signal confidence threshold** (minimum 55% required)
-
-### Telegram Not Working
-
-1. **Test Telegram connection:**
-   ```bash
-   python3 scripts/test_telegram_notifications.py
-   ```
-
-2. **Verify bot token and chat ID are correct**
-3. **Check that notifications are enabled in config**
-
-### Service Errors
-
-1. **Check error count:**
-   ```bash
-   cat data/nq_agent_state/state.json | jq .error_count
-   ```
-
-2. **Service auto-pauses after 10 consecutive errors**
-3. **Check logs for details:**
-   ```bash
-   tail -100 logs/nq_agent.log | grep ERROR
-   ```
-
----
-
-## 💼 Prop Firm Trading
-
-### Overview
-Strategy optimized for **prop firm style trading** with **Mini NQ (MNQ)**:
-- **Intraday swings** (15-60 minute holds)
-- **Quick scalps** (5-15 minute holds)
-- **Conservative risk** (1% per trade, 10% max drawdown)
-
-### MNQ vs NQ
-- **MNQ:** $2 per point, 1/10th size of NQ
-- **NQ:** $20 per point
-- **Better for prop firms:** Lower margin, better position sizing (5-15 contracts)
-
-### Position Sizing
-- **Minimum:** 5 MNQ contracts
-- **Default:** 10 MNQ contracts
-- **Maximum:** 15 MNQ contracts
-- **Risk Calculation:** Stop Loss Points × $2 × Contracts
-
-### Example Trade
+**Example Trade:**
 ```
 Entry: $17,500.00
 Stop: $17,496.25 (3.75 points)
@@ -317,101 +207,200 @@ Reward: 5.5 × $2 × 10 = $110
 R:R: 1.47:1
 ```
 
-### Risk Rules
-- **Max Risk/Trade:** 1% of account
-- **Max Drawdown:** 10% daily
-- **Stop Loss:** 1.5x ATR (tighter for scalping)
-- **Take Profit:** 1.5:1 R:R (quicker profits)
-- **Avoid Lunch:** 11:30 AM - 1:00 PM ET (low volume)
-
----
-
-## 📁 File Locations
-
-- **Logs**: `logs/nq_agent.log`
-- **State**: `data/nq_agent_state/state.json`
-- **Signals**: `data/nq_agent_state/signals.jsonl`
-- **Performance**: `data/nq_agent_state/performance.json`
-- **PID**: `logs/nq_agent.pid`
-- **Config**: `config/config.yaml`
-
 ---
 
 ## 📅 Daily Operations
 
-### Morning Check
-1. Verify IBKR Gateway is running
-2. Check service status: `./scripts/check_nq_agent_status.sh`
-3. Review overnight logs: `tail -100 logs/nq_agent.log`
+### Morning Checklist
+1. **Verify IBKR Gateway:**
+   ```bash
+   ./scripts/gateway/check_gateway_status.sh
+   ```
 
-### During Trading
-1. Monitor Telegram for signals
-2. Check performance periodically via Telegram notifications
-3. Watch for error notifications
+2. **Check Service Status:**
+   ```bash
+   ./scripts/lifecycle/check_nq_agent_status.sh
+   ```
+
+3. **Review Overnight Logs:**
+   ```bash
+   tail -100 logs/nq_agent.log
+   ```
+
+### During Trading Hours
+- Monitor Telegram for signals
+- Check performance via Telegram notifications
+- Watch for error notifications
+- Review signal quality and market conditions
 
 ### End of Day
 1. Review daily performance via Telegram summary
 2. Check signal count and win rate
 3. Review any error messages
+4. Verify service is still running
 
 ---
 
-## 🚀 Advanced Usage
+## 📊 Monitoring
 
-### Prop Firm Trading Setup
-The strategy is configured for **prop firm style trading** with MNQ:
-- **Symbol:** MNQ (Mini NQ - 1/10th size of NQ)
-- **Position Size:** 5-15 contracts per trade
-- **Risk:** 1% max per trade, 10% max drawdown
-- **Style:** Quick scalps (5-15 min) and intraday swings (15-60 min)
-- **Stops:** Tighter (1.5x ATR) for scalping
-- **Targets:** Quicker profits (1.5:1 R:R)
+### Automatic Monitoring (via Telegram)
+- **Heartbeat messages**: Every 1 hour with service status
+- **Status updates**: Every 30 minutes with performance metrics
+- **Data quality alerts**: When data issues detected
+- **Signal notifications**: When trading signals are generated
+- **Service notifications**: Startup/shutdown/recovery alerts
 
-**Contract Specs:**
-- MNQ: $2 per point (vs NQ $20 per point)
-- Example: 10 contracts, 3.75 point stop = $75 risk
+### Manual Monitoring Commands
 
-### Run with Custom Config
+**Check Service Status:**
 ```bash
-# Modify config/config.yaml first
-python3 -m pearlalgo.nq_agent.main
+./scripts/lifecycle/check_nq_agent_status.sh
 ```
 
-### Debug Mode
+**View Service State:**
 ```bash
-# Set log level to DEBUG
-export PEARLALGO_LOG_LEVEL=DEBUG
-python3 -m pearlalgo.nq_agent.main
+cat data/nq_agent_state/state.json | jq
 ```
 
-### Service Behavior
+**View Recent Signals:**
+```bash
+tail -20 data/nq_agent_state/signals.jsonl | jq
+```
 
-#### Automatic Features
-- **Scan Interval**: Checks for signals every 30 seconds (MNQ scalping) or 60 seconds (configurable)
-- **Status Updates**: Sends Telegram status every 30 minutes
-- **Signal Generation**: Automatically generates and sends signals during market hours
-- **Performance Tracking**: Automatically tracks all signals and outcomes
-- **Error Handling**: Circuit breaker pauses service after 10 consecutive errors
-- **Lunch Lull Filter**: Avoids signals during 11:30 AM - 1:00 PM ET (low volume)
+**View Performance Metrics:**
+```bash
+cat data/nq_agent_state/performance.json | jq
+```
 
-#### Market Hours
-Default trading hours: 09:30 - 16:00 ET
-- Signals only generated during market hours
-- Service runs 24/7 but only generates signals when market is open
-- Avoids lunch lull period for better signal quality
+**View Real-time Logs:**
+```bash
+tail -f logs/nq_agent.log
+```
+
+**View Real-time Signals:**
+```bash
+tail -f data/nq_agent_state/signals.jsonl | jq
+```
 
 ---
 
-## 🎯 Ready for Production
+## 🔍 Troubleshooting
 
-The service is production-ready and will automatically:
-- ✅ Generate signals during market hours
-- ✅ Send rich Telegram notifications
-- ✅ Track performance
-- ✅ Handle errors gracefully
-- ✅ Provide status updates
+### Service Won't Start
 
-When markets open, the service will begin generating and sending trading signals automatically.
+1. **Check IBKR Gateway:**
+   ```bash
+   ./scripts/gateway/check_gateway_status.sh
+   ```
+   If not running, start it:
+   ```bash
+   ./scripts/gateway/start_ibgateway_ibc.sh
+   ```
+
+2. **Check Telegram credentials:**
+   ```bash
+   echo $TELEGRAM_BOT_TOKEN
+   echo $TELEGRAM_CHAT_ID
+   ```
+
+3. **Check logs for errors:**
+   ```bash
+   tail -50 logs/nq_agent.log
+   ```
+
+4. **Verify configuration:**
+   ```bash
+   cat config/config.yaml
+   ```
+
+### No Signals Generated
+
+1. **Check market hours** (signals only during 09:30-16:00 ET)
+2. **Check buffer size:**
+   ```bash
+   cat data/nq_agent_state/state.json | jq .buffer_size
+   ```
+   Should be > 10 bars. If low, check data provider connection.
+3. **Check signal confidence threshold** (minimum 50% required, configurable in `config.yaml`)
+4. **Verify market is open:**
+   ```bash
+   # Check if current time is between 09:30-16:00 ET
+   ```
+
+### Telegram Not Working
+
+1. **Test Telegram connection:**
+   ```bash
+   python3 scripts/testing/test_all.py telegram
+   ```
+
+2. **Verify bot token and chat ID are correct** in `.env` or `config.yaml`
+3. **Check that notifications are enabled** in `config.yaml`:
+   ```yaml
+   telegram:
+     enabled: true
+   ```
+
+### Service Errors
+
+1. **Check error count:**
+   ```bash
+   cat data/nq_agent_state/state.json | jq .error_count
+   ```
+
+2. **Service auto-pauses after 10 consecutive errors** (circuit breaker)
+3. **Check logs for details:**
+   ```bash
+   tail -100 logs/nq_agent.log | grep ERROR
+   ```
+
+4. **Check connection failures:**
+   ```bash
+   cat data/nq_agent_state/state.json | jq .connection_failures
+   ```
+
+### Data Quality Issues
+
+1. **Check for stale data alerts** in Telegram
+2. **Verify IBKR Gateway is connected:**
+   ```bash
+   ./scripts/gateway/check_gateway_status.sh
+   ```
+3. **Check buffer size** (should be > 10 bars)
+4. **Review data quality alerts** in logs:
+   ```bash
+   tail -100 logs/nq_agent.log | grep -i "data quality\|stale\|buffer"
+   ```
+
+---
+
+## 📁 File Locations
+
+**Configuration:**
+- `config/config.yaml` - Main configuration file
+- `.env` - Environment variables (not in git)
+
+**Logs:**
+- `logs/nq_agent.log` - Service logs
+- `logs/nq_agent.pid` - Process ID file
+
+**State & Data:**
+- `data/nq_agent_state/state.json` - Current service state
+- `data/nq_agent_state/signals.jsonl` - Signal history (JSONL format)
+- `data/nq_agent_state/performance.json` - Performance metrics
+
+**Scripts:**
+- `scripts/lifecycle/` - Service lifecycle scripts
+- `scripts/gateway/` - IBKR Gateway scripts
+- `scripts/testing/` - Testing and validation scripts
+
+---
+
+## 📚 Additional Resources
+
+- **[PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)** - Complete system reference, architecture, components
+- **[GATEWAY.md](GATEWAY.md)** - IBKR Gateway setup and configuration
+- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Testing procedures and validation
 
 ---
 

@@ -8,7 +8,6 @@ Implements the DataProvider interface for provider-agnostic strategy code.
 from __future__ import annotations
 
 import asyncio
-import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import AsyncIterator, Dict, List, Optional
@@ -16,12 +15,7 @@ from typing import AsyncIterator, Dict, List, Optional
 import pandas as pd
 from ib_insync import util
 
-try:
-    from loguru import logger as loguru_logger
-
-    logger = loguru_logger
-except ImportError:
-    logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
 
 from pearlalgo.config.settings import Settings, get_settings
 from pearlalgo.data_providers.base import DataProvider
@@ -87,10 +81,13 @@ class IBKRProvider(DataProvider):
 
         # Initialize executor (dedicated thread for IBKR calls)
         # The executor manages its own connection lifecycle
+        # Use faster retry settings for better test performance
         self._executor = IBKRExecutor(
             host=self.host,
             port=self.port,
             client_id=self.client_id,
+            reconnect_delay=2.0,  # Faster retries
+            max_reconnect_attempts=3,  # Fail faster
         )
         self._executor.start()
 

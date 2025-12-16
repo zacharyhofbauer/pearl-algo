@@ -107,8 +107,15 @@ def mock_telegram_notifier():
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_service_full_cycle(real_data_provider, config, state_dir):
-    """Test full service cycle with real market data: data fetch → signal generation → notification."""
+    """
+    Test full service cycle with real market data: data fetch → signal generation → notification.
+    
+    This test uses real IBKR data and may take time to connect.
+    """
+    import asyncio
+    
     service = NQAgentService(
         data_provider=real_data_provider,
         config=config,
@@ -144,8 +151,13 @@ async def test_service_full_cycle(real_data_provider, config, state_dir):
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
 async def test_service_signal_to_telegram(real_data_provider, config, state_dir, mock_telegram_notifier):
-    """Test signal generation with real market data and Telegram notification."""
+    """
+    Test signal generation with real market data and Telegram notification.
+    
+    This test uses real IBKR data and may take time to connect.
+    """
     service = NQAgentService(
         data_provider=real_data_provider,
         config=config,
@@ -257,7 +269,7 @@ async def test_service_error_recovery(real_data_provider, config, state_dir):
 
 @pytest.mark.asyncio
 async def test_service_state_persistence(real_data_provider, config, state_dir):
-    """Test service state persists across restarts."""
+    """Test service state persists across restarts with real data."""
     # Create and run service
     service1 = NQAgentService(
         data_provider=real_data_provider,

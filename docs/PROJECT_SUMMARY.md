@@ -1,7 +1,7 @@
 # Project Summary - PearlAlgo MNQ Trading Agent
 
 **Version:** 0.2.0  
-**Last Updated:** 2025-12-16  
+**Last Updated:** 2025-12-16 (Cleanup & Consolidation)  
 **Status:** Production-Ready  
 **Trading Style:** Prop Firm - Intraday Swings & Quick Scalps
 
@@ -411,18 +411,22 @@ pearlalgo-dev-ai-agents/
 ├── config/                     # Configuration files
 │   └── config.yaml             # Main configuration
 │
-├── scripts/                     # Utility scripts (17 files)
-│   ├── start_nq_agent_service.sh    # Start service (background)
-│   ├── stop_nq_agent_service.sh     # Stop service
-│   ├── check_nq_agent_status.sh      # Check status
-│   ├── validate_strategy.py          # Comprehensive validation
-│   ├── start_ibgateway_ibc.sh       # Start IB Gateway
-│   ├── check_gateway_status.sh       # Check Gateway status
-│   ├── test_telegram_notifications.py  # Test notifications
-│   ├── test_signal_generation.py      # Test signal logic
-│   ├── test_nq_agent_with_mock.py     # Test full service
-│   ├── run_tests.sh                   # Run all tests
-│   └── ... (other setup scripts)
+├── scripts/                     # Utility scripts (organized by category)
+│   ├── lifecycle/                  # Service lifecycle scripts
+│   │   ├── start_nq_agent_service.sh    # Start service (background)
+│   │   ├── stop_nq_agent_service.sh     # Stop service
+│   │   └── check_nq_agent_status.sh      # Check status
+│   ├── gateway/                    # IBKR Gateway scripts
+│   │   ├── start_ibgateway_ibc.sh       # Start IB Gateway
+│   │   ├── check_gateway_status.sh      # Check Gateway status
+│   │   ├── setup_ibgateway.sh           # Complete gateway setup
+│   │   ├── setup_vnc_for_login.sh       # VNC setup
+│   │   └── disable_auto_sleep.sh        # System settings
+│   └── testing/                    # Testing and validation scripts
+│       ├── test_all.py                  # Unified test runner
+│       ├── validate_strategy.py         # Comprehensive validation
+│       ├── run_tests.sh                 # Run all tests
+│       └── smoke_test_ibkr.py           # IBKR smoke test
 │
 ├── tests/                       # Unit tests (12 files)
 │   ├── conftest.py             # Pytest configuration
@@ -434,12 +438,11 @@ pearlalgo-dev-ai-agents/
 │   └── ... (other test files)
 │
 ├── docs/                        # Documentation
-│   ├── PROJECT_SUMMARY.md      # This file
-│   ├── NQ_AGENT_GUIDE.md       # Complete MNQ Agent guide (includes prop firm config)
-│   ├── STRATEGY_TESTING_GUIDE.md  # Strategy validation guide
-│   ├── TESTING_GUIDE.md        # Testing procedures
-│   ├── MOCK_DATA_WARNING.md    # Mock data testing notes
-│   └── GATEWAY.md              # IBKR Gateway guide
+│   ├── PROJECT_SUMMARY.md      # This file (single source of truth)
+│   ├── NQ_AGENT_GUIDE.md       # Operational guide (how to run and operate)
+│   ├── TESTING_GUIDE.md        # Unified testing guide (all testing procedures)
+│   ├── GATEWAY.md              # IBKR Gateway setup
+│   └── MOCK_DATA_WARNING.md    # Mock data testing notes
 │
 ├── data/                        # Data storage
 │   ├── nq_agent_state/         # Service state
@@ -619,19 +622,23 @@ data_provider: "ibkr"
 
 **Quick Test (All Tests)**:
 ```bash
-./scripts/run_tests.sh
+# Unified test runner (recommended)
+python3 scripts/testing/test_all.py
+
+# Or use test script
+./scripts/testing/run_tests.sh
 ```
 
-**Individual Tests**:
+**Individual Test Modes**:
 ```bash
-# Test notifications
-python3 scripts/test_telegram_notifications.py
+# Test notifications only
+python3 scripts/testing/test_all.py telegram
 
-# Test signal generation
-python3 scripts/test_signal_generation.py
+# Test signal generation only
+python3 scripts/testing/test_all.py signals
 
-# Test full service
-python3 scripts/test_nq_agent_with_mock.py
+# Test full service only
+python3 scripts/testing/test_all.py service
 ```
 
 **Unit Tests**:
@@ -709,8 +716,8 @@ tail -f logs/nq_agent.log
 ### Daily Operations
 
 **Morning Checklist**:
-1. Verify IBKR Gateway is running: `./scripts/check_gateway_status.sh`
-2. Check service status: `./scripts/check_nq_agent_status.sh`
+1. Verify IBKR Gateway is running: `./scripts/gateway/check_gateway_status.sh`
+2. Check service status: `./scripts/lifecycle/check_nq_agent_status.sh`
 3. Review overnight logs: `tail -100 logs/nq_agent.log`
 
 **During Trading**:
@@ -739,7 +746,7 @@ tail -f logs/nq_agent.log
 
 **Check Service Status**:
 ```bash
-./scripts/check_nq_agent_status.sh
+./scripts/lifecycle/check_nq_agent_status.sh
 ps aux | grep "pearlalgo.nq_agent.main"
 ```
 
@@ -875,28 +882,34 @@ cat data/nq_agent_state/performance.json | jq
 
 ```bash
 # Start IBKR Gateway
-./scripts/start_ibgateway_ibc.sh
+./scripts/gateway/start_ibgateway_ibc.sh
 
 # Check Gateway Status
-./scripts/check_gateway_status.sh
+./scripts/gateway/check_gateway_status.sh
+
+# Setup IBKR Gateway (first time)
+./scripts/gateway/setup_ibgateway.sh
 
 # Start MNQ Agent Service
-./scripts/start_nq_agent_service.sh
+./scripts/lifecycle/start_nq_agent_service.sh
 
 # Stop MNQ Agent Service
-./scripts/stop_nq_agent_service.sh
+./scripts/lifecycle/stop_nq_agent_service.sh
 
 # Check Service Status
-./scripts/check_nq_agent_status.sh
+./scripts/lifecycle/check_nq_agent_status.sh
+
+# Run Tests
+python3 scripts/testing/test_all.py
 
 # Validate Strategy
-python3 scripts/validate_strategy.py
+python3 scripts/testing/validate_strategy.py
 
 # View Logs
 tail -f logs/nq_agent.log
 
-# Run All Tests
-./scripts/run_tests.sh
+# Run All Unit Tests
+./scripts/testing/run_tests.sh
 ```
 
 ### File Locations
@@ -970,9 +983,8 @@ The system is ready for production use and optimized for prop firm trading with 
 ---
 
 **For detailed guides, see:**
-- `docs/NQ_AGENT_GUIDE.md` - Complete MNQ Agent guide (includes prop firm configuration)
-- `docs/STRATEGY_TESTING_GUIDE.md` - Strategy validation guide
-- `docs/TESTING_GUIDE.md` - Testing procedures
+- `docs/NQ_AGENT_GUIDE.md` - Operational guide (how to run and operate)
+- `docs/TESTING_GUIDE.md` - Complete testing guide (all testing procedures)
 - `docs/GATEWAY.md` - IBKR Gateway setup
 
 **Last Updated:** 2025-12-16  

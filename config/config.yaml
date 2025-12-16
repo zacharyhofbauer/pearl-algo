@@ -46,3 +46,38 @@ logging:
 
 # Data Provider
 data_provider: "ibkr"  # Use IBKR for market data
+
+# Service intervals
+service:
+  status_update_interval: 1800  # 30 minutes in seconds
+  heartbeat_interval: 3600  # 1 hour in seconds
+  state_save_interval: 10  # cycles
+
+# Circuit breaker
+circuit_breaker:
+  max_consecutive_errors: 10
+  max_connection_failures: 10
+  max_data_fetch_errors: 5
+
+# Alert intervals
+alerts:
+  connection_failure_interval: 600  # 10 minutes
+  data_quality_interval: 300  # 5 minutes
+
+# Data fetching
+data:
+  buffer_size: 100
+  historical_hours: 2
+  multitimeframe_5m_hours: 4
+  multitimeframe_15m_hours: 12
+
+# Signal generation
+signals:
+  duplicate_window_seconds: 300  # 5 minutes
+  min_confidence: 0.50
+  min_risk_reward: 1.5
+
+# Performance tracking
+performance:
+  max_records: 1000
+  default_lookback_days: 7
