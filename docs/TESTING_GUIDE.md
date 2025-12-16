@@ -220,7 +220,7 @@ provider = MockDataProvider(
 
 **Solutions:**
 1. Check credentials: `echo $TELEGRAM_BOT_TOKEN`
-2. Test connection: `python3 scripts/test_telegram.py`
+2. Test connection: `python3 scripts/test_telegram_notifications.py`
 3. Verify bot token and chat ID are correct
 4. Make sure bot is started (send `/start` to bot first)
 

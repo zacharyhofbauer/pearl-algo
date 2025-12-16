@@ -26,7 +26,7 @@ class NQIntradayStrategy:
     
     Coordinates scanning and signal generation for NQ futures.
     """
-    
+
     def __init__(self, config: Optional[NQIntradayConfig] = None):
         """
         Initialize strategy.
@@ -37,9 +37,9 @@ class NQIntradayStrategy:
         self.config = config or NQIntradayConfig()
         self.scanner = NQScanner(config=self.config)
         self.signal_generator = NQSignalGenerator(config=self.config, scanner=self.scanner)
-        
+
         logger.info(f"NQIntradayStrategy initialized: symbol={self.config.symbol}")
-    
+
     def analyze(self, market_data: Dict) -> List[Dict]:
         """
         Analyze market data and generate signals.
@@ -56,7 +56,7 @@ class NQIntradayStrategy:
         except Exception as e:
             logger.error(f"Error analyzing market data: {e}", exc_info=True)
             return []
-    
+
     def get_config(self) -> NQIntradayConfig:
         """Get strategy configuration."""
         return self.config

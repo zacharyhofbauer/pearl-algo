@@ -398,8 +398,7 @@ pearlalgo-dev-ai-agents/
 │   │   │   ├── ibkr_provider.py
 │   │   │   ├── connection_manager.py
 │   │   │   └── entitlements.py
-│   │   ├── ibkr_executor.py    # Thread-safe executor
-│   │   └── ibkr_data_provider.py
+│   │   └── ibkr_executor.py    # Thread-safe executor
 │   ├── utils/                  # Utilities (4 files)
 │   │   ├── telegram_alerts.py  # Telegram core
 │   │   ├── market_hours.py     # Market hours logic
@@ -425,12 +424,13 @@ pearlalgo-dev-ai-agents/
 │   ├── run_tests.sh                   # Run all tests
 │   └── ... (other setup scripts)
 │
-├── tests/                       # Unit tests (11 files)
+├── tests/                       # Unit tests (12 files)
 │   ├── conftest.py             # Pytest configuration
 │   ├── mock_data_provider.py   # Mock data for testing
 │   ├── test_nq_agent_service.py
 │   ├── test_nq_agent_integration.py
 │   ├── test_ibkr_provider.py
+│   ├── test_ibkr_executor.py   # Integration tests (marked)
 │   └── ... (other test files)
 │
 ├── docs/                        # Documentation

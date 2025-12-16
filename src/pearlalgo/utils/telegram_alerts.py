@@ -130,7 +130,7 @@ class TelegramAlerts:
                     )
                     # Don't retry on 404 - it won't work
                     return False
-                
+
                 # Markdown parsing errors - try sending as plain text immediately
                 if "parse entities" in error_msg.lower() or "can't parse" in error_msg.lower():
                     logger.warning(f"Markdown parsing error, retrying as plain text: {e}")
@@ -158,7 +158,7 @@ class TelegramAlerts:
                         except Exception as plain_error:
                             logger.error(f"Failed to send as plain text: {plain_error}")
                             return False
-                
+
                 if attempt < max_retries - 1:
                     # Exponential backoff
                     wait_time = 2 ** attempt
@@ -219,17 +219,17 @@ class TelegramAlerts:
         pnl_emoji = "📈" if daily_pnl >= 0 else "📉"
         trend_emoji = "↗️" if daily_pnl >= 0 else "↘️"
         trend_text = "Profitable" if daily_pnl >= 0 else "Loss"
-        
+
         message = f"{pnl_emoji} *Daily Summary*\n\n"
         message += f"💰 *P&L:* {_format_currency(daily_pnl)}\n"
-        
+
         if win_rate is not None:
             message += f"📊 *Trades:* {total_trades} ({_format_percentage(win_rate * 100)} WR)\n"
         else:
             message += f"📊 *Trades:* {total_trades}\n"
-        
+
         message += f"📈 *Trend:* {trend_emoji} {trend_text}\n"
-        
+
         await self.send_message(message)
 
     async def notify_kill_switch(self, reason: str) -> None:
@@ -286,16 +286,16 @@ class TelegramAlerts:
         side_emoji = "🟢" if side.lower() == "long" else "🔴"
         side_text = side.upper()
         sep = _format_separator(25)
-        
+
         # Check if this is an options signal
         is_options = option_symbol is not None or option_type is not None
-        
+
         # Header (mobile-friendly, no long separators)
         if is_options:
             message = f"{side_emoji} *NEW OPTIONS SIGNAL*\n*{symbol} {side_text}*\n\n"
         else:
             message = f"{side_emoji} *NEW SIGNAL*\n*{symbol} {side_text}*\n\n"
-        
+
         # Entry/Stop/Target section with better alignment
         entry = entry_price if entry_price else price
         if entry:
@@ -303,21 +303,21 @@ class TelegramAlerts:
             stop_pct_str = ""
             tp_pct_str = ""
             rr_ratio = None
-            
+
             if stop_loss and entry:
                 if side.lower() == "long":
                     stop_pct = ((stop_loss - entry) / entry) * 100
                 else:
                     stop_pct = ((entry - stop_loss) / entry) * 100
                 stop_pct_str = f" ({stop_pct:+.2f}%)"
-            
+
             if take_profit and entry:
                 if side.lower() == "long":
                     tp_pct = ((take_profit - entry) / entry) * 100
                 else:
                     tp_pct = ((entry - take_profit) / entry) * 100
                 tp_pct_str = f" ({tp_pct:+.2f}%)"
-            
+
             # Calculate R:R if we have both stop and target
             if stop_loss and take_profit and entry:
                 if side.lower() == "long":
@@ -328,7 +328,7 @@ class TelegramAlerts:
                     reward = abs(entry - take_profit)
                 if risk > 0:
                     rr_ratio = reward / risk
-            
+
             # Format with consistent alignment
             message += f"Entry:    {_format_currency(entry)}\n"
             if stop_loss:
@@ -339,22 +339,22 @@ class TelegramAlerts:
                     message += f"Target:   {_format_currency(take_profit)}{tp_pct_str}  R:R {rr_ratio:.1f}:1\n"
                 else:
                     message += f"Target:   {_format_currency(take_profit)}{tp_pct_str}\n"
-        
+
         # Confidence bar
         if confidence is not None:
             confidence_pct = confidence * 100
             confidence_bar = "█" * int(confidence_pct / 10) + "░" * (10 - int(confidence_pct / 10))
             message += f"\n*Confidence:* {confidence_pct:.0f}% {confidence_bar}\n"
-        
+
         # Strategy and reasoning
         message += f"\n*Strategy:* {strategy}\n"
-        
+
         if reasoning:
             # Truncate reasoning intelligently for mobile
             if len(reasoning) > 120:
                 reasoning = reasoning[:117] + "..."
             message += f"\n*Reason:*\n{reasoning}\n"
-        
+
         # Options-specific info
         if is_options:
             if option_symbol:
@@ -370,7 +370,7 @@ class TelegramAlerts:
                 message += f"DTE: {dte} days\n"
             if delta is not None:
                 message += f"Delta: {delta:.3f}\n"
-        
+
         await self.send_message(message)
 
     async def notify_signal_logged(
@@ -397,24 +397,24 @@ class TelegramAlerts:
         """
         side_emoji = "📈" if side.lower() == "long" else "📉"
         pnl_emoji = "💰" if unrealized_pnl and unrealized_pnl >= 0 else "💸"
-        
+
         message = f"{side_emoji} *Signal Logged*\n\n"
         message += f"*Symbol:* {symbol}\n"
         message += f"*Side:* {side.upper()}\n"
         message += f"*Entry:* ${entry_price:,.2f}\n"
-        
+
         if stop_loss:
             message += f"*Stop Loss:* ${stop_loss:,.2f}\n"
-        
+
         if take_profit:
             message += f"*Take Profit:* ${take_profit:,.2f}\n"
-        
+
         if unrealized_pnl is not None:
             message += f"\n{pnl_emoji} *Unrealized P&L:* ${unrealized_pnl:,.2f}\n"
-        
+
         if risk_amount:
             message += f"*Risk:* ${risk_amount:,.2f}\n"
-        
+
         await self.send_message(message)
 
     async def notify_exit(
@@ -443,22 +443,22 @@ class TelegramAlerts:
         """
         pnl_emoji = "💰" if realized_pnl >= 0 else "💸"
         direction_emoji = "📈" if direction.lower() == "long" else "📉"
-        
+
         message = f"{pnl_emoji} *Position Exited*\n\n"
         message += f"*Symbol:* {symbol}\n"
         message += f"*Direction:* {direction.upper()} {direction_emoji}\n"
         message += f"*Entry:* ${entry_price:,.2f}\n"
         message += f"*Exit:* ${exit_price:,.2f}\n"
         message += f"*Size:* {size} contracts\n"
-        
+
         if hold_duration:
             message += f"*Hold Duration:* {hold_duration}\n"
-        
+
         message += f"\n*Realized P&L:* ${realized_pnl:,.2f}\n"
-        
+
         if exit_reason:
             message += f"\n*Exit Reason:* {exit_reason}\n"
-        
+
         await self.send_message(message)
 
     async def notify_stop_loss(
@@ -482,7 +482,7 @@ class TelegramAlerts:
             realized_pnl: Realized loss
         """
         loss_pct = abs((stop_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
-        
+
         message = f"🛑 *Stop Loss Hit*\n\n"
         message += f"*Symbol:* {symbol}\n"
         message += f"*Direction:* {direction.upper()}\n"
@@ -490,7 +490,7 @@ class TelegramAlerts:
         message += f"*Stop:* ${stop_price:,.2f} ({loss_pct:.2f}%)\n"
         message += f"*Size:* {size} contracts\n"
         message += f"\n*Realized Loss:* ${realized_pnl:,.2f}\n"
-        
+
         await self.send_message(message)
 
     async def notify_take_profit(
@@ -514,7 +514,7 @@ class TelegramAlerts:
             realized_pnl: Realized profit
         """
         profit_pct = abs((target_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
-        
+
         message = f"🎯 *Take Profit Hit*\n\n"
         message += f"*Symbol:* {symbol}\n"
         message += f"*Direction:* {direction.upper()}\n"
@@ -522,7 +522,7 @@ class TelegramAlerts:
         message += f"*Target:* ${target_price:,.2f} ({profit_pct:.2f}%)\n"
         message += f"*Size:* {size} contracts\n"
         message += f"\n*Realized Profit:* ${realized_pnl:,.2f}\n"
-        
+
         await self.send_message(message)
 
     async def notify_position_update(
@@ -547,7 +547,7 @@ class TelegramAlerts:
         """
         pnl_emoji = "📈" if unrealized_pnl >= 0 else "📉"
         pnl_pct = abs((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
-        
+
         message = f"{pnl_emoji} *Position Update*\n\n"
         message += f"*Symbol:* {symbol}\n"
         message += f"*Direction:* {direction.upper()}\n"
@@ -555,5 +555,5 @@ class TelegramAlerts:
         message += f"*Current:* ${current_price:,.2f} ({pnl_pct:.2f}%)\n"
         message += f"*Size:* {size} contracts\n"
         message += f"\n*Unrealized P&L:* ${unrealized_pnl:,.2f}\n"
-        
+
         await self.send_message(message)

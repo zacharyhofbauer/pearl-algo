@@ -516,7 +516,7 @@ Verify session filters work:
 
 **Solutions:**
 1. Check env vars: `echo $TELEGRAM_BOT_TOKEN`
-2. Test connection: `python3 scripts/test_telegram.py`
+2. Test connection: `python3 scripts/test_telegram_notifications.py`
 3. Verify bot is started in Telegram
 
 ---

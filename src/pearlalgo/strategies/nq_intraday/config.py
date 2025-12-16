@@ -15,21 +15,21 @@ from typing import Optional
 @dataclass
 class NQIntradayConfig:
     """Configuration for NQ intraday strategy."""
-    
+
     # Symbol
     symbol: str = "MNQ"  # Mini NQ (1/10th size of NQ) - better for prop firms
-    
+
     # Timeframe
     timeframe: str = "1m"  # 1-minute bars for intraday scalping/swings
-    
+
     # Scanning interval (seconds)
     scan_interval: int = 30  # Scan every 30 seconds (faster for scalping)
-    
+
     # Signal parameters
     lookback_periods: int = 20  # Number of bars for indicators
     min_volume: int = 100  # Minimum volume threshold
     volatility_threshold: float = 0.001  # Minimum volatility (1% of price)
-    
+
     # Risk parameters (Prop Firm Style)
     max_position_size: int = 10  # Maximum contracts (5-15 range for prop firms)
     min_position_size: int = 5  # Minimum contracts per trade
@@ -40,18 +40,18 @@ class NQIntradayConfig:
     max_risk_per_trade: float = 0.01  # 1% max risk per trade (prop firm conservative)
     # MNQ contract specs: $2 per point (vs NQ $20 per point)
     tick_value: float = 2.0  # MNQ tick value in dollars
-    
+
     # Time filters (Prop Firm Trading Hours)
     start_time: str = "09:30"  # Market open (ET)
     end_time: str = "16:00"  # Market close (ET)
     # Avoid lunch lull for scalping (11:30-13:00 ET)
     avoid_lunch_lull: bool = True  # Skip signals during low volume period
-    
+
     # Enable/disable features
     enable_momentum: bool = True
     enable_mean_reversion: bool = True
     enable_breakout: bool = True
-    
+
     @classmethod
     def from_config_file(cls, config_path: Optional[Path] = None) -> "NQIntradayConfig":
         """
@@ -67,17 +67,17 @@ class NQIntradayConfig:
             # Try to find config.yaml relative to project root
             project_root = Path(__file__).parent.parent.parent.parent.parent
             config_path = project_root / "config" / "config.yaml"
-        
+
         # Start with defaults
         config = cls()
-        
+
         # Load from file if exists
         if config_path and config_path.exists():
             try:
                 import yaml
                 with open(config_path) as f:
                     config_data = yaml.safe_load(f) or {}
-                    
+
                     # Load symbol and timeframe
                     if "symbol" in config_data:
                         config.symbol = config_data["symbol"]
@@ -85,7 +85,7 @@ class NQIntradayConfig:
                         config.timeframe = config_data["timeframe"]
                     if "scan_interval" in config_data:
                         config.scan_interval = config_data["scan_interval"]
-                    
+
                     # Load risk parameters
                     risk_config = config_data.get("risk", {})
                     if "stop_loss_atr_multiplier" in risk_config:
@@ -98,7 +98,7 @@ class NQIntradayConfig:
                         config.max_position_size = risk_config["max_position_size"]
                     if "min_position_size" in risk_config:
                         config.min_position_size = risk_config["min_position_size"]
-                    
+
                     # Support environment variable substitution
                     def substitute_env(value):
                         if isinstance(value, str) and value.startswith("${"):
@@ -106,14 +106,14 @@ class NQIntradayConfig:
                             default = value.split(":")[1][:-1] if ":" in value else None
                             return os.getenv(env_var, default)
                         return value
-                    
+
                     # Substitute any env vars in config values
                     config.symbol = substitute_env(config.symbol) or config.symbol
                     config.timeframe = substitute_env(config.timeframe) or config.timeframe
-                    
+
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.warning(f"Could not load config from {config_path}: {e}")
-        
+
         return config

@@ -7,11 +7,11 @@ from pearlalgo.data_providers.factory import (
     list_available_providers,
     register_provider,
 )
-from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
 
 __all__ = [
     "DataProvider",
-    "IBKRDataProvider",
+    "IBKRProvider",
     "create_data_provider",
     "create_data_provider_with_fallback",
     "list_available_providers",

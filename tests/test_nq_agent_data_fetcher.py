@@ -58,9 +58,9 @@ def config():
 
 
 @pytest.fixture
-def fetcher(mock_data_provider, config):
+def fetcher(real_data_provider, config):
     """Create a data fetcher instance."""
-    return NQAgentDataFetcher(mock_data_provider, config)
+    return NQAgentDataFetcher(real_data_provider, config)
 
 
 @pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def test_fetcher_initialization(fetcher):
 
 
 @pytest.mark.asyncio
-async def test_fetcher_fetch_latest_data(fetcher, mock_data_provider):
+async def test_fetcher_fetch_latest_data(fetcher):
     """Test fetching latest data."""
     result = await fetcher.fetch_latest_data()
     
@@ -85,7 +85,7 @@ async def test_fetcher_fetch_latest_data(fetcher, mock_data_provider):
 
 
 @pytest.mark.asyncio
-async def test_fetcher_buffer_management(fetcher, mock_data_provider):
+async def test_fetcher_buffer_management(fetcher):
     """Test data buffer management."""
     # Fetch data multiple times
     for _ in range(5):
@@ -98,20 +98,28 @@ async def test_fetcher_buffer_management(fetcher, mock_data_provider):
 
 
 @pytest.mark.asyncio
-async def test_fetcher_empty_data_handling(fetcher, mock_data_provider):
-    """Test handling of empty data."""
-    # Mock empty dataframe
-    mock_data_provider.fetch_historical = MagicMock(return_value=pd.DataFrame())
-    mock_data_provider.get_latest_bar = AsyncMock(return_value=None)
+async def test_fetcher_empty_data_handling(fetcher):
+    """Test handling of empty data with real provider."""
+    # Temporarily patch to return empty data
+    original_fetch = fetcher.data_provider.fetch_historical
+    original_get_latest = fetcher.data_provider.get_latest_bar
     
-    result = await fetcher.fetch_latest_data()
+    fetcher.data_provider.fetch_historical = MagicMock(return_value=pd.DataFrame())
+    fetcher.data_provider.get_latest_bar = AsyncMock(return_value=None)
     
-    assert result["df"].empty
-    assert result["latest_bar"] is None
+    try:
+        result = await fetcher.fetch_latest_data()
+        
+        assert result["df"].empty
+        assert result["latest_bar"] is None
+    finally:
+        # Restore original methods
+        fetcher.data_provider.fetch_historical = original_fetch
+        fetcher.data_provider.get_latest_bar = original_get_latest
 
 
 @pytest.mark.asyncio
-async def test_fetcher_stale_data_detection(fetcher, mock_data_provider):
+async def test_fetcher_stale_data_detection(fetcher):
     """Test stale data detection."""
     # Create stale data (old timestamp)
     stale_timestamp = datetime.now(timezone.utc) - timedelta(minutes=15)
@@ -131,15 +139,21 @@ async def test_fetcher_stale_data_detection(fetcher, mock_data_provider):
         "timestamp": dates,
     }, index=dates)
     
-    mock_data_provider.fetch_historical = MagicMock(return_value=df)
+    # Temporarily patch for stale data test
+    original_fetch = fetcher.data_provider.fetch_historical
+    fetcher.data_provider.fetch_historical = MagicMock(return_value=df)
     
     # Fetch should complete but may log warning
-    result = await fetcher.fetch_latest_data()
-    assert "df" in result
+    try:
+        result = await fetcher.fetch_latest_data()
+        assert "df" in result
+    finally:
+        # Restore original method
+        fetcher.data_provider.fetch_historical = original_fetch
 
 
 @pytest.mark.asyncio
-async def test_fetcher_missing_values_handling(fetcher, mock_data_provider):
+async def test_fetcher_missing_values_handling(fetcher):
     """Test handling of missing values in data."""
     # Create data with missing values
     dates = pd.date_range(
@@ -156,38 +170,59 @@ async def test_fetcher_missing_values_handling(fetcher, mock_data_provider):
         "volume": [1000] * len(dates),
     }, index=dates)
     
-    mock_data_provider.fetch_historical = MagicMock(return_value=df)
+    # Temporarily patch for missing values test
+    original_fetch = fetcher.data_provider.fetch_historical
+    fetcher.data_provider.fetch_historical = MagicMock(return_value=df)
     
     # Should handle missing values gracefully
-    result = await fetcher.fetch_latest_data()
-    assert "df" in result
+    try:
+        result = await fetcher.fetch_latest_data()
+        assert "df" in result
+    finally:
+        # Restore original method
+        fetcher.data_provider.fetch_historical = original_fetch
 
 
 @pytest.mark.asyncio
-async def test_fetcher_error_handling(fetcher, mock_data_provider):
+async def test_fetcher_error_handling(fetcher):
     """Test error handling in data fetcher."""
     # Make provider raise error
-    mock_data_provider.fetch_historical = MagicMock(side_effect=Exception("Fetch error"))
-    mock_data_provider.get_latest_bar = AsyncMock(side_effect=Exception("Latest bar error"))
+    # Temporarily patch to raise errors
+    original_fetch = fetcher.data_provider.fetch_historical
+    original_get_latest = fetcher.data_provider.get_latest_bar
+    
+    fetcher.data_provider.fetch_historical = MagicMock(side_effect=Exception("Fetch error"))
+    fetcher.data_provider.get_latest_bar = AsyncMock(side_effect=Exception("Latest bar error"))
     
     # Should return empty data instead of raising
-    result = await fetcher.fetch_latest_data()
-    
-    assert result["df"].empty
-    assert result["latest_bar"] is None
+    try:
+        result = await fetcher.fetch_latest_data()
+        
+        assert result["df"].empty
+        assert result["latest_bar"] is None
+    finally:
+        # Restore original methods
+        fetcher.data_provider.fetch_historical = original_fetch
+        fetcher.data_provider.get_latest_bar = original_get_latest
 
 
 @pytest.mark.asyncio
-async def test_fetcher_historical_fallback(fetcher, mock_data_provider):
+async def test_fetcher_historical_fallback(fetcher):
     """Test fallback to historical data when latest_bar unavailable."""
     # Mock get_latest_bar to return None
-    mock_data_provider.get_latest_bar = AsyncMock(return_value=None)
+    # Temporarily patch for fallback test
+    original_get_latest = fetcher.data_provider.get_latest_bar
+    fetcher.data_provider.get_latest_bar = AsyncMock(return_value=None)
     
     # Should use last row from historical data
-    result = await fetcher.fetch_latest_data()
-    
-    # Should still have latest_bar from historical data
-    assert result["latest_bar"] is not None
+    try:
+        result = await fetcher.fetch_latest_data()
+        
+        # Should still have latest_bar from historical data
+        assert result["latest_bar"] is not None
+    finally:
+        # Restore original method
+        fetcher.data_provider.get_latest_bar = original_get_latest
     assert "timestamp" in result["latest_bar"]
 
 

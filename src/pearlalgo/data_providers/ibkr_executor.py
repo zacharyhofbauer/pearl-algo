@@ -439,7 +439,7 @@ class IBKRExecutor:
         # Create event loop for this thread (required by ib_insync)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         logger.info("IBKRExecutor thread started")
 
         # Initialize IB connection
@@ -507,7 +507,7 @@ class IBKRExecutor:
                 self.ib.disconnect()
             except Exception as e:
                 logger.warning(f"Error disconnecting: {e}")
-        
+
         # Cleanup event loop
         try:
             loop = asyncio.get_event_loop()

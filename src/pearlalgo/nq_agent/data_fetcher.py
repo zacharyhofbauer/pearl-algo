@@ -29,7 +29,7 @@ class NQAgentDataFetcher:
     
     Fetches market data from data providers for strategy analysis.
     """
-    
+
     def __init__(
         self,
         data_provider: DataProvider,
@@ -44,17 +44,17 @@ class NQAgentDataFetcher:
         """
         self.data_provider = data_provider
         self.config = config or NQIntradayConfig()
-        
+
         # Buffer for historical data
         self._data_buffer: Optional[pd.DataFrame] = None
         self._buffer_size = 100  # Keep last 100 bars
-        
+
         # Multi-timeframe buffers
         self._data_buffer_5m: Optional[pd.DataFrame] = None
         self._data_buffer_15m: Optional[pd.DataFrame] = None
-        
+
         logger.info(f"NQAgentDataFetcher initialized with provider={type(data_provider).__name__}")
-    
+
     async def fetch_latest_data(self) -> Dict:
         """
         Fetch latest market data for analysis.
@@ -66,7 +66,7 @@ class NQAgentDataFetcher:
             # Fetch historical data to populate/update buffer
             end = datetime.now(timezone.utc)
             start = end - timedelta(hours=2)  # Last 2 hours for intraday
-            
+
             # Use sync method (data providers use sync interface)
             # Run in executor to avoid blocking the event loop
             import asyncio
@@ -80,18 +80,18 @@ class NQAgentDataFetcher:
                     timeframe=self.config.timeframe,
                 )
             )
-            
+
             if df.empty:
                 logger.warning(f"No historical data available for {self.config.symbol}")
                 return {"df": pd.DataFrame(), "latest_bar": None}
-            
+
             # Data quality checks
             # Check for missing values
             if df.isnull().any().any():
                 missing = df.isnull().sum()
                 missing_dict = {col: missing[col] for col in missing.index if missing[col] > 0}
                 logger.warning(f"Data contains missing values: {missing_dict}")
-            
+
             # Check for stale data (if timestamp column exists)
             data_freshness_warning = False
             if "timestamp" in df.columns:
@@ -101,13 +101,13 @@ class NQAgentDataFetcher:
                     if age_minutes > 10:
                         logger.warning(f"Data may be stale: latest historical bar is {age_minutes:.1f} minutes old (market may be closed or data subscription issue)")
                         data_freshness_warning = True
-            
+
             # Log data freshness status
             if not data_freshness_warning and not df.empty:
                 logger.debug(f"Data is fresh: {len(df)} bars retrieved for {self.config.symbol}")
-                
+
                 self._data_buffer = df.tail(self._buffer_size).reset_index(drop=True)
-            
+
             # Fetch latest bar if method available
             latest_bar = None
             if hasattr(self.data_provider, 'get_latest_bar'):
@@ -123,7 +123,7 @@ class NQAgentDataFetcher:
                         )
                 except Exception as e:
                     logger.warning(f"Could not fetch latest bar from provider: {e}. Will use historical data fallback.")
-            
+
             # If no latest_bar from provider, use last row from historical data
             if latest_bar is None and not df.empty:
                 logger.info(f"Using historical data fallback for latest bar (real-time subscription may not be available)")
@@ -133,7 +133,7 @@ class NQAgentDataFetcher:
                     timestamp = timestamp.to_pydatetime()
                 elif isinstance(timestamp, pd.Timestamp):
                     timestamp = timestamp.to_pydatetime()
-                
+
                 # Extract values from Series/DataFrame row
                 if hasattr(latest_row, 'get'):
                     open_val = latest_row.get("open", 0)
@@ -148,7 +148,7 @@ class NQAgentDataFetcher:
                     low_val = latest_row["low"] if "low" in latest_row.index else 0
                     close_val = latest_row["close"] if "close" in latest_row.index else 0
                     volume_val = latest_row["volume"] if "volume" in latest_row.index else 0
-                
+
                 latest_bar = {
                     "timestamp": timestamp if isinstance(timestamp, datetime) else datetime.now(timezone.utc),
                     "open": float(open_val),
@@ -158,11 +158,11 @@ class NQAgentDataFetcher:
                     "volume": int(volume_val),
                 }
                 logger.debug(f"Using last bar from historical data as latest_bar for {self.config.symbol}")
-            
+
             if latest_bar is None:
                 logger.warning(f"No latest bar available for {self.config.symbol}")
                 return {"df": pd.DataFrame(), "latest_bar": None}
-            
+
             # Update buffer if we have new data
             if self._data_buffer is None or self._data_buffer.empty:
                 self._data_buffer = df.tail(self._buffer_size).reset_index(drop=True)
@@ -171,7 +171,7 @@ class NQAgentDataFetcher:
                 timestamp = latest_bar.get("timestamp")
                 if timestamp and isinstance(timestamp, str):
                     timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                
+
                 new_row = pd.DataFrame([{
                     "timestamp": timestamp or datetime.now(timezone.utc),
                     "open": latest_bar.get("open"),
@@ -180,23 +180,23 @@ class NQAgentDataFetcher:
                     "close": latest_bar.get("close"),
                     "volume": latest_bar.get("volume", 0),
                 }])
-                
+
                 self._data_buffer = pd.concat([self._data_buffer, new_row], ignore_index=True)
-                
+
                 # Trim buffer to max size
                 if len(self._data_buffer) > self._buffer_size:
                     self._data_buffer = self._data_buffer.tail(self._buffer_size).reset_index(drop=True)
-            
+
             # Fetch multi-timeframe data
             df_5m, df_15m = await self._fetch_multitimeframe_data(end)
-            
+
             return {
                 "df": self._data_buffer.copy(),
                 "latest_bar": latest_bar,
                 "df_5m": df_5m,
                 "df_15m": df_15m,
             }
-            
+
         except Exception as e:
             logger.error(f"Error fetching latest data: {e}", exc_info=True)
             # Return empty data instead of raising to allow graceful degradation
@@ -206,7 +206,7 @@ class NQAgentDataFetcher:
                 "df_5m": pd.DataFrame(),
                 "df_15m": pd.DataFrame(),
             }
-    
+
     async def _fetch_multitimeframe_data(self, end: datetime) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Fetch 5m and 15m timeframe data for multi-timeframe analysis.
@@ -221,9 +221,9 @@ class NQAgentDataFetcher:
             # Calculate start time (need more history for higher timeframes)
             start_5m = end - timedelta(hours=4)  # 4 hours for 5m (48 bars)
             start_15m = end - timedelta(hours=12)  # 12 hours for 15m (48 bars)
-            
+
             loop = asyncio.get_event_loop()
-            
+
             # Fetch 5m data
             df_5m = await loop.run_in_executor(
                 None,
@@ -234,7 +234,7 @@ class NQAgentDataFetcher:
                     timeframe="5m",
                 )
             )
-            
+
             # Fetch 15m data
             df_15m = await loop.run_in_executor(
                 None,
@@ -245,22 +245,22 @@ class NQAgentDataFetcher:
                     timeframe="15m",
                 )
             )
-            
+
             # Update buffers
             if not df_5m.empty:
                 self._data_buffer_5m = df_5m.tail(50).reset_index(drop=True)
             if not df_15m.empty:
                 self._data_buffer_15m = df_15m.tail(50).reset_index(drop=True)
-            
+
             return (
                 self._data_buffer_5m.copy() if self._data_buffer_5m is not None else pd.DataFrame(),
                 self._data_buffer_15m.copy() if self._data_buffer_15m is not None else pd.DataFrame(),
             )
-            
+
         except Exception as e:
             logger.warning(f"Error fetching multi-timeframe data: {e}")
             return (pd.DataFrame(), pd.DataFrame())
-    
+
     def get_buffer_size(self) -> int:
         """Get current buffer size."""
         if self._data_buffer is None:

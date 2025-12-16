@@ -42,13 +42,13 @@ from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 async def main():
     """Main entry point."""
     logger.info("Starting NQ Agent Service...")
-    
+
     import os
-    
+
     # Load Telegram configuration from environment or config.yaml
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    
+
     # Try loading from config.yaml if env vars not set
     if not telegram_bot_token or not telegram_chat_id:
         try:
@@ -71,25 +71,25 @@ async def main():
                             telegram_chat_id = os.getenv(env_var) or telegram_config.get("chat_id", "")
         except Exception as e:
             logger.warning(f"Could not load Telegram config from config.yaml: {e}")
-    
+
     # Create configuration (load from config.yaml if available)
     try:
         config = NQIntradayConfig.from_config_file()
     except Exception as e:
         logger.warning(f"Could not load config from file, using defaults: {e}")
         config = NQIntradayConfig()
-    
+
     # Create data provider (use factory to get appropriate provider)
     # Default to IBKR if no provider specified via env var
     provider_name = os.getenv("PEARLALGO_DATA_PROVIDER", "ibkr")
-    
+
     try:
         data_provider = create_data_provider(provider_name)
         logger.info(f"Data provider: {type(data_provider).__name__} (provider={provider_name})")
     except Exception as e:
         logger.error(f"Failed to create data provider '{provider_name}': {e}")
         return
-    
+
     # Create service with Telegram configuration
     service = NQAgentService(
         data_provider=data_provider,
@@ -97,7 +97,7 @@ async def main():
         telegram_bot_token=telegram_bot_token,
         telegram_chat_id=telegram_chat_id,
     )
-    
+
     # Run service
     try:
         await service.start()

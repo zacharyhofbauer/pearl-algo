@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     # Explicit dummy mode flag - when True, allows dummy data fallback
     # When False and IBKR connection fails, raises error instead of silent fallback
     dummy_mode: bool = Field(default=False, description="Enable dummy data mode (for testing/development)")
-    
+
     @field_validator("ib_port")
     @classmethod
     def validate_port(cls, v: int) -> int:
@@ -69,7 +69,7 @@ class Settings(BaseSettings):
         if not (1 <= v <= 65535):
             raise ValueError(f"IBKR port must be between 1 and 65535, got {v}")
         return v
-    
+
     @field_validator("ib_client_id", "ib_data_client_id")
     @classmethod
     def validate_client_id(cls, v: int | None) -> int | None:
@@ -77,7 +77,7 @@ class Settings(BaseSettings):
         if v is not None and not (0 <= v <= 100):
             raise ValueError(f"IBKR client ID must be between 0 and 100, got {v}")
         return v
-    
+
     @field_validator("profile")
     @classmethod
     def validate_profile(cls, v: str) -> str:
@@ -89,12 +89,12 @@ class Settings(BaseSettings):
                 "See IBKR_CONNECTION_FIXES.md for help."
             )
         return v.lower()
-    
+
     @model_validator(mode="after")
     def validate_ibkr_config(self) -> Self:
         """
         Validate IBKR configuration (now optional).
-        
+
         Note: IBKR is deprecated. Use paper broker or other providers instead.
         IBKR configuration is only validated if explicitly using IBKR broker.
         """
@@ -111,15 +111,15 @@ class Settings(BaseSettings):
                     stacklevel=2
                 )
         return self
-    
+
     def __init__(self, **kwargs):
         """
         Override to normalize IBKR_* and PEARLALGO_* env vars.
-        
+
         Precedence: IBKR_* > PEARLALGO_* > defaults
         """
         import os
-        
+
         # Normalize IBKR_* and PEARLALGO_* env vars
         # IBKR_* takes precedence over PEARLALGO_*
         if "ib_host" not in kwargs:
@@ -128,14 +128,14 @@ class Settings(BaseSettings):
                 os.getenv("PEARLALGO_IB_HOST") or 
                 kwargs.get("ib_host", "127.0.0.1")
             )
-        
+
         if "ib_port" not in kwargs:
             port_str = os.getenv("IBKR_PORT") or os.getenv("PEARLALGO_IB_PORT")
             if port_str:
                 kwargs["ib_port"] = int(port_str)
             elif "ib_port" not in kwargs:
                 kwargs["ib_port"] = 4002
-        
+
         if "ib_client_id" not in kwargs:
             client_id_str = (
                 os.getenv("IBKR_CLIENT_ID") or 
@@ -145,7 +145,7 @@ class Settings(BaseSettings):
                 kwargs["ib_client_id"] = int(client_id_str)
             elif "ib_client_id" not in kwargs:
                 kwargs["ib_client_id"] = 1
-        
+
         if "ib_data_client_id" not in kwargs:
             data_client_id_str = (
                 os.getenv("IBKR_DATA_CLIENT_ID") or 
@@ -153,12 +153,12 @@ class Settings(BaseSettings):
             )
             if data_client_id_str:
                 kwargs["ib_data_client_id"] = int(data_client_id_str)
-        
+
         # Handle dummy_mode flag
         if "dummy_mode" not in kwargs:
             dummy_str = os.getenv("PEARLALGO_DUMMY_MODE", "").lower()
             kwargs["dummy_mode"] = dummy_str in ("true", "1", "yes", "on")
-        
+
         super().__init__(**kwargs)
 
     @classmethod
@@ -191,34 +191,34 @@ class Settings(BaseSettings):
             merged[key] = val
 
         merged["profile"] = file_profile
-        
+
         # Override with IBKR_* env vars (these take precedence over PEARLALGO_*)
         # This ensures IBKR_* vars always win, even if set after config file load
         if "IBKR_HOST" in os.environ:
             merged["ib_host"] = os.getenv("IBKR_HOST")
         elif "PEARLALGO_IB_HOST" in os.environ and "ib_host" not in merged:
             merged["ib_host"] = os.getenv("PEARLALGO_IB_HOST")
-            
+
         if "IBKR_PORT" in os.environ:
             merged["ib_port"] = int(os.getenv("IBKR_PORT"))
         elif "PEARLALGO_IB_PORT" in os.environ and "ib_port" not in merged:
             merged["ib_port"] = int(os.getenv("PEARLALGO_IB_PORT"))
-            
+
         if "IBKR_CLIENT_ID" in os.environ:
             merged["ib_client_id"] = int(os.getenv("IBKR_CLIENT_ID"))
         elif "PEARLALGO_IB_CLIENT_ID" in os.environ and "ib_client_id" not in merged:
             merged["ib_client_id"] = int(os.getenv("PEARLALGO_IB_CLIENT_ID"))
-            
+
         if "IBKR_DATA_CLIENT_ID" in os.environ:
             merged["ib_data_client_id"] = int(os.getenv("IBKR_DATA_CLIENT_ID"))
         elif "PEARLALGO_IB_DATA_CLIENT_ID" in os.environ and "ib_data_client_id" not in merged:
             merged["ib_data_client_id"] = int(os.getenv("PEARLALGO_IB_DATA_CLIENT_ID"))
-        
+
         # Handle dummy_mode flag
         if "PEARLALGO_DUMMY_MODE" in os.environ:
             dummy_str = os.getenv("PEARLALGO_DUMMY_MODE", "").lower()
             merged["dummy_mode"] = dummy_str in ("true", "1", "yes", "on")
-        
+
         try:
             return cls(**merged)
         except ValidationError as exc:
@@ -390,5 +390,5 @@ def validate_config(config_path: str | Path | None = None) -> AppConfig:
     """
     if config_path is None:
         config_path = Path(__file__).parent.parent.parent.parent / "config" / "config.yaml"
-    
+
     return AppConfig.validate_config_file(config_path)

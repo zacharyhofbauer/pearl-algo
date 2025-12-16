@@ -38,7 +38,7 @@ def async_retry_with_backoff(
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             delay = initial_delay
             last_exception = None
-            
+
             for attempt in range(max_retries):
                 try:
                     return await func(*args, **kwargs)
@@ -54,10 +54,10 @@ def async_retry_with_backoff(
                         logger.error(
                             f"Max retries ({max_retries}) exceeded for {func.__name__}"
                         )
-            
+
             # If we get here, all retries failed
             raise last_exception
-        
+
         return wrapper
     return decorator
 

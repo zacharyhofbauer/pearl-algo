@@ -2,19 +2,23 @@
 Integration tests for IBKR Executor and Data Provider.
 
 Tests the thread-safe executor architecture with real IBKR connections.
+These tests require IBKR Gateway to be running and will be skipped if not available.
 """
 
 import asyncio
 import pytest
 from datetime import datetime, timezone
 
-from pearlalgo.data_providers.ibkr_data_provider import IBKRDataProvider
+from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
 from pearlalgo.data_providers.ibkr_executor import (
     GetLatestBarTask,
     GetOptionsChainTask,
     IBKRExecutor,
 )
 from pearlalgo.config.settings import get_settings
+
+# Mark all tests in this file as integration tests
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
@@ -39,7 +43,7 @@ def executor(settings):
 @pytest.fixture
 def provider(settings):
     """Create data provider for testing."""
-    provider = IBKRDataProvider(settings=settings)
+    provider = IBKRProvider(settings=settings)
     yield provider
     # Cleanup handled by provider.close() if needed
 

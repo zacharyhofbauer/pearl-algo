@@ -29,7 +29,7 @@ class PerformanceTracker:
     - Average hold time
     - Average profit/loss
     """
-    
+
     def __init__(self, state_dir: Optional[Path] = None):
         """
         Initialize performance tracker.
@@ -39,15 +39,15 @@ class PerformanceTracker:
         """
         if state_dir is None:
             state_dir = Path("data/nq_agent_state")
-        
+
         self.state_dir = Path(state_dir)
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.signals_file = self.state_dir / "signals.jsonl"
         self.performance_file = self.state_dir / "performance.json"
-        
+
         logger.info(f"PerformanceTracker initialized: state_dir={self.state_dir}")
-    
+
     def track_signal_generated(self, signal: Dict) -> str:
         """
         Track a new signal generation.
@@ -59,22 +59,22 @@ class PerformanceTracker:
             Signal ID for tracking
         """
         signal_id = f"{signal.get('type', 'unknown')}_{datetime.now(timezone.utc).timestamp()}"
-        
+
         signal_record = {
             "signal_id": signal_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "status": "generated",
             "signal": signal,
         }
-        
+
         try:
             with open(self.signals_file, "a") as f:
                 f.write(json.dumps(signal_record) + "\n")
         except Exception as e:
             logger.error(f"Error tracking signal: {e}")
-        
+
         return signal_id
-    
+
     def track_signal_expired(self, signal_id: str, reason: str = "expired") -> None:
         """
         Track that a signal expired without execution.
@@ -84,7 +84,7 @@ class PerformanceTracker:
             reason: Reason for expiry
         """
         self._update_signal_status(signal_id, "expired", {"reason": reason})
-    
+
     def track_entry(self, signal_id: str, entry_price: float, entry_time: Optional[datetime] = None) -> None:
         """
         Track signal entry.
@@ -96,7 +96,7 @@ class PerformanceTracker:
         """
         if entry_time is None:
             entry_time = datetime.now(timezone.utc)
-        
+
         self._update_signal_status(
             signal_id,
             "entered",
@@ -105,7 +105,7 @@ class PerformanceTracker:
                 "entry_time": entry_time.isoformat(),
             },
         )
-    
+
     def track_exit(
         self,
         signal_id: str,
@@ -127,25 +127,25 @@ class PerformanceTracker:
         """
         if exit_time is None:
             exit_time = datetime.now(timezone.utc)
-        
+
         # Get original signal
         signal_record = self._get_signal_record(signal_id)
         if not signal_record:
             logger.warning(f"Signal {signal_id} not found for exit tracking")
             return None
-        
+
         signal = signal_record.get("signal", {})
         entry_price = signal.get("entry_price", 0)
         direction = signal.get("direction", "long").lower()
-        
+
         # Calculate P&L (simplified - assumes 1 contract)
         if direction == "long":
             pnl = (exit_price - entry_price) * 20  # NQ tick value
         else:
             pnl = (entry_price - exit_price) * 20
-        
+
         is_win = pnl > 0
-        
+
         # Calculate hold time
         entry_time_str = signal_record.get("entry_time")
         if entry_time_str:
@@ -153,7 +153,7 @@ class PerformanceTracker:
             hold_duration = (exit_time - entry_time).total_seconds() / 60  # minutes
         else:
             hold_duration = None
-        
+
         performance = {
             "signal_id": signal_id,
             "signal_type": signal.get("type"),
@@ -166,7 +166,7 @@ class PerformanceTracker:
             "hold_duration_minutes": hold_duration,
             "exit_time": exit_time.isoformat(),
         }
-        
+
         # Update signal status
         self._update_signal_status(
             signal_id,
@@ -179,12 +179,12 @@ class PerformanceTracker:
                 "is_win": is_win,
             },
         )
-        
+
         # Save performance record
         self._save_performance(performance)
-        
+
         return performance
-    
+
     def get_performance_metrics(self, days: int = 7) -> Dict:
         """
         Get performance metrics for the last N days.
@@ -196,7 +196,7 @@ class PerformanceTracker:
             Dictionary with performance metrics
         """
         cutoff_time = datetime.now(timezone.utc).timestamp() - (days * 24 * 60 * 60)
-        
+
         # Load all signals
         signals = []
         if self.signals_file.exists():
@@ -214,10 +214,10 @@ class PerformanceTracker:
                             continue
             except Exception as e:
                 logger.error(f"Error loading signals: {e}")
-        
+
         # Filter to exited signals only
         exited_signals = [s for s in signals if s.get("status") == "exited"]
-        
+
         if not exited_signals:
             return {
                 "total_signals": len(signals),
@@ -230,20 +230,20 @@ class PerformanceTracker:
                 "avg_hold_minutes": 0.0,
                 "by_signal_type": {},
             }
-        
+
         # Calculate metrics
         total_pnl = sum(s.get("pnl", 0) for s in exited_signals)
         wins = sum(1 for s in exited_signals if s.get("is_win", False))
         losses = len(exited_signals) - wins
         win_rate = wins / len(exited_signals) if exited_signals else 0.0
-        
+
         hold_times = [
             s.get("hold_duration_minutes")
             for s in exited_signals
             if s.get("hold_duration_minutes") is not None
         ]
         avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0.0
-        
+
         # Metrics by signal type
         by_type: Dict[str, Dict] = {}
         for signal in exited_signals:
@@ -255,14 +255,14 @@ class PerformanceTracker:
                     "losses": 0,
                     "total_pnl": 0.0,
                 }
-            
+
             by_type[signal_type]["count"] += 1
             if signal.get("is_win", False):
                 by_type[signal_type]["wins"] += 1
             else:
                 by_type[signal_type]["losses"] += 1
             by_type[signal_type]["total_pnl"] += signal.get("pnl", 0)
-        
+
         # Calculate win rates by type
         for signal_type, metrics in by_type.items():
             metrics["win_rate"] = (
@@ -271,7 +271,7 @@ class PerformanceTracker:
             metrics["avg_pnl"] = (
                 metrics["total_pnl"] / metrics["count"] if metrics["count"] > 0 else 0.0
             )
-        
+
         return {
             "total_signals": len(signals),
             "exited_signals": len(exited_signals),
@@ -283,12 +283,12 @@ class PerformanceTracker:
             "avg_hold_minutes": avg_hold,
             "by_signal_type": by_type,
         }
-    
+
     def _get_signal_record(self, signal_id: str) -> Optional[Dict]:
         """Get signal record by ID."""
         if not self.signals_file.exists():
             return None
-        
+
         try:
             with open(self.signals_file, "r") as f:
                 for line in f:
@@ -300,15 +300,52 @@ class PerformanceTracker:
                         continue
         except Exception as e:
             logger.error(f"Error loading signal record: {e}")
-        
+
         return None
-    
+
     def _update_signal_status(self, signal_id: str, status: str, data: Dict) -> None:
         """Update signal status (read all, update, write back)."""
-        # This is a simplified implementation
-        # In production, you might want to use a database or append-only log
         logger.debug(f"Signal {signal_id} status: {status}")
-    
+
+        if not self.signals_file.exists():
+            return
+
+        # Read all records
+        records = []
+        try:
+            with open(self.signals_file, "r") as f:
+                for line in f:
+                    try:
+                        record = json.loads(line.strip())
+                        records.append(record)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+        except Exception as e:
+            logger.error(f"Error reading signals file: {e}")
+            return
+
+        # Update matching record
+        updated = False
+        for record in records:
+            if record.get("signal_id") == signal_id:
+                record["status"] = status
+                record.update(data)
+                updated = True
+                break
+
+        # If not found, create a new record (shouldn't happen, but handle gracefully)
+        if not updated:
+            logger.warning(f"Signal {signal_id} not found for status update")
+            return
+
+        # Write all records back
+        try:
+            with open(self.signals_file, "w") as f:
+                for record in records:
+                    f.write(json.dumps(record) + "\n")
+        except Exception as e:
+            logger.error(f"Error writing signals file: {e}")
+
     def _save_performance(self, performance: Dict) -> None:
         """Save performance record."""
         # Load existing performance records
@@ -319,13 +356,13 @@ class PerformanceTracker:
                     performances = json.load(f)
             except Exception as e:
                 logger.error(f"Error loading performance records: {e}")
-        
+
         performances.append(performance)
-        
+
         # Keep only last 1000 records
         if len(performances) > 1000:
             performances = performances[-1000:]
-        
+
         try:
             with open(self.performance_file, "w") as f:
                 json.dump(performances, f, indent=2)

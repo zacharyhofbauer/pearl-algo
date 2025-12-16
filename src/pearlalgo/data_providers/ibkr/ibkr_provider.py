@@ -242,7 +242,7 @@ class IBKRProvider(DataProvider):
         # The executor manages its own connection
         # Submit a connect task to ensure connection
         from pearlalgo.data_providers.ibkr_executor import ConnectTask
-        
+
         connect_task = ConnectTask(
             task_id="validate_connection",
             host=self.host,
@@ -250,7 +250,7 @@ class IBKRProvider(DataProvider):
             client_id=self.client_id,
             timeout=10.0,
         )
-        
+
         try:
             future = self._executor.submit_task(connect_task)
             result = await asyncio.wrap_future(future)

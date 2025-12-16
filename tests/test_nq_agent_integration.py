@@ -17,8 +17,35 @@ from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 
 
 @pytest.fixture
+def real_data_provider():
+    """
+    Use real IBKR data provider for integration tests.
+    Tests will use actual market data when IBKR Gateway is available.
+    """
+    try:
+        from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
+        from pearlalgo.config.settings import get_settings
+        
+        settings = get_settings()
+        provider = IBKRProvider(settings=settings)
+        yield provider
+        
+        # Cleanup
+        import asyncio
+        try:
+            asyncio.run(provider.close())
+        except Exception:
+            pass
+    except Exception as e:
+        pytest.skip(f"Real data provider not available (IBKR Gateway may not be running): {e}")
+
+
+@pytest.fixture
 def mock_data_provider():
-    """Create a comprehensive mock data provider."""
+    """
+    Fallback mock provider - only used if real provider is not available.
+    Prefer real_data_provider fixture for tests that should use real market data.
+    """
     provider = MagicMock()
     
     # Create realistic historical data
@@ -80,10 +107,10 @@ def mock_telegram_notifier():
 
 
 @pytest.mark.asyncio
-async def test_service_full_cycle(mock_data_provider, config, state_dir):
-    """Test full service cycle: data fetch → signal generation → notification."""
+async def test_service_full_cycle(real_data_provider, config, state_dir):
+    """Test full service cycle with real market data: data fetch → signal generation → notification."""
     service = NQAgentService(
-        data_provider=mock_data_provider,
+        data_provider=real_data_provider,
         config=config,
         state_dir=state_dir,
         telegram_bot_token=None,
@@ -117,10 +144,10 @@ async def test_service_full_cycle(mock_data_provider, config, state_dir):
 
 
 @pytest.mark.asyncio
-async def test_service_signal_to_telegram(mock_data_provider, config, state_dir, mock_telegram_notifier):
-    """Test signal generation and Telegram notification."""
+async def test_service_signal_to_telegram(real_data_provider, config, state_dir, mock_telegram_notifier):
+    """Test signal generation with real market data and Telegram notification."""
     service = NQAgentService(
-        data_provider=mock_data_provider,
+        data_provider=real_data_provider,
         config=config,
         state_dir=state_dir,
         telegram_bot_token="test_token",
@@ -158,10 +185,10 @@ async def test_service_signal_to_telegram(mock_data_provider, config, state_dir,
 
 
 @pytest.mark.asyncio
-async def test_service_performance_tracking(mock_data_provider, config, state_dir):
-    """Test performance tracking through signal lifecycle."""
+async def test_service_performance_tracking(real_data_provider, config, state_dir):
+    """Test performance tracking with real market data through signal lifecycle."""
     service = NQAgentService(
-        data_provider=mock_data_provider,
+        data_provider=real_data_provider,
         config=config,
         state_dir=state_dir,
     )
@@ -198,16 +225,17 @@ async def test_service_performance_tracking(mock_data_provider, config, state_di
 
 
 @pytest.mark.asyncio
-async def test_service_error_recovery(mock_data_provider, config, state_dir):
-    """Test service recovers from errors."""
+async def test_service_error_recovery(real_data_provider, config, state_dir):
+    """Test service recovers from errors with real data provider."""
     service = NQAgentService(
-        data_provider=mock_data_provider,
+        data_provider=real_data_provider,
         config=config,
         state_dir=state_dir,
     )
     
-    # Make data provider fail
-    mock_data_provider.fetch_historical = MagicMock(side_effect=Exception("Temporary error"))
+    # Temporarily make data provider fail
+    original_fetch = real_data_provider.fetch_historical
+    real_data_provider.fetch_historical = MagicMock(side_effect=Exception("Temporary error"))
     
     # Service should handle error gracefully
     try:
@@ -217,16 +245,10 @@ async def test_service_error_recovery(mock_data_provider, config, state_dir):
     except Exception as e:
         pytest.fail(f"Service should handle errors gracefully: {e}")
     
-    # Reset provider
-    mock_data_provider.fetch_historical = MagicMock(return_value=pd.DataFrame({
-        "open": [15000],
-        "high": [15010],
-        "low": [14990],
-        "close": [15005],
-        "volume": [1000],
-    }))
+    # Reset provider to original
+    real_data_provider.fetch_historical = original_fetch
     
-    # Should recover and work again
+    # Should recover and work again with real data
     market_data = await service.data_fetcher.fetch_latest_data()
     assert "df" in market_data
     
@@ -234,11 +256,11 @@ async def test_service_error_recovery(mock_data_provider, config, state_dir):
 
 
 @pytest.mark.asyncio
-async def test_service_state_persistence(mock_data_provider, config, state_dir):
+async def test_service_state_persistence(real_data_provider, config, state_dir):
     """Test service state persists across restarts."""
     # Create and run service
     service1 = NQAgentService(
-        data_provider=mock_data_provider,
+        data_provider=real_data_provider,
         config=config,
         state_dir=state_dir,
     )
@@ -251,7 +273,7 @@ async def test_service_state_persistence(mock_data_provider, config, state_dir):
     
     # Create new service instance
     service2 = NQAgentService(
-        data_provider=mock_data_provider,
+        data_provider=real_data_provider,
         config=config,
         state_dir=state_dir,
     )

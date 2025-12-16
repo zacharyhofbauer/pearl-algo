@@ -62,18 +62,35 @@ async def test_notifier_disabled():
 
 
 @pytest.mark.asyncio
-async def test_notifier_send_signal(notifier, mock_telegram_alerts):
-    """Test sending a signal."""
-    signal = {
-        "symbol": "NQ",
-        "direction": "long",
-        "entry_price": 15000.0,
-        "stop_loss": 14900.0,
-        "take_profit": 15200.0,
-        "confidence": 0.75,
-        "reason": "Test signal",
-        "strategy": "nq_intraday",
-    }
+async def test_notifier_send_signal(notifier, mock_telegram_alerts, past_signals):
+    """Test sending a signal - use real past signal if available."""
+    # Try to use a real past signal first
+    if past_signals:
+        # Use the most recent real signal
+        real_signal = past_signals[-1].get("signal", {})
+        signal = {
+            "symbol": real_signal.get("symbol", "MNQ"),
+            "direction": real_signal.get("direction", "long"),
+            "entry_price": real_signal.get("entry_price", 15000.0),
+            "stop_loss": real_signal.get("stop_loss", 14900.0),
+            "take_profit": real_signal.get("take_profit", 15200.0),
+            "confidence": real_signal.get("confidence", 0.75),
+            "reason": real_signal.get("reason", "Real signal from past data"),
+            "strategy": real_signal.get("strategy", "nq_intraday"),
+            "type": real_signal.get("type", "breakout"),
+        }
+    else:
+        # Fallback to test signal if no past signals available
+        signal = {
+            "symbol": "MNQ",
+            "direction": "long",
+            "entry_price": 15000.0,
+            "stop_loss": 14900.0,
+            "take_profit": 15200.0,
+            "confidence": 0.75,
+            "reason": "Test signal",
+            "strategy": "nq_intraday",
+        }
     
     result = await notifier.send_signal(signal)
     

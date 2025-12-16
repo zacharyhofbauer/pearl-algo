@@ -30,7 +30,7 @@ class SignalQualityScorer:
     - Information ratio (signal strength vs noise)
     - Minimum edge threshold enforcement
     """
-    
+
     def __init__(
         self,
         state_dir: Optional[Path] = None,
@@ -45,21 +45,21 @@ class SignalQualityScorer:
         """
         if state_dir is None:
             state_dir = Path("data/nq_agent_state")
-        
+
         self.state_dir = Path(state_dir)
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.performance_file = self.state_dir / "performance.json"
         self.signals_file = self.state_dir / "signals.jsonl"
-        
+
         self.min_edge_threshold = min_edge_threshold
-        
+
         # Cache for performance lookup
         self._performance_cache: Optional[Dict] = None
         self._cache_timestamp: Optional[datetime] = None
-        
+
         logger.info(f"SignalQualityScorer initialized: min_edge={min_edge_threshold:.0%}")
-    
+
     def score_signal(self, signal: Dict) -> Dict:
         """
         Score signal quality based on historical performance.
@@ -81,15 +81,15 @@ class SignalQualityScorer:
         regime = signal.get("regime", {})
         regime_type = regime.get("regime", "ranging")
         volatility = regime.get("volatility", "normal")
-        
+
         # Load performance data
         performance_data = self._load_performance_data()
-        
+
         # Lookup historical win rate
         historical_wr = self._lookup_historical_wr(
             signal_type, regime_type, volatility, performance_data
         )
-        
+
         # Calculate information ratio (simplified)
         # Information ratio = (Win Rate - 50%) / StdDev
         # For now, use a simplified version based on win rate
@@ -100,16 +100,16 @@ class SignalQualityScorer:
         else:
             # Negative edge
             information_ratio = (historical_wr - 0.5) * 2  # Scale to -1-0
-        
+
         # Quality score (combination of historical WR and information ratio)
         quality_score = (historical_wr * 0.7 + (information_ratio + 1) / 2 * 0.3)
-        
+
         # Check if meets threshold
         meets_threshold = historical_wr >= self.min_edge_threshold
-        
+
         # Should send if meets threshold and has positive information ratio
         should_send = meets_threshold and information_ratio > 0
-        
+
         return {
             "quality_score": float(quality_score),
             "historical_wr": float(historical_wr),
@@ -117,7 +117,7 @@ class SignalQualityScorer:
             "meets_threshold": meets_threshold,
             "should_send": should_send,
         }
-    
+
     def _load_performance_data(self) -> Dict:
         """Load performance data from file."""
         # Use cache if recent (within 5 minutes)
@@ -125,7 +125,7 @@ class SignalQualityScorer:
             age = (datetime.now(timezone.utc) - self._cache_timestamp).total_seconds()
             if age < 300:  # 5 minutes
                 return self._performance_cache
-        
+
         try:
             if self.performance_file.exists():
                 with open(self.performance_file) as f:
@@ -135,10 +135,10 @@ class SignalQualityScorer:
                     return data
         except Exception as e:
             logger.warning(f"Error loading performance data: {e}")
-        
+
         # Return default if no data
         return {}
-    
+
     def _lookup_historical_wr(
         self,
         signal_type: str,
@@ -160,7 +160,7 @@ class SignalQualityScorer:
         """
         # Try to find matching historical data
         # Look for signal type + regime combination
-        
+
         # First, try exact match
         key = f"{signal_type}_{regime_type}_{volatility}"
         if key in performance_data.get("signal_stats", {}):
@@ -169,7 +169,7 @@ class SignalQualityScorer:
             total = stats.get("total", 0)
             if total > 0:
                 return wins / total
-        
+
         # Try signal type only
         key = signal_type
         if key in performance_data.get("signal_stats", {}):
@@ -178,7 +178,7 @@ class SignalQualityScorer:
             total = stats.get("total", 0)
             if total > 0:
                 return wins / total
-        
+
         # Try regime type only
         key = regime_type
         if key in performance_data.get("regime_stats", {}):
@@ -187,10 +187,10 @@ class SignalQualityScorer:
             total = stats.get("total", 0)
             if total > 0:
                 return wins / total
-        
+
         # Default to 0.5 (no edge) if no historical data
         return 0.5
-    
+
     def update_performance_stats(self, signal: Dict, outcome: Dict) -> None:
         """
         Update performance statistics for a signal.
@@ -209,16 +209,16 @@ class SignalQualityScorer:
             regime = signal.get("regime", {})
             regime_type = regime.get("regime", "ranging")
             volatility = regime.get("volatility", "normal")
-            
+
             # Load current stats
             performance_data = self._load_performance_data()
-            
+
             # Initialize stats structure if needed
             if "signal_stats" not in performance_data:
                 performance_data["signal_stats"] = {}
             if "regime_stats" not in performance_data:
                 performance_data["regime_stats"] = {}
-            
+
             # Update signal type + regime stats
             key = f"{signal_type}_{regime_type}_{volatility}"
             if key not in performance_data["signal_stats"]:
@@ -228,7 +228,7 @@ class SignalQualityScorer:
                     "total": 0,
                     "total_pnl": 0.0,
                 }
-            
+
             stats = performance_data["signal_stats"][key]
             stats["total"] += 1
             if outcome.get("win", False):
@@ -236,7 +236,7 @@ class SignalQualityScorer:
             else:
                 stats["losses"] += 1
             stats["total_pnl"] += outcome.get("pnl", 0.0)
-            
+
             # Update signal type stats
             if signal_type not in performance_data["signal_stats"]:
                 performance_data["signal_stats"][signal_type] = {
@@ -245,7 +245,7 @@ class SignalQualityScorer:
                     "total": 0,
                     "total_pnl": 0.0,
                 }
-            
+
             stats_type = performance_data["signal_stats"][signal_type]
             stats_type["total"] += 1
             if outcome.get("win", False):
@@ -253,7 +253,7 @@ class SignalQualityScorer:
             else:
                 stats_type["losses"] += 1
             stats_type["total_pnl"] += outcome.get("pnl", 0.0)
-            
+
             # Update regime stats
             if regime_type not in performance_data["regime_stats"]:
                 performance_data["regime_stats"][regime_type] = {
@@ -262,7 +262,7 @@ class SignalQualityScorer:
                     "total": 0,
                     "total_pnl": 0.0,
                 }
-            
+
             stats_regime = performance_data["regime_stats"][regime_type]
             stats_regime["total"] += 1
             if outcome.get("win", False):
@@ -270,14 +270,14 @@ class SignalQualityScorer:
             else:
                 stats_regime["losses"] += 1
             stats_regime["total_pnl"] += outcome.get("pnl", 0.0)
-            
+
             # Save updated stats
             with open(self.performance_file, "w") as f:
                 json.dump(performance_data, f, indent=2)
-            
+
             # Invalidate cache
             self._performance_cache = None
-            
+
         except Exception as e:
             logger.error(f"Error updating performance stats: {e}", exc_info=True)
 

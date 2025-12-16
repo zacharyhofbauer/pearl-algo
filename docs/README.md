@@ -12,9 +12,10 @@
 - **Config** (`src/pearlalgo/config/`) - Configuration (3 files)
 
 ### Essential Scripts (9 files)
-- `start_nq_agent.sh` - Start the NQ agent
+- `start_nq_agent_service.sh` - Start the NQ agent (background service)
+- `start_nq_agent.sh` - Start the NQ agent (foreground, for testing)
 - `smoke_test_ibkr.py` - Test IBKR connection
-- `test_telegram.py` - Test Telegram notifications
+- `test_telegram_notifications.py` - Test Telegram notifications
 - IBKR Gateway setup scripts
 
 ### Documentation
@@ -37,10 +38,12 @@ pip install -e .
 python scripts/smoke_test_ibkr.py
 
 # 5. Test Telegram
-python scripts/test_telegram.py
+python scripts/test_telegram_notifications.py
 
-# 6. Start NQ agent
-./scripts/start_nq_agent.sh
+# 6. Start NQ agent (background service)
+./scripts/start_nq_agent_service.sh
+# Or for foreground testing:
+# ./scripts/start_nq_agent.sh
 ```
 
 ## Project Structure

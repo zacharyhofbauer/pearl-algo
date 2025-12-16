@@ -265,7 +265,7 @@ All notifications are automatic - no bot commands needed. You'll receive:
 
 1. **Test Telegram connection:**
    ```bash
-   python3 scripts/test_telegram.py
+   python3 scripts/test_telegram_notifications.py
    ```
 
 2. **Verify bot token and chat ID are correct**

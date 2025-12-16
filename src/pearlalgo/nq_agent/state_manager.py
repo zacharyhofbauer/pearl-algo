@@ -25,7 +25,7 @@ class NQAgentStateManager:
     
     Stores signals, positions, and service state.
     """
-    
+
     def __init__(self, state_dir: Optional[Path] = None):
         """
         Initialize state manager.
@@ -35,15 +35,15 @@ class NQAgentStateManager:
         """
         if state_dir is None:
             state_dir = Path("data/nq_agent_state")
-        
+
         self.state_dir = Path(state_dir)
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.signals_file = self.state_dir / "signals.jsonl"
         self.state_file = self.state_dir / "state.json"
-        
+
         logger.info(f"NQAgentStateManager initialized: state_dir={self.state_dir}")
-    
+
     def save_signal(self, signal: Dict) -> None:
         """
         Save a signal to persistent storage.
@@ -56,7 +56,7 @@ class NQAgentStateManager:
                 f.write(json.dumps(signal) + "\n")
         except Exception as e:
             logger.error(f"Error saving signal: {e}")
-    
+
     def get_recent_signals(self, limit: int = 100) -> List[Dict]:
         """
         Get recent signals.
@@ -68,10 +68,10 @@ class NQAgentStateManager:
             List of signal dictionaries
         """
         signals = []
-        
+
         if not self.signals_file.exists():
             return signals
-        
+
         try:
             with open(self.signals_file, "r") as f:
                 lines = f.readlines()
@@ -83,9 +83,9 @@ class NQAgentStateManager:
                         continue
         except Exception as e:
             logger.error(f"Error reading signals: {e}")
-        
+
         return signals
-    
+
     def save_state(self, state: Dict) -> None:
         """
         Save service state.
@@ -99,7 +99,7 @@ class NQAgentStateManager:
                 json.dump(state, f, indent=2)
         except Exception as e:
             logger.error(f"Error saving state: {e}")
-    
+
     def load_state(self) -> Dict:
         """
         Load service state.
@@ -109,7 +109,7 @@ class NQAgentStateManager:
         """
         if not self.state_file.exists():
             return {}
-        
+
         try:
             with open(self.state_file, "r") as f:
                 return json.load(f)

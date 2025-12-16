@@ -17,8 +17,35 @@ from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 
 
 @pytest.fixture
+def real_data_provider():
+    """
+    Use real IBKR data provider with graceful fallback.
+    Tests will use actual market data when IBKR Gateway is available.
+    """
+    try:
+        from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
+        from pearlalgo.config.settings import get_settings
+        
+        settings = get_settings()
+        provider = IBKRProvider(settings=settings)
+        yield provider
+        
+        # Cleanup
+        import asyncio
+        try:
+            asyncio.run(provider.close())
+        except Exception:
+            pass
+    except Exception as e:
+        pytest.skip(f"Real data provider not available (IBKR Gateway may not be running): {e}")
+
+
+@pytest.fixture
 def mock_data_provider():
-    """Create a mock data provider."""
+    """
+    Fallback mock provider - only used if real provider is not available.
+    Prefer real_data_provider fixture for tests that should use real market data.
+    """
     provider = MagicMock()
     provider.fetch_historical = MagicMock(return_value=[])
     provider.get_latest_bar = AsyncMock(return_value=None)
@@ -45,10 +72,10 @@ def state_dir(tmp_path):
 
 
 @pytest.fixture
-def service(mock_data_provider, config, state_dir):
-    """Create a service instance for testing."""
+def service(real_data_provider, config, state_dir):
+    """Create a service instance for testing with real data provider."""
     return NQAgentService(
-        data_provider=mock_data_provider,
+        data_provider=real_data_provider,
         config=config,
         state_dir=state_dir,
         telegram_bot_token=None,
@@ -158,13 +185,15 @@ async def test_service_state_persistence(service, state_dir):
 
 
 @pytest.mark.asyncio
-async def test_service_data_fetch_error_handling(service, mock_data_provider):
-    """Test service handles data fetch errors gracefully."""
-    # Make data provider raise error
-    async def fetch_error():
-        raise Exception("Data fetch error")
+async def test_service_data_fetch_error_handling(service):
+    """Test service handles data fetch errors gracefully with real data provider."""
+    # Temporarily patch the data provider to raise an error
+    original_fetch = service.data_provider.fetch_historical
+    original_get_latest = service.data_provider.get_latest_bar
     
-    mock_data_provider.fetch_historical = MagicMock(side_effect=Exception("Fetch error"))
+    # Make data provider raise error
+    service.data_provider.fetch_historical = MagicMock(side_effect=Exception("Fetch error"))
+    service.data_provider.get_latest_bar = AsyncMock(side_effect=Exception("Latest bar error"))
     
     # Start service
     service.running = True
@@ -173,8 +202,12 @@ async def test_service_data_fetch_error_handling(service, mock_data_provider):
     # Run one cycle
     try:
         await service._run_loop()
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, Exception):
         pass
+    finally:
+        # Restore original methods
+        service.data_provider.fetch_historical = original_fetch
+        service.data_provider.get_latest_bar = original_get_latest
     
     # Should have incremented error count
     assert service.error_count > 0 or service.data_fetch_errors > 0
@@ -231,12 +264,13 @@ async def test_service_process_signal(service):
 
 
 @pytest.mark.asyncio
-async def test_service_empty_data_handling(service, mock_data_provider):
-    """Test service handles empty data gracefully."""
+async def test_service_empty_data_handling(service):
+    """Test service handles empty data gracefully with real data provider."""
     import pandas as pd
     
-    # Mock empty dataframe
-    mock_data_provider.fetch_historical = MagicMock(return_value=pd.DataFrame())
+    # Temporarily patch to return empty dataframe
+    original_fetch = service.data_provider.fetch_historical
+    service.data_provider.fetch_historical = MagicMock(return_value=pd.DataFrame())
     
     # Service should handle empty data without crashing
     service.running = True
@@ -250,6 +284,9 @@ async def test_service_empty_data_handling(service, mock_data_provider):
             pass
     except Exception as e:
         pytest.fail(f"Service should handle empty data gracefully: {e}")
+    finally:
+        # Restore original method
+        service.data_provider.fetch_historical = original_fetch
 
 
 

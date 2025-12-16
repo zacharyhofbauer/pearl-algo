@@ -29,7 +29,7 @@ class HealthMonitor:
     - File system health
     - Overall service health
     """
-    
+
     def __init__(self, state_dir: Optional[Path] = None):
         """
         Initialize health monitor.
@@ -39,7 +39,7 @@ class HealthMonitor:
         """
         self.state_dir = Path(state_dir) if state_dir else Path("data/nq_agent_state")
         self.last_check: Optional[datetime] = None
-    
+
     def check_data_provider_health(self, data_provider) -> Dict:
         """
         Check data provider health.
@@ -73,7 +73,7 @@ class HealthMonitor:
                 "status": f"Error: {str(e)}",
                 "last_check": datetime.now(timezone.utc).isoformat(),
             }
-    
+
     def check_telegram_health(self, telegram_notifier) -> Dict:
         """
         Check Telegram connectivity health.
@@ -91,7 +91,7 @@ class HealthMonitor:
                     "status": "Disabled",
                     "last_check": datetime.now(timezone.utc).isoformat(),
                 }
-            
+
             if telegram_notifier.telegram and telegram_notifier.telegram.bot:
                 return {
                     "healthy": True,
@@ -111,7 +111,7 @@ class HealthMonitor:
                 "status": f"Error: {str(e)}",
                 "last_check": datetime.now(timezone.utc).isoformat(),
             }
-    
+
     def check_file_system_health(self) -> Dict:
         """
         Check file system health (state directory writable).
@@ -122,13 +122,13 @@ class HealthMonitor:
         try:
             # Check if state directory exists and is writable
             self.state_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Try to write a test file
             test_file = self.state_dir / ".health_check"
             try:
                 test_file.write_text("health_check")
                 test_file.unlink()
-                
+
                 return {
                     "healthy": True,
                     "status": "Writable",
@@ -147,7 +147,7 @@ class HealthMonitor:
                 "status": f"Error: {str(e)}",
                 "last_check": datetime.now(timezone.utc).isoformat(),
             }
-    
+
     def get_overall_health(
         self,
         data_provider=None,
@@ -168,24 +168,24 @@ class HealthMonitor:
             "components": {},
             "overall": "unknown",
         }
-        
+
         # Check data provider
         if data_provider:
             health["components"]["data_provider"] = self.check_data_provider_health(data_provider)
-        
+
         # Check Telegram
         if telegram_notifier:
             health["components"]["telegram"] = self.check_telegram_health(telegram_notifier)
-        
+
         # Check file system
         health["components"]["file_system"] = self.check_file_system_health()
-        
+
         # Determine overall health
         all_healthy = all(
             comp.get("healthy", False)
             for comp in health["components"].values()
         )
-        
+
         if all_healthy:
             health["overall"] = "healthy"
         else:
@@ -195,9 +195,9 @@ class HealthMonitor:
                 and health["components"].get("file_system", {}).get("healthy", False)
             )
             health["overall"] = "degraded" if critical_healthy else "unhealthy"
-        
+
         self.last_check = datetime.now(timezone.utc)
-        
+
         return health
 
 
