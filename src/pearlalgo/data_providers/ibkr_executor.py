@@ -9,6 +9,7 @@ results through Futures, eliminating event loop issues.
 from __future__ import annotations
 
 import asyncio
+import math
 import queue
 import threading
 import time
@@ -22,6 +23,17 @@ from ib_insync import IB, Future, Option, Stock, util
 
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.utils.logger import logger
+
+
+def _is_valid_price(value: Any) -> bool:
+    """Check if a price value is valid (not None, not NaN, and > 0)."""
+    if value is None:
+        return False
+    try:
+        float_val = float(value)
+        return not math.isnan(float_val) and float_val > 0
+    except (ValueError, TypeError):
+        return False
 
 
 def _calculate_order_book_metrics(bids: List[Any], asks: List[Any]) -> Dict[str, Any]:
@@ -128,148 +140,44 @@ class GetLatestBarTask(Task):
     is_futures: bool = False
 
     def execute(self, ib: IB) -> Optional[Dict]:
-        """Fetch latest bar data with Level 2 support."""
-        # Load configuration
-        service_config = load_service_config()
-        data_settings = service_config.get("data", {})
-        use_level2 = data_settings.get("use_level2_data", True)
-        order_book_depth = data_settings.get("order_book_depth", 10)
+        """Fetch latest bar data using Level 1 market data only."""
+        logger.info(f"🔵 GetLatestBarTask.execute() STARTED for {self.symbol}")
         
-        logger.info(f"GetLatestBarTask.execute() called for {self.symbol}, use_level2={use_level2}")
-        
-        # Create contract
+        # Create contract with detailed logging
+        logger.info(f"📋 Step 1: Creating contract for {self.symbol}")
         if self.is_futures:
             # For futures, use reqContractDetails to get all contracts, then select front month
             contract = Future(self.symbol, exchange="CME", currency="USD")
+            logger.info(f"   Created Future contract: symbol={self.symbol}, exchange=CME, currency=USD")
             try:
+                logger.info(f"   Requesting contract details from IBKR...")
                 # Request contract details which returns all available contracts
                 contracts = ib.reqContractDetails(contract)
+                logger.info(f"   Received {len(contracts) if contracts else 0} contract(s) from IBKR")
                 if contracts:
                     # Select the front month (nearest expiration)
                     contract_details = min(contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
                     contract = contract_details.contract
-                    logger.debug(f"Selected front month contract: {contract.localSymbol} (exp: {contract.lastTradeDateOrContractMonth})")
+                    logger.info(
+                        f"✅ Selected front month contract:\n"
+                        f"   - Local Symbol: {contract.localSymbol}\n"
+                        f"   - ConId: {contract.conId}\n"
+                        f"   - Expiration: {contract.lastTradeDateOrContractMonth}\n"
+                        f"   - Exchange: {contract.exchange}\n"
+                        f"   - Currency: {contract.currency}"
+                    )
                 else:
-                    logger.warning(f"No contract details found for {self.symbol}")
+                    logger.error(f"❌ No contract details found for {self.symbol}")
                     return None
             except Exception as e:
-                logger.warning(f"Error getting contract details for {self.symbol}: {e}")
+                logger.error(f"❌ Error getting contract details for {self.symbol}: {e}", exc_info=True)
                 return None
         else:
             contract = Stock(self.symbol, exchange="SMART", currency="USD")
+            logger.info(f"   Created Stock contract: symbol={self.symbol}, exchange=SMART")
 
-        # Try Level 2 first if enabled (user has Level 2 subscription), then Level 1 as fallback
-        # User can only subscribe to Level 1 OR Level 2, not both
-        # Priority: Level 2 (if enabled) → Level 1 → Historical
-        
-        # Try Level 2 (order book depth) first if enabled and user has Level 2 subscription
-        # Note: User has Level 1 subscription, so Level 2 will fail and fall back to Level 1
-        if use_level2:
-            depth_ticker = None
-            try:
-                logger.info(f"Attempting Level 2 market depth for {self.symbol} (depth: {order_book_depth} levels)")
-                depth_ticker = ib.reqMktDepth(contract, numRows=order_book_depth, isSmartDepth=False)
-                
-                # Wait for order book data to populate and errors to arrive
-                # IBKR errors (354, 310) are logged but we need to check if we got data
-                time.sleep(2.5)  # Increased wait time for errors to propagate and data to arrive
-                
-                # Check if we have order book data - if not, likely an error occurred
-                # IBKR errors are logged to stderr but don't raise exceptions
-                # The ticker object might exist but be empty if there's an error
-                has_order_book_data = False
-                if depth_ticker:
-                    # Check if we actually got order book data
-                    bids_list = list(depth_ticker.domBids) if depth_ticker.domBids else []
-                    asks_list = list(depth_ticker.domAsks) if depth_ticker.domAsks else []
-                    has_order_book_data = len(bids_list) > 0 or len(asks_list) > 0
-                    
-                    # If no data after waiting, likely an error (354 or 310)
-                    if not has_order_book_data:
-                        logger.warning(
-                            f"⚠️  Level 2 request for {self.symbol} returned no order book data after 2.5s wait.\n"
-                            f"   This indicates Error 354 (subscription not available) or Error 310 (market depth not found).\n"
-                            f"   \n"
-                            f"   📋 Since you have 'CME Real-Time (NP,L2)' subscribed, the issue is likely:\n"
-                            f"   1. Subscription is active for TWS but NOT enabled for API access\n"
-                            f"   2. IB Gateway needs to be restarted after subscription activation\n"
-                            f"   3. Check IBKR Client Portal → Account → Market Data Subscriptions\n"
-                            f"      - Look for 'API Access' or 'Market Data API' settings\n"
-                            f"      - Some subscriptions require separate API enablement\n"
-                            f"   4. Verify Gateway is connected with proper permissions\n"
-                            f"   5. Try restarting Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh && ./scripts/gateway/start_ibgateway_ibc.sh\n"
-                            f"   \n"
-                            f"   Falling back to Level 1, then historical if needed."
-                        )
-                        try:
-                            ib.cancelMktDepth(contract)
-                        except Exception:
-                            pass
-                        depth_ticker = None
-                
-                # Check if we have order book data
-                if depth_ticker and has_order_book_data:
-                    # Extract order book
-                    bids = list(depth_ticker.domBids) if depth_ticker.domBids else []
-                    asks = list(depth_ticker.domAsks) if depth_ticker.domAsks else []
-                    
-                    logger.debug(f"Level 2 data received for {self.symbol}: {len(bids)} bid levels, {len(asks)} ask levels")
-                    
-                    # Calculate order book metrics
-                    order_book_metrics = _calculate_order_book_metrics(bids, asks)
-                    
-                    # Get price from order book (use weighted mid or best bid/ask)
-                    if order_book_metrics["weighted_mid"]:
-                        price = order_book_metrics["weighted_mid"]
-                    elif bids and asks:
-                        price = (bids[0].price + asks[0].price) / 2.0
-                    elif bids:
-                        price = float(bids[0].price)
-                    elif asks:
-                        price = float(asks[0].price)
-                    else:
-                        price = None
-                    
-                    if price and price > 0:
-                        # Use order book price directly (don't request Level 1 since user can only subscribe to one)
-                        # Level 2 order book gives us bid/ask, we'll use the weighted mid or best bid/ask as price
-                        result = {
-                            "timestamp": datetime.now(timezone.utc),
-                            "open": price,  # Use order book price for all OHLC
-                            "high": price,
-                            "low": price,
-                            "close": price,
-                            "volume": 0,  # Volume not available from Level 2 order book alone
-                            "bid": float(bids[0].price) if bids else None,
-                            "ask": float(asks[0].price) if asks else None,
-                            "_data_level": "level2",  # Metadata
-                        }
-                        # Add order book metrics
-                        result.update(order_book_metrics)
-                        
-                        # Cleanup
-                        ib.cancelMktDepth(contract)
-                        
-                        logger.info(f"✅ Successfully retrieved Level 2 data for {self.symbol}: ${price:.2f}, imbalance={order_book_metrics['imbalance']:.2f}, bid_depth={order_book_metrics['bid_depth']}, ask_depth={order_book_metrics['ask_depth']}")
-                        return result
-                    
-                    # Cleanup depth ticker
-                    ib.cancelMktDepth(contract)
-                    depth_ticker = None
-                # If we get here, Level 2 didn't work (no data or error)
-                # The depth_ticker cleanup is already handled above
-            except Exception as e:
-                error_str = str(e).lower()
-                if "354" in str(e) or "310" in str(e) or "subscription" in error_str:
-                    logger.info(f"Level 2 subscription not available for {self.symbol} (Error 354/310), will try Level 1")
-                else:
-                    logger.debug(f"Level 2 data request failed for {self.symbol}: {e}, will try Level 1")
-                if depth_ticker:
-                    try:
-                        ib.cancelMktDepth(contract)
-                    except Exception:
-                        pass
-
+        # REMOVED: All Level 2 code - user has Level 1 subscription only
+        # Directly request Level 1 market data
         # Check if market is likely open (CME futures: ETH Sun 6PM ET - Fri 5PM ET, with Mon-Thu 5-6PM maintenance break)
         # This helps explain Error 354 when market is closed
         from datetime import datetime, timezone
@@ -313,108 +221,265 @@ class GetLatestBarTask(Task):
             is_market_open = False
             market_status = "Market closed (opens Sunday 6:00 PM ET)"
         
-        # Fallback to Level 1 (top bid/ask) if Level 2 failed or not enabled
+        # Request Level 1 market data (ONLY - no Level 2)
+        logger.info(f"📡 Step 2: Requesting Level 1 market data for {self.symbol}")
+        logger.info(
+            f"   Contract Details:\n"
+            f"   - Symbol: {contract.symbol}\n"
+            f"   - Local Symbol: {contract.localSymbol if hasattr(contract, 'localSymbol') else 'N/A'}\n"
+            f"   - ConId: {contract.conId if hasattr(contract, 'conId') else 'N/A'}\n"
+            f"   - Exchange: {contract.exchange}\n"
+            f"   - Currency: {contract.currency}\n"
+            f"   - SecType: {contract.secType if hasattr(contract, 'secType') else 'N/A'}"
+        )
+        logger.info(
+            f"   Market Status:\n"
+            f"   - Current time: {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
+            f"   - Market status: {market_status}\n"
+            f"   - Market open: {is_market_open}"
+        )
+        logger.info(f"   Subscription: CME Real-Time (NP,L1) - Level 1 only")
+        
         ticker = None
         try:
-            logger.info(
-                f"Requesting Level 1 market data for {self.symbol} (you have CME Real-Time NP,L1 subscription)\n"
-                f"   Current time: {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
-                f"   Market status: {market_status}"
-            )
-            # Request market data (may fail with Error 354 if no subscription OR if market is closed)
+            # Ensure market data type is LIVE (1) before requesting
+            logger.info(f"   Setting market data type to LIVE (1)...")
+            try:
+                ib.reqMarketDataType(1)  # 1 = Live, 2 = Frozen, 3 = Delayed, 4 = Delayed-Frozen
+                logger.info(f"   ✅ Market data type set to LIVE (1)")
+            except Exception as md_type_e:
+                logger.warning(f"   ⚠️  Could not set market data type (may already be set): {md_type_e}")
+            
+            # Request Level 1 market data
+            # Parameters: contract, genericTickList="", snapshot=False, regulatorySnapshot=False
+            logger.info(f"   Calling ib.reqMktData(contract, '', False, False)...")
+            logger.info(f"   - genericTickList: '' (empty = default ticks)")
+            logger.info(f"   - snapshot: False (streaming)")
+            logger.info(f"   - regulatorySnapshot: False")
+            
             ticker = ib.reqMktData(contract, "", False, False)
+            logger.info(f"   ✅ reqMktData() call completed, ticker object created")
+            logger.info(f"   Ticker object type: {type(ticker)}")
+            logger.info(f"   Ticker ID: {ticker.reqId if hasattr(ticker, 'reqId') else 'N/A'}")
             
-            # Wait longer for data to arrive (increased from 0.5s to 1.5s for better reliability)
-            time.sleep(1.5)
+            # Wait for data/errors with detailed progress logging
+            logger.info(f"   Waiting for market data to arrive...")
+            max_wait = 3.0
+            check_interval = 0.5
+            waited = 0.0
             
-            # Check for market data errors
-            if hasattr(ticker, 'modelOption') and ticker.modelOption:
-                # Check if there's an error message
-                error_msg = str(ticker.modelOption) if ticker.modelOption else ""
-                if "354" in error_msg or "subscription" in error_msg.lower():
-                    if not is_market_open:
-                        logger.info(
-                            f"Level 1 data not available for {self.symbol} (Error 354) - Market is closed\n"
-                            f"   {market_status}\n"
-                            f"   Error 354 can occur when market is closed even with active subscription.\n"
-                            f"   Will use historical data fallback."
-                        )
-                    else:
-                        logger.warning(
-                            f"Level 1 subscription not available for {self.symbol} (Error 354) - Market is OPEN\n"
-                            f"   This suggests a subscription issue:\n"
-                            f"   1. Verify subscription is active and paid\n"
-                            f"   2. Check account balance (minimum USD 500)\n"
-                            f"   3. Ensure Market Data API Acknowledgement is signed\n"
-                            f"   4. Wait 1-2 minutes after subscribing, then restart Gateway\n"
-                            f"   Will use historical data fallback."
-                        )
-                    ib.cancelMktData(contract)
-                    ticker = None  # Will fall back to historical data
-                elif ticker.last or ticker.close:
-                    # Got valid data
-                    last_price = ticker.last if ticker.last else ticker.close
-                    if last_price and last_price > 0:
-                        result = {
-                            "timestamp": datetime.now(timezone.utc),
-                            "open": ticker.open if ticker.open else last_price,
-                            "high": ticker.high if ticker.high else last_price,
-                            "low": ticker.low if ticker.low else last_price,
-                            "close": last_price,
-                            "volume": ticker.volume if ticker.volume else 0,
-                            "bid": ticker.bid if ticker.bid else None,
-                            "ask": ticker.ask if ticker.ask else None,
-                            "_data_level": "level1",  # Metadata
-                        }
-                        # Add empty order book structure for consistency
-                        result.update({
-                            "order_book": {"bids": [], "asks": []},
-                            "bid_depth": 0,
-                            "ask_depth": 0,
-                            "imbalance": 0.0,
-                            "weighted_mid": None,
-                        })
+            while waited < max_wait:
+                time.sleep(check_interval)
+                waited += check_interval
+                logger.info(f"   [{waited:.1f}s] Checking for data/errors...")
+                
+                # Check ticker attributes
+                if ticker:
+                    # Check for NaN values explicitly
+                    last_val = ticker.last if hasattr(ticker, 'last') else None
+                    close_val = ticker.close if hasattr(ticker, 'close') else None
+                    bid_val = ticker.bid if hasattr(ticker, 'bid') else None
+                    ask_val = ticker.ask if hasattr(ticker, 'ask') else None
+                    
+                    # Format values for logging (show "NaN" if it's NaN)
+                    last_str = "NaN" if (last_val is not None and math.isnan(float(last_val))) else str(last_val) if last_val is not None else "N/A"
+                    close_str = "NaN" if (close_val is not None and math.isnan(float(close_val))) else str(close_val) if close_val is not None else "N/A"
+                    bid_str = "NaN" if (bid_val is not None and math.isnan(float(bid_val))) else str(bid_val) if bid_val is not None else "N/A"
+                    ask_str = "NaN" if (ask_val is not None and math.isnan(float(ask_val))) else str(ask_val) if ask_val is not None else "N/A"
+                    
+                    logger.info(
+                        f"   Ticker state:\n"
+                        f"   - last: {last_str}\n"
+                        f"   - close: {close_str}\n"
+                        f"   - bid: {bid_str}\n"
+                        f"   - ask: {ask_str}\n"
+                        f"   - volume: {ticker.volume if hasattr(ticker, 'volume') else 'N/A'}\n"
+                        f"   - modelOption: {ticker.modelOption if hasattr(ticker, 'modelOption') else 'N/A'}"
+                    )
+                    
+                    # Check if we have NaN values (indicates no data, market closed, or subscription issue)
+                    has_nan = False
+                    if last_val is not None and math.isnan(float(last_val)):
+                        has_nan = True
+                    if close_val is not None and math.isnan(float(close_val)):
+                        has_nan = True
+                    
+                    if has_nan:
+                        logger.warning(f"   ⚠️  Ticker contains NaN values - this indicates no market data available")
+                        if not is_market_open:
+                            logger.info(f"   Market is CLOSED ({market_status}) - NaN values are expected during market closure")
+                        else:
+                            logger.warning(f"   Market is OPEN but ticker has NaN - may indicate subscription issue or data not yet available")
+                
+                # Check for errors in modelOption (IBKR error callback)
+                if hasattr(ticker, 'modelOption') and ticker.modelOption:
+                    error_msg = str(ticker.modelOption)
+                    logger.warning(f"   ⚠️  Ticker modelOption contains: {error_msg}")
+                    if "354" in error_msg or "subscription" in error_msg.lower() or "not subscribed" in error_msg.lower():
+                        logger.error(f"   ❌ ERROR 354 DETECTED in modelOption!")
+                        if not is_market_open:
+                            logger.warning(
+                                f"   Market is CLOSED ({market_status})\n"
+                                f"   Error 354 is normal when market is closed.\n"
+                                f"   Will use historical data fallback."
+                            )
+                        else:
+                            logger.error(
+                                f"   ❌ ERROR 354 - Market is OPEN but subscription not working!\n"
+                                f"   \n"
+                                f"   📋 Troubleshooting steps:\n"
+                                f"   1. Verify 'CME Real-Time (NP,L1)' subscription is ACTIVE and PAID\n"
+                                f"   2. Ensure 'Market Data API Acknowledgement' is signed in Client Portal\n"
+                                f"      (Settings → Market Data Subscriptions → Market Data API Acknowledgement)\n"
+                                f"   3. Verify 'API User Activity Certification' is completed (for futures)\n"
+                                f"   4. Check if subscription is enabled for API access (not just TWS)\n"
+                                f"   5. Wait 1-2 minutes after subscribing/acknowledging\n"
+                                f"   6. Restart Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh && ./scripts/gateway/start_ibgateway_ibc.sh\n"
+                                f"   7. Restart service after Gateway restart\n"
+                                f"   \n"
+                                f"   Note: IBKR API works with free trial accounts - no minimum balance required.\n"
+                                f"   Will use historical data fallback."
+                            )
+                        try:
+                            ib.cancelMktData(contract)
+                            logger.info(f"   ✅ Cancelled market data request")
+                        except Exception as cancel_e:
+                            logger.warning(f"   ⚠️  Error cancelling market data: {cancel_e}")
+                        ticker = None
+                        break
+                
+                # Check if we got valid data (can exit early if data received)
+                # Must check for valid price (not None, not NaN, > 0)
+                if ticker:
+                    last_val = ticker.last if hasattr(ticker, 'last') else None
+                    close_val = ticker.close if hasattr(ticker, 'close') else None
+                    if _is_valid_price(last_val) or _is_valid_price(close_val):
+                        logger.info(f"   ✅ VALID DATA RECEIVED! Exiting wait loop early.")
+                        break
+            
+            # Final check for valid data (must be valid price, not NaN)
+            if ticker:
+                last_val = ticker.last if hasattr(ticker, 'last') else None
+                close_val = ticker.close if hasattr(ticker, 'close') else None
+                
+                # Get the first valid price (not None, not NaN, > 0)
+                last_price = None
+                if _is_valid_price(last_val):
+                    last_price = float(last_val)
+                elif _is_valid_price(close_val):
+                    last_price = float(close_val)
+                
+                if last_price:
+                    logger.info(f"   ✅ Processing Level 1 data...")
+                    
+                    # Extract all values, handling NaN properly
+                    open_val = float(ticker.open) if _is_valid_price(ticker.open) else last_price
+                    high_val = float(ticker.high) if _is_valid_price(ticker.high) else last_price
+                    low_val = float(ticker.low) if _is_valid_price(ticker.low) else last_price
+                    bid_val = float(ticker.bid) if _is_valid_price(ticker.bid) else None
+                    ask_val = float(ticker.ask) if _is_valid_price(ticker.ask) else None
+                    volume_val = int(ticker.volume) if ticker.volume and not math.isnan(float(ticker.volume)) else 0
+                    
+                    logger.info(
+                        f"   Data received:\n"
+                        f"   - Last: ${last_price:.2f}\n"
+                        f"   - Close: ${last_price:.2f}\n"
+                        f"   - Bid: ${bid_val:.2f if bid_val else 'N/A'}\n"
+                        f"   - Ask: ${ask_val:.2f if ask_val else 'N/A'}\n"
+                        f"   - Volume: {volume_val}\n"
+                        f"   - Open: ${open_val:.2f}\n"
+                        f"   - High: ${high_val:.2f}\n"
+                        f"   - Low: ${low_val:.2f}"
+                    )
+                    
+                    result = {
+                        "timestamp": datetime.now(timezone.utc),
+                        "open": open_val,
+                        "high": high_val,
+                        "low": low_val,
+                        "close": last_price,
+                        "volume": volume_val,
+                        "bid": bid_val,
+                        "ask": ask_val,
+                        "_data_level": "level1",  # Metadata
+                    }
+                    # Add empty order book structure for consistency
+                    result.update({
+                        "order_book": {"bids": [], "asks": []},
+                        "bid_depth": 0,
+                        "ask_depth": 0,
+                        "imbalance": 0.0,
+                        "weighted_mid": None,
+                    })
+                    
+                    try:
                         ib.cancelMktData(contract)
-                        logger.info(f"✅ Successfully retrieved Level 1 data for {self.symbol}: ${last_price:.2f}")
-                        return result
-            
-            # Check if we got data but it's not valid
-            if ticker and not (ticker.last or ticker.close):
-                logger.debug(f"Level 1 data request for {self.symbol} returned no price data, will use historical fallback")
-                ib.cancelMktData(contract)
-                ticker = None
+                        logger.info(f"   ✅ Cancelled market data request")
+                    except Exception as cancel_e:
+                        logger.warning(f"   ⚠️  Error cancelling market data: {cancel_e}")
+                    
+                    logger.info(f"✅✅✅ SUCCESS: Retrieved Level 1 LIVE data for {self.symbol}: ${last_price:.2f} (bid: ${bid_val:.2f if bid_val else 'N/A'}, ask: ${ask_val:.2f if ask_val else 'N/A'})")
+                    return result
+                else:
+                    # No valid price (all NaN or None)
+                    last_val = ticker.last if hasattr(ticker, 'last') else None
+                    close_val = ticker.close if hasattr(ticker, 'close') else None
+                    logger.warning(
+                        f"   ⚠️  Ticker returned but all prices are NaN/None:\n"
+                        f"   - last: {last_val} ({'NaN' if last_val is not None and math.isnan(float(last_val)) else 'None' if last_val is None else 'valid'})\n"
+                        f"   - close: {close_val} ({'NaN' if close_val is not None and math.isnan(float(close_val)) else 'None' if close_val is None else 'valid'})\n"
+                        f"   This indicates no market data available (market closed or subscription issue)."
+                    )
+            else:
+                logger.warning(
+                    f"   ⚠️  No valid price data received after {waited:.1f}s wait\n"
+                    f"   Ticker exists but has no valid price data (all NaN or None).\n"
+                    f"   This may indicate:\n"
+                    f"   - Market is closed ({market_status})\n"
+                    f"   - Error 354 (subscription not available for API)\n"
+                    f"   - Data not yet available\n"
+                    f"   Will use historical data fallback."
+                )
+                if ticker:
+                    try:
+                        ib.cancelMktData(contract)
+                        logger.info(f"   ✅ Cancelled market data request")
+                    except Exception as cancel_e:
+                        logger.warning(f"   ⚠️  Error cancelling market data: {cancel_e}")
+                    ticker = None
+                    
         except Exception as e:
+            logger.error(f"   ❌ EXCEPTION during Level 1 request: {e}", exc_info=True)
             error_str = str(e).lower()
             if "354" in str(e) or "subscription" in error_str:
                 if not is_market_open:
-                    logger.info(
-                        f"Level 1 subscription error for {self.symbol}: {e}\n"
-                        f"   Market is closed ({market_status})\n"
-                        f"   Error 354 is normal when market is closed. Will use historical data fallback."
+                    logger.warning(
+                        f"   Market is CLOSED ({market_status})\n"
+                        f"   Error 354 is normal when market is closed.\n"
+                        f"   Will use historical data fallback."
                     )
                 else:
-                    logger.warning(
-                        f"Level 1 subscription error for {self.symbol}: {e}\n"
-                        f"   Market is OPEN - this suggests a subscription issue. Will use historical data fallback."
+                    logger.error(
+                        f"   ❌ ERROR 354 - Market is OPEN but subscription not working!\n"
+                        f"   Will use historical data fallback."
                     )
             else:
-                logger.debug(f"Error requesting Level 1 market data for {self.symbol}: {e}, will use historical fallback")
+                logger.warning(f"   Unexpected error: {e}. Will use historical data fallback.")
             if ticker:
                 try:
                     ib.cancelMktData(contract)
+                    logger.info(f"   ✅ Cancelled market data request")
                 except Exception:
                     pass
-            ticker = None  # Will fall back to historical data
+            ticker = None
 
         # Fallback: Use latest historical bar if real-time data not available
-        # This handles Error 354 (market data subscription not available OR market closed)
-        # Use longer durations that are more reliable when market is closed or contract is expiring
+        logger.info(f"📉 Step 3: Using historical data fallback for {self.symbol}")
+        logger.info(f"   Reason: Level 1 real-time data not available")
+        logger.info(f"   Market status: {market_status}")
+        logger.info(f"   Note: Error 354 can occur when market is closed, even with active subscription")
+        
         try:
-            logger.info(
-                f"Using historical data fallback for {self.symbol} (real-time subscription not available)\n"
-                f"   Market status: {market_status}\n"
-                f"   Note: Error 354 can occur when market is closed, even with active subscription"
-            )
             # IBKR requires duration format: integer{SPACE}unit where unit is S|D|W|M|Y (NOT H for hours!)
             # Error 162 often occurs with very short durations (5 min) when market is closed
             # Try longer durations first which are more reliable
@@ -428,7 +493,8 @@ class GetLatestBarTask(Task):
             
             for duration_str, use_rth in duration_strategies:
                 try:
-                    logger.debug(f"Trying historical data: {duration_str}, useRTH={use_rth}")
+                    logger.info(f"   Trying historical data: duration={duration_str}, useRTH={use_rth}")
+                    logger.info(f"   Calling ib.reqHistoricalData(contract, endDateTime='', durationStr='{duration_str}', barSizeSetting='1 min', whatToShow='TRADES', useRTH={use_rth})")
                     bars = ib.reqHistoricalData(
                         contract,
                         endDateTime="",
@@ -438,9 +504,12 @@ class GetLatestBarTask(Task):
                         useRTH=use_rth,
                         formatDate=1,
                     )
+                    logger.info(f"   ✅ Historical data request completed: received {len(bars) if bars else 0} bars")
                     if bars and len(bars) > 0:
-                        logger.debug(f"Successfully retrieved {len(bars)} historical bars with {duration_str}")
+                        logger.info(f"   ✅ SUCCESS: Retrieved {len(bars)} historical bars with {duration_str}")
                         break  # Success, exit the loop
+                    else:
+                        logger.warning(f"   ⚠️  No bars returned for {duration_str}, trying next strategy...")
                 except Exception as hist_e:
                     error_str = str(hist_e).lower()
                     # Error 162 often means TWS session conflict, market closed, contract expired, or no data available
@@ -473,15 +542,14 @@ class GetLatestBarTask(Task):
                 logger.error(
                     f"❌ CRITICAL: All historical data strategies failed for {self.symbol}\n"
                     f"   This means:\n"
-                    f"   - Level 2 subscription not available (if enabled)\n"
-                    f"   - Level 1 subscription not available (Error 354)\n"
+                    f"   - Level 1 subscription not available (Error 354) OR market is closed\n"
                     f"   - Historical data service unavailable (Error 162 - TWS conflict or market closed)\n"
                     f"   \n"
                     f"   📋 Immediate actions:\n"
-                    f"   1. Check if market is open (CME futures: 17:00-16:00 CT, Sun-Fri)\n"
-                    f"   2. If Error 162: Close any TWS sessions, restart Gateway\n"
+                    f"   1. Check if market is open (CME futures: ETH Sun 6PM ET - Fri 5PM ET, Mon-Thu 5-6PM maintenance break)\n"
+                    f"   2. If Error 162: Close any TWS sessions, wait 60s, restart Gateway\n"
                     f"   3. Verify Level 1 subscription is active and paid\n"
-                    f"   4. Check account balance (minimum USD 500 required)\n"
+                    f"   4. Ensure 'Market Data API Acknowledgement' is signed\n"
                     f"   5. Wait 1-2 minutes after subscribing, then restart Gateway"
                 )
             
@@ -534,15 +602,15 @@ class GetLatestBarTask(Task):
                 logger.error(
                     f"❌ CRITICAL: No historical bars returned for {self.symbol} - all data sources failed!\n"
                     f"   This means:\n"
-                    f"   - Level 2 subscription not available (Error 354/310)\n"
-                    f"   - Level 1 subscription not available (Error 354)\n"
-                    f"   - Historical data service unavailable (Error 162)\n"
+                    f"   - Level 1 subscription not available (Error 354) OR market is closed\n"
+                    f"   - Historical data service unavailable (Error 162 - TWS conflict)\n"
                     f"   \n"
                     f"   📋 Immediate actions:\n"
-                    f"   1. Check if market is open (CME futures: 17:00-16:00 CT, Sun-Fri)\n"
-                    f"   2. Verify contract {contract.localSymbol if hasattr(contract, 'localSymbol') else 'N/A'} hasn't expired\n"
-                    f"   3. Check IBKR Gateway connection and subscriptions\n"
-                    f"   4. Restart Gateway if needed"
+                    f"   1. Check if market is open (CME futures: ETH Sun 6PM ET - Fri 5PM ET, Mon-Thu 5-6PM maintenance break)\n"
+                    f"   2. If Error 162: Close any TWS sessions, wait 60s, restart Gateway\n"
+                    f"   3. Verify contract {contract.localSymbol if hasattr(contract, 'localSymbol') else 'N/A'} hasn't expired\n"
+                    f"   4. Ensure 'Market Data API Acknowledgement' is signed\n"
+                    f"   5. Restart Gateway if needed"
                 )
         except Exception as e:
             error_str = str(e).lower()

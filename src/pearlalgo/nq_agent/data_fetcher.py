@@ -271,8 +271,8 @@ class NQAgentDataFetcher:
                         f"   📋 Actions:\n"
                         f"   1. Resolve Error 162: Close any TWS sessions, wait 60s, restart Gateway\n"
                         f"   2. Verify Level 1 subscription is active and paid\n"
-                        f"   3. Check account balance (minimum USD 500)\n"
-                        f"   4. Ensure Market Data API Acknowledgement is signed"
+                        f"   3. Ensure 'Market Data API Acknowledgement' is signed in Client Portal\n"
+                        f"   4. Check if market is open (CME futures: ETH Sun 6PM ET - Fri 5PM ET)"
                     )
                     latest_bar = None
 
