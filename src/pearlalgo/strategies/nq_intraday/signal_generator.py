@@ -182,14 +182,28 @@ class NQSignalGenerator:
         take_profit = signal.get("take_profit")
         
         if entry_price > 0 and stop_loss:
+            # Calculate risk amount based on contract type
+            # MNQ: $2 per point, NQ: $20 per point
+            tick_value = getattr(self.config, 'tick_value', 2.0 if self.config.symbol == "MNQ" else 20.0)
+            position_size = getattr(self.config, 'max_position_size', 10)
+            
             if signal["direction"] == "long":
-                risk_amount = abs(entry_price - stop_loss) * self.config.max_position_size * 20  # NQ tick value
+                risk_points = abs(entry_price - stop_loss)
             else:
-                risk_amount = abs(stop_loss - entry_price) * self.config.max_position_size * 20
+                risk_points = abs(stop_loss - entry_price)
+            
+            # Risk = points * tick_value * contracts
+            risk_amount = risk_points * tick_value * position_size
             formatted["risk_amount"] = risk_amount
+            formatted["position_size"] = position_size
+            formatted["tick_value"] = tick_value
         
-        # Expected hold time (intraday signals typically 15-60 minutes)
-        formatted["expected_hold_minutes"] = 30
+        # Expected hold time (prop firm style: quick scalps 5-15 min, swings 15-60 min)
+        # For scalping with tighter stops, expect faster exits
+        if self.config.stop_loss_atr_multiplier <= 1.5:
+            formatted["expected_hold_minutes"] = 10  # Quick scalps
+        else:
+            formatted["expected_hold_minutes"] = 30  # Intraday swings
         
         # Add market context
         latest_bar = market_data.get("latest_bar")

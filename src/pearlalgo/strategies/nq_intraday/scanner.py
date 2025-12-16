@@ -231,12 +231,22 @@ class NQScanner:
         order_flow_data = self.order_flow.analyze_order_flow(df)
         logger.debug(f"Order Flow: {order_flow_data.get('recent_trend')} (net: {order_flow_data.get('net_pressure', 0):.2f})")
         
-        # Check volume threshold
-        if latest.get("volume", 0) < self.config.min_volume:
+        # Check volume threshold (lower for MNQ scalping)
+        min_volume = self.config.min_volume
+        if self.config.symbol == "MNQ":
+            # MNQ typically has higher volume, but we want to ensure liquidity
+            min_volume = max(min_volume, 500)  # Ensure minimum liquidity
+        
+        if latest.get("volume", 0) < min_volume:
             return signals
         
-        # Check volatility threshold
-        if latest.get("atr", 0) / latest["close"] < self.config.volatility_threshold:
+        # Check volatility threshold (slightly lower for scalping opportunities)
+        volatility_threshold = self.config.volatility_threshold
+        if self.config.symbol == "MNQ":
+            # Allow slightly lower volatility for scalping setups
+            volatility_threshold = volatility_threshold * 0.8
+        
+        if latest.get("atr", 0) / latest["close"] < volatility_threshold:
             return signals
         
         # Calculate ATR-based stop loss and take profit
@@ -306,6 +316,12 @@ class NQScanner:
         # Session-based filters
         session = regime.get("session", "afternoon")
         
+        # Prop firm style: Avoid lunch lull for scalping (low volume, choppy)
+        avoid_lunch = getattr(self.config, 'avoid_lunch_lull', True)
+        if avoid_lunch and session == "lunch_lull":
+            logger.debug("Skipping signals during lunch lull (prop firm style)")
+            return signals
+        
         # Momentum signal (fast MA crosses above slow MA with MACD confirmation)
         # Disable momentum during lunch lull (low volume, choppy)
         if self.config.enable_momentum and session != "lunch_lull":
@@ -330,52 +346,50 @@ class NQScanner:
                         "long", mtf_analysis
                     )
                     
-                    if not is_aligned:
+                    if is_aligned:
+                        confidence = max(0.0, min(1.0, confidence + mtf_adjustment))
+                        
+                        # Adjust confidence based on VWAP position
+                        confidence = self.vwap_calculator.adjust_confidence_by_vwap(
+                            "long", confidence, vwap_data
+                        )
+                        
+                        # Adjust confidence based on volume profile proximity
+                        proximity = self.volume_profile.get_proximity_to_key_levels(
+                            current_price, volume_profile_data
+                        )
+                        confidence = self.volume_profile.adjust_confidence_by_proximity(
+                            confidence, proximity
+                        )
+                        
+                        # Check order flow alignment
+                        is_flow_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
+                            "long", order_flow_data
+                        )
+                        
+                        if is_flow_aligned:
+                            confidence = max(0.0, min(1.0, confidence + flow_adjustment))
+                            
+                            signals.append({
+                                "type": "momentum_long",
+                                "direction": "long",
+                                "confidence": confidence,
+                                "entry_price": current_price,
+                                "stop_loss": stop_loss,
+                                "take_profit": take_profit,
+                                "reason": "Fast MA crossed above slow MA with volume and MACD confirmation",
+                                "regime": regime,  # Include regime context
+                                "mtf_analysis": mtf_analysis,  # Include MTF context
+                                "vwap_data": vwap_data,  # Include VWAP context
+                                "volume_profile": volume_profile_data,  # Include volume profile context
+                                "order_flow": order_flow_data,  # Include order flow context
+                            })
+                        else:
+                            # Reject if order flow strongly conflicts
+                            logger.debug("Momentum long signal rejected due to order flow conflict")
+                    else:
                         # Reject signal if MTF is strongly conflicting
                         logger.debug("Momentum long signal rejected due to MTF conflict")
-                        continue
-                    
-                    confidence = max(0.0, min(1.0, confidence + mtf_adjustment))
-                    
-                    # Adjust confidence based on VWAP position
-                    confidence = self.vwap_calculator.adjust_confidence_by_vwap(
-                        "long", confidence, vwap_data
-                    )
-                    
-                    # Adjust confidence based on volume profile proximity
-                    proximity = self.volume_profile.get_proximity_to_key_levels(
-                        current_price, volume_profile_data
-                    )
-                    confidence = self.volume_profile.adjust_confidence_by_proximity(
-                        confidence, proximity
-                    )
-                    
-                    # Check order flow alignment
-                    is_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
-                        "long", order_flow_data
-                    )
-                    
-                    if not is_aligned:
-                        # Reject if order flow strongly conflicts
-                        logger.debug("Momentum long signal rejected due to order flow conflict")
-                        continue
-                    
-                    confidence = max(0.0, min(1.0, confidence + flow_adjustment))
-                    
-                    signals.append({
-                        "type": "momentum_long",
-                        "direction": "long",
-                        "confidence": confidence,
-                        "entry_price": current_price,
-                        "stop_loss": stop_loss,
-                        "take_profit": take_profit,
-                        "reason": "Fast MA crossed above slow MA with volume and MACD confirmation",
-                        "regime": regime,  # Include regime context
-                        "mtf_analysis": mtf_analysis,  # Include MTF context
-                        "vwap_data": vwap_data,  # Include VWAP context
-                        "volume_profile": volume_profile_data,  # Include volume profile context
-                        "order_flow": order_flow_data,  # Include order flow context
-                    })
         
         # Mean reversion signal (RSI oversold with multiple confirmations)
         if self.config.enable_mean_reversion and session != "opening":
@@ -402,53 +416,53 @@ class NQScanner:
                 )
                 
                 # Allow mean reversion even with partial MTF conflict (it's counter-trend by nature)
-                if not is_aligned and mtf_adjustment < -0.25:
+                # Only reject if strongly conflicting
+                if is_aligned or mtf_adjustment >= -0.25:
+                    confidence = max(0.0, min(1.0, confidence + mtf_adjustment * 0.5))  # Less weight for mean reversion
+                    
+                    # Adjust confidence based on VWAP position (mean reversion less sensitive to VWAP)
+                    confidence = self.vwap_calculator.adjust_confidence_by_vwap(
+                        "long", confidence, vwap_data
+                    ) * 0.9  # Slightly reduce VWAP impact for mean reversion
+                    
+                    # Adjust confidence based on volume profile proximity
+                    proximity = self.volume_profile.get_proximity_to_key_levels(
+                        current_price, volume_profile_data
+                    )
+                    confidence = self.volume_profile.adjust_confidence_by_proximity(
+                        confidence, proximity
+                    )
+                    
+                    # Check order flow alignment (mean reversion less strict)
+                    is_flow_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
+                        "long", order_flow_data
+                    )
+                    
+                    # Mean reversion can work against order flow (it's counter-trend)
+                    # Only reject if very strong conflict
+                    if is_flow_aligned or flow_adjustment >= -0.12:
+                        confidence = max(0.0, min(1.0, confidence + flow_adjustment * 0.5))  # Less weight for mean reversion
+                        
+                        signals.append({
+                            "type": "mean_reversion_long",
+                            "direction": "long",
+                            "confidence": confidence,
+                            "entry_price": current_price,
+                            "stop_loss": stop_loss,
+                            "take_profit": float(latest.get("bb_middle", take_profit)),
+                            "reason": "RSI oversold with price at lower Bollinger Band and volume confirmation",
+                            "regime": regime,  # Include regime context
+                            "mtf_analysis": mtf_analysis,  # Include MTF context
+                            "vwap_data": vwap_data,  # Include VWAP context
+                            "volume_profile": volume_profile_data,  # Include volume profile context
+                            "order_flow": order_flow_data,  # Include order flow context
+                        })
+                    else:
+                        # Only reject if very strong conflict
+                        logger.debug("Mean reversion long signal rejected due to strong order flow conflict")
+                else:
                     # Only reject if strongly conflicting
                     logger.debug("Mean reversion long signal rejected due to strong MTF conflict")
-                    continue
-                
-                confidence = max(0.0, min(1.0, confidence + mtf_adjustment * 0.5))  # Less weight for mean reversion
-                
-                # Adjust confidence based on VWAP position (mean reversion less sensitive to VWAP)
-                confidence = self.vwap_calculator.adjust_confidence_by_vwap(
-                    "long", confidence, vwap_data
-                ) * 0.9  # Slightly reduce VWAP impact for mean reversion
-                
-                # Adjust confidence based on volume profile proximity
-                proximity = self.volume_profile.get_proximity_to_key_levels(
-                    current_price, volume_profile_data
-                )
-                confidence = self.volume_profile.adjust_confidence_by_proximity(
-                    confidence, proximity
-                )
-                
-                # Check order flow alignment (mean reversion less strict)
-                is_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
-                    "long", order_flow_data
-                )
-                
-                # Mean reversion can work against order flow (it's counter-trend)
-                if not is_aligned and flow_adjustment < -0.12:
-                    # Only reject if very strong conflict
-                    logger.debug("Mean reversion long signal rejected due to strong order flow conflict")
-                    continue
-                
-                confidence = max(0.0, min(1.0, confidence + flow_adjustment * 0.5))  # Less weight for mean reversion
-                
-                signals.append({
-                    "type": "mean_reversion_long",
-                    "direction": "long",
-                    "confidence": confidence,
-                    "entry_price": current_price,
-                    "stop_loss": stop_loss,
-                    "take_profit": float(latest.get("bb_middle", take_profit)),
-                    "reason": "RSI oversold with price at lower Bollinger Band and volume confirmation",
-                    "regime": regime,  # Include regime context
-                    "mtf_analysis": mtf_analysis,  # Include MTF context
-                    "vwap_data": vwap_data,  # Include VWAP context
-                    "volume_profile": volume_profile_data,  # Include volume profile context
-                    "order_flow": order_flow_data,  # Include order flow context
-                })
         
         # Breakout signal (price breaks above recent high with volume)
         if self.config.enable_breakout:
@@ -488,51 +502,51 @@ class NQScanner:
                         # Breaking 5m resistance - boost confidence
                         mtf_adjustment += 0.10
                     
-                    if not is_aligned and mtf_adjustment < -0.20:
+                    # Reject if strongly conflicting
+                    if is_aligned or mtf_adjustment >= -0.20:
+                        confidence = max(0.0, min(1.0, confidence + mtf_adjustment))
+                        
+                        # Adjust confidence based on VWAP position (breakouts benefit from VWAP support)
+                        confidence = self.vwap_calculator.adjust_confidence_by_vwap(
+                            "long", confidence, vwap_data
+                        )
+                        
+                        # Adjust confidence based on volume profile proximity
+                        proximity = self.volume_profile.get_proximity_to_key_levels(
+                            current_price, volume_profile_data
+                        )
+                        confidence = self.volume_profile.adjust_confidence_by_proximity(
+                            confidence, proximity
+                        )
+                        
+                        # Check order flow alignment (breakouts need strong order flow)
+                        is_flow_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
+                            "long", order_flow_data
+                        )
+                        
+                        # Reject if order flow strongly conflicts
+                        if is_flow_aligned or flow_adjustment >= -0.12:
+                            confidence = max(0.0, min(1.0, confidence + flow_adjustment))
+                            
+                            signals.append({
+                                "type": "breakout_long",
+                                "direction": "long",
+                                "confidence": confidence,
+                                "entry_price": current_price,
+                                "stop_loss": stop_loss,
+                                "take_profit": take_profit,
+                                "reason": f"Price broke above recent high ({recent_high:.2f}) with strong volume and MACD confirmation",
+                                "regime": regime,  # Include regime context
+                                "mtf_analysis": mtf_analysis,  # Include MTF context
+                                "vwap_data": vwap_data,  # Include VWAP context
+                                "volume_profile": volume_profile_data,  # Include volume profile context
+                                "order_flow": order_flow_data,  # Include order flow context
+                            })
+                        else:
+                            # Reject if order flow strongly conflicts
+                            logger.debug("Breakout long signal rejected due to order flow conflict")
+                    else:
                         # Reject if strongly conflicting
                         logger.debug("Breakout long signal rejected due to MTF conflict")
-                        continue
-                    
-                    confidence = max(0.0, min(1.0, confidence + mtf_adjustment))
-                    
-                    # Adjust confidence based on VWAP position (breakouts benefit from VWAP support)
-                    confidence = self.vwap_calculator.adjust_confidence_by_vwap(
-                        "long", confidence, vwap_data
-                    )
-                    
-                    # Adjust confidence based on volume profile proximity
-                    proximity = self.volume_profile.get_proximity_to_key_levels(
-                        current_price, volume_profile_data
-                    )
-                    confidence = self.volume_profile.adjust_confidence_by_proximity(
-                        confidence, proximity
-                    )
-                    
-                    # Check order flow alignment (breakouts need strong order flow)
-                    is_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
-                        "long", order_flow_data
-                    )
-                    
-                    if not is_aligned and flow_adjustment < -0.12:
-                        # Reject if order flow strongly conflicts
-                        logger.debug("Breakout long signal rejected due to order flow conflict")
-                        continue
-                    
-                    confidence = max(0.0, min(1.0, confidence + flow_adjustment))
-                    
-                    signals.append({
-                        "type": "breakout_long",
-                        "direction": "long",
-                        "confidence": confidence,
-                        "entry_price": current_price,
-                        "stop_loss": stop_loss,
-                        "take_profit": take_profit,
-                        "reason": f"Price broke above recent high ({recent_high:.2f}) with strong volume and MACD confirmation",
-                        "regime": regime,  # Include regime context
-                        "mtf_analysis": mtf_analysis,  # Include MTF context
-                        "vwap_data": vwap_data,  # Include VWAP context
-                        "volume_profile": volume_profile_data,  # Include volume profile context
-                        "order_flow": order_flow_data,  # Include order flow context
-                    })
         
         return signals

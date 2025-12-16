@@ -24,16 +24,19 @@ class MockDataProvider(DataProvider):
     
     def __init__(
         self,
-        base_price: float = 15000.0,
-        volatility: float = 50.0,
-        trend: float = 0.0,  # Price trend per bar
+        base_price: float = 17500.0,  # Realistic NQ futures price (Dec 2024 range: ~17,000-20,000)
+        volatility: float = 25.0,  # Realistic intraday volatility for NQ (points per bar)
+        trend: float = 0.0,  # Price trend per bar (positive = uptrend, negative = downtrend)
     ):
         """
         Initialize mock data provider.
         
+        NOTE: This generates SYNTHETIC data for testing strategy LOGIC only.
+        Prices are not real market data and should not be used for actual trading decisions.
+        
         Args:
-            base_price: Starting price for generated data
-            volatility: Price volatility (standard deviation)
+            base_price: Starting price for generated data (default ~17,500 for NQ futures)
+            volatility: Price volatility in points per bar (default 25 points for realistic NQ movement)
             trend: Price trend per bar (positive = uptrend, negative = downtrend)
         """
         self.base_price = base_price

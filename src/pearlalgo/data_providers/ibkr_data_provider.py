@@ -73,7 +73,7 @@ class IBKRDataProvider(DataProvider):
         self.client_id = client_id or self.settings.ib_data_client_id or self.settings.ib_client_id
         
         # Futures symbols for contract type detection
-        self.futures_symbols = {"ES", "NQ", "YM", "RTY", "CL", "GC", "SI", "NG", "ZB", "ZN", "ZF", "ZT"}
+        self.futures_symbols = {"ES", "MES", "NQ", "MNQ", "YM", "MYM", "RTY", "M2K", "CL", "MCL", "GC", "MGC", "SI", "MSI", "NG", "MNG", "ZB", "MZB", "ZN", "MZN", "ZF", "MZF", "ZT", "MZT"}
         
         # Initialize executor (dedicated thread for IBKR calls)
         self._executor = IBKRExecutor(

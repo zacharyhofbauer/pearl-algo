@@ -109,7 +109,7 @@ class NQAgentTelegramNotifier:
         Returns:
             Formatted message string
         """
-        symbol = signal.get("symbol", "NQ")
+        symbol = signal.get("symbol", "MNQ")  # Default to MNQ for prop firm trading
         signal_type = signal.get("type", "unknown").replace("_", " ").title()
         direction = signal.get("direction", "long").upper()
         entry_price = signal.get("entry_price", 0)
@@ -320,7 +320,7 @@ class NQAgentTelegramNotifier:
         Returns:
             Formatted message string
         """
-        symbol = signal.get("symbol", "NQ")
+        symbol = signal.get("symbol", "MNQ")  # Default to MNQ for prop firm trading
         signal_type = signal.get("type", "unknown")
         direction = signal.get("direction", "").upper()
         entry_price = signal.get("entry_price", 0)
@@ -433,6 +433,16 @@ class NQAgentTelegramNotifier:
             
             message += f"{status_emoji} *Service:* RUNNING{pause_status}{uptime_str}\n"
             message += f"{market_emoji} *Market:* {market_text}\n"
+            
+            # Connection status
+            connection_status = status.get('connection_status', 'unknown')
+            connection_failures = status.get('connection_failures', 0)
+            if connection_status == 'disconnected' or connection_failures > 0:
+                conn_emoji = "🔴" if connection_status == 'disconnected' else "🟡"
+                message += f"\n*Connection:*\n"
+                message += f"{conn_emoji} {connection_status.upper()}\n"
+                if connection_failures > 0:
+                    message += f"⚠️ {connection_failures} failures\n"
             
             # Activity section
             cycles = status.get('cycle_count', 0)
@@ -581,7 +591,7 @@ class NQAgentTelegramNotifier:
             message = f"🚀 *NQ Agent Started*\n\n"
             
             # Compact config (mobile-friendly)
-            symbol = config.get('symbol', 'NQ')
+            symbol = config.get('symbol', 'MNQ')  # Default to MNQ for prop firm trading
             timeframe = config.get('timeframe', '1m')
             scan_interval = config.get('scan_interval', 60)
             max_risk = config.get('max_risk_per_trade', 0.02) * 100

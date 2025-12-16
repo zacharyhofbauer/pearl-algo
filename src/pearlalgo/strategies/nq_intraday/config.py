@@ -17,30 +17,35 @@ class NQIntradayConfig:
     """Configuration for NQ intraday strategy."""
     
     # Symbol
-    symbol: str = "NQ"
+    symbol: str = "MNQ"  # Mini NQ (1/10th size of NQ) - better for prop firms
     
     # Timeframe
-    timeframe: str = "1m"  # 1-minute bars for intraday
+    timeframe: str = "1m"  # 1-minute bars for intraday scalping/swings
     
     # Scanning interval (seconds)
-    scan_interval: int = 60  # Scan every 60 seconds
+    scan_interval: int = 30  # Scan every 30 seconds (faster for scalping)
     
     # Signal parameters
     lookback_periods: int = 20  # Number of bars for indicators
     min_volume: int = 100  # Minimum volume threshold
     volatility_threshold: float = 0.001  # Minimum volatility (1% of price)
     
-    # Risk parameters
-    max_position_size: int = 1  # Maximum contracts
-    stop_loss_ticks: int = 20  # Stop loss in ticks (5 points = 100 ticks)
-    take_profit_ticks: int = 40  # Take profit in ticks (10 points = 200 ticks)
-    stop_loss_atr_multiplier: float = 2.0  # ATR multiplier for stop loss
-    take_profit_risk_reward: float = 2.0  # Risk/reward ratio for take profit
-    max_risk_per_trade: float = 0.02  # Maximum risk per trade (2% default)
+    # Risk parameters (Prop Firm Style)
+    max_position_size: int = 10  # Maximum contracts (5-15 range for prop firms)
+    min_position_size: int = 5  # Minimum contracts per trade
+    stop_loss_ticks: int = 15  # Tighter stops for scalping (15 ticks = 3.75 points)
+    take_profit_ticks: int = 22  # Quick profit targets (22 ticks = 5.5 points, 1.5:1 R/R)
+    stop_loss_atr_multiplier: float = 1.5  # Tighter stops for scalping (was 2.0)
+    take_profit_risk_reward: float = 1.5  # 1.5:1 R/R for quick scalps (was 2.0)
+    max_risk_per_trade: float = 0.01  # 1% max risk per trade (prop firm conservative)
+    # MNQ contract specs: $2 per point (vs NQ $20 per point)
+    tick_value: float = 2.0  # MNQ tick value in dollars
     
-    # Time filters
+    # Time filters (Prop Firm Trading Hours)
     start_time: str = "09:30"  # Market open (ET)
     end_time: str = "16:00"  # Market close (ET)
+    # Avoid lunch lull for scalping (11:30-13:00 ET)
+    avoid_lunch_lull: bool = True  # Skip signals during low volume period
     
     # Enable/disable features
     enable_momentum: bool = True
@@ -89,6 +94,10 @@ class NQIntradayConfig:
                         config.take_profit_risk_reward = risk_config["take_profit_risk_reward"]
                     if "max_risk_per_trade" in risk_config:
                         config.max_risk_per_trade = risk_config["max_risk_per_trade"]
+                    if "max_position_size" in risk_config:
+                        config.max_position_size = risk_config["max_position_size"]
+                    if "min_position_size" in risk_config:
+                        config.min_position_size = risk_config["min_position_size"]
                     
                     # Support environment variable substitution
                     def substitute_env(value):

@@ -326,9 +326,28 @@ All tests use mock data - no live market data or IBKR connection needed!
 
 ## 📝 Notes
 
-- All test scripts use mock data - no external dependencies
+- All test scripts use **synthetic mock data** - no external dependencies
 - Tests run quickly - no waiting for market hours
 - Tests are deterministic - same inputs produce same outputs
 - Tests can be run anytime - not limited to market hours
-- Tests verify functionality - not actual trading performance
+- Tests verify **functionality and logic** - NOT actual trading performance
+- **Mock prices are fake** - do not represent real market data
+- For real market testing, use IB Gateway with live data
+
+⚠️ **Important:** See [Mock Data Warning](./MOCK_DATA_WARNING.md) for details on what these tests validate vs. what they don't.
+
+---
+
+## 🎯 Strategy Testing
+
+For comprehensive strategy testing and validation, see:
+- **[Strategy Testing Guide](./STRATEGY_TESTING_GUIDE.md)** - Complete guide to testing if your strategy is working
+
+The strategy testing guide covers:
+- Quick validation tests
+- Signal quality testing
+- Integration testing
+- Live data validation
+- Performance tracking
+- Advanced testing scenarios
 

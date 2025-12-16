@@ -71,18 +71,18 @@ class IBKRProvider(DataProvider):
 
         # Futures symbols for contract type detection
         self.futures_symbols = {
-            "ES",
-            "NQ",
-            "YM",
-            "RTY",
-            "CL",
-            "GC",
-            "SI",
-            "NG",
-            "ZB",
-            "ZN",
-            "ZF",
-            "ZT",
+            "ES", "MES",  # E-mini and Micro E-mini S&P 500
+            "NQ", "MNQ",  # E-mini and Micro E-mini NASDAQ-100
+            "YM", "MYM",  # E-mini and Micro E-mini Dow
+            "RTY", "M2K",  # E-mini and Micro Russell 2000
+            "CL", "MCL",  # Crude Oil and Micro
+            "GC", "MGC",  # Gold and Micro
+            "SI", "MSI",  # Silver and Micro
+            "NG", "MNG",  # Natural Gas and Micro
+            "ZB", "MZB",  # 30-Year Bond and Micro
+            "ZN", "MZN",  # 10-Year Note and Micro
+            "ZF", "MZF",  # 5-Year Note and Micro
+            "ZT", "MZT",  # 2-Year Note and Micro
         }
 
         # Initialize executor (dedicated thread for IBKR calls)

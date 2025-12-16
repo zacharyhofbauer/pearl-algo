@@ -13,6 +13,8 @@ from pathlib import Path
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
+# Add project root first for tests module, then src for pearlalgo
+sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
 # Try to activate virtual environment if it exists
@@ -31,7 +33,23 @@ except ImportError:
 
 from pearlalgo.nq_agent.service import NQAgentService
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
-from tests.mock_data_provider import MockDataProvider
+
+# Import mock data provider - ensure project root is in path
+import os
+os.chdir(project_root)  # Change to project root so imports work
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+try:
+    from tests.mock_data_provider import MockDataProvider
+except ImportError:
+    # Fallback: direct file import
+    import importlib.util
+    mock_provider_file = project_root / "tests" / "mock_data_provider.py"
+    spec = importlib.util.spec_from_file_location("mock_data_provider", mock_provider_file)
+    mock_data_provider = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mock_data_provider)
+    MockDataProvider = mock_data_provider.MockDataProvider
 
 
 async def test_service_with_mock():
@@ -52,10 +70,12 @@ async def test_service_with_mock():
         print()
     
     # Create mock data provider
+    # NOTE: This uses SYNTHETIC data - prices are fake and for testing logic only
     print("Creating mock data provider...")
+    print("⚠️  NOTE: Using synthetic mock data - prices are NOT real market data")
     mock_provider = MockDataProvider(
-        base_price=15000.0,
-        volatility=50.0,
+        base_price=17500.0,  # Realistic NQ futures price (Dec 2024 range)
+        volatility=25.0,  # Realistic intraday volatility
         trend=0.5,  # Slight uptrend
     )
     print("✅ Mock data provider created")

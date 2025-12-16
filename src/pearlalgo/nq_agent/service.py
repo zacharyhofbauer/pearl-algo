@@ -80,6 +80,10 @@ class NQAgentService:
         self.max_consecutive_errors = 10  # Circuit breaker threshold
         self.data_fetch_errors = 0
         self.max_data_fetch_errors = 5
+        self.connection_failures = 0
+        self.max_connection_failures = 10  # Circuit breaker threshold for connection issues
+        self.last_connection_failure_alert: Optional[datetime] = None
+        self.connection_failure_alert_interval = 600  # 10 minutes between connection failure alerts
         self.last_successful_cycle: Optional[datetime] = None
         self.last_data_quality_alert: Optional[datetime] = None
         self.data_quality_alert_interval = 300  # 5 minutes between data quality alerts
@@ -175,15 +179,56 @@ class NQAgentService:
                 # Fetch latest data with error handling
                 try:
                     market_data = await self.data_fetcher.fetch_latest_data()
-                    self.data_fetch_errors = 0  # Reset on success
+                    
+                    # Check if data is empty due to connection issues
+                    is_connection_error = self._is_connection_error(market_data)
+                    
+                    if is_connection_error:
+                        # This is a connection issue, not just empty data
+                        self.connection_failures += 1
+                        self.data_fetch_errors += 1
+                        self.error_count += 1
+                        
+                        # Alert on connection failures
+                        await self._handle_connection_failure()
+                        
+                        # Circuit breaker: pause service if too many connection failures
+                        if self.connection_failures >= self.max_connection_failures:
+                            logger.error(
+                                f"Too many connection failures ({self.connection_failures}), "
+                                "pausing service. IB Gateway may be down."
+                            )
+                            await self.telegram_notifier.send_circuit_breaker_alert(
+                                "IB Gateway connection lost",
+                                {
+                                    "connection_failures": self.connection_failures,
+                                    "error_type": "connection",
+                                    "action_taken": "Service paused - IB Gateway appears to be down",
+                                }
+                            )
+                            self.paused = True
+                        
+                        await asyncio.sleep(self.config.scan_interval)
+                        continue
+                    
+                    # Success - reset error counters
+                    self.data_fetch_errors = 0
+                    self.connection_failures = 0
                     self.last_successful_cycle = datetime.now(timezone.utc)
                     
                     # Check data quality
                     await self._check_data_quality(market_data)
+                    
                 except Exception as e:
                     logger.error(f"Error fetching market data: {e}", exc_info=True)
                     self.data_fetch_errors += 1
                     self.error_count += 1
+                    
+                    # Check if this is a connection error
+                    error_str = str(e).lower()
+                    if "connection" in error_str or "refused" in error_str or "timeout" in error_str:
+                        self.connection_failures += 1
+                        await self._handle_connection_failure()
                     
                     # Alert on consecutive fetch failures
                     if self.data_fetch_errors >= 3:
@@ -206,6 +251,14 @@ class NQAgentService:
                     continue
                 
                 if market_data["df"].empty:
+                    # Empty data could be normal (market closed) or a problem
+                    # Check if we've had recent successful cycles
+                    if self.last_successful_cycle:
+                        time_since_success = (datetime.now(timezone.utc) - self.last_successful_cycle).total_seconds()
+                        if time_since_success > 1800:  # 30 minutes without data
+                            logger.warning("No market data for 30+ minutes - possible connection issue")
+                            await self._handle_connection_failure()
+                    
                     logger.debug("No market data available, waiting...")
                     await asyncio.sleep(self.config.scan_interval)
                     continue
@@ -365,6 +418,16 @@ class NQAgentService:
         # Extract data source health
         data_source_health = health.get("components", {}).get("data_provider", {})
         
+        # Check connection status
+        connection_status = "unknown"
+        try:
+            if hasattr(self.data_fetcher.data_provider, '_executor'):
+                executor = self.data_fetcher.data_provider._executor
+                if hasattr(executor, 'is_connected'):
+                    connection_status = "connected" if executor.is_connected() else "disconnected"
+        except Exception:
+            pass
+        
         return {
             "running": self.running,
             "paused": self.paused,
@@ -373,6 +436,8 @@ class NQAgentService:
             "cycle_count": self.cycle_count,
             "signal_count": self.signal_count,
             "error_count": self.error_count,
+            "connection_failures": self.connection_failures,
+            "connection_status": connection_status,
             "buffer_size": self.data_fetcher.get_buffer_size(),
             "performance": performance,
             "data_source_health": data_source_health,
@@ -436,7 +501,6 @@ class NQAgentService:
         if latest_bar and "timestamp" in latest_bar:
             timestamp = latest_bar["timestamp"]
             if isinstance(timestamp, str):
-                from datetime import datetime
                 timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             
             if isinstance(timestamp, datetime):
@@ -469,6 +533,58 @@ class NQAgentService:
                 {"buffer_size": buffer_size},
             )
             self.last_data_quality_alert = now
+    
+    def _is_connection_error(self, market_data: Dict) -> bool:
+        """
+        Check if empty data is due to connection error vs normal market closure.
+        
+        Args:
+            market_data: Market data dictionary
+            
+        Returns:
+            True if this appears to be a connection error
+        """
+        # Check if data provider executor is connected
+        try:
+            if hasattr(self.data_fetcher.data_provider, '_executor'):
+                executor = self.data_fetcher.data_provider._executor
+                if hasattr(executor, 'is_connected'):
+                    if not executor.is_connected():
+                        return True
+        except Exception:
+            pass  # If we can't check, assume it might be a connection issue
+        
+        # If data is empty and we have no latest_bar, likely a connection issue
+        if market_data.get("df") is not None and market_data["df"].empty:
+            if market_data.get("latest_bar") is None:
+                # If we've had recent successful cycles but now getting empty data,
+                # it's likely a connection issue (not just market closed)
+                if self.last_successful_cycle:
+                    time_since_success = (datetime.now(timezone.utc) - self.last_successful_cycle).total_seconds()
+                    if time_since_success < 600:  # Had data within last 10 minutes
+                        return True
+        return False
+    
+    async def _handle_connection_failure(self) -> None:
+        """Handle connection failure and send alerts if needed."""
+        now = datetime.now(timezone.utc)
+        
+        # Throttle connection failure alerts
+        if (
+            self.last_connection_failure_alert is None
+            or (now - self.last_connection_failure_alert).total_seconds() >= self.connection_failure_alert_interval
+        ):
+            await self.telegram_notifier.send_data_quality_alert(
+                "fetch_failure",
+                f"IB Gateway connection issue detected ({self.connection_failures} failures). "
+                "Check if IB Gateway is running.",
+                {
+                    "connection_failures": self.connection_failures,
+                    "error_type": "connection",
+                    "suggestion": "Run: ./scripts/check_gateway_status.sh or ./scripts/start_ibgateway_ibc.sh",
+                },
+            )
+            self.last_connection_failure_alert = now
     
     def _signal_handler(self, signum, frame) -> None:
         """Handle shutdown signals."""

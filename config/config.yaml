@@ -1,14 +1,15 @@
-# NQ Trading Agent Configuration
-# Simple configuration for NQ futures trading with IBKR and Telegram
+# MNQ Trading Agent Configuration
+# Prop firm style trading configuration for Mini NQ (MNQ) futures
+# Optimized for intraday swings and quick scalps
 
 # Trading Symbol
-symbol: "NQ"  # E-mini NASDAQ-100 futures
+symbol: "MNQ"  # Mini E-mini NASDAQ-100 futures (1/10th size of NQ)
 
 # Timeframe
-timeframe: "1m"  # 1-minute bars for intraday trading
+timeframe: "1m"  # 1-minute bars for intraday scalping/swings
 
 # Scan Interval (seconds)
-scan_interval: 60  # Check for signals every 60 seconds
+scan_interval: 30  # Check for signals every 30 seconds (faster for scalping)
 
 # IBKR Connection
 ibkr:
@@ -28,12 +29,14 @@ telegram:
     - "exit"
     - "error"
 
-# Risk Management
+# Risk Management (Prop Firm Style)
 risk:
-  max_risk_per_trade: 0.02  # 2% max risk per trade
-  max_drawdown: 0.15  # 15% account drawdown limit
-  stop_loss_atr_multiplier: 2.0
-  take_profit_risk_reward: 2.0  # 2:1 R/R ratio
+  max_risk_per_trade: 0.01  # 1% max risk per trade (prop firm conservative)
+  max_drawdown: 0.10  # 10% account drawdown limit (prop firm typical)
+  stop_loss_atr_multiplier: 1.5  # Tighter stops for scalping (was 2.0)
+  take_profit_risk_reward: 1.5  # 1.5:1 R/R for quick scalps (was 2.0)
+  min_position_size: 5  # Minimum contracts per trade
+  max_position_size: 15  # Maximum contracts per trade (5-15 range for prop firms)
 
 # Logging
 logging:
