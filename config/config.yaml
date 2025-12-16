@@ -72,9 +72,9 @@ data:
   multitimeframe_15m_hours: 12
   stale_data_threshold_minutes: 10  # Alert if data is older than this
   connection_timeout_minutes: 30  # Consider connection lost after this time without data
-  use_level2_data: true  # Enable Level 2 (depth-of-book) market data requests
-  order_book_depth: 10  # Number of order book levels to request (5-20 recommended)
-  order_book_analysis: true  # Enable order book analysis for signal generation
+  use_level2_data: false  # Disabled - you have Level 1 subscription (CME Real-Time NP,L1), not Level 2
+  order_book_depth: 10  # Number of order book levels to request (5-20 recommended) - not used when Level 2 disabled
+  order_book_analysis: false  # Disabled - requires Level 2 data for order book analysis
 
 # Signal generation
 signals:

@@ -356,9 +356,19 @@ class IBKRProvider(DataProvider):
                         f"❌ IBKR Error 162: TWS session conflict detected for {symbol}\n"
                         f"   This error occurs when Trader Workstation (TWS) is connected from a different IP address.\n"
                         f"   You cannot use both TWS and Gateway simultaneously from different IPs.\n"
-                        f"   Solution: Close TWS or disconnect it, then restart the Gateway.\n"
+                        f"   \n"
+                        f"   📋 Solution:\n"
+                        f"   1. Close TWS or disconnect it completely (check all devices)\n"
+                        f"   2. Wait 30-60 seconds for session to clear\n"
+                        f"   3. Restart Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh && ./scripts/gateway/start_ibgateway_ibc.sh\n"
+                        f"   4. Restart service\n"
+                        f"   \n"
+                        f"   Note: This error blocks historical data. Level 1 real-time data may still work.\n"
                         f"   Original error: {e}"
                     )
+                    # Don't raise - return empty DataFrame so service can continue
+                    # Level 1 real-time data might still work even if historical fails
+                    return pd.DataFrame()
                 raise
             
             if not bars:
@@ -426,6 +436,8 @@ class IBKRProvider(DataProvider):
             # Determine if futures or stock
             is_futures = symbol.upper() in self.futures_symbols
 
+            logger.info(f"Submitting GetLatestBarTask for {symbol} (will try Level 1 since you have CME Real-Time NP,L1)")
+            
             # Submit task to executor
             task_id = str(uuid.uuid4())
             task = GetLatestBarTask(
@@ -436,9 +448,14 @@ class IBKRProvider(DataProvider):
 
             future = self._executor.submit_task(task)
             result = await asyncio.wrap_future(future)
+            
+            if result:
+                logger.info(f"✅ GetLatestBarTask completed for {symbol}, data_level={result.get('_data_level', 'unknown')}")
+            else:
+                logger.warning(f"⚠️  GetLatestBarTask returned None for {symbol}")
 
             return result
 
         except Exception as e:
-            logger.error(f"Error fetching latest bar for {symbol}: {e}")
+            logger.error(f"❌ Error fetching latest bar for {symbol}: {e}", exc_info=True)
             return None

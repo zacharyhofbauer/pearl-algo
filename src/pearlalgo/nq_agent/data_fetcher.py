@@ -104,10 +104,10 @@ class NQAgentDataFetcher:
             )
 
             if df.empty:
-                logger.warning(f"No historical data available for {self.config.symbol}")
-                market_data = {"df": pd.DataFrame(), "latest_bar": None}
-                self._last_market_data = market_data
-                return market_data
+                logger.warning(f"No historical data available for {self.config.symbol} (Error 162 may be blocking historical data)")
+                # Don't return early - still try to get latest bar (Level 1 real-time data might work)
+                # Set df to empty DataFrame but continue to try get_latest_bar
+                df = pd.DataFrame()
 
             # Data quality checks
             # Check for missing values
@@ -123,25 +123,30 @@ class NQAgentDataFetcher:
                 age_minutes = freshness_check["age_minutes"]
                 logger.warning(f"Data may be stale: latest historical bar is {age_minutes:.1f} minutes old (market may be closed or data subscription issue)")
 
-            # Log data freshness status
-            if not data_freshness_warning and not df.empty:
-                logger.debug(f"Data is fresh: {len(df)} bars retrieved for {self.config.symbol}")
-                self._data_buffer = df.tail(self._buffer_size).reset_index(drop=True)
-            
-            # Log data freshness at INFO level for observability
-            if "timestamp" in df.columns and not df.empty:
-                latest_timestamp = df["timestamp"].max()
-                if isinstance(latest_timestamp, pd.Timestamp):
-                    age_minutes = (datetime.now(timezone.utc) - latest_timestamp.to_pydatetime().replace(tzinfo=timezone.utc)).total_seconds() / 60
-                    logger.info(f"Data freshness: latest_bar_age={age_minutes:.1f} minutes")
-            
-            # Log buffer status
-            buffer_size = len(self._data_buffer) if self._data_buffer is not None else 0
-            if self._data_buffer is not None and not self._data_buffer.empty and "timestamp" in self._data_buffer.columns:
-                latest_buffer_time = self._data_buffer["timestamp"].max()
-                logger.info(f"Buffer: {buffer_size} bars, latest_timestamp={latest_buffer_time}")
+            # Update buffer if we have data
+            if not df.empty:
+                # Log data freshness status
+                if not data_freshness_warning:
+                    logger.debug(f"Data is fresh: {len(df)} bars retrieved for {self.config.symbol}")
+                    self._data_buffer = df.tail(self._buffer_size).reset_index(drop=True)
+                
+                # Log data freshness at INFO level for observability
+                if "timestamp" in df.columns:
+                    latest_timestamp = df["timestamp"].max()
+                    if isinstance(latest_timestamp, pd.Timestamp):
+                        age_minutes = (datetime.now(timezone.utc) - latest_timestamp.to_pydatetime().replace(tzinfo=timezone.utc)).total_seconds() / 60
+                        logger.info(f"Data freshness: latest_bar_age={age_minutes:.1f} minutes")
+                
+                # Log buffer status
+                buffer_size = len(self._data_buffer) if self._data_buffer is not None else 0
+                if self._data_buffer is not None and not self._data_buffer.empty and "timestamp" in self._data_buffer.columns:
+                    latest_buffer_time = self._data_buffer["timestamp"].max()
+                    logger.info(f"Buffer: {buffer_size} bars, latest_timestamp={latest_buffer_time}")
+                else:
+                    logger.info(f"Buffer: {buffer_size} bars")
             else:
-                logger.info(f"Buffer: {buffer_size} bars")
+                # No historical data, but we'll still try real-time Level 1
+                logger.info(f"Buffer: 0 bars (historical data unavailable, will try Level 1 real-time data)")
 
             # Fetch latest bar if method available
             latest_bar = None
@@ -195,64 +200,81 @@ class NQAgentDataFetcher:
                             data_source = "provider"
                             logger.debug(f"Latest bar for {self.config.symbol} from provider (timestamp not available)")
                 except Exception as e:
-                    logger.warning(f"Could not fetch latest bar from provider: {e}. Will use historical data fallback.")
+                    logger.error(f"❌ Could not fetch latest bar from provider: {e}. Will use historical data fallback.", exc_info=True)
                     data_source = "fallback"
 
-            # If no latest_bar from provider, use last row from historical data
-            if latest_bar is None and not df.empty:
-                data_source = "historical_fallback"
-                logger.info(f"Using historical data fallback for latest bar (real-time subscription may not be available)")
-                latest_row = df.iloc[-1]
-                timestamp = latest_row.name if hasattr(latest_row, 'name') else datetime.now(timezone.utc)
-                if hasattr(timestamp, 'to_pydatetime'):
-                    timestamp = timestamp.to_pydatetime()
-                elif isinstance(timestamp, pd.Timestamp):
-                    timestamp = timestamp.to_pydatetime()
-
-                # Extract values from Series/DataFrame row
-                if hasattr(latest_row, 'get'):
-                    open_val = latest_row.get("open", 0)
-                    high_val = latest_row.get("high", 0)
-                    low_val = latest_row.get("low", 0)
-                    close_val = latest_row.get("close", 0)
-                    volume_val = latest_row.get("volume", 0)
-                else:
-                    # DataFrame row access
-                    open_val = latest_row["open"] if "open" in latest_row.index else 0
-                    high_val = latest_row["high"] if "high" in latest_row.index else 0
-                    low_val = latest_row["low"] if "low" in latest_row.index else 0
-                    close_val = latest_row["close"] if "close" in latest_row.index else 0
-                    volume_val = latest_row["volume"] if "volume" in latest_row.index else 0
-
-                latest_bar = {
-                    "timestamp": timestamp if isinstance(timestamp, datetime) else datetime.now(timezone.utc),
-                    "open": float(open_val),
-                    "high": float(high_val),
-                    "low": float(low_val),
-                    "close": float(close_val),
-                    "volume": int(volume_val),
-                }
-                
-                # Check age of historical fallback data
-                if isinstance(timestamp, datetime):
+            # If no latest_bar from provider, use last row from historical data (if available)
+            if latest_bar is None:
+                if not df.empty:
+                    data_source = "historical_fallback"
+                    logger.info(f"Using historical data fallback for latest bar (real-time subscription may not be available)")
+                    latest_row = df.iloc[-1]
+                    timestamp = latest_row.name if hasattr(latest_row, 'name') else datetime.now(timezone.utc)
+                    if hasattr(timestamp, 'to_pydatetime'):
+                        timestamp = timestamp.to_pydatetime()
+                    elif isinstance(timestamp, pd.Timestamp):
+                        timestamp = timestamp.to_pydatetime()
                     if timestamp.tzinfo is None:
                         timestamp = timestamp.replace(tzinfo=timezone.utc)
-                    now = datetime.now(timezone.utc)
-                    age_seconds = (now - timestamp).total_seconds()
-                    age_minutes = age_seconds / 60
+
+                    # Extract values from Series/DataFrame row
+                    if hasattr(latest_row, 'get'):
+                        open_val = latest_row.get("open", 0)
+                        high_val = latest_row.get("high", 0)
+                        low_val = latest_row.get("low", 0)
+                        close_val = latest_row.get("close", 0)
+                        volume_val = latest_row.get("volume", 0)
+                    else:
+                        # DataFrame row access
+                        open_val = latest_row["open"] if "open" in latest_row.index else 0
+                        high_val = latest_row["high"] if "high" in latest_row.index else 0
+                        low_val = latest_row["low"] if "low" in latest_row.index else 0
+                        close_val = latest_row["close"] if "close" in latest_row.index else 0
+                        volume_val = latest_row["volume"] if "volume" in latest_row.index else 0
+
+                    latest_bar = {
+                        "timestamp": timestamp if isinstance(timestamp, datetime) else datetime.now(timezone.utc),
+                        "open": float(open_val),
+                        "high": float(high_val),
+                        "low": float(low_val),
+                        "close": float(close_val),
+                        "volume": int(volume_val),
+                    }
                     
-                    logger.debug(
-                        f"Using last bar from historical data as latest_bar for {self.config.symbol} "
-                        f"(age: {age_minutes:.1f} minutes, price: ${close_val:.2f})"
-                    )
-                    
-                    # Warn if historical fallback is stale
-                    if age_minutes > self.stale_data_threshold_minutes:
-                        logger.warning(
-                            f"⚠️  Historical fallback data for {self.config.symbol} is stale: "
-                            f"{age_minutes:.1f} minutes old (threshold: {self.stale_data_threshold_minutes} min). "
-                            f"Price ${close_val:.2f} may not match current market."
+                    # Check age of historical fallback data
+                    if isinstance(timestamp, datetime):
+                        if timestamp.tzinfo is None:
+                            timestamp = timestamp.replace(tzinfo=timezone.utc)
+                        now = datetime.now(timezone.utc)
+                        age_seconds = (now - timestamp).total_seconds()
+                        age_minutes = age_seconds / 60
+                        
+                        logger.debug(
+                            f"Using last bar from historical data as latest_bar for {self.config.symbol} "
+                            f"(age: {age_minutes:.1f} minutes, price: ${close_val:.2f})"
                         )
+                        
+                        # Warn if historical fallback is stale
+                        if age_minutes > self.stale_data_threshold_minutes:
+                            logger.warning(
+                                f"⚠️  Historical fallback data for {self.config.symbol} is stale: "
+                                f"{age_minutes:.1f} minutes old (threshold: {self.stale_data_threshold_minutes} min). "
+                                f"Price ${close_val:.2f} may not match current market."
+                            )
+                else:
+                    # No historical data AND no real-time data - this is a problem
+                    logger.error(
+                        f"❌ CRITICAL: No data available for {self.config.symbol}\n"
+                        f"   - Historical data blocked by Error 162 (TWS conflict)\n"
+                        f"   - Level 1 real-time data not available (Error 354 or subscription issue)\n"
+                        f"   \n"
+                        f"   📋 Actions:\n"
+                        f"   1. Resolve Error 162: Close any TWS sessions, wait 60s, restart Gateway\n"
+                        f"   2. Verify Level 1 subscription is active and paid\n"
+                        f"   3. Check account balance (minimum USD 500)\n"
+                        f"   4. Ensure Market Data API Acknowledgement is signed"
+                    )
+                    latest_bar = None
 
             if latest_bar is None:
                 logger.warning(f"No latest bar available for {self.config.symbol}")
