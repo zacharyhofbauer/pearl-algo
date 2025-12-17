@@ -346,6 +346,118 @@ class NQAgentTelegramNotifier:
 
         return message
 
+    async def send_entry_notification(self, signal_id: str, entry_price: float, signal: Dict) -> bool:
+        """
+        Send trade entry notification to Telegram.
+        
+        Args:
+            signal_id: Signal ID for tracking
+            entry_price: Actual entry price
+            signal: Original signal dictionary
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+
+        try:
+            symbol = signal.get("symbol", "NQ")
+            signal_type = signal.get("type", "unknown").replace("_", " ").title()
+            direction = signal.get("direction", "long").upper()
+            stop_loss = signal.get("stop_loss", 0)
+            take_profit = signal.get("take_profit", 0)
+            
+            # Calculate risk/reward
+            if direction == "LONG" and stop_loss > 0 and take_profit > 0:
+                risk = entry_price - stop_loss
+                reward = take_profit - entry_price
+                risk_reward = reward / risk if risk > 0 else 0
+            else:
+                risk_reward = 0
+            
+            message = f"✅ *{symbol} {direction} ENTRY*\n\n"
+            message += f"*Type:* {signal_type}\n"
+            message += f"*Entry Price:* ${entry_price:.2f}\n"
+            message += f"*Stop Loss:* ${stop_loss:.2f} ({stop_loss - entry_price:+.2f})\n"
+            message += f"*Take Profit:* ${take_profit:.2f} ({take_profit - entry_price:+.2f})\n"
+            message += f"*R:R:* {risk_reward:.2f}:1\n"
+            message += f"*Signal ID:* {signal_id[:16]}...\n"
+            
+            return await self.telegram.send_message(message)
+        except Exception as e:
+            ErrorHandler.handle_telegram_error(e, "send_entry_notification")
+            return False
+
+    async def send_exit_notification(
+        self,
+        signal_id: str,
+        exit_price: float,
+        exit_reason: str,
+        pnl: float,
+        signal: Dict,
+        hold_duration_minutes: Optional[float] = None,
+    ) -> bool:
+        """
+        Send trade exit notification to Telegram with P&L.
+        
+        Args:
+            signal_id: Signal ID for tracking
+            exit_price: Exit price
+            exit_reason: Reason for exit (stop_loss, take_profit, manual, etc.)
+            pnl: Profit/loss amount
+            signal: Original signal dictionary
+            hold_duration_minutes: Hold duration in minutes (optional)
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+
+        try:
+            symbol = signal.get("symbol", "NQ")
+            signal_type = signal.get("type", "unknown").replace("_", " ").title()
+            direction = signal.get("direction", "long").upper()
+            entry_price = signal.get("entry_price", 0)
+            
+            # Determine win/loss emoji and status
+            is_win = pnl > 0
+            result_emoji = "✅" if is_win else "❌"
+            result_text = "WIN" if is_win else "LOSS"
+            pnl_emoji = "🟢" if is_win else "🔴"
+            
+            # Format exit reason
+            exit_reason_map = {
+                "stop_loss": "Stop Loss",
+                "take_profit": "Take Profit",
+                "manual": "Manual Exit",
+                "expired": "Expired",
+            }
+            exit_reason_display = exit_reason_map.get(exit_reason.lower(), exit_reason.title())
+            
+            message = f"{result_emoji} *{symbol} {direction} EXIT - {result_text}*\n\n"
+            message += f"*Type:* {signal_type}\n"
+            message += f"*Entry:* ${entry_price:.2f}\n"
+            message += f"*Exit:* ${exit_price:.2f} ({exit_price - entry_price:+.2f})\n"
+            message += f"*Reason:* {exit_reason_display}\n"
+            message += f"{pnl_emoji} *P&L:* {_format_currency(pnl)}\n"
+            
+            if hold_duration_minutes is not None:
+                hold_hours = int(hold_duration_minutes // 60)
+                hold_mins = int(hold_duration_minutes % 60)
+                if hold_hours > 0:
+                    message += f"*Hold Time:* {hold_hours}h {hold_mins}m\n"
+                else:
+                    message += f"*Hold Time:* {hold_mins}m\n"
+            
+            message += f"*Signal ID:* {signal_id[:16]}...\n"
+            
+            return await self.telegram.send_message(message)
+        except Exception as e:
+            ErrorHandler.handle_telegram_error(e, "send_exit_notification")
+            return False
+
     async def send_status(self, status: Dict) -> bool:
         """
         Send status update to Telegram.
@@ -492,66 +604,73 @@ class NQAgentTelegramNotifier:
             message += f"{status_emoji} *Service:* RUNNING{pause_status}{uptime_str}\n"
             message += f"{market_emoji} *Market:* {market_text}\n"
 
-            # Connection status
+            # Connection status (only show if issues)
             connection_status = status.get('connection_status', 'unknown')
             connection_failures = status.get('connection_failures', 0)
             if connection_status == 'disconnected' or connection_failures > 0:
                 conn_emoji = "🔴" if connection_status == 'disconnected' else "🟡"
-                message += f"\n*Connection:*\n"
-                message += f"{conn_emoji} {connection_status.upper()}\n"
+                message += f"{conn_emoji} *Connection:* {connection_status.upper()}"
                 if connection_failures > 0:
-                    message += f"⚠️ {connection_failures} failures\n"
+                    message += f" ({connection_failures} failures)"
+                message += "\n"
 
-            # Activity section
+            # Activity section (compact single line)
             cycles = status.get('cycle_count', 0)
             signals = status.get('signal_count', 0)
             errors = status.get('error_count', 0)
             buffer = status.get('buffer_size', 0)
-            message += f"\n*Activity:*\n"
-            message += f"🔄 {cycles:,} cycles\n"
-            message += f"🔔 {signals} signals\n"
-            message += f"📊 {buffer} bars\n"
-            message += f"⚠️ {errors} errors\n"
+            message += f"📊 *Activity:* {cycles:,} cycles • {signals} signals • {buffer} bars • {errors} errors\n"
             
-            # Data quality section (order book info)
+            # Data quality section (compact)
             latest_bar = status.get('latest_bar')
             if latest_bar:
                 data_level = latest_bar.get('_data_level', 'unknown')
                 if data_level == 'level2':
                     data_emoji = "📊"
-                    data_text = "Level 2 (Order Book)"
+                    data_text = "Level 2"
                     imbalance = latest_bar.get('imbalance', 0.0)
-                    bid_depth = latest_bar.get('bid_depth', 0)
-                    ask_depth = latest_bar.get('ask_depth', 0)
-                    message += f"\n*Market Data:*\n"
-                    message += f"{data_emoji} {data_text}\n"
                     if imbalance is not None:
                         imbalance_pct = imbalance * 100
                         if imbalance > 0.1:
-                            message += f"🟢 Bid Pressure: {imbalance_pct:+.1f}%\n"
+                            data_text += f" • 🟢 Bid {imbalance_pct:+.1f}%"
                         elif imbalance < -0.1:
-                            message += f"🔴 Ask Pressure: {imbalance_pct:+.1f}%\n"
+                            data_text += f" • 🔴 Ask {imbalance_pct:+.1f}%"
                         else:
-                            message += f"⚪ Balanced: {imbalance_pct:+.1f}%\n"
-                    if bid_depth > 0 or ask_depth > 0:
-                        message += f"📈 Bid: {bid_depth:,} | Ask: {ask_depth:,}\n"
+                            data_text += f" • ⚪ Balanced"
+                    message += f"{data_emoji} *Data:* {data_text}\n"
                 elif data_level == 'level1':
-                    data_emoji = "📈"
-                    data_text = "Level 1 (Top of Book)"
-                    message += f"\n*Market Data:*\n"
-                    message += f"{data_emoji} {data_text}\n"
+                    message += f"📈 *Data:* Level 1\n"
                 else:
                     # Check if historical data is ETH (Extended Trading Hours) which includes all sessions
                     is_eth = latest_bar.get('_historical_eth', False)
-                    data_emoji = "📉"
+                    data_emoji = "📊"
+                    
+                    # Calculate data age if timestamp is available
+                    data_age_minutes = None
+                    if 'timestamp' in latest_bar and latest_bar['timestamp']:
+                        try:
+                            from datetime import datetime, timezone
+                            bar_time = parse_utc_timestamp(latest_bar['timestamp'])
+                            if bar_time:
+                                age_delta = datetime.now(timezone.utc) - bar_time
+                                data_age_minutes = age_delta.total_seconds() / 60
+                        except Exception:
+                            pass
+                    
                     if is_eth:
-                        data_text = "Historical (ETH - All Sessions)"
+                        if data_age_minutes is not None and data_age_minutes > 10:
+                            data_text = f"Delayed (ETH - {data_age_minutes:.0f}m)"
+                            data_emoji = "📉"
+                        else:
+                            data_text = "Live (ETH)"
                     else:
-                        data_text = "Historical (Delayed)"
-                    message += f"\n*Market Data:*\n"
-                    message += f"{data_emoji} {data_text}\n"
+                        if data_age_minutes is not None and data_age_minutes > 10:
+                            data_text = f"Delayed ({data_age_minutes:.0f}m)"
+                        else:
+                            data_text = "Live"
+                    message += f"{data_emoji} *Data:* {data_text}\n"
 
-            # Performance section
+            # Performance section (compact)
             performance = status.get("performance", {})
             if performance:
                 exited = performance.get("exited_signals", 0)
@@ -562,14 +681,9 @@ class NQAgentTelegramNotifier:
                     total_pnl = performance.get('total_pnl', 0)
                     avg_pnl = performance.get('avg_pnl', 0)
 
-                    message += f"\n*Performance (7d):*\n"
-                    message += f"✅ {wins}W  ❌ {losses}L\n"
-                    message += f"📈 {_format_percentage(win_rate)} WR\n"
-                    message += f"💰 {_format_currency(total_pnl)}\n"
-                    message += f"📊 {_format_currency(avg_pnl)} avg\n"
+                    message += f"📈 *Performance (7d):* {wins}W/{losses}L • {_format_percentage(win_rate)} WR • {_format_currency(total_pnl)} • {_format_currency(avg_pnl)} avg\n"
                 else:
-                    message += f"\n*Performance (7d):*\n"
-                    message += "⏳ No completed trades yet\n"
+                    message += f"📈 *Performance (7d):* No completed trades yet\n"
 
             await self.telegram.send_message(message)
             return True
@@ -594,21 +708,13 @@ class NQAgentTelegramNotifier:
             market_hours = get_market_hours()
             is_market_open = market_hours.is_market_open()
 
-            # Format uptime
-            uptime_str = ""
-            if "uptime" in status and status["uptime"]:
-                uptime_str = _format_uptime(status["uptime"])
-
-            message = f"💓 *Heartbeat*\n*{uptime_str} uptime*\n\n"
-
-            # Current price and time
+            # Ultra-compact heartbeat: Price, Market status, Activity summary
             latest_price = status.get('latest_price')
             current_time = status.get('current_time')
             symbol = status.get('symbol', 'NQ')
             
-            if latest_price:
-                message += f"💰 *Price:* ${latest_price:,.2f} ({symbol})\n"
-            
+            # Format time (compact)
+            time_str = ""
             if current_time:
                 try:
                     from datetime import datetime, timezone as tz
@@ -619,63 +725,29 @@ class NQAgentTelegramNotifier:
                         current_time = current_time.replace(tzinfo=tz.utc)
                     et_tz = pytz.timezone('US/Eastern')
                     et_time = current_time.astimezone(et_tz)
-                    time_str = et_time.strftime("%I:%M:%S %p ET")
-                    message += f"🕐 *Time:* {time_str}\n"
+                    time_str = et_time.strftime("%I:%M %p ET")
                 except Exception:
-                    # Fallback to UTC
                     try:
                         if hasattr(current_time, 'strftime'):
-                            time_str = current_time.strftime("%H:%M:%S UTC")
-                            message += f"🕐 *Time:* {time_str}\n"
+                            time_str = current_time.strftime("%H:%M UTC")
                     except:
                         pass
             
-            message += "\n"
-
-            # Status line
+            # Build compact message
             market_emoji = "🟢" if is_market_open else "🔴"
-            message += f"🟢 *Service:* RUNNING\n"
-            message += f"{market_emoji} *Market:* {'OPEN' if is_market_open else 'CLOSED'}\n"
+            message = f"💓 *Heartbeat* {time_str}\n\n"
+            
+            if latest_price:
+                message += f"💰 ${latest_price:,.2f} ({symbol}) • {market_emoji} Market {'OPEN' if is_market_open else 'CLOSED'}\n"
+            else:
+                message += f"{market_emoji} *Market:* {'OPEN' if is_market_open else 'CLOSED'}\n"
 
-            # Order book info (if available)
-            latest_bar = status.get('latest_bar')
-            if latest_bar and isinstance(latest_bar, dict):
-                data_level = latest_bar.get('_data_level', 'unknown')
-                imbalance = latest_bar.get('imbalance')
-                
-                if data_level == 'level2' and imbalance is not None:
-                    imbalance_pct = imbalance * 100
-                    if imbalance > 0.15:
-                        ob_emoji = "🟢"
-                        ob_text = f"Bid Pressure: {imbalance_pct:+.1f}%"
-                    elif imbalance < -0.15:
-                        ob_emoji = "🔴"
-                        ob_text = f"Ask Pressure: {imbalance_pct:+.1f}%"
-                    else:
-                        ob_emoji = "⚪"
-                        ob_text = f"Balanced: {imbalance_pct:+.1f}%"
-                    message += f"\n*Order Book:*\n"
-                    message += f"{ob_emoji} {ob_text}\n"
-                elif data_level == 'level1':
-                    message += f"\n*Data:* 📈 Level 1\n"
-                elif data_level == 'historical':
-                    # Check if historical data is ETH (Extended Trading Hours) which includes all sessions
-                    is_eth = latest_bar.get('_historical_eth', False)
-                    if is_eth:
-                        message += f"\n*Data:* 📉 Historical (ETH - All Sessions)\n"
-                    else:
-                        message += f"\n*Data:* 📉 Historical\n"
-
-            # Activity (mobile-friendly, one per line)
+            # Activity summary (compact single line)
             cycles = status.get('cycle_count', 0)
             signals = status.get('signal_count', 0)
             errors = status.get('error_count', 0)
             buffer = status.get('buffer_size', 0)
-            message += f"\n*Activity:*\n"
-            message += f"🔄 {cycles:,} cycles\n"
-            message += f"🔔 {signals} signals\n"
-            message += f"📊 {buffer} bars\n"
-            message += f"⚠️ {errors} errors\n"
+            message += f"📊 {cycles:,} cycles • {signals} signals • {buffer} bars • {errors} errors\n"
 
             await self.telegram.send_message(message)
             return True
@@ -814,21 +886,18 @@ class NQAgentTelegramNotifier:
                 message += f"💰 *Price:* ${latest_price:,.2f} ({symbol})\n"
             else:
                 message += f"📊 *Symbol:* {symbol}\n"
-            message += f"🕐 *Time:* {time_str}\n\n"
+            message += f"🕐 *Time:* {time_str}\n"
 
-            # Compact config (mobile-friendly)
+            # Compact config (single line)
             timeframe = config.get('timeframe', '1m')
             scan_interval = config.get('scan_interval', 60)
-
-            message += f"*Config:*\n"
-            message += f"• Timeframe: {timeframe}\n"
-            message += f"• Scan: {scan_interval}s\n"
+            message += f"⚙️ *Config:* {timeframe} timeframe, {scan_interval}s scan\n"
 
             # Market status
             market_hours = get_market_hours()
             is_market_open = market_hours.is_market_open()
             market_emoji = "🟢" if is_market_open else "🔴"
-            message += f"\n{market_emoji} *Market:* {'OPEN' if is_market_open else 'CLOSED'}\n"
+            message += f"{market_emoji} *Market:* {'OPEN' if is_market_open else 'CLOSED'}\n"
 
             await self.telegram.send_message(message)
             return True
