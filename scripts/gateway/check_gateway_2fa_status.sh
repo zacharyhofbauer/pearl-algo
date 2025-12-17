@@ -61,3 +61,4 @@ echo "View Gateway logs: tail -f ibkr/ibc/logs/ibc-*.txt"
 echo "Check Gateway process: ps aux | grep IBC.jar"
 
 
+

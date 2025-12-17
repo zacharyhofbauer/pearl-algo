@@ -128,3 +128,4 @@ class TestServiceRecovery:
             pytest.fail(f"Service should handle errors gracefully: {e}")
 
 
+
