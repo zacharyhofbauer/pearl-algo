@@ -163,3 +163,4 @@ class TestServiceEdgeCases:
             pass
         finally:
             provider.fetch_historical = original_fetch
+

@@ -86,7 +86,14 @@ done
 
 # If we get here, port still not listening
 echo "⚠️  Port 4002 not listening after 60 seconds"
-echo "   Gateway may still be authenticating or there may be an issue"
+echo ""
+echo "📱 If you're using IBKR mobile app for 2FA:"
+echo "   1. Check your mobile app for a login approval notification"
+echo "   2. Tap 'Approve' or 'Allow' to approve the login"
+echo "   3. Gateway will automatically continue after approval"
+echo ""
+echo "   To monitor authentication progress:"
+echo "   ./scripts/gateway/wait_for_2fa_approval.sh"
 echo ""
 echo "Check status:"
 echo "  ps aux | grep -E '(java.*IBC|IBC.jar)' | grep -v grep"

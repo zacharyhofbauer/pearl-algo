@@ -8,7 +8,7 @@ Example usage:
     try:
         data = await fetch_data()
     except Exception as e:
-        error_info = ErrorHandler.handle_data_fetch_error(e, context={"symbol": "MNQ"})
+        error_info = ErrorHandler.handle_data_fetch_error(e, context={"symbol": "NQ"})
         if error_info.get("is_connection_error"):
             # Handle connection error
             pass
@@ -157,3 +157,4 @@ class ErrorHandler:
             exc_info=True,
             extra={"notification_type": notification_type},
         )
+

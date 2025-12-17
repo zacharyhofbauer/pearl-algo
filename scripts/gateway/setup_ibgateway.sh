@@ -101,3 +101,4 @@ echo "  2. Check status:"
 echo "     ./scripts/gateway/check_gateway_status.sh"
 echo "  3. Test connection:"
 echo "     python3 scripts/testing/smoke_test_ibkr.py"
+

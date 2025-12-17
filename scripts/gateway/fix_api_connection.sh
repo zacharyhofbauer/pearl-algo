@@ -34,3 +34,4 @@ echo ""
 echo "3. Test connection:"
 echo "   python3 -c \"from ib_insync import IB; ib=IB(); ib.connect('127.0.0.1', 4002, clientId=11); print('Connected!' if ib.isConnected() else 'Failed'); ib.disconnect()\""
 echo ""
+

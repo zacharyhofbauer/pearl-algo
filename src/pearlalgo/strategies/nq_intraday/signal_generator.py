@@ -328,8 +328,9 @@ class NQSignalGenerator:
 
         if entry_price > 0 and stop_loss:
             # Calculate risk amount based on contract type
-            # MNQ: $2 per point, NQ: $20 per point
-            tick_value = getattr(self.config, 'tick_value', 2.0 if self.config.symbol == "MNQ" else 20.0)
+            # NQ: $20 per point, MNQ: $2 per point (1/10th size)
+            # Using NQ with scaled contract sizes to match MNQ exposure
+            tick_value = getattr(self.config, 'tick_value', 20.0 if self.config.symbol == "NQ" else 2.0)
             position_size = getattr(self.config, 'max_position_size', 10)
 
             if signal["direction"] == "long":

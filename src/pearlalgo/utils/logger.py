@@ -16,3 +16,4 @@ except ImportError:
     logger = logging.getLogger("pearlalgo")
 
 __all__ = ["logger"]
+

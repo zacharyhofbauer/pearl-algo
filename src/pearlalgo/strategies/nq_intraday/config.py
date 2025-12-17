@@ -17,7 +17,7 @@ class NQIntradayConfig:
     """Configuration for NQ intraday strategy."""
 
     # Symbol
-    symbol: str = "MNQ"  # Mini NQ (1/10th size of NQ) - better for prop firms
+    symbol: str = "NQ"  # E-mini NASDAQ-100 futures (using NQ with scaled contract sizes to match MNQ exposure)
 
     # Timeframe
     timeframe: str = "1m"  # 1-minute bars for intraday scalping/swings
@@ -38,8 +38,9 @@ class NQIntradayConfig:
     stop_loss_atr_multiplier: float = 1.5  # Tighter stops for scalping (was 2.0)
     take_profit_risk_reward: float = 1.5  # 1.5:1 R/R for quick scalps (was 2.0)
     max_risk_per_trade: float = 0.01  # 1% max risk per trade (prop firm conservative)
-    # MNQ contract specs: $2 per point (vs NQ $20 per point)
-    tick_value: float = 2.0  # MNQ tick value in dollars
+    # NQ contract specs: $20 per point (MNQ is $2 per point, 1/10th size)
+    # Using NQ but scaling contract sizes by 0.1 to match MNQ exposure
+    tick_value: float = 20.0  # NQ tick value in dollars
 
     # Time filters (Prop Firm Trading Hours)
     start_time: str = "09:30"  # Market open (ET)

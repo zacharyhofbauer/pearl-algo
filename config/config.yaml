@@ -3,7 +3,7 @@
 # Optimized for intraday swings and quick scalps
 
 # Trading Symbol
-symbol: "MNQ"  # Mini E-mini NASDAQ-100 futures (1/10th size of NQ)
+symbol: "NQ"  # E-mini NASDAQ-100 futures (using NQ but scaling contract sizes to match MNQ)
 
 # Timeframe
 timeframe: "1m"  # 1-minute bars for intraday scalping/swings
@@ -35,8 +35,8 @@ risk:
   max_drawdown: 0.10  # 10% account drawdown limit (prop firm typical)
   stop_loss_atr_multiplier: 1.5  # Tighter stops for scalping (was 2.0)
   take_profit_risk_reward: 1.5  # 1.5:1 R/R for quick scalps (was 2.0)
-  min_position_size: 5  # Minimum contracts per trade
-  max_position_size: 15  # Maximum contracts per trade (5-15 range for prop firms)
+  min_position_size: 1  # Minimum contracts per trade (NQ = 10x MNQ, so 1 NQ = 10 MNQ)
+  max_position_size: 2  # Maximum contracts per trade (2 NQ = 20 MNQ equivalent)
 
 # Logging
 logging:
@@ -89,20 +89,23 @@ performance:
   default_lookback_days: 7
 
 # Prop Firm Trading Assumptions
-# These values are optimized for prop firm style trading with MNQ futures
+# Using NQ but scaling contract sizes to match MNQ equivalent exposure
 prop_firm:
-  # MNQ (Mini NQ) is 1/10th size of NQ
-  # MNQ tick value: $2 per point
+  # NQ (E-mini) is 10x size of MNQ
   # NQ tick value: $20 per point
-  mnq_tick_value: 2.0  # $2 per point for MNQ
+  # MNQ tick value: $2 per point (1/10th of NQ)
+  # We use NQ but trade 1/10th the contracts to match MNQ exposure
   nq_tick_value: 20.0  # $20 per point for NQ
+  mnq_tick_value: 2.0  # $2 per point for MNQ (for reference)
+  contract_size_multiplier: 0.1  # Divide NQ contracts by 10 to get MNQ-equivalent exposure
   
-  # Position sizing range for prop firms
+  # Position sizing range for prop firms (scaled for NQ)
   # Typical prop firm accounts: $25k-$100k
-  # MNQ allows better position sizing (5-15 contracts vs 1-3 for NQ)
-  min_contracts: 5
-  max_contracts: 15
-  default_contracts: 10
+  # 1 NQ contract = 10 MNQ contracts in exposure
+  # So 1-2 NQ contracts = 10-20 MNQ equivalent
+  min_contracts: 1  # 1 NQ = 10 MNQ equivalent
+  max_contracts: 2  # 2 NQ = 20 MNQ equivalent
+  default_contracts: 1  # 1 NQ = 10 MNQ equivalent
   
   # Risk management assumptions
   # Conservative prop firm approach: 1% max risk per trade, 10% max drawdown

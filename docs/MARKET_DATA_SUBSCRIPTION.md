@@ -333,3 +333,4 @@ If you subscribe but still get Error 354:
 **Subscription Required:** CME Real-Time (NP,L1) - $1.55/month (waived if $20+ commissions)  
 **Status:** Code ready - just needs subscription activation  
 **Confirmation:** Subscription explicitly includes NQ contracts (ES, NQ, HE)
+

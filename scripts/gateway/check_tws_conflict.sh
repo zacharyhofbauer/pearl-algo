@@ -72,3 +72,4 @@ if [ -f "logs/nq_agent.log" ]; then
 fi
 
 echo ""
+

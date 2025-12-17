@@ -100,3 +100,4 @@ def parse_utc_timestamp(timestamp: str) -> datetime:
     # Handle "Z" suffix (replace with "+00:00" for fromisoformat)
     normalized = timestamp.replace("Z", "+00:00")
     return datetime.fromisoformat(normalized)
+

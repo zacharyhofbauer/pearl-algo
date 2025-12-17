@@ -264,9 +264,12 @@ class NQScanner:
             order_flow_data = self.order_flow.analyze_order_flow(df)
             logger.debug(f"Order Flow (approximated): {order_flow_data.get('recent_trend')} (net: {order_flow_data.get('net_pressure', 0):.2f})")
 
-        # Check volume threshold (lower for MNQ scalping)
+        # Check volume threshold
         min_volume = self.config.min_volume
-        if self.config.symbol == "MNQ":
+        if self.config.symbol == "NQ":
+            # NQ has good liquidity, standard threshold
+            min_volume = max(min_volume, 100)
+        elif self.config.symbol == "MNQ":
             # MNQ typically has higher volume, but we want to ensure liquidity
             min_volume = max(min_volume, 500)  # Ensure minimum liquidity
 
@@ -275,8 +278,8 @@ class NQScanner:
 
         # Check volatility threshold (slightly lower for scalping opportunities)
         volatility_threshold = self.config.volatility_threshold
-        if self.config.symbol == "MNQ":
-            # Allow slightly lower volatility for scalping setups
+        if self.config.symbol in ["NQ", "MNQ"]:
+            # Allow slightly lower volatility for scalping setups (works for both NQ and MNQ)
             volatility_threshold = volatility_threshold * 0.8
 
         if latest.get("atr", 0) / latest["close"] < volatility_threshold:

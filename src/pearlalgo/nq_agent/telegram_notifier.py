@@ -106,7 +106,7 @@ class NQAgentTelegramNotifier:
         Returns:
             Formatted message string
         """
-        symbol = signal.get("symbol", "MNQ")  # Default to MNQ for prop firm trading
+        symbol = signal.get("symbol", "NQ")  # Default to NQ (using NQ with scaled contract sizes)
         signal_type = signal.get("type", "unknown").replace("_", " ").title()
         direction = signal.get("direction", "long").upper()
         entry_price = signal.get("entry_price", 0)
@@ -377,7 +377,7 @@ class NQAgentTelegramNotifier:
         Returns:
             Formatted message string
         """
-        symbol = signal.get("symbol", "MNQ")  # Default to MNQ for prop firm trading
+        symbol = signal.get("symbol", "NQ")  # Default to NQ (using NQ with scaled contract sizes)
         signal_type = signal.get("type", "unknown")
         direction = signal.get("direction", "").upper()
         entry_price = signal.get("entry_price", 0)
@@ -598,7 +598,7 @@ class NQAgentTelegramNotifier:
             # Current price and time
             latest_price = status.get('latest_price')
             current_time = status.get('current_time')
-            symbol = status.get('symbol', 'MNQ')
+            symbol = status.get('symbol', 'NQ')
             
             if latest_price:
                 message += f"💰 *Price:* ${latest_price:,.2f} ({symbol})\n"
@@ -797,7 +797,7 @@ class NQAgentTelegramNotifier:
                     time_str = str(current_time)
             
             latest_price = config.get('latest_price')
-            symbol = config.get('symbol', 'MNQ')
+            symbol = config.get('symbol', 'NQ')
             
             if latest_price:
                 message += f"💰 *Price:* ${latest_price:,.2f} ({symbol})\n"

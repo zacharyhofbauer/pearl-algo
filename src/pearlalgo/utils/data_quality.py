@@ -170,3 +170,4 @@ class DataQualityChecker:
             "buffer_size": buffer_check,
             "issues": issues,
         }
+

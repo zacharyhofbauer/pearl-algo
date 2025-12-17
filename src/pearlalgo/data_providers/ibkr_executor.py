@@ -139,9 +139,13 @@ class GetLatestBarTask(Task):
     symbol: str
     is_futures: bool = False
 
-    def execute(self, ib: IB) -> Optional[Dict]:
+    def execute(self, ib: IB, executor=None) -> Optional[Dict]:
         """Fetch latest bar data using Level 1 market data only."""
         logger.info(f"🔵 GetLatestBarTask.execute() STARTED for {self.symbol}")
+        
+        # Store executor reference for error checking
+        if executor:
+            ib._executor = executor
         
         # Create contract with detailed logging
         logger.info(f"📋 Step 1: Creating contract for {self.symbol}")
@@ -155,11 +159,40 @@ class GetLatestBarTask(Task):
                 contracts = ib.reqContractDetails(contract)
                 logger.info(f"   Received {len(contracts) if contracts else 0} contract(s) from IBKR")
                 if contracts:
-                    # Select the front month (nearest expiration)
-                    contract_details = min(contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
+                    # Sort contracts by expiration date
+                    sorted_contracts = sorted(contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
+                    
+                    # Check if front month is expiring soon (within 3 days)
+                    from datetime import datetime, timedelta
+                    front_month = sorted_contracts[0]
+                    expiration_str = front_month.contract.lastTradeDateOrContractMonth
+                    try:
+                        # Parse expiration date (format: YYYYMMDD)
+                        expiration_date = datetime.strptime(expiration_str, "%Y%m%d")
+                        days_until_expiration = (expiration_date - datetime.now()).days
+                        
+                        if days_until_expiration <= 3:
+                            logger.warning(
+                                f"⚠️  Front month contract expires in {days_until_expiration} days ({expiration_str})!\n"
+                                f"   This may cause live data issues. Trying next month contract instead..."
+                            )
+                            # Use next month contract if available
+                            if len(sorted_contracts) > 1:
+                                contract_details = sorted_contracts[1]
+                                logger.info(f"✅ Using next month contract instead (expires {contract_details.contract.lastTradeDateOrContractMonth})")
+                            else:
+                                contract_details = front_month
+                                logger.warning(f"⚠️  Only one contract available, using front month despite expiration")
+                        else:
+                            contract_details = front_month
+                            logger.info(f"✅ Front month contract expires in {days_until_expiration} days - OK")
+                    except Exception as date_e:
+                        logger.warning(f"⚠️  Could not parse expiration date '{expiration_str}': {date_e}, using front month")
+                        contract_details = front_month
+                    
                     contract = contract_details.contract
                     logger.info(
-                        f"✅ Selected front month contract:\n"
+                        f"✅ Selected contract:\n"
                         f"   - Local Symbol: {contract.localSymbol}\n"
                         f"   - ConId: {contract.conId}\n"
                         f"   - Expiration: {contract.lastTradeDateOrContractMonth}\n"
@@ -251,27 +284,49 @@ class GetLatestBarTask(Task):
                 logger.warning(f"   ⚠️  Could not set market data type (may already be set): {md_type_e}")
             
             # Request Level 1 market data
-            # Parameters: contract, genericTickList="", snapshot=False, regulatorySnapshot=False
-            logger.info(f"   Calling ib.reqMktData(contract, '', False, False)...")
+            # Try snapshot first to get initial price, then switch to streaming if needed
+            # Parameters: contract, genericTickList="", snapshot=True/False, regulatorySnapshot=False
+            logger.info(f"   Attempting snapshot request first to get initial price...")
+            logger.info(f"   Calling ib.reqMktData(contract, '', True, False) [snapshot=True]...")
             logger.info(f"   - genericTickList: '' (empty = default ticks)")
-            logger.info(f"   - snapshot: False (streaming)")
+            logger.info(f"   - snapshot: True (one-time snapshot to get initial price)")
             logger.info(f"   - regulatorySnapshot: False")
             
-            ticker = ib.reqMktData(contract, "", False, False)
+            # Try snapshot first (one-time request, might work better for initial price)
+            ticker = ib.reqMktData(contract, "", True, False)
+            ticker_req_id = ticker.reqId if hasattr(ticker, 'reqId') else None
             logger.info(f"   ✅ reqMktData() call completed, ticker object created")
             logger.info(f"   Ticker object type: {type(ticker)}")
-            logger.info(f"   Ticker ID: {ticker.reqId if hasattr(ticker, 'reqId') else 'N/A'}")
+            logger.info(f"   Ticker ID: {ticker_req_id}")
             
-            # Wait for data/errors with detailed progress logging
-            logger.info(f"   Waiting for market data to arrive...")
-            max_wait = 3.0
-            check_interval = 0.5
+            # Clear any previous errors for this reqId
+            if ticker_req_id is not None:
+                executor = getattr(ib, '_executor', None)
+                if executor and hasattr(executor, '_market_data_errors'):
+                    with executor._error_lock:
+                        executor._market_data_errors.pop(ticker_req_id, None)
+            
+            # Wait for data/errors using event-based approach
+            logger.info(f"   Waiting for market data to arrive (snapshot request, should be faster)...")
+            max_wait = 15.0  # Increased wait time for snapshot requests
+            check_interval = 0.5  # Check every 0.5 seconds
             waited = 0.0
             
+            # For snapshot requests, we need to wait for the snapshot to complete
+            # Use ib.waitForUpdate() to properly wait for ticker events
+            # This is more reliable than time.sleep() polling
             while waited < max_wait:
-                time.sleep(check_interval)
-                waited += check_interval
-                logger.info(f"   [{waited:.1f}s] Checking for data/errors...")
+                try:
+                    # Wait for update with timeout (raises exception on timeout, which is expected)
+                    ib.waitForUpdate(timeout=check_interval)
+                    waited += check_interval
+                    logger.info(f"   [{waited:.1f}s] Event received, checking ticker state...")
+                except Exception:
+                    # Timeout exception is expected when no update arrives - continue checking
+                    waited += check_interval
+                    # Only log every 2 seconds to reduce spam
+                    if int(waited * 2) % 4 == 0:
+                        logger.info(f"   [{waited:.1f}s] Waiting for snapshot data...")
                 
                 # Check ticker attributes
                 if ticker:
@@ -309,14 +364,53 @@ class GetLatestBarTask(Task):
                         if not is_market_open:
                             logger.info(f"   Market is CLOSED ({market_status}) - NaN values are expected during market closure")
                         else:
-                            logger.warning(f"   Market is OPEN but ticker has NaN - may indicate subscription issue or data not yet available")
+                            # Only log this warning every 2 seconds to reduce spam
+                            if int(waited * 2) % 4 == 0:  # Every 2 seconds
+                                logger.warning(
+                                    f"   Market is OPEN but ticker has NaN after {waited:.1f}s - may indicate:\n"
+                                    f"   - Missing 'Market Data API Acknowledgement' in Client Portal (MOST LIKELY)\n"
+                                    f"   - Subscription not active/paid for API access\n"
+                                    f"   - Data not yet available (waiting for first tick)\n"
+                                    f"   Continuing to wait for data/errors..."
+                                )
                 
-                # Check for errors in modelOption (IBKR error callback)
-                if hasattr(ticker, 'modelOption') and ticker.modelOption:
+                # Check for Error 354 from error callback (most reliable)
+                error_354_detected = False
+                error_msg = None
+                executor = getattr(ib, '_executor', None)
+                if ticker_req_id is not None and executor and hasattr(executor, '_market_data_errors'):
+                    with executor._error_lock:
+                        error_info = executor._market_data_errors.get(ticker_req_id)
+                        if error_info:
+                            error_code = error_info.get('code', 0)
+                            error_msg = error_info.get('message', '')
+                            if error_code == 354 or "354" in str(error_msg):
+                                error_354_detected = True
+                                logger.error(f"   ❌ ERROR 354 DETECTED via error callback (reqId={ticker_req_id})!")
+                
+                # Check modelOption for errors (backup method)
+                if not error_354_detected and hasattr(ticker, 'modelOption') and ticker.modelOption:
                     error_msg = str(ticker.modelOption)
-                    logger.warning(f"   ⚠️  Ticker modelOption contains: {error_msg}")
+                    logger.info(f"   Ticker modelOption: {error_msg}")
                     if "354" in error_msg or "subscription" in error_msg.lower() or "not subscribed" in error_msg.lower():
-                        logger.error(f"   ❌ ERROR 354 DETECTED in modelOption!")
+                        error_354_detected = True
+                
+                # Check for other error indicators in ticker
+                if not error_354_detected and hasattr(ticker, 'errorMessage') and ticker.errorMessage:
+                    error_msg = str(ticker.errorMessage)
+                    logger.warning(f"   ⚠️  Ticker errorMessage: {error_msg}")
+                    if "354" in error_msg or "subscription" in error_msg.lower():
+                        error_354_detected = True
+                
+                # Check marketDataType - if it's not LIVE (1), that's a problem
+                if hasattr(ticker, 'marketDataType'):
+                    mkt_data_type = ticker.marketDataType
+                    logger.info(f"   Market data type: {mkt_data_type} (1=LIVE, 2=FROZEN, 3=DELAYED, 4=DELAYED_FROZEN)")
+                    if mkt_data_type != 1:
+                        logger.warning(f"   ⚠️  Market data type is {mkt_data_type}, not LIVE (1). This may indicate delayed data or subscription issue.")
+                
+                if error_354_detected:
+                        logger.error(f"   ❌ ERROR 354 DETECTED!")
                         if not is_market_open:
                             logger.warning(
                                 f"   Market is CLOSED ({market_status})\n"
@@ -327,17 +421,22 @@ class GetLatestBarTask(Task):
                             logger.error(
                                 f"   ❌ ERROR 354 - Market is OPEN but subscription not working!\n"
                                 f"   \n"
-                                f"   📋 Troubleshooting steps:\n"
-                                f"   1. Verify 'CME Real-Time (NP,L1)' subscription is ACTIVE and PAID\n"
-                                f"   2. Ensure 'Market Data API Acknowledgement' is signed in Client Portal\n"
-                                f"      (Settings → Market Data Subscriptions → Market Data API Acknowledgement)\n"
-                                f"   3. Verify 'API User Activity Certification' is completed (for futures)\n"
-                                f"   4. Check if subscription is enabled for API access (not just TWS)\n"
-                                f"   5. Wait 1-2 minutes after subscribing/acknowledging\n"
-                                f"   6. Restart Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh && ./scripts/gateway/start_ibgateway_ibc.sh\n"
-                                f"   7. Restart service after Gateway restart\n"
+                                f"   📋 CRITICAL: This usually means missing API acknowledgment!\n"
                                 f"   \n"
-                                f"   Note: IBKR API works with free trial accounts - no minimum balance required.\n"
+                                f"   Steps to fix (MUST DO ALL):\n"
+                                f"   1. Log into IBKR Client Portal: https://www.interactivebrokers.com/portal/\n"
+                                f"   2. Go to: Settings → Account Settings → Market Data Subscriptions\n"
+                                f"   3. Find 'CME Real-Time (NP,L1)' in your subscriptions\n"
+                                f"   4. Look for 'Market Data API Acknowledgement' section\n"
+                                f"   5. Click 'Read and Acknowledge' or 'Sign' button\n"
+                                f"   6. Also check: Settings → Trading Permissions → API User Activity Certification\n"
+                                f"   7. Complete any required certifications for futures/API access\n"
+                                f"   8. Wait 2-3 minutes for changes to propagate\n"
+                                f"   9. Restart Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh && sleep 5 && ./scripts/gateway/start_ibgateway_ibc.sh\n"
+                                f"   10. Wait 30 seconds for Gateway to fully connect\n"
+                                f"   11. Restart service: ./scripts/lifecycle/start_nq_agent_service.sh\n"
+                                f"   \n"
+                                f"   Note: Subscription must be ACTIVE, PAID, and ACKNOWLEDGED for API access.\n"
                                 f"   Will use historical data fallback."
                             )
                         try:
@@ -412,23 +511,33 @@ class GetLatestBarTask(Task):
                         "weighted_mid": None,
                     })
                     
+                    # Note: For snapshot requests, we don't need to cancel (it's one-time)
+                    # But we'll try anyway to be safe
                     try:
                         ib.cancelMktData(contract)
                         logger.info(f"   ✅ Cancelled market data request")
                     except Exception as cancel_e:
-                        logger.warning(f"   ⚠️  Error cancelling market data: {cancel_e}")
+                        logger.debug(f"   Note: Error cancelling snapshot (may already be complete): {cancel_e}")
                     
                     logger.info(f"✅✅✅ SUCCESS: Retrieved Level 1 LIVE data for {self.symbol}: ${last_price:.2f} (bid: ${bid_val:.2f if bid_val else 'N/A'}, ask: ${ask_val:.2f if ask_val else 'N/A'})")
                     return result
                 else:
-                    # No valid price (all NaN or None)
+                    # No valid price (all NaN or None) - snapshot request failed
                     last_val = ticker.last if hasattr(ticker, 'last') else None
                     close_val = ticker.close if hasattr(ticker, 'close') else None
-                    logger.warning(
-                        f"   ⚠️  Ticker returned but all prices are NaN/None:\n"
+                    logger.error(
+                        f"   ❌ Snapshot request returned NaN/None after {waited:.1f}s:\n"
                         f"   - last: {last_val} ({'NaN' if last_val is not None and math.isnan(float(last_val)) else 'None' if last_val is None else 'valid'})\n"
                         f"   - close: {close_val} ({'NaN' if close_val is not None and math.isnan(float(close_val)) else 'None' if close_val is None else 'valid'})\n"
-                        f"   This indicates no market data available (market closed or subscription issue)."
+                        f"   - marketDataType: {ticker.marketDataType if hasattr(ticker, 'marketDataType') else 'N/A'} (1=LIVE)\n"
+                        f"   \n"
+                        f"   Possible causes:\n"
+                        f"   1. Market is closed (check CME hours: Sun 6PM ET - Fri 5PM ET)\n"
+                        f"   2. Contract expiring soon (check expiration date)\n"
+                        f"   3. Subscription delay (acknowledgment may need time to propagate)\n"
+                        f"   4. API connection issue (try restarting Gateway)\n"
+                        f"   \n"
+                        f"   Note: Your acknowledgment is signed, so this is likely a timing or market hours issue."
                     )
             else:
                 logger.warning(
@@ -445,7 +554,7 @@ class GetLatestBarTask(Task):
                         ib.cancelMktData(contract)
                         logger.info(f"   ✅ Cancelled market data request")
                     except Exception as cancel_e:
-                        logger.warning(f"   ⚠️  Error cancelling market data: {cancel_e}")
+                        logger.debug(f"   Note: Error cancelling snapshot (may already be complete): {cancel_e}")
                     ticker = None
                     
         except Exception as e:
@@ -901,6 +1010,10 @@ class IBKRExecutor:
         # Connection state
         self._connection_lock = threading.Lock()
         self._reconnect_attempts = 0
+        
+        # Error tracking for market data requests
+        self._market_data_errors: Dict[int, Dict[str, Any]] = {}  # reqId -> error info
+        self._error_lock = threading.Lock()
 
         logger.info(
             f"IBKRExecutor initialized: host={host}, port={port}, client_id={client_id}"
@@ -1015,8 +1128,14 @@ class IBKRExecutor:
                     # Rate limiting
                     self._rate_limit()
 
-                    # Execute task
-                    result = task.execute(self.ib)
+                    # Execute task (pass executor reference only for GetLatestBarTask)
+                    # Check by class name since isinstance requires import
+                    task_class_name = task.__class__.__name__
+                    if task_class_name == "GetLatestBarTask":
+                        # GetLatestBarTask needs executor for error tracking
+                        result = task.execute(self.ib, executor=self)
+                    else:
+                        result = task.execute(self.ib)
 
                     # Set result in Future
                     with self._results_lock:
@@ -1067,6 +1186,27 @@ class IBKRExecutor:
 
             if self.ib is None:
                 self.ib = IB()
+                
+                # Register error handler to catch Error 354 and other market data errors
+                def on_error(reqId, errorCode, errorString, contract):
+                    """Handle IBKR error callbacks."""
+                    error_str = str(errorString).lower()
+                    if errorCode == 354 or "not subscribed" in error_str or "subscription" in error_str:
+                        with self._error_lock:
+                            self._market_data_errors[reqId] = {
+                                "code": errorCode,
+                                "message": errorString,
+                                "contract": contract,
+                                "timestamp": datetime.now(timezone.utc)
+                            }
+                        logger.error(
+                            f"❌ IBKR Error {errorCode} (reqId={reqId}): {errorString}\n"
+                            f"   This indicates market data subscription issue (Error 354)."
+                        )
+                    elif errorCode != 0:  # 0 is informational, not an error
+                        logger.warning(f"IBKR Error {errorCode} (reqId={reqId}): {errorString}")
+                
+                self.ib.errorEvent += on_error
 
             # Try to connect with retries
             while not self.ib.isConnected():
@@ -1081,6 +1221,31 @@ class IBKRExecutor:
                     self._connected = True
                     self._reconnect_attempts = 0
                     logger.info("Connected to IB Gateway successfully")
+                    
+                    # Verify account type (live vs paper)
+                    try:
+                        # Get account list to verify connection
+                        accounts = self.ib.accountValues()
+                        if accounts:
+                            # Check if this is a paper trading account
+                            # Paper accounts typically have "DU" prefix or contain "paper" in account ID
+                            account_ids = [acc.account for acc in accounts if hasattr(acc, 'account')]
+                            if account_ids:
+                                account_id = account_ids[0]
+                                is_paper = "DU" in account_id.upper() or "PAPER" in account_id.upper()
+                                if is_paper:
+                                    logger.warning(
+                                        f"⚠️  WARNING: Connected to PAPER TRADING account ({account_id})\n"
+                                        f"   To use LIVE trading, set TradingMode=live in ibkr/ibc/config-auto.ini\n"
+                                        f"   Then restart Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh && ./scripts/gateway/start_ibgateway_ibc.sh"
+                                    )
+                                else:
+                                    logger.info(f"✅ Connected to LIVE account: {account_id}")
+                        else:
+                            logger.warning("⚠️  Could not verify account type - no account values returned")
+                    except Exception as acc_e:
+                        logger.warning(f"⚠️  Could not verify account type: {acc_e}")
+                    
                     return
                 except Exception as e:
                     self._connected = False
