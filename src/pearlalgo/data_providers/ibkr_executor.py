@@ -594,11 +594,24 @@ class GetLatestBarTask(Task):
             # Try longer durations first which are more reliable
             # Note: IBKR doesn't support "H" (hours), so we use "1 D" (1 day) for recent data
             bars = None
-            duration_strategies = [
-                ("1 D", True),   # 1 day with RTH - most reliable for recent data
-                ("1 D", False), # 1 day without RTH - if market is closed
-                ("1 W", False), # 1 week without RTH - final fallback
-            ]
+            used_eth = None  # Track whether ETH (False) or RTH (True) was used
+            # For futures (NQ, etc.), prioritize ETH (Extended Trading Hours) to get all sessions:
+            # - Asia session (evening US time)
+            # - London session (early morning US time)  
+            # - US session (regular trading hours)
+            # For stocks, prioritize RTH (Regular Trading Hours) first
+            if self.is_futures:
+                duration_strategies = [
+                    ("1 D", False), # 1 day with ETH (Extended Trading Hours) - includes all sessions (Asia, London, US)
+                    ("1 D", True),  # 1 day with RTH - fallback if ETH fails
+                    ("1 W", False), # 1 week with ETH - final fallback
+                ]
+            else:
+                duration_strategies = [
+                    ("1 D", True),   # 1 day with RTH - most reliable for recent data
+                    ("1 D", False), # 1 day without RTH - if market is closed
+                    ("1 W", False), # 1 week without RTH - final fallback
+                ]
             
             for duration_str, use_rth in duration_strategies:
                 try:
@@ -615,7 +628,8 @@ class GetLatestBarTask(Task):
                     )
                     logger.info(f"   ✅ Historical data request completed: received {len(bars) if bars else 0} bars")
                     if bars and len(bars) > 0:
-                        logger.info(f"   ✅ SUCCESS: Retrieved {len(bars)} historical bars with {duration_str}")
+                        used_eth = not use_rth  # Track whether ETH (False) or RTH (True) was used
+                        logger.info(f"   ✅ SUCCESS: Retrieved {len(bars)} historical bars with {duration_str} (ETH={'Yes' if used_eth else 'No'})")
                         break  # Success, exit the loop
                     else:
                         logger.warning(f"   ⚠️  No bars returned for {duration_str}, trying next strategy...")
@@ -697,6 +711,7 @@ class GetLatestBarTask(Task):
                     "bid": None,  # Not available from historical data
                     "ask": None,  # Not available from historical data
                     "_data_level": "historical",  # Metadata
+                    "_historical_eth": used_eth if used_eth is not None else False,  # Track if ETH was used (includes all sessions)
                 }
                 # Add empty order book structure for consistency
                 result.update({

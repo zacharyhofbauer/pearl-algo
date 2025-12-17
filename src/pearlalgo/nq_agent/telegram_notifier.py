@@ -540,8 +540,13 @@ class NQAgentTelegramNotifier:
                     message += f"\n*Market Data:*\n"
                     message += f"{data_emoji} {data_text}\n"
                 else:
+                    # Check if historical data is ETH (Extended Trading Hours) which includes all sessions
+                    is_eth = latest_bar.get('_historical_eth', False)
                     data_emoji = "📉"
-                    data_text = "Historical (Delayed)"
+                    if is_eth:
+                        data_text = "Historical (ETH - All Sessions)"
+                    else:
+                        data_text = "Historical (Delayed)"
                     message += f"\n*Market Data:*\n"
                     message += f"{data_emoji} {data_text}\n"
 
@@ -653,7 +658,12 @@ class NQAgentTelegramNotifier:
                 elif data_level == 'level1':
                     message += f"\n*Data:* 📈 Level 1\n"
                 elif data_level == 'historical':
-                    message += f"\n*Data:* 📉 Historical\n"
+                    # Check if historical data is ETH (Extended Trading Hours) which includes all sessions
+                    is_eth = latest_bar.get('_historical_eth', False)
+                    if is_eth:
+                        message += f"\n*Data:* 📉 Historical (ETH - All Sessions)\n"
+                    else:
+                        message += f"\n*Data:* 📉 Historical\n"
 
             # Activity (mobile-friendly, one per line)
             cycles = status.get('cycle_count', 0)
