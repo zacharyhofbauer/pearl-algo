@@ -57,8 +57,10 @@ class PerformanceTracker:
 
         # Load performance configuration
         service_config = load_service_config()
+        data_settings = service_config.get("data", {})
         performance_settings = service_config.get("performance", {})
-        self._max_records = performance_settings.get("max_records", 1000)
+        # Use data.performance_history_limit if available, fallback to performance.max_records for backward compatibility
+        self._max_records = data_settings.get("performance_history_limit", performance_settings.get("max_records", 1000))
         self._default_lookback_days = performance_settings.get("default_lookback_days", 7)
 
         logger.info(f"PerformanceTracker initialized: state_dir={self.state_dir}")

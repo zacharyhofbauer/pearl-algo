@@ -51,7 +51,9 @@ data_provider: "ibkr"  # Use IBKR for market data
 service:
   status_update_interval: 1800  # 30 minutes in seconds
   heartbeat_interval: 3600  # 1 hour in seconds
-  state_save_interval: 10  # cycles
+  state_save_interval: 10  # Save state every N cycles
+  connection_failure_alert_interval: 600  # 10 minutes in seconds
+  data_quality_alert_interval: 300  # 5 minutes in seconds
 
 # Circuit breaker
 circuit_breaker:
@@ -66,10 +68,13 @@ alerts:
 
 # Data fetching
 data:
-  buffer_size: 100
-  historical_hours: 2
-  multitimeframe_5m_hours: 4
-  multitimeframe_15m_hours: 12
+  buffer_size: 100  # Main buffer (1m bars)
+  buffer_size_5m: 50  # 5m timeframe buffer
+  buffer_size_15m: 50  # 15m timeframe buffer
+  historical_hours: 2  # Historical data fetch window
+  multitimeframe_5m_hours: 4  # 5m MTF window
+  multitimeframe_15m_hours: 12  # 15m MTF window
+  performance_history_limit: 1000  # Max performance records
   stale_data_threshold_minutes: 10  # Alert if data is older than this
   connection_timeout_minutes: 30  # Consider connection lost after this time without data
   use_level2_data: false  # Disabled - you have Level 1 subscription (CME Real-Time NP,L1), not Level 2

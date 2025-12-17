@@ -1,5 +1,9 @@
 #!/bin/bash
-# Start IB Gateway with IBC for read-only data access
+# ============================================================================
+# Category: Gateway
+# Purpose: Start IBKR Gateway with IBC (Interactive Brokers Controller) - Preferred method
+# Usage: ./scripts/gateway/start_ibgateway_ibc.sh
+# ============================================================================
 
 echo "=== Starting IB Gateway with IBC (Read-Only Mode) ==="
 echo ""

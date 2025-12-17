@@ -21,6 +21,7 @@ except ImportError:
 
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import get_market_hours
+from pearlalgo.utils.paths import parse_utc_timestamp
 from pearlalgo.utils.retry import async_retry_with_backoff
 from pearlalgo.utils.telegram_alerts import (
     TelegramAlerts,
@@ -613,7 +614,7 @@ class NQAgentTelegramNotifier:
                     from datetime import datetime, timezone as tz
                     import pytz
                     if isinstance(current_time, str):
-                        current_time = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+                        current_time = parse_utc_timestamp(current_time)
                     if current_time.tzinfo is None:
                         current_time = current_time.replace(tzinfo=tz.utc)
                     et_tz = pytz.timezone('US/Eastern')

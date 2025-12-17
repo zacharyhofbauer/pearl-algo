@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
 
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.data_providers.base import DataProvider
@@ -70,7 +71,6 @@ class NQAgentService:
         service_config = load_service_config()
         service_settings = service_config.get("service", {})
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
-        alert_settings = service_config.get("alerts", {})
         data_settings = service_config.get("data", {})
 
         self.running = False
@@ -85,6 +85,8 @@ class NQAgentService:
         self.last_heartbeat: Optional[datetime] = None
         self.heartbeat_interval = service_settings.get("heartbeat_interval", 3600)
         self.state_save_interval = service_settings.get("state_save_interval", 10)
+        self.connection_failure_alert_interval = service_settings.get("connection_failure_alert_interval", 600)
+        self.data_quality_alert_interval = service_settings.get("data_quality_alert_interval", 300)
         self.consecutive_errors = 0
         self.max_consecutive_errors = circuit_breaker_settings.get("max_consecutive_errors", 10)
         self.data_fetch_errors = 0
@@ -92,10 +94,8 @@ class NQAgentService:
         self.connection_failures = 0
         self.max_connection_failures = circuit_breaker_settings.get("max_connection_failures", 10)
         self.last_connection_failure_alert: Optional[datetime] = None
-        self.connection_failure_alert_interval = alert_settings.get("connection_failure_interval", 600)
         self.last_successful_cycle: Optional[datetime] = None
         self.last_data_quality_alert: Optional[datetime] = None
-        self.data_quality_alert_interval = alert_settings.get("data_quality_interval", 300)
         self._last_stale_data_alert_type: Optional[str] = None  # Track last alert type to prevent duplicates
         self.stale_data_threshold_minutes = data_settings.get("stale_data_threshold_minutes", 10)
         self.connection_timeout_minutes = data_settings.get("connection_timeout_minutes", 30)
@@ -133,7 +133,7 @@ class NQAgentService:
                 "stop_loss_atr_multiplier": self.config.stop_loss_atr_multiplier,
                 "take_profit_risk_reward": self.config.take_profit_risk_reward,
                 "max_risk_per_trade": self.config.max_risk_per_trade,
-                "current_time": datetime.now(timezone.utc),
+                "current_time": get_utc_timestamp(),
             }
             
             # Try to get latest price for startup message (non-blocking, timeout quickly)
@@ -315,7 +315,7 @@ class NQAgentService:
                     latest_bar_time = market_data["latest_bar"].get("timestamp")
                     if latest_bar_time:
                         if isinstance(latest_bar_time, str):
-                            latest_bar_time = datetime.fromisoformat(latest_bar_time.replace("Z", "+00:00"))
+                            latest_bar_time = parse_utc_timestamp(latest_bar_time)
                         age_seconds = (datetime.now(timezone.utc) - latest_bar_time.replace(tzinfo=timezone.utc)).total_seconds()
                         stale_threshold_seconds = self.stale_data_threshold_minutes * 60
                         data_fresh = age_seconds < stale_threshold_seconds
@@ -517,7 +517,7 @@ class NQAgentService:
             "performance": performance,
             "data_source_health": data_source_health,
             "last_successful_cycle": (
-                self.last_successful_cycle.isoformat() if self.last_successful_cycle else None
+                get_utc_timestamp() if self.last_successful_cycle else None
             ),
             "config": {
                 "symbol": self.config.symbol,

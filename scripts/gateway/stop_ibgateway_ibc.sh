@@ -1,5 +1,9 @@
 #!/bin/bash
-# Stop IB Gateway started with IBC
+# ============================================================================
+# Category: Gateway
+# Purpose: Stop IBKR Gateway gracefully (IBC method)
+# Usage: ./scripts/gateway/stop_ibgateway_ibc.sh
+# ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"

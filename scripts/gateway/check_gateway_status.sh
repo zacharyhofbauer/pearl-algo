@@ -1,5 +1,9 @@
 #!/bin/bash
-# Check IBKR Gateway status
+# ============================================================================
+# Category: Gateway
+# Purpose: Check IBKR Gateway status and connection health
+# Usage: ./scripts/gateway/check_gateway_status.sh
+# ============================================================================
 
 echo "=== IBKR Gateway Status ==="
 echo ""

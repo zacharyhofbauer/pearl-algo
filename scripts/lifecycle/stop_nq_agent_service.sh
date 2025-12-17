@@ -1,4 +1,9 @@
 #!/bin/bash
+# ============================================================================
+# Category: Lifecycle
+# Purpose: Stop NQ Agent Service gracefully
+# Usage: ./scripts/lifecycle/stop_nq_agent_service.sh
+# ============================================================================
 # Stop NQ Agent Service
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

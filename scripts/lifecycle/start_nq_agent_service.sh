@@ -1,5 +1,9 @@
 #!/bin/bash
-# Start NQ Agent Service in Background
+# ============================================================================
+# Category: Lifecycle
+# Purpose: Start NQ Agent Service (production-ready with PID management)
+# Usage: ./scripts/lifecycle/start_nq_agent_service.sh [--background]
+# ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"

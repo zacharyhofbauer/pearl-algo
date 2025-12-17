@@ -1,5 +1,9 @@
 #!/bin/bash
-# Run All Tests with Proper Environment Setup
+# ============================================================================
+# Category: Testing
+# Purpose: Run all unit tests with proper environment setup
+# Usage: ./scripts/testing/run_tests.sh
+# ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"

@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# ============================================================================
+# Category: Testing
+# Purpose: Unified test runner for NQ Agent (combines multiple test scripts)
+# Usage: python3 scripts/testing/test_all.py [mode]
+# Modes: all (default), telegram, signals, service
+# ============================================================================
 """
 Unified Test Runner for NQ Agent
 

@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.paths import parse_utc_timestamp
 
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.data_providers.base import DataProvider
@@ -51,6 +52,8 @@ class NQAgentDataFetcher:
         # Buffer for historical data
         self._data_buffer: Optional[pd.DataFrame] = None
         self._buffer_size = data_settings.get("buffer_size", 100)
+        self._buffer_size_5m = data_settings.get("buffer_size_5m", 50)
+        self._buffer_size_15m = data_settings.get("buffer_size_15m", 50)
         self._historical_hours = data_settings.get("historical_hours", 2)
         self._multitimeframe_5m_hours = data_settings.get("multitimeframe_5m_hours", 4)
         self._multitimeframe_15m_hours = data_settings.get("multitimeframe_15m_hours", 12)
@@ -168,7 +171,7 @@ class NQAgentDataFetcher:
                         bar_timestamp = latest_bar.get("timestamp")
                         if bar_timestamp:
                             if isinstance(bar_timestamp, str):
-                                bar_timestamp = datetime.fromisoformat(bar_timestamp.replace("Z", "+00:00"))
+                                bar_timestamp = parse_utc_timestamp(bar_timestamp)
                             if isinstance(bar_timestamp, pd.Timestamp):
                                 bar_timestamp = bar_timestamp.to_pydatetime()
                             if bar_timestamp.tzinfo is None:
@@ -292,7 +295,7 @@ class NQAgentDataFetcher:
                 # Append latest bar to buffer
                 timestamp = latest_bar.get("timestamp")
                 if timestamp and isinstance(timestamp, str):
-                    timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    timestamp = parse_utc_timestamp(timestamp)
 
                 new_row = pd.DataFrame([{
                     "timestamp": timestamp or datetime.now(timezone.utc),
@@ -380,9 +383,9 @@ class NQAgentDataFetcher:
 
             # Update buffers
             if not df_5m.empty:
-                self._data_buffer_5m = df_5m.tail(50).reset_index(drop=True)
+                self._data_buffer_5m = df_5m.tail(self._buffer_size_5m).reset_index(drop=True)
             if not df_15m.empty:
-                self._data_buffer_15m = df_15m.tail(50).reset_index(drop=True)
+                self._data_buffer_15m = df_15m.tail(self._buffer_size_15m).reset_index(drop=True)
 
             return (
                 self._data_buffer_5m.copy() if self._data_buffer_5m is not None else pd.DataFrame(),

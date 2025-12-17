@@ -1,4 +1,9 @@
 #!/bin/bash
+# ============================================================================
+# Category: Lifecycle
+# Purpose: Check NQ Agent Service status and display information
+# Usage: ./scripts/lifecycle/check_nq_agent_status.sh
+# ============================================================================
 # Check NQ Agent Service Status
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
