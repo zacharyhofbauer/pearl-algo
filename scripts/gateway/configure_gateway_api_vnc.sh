@@ -69,3 +69,4 @@ echo "Close VNC when done:"
 echo "   vncserver -kill ${VNC_DISPLAY}"
 echo ""
 
+

@@ -60,3 +60,4 @@ echo "Check API port: ss -tuln | grep 4002"
 echo "View Gateway logs: tail -f ibkr/ibc/logs/ibc-*.txt"
 echo "Check Gateway process: ps aux | grep IBC.jar"
 
+

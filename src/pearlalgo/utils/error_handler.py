@@ -158,3 +158,4 @@ class ErrorHandler:
             extra={"notification_type": notification_type},
         )
 
+

@@ -127,3 +127,4 @@ class TestServiceRecovery:
         except Exception as e:
             pytest.fail(f"Service should handle errors gracefully: {e}")
 
+
