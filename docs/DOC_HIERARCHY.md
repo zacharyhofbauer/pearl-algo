@@ -14,6 +14,9 @@ All other documents must remain consistent with this summary.
 
 ## 2. Operational Guides
 
+- `CHEAT_SHEET.md`
+  - One-page PEARLalgo operational quick reference
+  - Daily startup flow, core scripts, Telegram expectations, fast troubleshooting
 - `NQ_AGENT_GUIDE.md`
   - How to start/stop/check the NQ Agent Service
   - Daily operations and monitoring
@@ -51,4 +54,3 @@ When adding or updating documentation:
 2. Either update the existing document for that category or add a clearly linked sub‑section.
 3. Avoid duplicating content across documents; prefer linking to the authoritative section.
 4. Ensure all paths and commands you mention exist and are listed in `PATH_TRUTH_TABLE.md`.
-

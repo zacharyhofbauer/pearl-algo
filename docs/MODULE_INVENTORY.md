@@ -106,6 +106,7 @@ Gateway / IBKR‑specific orchestration scripts (start/stop, 2FA workflow, conne
 
 ## Documentation under `docs/`
 
+- `CHEAT_SHEET.md` – PEARLalgo operational quick reference (primary cheat sheet)
 - `PROJECT_SUMMARY.md` – system architecture (single source of truth)
 - `NQ_AGENT_GUIDE.md` – operational guide for running and monitoring NQ Agent
 - `GATEWAY.md` – IBKR Gateway setup and troubleshooting
@@ -126,4 +127,3 @@ Gateway / IBKR‑specific orchestration scripts (start/stop, 2FA workflow, conne
 - **Docs**: architecture, operational, testing, and reference guides as listed above.
 
 A more detailed keep/merge/delete/move matrix will be maintained separately once orphan detection and reference mapping are complete.
-

@@ -2,7 +2,8 @@
 
 **Prop Firm Trading Strategy for Mini NQ (MNQ) Futures**
 
-> **Note:** For system architecture, component details, and technical deep-dives, see [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md).
+> **Fast path:** For a one-page operational view (env, startup steps, scripts, Telegram expectations), use `CHEAT_SHEET.md`.
+> **Deep dive:** For system architecture, component details, and technical deep-dives, see `PROJECT_SUMMARY.md`.
 
 ## 📋 Table of Contents
 
@@ -40,7 +41,7 @@ cd ~/pearlalgo-dev-ai-agents
 ## 📋 Prerequisites
 
 - **IBKR Account**: Active Interactive Brokers account
-- **IBKR Gateway**: Installed and configured (see [GATEWAY.md](GATEWAY.md))
+- **IBKR Gateway**: Installed and configured (see `GATEWAY.md`)
 - **Python 3.12+**: Installed on system
 - **Telegram Bot**: Created and configured (bot token and chat ID)
 
@@ -84,7 +85,7 @@ PEARLALGO_LOG_LEVEL=INFO
 ./scripts/gateway/check_gateway_status.sh
 ```
 
-For detailed gateway setup, see [GATEWAY.md](GATEWAY.md).
+For detailed gateway setup, see `GATEWAY.md`.
 
 ---
 
@@ -185,7 +186,7 @@ telegram:
 - `service.heartbeat_interval`: Heartbeat message frequency (seconds)
 - `circuit_breaker.*`: Error threshold settings
 
-For complete configuration reference, see [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md#configuration).
+For complete configuration reference, see `PROJECT_SUMMARY.md` (Configuration section).
 
 ### Prop Firm Trading Configuration
 
@@ -465,20 +466,12 @@ tail -f data/nq_agent_state/signals.jsonl | jq
 
 ## 📚 Additional Resources
 
-- **[PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)** - Complete system reference, architecture, components
-- **[GATEWAY.md](GATEWAY.md)** - IBKR Gateway setup and configuration
-- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Testing procedures and validation
+- `CHEAT_SHEET.md` – PEARLalgo quick reference
+- `PROJECT_SUMMARY.md` – Complete system reference, architecture, components
+- `GATEWAY.md` – IBKR Gateway setup and configuration
+- `TESTING_GUIDE.md` – Testing procedures and validation
 
 ---
 
-**Last Updated:** 2025-12-16  
+**Last Updated:** 2025-12-18  
 **Current Configuration:** MNQ (Mini NQ) - Prop Firm Style Trading
-
-
-
-
-
-
-
-
-
