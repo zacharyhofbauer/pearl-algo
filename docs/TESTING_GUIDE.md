@@ -463,31 +463,19 @@ Verify session filters work:
 
 ## 🧪 Mock Data Provider
 
-The `tests/mock_data_provider.py` provides fake market data for testing.
+The `tests/mock_data_provider.py` provides **synthetic** OHLCV data for testing.
 
-**Features:**
-- Generates realistic OHLCV data
-- Configurable base price, volatility, and trend
-- No external dependencies
-- Fast and reliable
+**What mock data is good for:**
+- Fast, repeatable tests without market hours
+- Controlled scenarios (uptrend, downtrend, high/low volatility)
+- Verifying that strategy logic, data pipelines, and notifications work end‑to‑end
 
-**Usage:**
-```python
-from tests.mock_data_provider import MockDataProvider
+**What mock data is *not* good for:**
+- Real market performance evaluation
+- Live trading decisions
+- Realistic risk metrics
 
-# Create provider
-provider = MockDataProvider(
-    base_price=17500.0,  # Starting price
-    volatility=50.0,      # Price volatility
-    trend=0.5,           # Price trend per bar
-)
-
-# Generate data
-df = provider.fetch_historical("MNQ", start, end, "1m")
-latest_bar = await provider.get_latest_bar("MNQ")
-```
-
-**Note:** Mock data is synthetic - prices are NOT real market data. See [MOCK_DATA_WARNING.md](MOCK_DATA_WARNING.md) for details.
+Always validate strategy performance with **real market data** (IB Gateway + NQ Agent service) before using in production.
 
 ---
 

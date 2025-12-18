@@ -141,3 +141,12 @@ cd ~/pearlalgo-dev-ai-agents
 
 **Last Updated:** 2025-12-12  
 **Gateway Version:** 1041 | **IBC Version:** 3.23.0
+
+---
+
+## 📚 Additional IBKR References
+
+For deeper background and historical notes on IBKR behavior and market data subscriptions, see the archived references:
+
+- [`archive/IBKR_DETAILS.md`](archive/IBKR_DETAILS.md) – additional implementation and behavior notes.
+- [`archive/MARKET_DATA_SUBSCRIPTION.md`](archive/MARKET_DATA_SUBSCRIPTION.md) – detailed market data subscription and Error 354 guidance.
