@@ -24,3 +24,4 @@ echo ""
 
 python3 -m pearlalgo.nq_agent.telegram_command_handler
 
+

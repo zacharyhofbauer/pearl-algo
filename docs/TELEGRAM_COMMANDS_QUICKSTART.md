@@ -80,3 +80,4 @@ These require the handler service to be running:
 - Set commands via BotFather: `/setcommands` → Select bot → Send command list
 - Or run: `python3 scripts/telegram/set_bot_commands.py`
 
+

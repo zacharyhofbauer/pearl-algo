@@ -480,3 +480,4 @@ tail -f data/nq_agent_state/signals.jsonl | jq
 
 
 
+
