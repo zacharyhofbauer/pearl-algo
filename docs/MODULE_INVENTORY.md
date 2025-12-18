@@ -126,3 +126,4 @@ Gateway / IBKR‑specific orchestration scripts (start/stop, 2FA workflow, conne
 - **Docs**: architecture, operational, testing, and reference guides as listed above.
 
 A more detailed keep/merge/delete/move matrix will be maintained separately once orphan detection and reference mapping are complete.
+

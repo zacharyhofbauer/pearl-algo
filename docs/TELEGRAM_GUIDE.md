@@ -186,3 +186,4 @@ If commands are unresponsive but you still get status/heartbeat messages, it alm
   - Re‑run `/setcommands` in BotFather or `scripts/telegram/set_bot_commands.py`.
 
 This file is the authoritative reference for Telegram integration. Other Telegram docs should defer to this guide.
+

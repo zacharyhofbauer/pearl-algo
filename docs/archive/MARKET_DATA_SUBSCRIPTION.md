@@ -7,3 +7,4 @@ For day‑to‑day operations, see the main gateway guide:
 - [`GATEWAY.md`](../GATEWAY.md)
 
 It links back here for deeper explanation when needed.
+

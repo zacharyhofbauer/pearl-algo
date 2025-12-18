@@ -51,3 +51,4 @@ When adding or updating documentation:
 2. Either update the existing document for that category or add a clearly linked sub‑section.
 3. Avoid duplicating content across documents; prefer linking to the authoritative section.
 4. Ensure all paths and commands you mention exist and are listed in `PATH_TRUTH_TABLE.md`.
+

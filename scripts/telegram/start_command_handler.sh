@@ -51,3 +51,4 @@ echo ""
 "$PYTHON_CMD" -m pearlalgo.nq_agent.telegram_command_handler
 
 
+

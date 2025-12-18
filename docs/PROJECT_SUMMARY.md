@@ -1004,3 +1004,4 @@ The system is ready for production use and optimized for prop firm trading with 
 
 
 
+
