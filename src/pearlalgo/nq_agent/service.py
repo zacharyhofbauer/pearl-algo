@@ -118,6 +118,7 @@ class NQAgentService:
         self.start_time = datetime.now(timezone.utc)
 
         # Setup signal handlers
+        # Note: These set shutdown_requested flag, stop() is called in finally block
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
@@ -157,23 +158,32 @@ class NQAgentService:
 
         try:
             await self._run_loop()
+        except KeyboardInterrupt:
+            logger.info("Received KeyboardInterrupt, shutting down gracefully...")
+            await self.stop("Keyboard interrupt (Ctrl+C)")
         except Exception as e:
             logger.error(f"Service error: {e}", exc_info=True)
+            await self.stop(f"Error: {str(e)[:50]}")
         finally:
-            await self.stop()
+            # Ensure stop is called even if exception occurred
+            if self.running:
+                await self.stop("Final cleanup")
 
-    async def stop(self) -> None:
+    async def stop(self, shutdown_reason: str = "Normal shutdown") -> None:
         """Stop the service."""
         if not self.running:
             return
 
-        logger.info("Stopping NQ Agent Service...")
+        logger.info(f"Stopping NQ Agent Service... ({shutdown_reason})")
         self.shutdown_requested = True
 
         # Save final state
-        self._save_state()
+        try:
+            self._save_state()
+        except Exception as e:
+            logger.warning(f"Could not save final state: {e}")
 
-        # Send shutdown notification
+        # Send shutdown notification (with timeout to ensure it doesn't block)
         try:
             uptime_delta = datetime.now(timezone.utc) - self.start_time if self.start_time else None
             summary = {
@@ -182,6 +192,7 @@ class NQAgentService:
                 "cycle_count": self.cycle_count,
                 "signal_count": self.signal_count,
                 "error_count": self.error_count,
+                "shutdown_reason": shutdown_reason,
             }
 
             # Add performance metrics if available
@@ -193,7 +204,14 @@ class NQAgentService:
             except Exception:
                 pass
 
-            await self.telegram_notifier.send_shutdown_notification(summary)
+            # Send with timeout to ensure it doesn't hang
+            await asyncio.wait_for(
+                self.telegram_notifier.send_shutdown_notification(summary),
+                timeout=5.0
+            )
+            logger.info("Shutdown notification sent to Telegram")
+        except asyncio.TimeoutError:
+            logger.warning("Timeout sending shutdown notification (continuing shutdown)")
         except Exception as e:
             logger.warning(f"Could not send shutdown notification: {e}")
 
@@ -672,5 +690,10 @@ class NQAgentService:
 
     def _signal_handler(self, signum, frame) -> None:
         """Handle shutdown signals."""
-        logger.info(f"Received signal {signum}, shutting down...")
+        signal_names = {
+            signal.SIGINT: "SIGINT (Ctrl+C)",
+            signal.SIGTERM: "SIGTERM",
+        }
+        signal_name = signal_names.get(signum, f"Signal {signum}")
+        logger.info(f"Received {signal_name}, initiating graceful shutdown...")
         self.shutdown_requested = True

@@ -919,7 +919,14 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
-            message = f"🛑 *NQ Agent Stopped*\n\n"
+            shutdown_reason = summary.get('shutdown_reason', 'Normal shutdown')
+            message = f"🛑 *NQ Agent Stopped*\n"
+            
+            # Show shutdown reason
+            if shutdown_reason and shutdown_reason != "Normal shutdown":
+                reason_emoji = "⚠️" if "Error" in shutdown_reason or "interrupt" in shutdown_reason.lower() else "ℹ️"
+                message += f"{reason_emoji} *Reason:* {shutdown_reason}\n"
+            message += "\n"
 
             # Session summary (mobile-friendly)
             uptime_h = summary.get('uptime_hours', 0)
@@ -1071,4 +1078,133 @@ class NQAgentTelegramNotifier:
             return True
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_recovery_notification")
+            return False
+
+    async def send_error_summary(
+        self,
+        error_count: int,
+        error_types: Optional[Dict[str, int]] = None,
+        last_error: Optional[str] = None,
+        time_window_minutes: int = 60,
+    ) -> bool:
+        """
+        Send error summary notification.
+        
+        Args:
+            error_count: Total number of errors in time window
+            error_types: Dictionary of error type -> count
+            last_error: Description of last error
+            time_window_minutes: Time window for error summary
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+
+        try:
+            message = f"⚠️ *Error Summary ({time_window_minutes}m)*\n\n"
+            message += f"*Total Errors:* {error_count}\n"
+
+            if error_types:
+                message += f"\n*By Type:*\n"
+                for error_type, count in sorted(error_types.items(), key=lambda x: x[1], reverse=True):
+                    message += f"• {error_type}: {count}\n"
+
+            if last_error:
+                message += f"\n*Last Error:*\n{last_error[:200]}\n"
+
+            await self.telegram.send_message(message)
+            return True
+        except Exception as e:
+            ErrorHandler.handle_telegram_error(e, "send_error_summary")
+            return False
+
+    async def send_price_alert(
+        self,
+        symbol: str,
+        current_price: float,
+        previous_price: float,
+        price_change_pct: float,
+        alert_type: str = "significant_move",
+    ) -> bool:
+        """
+        Send price alert notification for significant price movements.
+        
+        Args:
+            symbol: Trading symbol
+            current_price: Current price
+            previous_price: Previous price
+            price_change_pct: Price change percentage
+            alert_type: Type of alert (significant_move, level_reached, etc.)
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+
+        try:
+            direction = "📈" if price_change_pct > 0 else "📉"
+            direction_text = "UP" if price_change_pct > 0 else "DOWN"
+            
+            message = f"{direction} *Price Alert: {symbol}*\n\n"
+            message += f"*Price:* ${current_price:,.2f}\n"
+            message += f"*Change:* {direction_text} {abs(price_change_pct):.2f}% (${abs(current_price - previous_price):,.2f})\n"
+            message += f"*Previous:* ${previous_price:,.2f}\n"
+            
+            if alert_type == "significant_move":
+                if abs(price_change_pct) > 1.0:
+                    message += f"\n⚠️ Significant price movement detected\n"
+
+            await self.telegram.send_message(message)
+            return True
+        except Exception as e:
+            ErrorHandler.handle_telegram_error(e, "send_price_alert")
+            return False
+
+    async def send_connection_status_update(
+        self,
+        status: str,
+        details: Optional[Dict] = None,
+    ) -> bool:
+        """
+        Send detailed connection status update.
+        
+        Args:
+            status: Connection status (connected, disconnected, reconnecting, etc.)
+            details: Additional details (failures, last_attempt, etc.)
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+
+        try:
+            status_emoji_map = {
+                "connected": "🟢",
+                "disconnected": "🔴",
+                "reconnecting": "🟡",
+                "connection_lost": "🔴",
+                "recovered": "✅",
+            }
+            emoji = status_emoji_map.get(status.lower(), "⚪")
+            
+            message = f"{emoji} *Connection Status: {status.upper()}*\n\n"
+
+            if details:
+                if "failures" in details:
+                    message += f"*Failures:* {details['failures']}\n"
+                if "last_attempt" in details:
+                    message += f"*Last Attempt:* {details['last_attempt']}\n"
+                if "recovery_time" in details:
+                    message += f"*Recovery Time:* {details['recovery_time']:.1f}s\n"
+                if "suggestion" in details:
+                    message += f"\n*Suggestion:* {details['suggestion']}\n"
+
+            await self.telegram.send_message(message)
+            return True
+        except Exception as e:
+            ErrorHandler.handle_telegram_error(e, "send_connection_status_update")
             return False

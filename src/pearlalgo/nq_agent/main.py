@@ -109,11 +109,11 @@ async def main():
     try:
         await service.start()
     except KeyboardInterrupt:
-        logger.info("Received interrupt, shutting down...")
+        logger.info("Received KeyboardInterrupt at main level, service should handle shutdown")
+        # Service.stop() will be called in finally block via service.start()'s finally
     except Exception as e:
         logger.error(f"Service error: {e}", exc_info=True)
-    finally:
-        await service.stop()
+        # Service.stop() will be called in finally block via service.start()'s finally
 
 
 if __name__ == "__main__":
