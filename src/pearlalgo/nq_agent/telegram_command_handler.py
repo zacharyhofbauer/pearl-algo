@@ -627,7 +627,7 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🔔 All Signals", callback_data='signals'),
                 InlineKeyboardButton("📈 Performance", callback_data='performance'),
             ])
-            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='status')])
+            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='start')])
             reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
             
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -848,7 +848,7 @@ class TelegramCommandHandler:
                             
                             reply_markup = InlineKeyboardMarkup([[
                                 InlineKeyboardButton("🔄 Run Again", callback_data='backtest'),
-                                InlineKeyboardButton("🏠 Main Menu", callback_data='status'),
+                                InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
                             ]])
                             
                             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -992,7 +992,7 @@ class TelegramCommandHandler:
                 
                 reply_markup = InlineKeyboardMarkup([[
                     InlineKeyboardButton("🔄 Generate Another", callback_data='test_signal'),
-                    InlineKeyboardButton("🏠 Main Menu", callback_data='status'),
+                    InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
                 ]])
                 
                 await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -1503,22 +1503,22 @@ class TelegramCommandHandler:
         
         # Navigation
         keyboard.append([
-            InlineKeyboardButton("🏠 Main Menu", callback_data='status'),
+            InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
             InlineKeyboardButton("📊 Agent Status", callback_data='status'),
         ])
         
         return InlineKeyboardMarkup(keyboard)
     
     def _get_back_to_menu_button(self, include_refresh: bool = False) -> InlineKeyboardMarkup:
-        """Generate navigation buttons."""
+        """Generate navigation buttons - always returns to main menu (/start)."""
         keyboard = []
         if include_refresh:
             keyboard.append([
                 InlineKeyboardButton("🔄 Refresh", callback_data='status'),
-                InlineKeyboardButton("🏠 Main Menu", callback_data='status'),
+                InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
             ])
         else:
-            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='status')])
+            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='start')])
         return InlineKeyboardMarkup(keyboard)
     
     def _get_signals_buttons(self, has_signals: bool = True) -> InlineKeyboardMarkup:
@@ -1529,9 +1529,11 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🔄 Refresh", callback_data='signals'),
                 InlineKeyboardButton("📊 Last Signal", callback_data='last_signal'),
             ])
+        # Always include main menu button
+        keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='start')])
         keyboard.append([
             InlineKeyboardButton("📈 Performance", callback_data='performance'),
-            InlineKeyboardButton("🏠 Main Menu", callback_data='status'),
+            InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
         ])
         return InlineKeyboardMarkup(keyboard)
     
@@ -1601,6 +1603,9 @@ class TelegramCommandHandler:
             await self._handle_start_gateway(update, context)
         elif callback_data == 'stop_gateway':
             await self._handle_stop_gateway(update, context)
+        elif callback_data == 'start' or callback_data == 'main_menu':
+            # Main menu - always return to start
+            await self._handle_start(update, context)
         elif callback_data == 'help':
             await self._handle_help(update, context)
         elif callback_data == 'test_signal':
