@@ -67,6 +67,21 @@ class NQAgentService:
             bot_token=telegram_bot_token,
             chat_id=telegram_chat_id,
         )
+        
+        # Log Telegram configuration status
+        if self.telegram_notifier.enabled:
+            logger.info(
+                f"Telegram notifications enabled: bot_token={'***' if telegram_bot_token else 'MISSING'}, "
+                f"chat_id={'***' if telegram_chat_id else 'MISSING'}, "
+                f"telegram_instance={self.telegram_notifier.telegram is not None}"
+            )
+        else:
+            logger.warning(
+                "Telegram notifications DISABLED - signals will not be sent to Telegram. "
+                f"bot_token={'present' if telegram_bot_token else 'MISSING'}, "
+                f"chat_id={'present' if telegram_chat_id else 'MISSING'}"
+            )
+        
         self.health_monitor = HealthMonitor(state_dir=state_dir)
 
         # Load service configuration
@@ -80,9 +95,27 @@ class NQAgentService:
         self.paused = False
         self.pause_reason: Optional[str] = None
         self.start_time: Optional[datetime] = None
-        self.cycle_count = 0
-        self.signal_count = 0
-        self.error_count = 0
+        
+        # Load persisted state to restore counters
+        saved_state = self.state_manager.load_state()
+        self.cycle_count = saved_state.get("cycle_count", 0)
+        # Restore signal_count from saved state OR count from signals file (more accurate)
+        saved_signal_count = saved_state.get("signal_count", 0)
+        try:
+            # Count actual signals in signals file for accuracy
+            signals_file = self.state_manager.signals_file
+            if signals_file.exists():
+                actual_signal_count = sum(1 for _ in open(signals_file)) if signals_file.exists() else 0
+                self.signal_count = max(saved_signal_count, actual_signal_count)
+                logger.info(f"Restored signal_count: {self.signal_count} (from state: {saved_signal_count}, from file: {actual_signal_count})")
+            else:
+                self.signal_count = saved_signal_count
+                logger.info(f"Restored signal_count: {self.signal_count} (from state, no signals file yet)")
+        except Exception as e:
+            logger.warning(f"Could not count signals from file, using saved state: {e}")
+            self.signal_count = saved_signal_count
+        
+        self.error_count = saved_state.get("error_count", 0)
         self.last_status_update: Optional[datetime] = None
         self.status_update_interval = service_settings.get("status_update_interval", 1800)
         self.last_heartbeat: Optional[datetime] = None
@@ -187,6 +220,7 @@ class NQAgentService:
             logger.warning(f"Could not save final state: {e}")
 
         # Send shutdown notification (with timeout to ensure it doesn't block)
+        # IMPORTANT: Send this BEFORE setting running=False so Telegram is still available
         try:
             uptime_delta = datetime.now(timezone.utc) - self.start_time if self.start_time else None
             summary = {
@@ -207,16 +241,24 @@ class NQAgentService:
             except Exception:
                 pass
 
-            # Send with timeout to ensure it doesn't hang
-            await asyncio.wait_for(
-                self.telegram_notifier.send_shutdown_notification(summary),
-                timeout=5.0
-            )
-            logger.info("Shutdown notification sent to Telegram")
-        except asyncio.TimeoutError:
-            logger.warning("Timeout sending shutdown notification (continuing shutdown)")
+            # Send with timeout to ensure it doesn't hang, but log if it fails
+            logger.info(f"Sending shutdown notification: {shutdown_reason}")
+            try:
+                await asyncio.wait_for(
+                    self.telegram_notifier.send_shutdown_notification(summary),
+                    timeout=10.0  # Increased timeout to give more time
+                )
+                logger.info("✅ Shutdown notification sent to Telegram")
+            except asyncio.TimeoutError:
+                logger.error("❌ Timeout sending shutdown notification - Telegram may be slow or unreachable")
+                # Try one more time without timeout as last resort
+                try:
+                    await self.telegram_notifier.send_shutdown_notification(summary)
+                    logger.info("✅ Shutdown notification sent on retry")
+                except Exception as retry_e:
+                    logger.error(f"❌ Failed to send shutdown notification on retry: {retry_e}")
         except Exception as e:
-            logger.warning(f"Could not send shutdown notification: {e}")
+            logger.error(f"❌ Error sending shutdown notification: {e}", exc_info=True)
 
         self.running = False
         logger.info("NQ Agent Service stopped")
@@ -393,10 +435,17 @@ class NQAgentService:
                 )
 
                 # Process signals
-                for signal in signals:
-                    # Get buffer data for chart generation
-                    buffer_data = market_data.get("df", pd.DataFrame())
-                    await self._process_signal(signal, buffer_data=buffer_data)
+                if signals:
+                    logger.info(f"🔔 Processing {len(signals)} signal(s) from strategy analysis")
+                    for i, signal in enumerate(signals, 1):
+                        signal_type = signal.get('type', 'unknown')
+                        signal_direction = signal.get('direction', 'unknown')
+                        logger.info(f"  Signal {i}/{len(signals)}: {signal_type} {signal_direction}")
+                        # Get buffer data for chart generation
+                        buffer_data = market_data.get("df", pd.DataFrame())
+                        await self._process_signal(signal, buffer_data=buffer_data)
+                else:
+                    logger.debug(f"No signals generated in cycle {self.cycle_count}")
 
                 # Send periodic status updates
                 await self._check_status_update()
@@ -475,12 +524,20 @@ class NQAgentService:
             signal_id = self.performance_tracker.track_signal_generated(signal)
 
             # Send to Telegram (await async call) with buffer data for chart generation
+            signal_type = signal.get('type', 'unknown')
+            signal_direction = signal.get('direction', 'unknown')
+            logger.info(f"Processing signal: {signal_type} {signal_direction}")
+            
             success = await self.telegram_notifier.send_signal(signal, buffer_data=buffer_data)
 
             if success:
-                logger.info(f"Signal sent to Telegram: {signal.get('type')} {signal.get('direction')}")
+                logger.info(f"✅ Signal sent to Telegram: {signal_type} {signal_direction}")
             else:
-                logger.warning("Failed to send signal to Telegram")
+                logger.error(
+                    f"❌ Failed to send signal to Telegram: {signal_type} {signal_direction}. "
+                    f"Telegram enabled: {self.telegram_notifier.enabled}, "
+                    f"Telegram instance: {self.telegram_notifier.telegram is not None}"
+                )
 
             self.signal_count += 1
 

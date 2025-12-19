@@ -222,17 +222,22 @@ class TelegramCommandHandler:
         
         message = (
             "🤖 *NQ Agent Bot*\n\n"
-            "Welcome! Use the buttons below to navigate.\n\n"
-            "💡 *Quick Start:*\n"
-            "• Check Gateway Status first\n"
-            "• Start Agent when ready\n"
-            "• Monitor via Status & Signals\n\n"
+            "Welcome! This is the *main menu* for controlling your NQ trading agent.\n\n"
+            "💡 *Important:*\n"
+            "• `/start` shows this menu (does NOT start the agent)\n"
+            "• Use '▶️ Start Agent' button below to start the agent\n"
+            "• Or use `/start_agent` command\n\n"
+            "📋 *Quick Start:*\n"
+            "1. Check Gateway Status first\n"
+            "2. Start Agent when ready\n"
+            "3. Monitor via Status & Signals\n\n"
             f"*Current State:*\n"
             f"{'🟢' if agent_running else '🔴'} Agent: {'RUNNING' if agent_running else 'STOPPED'}\n"
             f"{'🟢' if gateway_running else '🔴'} Gateway: {'RUNNING' if gateway_running else 'STOPPED'}"
         )
         
         reply_markup = self._get_main_menu_buttons(agent_running=agent_running, gateway_running=gateway_running)
+        logger.info(f"Sending /start menu with {len(reply_markup.inline_keyboard)} button rows to chat {update.effective_chat.id}")
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
     
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1546,28 +1551,54 @@ class TelegramCommandHandler:
         parse_mode: str = "Markdown",
     ):
         """Helper to send message for commands or edit for callbacks."""
-        if update.callback_query:
+        try:
+            if update.callback_query:
+                try:
+                    await update.callback_query.edit_message_text(
+                        text=message,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                    )
+                    logger.debug(f"Edited message with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows")
+                except Exception as e:
+                    # If edit fails (e.g., message unchanged), send new message
+                    logger.debug(f"Could not edit message, sending new: {e}")
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=message,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                    )
+                    logger.debug(f"Sent new message with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows")
+            else:
+                if update.message:
+                    await update.message.reply_text(
+                        message,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                    )
+                    logger.info(f"Sent message with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows to chat {update.effective_chat.id}")
+                else:
+                    # Fallback: send directly via bot
+                    logger.warning("No update.message, sending directly via bot")
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=message,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                    )
+                    logger.info(f"Sent message directly with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows")
+        except Exception as e:
+            logger.error(f"Error sending message: {e}", exc_info=True)
+            # Try to send error message without markup
             try:
-                await update.callback_query.edit_message_text(
-                    text=message,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode,
-                )
-            except Exception as e:
-                # If edit fails (e.g., message unchanged), send new message
-                logger.debug(f"Could not edit message, sending new: {e}")
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text=message,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode,
-                )
-        else:
-            await update.message.reply_text(
-                message,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode,
-            )
+                error_msg = f"❌ Error sending message: {str(e)[:100]}"
+                if update.message:
+                    await update.message.reply_text(error_msg)
+                else:
+                    await context.bot.send_message(chat_id=update.effective_chat.id, text=error_msg)
+            except Exception as e2:
+                logger.error(f"Could not send error message: {e2}")
     
     async def _handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle inline button callbacks."""

@@ -77,14 +77,28 @@ class NQAgentTelegramNotifier:
                     chat_id=chat_id,
                     enabled=True,
                 )
-                logger.info("NQAgentTelegramNotifier initialized using TelegramAlerts")
+                logger.info(
+                    f"NQAgentTelegramNotifier initialized successfully: "
+                    f"enabled={self.enabled}, telegram_instance={self.telegram is not None}"
+                )
             except Exception as e:
-                logger.warning(f"Could not initialize TelegramAlerts: {e}")
+                logger.error(
+                    f"❌ Could not initialize TelegramAlerts: {e}. "
+                    f"Signal messages will NOT be sent to Telegram.",
+                    exc_info=True
+                )
                 self.telegram = None
                 self.enabled = False
         elif enabled:
-            logger.warning("Telegram enabled but bot_token or chat_id not provided")
+            logger.error(
+                f"❌ Telegram enabled but credentials missing: "
+                f"bot_token={'present' if bot_token else 'MISSING'}, "
+                f"chat_id={'present' if chat_id else 'MISSING'}. "
+                f"Signal messages will NOT be sent to Telegram."
+            )
             self.enabled = False
+        else:
+            logger.info("Telegram notifications disabled (enabled=False)")
         
         # Initialize chart generator if available
         if CHART_GENERATOR_AVAILABLE and enabled:
@@ -105,7 +119,15 @@ class NQAgentTelegramNotifier:
         Returns:
             True if sent successfully
         """
-        if not self.enabled or not self.telegram:
+        if not self.enabled:
+            logger.warning("Telegram notifier is disabled - signal not sent")
+            return False
+        
+        if not self.telegram:
+            logger.error(
+                "Telegram notifier not initialized - signal not sent. "
+                "Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID environment variables."
+            )
             return False
 
         try:

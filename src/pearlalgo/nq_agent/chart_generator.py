@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+import numpy as np
 from datetime import datetime, timezone
 
 from pearlalgo.utils.logger import logger
@@ -38,7 +39,175 @@ class ChartGenerator:
         # Set style
         plt.style.use('dark_background')
         self.fig_size = (12, 8)
-        self.dpi = 100
+        self.dpi = 150  # Increased for Telegram quality
+    
+    def draw_candles(
+        self,
+        ax,
+        opens: np.ndarray,
+        highs: np.ndarray,
+        lows: np.ndarray,
+        closes: np.ndarray,
+        x_indices: Optional[np.ndarray] = None,
+    ) -> None:
+        """
+        Draw TradingView-correct candlesticks with explicit spacing.
+        
+        Uses categorical indices for x-axis to prevent diagonal banding and merged candles.
+        Candles are rendered with explicit spacing (width=0.6) ensuring visible gaps.
+        
+        Args:
+            ax: Matplotlib axes to draw on
+            opens: Array of open prices
+            highs: Array of high prices
+            lows: Array of low prices
+            closes: Array of close prices
+            x_indices: Optional array of x positions (defaults to range(len(opens)))
+        """
+        # Convert to numpy arrays if needed
+        opens = np.asarray(opens)
+        highs = np.asarray(highs)
+        lows = np.asarray(lows)
+        closes = np.asarray(closes)
+        
+        # Use categorical indices if not provided
+        if x_indices is None:
+            x_indices = np.arange(len(opens))
+        else:
+            x_indices = np.asarray(x_indices)
+        
+        # CRITICAL: Disable datetime formatting BEFORE setting limits
+        # This prevents matplotlib from trying to use datetime coordinates
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: ''))
+        ax.xaxis.set_major_locator(plt.NullLocator())
+        
+        # Set x-axis limits to ensure proper spacing (categorical indices)
+        ax.set_xlim(-1, len(opens))
+        
+        # Disable autoscaling to prevent matplotlib from changing our limits
+        ax.set_autoscalex_on(False)
+        
+        # Candle width - explicit spacing ensures candles don't touch
+        candle_width = 0.6
+        
+        # Draw each candlestick
+        for i, x in enumerate(x_indices):
+            # Determine color based on close vs open
+            is_bullish = closes[i] >= opens[i]
+            color = '#26a69a' if is_bullish else '#ef5350'
+            
+            # Draw wick (high-low line) using vlines
+            ax.vlines(
+                x, 
+                lows[i], 
+                highs[i], 
+                colors=color, 
+                linewidths=1.0, 
+                alpha=1.0,
+                zorder=1
+            )
+            
+            # Calculate body dimensions
+            body_bottom = min(opens[i], closes[i])
+            body_height = abs(closes[i] - opens[i])
+            
+            # For doji (very small body), ensure minimum visibility
+            if body_height < 0.01:
+                body_height = 0.5
+                body_bottom = closes[i] - body_height / 2
+            
+            # Draw body using Rectangle
+            rect = Rectangle(
+                (x - candle_width/2, body_bottom),
+                candle_width,
+                body_height,
+                facecolor=color,
+                edgecolor=color,
+                alpha=1.0,
+                linewidth=0.5,
+                zorder=2
+            )
+            ax.add_patch(rect)
+    
+    def _apply_tradingview_styling(
+        self,
+        ax,
+        timestamps: np.ndarray,
+        x_indices: Optional[np.ndarray] = None,
+    ) -> None:
+        """
+        Apply TradingView-style formatting to axes.
+        
+        Args:
+            ax: Matplotlib axes to style
+            timestamps: Array of timestamps for x-axis labels
+            x_indices: Optional array of x positions (defaults to range(len(timestamps)))
+        """
+        # Use categorical indices if not provided
+        if x_indices is None:
+            x_indices = np.arange(len(timestamps))
+        else:
+            x_indices = np.asarray(x_indices)
+        
+        # CRITICAL: Disable any datetime formatting on x-axis
+        # This prevents matplotlib from trying to use datetime coordinates
+        # Clear any existing formatters/locators that might be datetime-based
+        try:
+            import matplotlib.dates as mdates
+            # Remove any date formatters
+            if isinstance(ax.xaxis.get_major_formatter(), mdates.DateFormatter):
+                ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: ''))
+            if isinstance(ax.xaxis.get_major_locator(), (mdates.MinuteLocator, mdates.HourLocator, mdates.DayLocator)):
+                ax.xaxis.set_major_locator(plt.NullLocator())
+        except:
+            pass
+        # Always set to null formatter/locator to be safe
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: ''))
+        ax.xaxis.set_major_locator(plt.NullLocator())
+        
+        # Set background color
+        ax.set_facecolor('#0b0e11')
+        
+        # Price axis on right side only
+        ax.yaxis.tick_right()
+        ax.yaxis.set_label_position('right')
+        ax.set_ylabel('Price ($)', fontsize=10, color='white')
+        
+        # Remove top and left spines
+        ax.spines['top'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['right'].set_color('white')
+        ax.spines['bottom'].set_color('white')
+        
+        # Grid with low alpha
+        ax.grid(True, alpha=0.2, color='gray', linestyle='-')
+        
+        # Set x-axis to use categorical indices but show timestamp labels
+        ax.set_xlabel('Time', fontsize=9, color='white')
+        
+        # Ensure x-axis limits are set to categorical range
+        ax.set_xlim(-1, len(timestamps))
+        
+        # Select tick positions (show ~10 ticks)
+        num_ticks = min(10, len(timestamps))
+        if num_ticks > 1:
+            tick_indices = np.linspace(0, len(timestamps) - 1, num_ticks, dtype=int)
+            # Set ticks at categorical positions
+            tick_positions = x_indices[tick_indices]
+            ax.set_xticks(tick_positions)
+            
+            # Format timestamps for labels (but positions are categorical)
+            try:
+                timestamp_labels = [pd.to_datetime(ts).strftime('%H:%M') for ts in timestamps[tick_indices]]
+                ax.set_xticklabels(timestamp_labels, rotation=0, ha='center', color='white')
+            except:
+                # Fallback if timestamp conversion fails
+                ax.set_xticklabels([str(i) for i in tick_indices], rotation=0, ha='center', color='white')
+        else:
+            ax.set_xticks([])
+        
+        # Minimal ticks
+        ax.tick_params(colors='white', which='both', length=3)
     
     def generate_entry_chart(
         self,
@@ -102,6 +271,12 @@ class ChartGenerator:
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=self.fig_size, dpi=self.dpi,
                                          gridspec_kw={'height_ratios': [3, 1]})
             
+            # CRITICAL: Disable datetime formatting immediately after subplot creation
+            ax1.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: ''))
+            ax1.xaxis.set_major_locator(plt.NullLocator())
+            ax2.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: ''))
+            ax2.xaxis.set_major_locator(plt.NullLocator())
+            
             # Plot candlesticks
             self._plot_candlesticks(ax1, chart_data, entry_price, stop_loss, take_profit, direction, symbol)
             
@@ -122,7 +297,9 @@ class ChartGenerator:
             # Save to temp file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
             temp_path = Path(temp_file.name)
-            plt.savefig(temp_path, dpi=self.dpi, bbox_inches='tight', facecolor='black')
+            # Set figure background to TradingView dark color
+            fig.patch.set_facecolor('#0b0e11')
+            plt.savefig(temp_path, dpi=self.dpi, bbox_inches='tight', facecolor='#0b0e11')
             plt.close(fig)
             
             logger.debug(f"Generated entry chart: {temp_path}")
@@ -202,6 +379,12 @@ class ChartGenerator:
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=self.fig_size, dpi=self.dpi,
                                          gridspec_kw={'height_ratios': [3, 1]})
             
+            # CRITICAL: Disable datetime formatting immediately after subplot creation
+            ax1.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: ''))
+            ax1.xaxis.set_major_locator(plt.NullLocator())
+            ax2.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: ''))
+            ax2.xaxis.set_major_locator(plt.NullLocator())
+            
             # Plot candlesticks with entry and exit
             self._plot_candlesticks_with_exit(
                 ax1, chart_data, entry_price, exit_price, stop_loss, take_profit, 
@@ -227,7 +410,9 @@ class ChartGenerator:
             # Save to temp file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
             temp_path = Path(temp_file.name)
-            plt.savefig(temp_path, dpi=self.dpi, bbox_inches='tight', facecolor='black')
+            # Set figure background to TradingView dark color
+            fig.patch.set_facecolor('#0b0e11')
+            plt.savefig(temp_path, dpi=self.dpi, bbox_inches='tight', facecolor='#0b0e11')
             plt.close(fig)
             
             logger.debug(f"Generated exit chart: {temp_path}")
@@ -290,6 +475,18 @@ class ChartGenerator:
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=self.fig_size, dpi=self.dpi,
                                          gridspec_kw={'height_ratios': [3, 1]})
             
+            # CRITICAL: Disable datetime formatting on both axes immediately after creation
+            # This prevents matplotlib from auto-detecting datetime data and applying datetime formatters
+            try:
+                import matplotlib.dates as mdates
+                # Remove any date formatters that might have been auto-applied
+                ax1.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: ''))
+                ax1.xaxis.set_major_locator(plt.NullLocator())
+                ax2.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: ''))
+                ax2.xaxis.set_major_locator(plt.NullLocator())
+            except:
+                pass
+            
             # Plot price action
             self._plot_backtest_price_action(ax1, chart_data, signals, symbol)
             
@@ -309,7 +506,9 @@ class ChartGenerator:
             # Save to temp file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
             temp_path = Path(temp_file.name)
-            plt.savefig(temp_path, dpi=self.dpi, bbox_inches='tight', facecolor='black')
+            # Set figure background to TradingView dark color
+            fig.patch.set_facecolor('#0b0e11')
+            plt.savefig(temp_path, dpi=self.dpi, bbox_inches='tight', facecolor='#0b0e11')
             plt.close(fig)
             
             logger.debug(f"Generated backtest chart: {temp_path}")
@@ -336,80 +535,24 @@ class ChartGenerator:
         closes = data["close"].values
         timestamps = data["timestamp"].values
         
-        # Calculate proper spacing for candlesticks
-        # Use matplotlib's date conversion for proper spacing
-        date_nums = [mdates.date2num(ts) for ts in timestamps]
+        # Use categorical indices for x-axis (prevents diagonal banding)
+        x_indices = np.arange(len(data))
         
-        # Calculate average spacing between candles
-        if len(date_nums) > 1:
-            avg_spacing = (date_nums[-1] - date_nums[0]) / (len(date_nums) - 1)
-            # Use 60% of spacing for candle width to ensure gaps between candles
-            candle_width = avg_spacing * 0.6
-        else:
-            candle_width = 0.01
+        # Draw candlesticks using the unified function
+        self.draw_candles(ax, opens, highs, lows, closes, x_indices)
         
-        # Plot individual candlesticks - proper TradingView-style
-        for i in range(len(data)):
-            ts = timestamps[i]
-            ts_num = date_nums[i]
-            open_val = opens[i]
-            high_val = highs[i]
-            low_val = lows[i]
-            close_val = closes[i]
-            
-            # Determine colors - green for bullish, red for bearish
-            is_bullish = close_val >= open_val
-            body_color = '#26a69a' if is_bullish else '#ef5350'  # TradingView-like colors
-            wick_color = body_color
-            
-            # Draw the wick (high-low line) - thin line
-            ax.plot([ts_num, ts_num], [low_val, high_val], 
-                   color=wick_color, linewidth=1.0, alpha=0.9, zorder=1, solid_capstyle='round')
-            
-            # Draw the body (open-close rectangle)
-            body_top = max(open_val, close_val)
-            body_bottom = min(open_val, close_val)
-            body_height = body_top - body_bottom
-            
-            # For doji (very small body), show a small line
-            if body_height < 0.01:
-                body_height = 0.5
-                body_bottom = close_val - body_height / 2
-            
-            # Draw filled rectangle for body
-            rect = Rectangle(
-                (ts_num - candle_width/2, body_bottom),
-                candle_width,
-                body_height,
-                facecolor=body_color,
-                edgecolor=body_color,
-                alpha=0.9,
-                zorder=2,
-                linewidth=0.5
-            )
-            ax.add_patch(rect)
-            
-            # Add thin outline for better definition
-            if body_height > 0.01:
-                # Top edge
-                ax.plot([ts_num - candle_width/2, ts_num + candle_width/2], 
-                       [body_top, body_top], 
-                       color=body_color, linewidth=0.5, alpha=0.9, zorder=3)
-                # Bottom edge
-                ax.plot([ts_num - candle_width/2, ts_num + candle_width/2], 
-                       [body_bottom, body_bottom], 
-                       color=body_color, linewidth=0.5, alpha=0.9, zorder=3)
-        
-        # Plot signal markers - above/below candlesticks
+        # Plot signal markers - positioned at categorical indices
         signal_labels_added = {'long': False, 'short': False}
+        price_range = highs.max() - lows.min()
+        price_offset = price_range * 0.02  # 2% of price range
+        
         for signal in signals:
             entry_price = signal.get("entry_price", 0)
             direction = signal.get("direction", "long").lower()
             
             if entry_price > 0:
-                # Find closest timestamp in data
-                signal_time = None
-                signal_time_num = None
+                # Find closest index in data for signal timestamp
+                signal_idx = None
                 
                 if "timestamp" in signal:
                     try:
@@ -417,69 +560,48 @@ class ChartGenerator:
                         # Find closest index
                         time_diffs = [abs((pd.to_datetime(ts) - signal_time).total_seconds()) 
                                     for ts in timestamps]
-                        closest_idx = time_diffs.index(min(time_diffs))
-                        signal_time = timestamps[closest_idx]
-                        signal_time_num = date_nums[closest_idx]
+                        signal_idx = time_diffs.index(min(time_diffs))
                     except:
                         pass
                 
-                if signal_time is None or signal_time_num is None:
-                    # Use middle of data range
-                    mid_idx = len(timestamps) // 2
-                    signal_time = timestamps[mid_idx]
-                    signal_time_num = date_nums[mid_idx]
+                if signal_idx is None:
+                    # Use middle of data range if timestamp not found
+                    signal_idx = len(timestamps) // 2
                 
-                # Position marker above/below the candle
-                price_offset = (highs.max() - lows.min()) * 0.02  # 2% of price range
+                # Position markers: long at low - offset, short at high + offset
                 if direction == 'long':
-                    marker_y = entry_price + price_offset  # Above entry
+                    marker_y = lows[signal_idx] - price_offset
+                    marker_color = '#00ff88'  # Green for long
+                    marker_shape = '^'
                 else:
-                    marker_y = entry_price - price_offset  # Below entry
+                    marker_y = highs[signal_idx] + price_offset
+                    marker_color = '#ff8800'  # Orange for short
+                    marker_shape = 'v'
                 
-                # Plot signal marker - larger and more visible
-                marker_color = '#00ff88' if direction == 'long' else '#ff8800'  # Bright colors
-                marker_shape = '^' if direction == 'long' else 'v'
+                # Plot signal marker
                 label = None
                 if not signal_labels_added[direction]:
                     label = f'{direction.upper()} Signal'
                     signal_labels_added[direction] = True
                 
                 ax.scatter(
-                    signal_time_num,
+                    signal_idx,  # Use categorical index
                     marker_y,
                     color=marker_color,
                     marker=marker_shape,
-                    s=300,  # Larger markers
+                    s=300,
                     alpha=0.9,
                     edgecolors='white',
                     linewidths=2.5,
-                    zorder=10,  # Above everything
+                    zorder=10,
                     label=label
                 )
-                
-                # Add thin entry line (dashed)
-                ax.axhline(y=entry_price, color=marker_color, linestyle='--', 
-                         linewidth=1, alpha=0.4, zorder=4)
         
-        # Formatting
-        ax.set_ylabel('Price ($)', fontsize=10, color='white')
-        ax.set_xlabel('Time', fontsize=9, color='white')
-        ax.grid(True, alpha=0.2, color='gray', linestyle='--')
-        ax.set_facecolor('black')
-        
-        # Add chart type label
-        ax.text(0.02, 0.02, 'Candlestick Chart', transform=ax.transAxes,
-               fontsize=8, color='gray', alpha=0.7,
-               bbox=dict(boxstyle='round', facecolor='black', edgecolor='gray', alpha=0.5))
+        # Apply TradingView-style formatting (pass x_indices to ensure proper setup)
+        self._apply_tradingview_styling(ax, timestamps, x_indices)
         
         if signals:
             ax.legend(loc='upper left', fontsize=8, facecolor='black', edgecolor='white', framealpha=0.9)
-        ax.tick_params(colors='white')
-        
-        # Format x-axis dates
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=max(1, len(data) // 10)))
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
     
     def _plot_candlesticks(
         self,
@@ -499,52 +621,29 @@ class ChartGenerator:
         closes = data["close"].values
         timestamps = data["timestamp"].values
         
-        # Plot candlesticks
-        for i, (ts, open_val, high_val, low_val, close_val) in enumerate(
-            zip(timestamps, opens, highs, lows, closes)
-        ):
-            color = 'green' if close_val >= open_val else 'red'
-            alpha = 0.8
-            
-            # Draw the wick
-            ax.plot([ts, ts], [low_val, high_val], color=color, linewidth=0.5, alpha=alpha)
-            
-            # Draw the body
-            body_height = abs(close_val - open_val)
-            body_bottom = min(open_val, close_val)
-            rect = Rectangle(
-                (mdates.date2num(ts) - 0.3, body_bottom),
-                0.6,
-                body_height,
-                facecolor=color,
-                edgecolor=color,
-                alpha=alpha
-            )
-            ax.add_patch(rect)
+        # Use categorical indices for x-axis
+        x_indices = np.arange(len(data))
+        
+        # Draw candlesticks using the unified function
+        self.draw_candles(ax, opens, highs, lows, closes, x_indices)
         
         # Plot entry, stop, and TP lines
         entry_color = 'lime' if direction == 'long' else 'orange'
         ax.axhline(y=entry_price, color=entry_color, linestyle='-', linewidth=2, 
-                  label=f'Entry: ${entry_price:.2f}', alpha=0.8)
+                  label=f'Entry: ${entry_price:.2f}', alpha=0.8, zorder=5)
         
         if stop_loss and stop_loss > 0:
             ax.axhline(y=stop_loss, color='red', linestyle='--', linewidth=2,
-                      label=f'Stop: ${stop_loss:.2f}', alpha=0.8)
+                      label=f'Stop: ${stop_loss:.2f}', alpha=0.8, zorder=5)
         
         if take_profit and take_profit > 0:
             ax.axhline(y=take_profit, color='green', linestyle='--', linewidth=2,
-                      label=f'TP: ${take_profit:.2f}', alpha=0.8)
+                      label=f'TP: ${take_profit:.2f}', alpha=0.8, zorder=5)
         
-        # Formatting
-        ax.set_ylabel('Price ($)', fontsize=10, color='white')
-        ax.grid(True, alpha=0.3, color='gray')
-        ax.legend(loc='upper left', fontsize=8, facecolor='black', edgecolor='white')
-        ax.tick_params(colors='white')
+        # Apply TradingView-style formatting
+        self._apply_tradingview_styling(ax, timestamps, x_indices)
         
-        # Format x-axis dates
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=max(1, len(data) // 10)))
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        ax.legend(loc='upper left', fontsize=8, facecolor='black', edgecolor='white', framealpha=0.9)
     
     def _plot_candlesticks_with_exit(
         self,
@@ -567,47 +666,30 @@ class ChartGenerator:
         closes = data["close"].values
         timestamps = data["timestamp"].values
         
-        # Plot candlesticks
-        for i, (ts, open_val, high_val, low_val, close_val) in enumerate(
-            zip(timestamps, opens, highs, lows, closes)
-        ):
-            color = 'green' if close_val >= open_val else 'red'
-            alpha = 0.8
-            
-            # Draw the wick
-            ax.plot([ts, ts], [low_val, high_val], color=color, linewidth=0.5, alpha=alpha)
-            
-            # Draw the body
-            body_height = abs(close_val - open_val)
-            body_bottom = min(open_val, close_val)
-            rect = Rectangle(
-                (mdates.date2num(ts) - 0.3, body_bottom),
-                0.6,
-                body_height,
-                facecolor=color,
-                edgecolor=color,
-                alpha=alpha
-            )
-            ax.add_patch(rect)
+        # Use categorical indices for x-axis
+        x_indices = np.arange(len(data))
+        
+        # Draw candlesticks using the unified function
+        self.draw_candles(ax, opens, highs, lows, closes, x_indices)
         
         # Plot entry line
         entry_color = 'lime' if direction == 'long' else 'orange'
         ax.axhline(y=entry_price, color=entry_color, linestyle='-', linewidth=2,
-                  label=f'Entry: ${entry_price:.2f}', alpha=0.8)
+                  label=f'Entry: ${entry_price:.2f}', alpha=0.8, zorder=5)
         
         # Plot exit line
         exit_color = 'cyan'
         ax.axhline(y=exit_price, color=exit_color, linestyle='-', linewidth=2,
-                  label=f'Exit: ${exit_price:.2f} ({exit_reason})', alpha=0.8)
+                  label=f'Exit: ${exit_price:.2f} ({exit_reason})', alpha=0.8, zorder=5)
         
         # Plot stop and TP lines (dashed for reference)
         if stop_loss and stop_loss > 0:
             ax.axhline(y=stop_loss, color='red', linestyle='--', linewidth=1.5,
-                      label=f'Stop: ${stop_loss:.2f}', alpha=0.6)
+                      label=f'Stop: ${stop_loss:.2f}', alpha=0.6, zorder=5)
         
         if take_profit and take_profit > 0:
             ax.axhline(y=take_profit, color='green', linestyle='--', linewidth=1.5,
-                      label=f'TP: ${take_profit:.2f}', alpha=0.6)
+                      label=f'TP: ${take_profit:.2f}', alpha=0.6, zorder=5)
         
         # Add P&L annotation
         pnl_color = 'green' if pnl > 0 else 'red'
@@ -617,35 +699,61 @@ class ChartGenerator:
                verticalalignment='top', bbox=dict(boxstyle='round', 
                facecolor='black', edgecolor=pnl_color, alpha=0.8))
         
-        # Formatting
-        ax.set_ylabel('Price ($)', fontsize=10, color='white')
-        ax.grid(True, alpha=0.3, color='gray')
-        ax.legend(loc='upper left', fontsize=8, facecolor='black', edgecolor='white')
-        ax.tick_params(colors='white')
+        # Apply TradingView-style formatting
+        self._apply_tradingview_styling(ax, timestamps, x_indices)
         
-        # Format x-axis dates
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=max(1, len(data) // 10)))
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        ax.legend(loc='upper left', fontsize=8, facecolor='black', edgecolor='white', framealpha=0.9)
     
     def _plot_volume(self, ax, data: pd.DataFrame):
-        """Plot volume bars."""
+        """Plot volume bars with categorical indices matching candle width."""
         if "volume" not in data.columns:
             return
         
         timestamps = data["timestamp"].values
         volumes = data["volume"].values
         
-        # Plot volume bars
-        colors = ['green' if data.iloc[i]["close"] >= data.iloc[i]["open"] 
-                 else 'red' for i in range(len(data))]
+        # Use categorical indices matching price panel
+        x_indices = np.arange(len(data))
         
-        ax.bar(timestamps, volumes, color=colors, alpha=0.6, width=0.8)
+        # Color volume bars by candle direction (green/red matching candles)
+        colors = ['#26a69a' if data.iloc[i]["close"] >= data.iloc[i]["open"] 
+                 else '#ef5350' for i in range(len(data))]
+        
+        # CRITICAL: Disable datetime formatting on x-axis
+        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: ''))
+        ax.xaxis.set_major_locator(plt.NullLocator())
+        
+        # Bar width matches candle width (0.6)
+        bar_width = 0.6
+        ax.bar(x_indices, volumes, color=colors, alpha=0.6, width=bar_width)
+        
+        # Set x-axis limits to match price panel (categorical indices)
+        ax.set_xlim(-1, len(data))
+        ax.set_autoscalex_on(False)
+        
+        # Volume panel styling
+        ax.set_facecolor('#0b0e11')
         ax.set_ylabel('Volume', fontsize=10, color='white')
-        ax.tick_params(colors='white')
-        ax.grid(True, alpha=0.3, color='gray', axis='y')
+        ax.tick_params(colors='white', which='both', length=3)
+        ax.grid(True, alpha=0.2, color='gray', axis='y', linestyle='-')
         
-        # Format x-axis dates
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=max(1, len(data) // 10)))
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        # Remove top and left spines
+        ax.spines['top'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['right'].set_color('white')
+        ax.spines['bottom'].set_color('white')
+        
+        # Format x-axis with timestamp labels (matching price panel)
+        num_ticks = min(10, len(timestamps))
+        if num_ticks > 1:
+            tick_indices = np.linspace(0, len(timestamps) - 1, num_ticks, dtype=int)
+            tick_positions = x_indices[tick_indices]
+            ax.set_xticks(tick_positions)
+            
+            try:
+                timestamp_labels = [pd.to_datetime(ts).strftime('%H:%M') for ts in timestamps[tick_indices]]
+                ax.set_xticklabels(timestamp_labels, rotation=0, ha='center', color='white')
+            except:
+                ax.set_xticklabels([str(i) for i in tick_indices], rotation=0, ha='center', color='white')
+        else:
+            ax.set_xticks([])
