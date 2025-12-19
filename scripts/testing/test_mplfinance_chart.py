@@ -53,56 +53,10 @@ def create_sample_data(num_bars=100):
     
     return pd.DataFrame(data)
 
-def test_matplotlib_chart():
-    """Test matplotlib-based chart generator."""
-    print("\n" + "="*60)
-    print("Testing MATPLOTLIB Chart Generator")
-    print("="*60)
-    
-    try:
-        # Create sample data
-        data = create_sample_data(100)
-        
-        # Create signal
-        signal = {
-            'entry_price': 25025.0,
-            'stop_loss': 25000.0,
-            'take_profit': 25050.0,
-            'direction': 'long',
-            'type': 'momentum_breakout',
-            'timestamp': data['timestamp'].iloc[-20].isoformat()
-        }
-        
-        # Create generator with matplotlib (default)
-        config = ChartConfig(use_mplfinance=False)
-        generator = ChartGenerator(config)
-        
-        # Generate chart
-        print("Generating chart with matplotlib...")
-        chart_path = generator.generate_entry_chart(
-            signal=signal,
-            buffer_data=data,
-            symbol="MNQ",
-            timeframe="1m"
-        )
-        
-        if chart_path:
-            print(f"✅ Chart generated successfully: {chart_path}")
-            return chart_path
-        else:
-            print("❌ Chart generation failed")
-            return None
-            
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-def test_mplfinance_chart():
+def test_chart_generator():
     """Test mplfinance-based chart generator."""
     print("\n" + "="*60)
-    print("Testing MPLFINANCE Chart Generator")
+    print("Testing Chart Generator (mplfinance)")
     print("="*60)
     
     try:
@@ -119,12 +73,12 @@ def test_mplfinance_chart():
             'timestamp': data['timestamp'].iloc[-20].isoformat()
         }
         
-        # Create generator with mplfinance
-        config = ChartConfig(use_mplfinance=True)
+        # Create generator (now uses mplfinance by default)
+        config = ChartConfig()
         generator = ChartGenerator(config)
         
         # Generate chart
-        print("Generating chart with mplfinance...")
+        print("Generating chart...")
         chart_path = generator.generate_entry_chart(
             signal=signal,
             buffer_data=data,
@@ -148,30 +102,21 @@ def test_mplfinance_chart():
 def main():
     """Run tests."""
     print("\n" + "="*60)
-    print("MPLFINANCE Chart Generator Test")
+    print("Chart Generator Test (mplfinance)")
     print("="*60)
     
-    # Test mplfinance first (recommended)
-    mplf_path = test_mplfinance_chart()
-    
-    # Test matplotlib for comparison
-    mpl_path = test_matplotlib_chart()
+    # Test chart generator
+    chart_path = test_chart_generator()
     
     print("\n" + "="*60)
     print("Summary")
     print("="*60)
-    print(f"mplfinance chart: {'✅ Generated' if mplf_path else '❌ Failed'}")
-    print(f"matplotlib chart: {'✅ Generated' if mpl_path else '❌ Failed'}")
-    
-    if mplf_path and mpl_path:
-        print("\n💡 Compare the two charts to see the difference!")
-        print(f"   mplfinance: {mplf_path}")
-        print(f"   matplotlib: {mpl_path}")
-        print("\n✅ Recommendation: Use mplfinance (use_mplfinance=True)")
-    elif mplf_path:
-        print("\n✅ mplfinance works! Use it by setting use_mplfinance=True")
+    if chart_path:
+        print(f"✅ Chart generated successfully: {chart_path}")
+        print("\n✅ Chart generator is working with mplfinance!")
     else:
-        print("\n⚠️  mplfinance failed. Check error messages above.")
+        print("❌ Chart generation failed")
+        print("\n⚠️  Check error messages above.")
 
 if __name__ == "__main__":
     main()

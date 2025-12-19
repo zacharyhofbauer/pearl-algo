@@ -40,8 +40,8 @@ CANDLE_DOWN = "#ef5350"  # Red for bearish candles
 SIGNAL_LONG = "#26a69a"  # Green for long signals
 SIGNAL_SHORT = "#ef5350"  # Red for short signals
 ENTRY_COLOR = "#2962ff"  # Blue for entry lines
-VWAP_COLOR = "#2196f3"  # Blue for VWAP (matching test picture)
-MA_COLORS = ['#9c27b0', '#ffa726', '#f44336']  # Purple (EMA), Orange, Red for MAs
+VWAP_COLOR = "#ffa726"  # Orange for VWAP
+MA_COLORS = ['#2196f3', '#9c27b0', '#f44336']  # Blue, Purple, Red for MAs
 
 
 @dataclass
@@ -60,11 +60,16 @@ class ChartConfig:
     candle_width_fraction: float = 0.75  # 75% of interval (70-80% range)
     wick_linewidth: float = 1.0  # Thin wicks (~1px)
     volume_ma_period: int = 20  # Period for volume moving average
-    show_entry_sl_tp_bands: bool = True  # Show shaded bands for entry/SL/TP (enabled to match test picture)
+    show_entry_sl_tp_bands: bool = True  # Show shaded bands for entry/SL/TP
+    use_mplfinance: bool = False  # Use mplfinance instead of matplotlib (recommended)
 
 
 class ChartGenerator:
-    """Generates trading charts for signals and trades using matplotlib."""
+    """Generates trading charts for signals and trades.
+    
+    Can use either matplotlib (default) or mplfinance (recommended).
+    Set config.use_mplfinance=True to use the mplfinance implementation.
+    """
     
     def __init__(self, config: Optional[ChartConfig] = None):
         """Initialize chart generator.
@@ -72,6 +77,38 @@ class ChartGenerator:
         Args:
             config: Chart configuration (optional, uses defaults if not provided)
         """
+        self.config = config or ChartConfig()
+        
+        # Check if mplfinance should be used
+        if self.config.use_mplfinance:
+            try:
+                from pearlalgo.nq_agent.chart_generator_mplfinance import (
+                    MplfinanceChartGenerator,
+                    MplfinanceChartConfig
+                )
+                # Convert config
+                mplf_config = MplfinanceChartConfig(
+                    show_vwap=self.config.show_vwap,
+                    show_ma=self.config.show_ma,
+                    ma_periods=self.config.ma_periods,
+                    signal_marker_size=self.config.signal_marker_size,
+                    max_signals_displayed=self.config.max_signals_displayed,
+                    cluster_signals=self.config.cluster_signals,
+                    show_performance_metrics=self.config.show_performance_metrics,
+                    timeframe=self.config.timeframe,
+                    show_entry_sl_tp_bands=self.config.show_entry_sl_tp_bands,
+                )
+                self._mplf_generator = MplfinanceChartGenerator(mplf_config)
+                self._use_mplfinance = True
+                logger.info("Using mplfinance chart generator (recommended)")
+                return
+            except ImportError:
+                logger.warning("mplfinance not available, falling back to matplotlib. Install with: pip install mplfinance")
+                self._use_mplfinance = False
+        else:
+            self._use_mplfinance = False
+        
+        # Use matplotlib implementation
         if not MATPLOTLIB_AVAILABLE:
             raise ImportError("matplotlib required for chart generation")
         
@@ -79,7 +116,6 @@ class ChartGenerator:
         plt.style.use('dark_background')
         self.fig_size = (12, 8)
         self.dpi = 150  # Increased for Telegram quality
-        self.config = config or ChartConfig()
     
     def draw_candles(
         self,
@@ -91,10 +127,10 @@ class ChartGenerator:
         x_indices: Optional[np.ndarray] = None,
     ) -> None:
         """
-        Draw TradingView-style candlesticks with proper spacing and colors.
+        Draw TradingView-correct candlesticks with explicit spacing.
         
-        Uses filled rectangles for candle bodies with thin wicks.
-        Color-coded: teal-green for bullish, red for bearish.
+        Uses categorical indices for x-axis to prevent diagonal banding and merged candles.
+        Candles are rendered with explicit spacing (width=0.6) ensuring visible gaps.
         
         Args:
             ax: Matplotlib axes to draw on
@@ -117,25 +153,32 @@ class ChartGenerator:
             x_indices = np.asarray(x_indices)
         
         # CRITICAL: Disable datetime formatting BEFORE setting limits
+        # This prevents matplotlib from trying to use datetime coordinates
         ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: ''))
         ax.xaxis.set_major_locator(plt.NullLocator())
         
         # Set x-axis limits to ensure proper spacing (categorical indices)
         ax.set_xlim(-1, len(opens))
+
+        # Disable autoscaling to prevent matplotlib from changing our limits
         ax.set_autoscalex_on(False)
 
-        # Candle width - TradingView style: wide candles with minimal gaps
+        # Candle width - TradingView style: 70-80% of interval (default 75%)
         candle_width = self.config.candle_width_fraction if hasattr(self, 'config') else 0.75
 
         # Draw each candlestick - TradingView style with proper filled rectangles
+        # TradingView color logic: Teal-green (#26a69a) for bullish, Red (#ef5350) for bearish
         bullish_count = 0
         bearish_count = 0
+
+        # Get wick linewidth from config
         wick_linewidth = self.config.wick_linewidth if hasattr(self, 'config') else 1.0
 
         for i, x in enumerate(x_indices):
             # Validate OHLC data
             if highs[i] < max(opens[i], closes[i]) or lows[i] > min(opens[i], closes[i]):
                 logger.warning(f"Invalid OHLC at index {i}: High={highs[i]}, Low={lows[i]}, Open={opens[i]}, Close={closes[i]}")
+                # Fix invalid data
                 highs[i] = max(highs[i], opens[i], closes[i])
                 lows[i] = min(lows[i], opens[i], closes[i])
             
@@ -163,31 +206,32 @@ class ChartGenerator:
                     body_bottom = closes[i] - body_height / 2
                     body_top = closes[i] + body_height / 2
             
-            # Draw full wick first (from low to high) - thin wicks
+            # Draw full wick first (from low to high) - TradingView style with thin wicks
             ax.vlines(
                 x,
                 lows[i],
                 highs[i],
                 colors=wick_color,
-                linewidths=wick_linewidth,
+                linewidths=wick_linewidth,  # Thin wicks (~1px)
                 alpha=1.0,
                 zorder=1
             )
             
-            # Draw body using Rectangle - solid filled rectangles
+            # Draw body using Rectangle - TradingView style: SOLID FILLED rectangles
+            # Always draw body, even if very small (for doji)
             rect = Rectangle(
                 (x - candle_width/2, body_bottom),
                 candle_width,
                 body_height,
                 facecolor=body_color,
-                edgecolor=body_color,
+                edgecolor=body_color,  # Match face for solid fill (no border)
                 alpha=1.0,
-                linewidth=0,
-                zorder=3
+                linewidth=0,  # No edge line
+                zorder=3  # Above wick
             )
             ax.add_patch(rect)
         
-        # Log color distribution for debugging
+        # Log color distribution for debugging (only if significant data)
         if len(opens) > 10:
             logger.debug(f"Candle colors: {bullish_count} bullish (green), {bearish_count} bearish (red) out of {len(opens)} candles")
     
@@ -301,7 +345,7 @@ class ChartGenerator:
         ax.tick_params(axis='x', colors=TEXT_SECONDARY, which='both', length=3, width=0.5, labelsize=9)
         
         # Minimal padding: remove excessive margins
-        ax.margins(x=0, y=0)  # Auto-fit data to screen (no margins)
+        ax.margins(x=0.01, y=0.01)  # Very small margins
     
     def generate_entry_chart(
         self,
@@ -322,6 +366,10 @@ class ChartGenerator:
         Returns:
             Path to generated chart image, or None if generation failed
         """
+        # Use mplfinance if configured
+        if self._use_mplfinance:
+            return self._mplf_generator.generate_entry_chart(signal, buffer_data, symbol, timeframe)
+        
         if not MATPLOTLIB_AVAILABLE:
             return None
         
@@ -387,11 +435,12 @@ class ChartGenerator:
             else:
                 ax2.axis('off')
             
-            # Add title with timeframe - top-left (matching test picture)
+            # Add title with timeframe - TradingView style: top-left alignment
             signal_type = signal.get("type", "unknown").replace("_", " ").title()
             is_test = signal.get("reason", "").lower().startswith("test")
-            title_prefix = "TEST: " if is_test else ""
+            title_prefix = "🧪 TEST: " if is_test else ""
             title = f"{title_prefix}{symbol} {direction.upper()} {signal_type} - Entry Chart ({timeframe})"
+            # Title at top-left (TradingView style)
             fig.text(0.02, 0.98, title, ha='left', va='top', fontsize=14, fontweight='bold', 
                     color='#ffd54f' if is_test else TEXT_PRIMARY, transform=fig.transFigure)
             
@@ -526,10 +575,11 @@ class ChartGenerator:
             else:
                 ax2.axis('off')
             
-            # Add title with timeframe - top-left (matching test picture)
+            # Add title with timeframe - TradingView style: top-left alignment
             signal_type = signal.get("type", "unknown").replace("_", " ").title()
             result = "WIN" if pnl > 0 else "LOSS"
             title = f"{symbol} {direction.upper()} {signal_type} - Exit ({result}) ({timeframe})"
+            # Title at top-left (TradingView style)
             fig.text(0.02, 0.98, title, ha='left', va='top', fontsize=14, fontweight='bold', 
                     color=SIGNAL_LONG if pnl > 0 else SIGNAL_SHORT, transform=fig.transFigure)
             
@@ -578,6 +628,12 @@ class ChartGenerator:
         Returns:
             Path to generated chart image, or None if generation failed
         """
+        # Use mplfinance if configured
+        if self._use_mplfinance:
+            return self._mplf_generator.generate_backtest_chart(
+                backtest_data, signals, symbol, title, performance_data
+            )
+        
         if not MATPLOTLIB_AVAILABLE:
             return None
         
@@ -635,9 +691,10 @@ class ChartGenerator:
             else:
                 ax2.axis('off')
             
-            # Add title with chart type clarification and timeframe - centered (matching test picture)
+            # Add title with chart type clarification and timeframe - TradingView style: top-left
             chart_type_title = f"{title} - Candlestick Chart with Signal Markers ({timeframe})"
-            fig.suptitle(chart_type_title, fontsize=15, fontweight='bold', color=TEXT_PRIMARY, y=0.99)
+            fig.text(0.02, 0.98, chart_type_title, ha='left', va='top', fontsize=14, fontweight='bold', 
+                    color=TEXT_PRIMARY, transform=fig.transFigure)
             
             # Add chart metadata - below title, muted color
             self._add_chart_metadata(fig, chart_data, symbol, title, timeframe)
@@ -1049,23 +1106,14 @@ class ChartGenerator:
             from pearlalgo.utils.vwap import VWAPCalculator
             
             vwap_calc = VWAPCalculator()
-            # Calculate VWAP for each bar (time series)
-            vwap_values = []
-            for idx in range(len(data)):
-                bar_data = data.iloc[:idx+1]
-                vwap_data = vwap_calc.calculate_vwap(bar_data)
-                vwap_value = vwap_data.get("vwap", 0)
-                vwap_values.append(vwap_value if vwap_value > 0 else np.nan)
+            vwap_data = vwap_calc.calculate_vwap(data)
+            vwap_value = vwap_data.get("vwap", 0)
             
-            vwap_values = np.array(vwap_values)
-            valid_mask = ~np.isnan(vwap_values)
-            
-            if np.any(valid_mask):
-                # Plot VWAP as time series line (blue, matching test picture)
-                ax.plot(
-                    x_indices[valid_mask],
-                    vwap_values[valid_mask],
-                    color=VWAP_COLOR,  # Blue for VWAP
+            if vwap_value > 0:
+                # Plot VWAP line
+                ax.axhline(
+                    y=vwap_value,
+                    color=VWAP_COLOR,  # Orange/amber color for VWAP
                     linestyle='-',
                     linewidth=1.5,
                     alpha=0.7,
@@ -1102,21 +1150,13 @@ class ChartGenerator:
                 if period > len(closes):
                     continue
                 
-                # Calculate EMA (Exponential Moving Average) for smoother line
+                # Calculate SMA
                 ma_values = []
-                alpha = 2.0 / (period + 1)  # EMA smoothing factor
-                ema = None
                 for j in range(len(closes)):
                     if j < period - 1:
                         ma_values.append(np.nan)
                     else:
-                        if ema is None:
-                            # Initialize EMA with SMA
-                            ema = np.mean(closes[j - period + 1:j + 1])
-                        else:
-                            # Update EMA: EMA = (Close - EMA) * alpha + EMA
-                            ema = (closes[j] - ema) * alpha + ema
-                        ma_values.append(ema)
+                        ma_values.append(np.mean(closes[j - period + 1:j + 1]))
                 
                 ma_values = np.array(ma_values)
                 
@@ -1124,16 +1164,15 @@ class ChartGenerator:
                 valid_mask = ~np.isnan(ma_values)
                 if np.any(valid_mask):
                     color = ma_colors[i % len(ma_colors)]
-                    label_name = f'EMA{period}' if i == 0 else f'MA{period}'  # First one is EMA
                     ax.plot(
                         x_indices[valid_mask],
                         ma_values[valid_mask],
                         color=color,
                         linestyle='-',
-                        linewidth=1.5,  # Slightly thicker for visibility
-                        alpha=0.7,  # More visible
+                        linewidth=1.2,
+                        alpha=0.6,
                         marker=None,  # Explicitly no markers
-                        label=label_name,
+                        label=f'MA{period}',
                         zorder=3
                     )
         except Exception as e:
@@ -1451,14 +1490,14 @@ class ChartGenerator:
                 
                 metadata = f"{symbol} | {bar_count} bars | {timeframe} | {time_range}"
                 
-                # Add metadata below title - top-left (matching test picture)
+                # Add metadata below title - TradingView style: top-left, muted color
                 fig.text(
                     0.02, 0.95,
                     metadata,
                     ha='left',
                     va='top',
                     fontsize=10,
-                    color=TEXT_SECONDARY,
+                    color=TEXT_SECONDARY,  # Muted gray
                     style='italic',
                     transform=fig.transFigure
                 )
