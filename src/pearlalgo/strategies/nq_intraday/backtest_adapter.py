@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -17,6 +17,7 @@ class BacktestResult:
     total_signals: int
     avg_confidence: float
     avg_risk_reward: float
+    signals: Optional[List[Dict]] = field(default=None)  # Optional: actual signals from backtest
 
 
 def _build_mtf(df_1m: pd.DataFrame, config: NQIntradayConfig) -> Dict[str, pd.DataFrame]:
@@ -43,12 +44,24 @@ def _build_mtf(df_1m: pd.DataFrame, config: NQIntradayConfig) -> Dict[str, pd.Da
     return {"df_5m": df_5m, "df_15m": df_15m}
 
 
-def run_signal_backtest(df_1m: pd.DataFrame, config: Optional[NQIntradayConfig] = None) -> BacktestResult:
+def run_signal_backtest(
+    df_1m: pd.DataFrame, 
+    config: Optional[NQIntradayConfig] = None,
+    return_signals: bool = False
+) -> BacktestResult:
     """Run the MNQ intraday strategy in signal-only mode on a 1m dataframe.
 
     This reuses the live `NQIntradayStrategy` and `NQSignalGenerator` to
     generate signals bar-by-bar. It does **not** place trades or simulate
     fills; the goal is to understand signal frequency and quality offline.
+    
+    Args:
+        df_1m: 1-minute OHLCV DataFrame
+        config: Strategy configuration (optional)
+        return_signals: If True, include actual signals in result
+        
+    Returns:
+        BacktestResult with summary and optionally signals
     """
 
     if config is None:
@@ -62,7 +75,13 @@ def run_signal_backtest(df_1m: pd.DataFrame, config: Optional[NQIntradayConfig] 
     risk_rewards: List[float] = []
 
     if df_1m.empty:
-        return BacktestResult(total_bars=0, total_signals=0, avg_confidence=0.0, avg_risk_reward=0.0)
+        return BacktestResult(
+            total_bars=0, 
+            total_signals=0, 
+            avg_confidence=0.0, 
+            avg_risk_reward=0.0,
+            signals=[] if return_signals else None
+        )
 
     # Iterate bar-by-bar using a rolling window to mimic live behavior
     for idx in range(len(df_1m)):
@@ -109,4 +128,5 @@ def run_signal_backtest(df_1m: pd.DataFrame, config: Optional[NQIntradayConfig] 
         total_signals=len(signals),
         avg_confidence=avg_conf,
         avg_risk_reward=avg_rr,
+        signals=signals if return_signals else None,
     )

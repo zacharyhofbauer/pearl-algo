@@ -102,6 +102,18 @@ class TelegramCommandHandler:
         
     def _register_handlers(self):
         """Register command and callback handlers."""
+        from telegram.ext import MessageHandler, filters
+        
+        # Add a message handler to log all incoming messages for debugging (low priority)
+        async def log_all_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if update.message and update.message.text:
+                logger.info(f"📨 Incoming message from chat {update.effective_chat.id}: {update.message.text}")
+            elif update.callback_query:
+                logger.info(f"🔘 Incoming callback from chat {update.effective_chat.id}: {update.callback_query.data}")
+        
+        # Add logging handler with low priority (so commands are processed first)
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_all_updates), group=99)
+        
         # Command handlers
         # Note: We'll add logging directly in each handler
         self.application.add_handler(CommandHandler("start", self._handle_start))
@@ -113,6 +125,8 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("signals", self._handle_signals))
         self.application.add_handler(CommandHandler("last_signal", self._handle_last_signal))
         self.application.add_handler(CommandHandler("active_trades", self._handle_active_trades))
+        self.application.add_handler(CommandHandler("backtest", self._handle_backtest))
+        self.application.add_handler(CommandHandler("test_signal", self._handle_test_signal))
         self.application.add_handler(CommandHandler("performance", self._handle_performance))
         # Read-only operational helpers
         self.application.add_handler(CommandHandler("config", self._handle_config))
@@ -181,69 +195,70 @@ class TelegramCommandHandler:
     async def _check_authorized(self, update: Update) -> bool:
         """Check if update is from authorized chat."""
         if not update.effective_chat:
+            logger.warning("Update has no effective_chat")
             return False
-        authorized = str(update.effective_chat.id) == str(self.chat_id)
+        chat_id = update.effective_chat.id
+        authorized = str(chat_id) == str(self.chat_id)
         if not authorized:
             logger.warning(
-                "Unauthorized Telegram access",
-                extra={"chat_id": update.effective_chat.id, "username": getattr(update.effective_user, 'username', None)},
+                f"Unauthorized Telegram access attempt from chat_id={chat_id} (expected {self.chat_id})",
+                extra={"chat_id": chat_id, "username": getattr(update.effective_user, 'username', None)},
             )
+        else:
+            logger.debug(f"Authorized access from chat_id={chat_id}")
         return authorized
     
     async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command."""
         logger.info(f"Received /start command from chat {update.effective_chat.id}")
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
+        
+        # Check if agent is running
+        agent_running = self._is_agent_process_running()
+        gateway_status = self.service_controller.get_gateway_status()
+        gateway_running = gateway_status.get("process_running", False)
         
         message = (
             "🤖 *NQ Agent Bot*\n\n"
-            "*Service Control:*\n"
-            "• /start_gateway - Start IBKR Gateway\n"
-            "• /stop_gateway - Stop IBKR Gateway\n"
-            "• /gateway_status - Check Gateway status\n"
-            "• /start_agent - Start NQ Agent Service\n"
-            "• /stop_agent - Stop NQ Agent Service\n"
-            "• /restart_agent - Restart NQ Agent Service\n\n"
-            "*Monitoring:*\n"
-            "• /status - Get current agent status\n"
-            "• /quick_status - Ultra-compact status\n"
-            "• /signals - Show recent signals\n"
-            "• /last_signal - Show most recent signal with chart\n"
-            "• /active_trades - Show currently open positions\n"
-            "• /performance - Show performance\n"
-            "• /config - Show configuration\n"
-            "• /health - Check agent health\n\n"
-            "• /help - Show detailed help\n"
+            "Welcome! Use the buttons below to navigate.\n\n"
+            "💡 *Quick Start:*\n"
+            "• Check Gateway Status first\n"
+            "• Start Agent when ready\n"
+            "• Monitor via Status & Signals\n\n"
+            f"*Current State:*\n"
+            f"{'🟢' if agent_running else '🔴'} Agent: {'RUNNING' if agent_running else 'STOPPED'}\n"
+            f"{'🟢' if gateway_running else '🔴'} Gateway: {'RUNNING' if gateway_running else 'STOPPED'}"
         )
-        await update.message.reply_text(message, parse_mode="Markdown")
+        
+        reply_markup = self._get_main_menu_buttons(agent_running=agent_running, gateway_running=gateway_running)
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
     
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command."""
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
         
         message = (
             "📚 *NQ Agent Bot Help*\n\n"
-            "*Service Control:*\n"
-            "*/start_gateway* - Start IBKR Gateway\n"
-            "*/stop_gateway* - Stop IBKR Gateway\n"
-            "*/gateway_status* - Check Gateway status\n"
-            "*/start_agent* - Start NQ Agent Service\n"
-            "*/stop_agent* - Stop NQ Agent Service\n"
-            "*/restart_agent* - Restart NQ Agent Service\n\n"
-            "*Monitoring:*\n"
-            "*/status* - Get current agent status and metrics\n"
-            "*/signals* - Show recent trading signals (last 10)\n"
-            "*/performance* - Show performance metrics (7-day)\n"
-            "*/config* - Show key configuration values\n"
-            "*/health* - Check agent health status\n\n"
-            "*/pause* - Pause the trading agent (informational)\n"
-            "*/resume* - Resume the paused trading agent (informational)\n"
+            "*Navigation:*\n"
+            "Use the buttons below each message to navigate. No need to type commands!\n\n"
+            "*Available Actions:*\n"
+            "• Service Control: Start/Stop Agent & Gateway\n"
+            "• Monitoring: Status, Signals, Performance\n"
+            "• Configuration: View settings and health\n\n"
+            "*Tip:* All actions are available via buttons for easy UI navigation."
         )
-        await update.message.reply_text(message, parse_mode="Markdown")
+        
+        gateway_status = self.service_controller.get_gateway_status()
+        gateway_running = gateway_status.get("process_running", False)
+        reply_markup = self._get_main_menu_buttons(
+            agent_running=self._is_agent_process_running(),
+            gateway_running=gateway_running
+        )
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
     
     async def _handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /status command."""
@@ -334,6 +349,10 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("💚 Health", callback_data='health'),
             ])
             
+            # Get gateway status for button display
+            gateway_status = self.service_controller.get_gateway_status()
+            gateway_running = gateway_status.get("process_running", False)
+            
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -344,11 +363,17 @@ class TelegramCommandHandler:
                 f"❌ *Error getting status*\n\n"
                 f"`{str(e)}`\n\n"
                 f"💡 *Suggestions:*\n"
-                f"• Check if agent service is running: `/health`\n"
+                f"• Check if agent service is running\n"
                 f"• Verify state file exists\n"
-                f"• Try `/restart_agent` if service is stuck"
+                f"• Try restarting the agent"
             )
-            await self._send_message_or_edit(update, context, error_msg)
+            gateway_status = self.service_controller.get_gateway_status()
+            gateway_running = gateway_status.get("process_running", False)
+            reply_markup = self._get_main_menu_buttons(
+                agent_running=self._is_agent_process_running(),
+                gateway_running=gateway_running
+            )
+            await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
     
     async def _handle_quick_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /quick_status command - ultra-compact status."""
@@ -360,10 +385,12 @@ class TelegramCommandHandler:
         try:
             state_file = get_state_file(self.state_dir)
             if not state_file.exists():
+                reply_markup = self._get_main_menu_buttons(agent_running=False)
                 await self._send_message_or_edit(
                     update, context,
-                    "🔴 *Agent:* NOT RUNNING\n"
-                    "💡 Run `/start_agent` to start"
+                    "🔴 *Agent:* NOT RUNNING\n\n"
+                    "💡 Tap 'Start Agent' below to begin",
+                    reply_markup=reply_markup
                 )
                 return
             
@@ -395,7 +422,8 @@ class TelegramCommandHandler:
             except Exception:
                 pass
             
-            await self._send_message_or_edit(update, context, message)
+            reply_markup = self._get_main_menu_buttons(agent_running=running)
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             
         except Exception as e:
             logger.error(f"Error handling quick_status command: {e}", exc_info=True)
@@ -405,29 +433,43 @@ class TelegramCommandHandler:
     async def _handle_pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /pause command."""
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
         
         # Note: This requires integration with the running service
         # For now, just acknowledge the command
-        await update.message.reply_text(
+        gateway_status = self.service_controller.get_gateway_status()
+        gateway_running = gateway_status.get("process_running", False)
+        reply_markup = self._get_main_menu_buttons(
+            agent_running=self._is_agent_process_running(),
+            gateway_running=gateway_running
+        )
+        await self._send_message_or_edit(
+            update, context,
             "⏸️ *Pause command received*\n\n"
             "Note: Direct pause/resume requires service integration.\n"
-            "Currently, you need to pause via service management scripts.",
-            parse_mode="Markdown"
+            "Use Stop Agent and Start Agent buttons for full control.",
+            reply_markup=reply_markup
         )
     
     async def _handle_resume(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /resume command."""
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
         
-        await update.message.reply_text(
+        gateway_status = self.service_controller.get_gateway_status()
+        gateway_running = gateway_status.get("process_running", False)
+        reply_markup = self._get_main_menu_buttons(
+            agent_running=self._is_agent_process_running(),
+            gateway_running=gateway_running
+        )
+        await self._send_message_or_edit(
+            update, context,
             "▶️ *Resume command received*\n\n"
             "Note: Direct pause/resume requires service integration.\n"
-            "Currently, you need to resume via service management scripts.",
-            parse_mode="Markdown"
+            "Use Stop Agent and Start Agent buttons for full control.",
+            reply_markup=reply_markup
         )
     
     async def _handle_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -536,7 +578,14 @@ class TelegramCommandHandler:
                         continue
             
             if not signals:
-                await self._send_message_or_edit(update, context, "📭 No signals found")
+                reply_markup = self._get_signals_buttons(has_signals=False)
+                await self._send_message_or_edit(
+                    update, context,
+                    "📭 *No signals found*\n\n"
+                    "Signals will appear here when the agent generates trading opportunities.\n\n"
+                    "💡 *Tip:* Make sure the agent is running and the market is open.",
+                    reply_markup=reply_markup
+                )
                 return
             
             # Get last signal
@@ -575,8 +624,10 @@ class TelegramCommandHandler:
                     InlineKeyboardButton("📊 View Chart", callback_data=f"signal_chart_{signal_id[:16]}")
                 ])
             keyboard.append([
-                InlineKeyboardButton("🔔 All Signals", callback_data='signals')
+                InlineKeyboardButton("🔔 All Signals", callback_data='signals'),
+                InlineKeyboardButton("📈 Performance", callback_data='performance'),
             ])
+            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='status')])
             reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
             
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -618,9 +669,10 @@ class TelegramCommandHandler:
                         continue
             
             if not active_trades:
+                reply_markup = self._get_back_to_menu_button()
                 message = "📭 *No Active Trades*\n\n"
                 message += "No positions are currently open."
-                await self._send_message_or_edit(update, context, message)
+                await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
                 return
             
             message = f"📊 *Active Trades ({len(active_trades)})*\n\n"
@@ -642,7 +694,8 @@ class TelegramCommandHandler:
                     message += f"   TP: ${take_profit:.2f}\n"
                 message += f"   ID: {signal_id[:16]}...\n\n"
             
-            await self._send_message_or_edit(update, context, message)
+            reply_markup = self._get_back_to_menu_button(include_refresh=True)
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             
         except Exception as e:
             logger.error(f"Error handling active_trades command: {e}", exc_info=True)
@@ -652,6 +705,339 @@ class TelegramCommandHandler:
                 f"💡 Try `/signals` to see all signals"
             )
             await self._send_message_or_edit(update, context, error_msg)
+    
+    async def _handle_backtest(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /backtest command - run backtest and show results with chart."""
+        logger.info(f"Received /backtest command from chat {update.effective_chat.id}")
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        try:
+            from pearlalgo.strategies.nq_intraday.backtest_adapter import run_signal_backtest
+            from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+            
+            # Try to get buffer data from state
+            state_file = get_state_file(self.state_dir)
+            buffer_data = None
+            signals_from_backtest = []
+            
+            if state_file.exists():
+                try:
+                    with open(state_file) as f:
+                        state = json.load(f)
+                    buffer_size = state.get('buffer_size', 0)
+                    
+                    if buffer_size > 50:
+                        # We have some data, but for a proper backtest we need more
+                        # For now, generate a demo backtest with test data
+                        message = (
+                            "📊 *Backtest Strategy*\n\n"
+                            f"Current buffer: {buffer_size} bars\n\n"
+                            "*For full backtest:*\n"
+                            "Use command line with historical data:\n"
+                            "```bash\n"
+                            "python3 scripts/testing/backtest_nq_strategy.py data.parquet\n"
+                            "```\n\n"
+                            "*Demo backtest:*\n"
+                            "Generating demo backtest with test data..."
+                        )
+                        await self._send_message_or_edit(update, context, message)
+                        
+                        # Generate demo backtest
+                        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+                        
+                        # Create demo data
+                        dates = pd.date_range(end=datetime.now(timezone.utc), periods=200, freq='1min')
+                        demo_data = pd.DataFrame({
+                            'timestamp': dates,
+                            'open': [25000 + i * 0.3 + (i % 5 - 2) * 0.5 for i in range(200)],
+                            'high': [25001 + i * 0.3 + abs(i % 5 - 2) * 0.7 for i in range(200)],
+                            'low': [24999 + i * 0.3 - abs(i % 5 - 2) * 0.7 for i in range(200)],
+                            'close': [25000.5 + i * 0.3 + (i % 5 - 2) * 0.3 for i in range(200)],
+                            'volume': [1000 + (i % 20) * 50 for i in range(200)],
+                        })
+                        demo_data = demo_data.set_index('timestamp')
+                        
+                        # Run backtest with signal capture
+                        config = NQIntradayConfig()
+                        result = run_signal_backtest(demo_data, config=config, return_signals=True)
+                        
+                        # Use actual signals from backtest if available
+                        if result.signals and len(result.signals) > 0:
+                            # Use real signals from backtest
+                            for signal in result.signals:
+                                # Ensure timestamp is set
+                                if 'timestamp' not in signal or not signal.get('timestamp'):
+                                    # Find closest timestamp in data
+                                    entry_price = signal.get('entry_price', 0)
+                                    if entry_price > 0:
+                                        closest_idx = (demo_data['close'] - entry_price).abs().idxmin()
+                                        signal['timestamp'] = closest_idx.isoformat() if hasattr(closest_idx, 'isoformat') else str(closest_idx)
+                                signals_from_backtest.append(signal)
+                        elif result.total_signals > 0:
+                            # Fallback: Create demo signals distributed across the data
+                            num_signals = min(result.total_signals, 10)  # Show up to 10 signals
+                            for i in range(num_signals):
+                                idx_pos = int(len(demo_data) * (i + 1) / (num_signals + 1))
+                                signal_time = demo_data.index[idx_pos]
+                                close_price = float(demo_data.loc[signal_time, 'close'])
+                                signals_from_backtest.append({
+                                    'entry_price': close_price,
+                                    'stop_loss': close_price - 50,
+                                    'take_profit': close_price + 75,
+                                    'direction': 'long' if i % 2 == 0 else 'short',
+                                    'type': 'demo_signal',
+                                    'timestamp': signal_time.isoformat() if hasattr(signal_time, 'isoformat') else str(signal_time),
+                                    'confidence': 0.7 + (i % 3) * 0.1,
+                                })
+                        else:
+                            # No signals from strategy, create a few demo signals to show chart works
+                            for i in range(5):
+                                idx_pos = int(len(demo_data) * (i + 1) / 6)
+                                signal_time = demo_data.index[idx_pos]
+                                close_price = float(demo_data.loc[signal_time, 'close'])
+                                signals_from_backtest.append({
+                                    'entry_price': close_price,
+                                    'stop_loss': close_price - 50,
+                                    'take_profit': close_price + 75,
+                                    'direction': 'long' if i % 2 == 0 else 'short',
+                                    'type': 'demo_signal',
+                                    'timestamp': signal_time.isoformat() if hasattr(signal_time, 'isoformat') else str(signal_time),
+                                    'confidence': 0.7 + (i % 3) * 0.1,
+                                })
+                        
+                        # Generate backtest chart
+                        if self.chart_generator and not demo_data.empty:
+                            signals_shown = len(signals_from_backtest)
+                            
+                            # Create clearer title
+                            if result.total_signals > 0:
+                                chart_title = f"Backtest Results - {result.total_signals} Signals"
+                            else:
+                                chart_title = f"Backtest Results - Demo Visualization ({signals_shown} demo signals)"
+                            
+                            chart_path = self.chart_generator.generate_backtest_chart(
+                                demo_data.reset_index(),
+                                signals_from_backtest,
+                                'MNQ',
+                                chart_title
+                            )
+                            
+                            # Format results message
+                            chart_type_note = ""
+                            if result.total_signals == 0 and signals_shown > 0:
+                                chart_type_note = "\n💡 *Note:* Chart shows demo signals for visualization (strategy generated 0 signals on this data).\n"
+                            
+                            message = (
+                                "📊 *Backtest Results*\n\n"
+                                f"*Chart Type:* Candlestick with Signal Markers\n"
+                                f"*Bars Analyzed:* {result.total_bars:,}\n"
+                                f"*Signals Generated:* {result.total_signals}\n"
+                                f"*Signals on Chart:* {signals_shown}\n"
+                                f"*Avg Confidence:* {result.avg_confidence:.2f}\n"
+                                f"*Avg R:R:* {result.avg_risk_reward:.2f}:1{chart_type_note}\n"
+                                "📈 *Chart Components:*\n"
+                                "• Green/Red candlesticks = Price action\n"
+                                "• 🔼 Green triangles = Long entry signals\n"
+                                "• 🔽 Orange triangles = Short entry signals\n"
+                                "• Volume bars (bottom panel)"
+                            )
+                            
+                            reply_markup = InlineKeyboardMarkup([[
+                                InlineKeyboardButton("🔄 Run Again", callback_data='backtest'),
+                                InlineKeyboardButton("🏠 Main Menu", callback_data='status'),
+                            ]])
+                            
+                            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+                            
+                            # Send chart
+                            if chart_path and chart_path.exists():
+                                try:
+                                    with open(chart_path, 'rb') as photo:
+                                        if update.callback_query:
+                                            await context.bot.send_photo(
+                                                chat_id=update.effective_chat.id,
+                                                photo=photo,
+                                                caption="📊 Backtest Chart"
+                                            )
+                                        else:
+                                            await update.message.reply_photo(
+                                                photo=photo,
+                                                caption="📊 Backtest Chart"
+                                            )
+                                    chart_path.unlink()
+                                except Exception as e:
+                                    logger.error(f"Error sending backtest chart: {e}")
+                        else:
+                            message = (
+                                "📊 *Backtest Results (Demo)*\n\n"
+                                f"*Bars Analyzed:* {result.total_bars:,}\n"
+                                f"*Signals Generated:* {result.total_signals}\n"
+                                f"*Avg Confidence:* {result.avg_confidence:.2f}\n"
+                                f"*Avg R:R:* {result.avg_risk_reward:.2f}:1\n\n"
+                                "⚠️ Chart generation not available"
+                            )
+                            reply_markup = self._get_back_to_menu_button()
+                            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+                    else:
+                        # Not enough data
+                        message = (
+                            "📊 *Backtest Strategy*\n\n"
+                            f"Current buffer: {buffer_size} bars (need 50+ for demo)\n\n"
+                            "*Options:*\n"
+                            "1. Start agent and let it collect data\n"
+                            "2. Use command line with historical data:\n"
+                            "```bash\n"
+                            "python3 scripts/testing/backtest_nq_strategy.py data.parquet\n"
+                            "```"
+                        )
+                        reply_markup = self._get_back_to_menu_button()
+                        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+                except Exception as e:
+                    logger.error(f"Error reading state for backtest: {e}", exc_info=True)
+                    message = (
+                        "📊 *Backtest Strategy*\n\n"
+                        "Use command line with historical data:\n"
+                        "```bash\n"
+                        "python3 scripts/testing/backtest_nq_strategy.py data.parquet\n"
+                        "```"
+                    )
+                    reply_markup = self._get_back_to_menu_button()
+                    await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+            else:
+                # No state file
+                message = (
+                    "📊 *Backtest Strategy*\n\n"
+                    "Agent not running. Options:\n\n"
+                    "1. Start agent to collect data for demo backtest\n"
+                    "2. Use command line with historical data:\n"
+                    "```bash\n"
+                    "python3 scripts/testing/backtest_nq_strategy.py data.parquet\n"
+                    "```"
+                )
+                reply_markup = self._get_back_to_menu_button()
+                await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+                
+        except Exception as e:
+            logger.error(f"Error handling backtest command: {e}", exc_info=True)
+            reply_markup = self._get_back_to_menu_button()
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ *Error:* {str(e)}",
+                reply_markup=reply_markup
+            )
+    
+    async def _handle_test_signal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /test_signal command - generate a test signal with chart for testing."""
+        logger.info(f"Received /test_signal command from chat {update.effective_chat.id}")
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        try:
+            if not self.chart_generator:
+                reply_markup = self._get_back_to_menu_button()
+                await self._send_message_or_edit(
+                    update, context,
+                    "❌ Chart generation not available.\n\n"
+                    "Install matplotlib: `pip install matplotlib`",
+                    reply_markup=reply_markup
+                )
+                return
+            
+            # Generate test data
+            dates = pd.date_range(end=datetime.now(timezone.utc), periods=100, freq='1min')
+            test_data = pd.DataFrame({
+                'timestamp': dates,
+                'open': [25000 + i * 0.5 + (i % 3 - 1) * 0.2 for i in range(100)],
+                'high': [25001 + i * 0.5 + abs(i % 3 - 1) * 0.3 for i in range(100)],
+                'low': [24999 + i * 0.5 - abs(i % 3 - 1) * 0.3 for i in range(100)],
+                'close': [25000.5 + i * 0.5 + (i % 3 - 1) * 0.1 for i in range(100)],
+                'volume': [1000 + (i % 10) * 100 for i in range(100)],
+            })
+            
+            # Create test signal
+            test_signal = {
+                'entry_price': 25050.0,
+                'stop_loss': 25000.0,
+                'take_profit': 25100.0,
+                'direction': 'long',
+                'type': 'momentum_breakout',
+                'symbol': 'MNQ',
+                'confidence': 0.75,
+                'reason': 'Test signal for chart visualization',
+            }
+            
+            # Generate chart
+            chart_path = self.chart_generator.generate_entry_chart(
+                test_signal, test_data, 'MNQ'
+            )
+            
+            if chart_path and chart_path.exists():
+                # Send test signal message
+                message = (
+                    "🧪 *Test Signal Generated*\n\n"
+                    "*Type:* Momentum Breakout (LONG)\n"
+                    "*Entry:* $25,050.00\n"
+                    "*Stop:* $25,000.00\n"
+                    "*TP:* $25,100.00\n"
+                    "*R:R:* 1.5:1\n\n"
+                    "📊 Chart generated below!"
+                )
+                
+                reply_markup = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔄 Generate Another", callback_data='test_signal'),
+                    InlineKeyboardButton("🏠 Main Menu", callback_data='status'),
+                ]])
+                
+                await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+                
+                # Send chart
+                try:
+                    with open(chart_path, 'rb') as photo:
+                        if update.callback_query:
+                            await context.bot.send_photo(
+                                chat_id=update.effective_chat.id,
+                                photo=photo,
+                                caption="📊 Test Signal Chart"
+                            )
+                        else:
+                            await update.message.reply_photo(
+                                photo=photo,
+                                caption="📊 Test Signal Chart"
+                            )
+                    
+                    # Clean up
+                    chart_path.unlink()
+                    logger.info("Test signal chart sent successfully")
+                    
+                except Exception as e:
+                    logger.error(f"Error sending test chart: {e}", exc_info=True)
+                    await self._send_message_or_edit(
+                        update, context,
+                        f"⚠️ Chart generated but failed to send: {str(e)}"
+                    )
+            else:
+                reply_markup = self._get_back_to_menu_button()
+                await self._send_message_or_edit(
+                    update, context,
+                    "❌ Failed to generate test chart",
+                    reply_markup=reply_markup
+                )
+                
+        except Exception as e:
+            logger.error(f"Error handling test_signal command: {e}", exc_info=True)
+            reply_markup = self._get_back_to_menu_button()
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ *Error:* {str(e)}",
+                reply_markup=reply_markup
+            )
     
     async def _handle_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /performance command."""
@@ -685,7 +1071,8 @@ class TelegramCommandHandler:
             else:
                 message += "⏳ No completed trades yet\n"
             
-            await self._send_message_or_edit(update, context, message)
+            reply_markup = self._get_back_to_menu_button(include_refresh=True)
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             
         except Exception as e:
             logger.error(f"Error handling performance command: {e}", exc_info=True)
@@ -740,7 +1127,8 @@ class TelegramCommandHandler:
             message += f"- Max drawdown: {max_drawdown:.2%}\n"
             message += f"- Position size: {min_pos}-{max_pos} MNQ\n"
 
-            await self._send_message_or_edit(update, context, message)
+            reply_markup = self._get_back_to_menu_button(include_refresh=True)
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
         except Exception as e:
             logger.error(f"Error handling config command: {e}", exc_info=True)
             error_msg = (
@@ -781,7 +1169,8 @@ class TelegramCommandHandler:
             message += f"- State file: {'present' if state_exists else 'missing'}\n"
             message += f"- State last updated (UTC): {last_updated}\n"
 
-            await self._send_message_or_edit(update, context, message)
+            reply_markup = self._get_back_to_menu_button(include_refresh=True)
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
         except Exception as e:
             logger.error(f"Error handling health command: {e}", exc_info=True)
             error_msg = (
@@ -827,8 +1216,13 @@ class TelegramCommandHandler:
         message = f"{result['message']}\n"
         if result.get("details"):
             message += f"\n{result['details']}"
+        
+        # Get updated gateway status
+        gateway_status = self.service_controller.get_gateway_status()
+        gateway_running = gateway_status.get("process_running", False)
 
-        await update.message.reply_text(message, parse_mode="Markdown")
+        reply_markup = self._get_gateway_buttons(gateway_running=gateway_running)
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
 
     async def _handle_gateway_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /gateway_status command."""
@@ -845,8 +1239,12 @@ class TelegramCommandHandler:
         message += f"*Process:* {'🟢 RUNNING' if status['process_running'] else '🔴 STOPPED'}\n"
         message += f"*API Port:* {'🟢 LISTENING' if status['port_listening'] else '🔴 NOT LISTENING'}\n"
         message += f"\n*Status:* {status['message']}"
+        
+        if not status['process_running']:
+            message += "\n\n💡 *Tip:* Start Gateway before starting the Agent."
 
-        await update.message.reply_text(message, parse_mode="Markdown")
+        reply_markup = self._get_gateway_buttons(gateway_running=status['process_running'])
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
 
     async def _handle_start_agent(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start_agent command."""
@@ -887,7 +1285,10 @@ class TelegramCommandHandler:
         if result.get("details"):
             message += f"\n{result['details']}"
 
-        await update.message.reply_text(message, parse_mode="Markdown")
+        gateway_status = self.service_controller.get_gateway_status()
+        gateway_running = gateway_status.get("process_running", False)
+        reply_markup = self._get_main_menu_buttons(agent_running=False, gateway_running=gateway_running)
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
 
     async def _handle_restart_agent(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /restart_agent command."""
@@ -902,9 +1303,11 @@ class TelegramCommandHandler:
         # Stop first
         stop_result = await self.service_controller.stop_agent()
         if not stop_result["success"] and "not running" not in stop_result["message"].lower():
-            await update.message.reply_text(
+            reply_markup = self._get_main_menu_buttons(agent_running=True)
+            await self._send_message_or_edit(
+                update, context,
                 f"⚠️ Stop failed: {stop_result['message']}\nAborting restart.",
-                parse_mode="Markdown",
+                reply_markup=reply_markup
             )
             return
 
@@ -921,7 +1324,10 @@ class TelegramCommandHandler:
         if start_result.get("details"):
             message += f"\n\n{start_result['details']}"
 
-        await update.message.reply_text(message, parse_mode="Markdown")
+        gateway_status = self.service_controller.get_gateway_status()
+        gateway_running = gateway_status.get("process_running", False)
+        reply_markup = self._get_main_menu_buttons(agent_running=True, gateway_running=gateway_running)
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
 
     async def _handle_signal_chart(
         self,
@@ -1031,6 +1437,104 @@ class TelegramCommandHandler:
                 f"❌ Error: {str(e)}"
             )
     
+    def _get_main_menu_buttons(self, agent_running: bool = False, gateway_running: bool = False) -> InlineKeyboardMarkup:
+        """Generate main menu inline keyboard buttons with improved UX."""
+        keyboard = []
+        
+        # Primary actions row (most important)
+        if agent_running:
+            keyboard.append([
+                InlineKeyboardButton("⏹️ Stop Agent", callback_data='stop_agent'),
+                InlineKeyboardButton("🔄 Restart", callback_data='restart_agent'),
+            ])
+        else:
+            keyboard.append([InlineKeyboardButton("▶️ Start Agent", callback_data='start_agent')])
+        
+        # Gateway control row
+        gateway_status_text = "🔌 Gateway" + (" ✅" if gateway_running else " ❌")
+        keyboard.append([
+            InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
+            InlineKeyboardButton("🔄 Refresh", callback_data='status'),
+        ])
+        
+        # Quick monitoring row
+        keyboard.append([
+            InlineKeyboardButton("📊 Status", callback_data='status'),
+            InlineKeyboardButton("🔔 Signals", callback_data='signals'),
+        ])
+        
+        # Analysis row
+        keyboard.append([
+            InlineKeyboardButton("📈 Performance", callback_data='performance'),
+            InlineKeyboardButton("📉 Backtest", callback_data='backtest'),
+        ])
+        
+        # Secondary actions row
+        keyboard.append([
+            InlineKeyboardButton("⚙️ Config", callback_data='config'),
+            InlineKeyboardButton("💚 Health", callback_data='health'),
+        ])
+        
+        # Testing row
+        keyboard.append([
+            InlineKeyboardButton("🧪 Test Signal", callback_data='test_signal'),
+        ])
+        
+        # Help row
+        keyboard.append([InlineKeyboardButton("❓ Help", callback_data='help')])
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    def _get_gateway_buttons(self, gateway_running: bool = False) -> InlineKeyboardMarkup:
+        """Generate gateway control buttons."""
+        keyboard = []
+        
+        # Primary gateway actions
+        if gateway_running:
+            keyboard.append([
+                InlineKeyboardButton("⏹️ Stop Gateway", callback_data='stop_gateway'),
+                InlineKeyboardButton("🔄 Refresh", callback_data='gateway_status'),
+            ])
+        else:
+            keyboard.append([
+                InlineKeyboardButton("▶️ Start Gateway", callback_data='start_gateway'),
+                InlineKeyboardButton("🔄 Refresh", callback_data='gateway_status'),
+            ])
+        
+        # Navigation
+        keyboard.append([
+            InlineKeyboardButton("🏠 Main Menu", callback_data='status'),
+            InlineKeyboardButton("📊 Agent Status", callback_data='status'),
+        ])
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    def _get_back_to_menu_button(self, include_refresh: bool = False) -> InlineKeyboardMarkup:
+        """Generate navigation buttons."""
+        keyboard = []
+        if include_refresh:
+            keyboard.append([
+                InlineKeyboardButton("🔄 Refresh", callback_data='status'),
+                InlineKeyboardButton("🏠 Main Menu", callback_data='status'),
+            ])
+        else:
+            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='status')])
+        return InlineKeyboardMarkup(keyboard)
+    
+    def _get_signals_buttons(self, has_signals: bool = True) -> InlineKeyboardMarkup:
+        """Generate buttons for signals view."""
+        keyboard = []
+        if has_signals:
+            keyboard.append([
+                InlineKeyboardButton("🔄 Refresh", callback_data='signals'),
+                InlineKeyboardButton("📊 Last Signal", callback_data='last_signal'),
+            ])
+        keyboard.append([
+            InlineKeyboardButton("📈 Performance", callback_data='performance'),
+            InlineKeyboardButton("🏠 Main Menu", callback_data='status'),
+        ])
+        return InlineKeyboardMarkup(keyboard)
+    
     async def _send_message_or_edit(
         self,
         update: Update,
@@ -1093,6 +1597,16 @@ class TelegramCommandHandler:
             await self._handle_stop_agent(update, context)
         elif callback_data == 'gateway_status':
             await self._handle_gateway_status(update, context)
+        elif callback_data == 'start_gateway':
+            await self._handle_start_gateway(update, context)
+        elif callback_data == 'stop_gateway':
+            await self._handle_stop_gateway(update, context)
+        elif callback_data == 'help':
+            await self._handle_help(update, context)
+        elif callback_data == 'test_signal':
+            await self._handle_test_signal(update, context)
+        elif callback_data == 'backtest':
+            await self._handle_backtest(update, context)
         elif callback_data.startswith('signal_chart_'):
             # Handle signal chart viewing
             signal_id_prefix = callback_data.replace('signal_chart_', '')

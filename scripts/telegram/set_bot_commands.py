@@ -54,6 +54,8 @@ def set_bot_commands():
         BotCommand('signals', 'Show recent signals'),
         BotCommand('last_signal', 'Show most recent signal with chart'),
         BotCommand('active_trades', 'Show currently open positions'),
+        BotCommand('backtest', 'Run strategy backtest with chart'),
+        BotCommand('test_signal', 'Generate test signal with chart'),
         BotCommand('performance', 'Show performance metrics'),
         BotCommand('config', 'Show key configuration values'),
         BotCommand('health', 'Check agent health status'),

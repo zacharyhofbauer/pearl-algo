@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from datetime import datetime, timezone
@@ -238,6 +238,211 @@ class ChartGenerator:
             if 'fig' in locals():
                 plt.close(fig)
             return None
+    
+    def generate_backtest_chart(
+        self,
+        backtest_data: pd.DataFrame,
+        signals: List[Dict],
+        symbol: str = "MNQ",
+        title: str = "Backtest Results",
+    ) -> Optional[Path]:
+        """
+        Generate backtest results chart showing price action and signal markers.
+        
+        Args:
+            backtest_data: DataFrame with OHLCV data (must have timestamp column or index)
+            signals: List of signal dictionaries from backtest
+            symbol: Trading symbol
+            title: Chart title
+            
+        Returns:
+            Path to generated chart image, or None if generation failed
+        """
+        if not MATPLOTLIB_AVAILABLE:
+            return None
+        
+        try:
+            if backtest_data.empty:
+                logger.warning("Cannot generate backtest chart: data is empty")
+                return None
+            
+            # Prepare data
+            chart_data = backtest_data.copy()
+            
+            # Ensure timestamp column exists
+            if "timestamp" not in chart_data.columns:
+                if chart_data.index.name == "timestamp" or isinstance(chart_data.index, pd.DatetimeIndex):
+                    chart_data = chart_data.reset_index()
+                    if "timestamp" not in chart_data.columns:
+                        chart_data["timestamp"] = chart_data.index
+                else:
+                    chart_data["timestamp"] = pd.date_range(
+                        periods=len(chart_data),
+                        end=datetime.now(timezone.utc),
+                        freq="1min"
+                    )
+            
+            # Convert timestamp to datetime if needed
+            if not pd.api.types.is_datetime64_any_dtype(chart_data["timestamp"]):
+                chart_data["timestamp"] = pd.to_datetime(chart_data["timestamp"])
+            
+            # Create figure with subplots
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=self.fig_size, dpi=self.dpi,
+                                         gridspec_kw={'height_ratios': [3, 1]})
+            
+            # Plot price action
+            self._plot_backtest_price_action(ax1, chart_data, signals, symbol)
+            
+            # Plot volume
+            if "volume" in chart_data.columns:
+                self._plot_volume(ax2, chart_data)
+            else:
+                ax2.axis('off')
+            
+            # Add title with chart type clarification
+            chart_type_title = f"{title} - Candlestick Chart with Signal Markers"
+            fig.suptitle(chart_type_title, fontsize=14, fontweight='bold', color='white')
+            
+            # Adjust layout
+            plt.tight_layout()
+            
+            # Save to temp file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+            temp_path = Path(temp_file.name)
+            plt.savefig(temp_path, dpi=self.dpi, bbox_inches='tight', facecolor='black')
+            plt.close(fig)
+            
+            logger.debug(f"Generated backtest chart: {temp_path}")
+            return temp_path
+            
+        except Exception as e:
+            logger.error(f"Error generating backtest chart: {e}", exc_info=True)
+            if 'fig' in locals():
+                plt.close(fig)
+            return None
+    
+    def _plot_backtest_price_action(
+        self,
+        ax,
+        data: pd.DataFrame,
+        signals: List[Dict],
+        symbol: str,
+    ):
+        """Plot candlestick chart with signal markers for backtest."""
+        # Extract OHLC data
+        opens = data["open"].values
+        highs = data["high"].values
+        lows = data["low"].values
+        closes = data["close"].values
+        timestamps = data["timestamp"].values
+        
+        # Plot candlesticks - use clearer visualization
+        # Sample data if too many bars to avoid overcrowding
+        max_bars = 100
+        if len(data) > max_bars:
+            step = len(data) // max_bars
+            indices = list(range(0, len(data), step))
+        else:
+            indices = list(range(len(data)))
+        
+        for i in indices:
+            ts = timestamps[i]
+            open_val = opens[i]
+            high_val = highs[i]
+            low_val = lows[i]
+            close_val = closes[i]
+            
+            color = 'green' if close_val >= open_val else 'red'
+            alpha = 0.6  # Reduced alpha for clearer candlesticks
+            linewidth = 0.8
+            
+            # Draw the wick (high-low line)
+            ax.plot([ts, ts], [low_val, high_val], color=color, linewidth=linewidth, alpha=alpha, zorder=1)
+            
+            # Draw the body (open-close rectangle)
+            body_height = abs(close_val - open_val)
+            if body_height < 0.1:  # Doji - very small body
+                body_height = 0.5
+                body_bottom = close_val - body_height / 2
+            else:
+                body_bottom = min(open_val, close_val)
+            
+            # Use narrower body width for better visibility
+            body_width = 0.4
+            rect = Rectangle(
+                (mdates.date2num(ts) - body_width/2, body_bottom),
+                body_width,
+                body_height,
+                facecolor=color,
+                edgecolor=color,
+                alpha=alpha,
+                zorder=2
+            )
+            ax.add_patch(rect)
+        
+        # Plot signal markers
+        signal_labels_added = {'long': False, 'short': False}
+        for signal in signals:
+            entry_price = signal.get("entry_price", 0)
+            direction = signal.get("direction", "long").lower()
+            
+            if entry_price > 0:
+                # Find closest timestamp
+                signal_time = None
+                if "timestamp" in signal:
+                    try:
+                        signal_time = pd.to_datetime(signal["timestamp"])
+                    except:
+                        pass
+                
+                if signal_time is None:
+                    # Use middle of data range
+                    signal_time = timestamps[len(timestamps) // 2]
+                
+                # Plot signal marker
+                marker_color = 'lime' if direction == 'long' else 'orange'
+                marker_shape = '^' if direction == 'long' else 'v'
+                label = None
+                if not signal_labels_added[direction]:
+                    label = f'{direction.upper()} Signal'
+                    signal_labels_added[direction] = True
+                
+                ax.scatter(
+                    signal_time,
+                    entry_price,
+                    color=marker_color,
+                    marker=marker_shape,
+                    s=200,
+                    alpha=0.8,
+                    edgecolors='white',
+                    linewidths=2,
+                    zorder=5,
+                    label=label
+                )
+                
+                # Add entry line
+                ax.axhline(y=entry_price, color=marker_color, linestyle='--', 
+                         linewidth=1, alpha=0.5)
+        
+        # Formatting
+        ax.set_ylabel('Price ($)', fontsize=10, color='white')
+        ax.set_xlabel('Time', fontsize=9, color='white')
+        ax.grid(True, alpha=0.2, color='gray', linestyle='--')
+        ax.set_facecolor('black')
+        
+        # Add chart type label
+        ax.text(0.02, 0.02, 'Candlestick Chart', transform=ax.transAxes,
+               fontsize=8, color='gray', alpha=0.7,
+               bbox=dict(boxstyle='round', facecolor='black', edgecolor='gray', alpha=0.5))
+        
+        if signals:
+            ax.legend(loc='upper left', fontsize=8, facecolor='black', edgecolor='white', framealpha=0.9)
+        ax.tick_params(colors='white')
+        
+        # Format x-axis dates
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=max(1, len(data) // 10)))
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
     
     def _plot_candlesticks(
         self,
