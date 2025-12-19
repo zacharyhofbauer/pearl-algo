@@ -33,7 +33,7 @@ except ImportError:
 
 import pytest
 
-from pearlalgo.nq_agent.chart_generator import ChartGenerator
+from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
 
 
 @pytest.fixture
@@ -290,6 +290,66 @@ def test_price_axis_right_side(chart_generator, sample_ohlc_data):
     assert label_position == 'right', f"Y-axis label should be on right, got {label_position}"
     
     plt.close(fig)
+
+
+def test_chart_config():
+    """Test ChartConfig dataclass."""
+    config = ChartConfig()
+    assert config.show_vwap is True
+    assert config.show_ma is True
+    assert config.timeframe == "1m"
+    assert config.max_signals_displayed == 50
+
+
+def test_backtest_chart_with_performance(chart_generator, sample_ohlc_data):
+    """Test backtest chart generation with performance data."""
+    signals = [
+        {
+            'entry_price': 25025.0,
+            'stop_loss': 25000.0,
+            'take_profit': 25050.0,
+            'direction': 'long',
+            'type': 'test',
+            'timestamp': sample_ohlc_data['timestamp'].iloc[10].isoformat(),
+        }
+    ]
+    
+    performance_data = {
+        'total_signals': 1,
+        'avg_confidence': 0.75,
+        'avg_risk_reward': 1.5,
+    }
+    
+    chart_path = chart_generator.generate_backtest_chart(
+        sample_ohlc_data,
+        signals,
+        'MNQ',
+        'Test Backtest',
+        performance_data=performance_data
+    )
+    
+    assert chart_path is not None, "Chart generation failed"
+    assert chart_path.exists(), "Chart file does not exist"
+    
+    # Cleanup
+    if chart_path.exists():
+        chart_path.unlink()
+
+
+def test_signal_timestamp_matching(chart_generator, sample_ohlc_data):
+    """Test signal timestamp matching."""
+    # Create signal with timestamp
+    signal = {
+        'entry_price': 25025.0,
+        'direction': 'long',
+        'timestamp': sample_ohlc_data['timestamp'].iloc[20].isoformat(),
+    }
+    
+    timestamps = sample_ohlc_data['timestamp'].values
+    idx = chart_generator._find_signal_index(signal, timestamps, sample_ohlc_data)
+    
+    assert idx is not None, "Should find signal index"
+    assert 0 <= idx < len(sample_ohlc_data), "Index should be valid"
 
 
 if __name__ == "__main__":

@@ -827,15 +827,52 @@ class TelegramCommandHandler:
                         # Generate demo backtest
                         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
                         
-                        # Create demo data
+                        # Create demo data with realistic mixed bullish/bearish candles
                         dates = pd.date_range(end=datetime.now(timezone.utc), periods=200, freq='1min')
+                        
+                        # Generate realistic OHLC data with both green and red candles
+                        opens = []
+                        highs = []
+                        lows = []
+                        closes = []
+                        volumes = []
+                        
+                        base_price = 25000.0
+                        for i in range(200):
+                            # Add trend + volatility + random walk
+                            trend = i * 0.2  # Slow upward trend
+                            volatility = (i % 10 - 5) * 0.8  # Cyclical movement
+                            noise = (i % 7 - 3) * 0.4  # Random component
+                            
+                            mid_price = base_price + trend + volatility + noise
+                            
+                            # Create realistic OHLC - sometimes bullish, sometimes bearish
+                            # Pattern: roughly 2/3 bullish, 1/3 bearish for variety
+                            if i % 3 == 0:  # Bearish candle every 3rd
+                                open_price = mid_price + 0.5
+                                close_price = mid_price - 0.5
+                            else:  # Bullish candle
+                                open_price = mid_price - 0.5
+                                close_price = mid_price + 0.5
+                            
+                            # Add wicks (high and low)
+                            wick_size = abs((i % 5 - 2) * 0.3)
+                            high_price = max(open_price, close_price) + wick_size
+                            low_price = min(open_price, close_price) - wick_size
+                            
+                            opens.append(open_price)
+                            highs.append(high_price)
+                            lows.append(low_price)
+                            closes.append(close_price)
+                            volumes.append(1000 + (i % 20) * 50)
+                        
                         demo_data = pd.DataFrame({
                             'timestamp': dates,
-                            'open': [25000 + i * 0.3 + (i % 5 - 2) * 0.5 for i in range(200)],
-                            'high': [25001 + i * 0.3 + abs(i % 5 - 2) * 0.7 for i in range(200)],
-                            'low': [24999 + i * 0.3 - abs(i % 5 - 2) * 0.7 for i in range(200)],
-                            'close': [25000.5 + i * 0.3 + (i % 5 - 2) * 0.3 for i in range(200)],
-                            'volume': [1000 + (i % 20) * 50 for i in range(200)],
+                            'open': opens,
+                            'high': highs,
+                            'low': lows,
+                            'close': closes,
+                            'volume': volumes,
                         })
                         demo_data = demo_data.set_index('timestamp')
                         
@@ -897,11 +934,21 @@ class TelegramCommandHandler:
                             else:
                                 chart_title = f"Backtest Results - Demo Visualization ({signals_shown} demo signals)"
                             
+                            # Prepare performance data
+                            performance_data = {
+                                "total_signals": result.total_signals,
+                                "avg_confidence": result.avg_confidence,
+                                "avg_risk_reward": result.avg_risk_reward,
+                                "win_rate": result.win_rate,
+                                "total_pnl": result.total_pnl,
+                            }
+                            
                             chart_path = self.chart_generator.generate_backtest_chart(
                                 demo_data.reset_index(),
                                 signals_from_backtest,
                                 'MNQ',
-                                chart_title
+                                chart_title,
+                                performance_data=performance_data
                             )
                             
                             # Format results message
@@ -921,7 +968,9 @@ class TelegramCommandHandler:
                                 "• Green/Red candlesticks = Price action\n"
                                 "• 🔼 Green triangles = Long entry signals\n"
                                 "• 🔽 Orange triangles = Short entry signals\n"
-                                "• Volume bars (bottom panel)"
+                                "• Volume bars (bottom panel)\n"
+                                "• VWAP line (orange)\n"
+                                "• Moving averages (blue/purple)"
                             )
                             
                             reply_markup = InlineKeyboardMarkup([[
@@ -1028,15 +1077,50 @@ class TelegramCommandHandler:
                 )
                 return
             
-            # Generate test data
+            # Generate test data with realistic mixed bullish/bearish candles
             dates = pd.date_range(end=datetime.now(timezone.utc), periods=100, freq='1min')
+            
+            opens = []
+            highs = []
+            lows = []
+            closes = []
+            volumes = []
+            
+            base_price = 25000.0
+            for i in range(100):
+                # Add trend + volatility
+                trend = i * 0.3  # Moderate trend
+                volatility = (i % 8 - 4) * 0.6  # Volatility
+                noise = (i % 5 - 2) * 0.3  # Noise component
+                
+                mid_price = base_price + trend + volatility + noise
+                
+                # Create realistic OHLC - mix of bullish and bearish
+                if i % 3 == 0:  # Bearish candle every 3rd
+                    open_price = mid_price + 0.4
+                    close_price = mid_price - 0.4
+                else:  # Bullish candle
+                    open_price = mid_price - 0.4
+                    close_price = mid_price + 0.4
+                
+                # Add wicks
+                wick_size = abs((i % 4 - 1.5) * 0.25)
+                high_price = max(open_price, close_price) + wick_size
+                low_price = min(open_price, close_price) - wick_size
+                
+                opens.append(open_price)
+                highs.append(high_price)
+                lows.append(low_price)
+                closes.append(close_price)
+                volumes.append(1000 + (i % 10) * 100)
+            
             test_data = pd.DataFrame({
                 'timestamp': dates,
-                'open': [25000 + i * 0.5 + (i % 3 - 1) * 0.2 for i in range(100)],
-                'high': [25001 + i * 0.5 + abs(i % 3 - 1) * 0.3 for i in range(100)],
-                'low': [24999 + i * 0.5 - abs(i % 3 - 1) * 0.3 for i in range(100)],
-                'close': [25000.5 + i * 0.5 + (i % 3 - 1) * 0.1 for i in range(100)],
-                'volume': [1000 + (i % 10) * 100 for i in range(100)],
+                'open': opens,
+                'high': highs,
+                'low': lows,
+                'close': closes,
+                'volume': volumes,
             })
             
             # Create test signal

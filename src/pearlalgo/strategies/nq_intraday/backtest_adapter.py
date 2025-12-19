@@ -18,6 +18,10 @@ class BacktestResult:
     avg_confidence: float
     avg_risk_reward: float
     signals: Optional[List[Dict]] = field(default=None)  # Optional: actual signals from backtest
+    # Performance metrics (optional, calculated if signals available)
+    win_rate: Optional[float] = None
+    total_pnl: Optional[float] = None
+    signal_distribution: Optional[Dict[str, int]] = None
 
 
 def _build_mtf(df_1m: pd.DataFrame, config: NQIntradayConfig) -> Dict[str, pd.DataFrame]:
@@ -122,11 +126,22 @@ def run_signal_backtest(
 
     avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
     avg_rr = sum(risk_rewards) / len(risk_rewards) if risk_rewards else 0.0
-
+    
+    # Calculate signal distribution by type
+    signal_distribution = {}
+    if signals:
+        for signal in signals:
+            signal_type = signal.get("type", "unknown")
+            signal_distribution[signal_type] = signal_distribution.get(signal_type, 0) + 1
+    
+    # Note: win_rate and total_pnl would require trade simulation
+    # For signal-only backtest, these remain None
+    
     return BacktestResult(
         total_bars=len(df_1m),
         total_signals=len(signals),
         avg_confidence=avg_conf,
         avg_risk_reward=avg_rr,
         signals=signals if return_signals else None,
+        signal_distribution=signal_distribution if signal_distribution else None,
     )
