@@ -7,7 +7,10 @@ Sends signals and status updates to Telegram.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional
+
+import pandas as pd
 
 from pearlalgo.utils.logger import logger
 
@@ -30,6 +33,13 @@ from pearlalgo.utils.telegram_alerts import (
     _format_currency,
     _format_percentage,
 )
+
+try:
+    from pearlalgo.nq_agent.chart_generator import ChartGenerator
+    CHART_GENERATOR_AVAILABLE = True
+except ImportError:
+    CHART_GENERATOR_AVAILABLE = False
+    ChartGenerator = None
 
 
 class NQAgentTelegramNotifier:
@@ -57,6 +67,7 @@ class NQAgentTelegramNotifier:
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.telegram: Optional[TelegramAlerts] = None
+        self.chart_generator: Optional[ChartGenerator] = None
 
         # Initialize TelegramAlerts if credentials provided
         if enabled and bot_token and chat_id:
@@ -74,13 +85,22 @@ class NQAgentTelegramNotifier:
         elif enabled:
             logger.warning("Telegram enabled but bot_token or chat_id not provided")
             self.enabled = False
+        
+        # Initialize chart generator if available
+        if CHART_GENERATOR_AVAILABLE and enabled:
+            try:
+                self.chart_generator = ChartGenerator()
+            except Exception as e:
+                logger.warning(f"Could not initialize ChartGenerator: {e}")
+                self.chart_generator = None
 
-    async def send_signal(self, signal: Dict) -> bool:
+    async def send_signal(self, signal: Dict, buffer_data: Optional[pd.DataFrame] = None) -> bool:
         """
         Send a trading signal to Telegram using professional desk alert format.
         
         Args:
             signal: Signal dictionary with regime, MTF, VWAP context
+            buffer_data: Optional DataFrame with OHLCV data for chart generation
             
         Returns:
             True if sent successfully
@@ -91,10 +111,50 @@ class NQAgentTelegramNotifier:
         try:
             # Format professional desk alert
             message = self._format_professional_signal(signal)
-            # send_message already has retry logic, don't add nested retries
-            return await self.telegram.send_message(message)
+            
+            # Generate and send chart if available
+            chart_path = None
+            if self.chart_generator and buffer_data is not None and not buffer_data.empty:
+                try:
+                    symbol = signal.get("symbol", "MNQ")
+                    chart_path = self.chart_generator.generate_entry_chart(signal, buffer_data, symbol)
+                except Exception as e:
+                    logger.warning(f"Could not generate chart for signal: {e}")
+            
+            # Send message
+            success = await self.telegram.send_message(message)
+            
+            # Send chart if generated
+            if chart_path and chart_path.exists():
+                try:
+                    await self._send_photo(chart_path)
+                    # Clean up temp file
+                    try:
+                        chart_path.unlink()
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.warning(f"Could not send chart: {e}")
+            
+            return success
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_signal")
+            return False
+    
+    async def _send_photo(self, photo_path: Path) -> bool:
+        """Send photo to Telegram."""
+        if not self.enabled or not self.telegram or not self.telegram.bot:
+            return False
+        
+        try:
+            with open(photo_path, 'rb') as photo:
+                await self.telegram.bot.send_photo(
+                    chat_id=self.chat_id,
+                    photo=photo,
+                )
+            return True
+        except Exception as e:
+            logger.warning(f"Error sending photo: {e}")
             return False
 
     def _format_professional_signal(self, signal: Dict) -> str:
@@ -346,7 +406,13 @@ class NQAgentTelegramNotifier:
 
         return message
 
-    async def send_entry_notification(self, signal_id: str, entry_price: float, signal: Dict) -> bool:
+    async def send_entry_notification(
+        self, 
+        signal_id: str, 
+        entry_price: float, 
+        signal: Dict,
+        buffer_data: Optional[pd.DataFrame] = None,
+    ) -> bool:
         """
         Send trade entry notification to Telegram.
         
@@ -354,6 +420,7 @@ class NQAgentTelegramNotifier:
             signal_id: Signal ID for tracking
             entry_price: Actual entry price
             signal: Original signal dictionary
+            buffer_data: Optional DataFrame with OHLCV data for chart generation
             
         Returns:
             True if sent successfully
@@ -384,7 +451,28 @@ class NQAgentTelegramNotifier:
             message += f"*R:R:* {risk_reward:.2f}:1\n"
             message += f"*Signal ID:* {signal_id[:16]}...\n"
             
-            return await self.telegram.send_message(message)
+            # Send message
+            success = await self.telegram.send_message(message)
+            
+            # Generate and send chart if available
+            chart_path = None
+            if self.chart_generator and buffer_data is not None and not buffer_data.empty:
+                try:
+                    chart_path = self.chart_generator.generate_entry_chart(signal, buffer_data, symbol)
+                except Exception as e:
+                    logger.warning(f"Could not generate entry chart: {e}")
+            
+            if chart_path and chart_path.exists():
+                try:
+                    await self._send_photo(chart_path)
+                    try:
+                        chart_path.unlink()
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.warning(f"Could not send entry chart: {e}")
+            
+            return success
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_entry_notification")
             return False
@@ -397,6 +485,7 @@ class NQAgentTelegramNotifier:
         pnl: float,
         signal: Dict,
         hold_duration_minutes: Optional[float] = None,
+        buffer_data: Optional[pd.DataFrame] = None,
     ) -> bool:
         """
         Send trade exit notification to Telegram with P&L.
@@ -453,7 +542,31 @@ class NQAgentTelegramNotifier:
             
             message += f"*Signal ID:* {signal_id[:16]}...\n"
             
-            return await self.telegram.send_message(message)
+            # Send message
+            success = await self.telegram.send_message(message)
+            
+            # Generate and send chart if available
+            chart_path = None
+            if self.chart_generator and buffer_data is not None and not buffer_data.empty:
+                try:
+                    symbol = signal.get("symbol", "NQ")
+                    chart_path = self.chart_generator.generate_exit_chart(
+                        signal, exit_price, exit_reason, pnl, buffer_data, symbol
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not generate exit chart: {e}")
+            
+            if chart_path and chart_path.exists():
+                try:
+                    await self._send_photo(chart_path)
+                    try:
+                        chart_path.unlink()
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.warning(f"Could not send exit chart: {e}")
+            
+            return success
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_exit_notification")
             return False

@@ -3,7 +3,7 @@
 # Optimized for intraday swings and quick scalps
 
 # Trading Symbol
-symbol: "NQ"  # E-mini NASDAQ-100 futures (using NQ but scaling contract sizes to match MNQ)
+symbol: "MNQ"  # Mini NQ (1/10th size of NQ, prop-firm friendly)
 
 # Timeframe
 timeframe: "1m"  # 1-minute bars for intraday scalping/swings
@@ -32,11 +32,11 @@ telegram:
 # Risk Management (Prop Firm Style)
 risk:
   max_risk_per_trade: 0.01  # 1% max risk per trade (prop firm conservative)
-  max_drawdown: 0.10  # 10% account drawdown limit (prop firm typical)
-  stop_loss_atr_multiplier: 1.5  # Tighter stops for scalping (was 2.0)
-  take_profit_risk_reward: 1.5  # 1.5:1 R/R for quick scalps (was 2.0)
-  min_position_size: 1  # Minimum contracts per trade (NQ = 10x MNQ, so 1 NQ = 10 MNQ)
-  max_position_size: 2  # Maximum contracts per trade (2 NQ = 20 MNQ equivalent)
+  max_drawdown: 0.10        # 10% account drawdown limit (prop firm typical)
+  stop_loss_atr_multiplier: 1.5  # Tighter stops for scalping
+  take_profit_risk_reward: 1.5   # 1.5:1 R/R for quick scalps
+  min_position_size: 5      # Minimum MNQ contracts per trade
+  max_position_size: 15     # Maximum MNQ contracts per trade
 
 # Logging
 logging:
@@ -50,10 +50,10 @@ data_provider: "ibkr"  # Use IBKR for market data
 # Service intervals
 service:
   status_update_interval: 1800  # 30 minutes in seconds
-  heartbeat_interval: 3600  # 1 hour in seconds
-  state_save_interval: 10  # Save state every N cycles
+  heartbeat_interval: 3600      # 1 hour in seconds
+  state_save_interval: 10       # Save state every N cycles
   connection_failure_alert_interval: 600  # 10 minutes in seconds
-  data_quality_alert_interval: 300  # 5 minutes in seconds
+  data_quality_alert_interval: 300        # 5 minutes in seconds
 
 # Circuit breaker
 circuit_breaker:
@@ -64,55 +64,46 @@ circuit_breaker:
 # Alert intervals
 alerts:
   connection_failure_interval: 600  # 10 minutes
-  data_quality_interval: 300  # 5 minutes
+  data_quality_interval: 300        # 5 minutes
 
 # Data fetching
 data:
-  buffer_size: 100  # Main buffer (1m bars)
-  buffer_size_5m: 50  # 5m timeframe buffer
-  buffer_size_15m: 50  # 15m timeframe buffer
-  historical_hours: 2  # Historical data fetch window
-  multitimeframe_5m_hours: 4  # 5m MTF window
-  multitimeframe_15m_hours: 12  # 15m MTF window
+  buffer_size: 100                 # Main buffer (1m bars)
+  buffer_size_5m: 50               # 5m timeframe buffer
+  buffer_size_15m: 50              # 15m timeframe buffer
+  historical_hours: 2              # Historical data fetch window
+  multitimeframe_5m_hours: 4       # 5m MTF window
+  multitimeframe_15m_hours: 12     # 15m MTF window
   performance_history_limit: 1000  # Max performance records
-  stale_data_threshold_minutes: 10  # Alert if data is older than this
-  connection_timeout_minutes: 30  # Consider connection lost after this time without data
-  use_level2_data: false  # Disabled - you have Level 1 subscription (CME Real-Time NP,L1), not Level 2
-  order_book_depth: 10  # Number of order book levels to request (5-20 recommended) - not used when Level 2 disabled
-  order_book_analysis: false  # Disabled - requires Level 2 data for order book analysis
+  stale_data_threshold_minutes: 10 # Alert if data is older than this
+  connection_timeout_minutes: 30   # Consider connection lost after this time without data
+  use_level2_data: false           # Level 2 disabled by default (most prop-firm feeds are Level 1)
+  order_book_depth: 10             # Requested depth if Level 2 is enabled
+  order_book_analysis: false       # Order book analysis disabled when Level 2 is off
 
 # Signal generation
 signals:
-  duplicate_window_seconds: 300  # 5 minutes
-  min_confidence: 0.50
-  min_risk_reward: 1.5
-  duplicate_price_threshold_pct: 0.5  # 0.5% price difference for duplicate detection
+  duplicate_window_seconds: 300      # 5 minutes
+  min_confidence: 0.50               # Minimum signal confidence
+  min_risk_reward: 1.5               # Minimum R:R ratio
+  duplicate_price_threshold_pct: 0.5 # 0.5% price difference for duplicate detection
 
 # Performance tracking
 performance:
   max_records: 1000
   default_lookback_days: 7
 
-# Prop Firm Trading Assumptions
-# Using NQ but scaling contract sizes to match MNQ equivalent exposure
+# Prop Firm Trading Assumptions (MNQ-native)
 prop_firm:
-  # NQ (E-mini) is 10x size of MNQ
-  # NQ tick value: $20 per point
-  # MNQ tick value: $2 per point (1/10th of NQ)
-  # We use NQ but trade 1/10th the contracts to match MNQ exposure
-  nq_tick_value: 20.0  # $20 per point for NQ
-  mnq_tick_value: 2.0  # $2 per point for MNQ (for reference)
-  contract_size_multiplier: 0.1  # Divide NQ contracts by 10 to get MNQ-equivalent exposure
-  
-  # Position sizing range for prop firms (scaled for NQ)
-  # Typical prop firm accounts: $25k-$100k
-  # 1 NQ contract = 10 MNQ contracts in exposure
-  # So 1-2 NQ contracts = 10-20 MNQ equivalent
-  min_contracts: 1  # 1 NQ = 10 MNQ equivalent
-  max_contracts: 2  # 2 NQ = 20 MNQ equivalent
-  default_contracts: 1  # 1 NQ = 10 MNQ equivalent
-  
-  # Risk management assumptions
-  # Conservative prop firm approach: 1% max risk per trade, 10% max drawdown
+  # MNQ (Micro E-mini NASDAQ-100)
+  mnq_tick_value: 2.0          # $2 per point for MNQ
+  contract_size_multiplier: 1.0  # Native MNQ sizing (no NQ scaling)
+
+  # Position sizing range for prop firms (MNQ contracts)
+  min_contracts: 5
+  max_contracts: 15
+  default_contracts: 10
+
+  # Risk management assumptions (percent of account)
   max_risk_per_trade_pct: 1.0  # 1% of account
-  max_drawdown_pct: 10.0  # 10% of account
+  max_drawdown_pct: 10.0       # 10% of account

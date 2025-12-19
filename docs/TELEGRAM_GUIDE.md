@@ -20,11 +20,17 @@ It combines quick start steps, command setup, and command behavior.
 3. Select your bot.
 4. Paste this command list:
    ```
+   start_gateway - Start IBKR Gateway
+   stop_gateway - Stop IBKR Gateway
+   gateway_status - Check Gateway status
+   start_agent - Start NQ Agent Service
+   stop_agent - Stop NQ Agent Service
+   restart_agent - Restart NQ Agent Service
    status - Get current agent status
-   pause - Pause the trading agent
-   resume - Resume the trading agent
    signals - Show recent signals
    performance - Show performance metrics
+   config - Show key configuration values (read-only)
+   health - Show basic agent health (read-only)
    help - Show available commands
    ```
 5. BotFather will confirm the commands are set.
@@ -98,20 +104,53 @@ Once the command handler is running and commands are configured, the bot support
 - Shows basic bot information and available commands.
 - Intended primarily for you (authorized chat ID).
 
-### 3.2 `/status`
+### 3.2 Service Control Commands
+
+#### `/start_gateway`
+- Starts IBKR Gateway (may take 60+ seconds for authentication)
+- Returns success/failure status
+- **Note:** Gateway startup requires 2FA approval via IBKR mobile app
+
+#### `/stop_gateway`
+- Stops IBKR Gateway gracefully
+- Verifies Gateway process is stopped
+
+#### `/gateway_status`
+- Shows Gateway process status (running/stopped)
+- Shows API port status (listening/not listening)
+- Quick health check for Gateway
+
+#### `/start_agent`
+- Starts NQ Agent Service in background mode
+- Checks if Gateway is running (warns if not)
+- Verifies agent process started successfully
+
+#### `/stop_agent`
+- Stops NQ Agent Service gracefully
+- Verifies agent process is stopped
+
+#### `/restart_agent`
+- Stops then starts NQ Agent Service
+- Useful for applying configuration changes
+- Shows status of both stop and start operations
+
+### 3.3 `/status`
 
 Returns the current agent status, including:
 
 - Running / stopped state
-- Cycle count
-- Signal count
-- Buffer size (bars loaded)
+- Pause reason (if paused)
+- Cycle count, signal count, buffer size
+- Compact 7-day performance summary
 - Inline buttons:
-  - **Pause** – placeholder action (informational text for now)
-  - **Performance** – quick link to `/performance`
-  - **Signals** – quick link to `/signals`
+  - **Start Agent** / **Stop Agent** – Quick service control
+  - **Gateway Status** – Check Gateway health
+  - **Performance** – Detailed performance metrics
+  - **Signals** – Recent signals list
+  - **Config** – Configuration values
+  - **Health** – Health check
 
-### 3.3 `/signals`
+### 3.4 `/signals`
 
 - Shows the last **10 recent trading signals**.
 - For each signal, includes:
@@ -121,7 +160,7 @@ Returns the current agent status, including:
   - Current status (`generated`, `entered`, `exited`, `expired`).
 - Data is read from `data/nq_agent_state/signals.jsonl` via the `state_manager` and `performance_tracker`.
 
-### 3.4 `/performance`
+### 3.5 `/performance`
 
 - Shows **7‑day performance metrics**:
   - Total signals and exited signals
@@ -130,14 +169,21 @@ Returns the current agent status, including:
   - Total P&L and average P&L
 - Uses the same performance metrics as the periodic Telegram summaries.
 
-### 3.5 `/pause` and `/resume`
+### 3.6 `/config` and `/health`
 
-- Currently **informational only**:
-  - They confirm the command was received.
-  - They indicate that direct pause/resume requires service‑level integration.
-- The actual pause/resume of the agent is still controlled via lifecycle scripts:
-  - `./scripts/lifecycle/start_nq_agent_service.sh`
-  - `./scripts/lifecycle/stop_nq_agent_service.sh`
+- `/config`: Shows key configuration values (read-only)
+  - Symbol, timeframe, scan interval
+  - Risk parameters and position sizing
+  
+- `/health`: Shows basic agent health status
+  - Service process status
+  - State file presence and last update time
+
+### 3.7 `/pause` and `/resume` (Legacy)
+
+- Currently **informational only** (use `/stop_agent` and `/start_agent` instead)
+- These commands acknowledge receipt but don't perform actions
+- For full control, use the service control commands above
 
 ---
 
@@ -157,8 +203,9 @@ These notifications come directly from the NQ Agent Service via `NQAgentTelegram
 
 These features require the command handler service to be running:
 
-- `/status`, `/signals`, `/performance`, `/help`, `/pause`, `/resume`
-- Inline button callbacks (Pause, Performance, Signals)
+- All service control commands (`/start_gateway`, `/stop_gateway`, `/start_agent`, etc.)
+- All monitoring commands (`/status`, `/signals`, `/performance`, `/config`, `/health`)
+- Inline button callbacks (Start/Stop Agent, Gateway Status, Performance, Signals, etc.)
 
 If commands are unresponsive but you still get status/heartbeat messages, it almost always means the command handler is not running.
 

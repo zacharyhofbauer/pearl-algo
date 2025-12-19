@@ -535,6 +535,32 @@ logging:
 data_provider: "ibkr"
 ```
 
+### Configuration Precedence
+
+Configuration is resolved using the following precedence rules:
+
+1. **Environment variables** (from `.env` or process env) are the primary source for:
+   - IBKR connection (`IBKR_HOST`, `IBKR_PORT`, `IBKR_CLIENT_ID`, `IBKR_DATA_CLIENT_ID`)
+   - Telegram bot token and chat ID (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)
+   - Provider/profile flags (for example `PEARLALGO_DATA_PROVIDER`, `PEARLALGO_DUMMY_MODE`)
+2. **`config/config.yaml`** provides the **default behavior** for the MNQ agent:
+   - Trading symbol, timeframe, scan interval
+   - Risk/position sizing and prop‑firm assumptions
+   - Service intervals, data buffers, and signal thresholds
+3. **Code defaults** in:
+   - `strategies/nq_intraday/config.py` (`NQIntradayConfig`)
+   - `pearlalgo.config.config_loader.load_service_config`
+   - `pearlalgo.config.settings.Settings`
+
+   act as a safety net when a key is missing from `config.yaml`. They are kept in sync with the example
+   snippets above but should be treated as **fallbacks**, not the primary place to change behavior.
+
+In practice:
+- **Change behavior** (symbol, risk, scan intervals, thresholds) by editing `config/config.yaml`.
+- **Change infrastructure or secrets** (IBKR, Telegram, provider selection) by editing `.env`.
+- The entrypoints (`pearlalgo.nq_agent.main`, `telegram_command_handler.main`) will first read
+  from the environment and then fall back to `config/config.yaml` for any missing values.
+
 ---
 
 ## Key Features
@@ -710,6 +736,51 @@ pip install -e .
 **View Logs**:
 ```bash
 tail -f logs/nq_agent.log
+```
+
+### Example `systemd` Unit (VPS / server)
+
+To run the agent as a managed service on a Linux VPS, you can use a simple `systemd` unit:
+
+```ini
+[Unit]
+Description=PearlAlgo MNQ Agent
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pearlalgo/pearlalgo-dev-ai-agents
+Environment=\"PYTHONUNBUFFERED=1\"
+EnvironmentFile=/home/pearlalgo/pearlalgo-dev-ai-agents/.env
+ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin/python -m pearlalgo.nq_agent.main
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now pearlalgo-mnq.service
+sudo systemctl status pearlalgo-mnq.service
+```
+
+### Docker Deployment (optional)
+
+A minimal `Dockerfile` is provided in the project root. To build and run:
+
+```bash
+cd ~/pearlalgo-dev-ai-agents
+docker build -t pearlalgo-mnq .
+
+# IBKR Gateway must be reachable from inside the container (host network or a separate container)
+docker run --rm -it \\
+  --env-file .env \\
+  --network host \\
+  pearlalgo-mnq
 ```
 
 ### Service Management

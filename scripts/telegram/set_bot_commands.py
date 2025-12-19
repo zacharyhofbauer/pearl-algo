@@ -39,13 +39,24 @@ def set_bot_commands():
     
     bot = Bot(token=bot_token)
     
-    # Define commands
+    # Define commands (grouped by category for better UX)
     commands = [
+        # Service Control
+        BotCommand('start_gateway', 'Start IBKR Gateway'),
+        BotCommand('stop_gateway', 'Stop IBKR Gateway'),
+        BotCommand('gateway_status', 'Check Gateway status'),
+        BotCommand('start_agent', 'Start NQ Agent Service'),
+        BotCommand('stop_agent', 'Stop NQ Agent Service'),
+        BotCommand('restart_agent', 'Restart NQ Agent Service'),
+        # Monitoring
         BotCommand('status', 'Get current agent status'),
-        BotCommand('pause', 'Pause the trading agent'),
-        BotCommand('resume', 'Resume the trading agent'),
+        BotCommand('quick_status', 'Ultra-compact status'),
         BotCommand('signals', 'Show recent signals'),
+        BotCommand('last_signal', 'Show most recent signal with chart'),
+        BotCommand('active_trades', 'Show currently open positions'),
         BotCommand('performance', 'Show performance metrics'),
+        BotCommand('config', 'Show key configuration values'),
+        BotCommand('health', 'Check agent health status'),
         BotCommand('help', 'Show available commands'),
     ]
     

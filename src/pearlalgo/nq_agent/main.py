@@ -39,7 +39,7 @@ async def main():
     # Setup logging for console output (matches testing behavior)
     setup_logging(level="INFO")
     
-    logger.info("Starting NQ Agent Service...")
+    logger.info("Starting NQ Agent Service (MNQ-native config)...")
 
     import os
 
@@ -47,7 +47,9 @@ async def main():
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-    # Try loading from config.yaml if env vars not set
+    # Precedence for Telegram configuration:
+    # 1) Environment variables (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+    # 2) config/config.yaml -> telegram.bot_token / telegram.chat_id (with ${ENV} substitution)
     if not telegram_bot_token or not telegram_chat_id:
         try:
             from pathlib import Path

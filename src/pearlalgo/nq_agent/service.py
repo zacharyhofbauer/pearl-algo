@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
+import pandas as pd
+
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
 
@@ -76,6 +78,7 @@ class NQAgentService:
         self.running = False
         self.shutdown_requested = False
         self.paused = False
+        self.pause_reason: Optional[str] = None
         self.start_time: Optional[datetime] = None
         self.cycle_count = 0
         self.signal_count = 0
@@ -220,12 +223,26 @@ class NQAgentService:
 
     async def _run_loop(self) -> None:
         """Main service loop."""
-        logger.info(f"Starting main loop (scan_interval={self.config.scan_interval}s)")
+        logger.info(
+            "Starting main loop",
+            extra={
+                "scan_interval": self.config.scan_interval,
+                "symbol": self.config.symbol,
+                "timeframe": self.config.timeframe,
+            },
+        )
 
         while not self.shutdown_requested:
             try:
                 # Skip if paused
                 if self.paused:
+                    logger.info(
+                        "Service paused; skipping cycle",
+                        extra={
+                            "cycle": self.cycle_count,
+                            "pause_reason": self.pause_reason,
+                        },
+                    )
                     await asyncio.sleep(self.config.scan_interval)
                     continue
 
@@ -252,8 +269,12 @@ class NQAgentService:
                         # Circuit breaker: pause service if too many connection failures
                         if self.connection_failures >= self.max_connection_failures:
                             logger.error(
-                                f"Too many connection failures ({self.connection_failures}), "
-                                "pausing service. IB Gateway may be down."
+                                "Circuit breaker triggered: connection failures",
+                                extra={
+                                    "connection_failures": self.connection_failures,
+                                    "max_connection_failures": self.max_connection_failures,
+                                    "cycle": self.cycle_count,
+                                },
                             )
                             await self.telegram_notifier.send_circuit_breaker_alert(
                                 "IB Gateway connection lost",
@@ -264,6 +285,7 @@ class NQAgentService:
                                 }
                             )
                             self.paused = True
+                            self.pause_reason = "connection_failures"
 
                         await asyncio.sleep(self.config.scan_interval)
                         continue
@@ -301,8 +323,13 @@ class NQAgentService:
                     # Circuit breaker: if too many data fetch errors, wait longer
                     if self.data_fetch_errors >= self.max_data_fetch_errors:
                         logger.warning(
-                            f"Too many data fetch errors ({self.data_fetch_errors}), "
-                            f"waiting {self.config.scan_interval * 2}s before retry"
+                            "Data fetch error threshold reached; backing off",
+                            extra={
+                                "data_fetch_errors": self.data_fetch_errors,
+                                "max_data_fetch_errors": self.max_data_fetch_errors,
+                                "backoff_seconds": self.config.scan_interval * 2,
+                                "cycle": self.cycle_count,
+                            },
                         )
                         await self._notify_error("Data fetch failures", f"{self.data_fetch_errors} consecutive errors")
                         await asyncio.sleep(self.config.scan_interval * 2)
@@ -320,7 +347,13 @@ class NQAgentService:
                             logger.warning(f"No market data for {self.connection_timeout_minutes}+ minutes - possible connection issue")
                             await self._handle_connection_failure()
 
-                    logger.debug("No market data available, waiting...")
+                    logger.debug(
+                        "No market data available, waiting",
+                        extra={
+                            "cycle": self.cycle_count,
+                            "connection_failures": self.connection_failures,
+                        },
+                    )
                     await asyncio.sleep(self.config.scan_interval)
                     continue
 
@@ -345,14 +378,25 @@ class NQAgentService:
                     regime_info = "detected"
                 
                 logger.info(
-                    f"Cycle {self.cycle_count}: signals={len(signals)}, "
-                    f"data_fresh={data_fresh}, market_open={market_open}, "
-                    f"buffer_size={self.data_fetcher.get_buffer_size()}"
+                    "Cycle completed",
+                    extra={
+                        "cycle": self.cycle_count,
+                        "signals": len(signals),
+                        "data_fresh": data_fresh,
+                        "market_open": market_open,
+                        "buffer_size": self.data_fetcher.get_buffer_size(),
+                        "error_count": self.error_count,
+                        "consecutive_errors": self.consecutive_errors,
+                        "connection_failures": self.connection_failures,
+                        "data_fetch_errors": self.data_fetch_errors,
+                    },
                 )
 
                 # Process signals
                 for signal in signals:
-                    await self._process_signal(signal)
+                    # Get buffer data for chart generation
+                    buffer_data = market_data.get("df", pd.DataFrame())
+                    await self._process_signal(signal, buffer_data=buffer_data)
 
                 # Send periodic status updates
                 await self._check_status_update()
@@ -370,18 +414,26 @@ class NQAgentService:
                 await asyncio.sleep(self.config.scan_interval)
 
             except asyncio.CancelledError:
-                logger.info("Service loop cancelled")
+                logger.info("Service loop cancelled", extra={"cycle": self.cycle_count})
                 break
             except Exception as e:
-                logger.error(f"Error in service loop: {e}", exc_info=True)
+                logger.error(
+                    f"Error in service loop: {e}",
+                    exc_info=True,
+                    extra={"cycle": self.cycle_count},
+                )
                 self.error_count += 1
                 self.consecutive_errors += 1
 
                 # Circuit breaker: if too many consecutive errors, pause service
                 if self.consecutive_errors >= self.max_consecutive_errors:
                     logger.error(
-                        f"Too many consecutive errors ({self.consecutive_errors}), "
-                        "pausing service. Manual intervention required."
+                        "Circuit breaker triggered: consecutive errors",
+                        extra={
+                            "consecutive_errors": self.consecutive_errors,
+                            "max_consecutive_errors": self.max_consecutive_errors,
+                            "cycle": self.cycle_count,
+                        },
                     )
                     await self.telegram_notifier.send_circuit_breaker_alert(
                         "Too many consecutive errors",
@@ -389,9 +441,10 @@ class NQAgentService:
                             "consecutive_errors": self.consecutive_errors,
                             "error_type": "general",
                             "action_taken": "Service paused",
-                        }
+                        },
                     )
                     self.paused = True
+                    self.pause_reason = "consecutive_errors"
 
                 await asyncio.sleep(self.config.scan_interval)
             else:
@@ -409,19 +462,20 @@ class NQAgentService:
                     except Exception as e:
                         logger.warning(f"Could not send recovery notification: {e}")
 
-    async def _process_signal(self, signal: Dict) -> None:
+    async def _process_signal(self, signal: Dict, buffer_data: Optional[pd.DataFrame] = None) -> None:
         """
         Process a trading signal.
         
         Args:
             signal: Signal dictionary
+            buffer_data: Optional DataFrame with OHLCV data for chart generation
         """
         try:
             # Track signal generation (delegates to state_manager for persistence)
             signal_id = self.performance_tracker.track_signal_generated(signal)
 
-            # Send to Telegram (await async call)
-            success = await self.telegram_notifier.send_signal(signal)
+            # Send to Telegram (await async call) with buffer data for chart generation
+            success = await self.telegram_notifier.send_signal(signal, buffer_data=buffer_data)
 
             if success:
                 logger.info(f"Signal sent to Telegram: {signal.get('type')} {signal.get('direction')}")
@@ -458,11 +512,13 @@ class NQAgentService:
     def pause(self) -> None:
         """Pause the service."""
         self.paused = True
-        logger.info("Service paused")
+        self.pause_reason = "manual"
+        logger.info("Service paused", extra={"pause_reason": self.pause_reason})
 
     def resume(self) -> None:
         """Resume the service."""
         self.paused = False
+        self.pause_reason = None
         logger.info("Service resumed")
 
     async def _notify_error(self, title: str, message: str) -> None:
@@ -523,6 +579,7 @@ class NQAgentService:
         return {
             "running": self.running,
             "paused": self.paused,
+            "pause_reason": self.pause_reason,
             "start_time": self.start_time.isoformat() if self.start_time else None,
             "uptime": uptime,
             "cycle_count": self.cycle_count,

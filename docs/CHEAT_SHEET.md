@@ -31,7 +31,26 @@
 
 ---
 
-## 2. Daily Start-Up Flow (order matters)
+## 2. Daily Start-Up Flow
+
+### Option A: From Telegram (Remote Control) ⭐ Recommended
+
+**Prerequisites:** Telegram Command Handler must be running (one-time setup)
+
+1. **Start Telegram Command Handler** (if not already running)
+   ```bash
+   ./scripts/telegram/start_command_handler.sh
+   ```
+
+2. **From Telegram, run:**
+   ```
+   /gateway_status    # Check Gateway
+   /start_gateway      # Start Gateway (wait for 2FA approval)
+   /start_agent        # Start Agent
+   /status             # Verify everything is running
+   ```
+
+### Option B: From Terminal (Traditional)
 
 1. **Open terminal & activate venv**
    ```bash
@@ -56,14 +75,38 @@
      ./scripts/lifecycle/check_nq_agent_status.sh
      ```
 
-4. **Start Telegram Command Handler** (for `/status`, `/signals`, etc.)
+4. **Start Telegram Command Handler** (for remote control)
    ```bash
-   ./scripts/telegram/start_command_handler.sh
+   ./scripts/telegram/start_command_handler.sh              # foreground
+   ./scripts/telegram/start_command_handler.sh --background # background with logs
    ```
 
 ---
 
 ## 3. Core Commands You Actually Use
+
+### From Telegram (Remote Control) ⭐
+
+- **Service Control:**
+  ```
+  /start_gateway      # Start IBKR Gateway
+  /stop_gateway       # Stop IBKR Gateway
+  /gateway_status     # Check Gateway status
+  /start_agent        # Start NQ Agent
+  /stop_agent         # Stop NQ Agent
+  /restart_agent      # Restart Agent (for config changes)
+  ```
+
+- **Monitoring:**
+  ```
+  /status             # Full status with inline buttons
+  /signals            # Recent signals
+  /performance        # 7-day performance
+  /config             # Configuration values
+  /health             # Health check
+  ```
+
+### From Terminal (Traditional)
 
 - **Service lifecycle**
   ```bash
@@ -80,11 +123,11 @@
   ./scripts/gateway/check_gateway_status.sh
   ```
 
-- **Telegram**
+- **Telegram Command Handler**
   ```bash
   ./scripts/telegram/start_command_handler.sh            # listen to commands
   ./scripts/telegram/check_command_handler.sh            # is it running?
-  python3 scripts/telegram/set_bot_commands.py           # (re)push /status, /signals, ...
+  python3 scripts/telegram/set_bot_commands.py           # (re)push commands
   ```
 
 ---
@@ -97,11 +140,20 @@
   - Signal alerts, error/circuit‑breaker alerts
 
 - **Requires command handler running:**
-  - `/status` – Agent Status card with inline buttons
-  - `/signals` – Recent signals list
-  - `/performance` – 7‑day performance summary
-  - `/help` – command help
-  - `/pause`, `/resume` – **informational only**; actual control is via lifecycle scripts
+  - **Service Control:**
+    - `/start_gateway` – Start IBKR Gateway
+    - `/stop_gateway` – Stop IBKR Gateway
+    - `/gateway_status` – Check Gateway status
+    - `/start_agent` – Start NQ Agent Service
+    - `/stop_agent` – Stop NQ Agent Service
+    - `/restart_agent` – Restart NQ Agent Service
+  - **Monitoring:**
+    - `/status` – Agent Status card with inline buttons (includes Start/Stop controls)
+    - `/signals` – Recent signals list
+    - `/performance` – 7‑day performance summary
+    - `/config` – Show key configuration values
+    - `/health` – Basic health check
+    - `/help` – Command help
 
 ---
 
@@ -140,6 +192,6 @@
 - **Config**: `config/config.yaml`, `.env`
 - **State**: `data/nq_agent_state/` (`state.json`, `signals.jsonl`, `performance.json`)
 - **Services & scripts**: `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/`
-- **Deep-dive docs**: `NQ_AGENT_GUIDE.md`, `GATEWAY.md`, `TELEGRAM_GUIDE.md`, `PROJECT_SUMMARY.md`
+- **Deep-dive docs**: `NQ_AGENT_GUIDE.md`, `GATEWAY.md`, `TELEGRAM_GUIDE.md`, `TELEGRAM_REMOTE_CONTROL.md`, `PROJECT_SUMMARY.md`
 
 This cheat sheet is the **primary quick-reference** for PEARLalgo operations. Keep it updated as workflows evolve.
