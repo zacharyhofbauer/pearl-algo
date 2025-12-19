@@ -328,7 +328,7 @@ class ChartGenerator:
         signals: List[Dict],
         symbol: str,
     ):
-        """Plot candlestick chart with signal markers for backtest."""
+        """Plot proper candlestick chart with signal markers for backtest."""
         # Extract OHLC data
         opens = data["open"].values
         highs = data["high"].values
@@ -336,71 +336,108 @@ class ChartGenerator:
         closes = data["close"].values
         timestamps = data["timestamp"].values
         
-        # Plot candlesticks - use clearer visualization
-        # Sample data if too many bars to avoid overcrowding
-        max_bars = 100
-        if len(data) > max_bars:
-            step = len(data) // max_bars
-            indices = list(range(0, len(data), step))
-        else:
-            indices = list(range(len(data)))
+        # Calculate proper spacing for candlesticks
+        # Use matplotlib's date conversion for proper spacing
+        date_nums = [mdates.date2num(ts) for ts in timestamps]
         
-        for i in indices:
+        # Calculate average spacing between candles
+        if len(date_nums) > 1:
+            avg_spacing = (date_nums[-1] - date_nums[0]) / (len(date_nums) - 1)
+            # Use 60% of spacing for candle width to ensure gaps between candles
+            candle_width = avg_spacing * 0.6
+        else:
+            candle_width = 0.01
+        
+        # Plot individual candlesticks - proper TradingView-style
+        for i in range(len(data)):
             ts = timestamps[i]
+            ts_num = date_nums[i]
             open_val = opens[i]
             high_val = highs[i]
             low_val = lows[i]
             close_val = closes[i]
             
-            color = 'green' if close_val >= open_val else 'red'
-            alpha = 0.6  # Reduced alpha for clearer candlesticks
-            linewidth = 0.8
+            # Determine colors - green for bullish, red for bearish
+            is_bullish = close_val >= open_val
+            body_color = '#26a69a' if is_bullish else '#ef5350'  # TradingView-like colors
+            wick_color = body_color
             
-            # Draw the wick (high-low line)
-            ax.plot([ts, ts], [low_val, high_val], color=color, linewidth=linewidth, alpha=alpha, zorder=1)
+            # Draw the wick (high-low line) - thin line
+            ax.plot([ts_num, ts_num], [low_val, high_val], 
+                   color=wick_color, linewidth=1.0, alpha=0.9, zorder=1, solid_capstyle='round')
             
             # Draw the body (open-close rectangle)
-            body_height = abs(close_val - open_val)
-            if body_height < 0.1:  # Doji - very small body
+            body_top = max(open_val, close_val)
+            body_bottom = min(open_val, close_val)
+            body_height = body_top - body_bottom
+            
+            # For doji (very small body), show a small line
+            if body_height < 0.01:
                 body_height = 0.5
                 body_bottom = close_val - body_height / 2
-            else:
-                body_bottom = min(open_val, close_val)
             
-            # Use narrower body width for better visibility
-            body_width = 0.4
+            # Draw filled rectangle for body
             rect = Rectangle(
-                (mdates.date2num(ts) - body_width/2, body_bottom),
-                body_width,
+                (ts_num - candle_width/2, body_bottom),
+                candle_width,
                 body_height,
-                facecolor=color,
-                edgecolor=color,
-                alpha=alpha,
-                zorder=2
+                facecolor=body_color,
+                edgecolor=body_color,
+                alpha=0.9,
+                zorder=2,
+                linewidth=0.5
             )
             ax.add_patch(rect)
+            
+            # Add thin outline for better definition
+            if body_height > 0.01:
+                # Top edge
+                ax.plot([ts_num - candle_width/2, ts_num + candle_width/2], 
+                       [body_top, body_top], 
+                       color=body_color, linewidth=0.5, alpha=0.9, zorder=3)
+                # Bottom edge
+                ax.plot([ts_num - candle_width/2, ts_num + candle_width/2], 
+                       [body_bottom, body_bottom], 
+                       color=body_color, linewidth=0.5, alpha=0.9, zorder=3)
         
-        # Plot signal markers
+        # Plot signal markers - above/below candlesticks
         signal_labels_added = {'long': False, 'short': False}
         for signal in signals:
             entry_price = signal.get("entry_price", 0)
             direction = signal.get("direction", "long").lower()
             
             if entry_price > 0:
-                # Find closest timestamp
+                # Find closest timestamp in data
                 signal_time = None
+                signal_time_num = None
+                
                 if "timestamp" in signal:
                     try:
                         signal_time = pd.to_datetime(signal["timestamp"])
+                        # Find closest index
+                        time_diffs = [abs((pd.to_datetime(ts) - signal_time).total_seconds()) 
+                                    for ts in timestamps]
+                        closest_idx = time_diffs.index(min(time_diffs))
+                        signal_time = timestamps[closest_idx]
+                        signal_time_num = date_nums[closest_idx]
                     except:
                         pass
                 
-                if signal_time is None:
+                if signal_time is None or signal_time_num is None:
                     # Use middle of data range
-                    signal_time = timestamps[len(timestamps) // 2]
+                    mid_idx = len(timestamps) // 2
+                    signal_time = timestamps[mid_idx]
+                    signal_time_num = date_nums[mid_idx]
                 
-                # Plot signal marker
-                marker_color = 'lime' if direction == 'long' else 'orange'
+                # Position marker above/below the candle
+                price_offset = (highs.max() - lows.min()) * 0.02  # 2% of price range
+                if direction == 'long':
+                    marker_y = entry_price + price_offset  # Above entry
+                else:
+                    marker_y = entry_price - price_offset  # Below entry
+                
+                # Plot signal marker - larger and more visible
+                marker_color = '#00ff88' if direction == 'long' else '#ff8800'  # Bright colors
                 marker_shape = '^' if direction == 'long' else 'v'
                 label = None
                 if not signal_labels_added[direction]:
@@ -408,21 +445,21 @@ class ChartGenerator:
                     signal_labels_added[direction] = True
                 
                 ax.scatter(
-                    signal_time,
-                    entry_price,
+                    signal_time_num,
+                    marker_y,
                     color=marker_color,
                     marker=marker_shape,
-                    s=200,
-                    alpha=0.8,
+                    s=300,  # Larger markers
+                    alpha=0.9,
                     edgecolors='white',
-                    linewidths=2,
-                    zorder=5,
+                    linewidths=2.5,
+                    zorder=10,  # Above everything
                     label=label
                 )
                 
-                # Add entry line
+                # Add thin entry line (dashed)
                 ax.axhline(y=entry_price, color=marker_color, linestyle='--', 
-                         linewidth=1, alpha=0.5)
+                         linewidth=1, alpha=0.4, zorder=4)
         
         # Formatting
         ax.set_ylabel('Price ($)', fontsize=10, color='white')
