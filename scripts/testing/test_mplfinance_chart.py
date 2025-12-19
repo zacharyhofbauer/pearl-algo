@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test script to enable and test mplfinance chart generator.
+Test script to test chart generator (matplotlib-based).
 
 Usage:
     python scripts/testing/test_mplfinance_chart.py
@@ -53,10 +53,10 @@ def create_sample_data(num_bars=100):
     
     return pd.DataFrame(data)
 
-def test_chart_generator():
-    """Test mplfinance-based chart generator."""
+def test_matplotlib_chart():
+    """Test matplotlib-based chart generator."""
     print("\n" + "="*60)
-    print("Testing Chart Generator (mplfinance)")
+    print("Testing MATPLOTLIB Chart Generator")
     print("="*60)
     
     try:
@@ -73,12 +73,12 @@ def test_chart_generator():
             'timestamp': data['timestamp'].iloc[-20].isoformat()
         }
         
-        # Create generator (now uses mplfinance by default)
+        # Create generator with matplotlib (current implementation)
         config = ChartConfig()
         generator = ChartGenerator(config)
         
         # Generate chart
-        print("Generating chart...")
+        print("Generating chart with matplotlib...")
         chart_path = generator.generate_entry_chart(
             signal=signal,
             buffer_data=data,
@@ -102,21 +102,28 @@ def test_chart_generator():
 def main():
     """Run tests."""
     print("\n" + "="*60)
-    print("Chart Generator Test (mplfinance)")
+    print("Chart Generator Test")
     print("="*60)
     
-    # Test chart generator
-    chart_path = test_chart_generator()
+    # Test matplotlib chart generator
+    mpl_path = test_matplotlib_chart()
     
     print("\n" + "="*60)
     print("Summary")
     print("="*60)
-    if chart_path:
-        print(f"✅ Chart generated successfully: {chart_path}")
-        print("\n✅ Chart generator is working with mplfinance!")
+    print(f"matplotlib chart: {'✅ Generated' if mpl_path else '❌ Failed'}")
+    
+    if mpl_path:
+        print(f"\n✅ Chart generated successfully: {mpl_path}")
+        print("\n📊 Chart features:")
+        print("   - Blue VWAP line (curved)")
+        print("   - Purple EMA line (curved)")
+        print("   - Candlesticks (green up, red down)")
+        print("   - Shaded zones (Entry/Stop/TP)")
+        print("   - Top-left title")
+        print("   - Auto-fit to screen")
     else:
-        print("❌ Chart generation failed")
-        print("\n⚠️  Check error messages above.")
+        print("\n⚠️  Chart generation failed. Check error messages above.")
 
 if __name__ == "__main__":
     main()
