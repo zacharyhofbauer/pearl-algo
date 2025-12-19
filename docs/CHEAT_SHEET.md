@@ -192,6 +192,6 @@
 - **Config**: `config/config.yaml`, `.env`
 - **State**: `data/nq_agent_state/` (`state.json`, `signals.jsonl`, `performance.json`)
 - **Services & scripts**: `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/`
-- **Deep-dive docs**: `NQ_AGENT_GUIDE.md`, `GATEWAY.md`, `TELEGRAM_GUIDE.md`, `TELEGRAM_REMOTE_CONTROL.md`, `PROJECT_SUMMARY.md`
+- **Deep-dive docs**: `NQ_AGENT_GUIDE.md`, `GATEWAY.md`, `TELEGRAM_GUIDE.md`, `PROJECT_SUMMARY.md`
 
 This cheat sheet is the **primary quick-reference** for PEARLalgo operations. Keep it updated as workflows evolve.

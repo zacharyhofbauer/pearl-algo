@@ -58,6 +58,8 @@ Key scripts (to keep as canonical):
   - **Role**: Quick connectivity and entitlement smoke test for IBKR.
 - `validate_strategy.py`
   - **Role**: Validate strategy outputs/assumptions for given historical data.
+- `check_signals.py`
+  - **Role**: Diagnostic tool to check signals file format, count, and validity. Useful for troubleshooting signal persistence issues.
 
 ## Maintenance / Misc
 

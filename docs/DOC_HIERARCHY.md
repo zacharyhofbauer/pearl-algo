@@ -28,6 +28,14 @@ All other documents must remain consistent with this summary.
 - `TELEGRAM_GUIDE.md`
   - Single canonical Telegram integration guide
   - Quick start, command handler startup, command behavior reference
+  - Remote control (service control commands)
+  - Chart visualization and UI features
+  - Menu system and button navigation
+- `TELEGRAM_REMOTE_CONTROL.md` (redirect to `TELEGRAM_GUIDE.md`)
+- `TELEGRAM_FEATURES.md` (redirect to `TELEGRAM_GUIDE.md`)
+- `TELEGRAM_MENU_GUIDE.md` (redirect to `TELEGRAM_GUIDE.md`)
+- `TELEGRAM_COMMANDS_QUICKSTART.md` (redirect to `TELEGRAM_GUIDE.md`)
+- `TELEGRAM_BOT_COMMANDS.md` (redirect to `TELEGRAM_GUIDE.md`)
 
 ## 3. Testing and Validation
 
@@ -35,11 +43,21 @@ All other documents must remain consistent with this summary.
   - How to run tests via `scripts/testing/test_all.py` and `run_tests.sh`
   - Explanation of major test suites (integration, IBKR, Telegram, strategy)
   - Includes guidance on when and how to use the mock data provider
+  - Test coverage and gaps analysis
+- `TESTING_OVERVIEW.md` (redirect to `TESTING_GUIDE.md`)
 
 ## 4. Supporting / Historical Docs
 
 - `archive/CLEANUP_CONSOLIDATION_PLAN.md`
   - Historical cleanup and consolidation notes
+- `archive/ADDITIONAL_FIXES.md`
+  - Historical fix documentation
+- `archive/FIXES_SUMMARY.md`
+  - Historical fix documentation
+- `archive/SIGNAL_PERSISTENCE_FIX.md`
+  - Historical fix documentation
+- `archive/MENU_NAVIGATION_FIX.md`
+  - Historical fix documentation
 
 ## 5. Cross‑references
 

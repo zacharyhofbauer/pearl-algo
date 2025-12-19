@@ -18,6 +18,8 @@ from pearlalgo.utils.paths import (
     get_utc_timestamp,
 )
 
+# Import get_utc_timestamp is already in the import above
+
 
 class NQAgentStateManager:
     """
@@ -43,14 +45,40 @@ class NQAgentStateManager:
         """
         Save a signal to persistent storage.
         
+        Saves in the format expected by /signals command:
+        {
+            "signal_id": "...",
+            "timestamp": "...",
+            "status": "generated",
+            "signal": {...}
+        }
+        
         Args:
-            signal: Signal dictionary
+            signal: Signal dictionary (should already have signal_id set)
         """
         try:
+            # Extract signal_id from signal dict (set by performance_tracker)
+            signal_id = signal.get("signal_id", "")
+            if not signal_id:
+                # Generate one if missing (shouldn't happen, but be safe)
+                from datetime import datetime, timezone
+                signal_id = f"{signal.get('type', 'unknown')}_{datetime.now(timezone.utc).timestamp()}"
+                signal["signal_id"] = signal_id
+            
+            # Create wrapped record in format expected by /signals command
+            signal_record = {
+                "signal_id": signal_id,
+                "timestamp": get_utc_timestamp(),
+                "status": "generated",  # Default status for new signals
+                "signal": signal,  # Store full signal dict
+            }
+            
             with open(self.signals_file, "a") as f:
-                f.write(json.dumps(signal) + "\n")
+                f.write(json.dumps(signal_record) + "\n")
+            
+            logger.debug(f"Saved signal {signal_id} to {self.signals_file}")
         except Exception as e:
-            logger.error(f"Error saving signal: {e}")
+            logger.error(f"Error saving signal: {e}", exc_info=True)
 
     def get_recent_signals(self, limit: int = 100) -> List[Dict]:
         """

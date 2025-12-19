@@ -433,7 +433,8 @@ class TelegramCommandHandler:
         except Exception as e:
             logger.error(f"Error handling quick_status command: {e}", exc_info=True)
             error_msg = f"❌ Error: {str(e)}"
-            await self._send_message_or_edit(update, context, error_msg)
+            reply_markup = self._get_back_to_menu_button()
+            await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
     
     async def _handle_pause(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /pause command."""
@@ -490,28 +491,84 @@ class TelegramCommandHandler:
         try:
             signals_file = get_signals_file(self.state_dir)
             if not signals_file.exists():
-                await update.message.reply_text("📭 No signals found")
+                reply_markup = self._get_back_to_menu_button()
+                await self._send_message_or_edit(
+                    update, context,
+                    "📭 *No signals found*\n\n"
+                    "The signals file doesn't exist yet.\n"
+                    "Signals will appear here once the agent generates trading opportunities.",
+                    reply_markup=reply_markup
+                )
                 return
             
-            # Read last 10 signals
+            # Check file size
+            file_size = signals_file.stat().st_size
+            if file_size == 0:
+                reply_markup = self._get_back_to_menu_button()
+                await self._send_message_or_edit(
+                    update, context,
+                    "📭 *No signals found*\n\n"
+                    "The signals file exists but is empty.\n"
+                    "This could mean:\n"
+                    "• Signals haven't been generated yet\n"
+                    "• Signals were generated but not saved (check logs)\n"
+                    "• The file was cleared\n\n"
+                    f"💡 Check: `ls -lh {signals_file}`",
+                    reply_markup=reply_markup
+                )
+                return
+            
+            # Read all signals (handle both old and new formats)
             signals = []
+            line_num = 0
             with open(signals_file) as f:
                 for line in f:
+                    line_num += 1
+                    line = line.strip()
+                    if not line:
+                        continue
                     try:
-                        signal_data = json.loads(line.strip())
-                        signals.append(signal_data)
-                    except json.JSONDecodeError:
+                        signal_data = json.loads(line)
+                        
+                        # Handle both formats:
+                        # New format: {"signal_id": "...", "timestamp": "...", "status": "...", "signal": {...}}
+                        # Old format: {"signal_id": "...", "type": "...", "direction": "...", ...} (signal dict directly)
+                        if "signal" in signal_data:
+                            # New format - use as is
+                            signals.append(signal_data)
+                        elif "signal_id" in signal_data or "type" in signal_data:
+                            # Old format - wrap it
+                            signals.append({
+                                "signal_id": signal_data.get("signal_id", f"unknown_{line_num}"),
+                                "timestamp": signal_data.get("timestamp", ""),
+                                "status": signal_data.get("status", "generated"),
+                                "signal": signal_data,  # The whole thing is the signal
+                            })
+                        else:
+                            logger.warning(f"Unknown signal format at line {line_num}: {signal_data.keys()}")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Invalid JSON at line {line_num} in signals file: {e}")
                         continue
             
             if not signals:
-                await self._send_message_or_edit(update, context, "📭 No signals found")
+                reply_markup = self._get_back_to_menu_button()
+                await self._send_message_or_edit(
+                    update, context,
+                    f"📭 *No valid signals found*\n\n"
+                    f"File exists ({file_size} bytes) but contains no valid signal records.\n"
+                    f"Check logs for parsing errors.",
+                    reply_markup=reply_markup
+                )
                 return
             
             # Get last 10
             recent_signals = signals[-10:]
             recent_signals.reverse()  # Show newest first
             
-            message = f"🔔 *Recent Signals ({len(recent_signals)})*\n\n"
+            total_count = len(signals)
+            message = f"🔔 *Signals*\n\n"
+            message += f"*Total:* {total_count} signal(s) stored\n"
+            message += f"*Showing:* Last {len(recent_signals)} signal(s)\n\n"
             
             keyboard = []
             for i, sig_data in enumerate(recent_signals, 1):
@@ -555,7 +612,8 @@ class TelegramCommandHandler:
                 f"• Verify agent is running: `/status`\n"
                 f"• Wait for signals to be generated"
             )
-            await self._send_message_or_edit(update, context, error_msg)
+            reply_markup = self._get_back_to_menu_button()
+            await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
     
     async def _handle_last_signal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /last_signal command - show most recent signal with chart."""
@@ -569,7 +627,13 @@ class TelegramCommandHandler:
         try:
             signals_file = get_signals_file(self.state_dir)
             if not signals_file.exists():
-                await self._send_message_or_edit(update, context, "📭 No signals found")
+                reply_markup = self._get_back_to_menu_button()
+                await self._send_message_or_edit(
+                    update, context,
+                    "📭 *No signals found*\n\n"
+                    "Signals will appear here when the agent generates trading opportunities.",
+                    reply_markup=reply_markup
+                )
                 return
             
             # Read all signals and get the last one
@@ -583,7 +647,7 @@ class TelegramCommandHandler:
                         continue
             
             if not signals:
-                reply_markup = self._get_signals_buttons(has_signals=False)
+                reply_markup = self._get_back_to_menu_button()
                 await self._send_message_or_edit(
                     update, context,
                     "📭 *No signals found*\n\n"
@@ -644,7 +708,8 @@ class TelegramCommandHandler:
                 f"`{str(e)}`\n\n"
                 f"💡 Try `/signals` to see all signals"
             )
-            await self._send_message_or_edit(update, context, error_msg)
+            reply_markup = self._get_back_to_menu_button()
+            await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
     
     async def _handle_active_trades(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /active_trades command - show currently open positions."""
@@ -658,7 +723,13 @@ class TelegramCommandHandler:
         try:
             signals_file = get_signals_file(self.state_dir)
             if not signals_file.exists():
-                await self._send_message_or_edit(update, context, "📭 No signals found")
+                reply_markup = self._get_back_to_menu_button()
+                await self._send_message_or_edit(
+                    update, context,
+                    "📭 *No signals found*\n\n"
+                    "No positions are currently open.",
+                    reply_markup=reply_markup
+                )
                 return
             
             # Read all signals and filter for entered but not exited
@@ -709,7 +780,8 @@ class TelegramCommandHandler:
                 f"`{str(e)}`\n\n"
                 f"💡 Try `/signals` to see all signals"
             )
-            await self._send_message_or_edit(update, context, error_msg)
+            reply_markup = self._get_back_to_menu_button()
+            await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
     
     async def _handle_backtest(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /backtest command - run backtest and show results with chart."""
@@ -749,7 +821,8 @@ class TelegramCommandHandler:
                             "*Demo backtest:*\n"
                             "Generating demo backtest with test data..."
                         )
-                        await self._send_message_or_edit(update, context, message)
+                        reply_markup = self._get_back_to_menu_button()
+                        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
                         
                         # Generate demo backtest
                         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -1089,7 +1162,8 @@ class TelegramCommandHandler:
                 f"• Verify signals have been exited\n"
                 f"• Try `/status` to check agent state"
             )
-            await self._send_message_or_edit(update, context, error_msg)
+            reply_markup = self._get_back_to_menu_button()
+            await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
 
     async def _handle_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /config command (read-only view of key config)."""
@@ -1144,7 +1218,8 @@ class TelegramCommandHandler:
                 f"• Verify file permissions\n"
                 f"• Ensure YAML format is valid"
             )
-            await self._send_message_or_edit(update, context, error_msg)
+            reply_markup = self._get_back_to_menu_button()
+            await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
 
     async def _handle_health(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /health command (lightweight health summary)."""
@@ -1186,7 +1261,8 @@ class TelegramCommandHandler:
                 f"• Verify process detection is working\n"
                 f"• Try `/status` for basic status"
             )
-            await self._send_message_or_edit(update, context, error_msg)
+            reply_markup = self._get_back_to_menu_button()
+            await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
     
     async def _handle_start_gateway(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start_gateway command."""
@@ -1352,16 +1428,24 @@ class TelegramCommandHandler:
         
         try:
             if not self.chart_generator:
+                reply_markup = self._get_back_to_menu_button()
                 await self._send_message_or_edit(
                     update, context,
-                    "❌ Chart generation not available. matplotlib may not be installed."
+                    "❌ Chart generation not available. matplotlib may not be installed.",
+                    reply_markup=reply_markup
                 )
                 return
             
             # Find signal by ID
             signals_file = get_signals_file(self.state_dir)
             if not signals_file.exists():
-                await self._send_message_or_edit(update, context, "📭 Signal not found")
+                reply_markup = self._get_back_to_menu_button()
+                await self._send_message_or_edit(
+                    update, context,
+                    "📭 *Signal not found*\n\n"
+                    "The signals file doesn't exist.",
+                    reply_markup=reply_markup
+                )
                 return
             
             signal_data = None
@@ -1377,7 +1461,13 @@ class TelegramCommandHandler:
                         continue
             
             if not signal_data:
-                await self._send_message_or_edit(update, context, "📭 Signal not found")
+                reply_markup = self._get_back_to_menu_button()
+                await self._send_message_or_edit(
+                    update, context,
+                    "📭 *Signal not found*\n\n"
+                    "The requested signal could not be found in the signals file.",
+                    reply_markup=reply_markup
+                )
                 return
             
             signal = signal_data.get("signal", {})
