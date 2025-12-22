@@ -42,18 +42,24 @@ class TestDataQualityEdgeCases:
     @pytest.mark.asyncio
     async def test_empty_dataframe(self):
         """Test handling of empty DataFrame."""
+        import pandas as pd
+
         provider = MockDataProvider(base_price=17500.0, volatility=0.0, trend=0.0)
-        
-        # Mock to return empty DataFrame
-        async def empty_fetch():
-            import pandas as pd
-            return {"df": pd.DataFrame(), "latest_bar": None}
-        
+
+        # Force provider to return no historical data and no latest bar.
+        # This simulates a hard "no data available" scenario.
+        provider.fetch_historical = lambda *args, **kwargs: pd.DataFrame()  # type: ignore[assignment]
+
+        async def _no_latest_bar(*args, **kwargs):
+            return None
+
+        provider.get_latest_bar = _no_latest_bar  # type: ignore[assignment]
+
         fetcher = NQAgentDataFetcher(provider, config=NQIntradayConfig())
-        
-        # Should handle empty data gracefully
+
         result = await fetcher.fetch_latest_data()
-        assert result["df"].empty or len(result["df"]) == 0
+        assert result["latest_bar"] is None
+        assert result["df"].empty
 
     @pytest.mark.asyncio
     async def test_stale_data(self):

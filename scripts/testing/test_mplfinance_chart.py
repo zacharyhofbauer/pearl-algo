@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Test script to test chart generator (matplotlib-based).
+Test script to test chart generator (mplfinance-based).
 
 Usage:
-    python scripts/testing/test_mplfinance_chart.py
+    python3 scripts/testing/test_mplfinance_chart.py
 """
 
 import sys
@@ -53,10 +53,10 @@ def create_sample_data(num_bars=100):
     
     return pd.DataFrame(data)
 
-def test_matplotlib_chart():
-    """Test matplotlib-based chart generator."""
+def test_mplfinance_chart():
+    """Test mplfinance-based chart generator."""
     print("\n" + "="*60)
-    print("Testing MATPLOTLIB Chart Generator")
+    print("Testing MPLFINANCE Chart Generator")
     print("="*60)
     
     try:
@@ -73,12 +73,12 @@ def test_matplotlib_chart():
             'timestamp': data['timestamp'].iloc[-20].isoformat()
         }
         
-        # Create generator with matplotlib (current implementation)
+        # Create generator (mplfinance-only implementation)
         config = ChartConfig()
         generator = ChartGenerator(config)
         
         # Generate chart
-        print("Generating chart with matplotlib...")
+        print("Generating chart with mplfinance...")
         chart_path = generator.generate_entry_chart(
             signal=signal,
             buffer_data=data,
@@ -105,16 +105,16 @@ def main():
     print("Chart Generator Test")
     print("="*60)
     
-    # Test matplotlib chart generator
-    mpl_path = test_matplotlib_chart()
+    # Test mplfinance chart generator
+    chart_path = test_mplfinance_chart()
     
     print("\n" + "="*60)
     print("Summary")
     print("="*60)
-    print(f"matplotlib chart: {'✅ Generated' if mpl_path else '❌ Failed'}")
+    print(f"mplfinance chart: {'✅ Generated' if chart_path else '❌ Failed'}")
     
-    if mpl_path:
-        print(f"\n✅ Chart generated successfully: {mpl_path}")
+    if chart_path:
+        print(f"\n✅ Chart generated successfully: {chart_path}")
         print("\n📊 Chart features:")
         print("   - Blue VWAP line (curved)")
         print("   - Purple EMA line (curved)")

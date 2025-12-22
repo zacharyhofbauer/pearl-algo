@@ -806,18 +806,11 @@ class TelegramCommandHandler:
                 return None
         return self._data_provider
     
-    def _create_progress_bar(self, percent: int, length: int = 10) -> str:
-        """Create a visual progress bar using emojis."""
-        filled = int(length * percent / 100)
-        empty = length - filled
-        return "█" * filled + "░" * empty
-    
     async def _fetch_historical_data_for_backtest(
         self, 
         symbol: str = "MNQ", 
         months: int = 6,
         timeframe: str = "1m",
-        progress_callback: Optional[Callable[[int, int, str], Awaitable[None]]] = None
     ) -> Optional[pd.DataFrame]:
         """
         Fetch and cache historical data for backtesting.
@@ -826,13 +819,19 @@ class TelegramCommandHandler:
             symbol: Symbol to fetch (default: MNQ)
             months: Number of months to fetch (default: 6)
             timeframe: Data timeframe (default: 1m)
-            progress_callback: Optional callback for progress updates
             
         Returns:
             DataFrame with historical OHLCV data, or None if fetch failed
         """
         cache_file = self._historical_cache_dir / f"{symbol}_{timeframe}_{months}m.parquet"
-        end = datetime.now(timezone.utc)
+        # Backtests should use *completed* historical data only.
+        # If today is Monday, "yesterday" is Sunday (no session) which can cause HMDS weirdness/timeouts.
+        # Clamp to the most recent weekday (Mon-Fri) at 23:59 UTC.
+        end = (datetime.now(timezone.utc) - timedelta(days=1)).replace(
+            hour=23, minute=59, second=0, microsecond=0
+        )
+        while end.weekday() >= 5:  # Sat/Sun
+            end = end - timedelta(days=1)
         start = end - timedelta(days=months * 30)
         
         logger.info(f"Fetching {months} months of historical data for {symbol}...")
@@ -842,16 +841,87 @@ class TelegramCommandHandler:
             try:
                 cached_data = pd.read_parquet(cache_file)
                 if not cached_data.empty:
-                    logger.info(f"✅ Using cached data: {len(cached_data):,} bars")
-                    if isinstance(cached_data.index, pd.DatetimeIndex):
-                        cached_data = cached_data.reset_index()
-                        if 'index' in cached_data.columns:
-                            cached_data = cached_data.rename(columns={'index': 'timestamp'})
+                    # We REQUIRE a timestamp for backtests. Older caches were saved without it (lost index).
                     if 'timestamp' in cached_data.columns:
                         cached_data['timestamp'] = pd.to_datetime(cached_data['timestamp'])
+                        # Normalize return shape: keep timestamp column, but ensure DatetimeIndex for resampling.
+                        cached_data = cached_data.sort_values('timestamp')
+                        cached_data = cached_data.drop_duplicates(subset=['timestamp'], keep='first')
+                        cached_data = cached_data.set_index('timestamp', drop=False)
+                        logger.info(f"✅ Using cached data: {len(cached_data):,} bars")
                         return cached_data
+
+                    if isinstance(cached_data.index, pd.DatetimeIndex):
+                        cached_data = cached_data.reset_index()
+                        # The reset index column name can vary; normalize it to 'timestamp'.
+                        if 'timestamp' not in cached_data.columns and len(cached_data.columns) > 0:
+                            first_col = cached_data.columns[0]
+                            cached_data = cached_data.rename(columns={first_col: 'timestamp'})
+                        if 'timestamp' in cached_data.columns:
+                            cached_data['timestamp'] = pd.to_datetime(cached_data['timestamp'])
+                            cached_data = cached_data.sort_values('timestamp')
+                            cached_data = cached_data.drop_duplicates(subset=['timestamp'], keep='first')
+                            cached_data = cached_data.set_index('timestamp', drop=False)
+                            logger.info(f"✅ Using cached data: {len(cached_data):,} bars")
+                            return cached_data
+
+                    logger.warning("Cached data missing timestamp; deleting invalid cache and re-fetching")
+                    try:
+                        cache_file.unlink()
+                    except Exception as delete_error:
+                        logger.warning(f"Could not delete invalid cache file: {delete_error}")
             except Exception as e:
                 logger.warning(f"Error reading cache: {e}")
+
+        # If an exact cache file doesn't exist (or was invalid), try deriving it from a *larger* cached file.
+        # Example: if MNQ_1m_6m.parquet exists, we can slice it to create MNQ_1m_2m.parquet instantly.
+        try:
+            superset_files = list(self._historical_cache_dir.glob(f"{symbol}_{timeframe}_*m.parquet"))
+            candidates = []
+            for f in superset_files:
+                if f == cache_file:
+                    continue
+                tail = f.name.split("_")[-1]  # e.g. "6m.parquet"
+                if not tail.endswith("m.parquet"):
+                    continue
+                try:
+                    k = int(tail[:-9])  # strip "m.parquet"
+                except ValueError:
+                    continue
+                if k >= months:
+                    candidates.append((k, f))
+
+            if candidates:
+                # Prefer the smallest superset (closest to requested months)
+                candidates.sort(key=lambda x: x[0])
+                _, superset_file = candidates[0]
+                superset_df = pd.read_parquet(superset_file)
+                if not superset_df.empty:
+                    if "timestamp" not in superset_df.columns and isinstance(superset_df.index, pd.DatetimeIndex):
+                        superset_df = superset_df.reset_index()
+                        if "timestamp" not in superset_df.columns and len(superset_df.columns) > 0:
+                            first_col = superset_df.columns[0]
+                            superset_df = superset_df.rename(columns={first_col: "timestamp"})
+                    if "timestamp" in superset_df.columns:
+                        superset_df["timestamp"] = pd.to_datetime(superset_df["timestamp"])
+                        derived = superset_df[
+                            (superset_df["timestamp"] >= start) & (superset_df["timestamp"] <= end)
+                        ].copy()
+                        if not derived.empty:
+                            derived = derived.sort_values("timestamp")
+                            derived = derived.drop_duplicates(subset=["timestamp"], keep="first")
+                            derived = derived.set_index("timestamp", drop=False)
+                            try:
+                                derived.to_parquet(cache_file, index=False)
+                                logger.info(
+                                    f"💾 Derived cache {cache_file.name} from {superset_file.name} "
+                                    f"({len(derived):,} bars)"
+                                )
+                            except Exception as e:
+                                logger.warning(f"Could not write derived cache: {e}")
+                            return derived
+        except Exception as e:
+            logger.debug(f"Could not derive cache from superset: {e}")
         
         # Fetch data
         data_provider = self._get_data_provider()
@@ -859,55 +929,139 @@ class TelegramCommandHandler:
             logger.error("Data provider not available")
             return None
         
-        all_chunks = []
-        
         try:
-            for i in range(months):
-                chunk_start = end - timedelta(days=(months - i) * 30)
-                chunk_end = end - timedelta(days=(months - i - 1) * 30)
-                
-                if i == 0:
-                    chunk_start = start
-                if i == months - 1:
-                    chunk_end = end
-                
-                logger.info(f"Fetching chunk {i+1}/{months}: {chunk_start.date()} to {chunk_end.date()}")
-                
-                loop = asyncio.get_event_loop()
-                try:
-                    chunk_df = await asyncio.wait_for(
-                        loop.run_in_executor(
-                            None,
-                            lambda cs=chunk_start, ce=chunk_end: data_provider.fetch_historical(
-                                symbol=symbol,
-                                start=cs,
-                                end=ce,
-                                timeframe=timeframe,
-                            )
-                        ),
-                        timeout=30.0  # 30 second timeout (faster fail)
+            # If the most recent window fails (often due to expiry/roll), automatically shift further back in time.
+            # This matches your request: "pick past months if that's the only thing that works".
+            max_window_shifts = 3
+            all_chunks = []
+            window_end = end
+            window_start = start
+
+            # Smaller chunks are far more reliable with IBKR HMDS for 1m bars.
+            # We'll use weekly chunks and, if needed, fall back to daily chunks.
+            base_chunk_days = 7
+
+            for shift_idx in range(max_window_shifts + 1):
+                if shift_idx > 0:
+                    window_end = end - timedelta(days=shift_idx * 30)
+                    window_end = window_end.replace(hour=23, minute=59, second=0, microsecond=0)
+                    while window_end.weekday() >= 5:  # Sat/Sun
+                        window_end = window_end - timedelta(days=1)
+                    window_start = window_end - timedelta(days=months * 30)
+                    logger.warning(
+                        f"No data fetched for requested window; trying earlier window: "
+                        f"{window_start.date()} to {window_end.date()}"
                     )
-                    
+
+                all_chunks = []
+                # Build weekly chunk ranges
+                chunk_ranges = []
+                cur = window_start
+                while cur < window_end:
+                    nxt = min(cur + timedelta(days=base_chunk_days), window_end)
+                    chunk_ranges.append((cur, nxt))
+                    cur = nxt
+
+                total_chunks = max(1, len(chunk_ranges))
+                for chunk_i, (chunk_start, chunk_end) in enumerate(chunk_ranges, start=1):
+                    logger.info(
+                        f"Fetching chunk {chunk_i}/{total_chunks}: {chunk_start.date()} to {chunk_end.date()}"
+                    )
+
+                    loop = asyncio.get_event_loop()
+
+                    async def _fetch_range(cs, ce, timeout_s: float):
+                        return await asyncio.wait_for(
+                            loop.run_in_executor(
+                                None,
+                                lambda s=cs, e=ce: data_provider.fetch_historical(
+                                    symbol=symbol,
+                                    start=s,
+                                    end=e,
+                                    timeframe=timeframe,
+                                )
+                            ),
+                            timeout=timeout_s,
+                        )
+
+                    try:
+                        chunk_df = await _fetch_range(chunk_start, chunk_end, timeout_s=120.0)
+                    except asyncio.TimeoutError:
+                        chunk_df = None
+                        logger.warning(
+                            f"Chunk {chunk_i}/{total_chunks} timed out (weekly). Falling back to daily slices..."
+                        )
+                    except Exception as e:
+                        chunk_df = None
+                        logger.warning(
+                            f"Chunk {chunk_i}/{total_chunks} failed (weekly): {e}. Falling back to daily slices..."
+                        )
+
                     if chunk_df is not None and not chunk_df.empty:
                         all_chunks.append(chunk_df)
                         logger.info(f"Successfully fetched chunk: {len(chunk_df)} bars")
-                    else:
-                        logger.warning(f"Chunk {i+1} returned empty data, skipping...")
-                except asyncio.TimeoutError:
-                    logger.error(f"⚠️ Chunk {i+1} timed out - contract may be expired (MNQZ5 exp: 2025-12-19)")
-                    break  # Stop trying if we hit timeout
-                except Exception as e:
-                    logger.error(f"Error fetching chunk {i+1}: {e}")
-                    break  # Stop trying on error
-            
+                        continue
+
+                    # Daily fallback for this chunk (more requests, but much more reliable)
+                    daily_cur = chunk_start
+                    daily_chunks = []
+                    while daily_cur < chunk_end:
+                        daily_nxt = min(daily_cur + timedelta(days=1), chunk_end)
+                        try:
+                            day_df = await _fetch_range(daily_cur, daily_nxt, timeout_s=45.0)
+                        except Exception:
+                            day_df = None
+
+                        if day_df is not None and not day_df.empty:
+                            daily_chunks.append(day_df)
+                        daily_cur = daily_nxt
+
+                    if daily_chunks:
+                        day_df_all = pd.concat(daily_chunks)
+                        all_chunks.append(day_df_all)
+                        logger.info(
+                            f"Recovered chunk via daily slices: {len(day_df_all)} bars"
+                        )
+                        continue
+
+                    # If we can't fetch anything for the earliest part of this window, shift earlier.
+                    if not all_chunks:
+                        logger.error(
+                            f"⚠️ No data fetched for first chunk of window ({chunk_start.date()} to {chunk_end.date()}); "
+                            f"trying earlier months..."
+                        )
+                        break
+
+                    # Otherwise, we already have some data; stop here and use partial dataset.
+                    logger.warning(
+                        f"Stopping early due to repeated chunk failures; using partial data "
+                        f"({len(all_chunks)} chunks fetched so far)."
+                    )
+                    break
+
+                if all_chunks:
+                    # Lock in the window that produced data
+                    end = window_end
+                    start = window_start
+                    break
+
             if not all_chunks:
-                logger.error("❌ No data fetched - contract expired or unavailable")
+                logger.error("❌ No data fetched after trying multiple past windows")
                 return None
             
             # Combine chunks
-            df = pd.concat(all_chunks, ignore_index=True)
+            # IBKRProvider returns a DatetimeIndex; do NOT drop it (older code used ignore_index=True and lost timestamps).
+            df = pd.concat(all_chunks)
+            if isinstance(df.index, pd.DatetimeIndex):
+                df = df[~df.index.duplicated(keep='first')].sort_index()
+                # Persist timestamp as a column for caching + downstream usage.
+                df = df.reset_index()
+                # Normalize index column name to 'timestamp' (index name can be lost during concat/reset).
+                if 'timestamp' not in df.columns and len(df.columns) > 0:
+                    first_col = df.columns[0]
+                    df = df.rename(columns={first_col: 'timestamp'})
             if 'timestamp' in df.columns:
-                df = df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
             
             # Column mapping
             if 'timestamp' not in df.columns and df.index.name == 'timestamp':
@@ -927,6 +1081,12 @@ class TelegramCommandHandler:
                     if 'index' in df.columns:
                         df = df.rename(columns={'index': 'timestamp'})
             
+            # Normalize return shape: keep timestamp column, but ensure DatetimeIndex for resampling/backtests.
+            if 'timestamp' in df.columns:
+                df = df.sort_values('timestamp')
+                df = df.drop_duplicates(subset=['timestamp'], keep='first')
+                df = df.set_index('timestamp', drop=False)
+
             # Cache
             try:
                 df.to_parquet(cache_file, index=False)
@@ -950,10 +1110,16 @@ class TelegramCommandHandler:
         
         # If no months specified, show duration selection menu
         if months is None:
+            mode = (context.user_data.get("backtest_mode") or "5m") if hasattr(context, "user_data") else "5m"
+            if mode not in ("5m", "1m"):
+                mode = "5m"
+            mode_label = "5m decision (recommended)" if mode == "5m" else "1m (legacy)"
+
             message = (
                 "📊 *Backtest Strategy*\n\n"
+                f"*Mode:* {mode_label}\n\n"
                 "Select backtest duration:\n\n"
-                "Choose how many months of historical data to analyze."
+                "Tip: 2 months is a great default. 6 months is for deeper checks."
             )
             reply_markup = InlineKeyboardMarkup([
                 [
@@ -968,6 +1134,16 @@ class TelegramCommandHandler:
                     InlineKeyboardButton("5 Months", callback_data='backtest_5m'),
                     InlineKeyboardButton("6 Months", callback_data='backtest_6m'),
                 ],
+                [
+                    InlineKeyboardButton(
+                        "✅ 5m mode" if mode == "5m" else "5m mode",
+                        callback_data="backtest_setmode_5m",
+                    ),
+                    InlineKeyboardButton(
+                        "✅ 1m legacy" if mode == "1m" else "1m legacy",
+                        callback_data="backtest_setmode_1m",
+                    ),
+                ],
                 [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
             ])
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -976,13 +1152,21 @@ class TelegramCommandHandler:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
         try:
-            from pearlalgo.strategies.nq_intraday.backtest_adapter import run_signal_backtest
+            from pearlalgo.strategies.nq_intraday.backtest_adapter import (
+                run_signal_backtest,
+                run_signal_backtest_5m_decision,
+            )
             from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
             
+            mode = (context.user_data.get("backtest_mode") or "5m") if hasattr(context, "user_data") else "5m"
+            if mode not in ("5m", "1m"):
+                mode = "5m"
+
             # Simple message like the original that worked (NO PROGRESS BAR)
             await self._send_message_or_edit(
                 update, context,
                 f"📊 *Fetching Historical Data*\n\n"
+                f"Mode: {'5m decision' if mode == '5m' else '1m legacy'}\n"
                 f"Fetching {months} month{'s' if months > 1 else ''} of historical data for backtest...\n"
                 f"This may take a minute...",
                 reply_markup=None
@@ -993,7 +1177,6 @@ class TelegramCommandHandler:
                 symbol="MNQ",
                 months=months,
                 timeframe="1m",
-                progress_callback=None
             )
             
             signals_from_backtest = []
@@ -1005,14 +1188,33 @@ class TelegramCommandHandler:
                 # Ensure data is in correct format for backtest
                 backtest_data = historical_data.copy()
                 
-                # Set timestamp as index if it's a column
+                # CRITICAL: Ensure timestamp is properly set as DatetimeIndex
                 if 'timestamp' in backtest_data.columns:
+                    # Convert timestamp to datetime if it's not already
+                    backtest_data['timestamp'] = pd.to_datetime(backtest_data['timestamp'])
                     backtest_data = backtest_data.set_index('timestamp')
                 elif not isinstance(backtest_data.index, pd.DatetimeIndex):
+                    # If index is not DatetimeIndex, try to convert it
                     logger.warning("Historical data index is not DatetimeIndex, attempting to convert")
-                    if 'timestamp' in backtest_data.columns:
-                        backtest_data['timestamp'] = pd.to_datetime(backtest_data['timestamp'])
-                        backtest_data = backtest_data.set_index('timestamp')
+                    if backtest_data.index.name == 'timestamp' or 'timestamp' in backtest_data.columns:
+                        if 'timestamp' in backtest_data.columns:
+                            backtest_data['timestamp'] = pd.to_datetime(backtest_data['timestamp'])
+                            backtest_data = backtest_data.set_index('timestamp')
+                        else:
+                            # Try to convert the index itself
+                            backtest_data.index = pd.to_datetime(backtest_data.index)
+                    else:
+                        # Last resort: reset index and use first datetime-like column
+                        backtest_data = backtest_data.reset_index()
+                        for col in backtest_data.columns:
+                            if 'time' in col.lower() or 'date' in col.lower():
+                                backtest_data[col] = pd.to_datetime(backtest_data[col])
+                                backtest_data = backtest_data.set_index(col)
+                                break
+                
+                # Ensure we have a DatetimeIndex
+                if not isinstance(backtest_data.index, pd.DatetimeIndex):
+                    raise ValueError(f"Could not convert data index to DatetimeIndex. Index type: {type(backtest_data.index)}")
                 
                 # Ensure required columns exist (uppercase for backtest)
                 column_mapping = {
@@ -1026,7 +1228,17 @@ class TelegramCommandHandler:
                 # Running backtest (no progress updates - they interfere)
                 
                 config = NQIntradayConfig()
-                result = run_signal_backtest(backtest_data, config=config, return_signals=True)
+                if mode == "5m":
+                    result = run_signal_backtest_5m_decision(
+                        backtest_data,
+                        config=config,
+                        return_signals=True,
+                        decision_rule="5min",
+                        context_rule_1="1h",
+                        context_rule_2="4h",
+                    )
+                else:
+                    result = run_signal_backtest(backtest_data, config=config, return_signals=True)
                         
                 # Use actual signals from backtest if available
                 if result.signals and len(result.signals) > 0:
@@ -1049,19 +1261,31 @@ class TelegramCommandHandler:
                     # Create clearer title
                     data_start = backtest_data.index[0].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
                     data_end = backtest_data.index[-1].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
-                    chart_title = f"Backtest Results ({data_start} to {data_end}) - {result.total_signals} Signals"
+                    chart_title = (
+                        f"Backtest Results ({data_start} to {data_end}) - "
+                        f"{result.total_signals} Signals - "
+                        f"{'5m decision' if mode == '5m' else '1m legacy'}"
+                    )
                     
                     # Prepare performance data
                     performance_data = {
                         "total_signals": result.total_signals,
                         "avg_confidence": result.avg_confidence,
                         "avg_risk_reward": result.avg_risk_reward,
-                        "win_rate": result.win_rate,
-                        "total_pnl": result.total_pnl,
+                        "win_rate": result.win_rate if result.win_rate is not None else 0.0,
+                        "total_pnl": result.total_pnl if result.total_pnl is not None else 0.0,
                     }
                     
                     # Convert back to format expected by chart generator (reset index to get timestamp column)
-                    chart_data = backtest_data.reset_index()
+                    if mode == "5m":
+                        # Show the chart on 5-minute candles (matches trading workflow)
+                        agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
+                        if "volume" in backtest_data.columns:
+                            agg["volume"] = "sum"
+                        df_5m = backtest_data.resample("5min").agg(agg).dropna()
+                        chart_data = df_5m.reset_index()
+                    else:
+                        chart_data = backtest_data.reset_index()
                     if 'timestamp' not in chart_data.columns and chart_data.index.name == 'timestamp':
                         chart_data = chart_data.reset_index()
                     
@@ -1070,13 +1294,17 @@ class TelegramCommandHandler:
                         signals_from_backtest,
                         'MNQ',
                         chart_title,
-                        performance_data=performance_data
+                        performance_data=performance_data,
+                        timeframe=("5m" if mode == "5m" else "1m"),
                     )
                             
                     # Format results message
                     data_start = backtest_data.index[0].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
                     data_end = backtest_data.index[-1].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
                     
+                    win_rate_display = f"{result.win_rate:.1%}" if result.win_rate is not None else "N/A"
+                    total_pnl_display = f"${result.total_pnl:.2f}" if result.total_pnl is not None else "N/A"
+
                     message = (
                         f"📊 *Backtest Results ({months} Month{'s' if months > 1 else ''})*\n\n"
                         f"*Period:* {data_start} to {data_end}\n"
@@ -1085,8 +1313,8 @@ class TelegramCommandHandler:
                         f"*Signals on Chart:* {signals_shown}\n"
                         f"*Avg Confidence:* {result.avg_confidence:.2f}\n"
                         f"*Avg R:R:* {result.avg_risk_reward:.2f}:1\n"
-                        f"*Win Rate:* {result.win_rate:.1%}\n"
-                        f"*Total P&L:* ${result.total_pnl:.2f}\n\n"
+                        f"*Win Rate:* {win_rate_display}\n"
+                        f"*Total P&L:* {total_pnl_display}\n\n"
                         "📈 *Chart Components:*\n"
                         "• Green/Red candlesticks = Price action\n"
                         "• 🔼 Green triangles = Long entry signals\n"
@@ -1144,30 +1372,31 @@ class TelegramCommandHandler:
                     )
                     cache_info = (
                         f"\n💡 *Found cached data:* {most_recent.name} ({cache_age.days} days old)\n"
-                        f"   The contract may have expired (MNQZ5 exp: 20251219).\n"
-                        f"   Try using cached data or wait for next contract rollover."
+                        f"   Try using cached data (recommended) or retry fetching."
                     )
                 else:
                     cache_info = (
                         "\n⚠️ *No cached data found.*\n"
-                        "   The contract may have expired (MNQZ5 exp: 20251219).\n"
-                        "   Historical data may not be available until next contract is active."
+                        "   IBKR HMDS may be timing out or rate-limiting requests.\n"
+                        "   Try again in a few minutes or choose a shorter backtest window."
                     )
                 
                 message = (
                     "📊 *Backtest Strategy*\n\n"
                     "❌ Could not fetch historical data for backtest.\n\n"
-                    "*Likely cause:*\n"
-                    "• Contract expired: MNQZ5 expired on 2025-12-19\n"
-                    "• IBKR Error 162: Historical data unavailable for expired contracts\n\n"
+                    "*Likely causes:*\n"
+                    "• IBKR HMDS timeout / temporary outage\n"
+                    "• Pacing / rate limiting on historical requests\n"
+                    "• Contract rollover edge-case\n\n"
                     f"{cache_info}\n\n"
                     "*Solutions:*\n"
-                    "1. Wait for next contract rollover (usually 1-2 days)\n"
-                    "2. Use command line with existing data file:\n"
+                    "1. Try again (sometimes HMDS recovers within minutes)\n"
+                    "2. Choose a shorter backtest window (1–2 months)\n"
+                    "3. Use command line with an existing data file:\n"
                     "```bash\n"
                     "python3 scripts/testing/backtest_nq_strategy.py data.parquet\n"
                     "```\n"
-                    "3. Try again tomorrow when new contract is active"
+                    "4. If it still fails, retry later (IBKR side)"
                 )
                 reply_markup = InlineKeyboardMarkup([[
                     InlineKeyboardButton("🔄 Try Again", callback_data='backtest'),
@@ -1962,6 +2191,14 @@ class TelegramCommandHandler:
             await self._handle_test_signal(update, context)
         elif callback_data == 'backtest':
             await self._handle_backtest(update, context)
+        elif callback_data.startswith('backtest_setmode_'):
+            # Toggle backtest mode (5m recommended vs 1m legacy)
+            mode = callback_data.replace('backtest_setmode_', '')
+            if mode not in ("5m", "1m"):
+                mode = "5m"
+            if hasattr(context, "user_data"):
+                context.user_data["backtest_mode"] = mode
+            await self._handle_backtest(update, context, months=None)
         elif callback_data.startswith('backtest_'):
             # Handle backtest duration selection (backtest_1m, backtest_2m, etc.)
             try:

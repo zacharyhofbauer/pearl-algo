@@ -9,6 +9,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+import pandas as pd
+
 from pearlalgo.utils.logger import logger
 
 from pearlalgo.config.config_loader import load_service_config
@@ -66,8 +68,27 @@ class NQSignalGenerator:
         if df is None or df.empty:
             return []
 
-        # Check market hours
-        if not self.scanner.is_market_hours():
+        # Check market hours using the *bar timestamp* (critical for backtests).
+        # If we don't pass a datetime, the scanner defaults to "now", which makes
+        # backtests depend on current wall-clock time.
+        dt = None
+        latest_bar = market_data.get("latest_bar") if isinstance(market_data, dict) else None
+        ts = latest_bar.get("timestamp") if isinstance(latest_bar, dict) else None
+        if ts:
+            try:
+                dt = pd.to_datetime(ts)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                dt = None
+        if dt is None and isinstance(df.index, pd.DatetimeIndex) and len(df.index) > 0:
+            # Fallback to latest dataframe timestamp
+            try:
+                dt = df.index[-1].to_pydatetime() if hasattr(df.index[-1], "to_pydatetime") else df.index[-1]
+            except Exception:
+                dt = None
+
+        if not self.scanner.is_market_hours(dt):
             return []
 
         # Get multi-timeframe data

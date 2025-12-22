@@ -45,5 +45,5 @@ if pgrep -f "java.*IBC.jar" > /dev/null && ss -tuln | grep -q ":4002"; then
 elif pgrep -f "java.*IBC.jar" > /dev/null; then
     echo "⚠️  Gateway is running but API not ready yet (may still be authenticating)"
 else
-    echo "❌ Gateway is not running. Start it with: ./scripts/start_ibgateway_ibc.sh"
+    echo "❌ Gateway is not running. Start it with: ./scripts/gateway/start_ibgateway_ibc.sh"
 fi

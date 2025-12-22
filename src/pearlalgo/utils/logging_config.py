@@ -30,7 +30,6 @@ try:
     HAS_LOGURU = True
 except ImportError:
     HAS_LOGURU = False
-from rich.logging import RichHandler
 
 # Context variable for correlation ID
 correlation_id_var: ContextVar[Optional[str]] = ContextVar("correlation_id", default=None)
@@ -144,8 +143,13 @@ def setup_logging(
         console_handler.setFormatter(StructuredFormatter())
         handlers.append(console_handler)
     else:
-        # Rich handler for console
-        handlers.append(RichHandler(rich_tracebacks=True))
+        # Rich handler for console (optional). Fall back to plain StreamHandler if rich isn't installed.
+        try:
+            from rich.logging import RichHandler  # type: ignore
+
+            handlers.append(RichHandler(rich_tracebacks=True))
+        except ImportError:
+            handlers.append(logging.StreamHandler())
 
     if log_file:
         log_path = Path(log_file)

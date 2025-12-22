@@ -413,6 +413,7 @@ class ChartGenerator:
         symbol: str = "MNQ",
         title: str = "Backtest Results",
         performance_data: Optional[Dict] = None,
+        timeframe: Optional[str] = None,
     ) -> Optional[Path]:
         """Generate backtest chart using mplfinance."""
         if not MPLFINANCE_AVAILABLE:
@@ -428,10 +429,76 @@ class ChartGenerator:
             
             # Create indicators
             addplot = self._add_indicators(df)
+
+            # Add signal markers (scatter)
+            try:
+                if signals:
+                    max_n = self.config.max_signals_displayed
+                    sigs = signals[-max_n:] if max_n and len(signals) > max_n else signals
+
+                    long_y = pd.Series(np.nan, index=df.index)
+                    short_y = pd.Series(np.nan, index=df.index)
+
+                    for s in sigs:
+                        ts = s.get("timestamp")
+                        if not ts:
+                            continue
+                        try:
+                            dt = pd.to_datetime(ts)
+                        except Exception:
+                            continue
+
+                        # Align timezone to chart index if needed
+                        try:
+                            if getattr(df.index, "tz", None) is not None:
+                                if getattr(dt, "tzinfo", None) is None:
+                                    dt = dt.tz_localize(timezone.utc)
+                                dt = dt.tz_convert(df.index.tz)
+                        except Exception:
+                            pass
+
+                        try:
+                            pos = df.index.get_indexer([dt], method="nearest")[0]
+                        except Exception:
+                            continue
+                        if pos < 0 or pos >= len(df.index):
+                            continue
+
+                        direction = (s.get("direction") or "long").lower()
+                        if direction == "long":
+                            # Plot just below candle low
+                            low_val = float(df["Low"].iloc[pos])
+                            long_y.iloc[pos] = low_val * 0.999
+                        else:
+                            high_val = float(df["High"].iloc[pos])
+                            short_y.iloc[pos] = high_val * 1.001
+
+                    if not long_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                long_y,
+                                type="scatter",
+                                marker="^",
+                                markersize=self.config.signal_marker_size,
+                                color=SIGNAL_LONG,
+                            )
+                        )
+                    if not short_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                short_y,
+                                type="scatter",
+                                marker="v",
+                                markersize=self.config.signal_marker_size,
+                                color=SIGNAL_SHORT,
+                            )
+                        )
+            except Exception as e:
+                logger.debug(f"Error adding signal markers: {e}")
             
             # Create title
-            timeframe = self.config.timeframe
-            chart_title = f"{title} - Candlestick Chart with Signal Markers ({timeframe})"
+            tf_label = timeframe or self.config.timeframe
+            chart_title = f"{title} - Candlestick Chart with Signal Markers ({tf_label})"
             
             # Save to temp file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')

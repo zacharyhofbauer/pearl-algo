@@ -139,6 +139,24 @@
   - Heartbeats and periodic status summaries
   - Signal alerts, error/circuit‑breaker alerts
 
+### Backtesting (Telegram) ✅
+
+- **Command**:
+  - `/backtest` → pick duration (1–6 months)
+- **Default mode**:
+  - **5m decision (recommended)** with **1h/4h context** (matches discretionary workflow)
+  - You can toggle **1m legacy** mode from the backtest menu
+- **Caching (important)**:
+  - Historical data is cached to: `data/historical/`
+  - Files look like: `MNQ_1m_2m.parquet`, `MNQ_1m_6m.parquet`
+  - The bot will **reuse cache first** and only hit IBKR if missing
+  - Smaller windows can be **derived from larger caches** (ex: 2m sliced from 6m)
+
+- **Offline quick-run** (fast sanity check):
+  ```bash
+  python3 scripts/testing/backtest_nq_strategy.py data/historical/MNQ_1m_2m.parquet
+  ```
+
 - **Requires command handler running:**
   - **Service Control:**
     - `/start_gateway` – Start IBKR Gateway

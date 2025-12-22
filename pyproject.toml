@@ -20,6 +20,8 @@ dependencies = [
     "pytz>=2024.1",
     "ib-insync>=0.9.86",
     "matplotlib>=3.8.0",
+    "mplfinance>=0.12.10b0",
+    "pyarrow>=16.0.0",
 ]
 
 [project.optional-dependencies]

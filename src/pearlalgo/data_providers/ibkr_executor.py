@@ -793,6 +793,10 @@ class GetHistoricalDataTask(Task):
         else:
             end = self.end
 
+        bars = None
+
+        bars = None
+
         # Convert timeframe to IB bar size format
         bar_size_map = {
             "1m": "1 min",
@@ -819,33 +823,98 @@ class GetHistoricalDataTask(Task):
 
         # Create contract
         if self.is_futures:
-            # For futures, use reqContractDetails to get all contracts
+            # For futures, use reqContractDetails to get contracts.
+            # IMPORTANT: includeExpired=True so we can select the correct 2025 contract (e.g. MNQZ5)
+            # when backtesting after expiry/rollover.
             contract = Future(self.symbol, exchange="CME", currency="USD")
+            try:
+                # ib_insync / IB supports includeExpired on futures contracts
+                contract.includeExpired = True  # type: ignore[attr-defined]
+            except Exception:
+                pass
             try:
                 # Request contract details which returns all available contracts
                 contracts = ib.reqContractDetails(contract)
                 if contracts:
-                    # Filter out expired contracts and select the nearest active one
-                    from datetime import datetime as dt
-                    today = dt.now(timezone.utc).strftime("%Y%m%d")
-                    
-                    active_contracts = []
-                    for cd in contracts:
-                        exp_date = cd.contract.lastTradeDateOrContractMonth
-                        # Contract is active if expiration >= today
-                        if exp_date >= today:
-                            active_contracts.append(cd)
-                    
-                    if active_contracts:
-                        # Select the front month among active contracts
-                        contract_details = min(active_contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
-                        contract = contract_details.contract
-                        logger.debug(f"Selected active contract: {contract.localSymbol} (exp: {contract.lastTradeDateOrContractMonth})")
-                    else:
-                        # Fallback: select the nearest one even if expired
-                        contract_details = min(contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
-                        contract = contract_details.contract
-                        logger.warning(f"No active contracts, using: {contract.localSymbol} (exp: {contract.lastTradeDateOrContractMonth})")
+                    # Choose a small set of candidate contracts for the requested end date.
+                    # We try the closest-expiring contract first (usually the "correct" front month),
+                    # but if HMDS times out for that contract (common around expiry/rollover),
+                    # we fall back to a later-dated active contract that still has bars for the same dates.
+                    requested_end = end.astimezone(timezone.utc)
+                    requested_end_str = requested_end.strftime("%Y%m%d")
+                    today_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+
+                    def _exp_key(cd) -> str:
+                        raw = getattr(cd.contract, "lastTradeDateOrContractMonth", "") or ""
+                        # Normalize YYYYMM -> YYYYMM99 so string compare works.
+                        if len(raw) == 6:
+                            return raw + "99"
+                        if len(raw) == 8:
+                            return raw
+                        return "99999999"
+
+                    sorted_contracts = sorted(contracts, key=_exp_key)
+                    eligible = [cd for cd in sorted_contracts if _exp_key(cd) >= requested_end_str]
+                    active_today = [cd for cd in sorted_contracts if _exp_key(cd) >= today_str]
+
+                    candidates: List[Any] = []
+                    if eligible:
+                        candidates.extend(eligible[:3])  # try up to 3 expirations after requested_end
+                    if active_today:
+                        # ensure we also try a clearly-active contract as fallback
+                        candidates.append(active_today[0])
+
+                    # Deduplicate by conId
+                    seen_conids = set()
+                    unique_candidates = []
+                    for cd in candidates:
+                        conid = getattr(cd.contract, "conId", None)
+                        if conid is None or conid in seen_conids:
+                            continue
+                        seen_conids.add(conid)
+                        unique_candidates.append(cd)
+
+                    bars = None
+                    last_err: Optional[Exception] = None
+                    for idx, cd in enumerate(unique_candidates, start=1):
+                        contract_try = cd.contract
+                        logger.debug(
+                            f"Trying contract {idx}/{len(unique_candidates)} for {self.symbol} @ {requested_end.date()}: "
+                            f"{getattr(contract_try, 'localSymbol', 'UNKNOWN')} (exp: {getattr(contract_try, 'lastTradeDateOrContractMonth', '')})"
+                        )
+                        try:
+                            # IMPORTANT: keep this timeout < outer asyncio.wait_for so we can fall back.
+                            bars = ib.reqHistoricalData(
+                                contract_try,
+                                endDateTime=end,
+                                durationStr=duration_str,
+                                barSizeSetting=bar_size,
+                                whatToShow="TRADES",
+                                useRTH=False,
+                                formatDate=1,
+                                timeout=30,
+                            )
+                        except Exception as e:
+                            last_err = e
+                            bars = None
+
+                        if bars:
+                            contract = contract_try
+                            logger.debug(
+                                f"Selected contract for {self.symbol} @ {requested_end.date()}: "
+                                f"{contract.localSymbol} (exp: {contract.lastTradeDateOrContractMonth})"
+                            )
+                            break
+                        else:
+                            logger.warning(
+                                f"No historical bars returned for {self.symbol} using "
+                                f"{getattr(contract_try, 'localSymbol', 'UNKNOWN')} (attempt {idx}); trying next..."
+                            )
+
+                    if not bars:
+                        if last_err is not None:
+                            logger.warning(f"All contract attempts failed for {self.symbol}: {last_err}")
+                        return []
                 else:
                     logger.warning(f"No contract details found for {self.symbol}")
                     return []
@@ -855,16 +924,18 @@ class GetHistoricalDataTask(Task):
         else:
             contract = Stock(self.symbol, exchange="SMART", currency="USD")
 
-        # Request historical data
-        bars = ib.reqHistoricalData(
-            contract,
-            endDateTime=end,
-            durationStr=duration_str,
-            barSizeSetting=bar_size,
-            whatToShow="TRADES",
-            useRTH=False,
-            formatDate=1,
-        )
+        # Request historical data (non-futures) or futures fallback when contract already selected.
+        if not self.is_futures:
+            bars = ib.reqHistoricalData(
+                contract,
+                endDateTime=end,
+                durationStr=duration_str,
+                barSizeSetting=bar_size,
+                whatToShow="TRADES",
+                useRTH=False,
+                formatDate=1,
+                timeout=30,
+            )
 
         return bars
 

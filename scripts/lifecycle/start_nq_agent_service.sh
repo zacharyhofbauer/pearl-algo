@@ -19,7 +19,7 @@ if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")
     if ps -p "$PID" > /dev/null 2>&1; then
         echo "❌ NQ Agent Service already running (PID: $PID)"
-        echo "   Use './scripts/stop_nq_agent_service.sh' to stop it first"
+        echo "   Use './scripts/lifecycle/stop_nq_agent_service.sh' to stop it first"
         exit 1
     else
         # Stale PID file
@@ -30,7 +30,7 @@ fi
 # Check if IBKR Gateway is running
 if ! pgrep -f "java.*IBC.jar" > /dev/null; then
     echo "⚠️  Warning: IBKR Gateway doesn't appear to be running"
-    echo "   Start it with: ./scripts/start_ibgateway_ibc.sh"
+    echo "   Start it with: ./scripts/gateway/start_ibgateway_ibc.sh"
     read -p "Continue anyway? (y/N) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then

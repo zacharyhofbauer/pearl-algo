@@ -2,19 +2,21 @@
 
 ## Summary
 
-The chart generator has been **completely migrated from matplotlib to mplfinance**. All matplotlib dependencies have been removed and replaced with mplfinance.
+The chart generator has been **completely migrated from direct matplotlib charting to mplfinance**.
+We do **not** use matplotlib directly in the codebase for chart generation anymore; `mplfinance` is the
+charting API. (`mplfinance` itself uses matplotlib under the hood.)
 
 ## Changes Made
 
 ### 1. Chart Generator Replacement
 - ✅ Replaced `chart_generator.py` with mplfinance-based implementation
-- ✅ Removed all matplotlib code and dependencies
+- ✅ Removed matplotlib-only charting code paths (mplfinance is the single implementation)
 - ✅ Deleted `chart_generator_mplfinance.py` (merged into main file)
 - ✅ Updated `ChartConfig` to remove `use_mplfinance` flag (now the only option)
 
 ### 2. Dependencies Updated
-- ✅ Removed `matplotlib>=3.8.0` from `pyproject.toml`
-- ✅ Kept `mplfinance>=0.12.10` as the only charting dependency
+- ✅ Added/declared `mplfinance` as the charting dependency in `pyproject.toml`
+- ✅ `matplotlib` remains installed (directly or as a transitive dependency of mplfinance)
 
 ### 3. Code Updates
 - ✅ All imports now use mplfinance
@@ -23,8 +25,7 @@ The chart generator has been **completely migrated from matplotlib to mplfinance
 - ✅ All features maintained (Entry/SL/TP lines, signals, indicators)
 
 ### 4. Test Scripts Updated
-- ✅ Updated test scripts to remove matplotlib comparison
-- ✅ Simplified examples to reflect mplfinance-only usage
+- ✅ Updated test scripts/examples to reflect mplfinance-only usage
 
 ## Benefits
 
@@ -57,7 +58,7 @@ chart_path = generator.generate_backtest_chart(backtest_data, signals, "MNQ", "B
 ## Files Changed
 
 - `src/pearlalgo/nq_agent/chart_generator.py` - Complete rewrite with mplfinance
-- `pyproject.toml` - Removed matplotlib dependency
+- `pyproject.toml` - Declared mplfinance charting dependency
 - `scripts/testing/test_mplfinance_chart.py` - Updated tests
 - `scripts/enable_mplfinance_example.py` - Updated example
 - Deleted: `src/pearlalgo/nq_agent/chart_generator_mplfinance.py`

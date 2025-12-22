@@ -25,6 +25,9 @@ All other documents must remain consistent with this summary.
   - IBKR Gateway setup and lifecycle
   - 2FA flows and VNC usage
   - Common IBKR connection issues
+- `MPLFINANCE_QUICK_START.md`
+  - **Canonical charting reference** (mplfinance-based chart generator)
+  - Data contract and local verification script
 - `TELEGRAM_GUIDE.md`
   - Single canonical Telegram integration guide
   - Quick start, command handler startup, command behavior reference

@@ -224,8 +224,8 @@ Run the signal generation test and check:
 # Run all unit tests
 pytest tests/ -v
 
-# Run signal-specific tests
-pytest tests/test_nq_agent_signals.py -v
+# Run unit-only tests (by marker)
+pytest tests/ -m unit -v
 ```
 
 **What to Check:**
@@ -242,7 +242,7 @@ pytest tests/test_nq_agent_signals.py -v
 
 ```bash
 # Run integration tests
-pytest tests/test_nq_agent_integration.py -v
+pytest tests/ -m integration -v
 ```
 
 **What to Check:**
@@ -623,7 +623,7 @@ python3 scripts/testing/validate_strategy.py
 pytest tests/ -v
 
 # Integration tests
-pytest tests/test_nq_agent_integration.py -v
+pytest tests/ -m integration -v
 
 # Check status
 ./scripts/lifecycle/check_nq_agent_status.sh
@@ -632,8 +632,8 @@ pytest tests/test_nq_agent_integration.py -v
 ### Key Files
 - `scripts/testing/test_all.py` - Unified test runner
 - `scripts/testing/validate_strategy.py` - Comprehensive validation
-- `tests/test_nq_agent_signals.py` - Signal unit tests
-- `tests/test_nq_agent_integration.py` - Integration tests
+- `tests/test_edge_cases.py` - Edge-case coverage (market hours/data quality/service)
+- `tests/test_error_recovery.py` - Circuit breaker and recovery behaviors
 - `tests/mock_data_provider.py` - Mock data provider
 - `logs/nq_agent.log` - Service logs
 - `data/nq_agent_state/state.json` - Service state

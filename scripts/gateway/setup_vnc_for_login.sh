@@ -48,7 +48,7 @@ if [ $? -eq 0 ]; then
     echo "   vncserver -kill :1"
     echo ""
     echo "5. Future starts are headless:"
-    echo "   ./scripts/start_ibgateway_ibc.sh"
+    echo "   ./scripts/gateway/start_ibgateway_ibc.sh"
     echo ""
 else
     echo "❌ Failed to start VNC server"

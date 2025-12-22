@@ -264,7 +264,7 @@ async def test_connection_status():
             
             if not port_open:
                 details.append("⚠️  Check IB Gateway API settings (port 4002)")
-                details.append("   Run: ./scripts/check_gateway_status.sh")
+                details.append("   Run: ./scripts/gateway/check_gateway_status.sh")
             else:
                 details.append("✅ IB Gateway appears ready")
             
@@ -273,7 +273,7 @@ async def test_connection_status():
         else:
             details = [
                 "IB Gateway: Not running",
-                "⚠️  Start IB Gateway: ./scripts/start_ibgateway_ibc.sh",
+                "⚠️  Start IB Gateway: ./scripts/gateway/start_ibgateway_ibc.sh",
                 "ℹ️  Using mock data provider for other tests",
             ]
             print_result("Connection Status", False, details)

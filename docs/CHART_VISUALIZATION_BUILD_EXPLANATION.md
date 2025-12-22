@@ -1,4 +1,11 @@
-# Chart Visualization System - Build Explanation
+# Chart Visualization System - Build Explanation (Historical)
+
+> **Canonical charting reference:** `docs/MPLFINANCE_QUICK_START.md`  
+> **Production implementation:** `src/pearlalgo/nq_agent/chart_generator.py` (mplfinance-based)
+>
+> This file is retained for historical context. The detailed implementation notes below
+> describe an earlier matplotlib-focused approach and are **not** authoritative for the
+> current production chart generator.
 
 ## Overview
 

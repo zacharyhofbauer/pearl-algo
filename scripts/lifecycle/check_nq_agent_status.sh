@@ -69,7 +69,7 @@ if pgrep -f "java.*IBC.jar" > /dev/null; then
     echo "✅ IBKR Gateway: RUNNING"
 else
     echo "❌ IBKR Gateway: NOT RUNNING"
-    echo "   Start with: ./scripts/start_ibgateway_ibc.sh"
+    echo "   Start with: ./scripts/gateway/start_ibgateway_ibc.sh"
 fi
 
 echo ""

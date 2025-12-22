@@ -725,12 +725,12 @@ pip install -e .
 
 **Stop Service**:
 ```bash
-./scripts/stop_nq_agent_service.sh
+./scripts/lifecycle/stop_nq_agent_service.sh
 ```
 
 **Check Status**:
 ```bash
-./scripts/check_nq_agent_status.sh
+./scripts/lifecycle/check_nq_agent_status.sh
 ```
 
 **View Logs**:

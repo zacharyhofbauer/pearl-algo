@@ -1,5 +1,7 @@
 # Chart Generator Data Format Comparison
 
+> **Canonical charting reference:** `docs/MPLFINANCE_QUICK_START.md`
+
 ## Data Format Flow
 
 ### Test Script (`test_mplfinance_chart.py`)
