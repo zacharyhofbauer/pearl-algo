@@ -170,7 +170,17 @@ class ChartGenerator:
             try:
                 from pearlalgo.utils.vwap import VWAPCalculator
                 vwap_calc = VWAPCalculator()
-                vwap_data = vwap_calc.calculate_vwap(data.reset_index())
+                # Convert back to lowercase for VWAPCalculator (it expects lowercase columns)
+                vwap_df = data.reset_index().copy()
+                vwap_df = vwap_df.rename(columns={
+                    'Open': 'open',
+                    'High': 'high',
+                    'Low': 'low',
+                    'Close': 'close',
+                })
+                if 'Volume' in vwap_df.columns:
+                    vwap_df = vwap_df.rename(columns={'Volume': 'volume'})
+                vwap_data = vwap_calc.calculate_vwap(vwap_df)
                 vwap_value = vwap_data.get("vwap", 0)
                 if vwap_value > 0:
                     # Create constant VWAP line

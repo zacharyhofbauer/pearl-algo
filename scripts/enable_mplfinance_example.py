@@ -19,3 +19,4 @@ print("\nTo use in your code:")
 print("  from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig")
 print("  generator = ChartGenerator()")
 print("  chart_path = generator.generate_entry_chart(signal, data, 'MNQ', '1m')")
+

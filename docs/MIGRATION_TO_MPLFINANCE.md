@@ -81,3 +81,4 @@ python3 scripts/testing/test_mplfinance_chart.py
 ## Migration Complete ✅
 
 The migration is complete and tested. All chart generation now uses mplfinance exclusively.
+

@@ -287,3 +287,4 @@ This implementation follows TradingView's visual style and uses similar approach
 - Industry-standard color schemes and layouts
 
 The codebase is production-ready and handles both real-time trading signals and historical backtest visualization with professional-grade aesthetics matching TradingView's dark theme.
+

@@ -819,16 +819,33 @@ class GetHistoricalDataTask(Task):
 
         # Create contract
         if self.is_futures:
-            # For futures, use reqContractDetails to get all contracts, then select front month
+            # For futures, use reqContractDetails to get all contracts
             contract = Future(self.symbol, exchange="CME", currency="USD")
             try:
                 # Request contract details which returns all available contracts
                 contracts = ib.reqContractDetails(contract)
                 if contracts:
-                    # Select the front month (nearest expiration)
-                    contract_details = min(contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
-                    contract = contract_details.contract
-                    logger.debug(f"Selected front month contract: {contract.localSymbol} (exp: {contract.lastTradeDateOrContractMonth})")
+                    # Filter out expired contracts and select the nearest active one
+                    from datetime import datetime as dt
+                    today = dt.now(timezone.utc).strftime("%Y%m%d")
+                    
+                    active_contracts = []
+                    for cd in contracts:
+                        exp_date = cd.contract.lastTradeDateOrContractMonth
+                        # Contract is active if expiration >= today
+                        if exp_date >= today:
+                            active_contracts.append(cd)
+                    
+                    if active_contracts:
+                        # Select the front month among active contracts
+                        contract_details = min(active_contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
+                        contract = contract_details.contract
+                        logger.debug(f"Selected active contract: {contract.localSymbol} (exp: {contract.lastTradeDateOrContractMonth})")
+                    else:
+                        # Fallback: select the nearest one even if expired
+                        contract_details = min(contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
+                        contract = contract_details.contract
+                        logger.warning(f"No active contracts, using: {contract.localSymbol} (exp: {contract.lastTradeDateOrContractMonth})")
                 else:
                     logger.warning(f"No contract details found for {self.symbol}")
                     return []

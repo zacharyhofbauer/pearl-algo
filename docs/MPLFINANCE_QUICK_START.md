@@ -120,3 +120,4 @@ mplfinance has extensive customization options. See the `_create_tradingview_sty
 2. Compare output with matplotlib version
 3. If satisfied, set `use_mplfinance=True` as default
 4. Consider removing matplotlib implementation if no longer needed
+

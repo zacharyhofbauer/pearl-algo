@@ -10,11 +10,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable, Awaitable
 
 import pandas as pd
+import numpy as np
 
 from pearlalgo.utils.logger import logger
 
@@ -93,6 +94,11 @@ class TelegramCommandHandler:
                 self.chart_generator = ChartGenerator()
             except Exception as e:
                 logger.warning(f"Could not initialize ChartGenerator: {e}")
+        
+        # Data provider for fetching historical data (lazy initialization)
+        self._data_provider = None
+        self._historical_cache_dir = Path(self.state_dir.parent / "historical")
+        self._historical_cache_dir.mkdir(parents=True, exist_ok=True)
         
         # Build application
         self.application = Application.builder().token(bot_token).build()
@@ -783,11 +789,188 @@ class TelegramCommandHandler:
             reply_markup = self._get_back_to_menu_button()
             await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
     
-    async def _handle_backtest(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    def _get_data_provider(self):
+        """Get or create data provider for fetching historical data."""
+        if self._data_provider is None:
+            try:
+                from pearlalgo.data_providers.factory import create_data_provider
+                from pearlalgo.config.settings import get_settings
+                
+                settings = get_settings()
+                # Try to get provider from config, default to 'ibkr'
+                provider_name = getattr(settings, 'data_provider', 'ibkr') if hasattr(settings, 'data_provider') else 'ibkr'
+                self._data_provider = create_data_provider(provider_name, settings=settings)
+                logger.info(f"Initialized data provider: {provider_name}")
+            except Exception as e:
+                logger.warning(f"Could not initialize data provider: {e}")
+                return None
+        return self._data_provider
+    
+    def _create_progress_bar(self, percent: int, length: int = 10) -> str:
+        """Create a visual progress bar using emojis."""
+        filled = int(length * percent / 100)
+        empty = length - filled
+        return "█" * filled + "░" * empty
+    
+    async def _fetch_historical_data_for_backtest(
+        self, 
+        symbol: str = "MNQ", 
+        months: int = 6,
+        timeframe: str = "1m",
+        progress_callback: Optional[Callable[[int, int, str], Awaitable[None]]] = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        Fetch and cache historical data for backtesting.
+        
+        Args:
+            symbol: Symbol to fetch (default: MNQ)
+            months: Number of months to fetch (default: 6)
+            timeframe: Data timeframe (default: 1m)
+            progress_callback: Optional callback for progress updates
+            
+        Returns:
+            DataFrame with historical OHLCV data, or None if fetch failed
+        """
+        cache_file = self._historical_cache_dir / f"{symbol}_{timeframe}_{months}m.parquet"
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=months * 30)
+        
+        logger.info(f"Fetching {months} months of historical data for {symbol}...")
+        
+        # Check for cached data first
+        if cache_file.exists():
+            try:
+                cached_data = pd.read_parquet(cache_file)
+                if not cached_data.empty:
+                    logger.info(f"✅ Using cached data: {len(cached_data):,} bars")
+                    if isinstance(cached_data.index, pd.DatetimeIndex):
+                        cached_data = cached_data.reset_index()
+                        if 'index' in cached_data.columns:
+                            cached_data = cached_data.rename(columns={'index': 'timestamp'})
+                    if 'timestamp' in cached_data.columns:
+                        cached_data['timestamp'] = pd.to_datetime(cached_data['timestamp'])
+                        return cached_data
+            except Exception as e:
+                logger.warning(f"Error reading cache: {e}")
+        
+        # Fetch data
+        data_provider = self._get_data_provider()
+        if data_provider is None:
+            logger.error("Data provider not available")
+            return None
+        
+        all_chunks = []
+        
+        try:
+            for i in range(months):
+                chunk_start = end - timedelta(days=(months - i) * 30)
+                chunk_end = end - timedelta(days=(months - i - 1) * 30)
+                
+                if i == 0:
+                    chunk_start = start
+                if i == months - 1:
+                    chunk_end = end
+                
+                logger.info(f"Fetching chunk {i+1}/{months}: {chunk_start.date()} to {chunk_end.date()}")
+                
+                loop = asyncio.get_event_loop()
+                try:
+                    chunk_df = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            lambda cs=chunk_start, ce=chunk_end: data_provider.fetch_historical(
+                                symbol=symbol,
+                                start=cs,
+                                end=ce,
+                                timeframe=timeframe,
+                            )
+                        ),
+                        timeout=30.0  # 30 second timeout (faster fail)
+                    )
+                    
+                    if chunk_df is not None and not chunk_df.empty:
+                        all_chunks.append(chunk_df)
+                        logger.info(f"Successfully fetched chunk: {len(chunk_df)} bars")
+                    else:
+                        logger.warning(f"Chunk {i+1} returned empty data, skipping...")
+                except asyncio.TimeoutError:
+                    logger.error(f"⚠️ Chunk {i+1} timed out - contract may be expired (MNQZ5 exp: 2025-12-19)")
+                    break  # Stop trying if we hit timeout
+                except Exception as e:
+                    logger.error(f"Error fetching chunk {i+1}: {e}")
+                    break  # Stop trying on error
+            
+            if not all_chunks:
+                logger.error("❌ No data fetched - contract expired or unavailable")
+                return None
+            
+            # Combine chunks
+            df = pd.concat(all_chunks, ignore_index=True)
+            if 'timestamp' in df.columns:
+                df = df.drop_duplicates(subset=['timestamp']).sort_values('timestamp')
+            
+            # Column mapping
+            if 'timestamp' not in df.columns and df.index.name == 'timestamp':
+                df = df.reset_index()
+            
+            column_mapping = {
+                'Open': 'open', 'High': 'high', 'Low': 'low', 
+                'Close': 'close', 'Volume': 'volume'
+            }
+            for old, new in column_mapping.items():
+                if old in df.columns:
+                    df = df.rename(columns={old: new})
+            
+            if 'timestamp' not in df.columns:
+                if df.index.name == 'timestamp' or isinstance(df.index, pd.DatetimeIndex):
+                    df = df.reset_index()
+                    if 'index' in df.columns:
+                        df = df.rename(columns={'index': 'timestamp'})
+            
+            # Cache
+            try:
+                df.to_parquet(cache_file, index=False)
+                logger.info(f"💾 Cached {len(df):,} bars")
+            except Exception as e:
+                logger.warning(f"Could not cache: {e}")
+            
+            logger.info(f"✅ Complete: {len(df):,} bars")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error fetching data: {e}", exc_info=True)
+            return None
+    
+    async def _handle_backtest(self, update: Update, context: ContextTypes.DEFAULT_TYPE, months: Optional[int] = None):
         """Handle /backtest command - run backtest and show results with chart."""
         logger.info(f"Received /backtest command from chat {update.effective_chat.id}")
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        # If no months specified, show duration selection menu
+        if months is None:
+            message = (
+                "📊 *Backtest Strategy*\n\n"
+                "Select backtest duration:\n\n"
+                "Choose how many months of historical data to analyze."
+            )
+            reply_markup = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("1 Month", callback_data='backtest_1m'),
+                    InlineKeyboardButton("2 Months", callback_data='backtest_2m'),
+                ],
+                [
+                    InlineKeyboardButton("3 Months", callback_data='backtest_3m'),
+                    InlineKeyboardButton("4 Months", callback_data='backtest_4m'),
+                ],
+                [
+                    InlineKeyboardButton("5 Months", callback_data='backtest_5m'),
+                    InlineKeyboardButton("6 Months", callback_data='backtest_6m'),
+                ],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
+            ])
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             return
         
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -796,256 +979,200 @@ class TelegramCommandHandler:
             from pearlalgo.strategies.nq_intraday.backtest_adapter import run_signal_backtest
             from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
             
-            # Try to get buffer data from state
-            state_file = get_state_file(self.state_dir)
-            buffer_data = None
+            # Simple message like the original that worked (NO PROGRESS BAR)
+            await self._send_message_or_edit(
+                update, context,
+                f"📊 *Fetching Historical Data*\n\n"
+                f"Fetching {months} month{'s' if months > 1 else ''} of historical data for backtest...\n"
+                f"This may take a minute...",
+                reply_markup=None
+            )
+            
+            # Fetch data (no progress callbacks - they interfere)
+            historical_data = await self._fetch_historical_data_for_backtest(
+                symbol="MNQ",
+                months=months,
+                timeframe="1m",
+                progress_callback=None
+            )
+            
             signals_from_backtest = []
             
-            if state_file.exists():
-                try:
-                    with open(state_file) as f:
-                        state = json.load(f)
-                    buffer_size = state.get('buffer_size', 0)
+            if historical_data is not None and not historical_data.empty:
+                # Prepare data for backtest
+                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+                
+                # Ensure data is in correct format for backtest
+                backtest_data = historical_data.copy()
+                
+                # Set timestamp as index if it's a column
+                if 'timestamp' in backtest_data.columns:
+                    backtest_data = backtest_data.set_index('timestamp')
+                elif not isinstance(backtest_data.index, pd.DatetimeIndex):
+                    logger.warning("Historical data index is not DatetimeIndex, attempting to convert")
+                    if 'timestamp' in backtest_data.columns:
+                        backtest_data['timestamp'] = pd.to_datetime(backtest_data['timestamp'])
+                        backtest_data = backtest_data.set_index('timestamp')
+                
+                # Ensure required columns exist (uppercase for backtest)
+                column_mapping = {
+                    'open': 'Open', 'high': 'High', 'low': 'Low',
+                    'close': 'Close', 'volume': 'Volume'
+                }
+                for lower, upper in column_mapping.items():
+                    if lower in backtest_data.columns and upper not in backtest_data.columns:
+                        backtest_data[upper] = backtest_data[lower]
+                
+                # Running backtest (no progress updates - they interfere)
+                
+                config = NQIntradayConfig()
+                result = run_signal_backtest(backtest_data, config=config, return_signals=True)
+                        
+                # Use actual signals from backtest if available
+                if result.signals and len(result.signals) > 0:
+                    # Use real signals from backtest
+                    for signal in result.signals:
+                        # Ensure timestamp is set
+                        if 'timestamp' not in signal or not signal.get('timestamp'):
+                            # Find closest timestamp in data
+                            entry_price = signal.get('entry_price', 0)
+                            if entry_price > 0:
+                                close_col = 'Close' if 'Close' in backtest_data.columns else 'close'
+                                closest_idx = (backtest_data[close_col] - entry_price).abs().idxmin()
+                                signal['timestamp'] = closest_idx.isoformat() if hasattr(closest_idx, 'isoformat') else str(closest_idx)
+                        signals_from_backtest.append(signal)
+                
+                # Generate backtest chart
+                if self.chart_generator and not backtest_data.empty:
+                    signals_shown = len(signals_from_backtest)
                     
-                    if buffer_size > 50:
-                        # We have some data, but for a proper backtest we need more
-                        # For now, generate a demo backtest with test data
-                        message = (
-                            "📊 *Backtest Strategy*\n\n"
-                            f"Current buffer: {buffer_size} bars\n\n"
-                            "*For full backtest:*\n"
-                            "Use command line with historical data:\n"
-                            "```bash\n"
-                            "python3 scripts/testing/backtest_nq_strategy.py data.parquet\n"
-                            "```\n\n"
-                            "*Demo backtest:*\n"
-                            "Generating demo backtest with test data..."
-                        )
-                        reply_markup = self._get_back_to_menu_button()
-                        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
-                        
-                        # Generate demo backtest
-                        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-                        
-                        # Create demo data with realistic mixed bullish/bearish candles
-                        dates = pd.date_range(end=datetime.now(timezone.utc), periods=200, freq='1min')
-                        
-                        # Generate realistic OHLC data with both green and red candles
-                        opens = []
-                        highs = []
-                        lows = []
-                        closes = []
-                        volumes = []
-                        
-                        base_price = 25000.0
-                        for i in range(200):
-                            # Add trend + volatility + random walk
-                            trend = i * 0.2  # Slow upward trend
-                            volatility = (i % 10 - 5) * 0.8  # Cyclical movement
-                            noise = (i % 7 - 3) * 0.4  # Random component
+                    # Create clearer title
+                    data_start = backtest_data.index[0].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
+                    data_end = backtest_data.index[-1].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
+                    chart_title = f"Backtest Results ({data_start} to {data_end}) - {result.total_signals} Signals"
+                    
+                    # Prepare performance data
+                    performance_data = {
+                        "total_signals": result.total_signals,
+                        "avg_confidence": result.avg_confidence,
+                        "avg_risk_reward": result.avg_risk_reward,
+                        "win_rate": result.win_rate,
+                        "total_pnl": result.total_pnl,
+                    }
+                    
+                    # Convert back to format expected by chart generator (reset index to get timestamp column)
+                    chart_data = backtest_data.reset_index()
+                    if 'timestamp' not in chart_data.columns and chart_data.index.name == 'timestamp':
+                        chart_data = chart_data.reset_index()
+                    
+                    chart_path = self.chart_generator.generate_backtest_chart(
+                        chart_data,
+                        signals_from_backtest,
+                        'MNQ',
+                        chart_title,
+                        performance_data=performance_data
+                    )
                             
-                            mid_price = base_price + trend + volatility + noise
-                            
-                            # Create realistic OHLC - sometimes bullish, sometimes bearish
-                            # Pattern: roughly 2/3 bullish, 1/3 bearish for variety
-                            if i % 3 == 0:  # Bearish candle every 3rd
-                                open_price = mid_price + 0.5
-                                close_price = mid_price - 0.5
-                            else:  # Bullish candle
-                                open_price = mid_price - 0.5
-                                close_price = mid_price + 0.5
-                            
-                            # Add wicks (high and low)
-                            wick_size = abs((i % 5 - 2) * 0.3)
-                            high_price = max(open_price, close_price) + wick_size
-                            low_price = min(open_price, close_price) - wick_size
-                            
-                            opens.append(open_price)
-                            highs.append(high_price)
-                            lows.append(low_price)
-                            closes.append(close_price)
-                            volumes.append(1000 + (i % 20) * 50)
-                        
-                        demo_data = pd.DataFrame({
-                            'timestamp': dates,
-                            'open': opens,
-                            'high': highs,
-                            'low': lows,
-                            'close': closes,
-                            'volume': volumes,
-                        })
-                        demo_data = demo_data.set_index('timestamp')
-                        
-                        # Run backtest with signal capture
-                        config = NQIntradayConfig()
-                        result = run_signal_backtest(demo_data, config=config, return_signals=True)
-                        
-                        # Use actual signals from backtest if available
-                        if result.signals and len(result.signals) > 0:
-                            # Use real signals from backtest
-                            for signal in result.signals:
-                                # Ensure timestamp is set
-                                if 'timestamp' not in signal or not signal.get('timestamp'):
-                                    # Find closest timestamp in data
-                                    entry_price = signal.get('entry_price', 0)
-                                    if entry_price > 0:
-                                        closest_idx = (demo_data['close'] - entry_price).abs().idxmin()
-                                        signal['timestamp'] = closest_idx.isoformat() if hasattr(closest_idx, 'isoformat') else str(closest_idx)
-                                signals_from_backtest.append(signal)
-                        elif result.total_signals > 0:
-                            # Fallback: Create demo signals distributed across the data
-                            num_signals = min(result.total_signals, 10)  # Show up to 10 signals
-                            for i in range(num_signals):
-                                idx_pos = int(len(demo_data) * (i + 1) / (num_signals + 1))
-                                signal_time = demo_data.index[idx_pos]
-                                close_price = float(demo_data.loc[signal_time, 'close'])
-                                signals_from_backtest.append({
-                                    'entry_price': close_price,
-                                    'stop_loss': close_price - 50,
-                                    'take_profit': close_price + 75,
-                                    'direction': 'long' if i % 2 == 0 else 'short',
-                                    'type': 'demo_signal',
-                                    'timestamp': signal_time.isoformat() if hasattr(signal_time, 'isoformat') else str(signal_time),
-                                    'confidence': 0.7 + (i % 3) * 0.1,
-                                })
-                        else:
-                            # No signals from strategy, create a few demo signals to show chart works
-                            for i in range(5):
-                                idx_pos = int(len(demo_data) * (i + 1) / 6)
-                                signal_time = demo_data.index[idx_pos]
-                                close_price = float(demo_data.loc[signal_time, 'close'])
-                                signals_from_backtest.append({
-                                    'entry_price': close_price,
-                                    'stop_loss': close_price - 50,
-                                    'take_profit': close_price + 75,
-                                    'direction': 'long' if i % 2 == 0 else 'short',
-                                    'type': 'demo_signal',
-                                    'timestamp': signal_time.isoformat() if hasattr(signal_time, 'isoformat') else str(signal_time),
-                                    'confidence': 0.7 + (i % 3) * 0.1,
-                                })
-                        
-                        # Generate backtest chart
-                        if self.chart_generator and not demo_data.empty:
-                            signals_shown = len(signals_from_backtest)
-                            
-                            # Create clearer title
-                            if result.total_signals > 0:
-                                chart_title = f"Backtest Results - {result.total_signals} Signals"
-                            else:
-                                chart_title = f"Backtest Results - Demo Visualization ({signals_shown} demo signals)"
-                            
-                            # Prepare performance data
-                            performance_data = {
-                                "total_signals": result.total_signals,
-                                "avg_confidence": result.avg_confidence,
-                                "avg_risk_reward": result.avg_risk_reward,
-                                "win_rate": result.win_rate,
-                                "total_pnl": result.total_pnl,
-                            }
-                            
-                            chart_path = self.chart_generator.generate_backtest_chart(
-                                demo_data.reset_index(),
-                                signals_from_backtest,
-                                'MNQ',
-                                chart_title,
-                                performance_data=performance_data
-                            )
-                            
-                            # Format results message
-                            chart_type_note = ""
-                            if result.total_signals == 0 and signals_shown > 0:
-                                chart_type_note = "\n💡 *Note:* Chart shows demo signals for visualization (strategy generated 0 signals on this data).\n"
-                            
-                            message = (
-                                "📊 *Backtest Results*\n\n"
-                                f"*Chart Type:* Candlestick with Signal Markers\n"
-                                f"*Bars Analyzed:* {result.total_bars:,}\n"
-                                f"*Signals Generated:* {result.total_signals}\n"
-                                f"*Signals on Chart:* {signals_shown}\n"
-                                f"*Avg Confidence:* {result.avg_confidence:.2f}\n"
-                                f"*Avg R:R:* {result.avg_risk_reward:.2f}:1{chart_type_note}\n"
-                                "📈 *Chart Components:*\n"
-                                "• Green/Red candlesticks = Price action\n"
-                                "• 🔼 Green triangles = Long entry signals\n"
-                                "• 🔽 Orange triangles = Short entry signals\n"
-                                "• Volume bars (bottom panel)\n"
-                                "• VWAP line (orange)\n"
-                                "• Moving averages (blue/purple)"
-                            )
-                            
-                            reply_markup = InlineKeyboardMarkup([[
-                                InlineKeyboardButton("🔄 Run Again", callback_data='backtest'),
-                                InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
-                            ]])
-                            
-                            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
-                            
-                            # Send chart
-                            if chart_path and chart_path.exists():
-                                try:
-                                    with open(chart_path, 'rb') as photo:
-                                        if update.callback_query:
-                                            await context.bot.send_photo(
-                                                chat_id=update.effective_chat.id,
-                                                photo=photo,
-                                                caption="📊 Backtest Chart"
-                                            )
-                                        else:
-                                            await update.message.reply_photo(
-                                                photo=photo,
-                                                caption="📊 Backtest Chart"
-                                            )
-                                    chart_path.unlink()
-                                except Exception as e:
-                                    logger.error(f"Error sending backtest chart: {e}")
-                        else:
-                            message = (
-                                "📊 *Backtest Results (Demo)*\n\n"
-                                f"*Bars Analyzed:* {result.total_bars:,}\n"
-                                f"*Signals Generated:* {result.total_signals}\n"
-                                f"*Avg Confidence:* {result.avg_confidence:.2f}\n"
-                                f"*Avg R:R:* {result.avg_risk_reward:.2f}:1\n\n"
-                                "⚠️ Chart generation not available"
-                            )
-                            reply_markup = self._get_back_to_menu_button()
-                            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
-                    else:
-                        # Not enough data
-                        message = (
-                            "📊 *Backtest Strategy*\n\n"
-                            f"Current buffer: {buffer_size} bars (need 50+ for demo)\n\n"
-                            "*Options:*\n"
-                            "1. Start agent and let it collect data\n"
-                            "2. Use command line with historical data:\n"
-                            "```bash\n"
-                            "python3 scripts/testing/backtest_nq_strategy.py data.parquet\n"
-                            "```"
-                        )
-                        reply_markup = self._get_back_to_menu_button()
-                        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
-                except Exception as e:
-                    logger.error(f"Error reading state for backtest: {e}", exc_info=True)
+                    # Format results message
+                    data_start = backtest_data.index[0].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
+                    data_end = backtest_data.index[-1].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
+                    
                     message = (
-                        "📊 *Backtest Strategy*\n\n"
-                        "Use command line with historical data:\n"
-                        "```bash\n"
-                        "python3 scripts/testing/backtest_nq_strategy.py data.parquet\n"
-                        "```"
+                        f"📊 *Backtest Results ({months} Month{'s' if months > 1 else ''})*\n\n"
+                        f"*Period:* {data_start} to {data_end}\n"
+                        f"*Bars Analyzed:* {result.total_bars:,}\n"
+                        f"*Signals Generated:* {result.total_signals}\n"
+                        f"*Signals on Chart:* {signals_shown}\n"
+                        f"*Avg Confidence:* {result.avg_confidence:.2f}\n"
+                        f"*Avg R:R:* {result.avg_risk_reward:.2f}:1\n"
+                        f"*Win Rate:* {result.win_rate:.1%}\n"
+                        f"*Total P&L:* ${result.total_pnl:.2f}\n\n"
+                        "📈 *Chart Components:*\n"
+                        "• Green/Red candlesticks = Price action\n"
+                        "• 🔼 Green triangles = Long entry signals\n"
+                        "• 🔽 Orange triangles = Short entry signals\n"
+                        "• Volume bars (bottom panel)\n"
+                        "• VWAP line (orange)\n"
+                        "• Moving averages (blue/purple)"
+                    )
+                            
+                    reply_markup = InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔄 Run Again", callback_data='backtest'),
+                        InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
+                    ]])
+                    
+                    await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+                    
+                    # Send chart
+                    if chart_path and chart_path.exists():
+                        try:
+                            with open(chart_path, 'rb') as photo:
+                                if update.callback_query:
+                                    await context.bot.send_photo(
+                                        chat_id=update.effective_chat.id,
+                                        photo=photo,
+                                        caption="📊 Backtest Chart (6 Months Historical Data)"
+                                    )
+                                else:
+                                    await update.message.reply_photo(
+                                        photo=photo,
+                                        caption="📊 Backtest Chart (6 Months Historical Data)"
+                                    )
+                            chart_path.unlink()
+                        except Exception as e:
+                            logger.error(f"Error sending backtest chart: {e}")
+                else:
+                    message = (
+                        "📊 *Backtest Results*\n\n"
+                        f"*Bars Analyzed:* {result.total_bars:,}\n"
+                        f"*Signals Generated:* {result.total_signals}\n"
+                        f"*Avg Confidence:* {result.avg_confidence:.2f}\n"
+                        f"*Avg R:R:* {result.avg_risk_reward:.2f}:1\n\n"
+                        "⚠️ Chart generation not available"
                     )
                     reply_markup = self._get_back_to_menu_button()
                     await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             else:
-                # No state file
+                # Failed to fetch historical data - check for any cached data
+                cache_files = list(self._historical_cache_dir.glob("MNQ_1m_*.parquet"))
+                cache_info = ""
+                if cache_files:
+                    # Find the most recent cache
+                    most_recent = max(cache_files, key=lambda f: f.stat().st_mtime)
+                    cache_age = datetime.now(timezone.utc) - datetime.fromtimestamp(
+                        most_recent.stat().st_mtime, tz=timezone.utc
+                    )
+                    cache_info = (
+                        f"\n💡 *Found cached data:* {most_recent.name} ({cache_age.days} days old)\n"
+                        f"   The contract may have expired (MNQZ5 exp: 20251219).\n"
+                        f"   Try using cached data or wait for next contract rollover."
+                    )
+                else:
+                    cache_info = (
+                        "\n⚠️ *No cached data found.*\n"
+                        "   The contract may have expired (MNQZ5 exp: 20251219).\n"
+                        "   Historical data may not be available until next contract is active."
+                    )
+                
                 message = (
                     "📊 *Backtest Strategy*\n\n"
-                    "Agent not running. Options:\n\n"
-                    "1. Start agent to collect data for demo backtest\n"
-                    "2. Use command line with historical data:\n"
+                    "❌ Could not fetch historical data for backtest.\n\n"
+                    "*Likely cause:*\n"
+                    "• Contract expired: MNQZ5 expired on 2025-12-19\n"
+                    "• IBKR Error 162: Historical data unavailable for expired contracts\n\n"
+                    f"{cache_info}\n\n"
+                    "*Solutions:*\n"
+                    "1. Wait for next contract rollover (usually 1-2 days)\n"
+                    "2. Use command line with existing data file:\n"
                     "```bash\n"
                     "python3 scripts/testing/backtest_nq_strategy.py data.parquet\n"
-                    "```"
+                    "```\n"
+                    "3. Try again tomorrow when new contract is active"
                 )
-                reply_markup = self._get_back_to_menu_button()
+                reply_markup = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔄 Try Again", callback_data='backtest'),
+                    InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
+                ]])
                 await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
                 
         except Exception as e:
@@ -1064,7 +1191,7 @@ class TelegramCommandHandler:
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
         
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
         try:
             if not self.chart_generator:
@@ -1077,57 +1204,70 @@ class TelegramCommandHandler:
                 )
                 return
             
-            # Generate test data with realistic mixed bullish/bearish candles
-            dates = pd.date_range(end=datetime.now(timezone.utc), periods=100, freq='1min')
-            
-            opens = []
-            highs = []
-            lows = []
-            closes = []
-            volumes = []
-            
-            base_price = 25000.0
-            for i in range(100):
-                # Add trend + volatility
-                trend = i * 0.3  # Moderate trend
-                volatility = (i % 8 - 4) * 0.6  # Volatility
-                noise = (i % 5 - 2) * 0.3  # Noise component
+            # Generate test data using same method as test_mplfinance_chart.py
+            def create_sample_data(num_bars=100):
+                """Create sample OHLCV data for testing (same as test_mplfinance_chart.py)."""
+                base_price = 25000.0
+                dates = pd.date_range(
+                    end=datetime.now(timezone.utc),
+                    periods=num_bars,
+                    freq='1min'
+                )
                 
-                mid_price = base_price + trend + volatility + noise
+                # Generate realistic price data
+                np.random.seed(42)
+                price_changes = np.random.randn(num_bars) * 5
+                prices = base_price + np.cumsum(price_changes)
                 
-                # Create realistic OHLC - mix of bullish and bearish
-                if i % 3 == 0:  # Bearish candle every 3rd
-                    open_price = mid_price + 0.4
-                    close_price = mid_price - 0.4
-                else:  # Bullish candle
-                    open_price = mid_price - 0.4
-                    close_price = mid_price + 0.4
+                data = []
+                for i, (date, price) in enumerate(zip(dates, prices)):
+                    volatility = abs(np.random.randn() * 2)
+                    high = price + volatility
+                    low = price - volatility
+                    open_price = prices[i-1] if i > 0 else price
+                    close_price = price
+                    
+                    data.append({
+                        'timestamp': date,
+                        'open': open_price,
+                        'high': high,
+                        'low': low,
+                        'close': close_price,
+                        'volume': int(np.random.uniform(1000, 5000))
+                    })
                 
-                # Add wicks
-                wick_size = abs((i % 4 - 1.5) * 0.25)
-                high_price = max(open_price, close_price) + wick_size
-                low_price = min(open_price, close_price) - wick_size
-                
-                opens.append(open_price)
-                highs.append(high_price)
-                lows.append(low_price)
-                closes.append(close_price)
-                volumes.append(1000 + (i % 10) * 100)
+                return pd.DataFrame(data)
             
-            test_data = pd.DataFrame({
-                'timestamp': dates,
-                'open': opens,
-                'high': highs,
-                'low': lows,
-                'close': closes,
-                'volume': volumes,
-            })
+            # Create sample data (same as test_mplfinance_chart.py)
+            test_data = create_sample_data(100)
             
-            # Create test signal
+            # Calculate signal prices based on actual data range (so they're visible on chart)
+            data_high = test_data['high'].max()
+            data_low = test_data['low'].min()
+            data_close = test_data['close'].iloc[-1]  # Use last close as reference
+            
+            # Entry price: slightly above current price (for long signal)
+            entry_price = data_close + (data_high - data_low) * 0.1  # 10% of range above
+            
+            # Stop loss: below entry (risk of ~$50)
+            stop_loss = entry_price - 50.0
+            
+            # Take profit: above entry (reward of ~$75, R:R = 1.5:1)
+            take_profit = entry_price + 75.0
+            
+            # Ensure prices are within reasonable range of data
+            if stop_loss < data_low:
+                stop_loss = data_low - 10.0  # Slightly below data range
+            if entry_price > data_high:
+                entry_price = data_high + 10.0  # Slightly above data range
+            if take_profit > data_high + 50:
+                take_profit = data_high + 50.0  # Keep TP visible
+            
+            # Create test signal with prices based on actual data
             test_signal = {
-                'entry_price': 25050.0,
-                'stop_loss': 25000.0,
-                'take_profit': 25100.0,
+                'entry_price': round(entry_price, 2),
+                'stop_loss': round(stop_loss, 2),
+                'take_profit': round(take_profit, 2),
                 'direction': 'long',
                 'type': 'momentum_breakout',
                 'symbol': 'MNQ',
@@ -1141,14 +1281,19 @@ class TelegramCommandHandler:
             )
             
             if chart_path and chart_path.exists():
+                # Calculate R:R ratio
+                risk = abs(entry_price - stop_loss)
+                reward = abs(take_profit - entry_price)
+                rr_ratio = reward / risk if risk > 0 else 0
+                
                 # Send test signal message
                 message = (
                     "🧪 *Test Signal Generated*\n\n"
-                    "*Type:* Momentum Breakout (LONG)\n"
-                    "*Entry:* $25,050.00\n"
-                    "*Stop:* $25,000.00\n"
-                    "*TP:* $25,100.00\n"
-                    "*R:R:* 1.5:1\n\n"
+                    f"*Type:* Momentum Breakout (LONG)\n"
+                    f"*Entry:* ${entry_price:,.2f}\n"
+                    f"*Stop:* ${stop_loss:,.2f}\n"
+                    f"*TP:* ${take_profit:,.2f}\n"
+                    f"*R:R:* {rr_ratio:.2f}:1\n\n"
                     "📊 Chart generated below!"
                 )
                 
@@ -1817,6 +1962,25 @@ class TelegramCommandHandler:
             await self._handle_test_signal(update, context)
         elif callback_data == 'backtest':
             await self._handle_backtest(update, context)
+        elif callback_data.startswith('backtest_'):
+            # Handle backtest duration selection (backtest_1m, backtest_2m, etc.)
+            try:
+                months_str = callback_data.replace('backtest_', '').replace('m', '')
+                months = int(months_str)
+                if 1 <= months <= 6:
+                    await self._handle_backtest(update, context, months=months)
+                else:
+                    await self._send_message_or_edit(
+                        update, context,
+                        f"❌ Invalid duration: {months} months. Please select 1-6 months.",
+                        reply_markup=self._get_back_to_menu_button()
+                    )
+            except ValueError:
+                await self._send_message_or_edit(
+                    update, context,
+                    "❌ Invalid backtest duration format.",
+                    reply_markup=self._get_back_to_menu_button()
+                )
         elif callback_data.startswith('signal_chart_'):
             # Handle signal chart viewing
             signal_id_prefix = callback_data.replace('signal_chart_', '')

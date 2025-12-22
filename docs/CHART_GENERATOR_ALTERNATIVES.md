@@ -124,3 +124,4 @@ chart_path = generator.generate_entry_chart(
 4. Industry-standard for financial charts
 
 Keep the matplotlib implementation as a fallback or for special customizations.
+
