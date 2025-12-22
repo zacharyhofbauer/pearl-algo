@@ -844,6 +844,7 @@ class TelegramCommandHandler:
                     # We REQUIRE a timestamp for backtests. Older caches were saved without it (lost index).
                     if 'timestamp' in cached_data.columns:
                         cached_data['timestamp'] = pd.to_datetime(cached_data['timestamp'])
+                        cached_data = cached_data.dropna(subset=["timestamp"])
                         # Normalize return shape: keep timestamp column, but ensure DatetimeIndex for resampling.
                         cached_data = cached_data.sort_values('timestamp')
                         cached_data = cached_data.drop_duplicates(subset=['timestamp'], keep='first')
@@ -859,6 +860,7 @@ class TelegramCommandHandler:
                             cached_data = cached_data.rename(columns={first_col: 'timestamp'})
                         if 'timestamp' in cached_data.columns:
                             cached_data['timestamp'] = pd.to_datetime(cached_data['timestamp'])
+                            cached_data = cached_data.dropna(subset=["timestamp"])
                             cached_data = cached_data.sort_values('timestamp')
                             cached_data = cached_data.drop_duplicates(subset=['timestamp'], keep='first')
                             cached_data = cached_data.set_index('timestamp', drop=False)
@@ -904,6 +906,7 @@ class TelegramCommandHandler:
                             superset_df = superset_df.rename(columns={first_col: "timestamp"})
                     if "timestamp" in superset_df.columns:
                         superset_df["timestamp"] = pd.to_datetime(superset_df["timestamp"])
+                        superset_df = superset_df.dropna(subset=["timestamp"])
                         derived = superset_df[
                             (superset_df["timestamp"] >= start) & (superset_df["timestamp"] <= end)
                         ].copy()
@@ -1062,6 +1065,7 @@ class TelegramCommandHandler:
                     df = df.rename(columns={first_col: 'timestamp'})
             if 'timestamp' in df.columns:
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
+                df = df.dropna(subset=["timestamp"])
             
             # Column mapping
             if 'timestamp' not in df.columns and df.index.name == 'timestamp':

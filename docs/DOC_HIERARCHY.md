@@ -34,11 +34,6 @@ All other documents must remain consistent with this summary.
   - Remote control (service control commands)
   - Chart visualization and UI features
   - Menu system and button navigation
-- `TELEGRAM_REMOTE_CONTROL.md` (redirect to `TELEGRAM_GUIDE.md`)
-- `TELEGRAM_FEATURES.md` (redirect to `TELEGRAM_GUIDE.md`)
-- `TELEGRAM_MENU_GUIDE.md` (redirect to `TELEGRAM_GUIDE.md`)
-- `TELEGRAM_COMMANDS_QUICKSTART.md` (redirect to `TELEGRAM_GUIDE.md`)
-- `TELEGRAM_BOT_COMMANDS.md` (redirect to `TELEGRAM_GUIDE.md`)
 
 ## 3. Testing and Validation
 
@@ -47,12 +42,17 @@ All other documents must remain consistent with this summary.
   - Explanation of major test suites (integration, IBKR, Telegram, strategy)
   - Includes guidance on when and how to use the mock data provider
   - Test coverage and gaps analysis
-- `TESTING_OVERVIEW.md` (redirect to `TESTING_GUIDE.md`)
 
 ## 4. Supporting / Historical Docs
 
 - `archive/CLEANUP_CONSOLIDATION_PLAN.md`
   - Historical cleanup and consolidation notes
+- `archive/MIGRATION_TO_MPLFINANCE.md`
+  - Historical mplfinance migration documentation
+- `archive/CHART_VISUALIZATION_BUILD_EXPLANATION.md`
+  - Historical chart generator implementation notes
+- `archive/CHART_DATA_FORMAT.md`
+  - Historical chart data format documentation
 - `archive/ADDITIONAL_FIXES.md`
   - Historical fix documentation
 - `archive/FIXES_SUMMARY.md`
