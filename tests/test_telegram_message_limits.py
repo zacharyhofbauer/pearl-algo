@@ -542,3 +542,258 @@ def test_home_card_stopped_agent() -> None:
     assert "Agent: STOPPED" in result
     assert "Gateway: STOPPED" in result
 
+
+# ---------------------------------------------------------------------------
+# Home Card v2 spec tests - conditional callouts
+# ---------------------------------------------------------------------------
+
+def test_home_card_degraded_state() -> None:
+    """Test Home Card in fully degraded state (stale + session closed + stopped).
+    
+    This is the worst-case scenario: agent stopped, gateway stopped, session closed,
+    stale state. Verify all conditional callouts appear and message stays under limit.
+    """
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=False,
+        gateway_running=False,
+        futures_market_open=False,
+        strategy_session_open=False,
+        paused=False,
+        pause_reason=None,
+        cycles_session=0,
+        cycles_total=100,
+        signals_generated=5,
+        signals_sent=3,
+        errors=2,
+        buffer_size=50,
+        buffer_target=100,
+        # v2 fields
+        state_age_seconds=300.0,  # 5 minutes old = stale
+        state_stale_threshold=120.0,
+        signal_send_failures=2,
+        gateway_unknown=False,
+    )
+    
+    # Should show stale warning
+    assert "5.0m old" in result or "may be outdated" in result
+    # Should show session closed explanation
+    assert "Signals suppressed" in result or "session closed" in result
+    # Should show action cue
+    assert "Start agent to begin" in result
+    # Should show signal send failures
+    assert "2 signal send failures" in result
+    # Should stay under limits
+    assert len(result) < TELEGRAM_TEXT_LIMIT, f"Degraded Home Card too long: {len(result)} chars"
+    assert len(result) < 2000, f"Degraded Home Card should be compact: {len(result)} chars"
+
+
+def test_home_card_freshness_warning() -> None:
+    """Test that freshness warning appears when state is stale."""
+    # Fresh state (under threshold) - no warning
+    result_fresh = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        state_age_seconds=60.0,  # 1 minute = fresh
+        state_stale_threshold=120.0,
+    )
+    assert "may be outdated" not in result_fresh
+    
+    # Stale state (over threshold) - warning appears
+    result_stale = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        state_age_seconds=180.0,  # 3 minutes = stale
+        state_stale_threshold=120.0,
+    )
+    assert "may be outdated" in result_stale or "3.0m old" in result_stale
+
+
+def test_home_card_gate_expectations() -> None:
+    """Test that gate expectations are explained when closed."""
+    # Session closed - explain signals suppressed
+    result_session_closed = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=False,  # Session closed
+    )
+    assert "Signals suppressed" in result_session_closed
+    
+    # Market closed (session open/unknown) - explain data delay
+    result_market_closed = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=False,  # Market closed
+        strategy_session_open=None,  # Unknown
+    )
+    assert "Data may be delayed" in result_market_closed
+    
+    # Both open - no extra explanations
+    result_both_open = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+    )
+    assert "Signals suppressed" not in result_both_open
+    assert "Data may be delayed" not in result_both_open
+
+
+def test_home_card_action_cue() -> None:
+    """Test that action cue appears when agent is stopped."""
+    # Stopped - action cue appears
+    result_stopped = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=False,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+    )
+    assert "Start agent to begin" in result_stopped
+    
+    # Running - no action cue
+    result_running = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+    )
+    assert "Start agent to begin" not in result_running
+
+
+def test_home_card_circuit_breaker_pause() -> None:
+    """Test that circuit breaker pause shows intervention required."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        paused=True,
+        pause_reason="circuit_breaker_errors",
+    )
+    
+    assert "PAUSED" in result
+    assert "circuit breaker errors" in result  # safe_label converts underscores
+    assert "Manual intervention required" in result
+
+
+def test_home_card_signal_send_failures() -> None:
+    """Test that signal send failures are shown when non-zero."""
+    # No failures - no cue
+    result_no_failures = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        signal_send_failures=0,
+    )
+    assert "signal send failures" not in result_no_failures
+    
+    # Failures - cue appears
+    result_with_failures = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        signal_send_failures=3,
+    )
+    assert "3 signal send failures" in result_with_failures
+
+
+def test_home_card_gateway_unknown() -> None:
+    """Test that gateway unknown is displayed as '?' instead of false status."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=False,  # This would show STOPPED
+        futures_market_open=True,
+        strategy_session_open=True,
+        gateway_unknown=True,  # But this overrides to show '?'
+    )
+    
+    assert "Gateway: ?" in result
+    assert "Gateway: STOPPED" not in result
+
+
+def test_home_card_healthy_state_calm() -> None:
+    """Test that healthy state shows minimal output (no extra warnings)."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        paused=False,
+        cycles_session=100,
+        cycles_total=500,
+        signals_generated=10,
+        signals_sent=10,
+        errors=0,
+        buffer_size=100,
+        buffer_target=100,
+        state_age_seconds=30.0,  # Fresh
+        state_stale_threshold=120.0,
+        signal_send_failures=0,
+    )
+    
+    # None of the conditional callouts should appear
+    assert "may be outdated" not in result
+    assert "Signals suppressed" not in result
+    assert "Data may be delayed" not in result
+    assert "Start agent to begin" not in result
+    assert "signal send failures" not in result
+    assert "Manual intervention required" not in result
+    
+    # Should be very compact
+    assert len(result) < 800, f"Healthy Home Card should be minimal: {len(result)} chars"
+
+
+# ---------------------------------------------------------------------------
+# Markdown safety tests
+# ---------------------------------------------------------------------------
+
+def test_home_card_markdown_safety_underscores() -> None:
+    """Test that underscore-heavy pause reasons are safely rendered."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        paused=True,
+        pause_reason="consecutive_errors_exceeded_limit",
+    )
+    
+    # safe_label should convert underscores to spaces
+    assert "consecutive errors exceeded limit" in result
+    # The original underscore version should NOT appear (would break Markdown)
+    assert "consecutive_errors_exceeded_limit" not in result
+

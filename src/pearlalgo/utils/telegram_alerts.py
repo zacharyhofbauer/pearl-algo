@@ -306,11 +306,45 @@ def format_home_card(
     sparkline: str | None = None,
     price_change_str: str | None = None,
     last_signal_age: str | None = None,
+    # New fields for enhanced confidence/clarity (v2 spec)
+    state_age_seconds: float | None = None,
+    state_stale_threshold: float = 120.0,  # seconds; show warning if older
+    signal_send_failures: int = 0,
+    gateway_unknown: bool = False,  # True if gateway status couldn't be determined
 ) -> str:
     """
     Build unified Home Card message for status/dashboard (balanced verbosity).
 
     This is the canonical layout used by both interactive /status and push dashboard.
+
+    ══════════════════════════════════════════════════════════════════════════════
+    HOME CARD SPEC v2 - Clarity, Confidence, Action
+    ══════════════════════════════════════════════════════════════════════════════
+
+    DESIGN PRINCIPLES:
+    1. Healthy state stays CALM - no extra noise when everything is working.
+    2. Degraded state gets EXPLANATIONS - surface what's wrong and what to do.
+    3. Progressive disclosure - details live in Data Quality / Health views.
+
+    REQUIRED LINES (always shown):
+    - Header: Symbol + Time
+    - Service status: Agent + Gateway state
+    - Gates: Futures + Session open/closed
+    - Activity: cycles, signals, buffer, errors
+
+    CONDITIONAL CALLOUTS (only when relevant):
+    - Freshness warning: when state_age_seconds > state_stale_threshold
+    - Gate expectation: when session closed, explain "signals suppressed"
+    - Pause reason: when paused, show reason + action cue if circuit-breaker
+    - Action cue: when stopped, show "Start agent to begin"
+    - Error cue: when signal_send_failures > 0 or errors > 0
+
+    RULES FOR CONDITIONAL LINES:
+    - Never show freshness cue in healthy state (state_age < threshold).
+    - Never show gate explanation when session is open.
+    - Action cue only for stopped/paused states requiring intervention.
+    - Keep total message under 1500 chars for mobile readability.
+    ══════════════════════════════════════════════════════════════════════════════
 
     Args:
         symbol: Trading symbol (e.g., "MNQ")
@@ -333,6 +367,10 @@ def format_home_card(
         sparkline: Price sparkline string (optional)
         price_change_str: Price change string like "+0.25%" (optional)
         last_signal_age: Age of last signal like "5m ago" (optional)
+        state_age_seconds: Age of state file in seconds (for freshness cue)
+        state_stale_threshold: Threshold in seconds for showing stale warning
+        signal_send_failures: Number of signal send failures (for error cue)
+        gateway_unknown: True if gateway status couldn't be determined
 
     Returns:
         Formatted Home Card message string
@@ -356,15 +394,40 @@ def format_home_card(
 
     lines.append("")  # Blank line separator
 
-    # Service status line
-    lines.append(format_service_status(agent_running, gateway_running, paused))
+    # Service status line (with gateway_unknown handling)
+    if gateway_unknown:
+        # Show gateway as unknown rather than asserting running/stopped
+        agent_emoji = "🟢" if agent_running and not paused else "⏸️" if paused else "🔴"
+        agent_text = "PAUSED" if paused else ("RUNNING" if agent_running else "STOPPED")
+        lines.append(f"{agent_emoji} Agent: {agent_text}  •  ⚪ Gateway: ?")
+    else:
+        lines.append(format_service_status(agent_running, gateway_running, paused))
 
-    # Pause reason (if paused)
+    # CONDITIONAL: Pause reason (if paused)
     if paused and pause_reason:
-        lines.append(f"   ⚠️ Reason: {safe_label(pause_reason)}")
+        reason_safe = safe_label(pause_reason)
+        lines.append(f"   ⚠️ Reason: {reason_safe}")
+        # Add action cue for circuit-breaker style pauses
+        if "circuit" in pause_reason.lower() or "error" in pause_reason.lower():
+            lines.append(f"   💡 Manual intervention required")
+
+    # CONDITIONAL: Freshness warning (only when stale)
+    is_stale = (
+        state_age_seconds is not None
+        and state_age_seconds > state_stale_threshold
+    )
+    if is_stale:
+        age_mins = state_age_seconds / 60.0
+        lines.append(f"⚠️ State {age_mins:.1f}m old (may be outdated)")
 
     # Gates line
     lines.append(format_gate_status(futures_market_open, strategy_session_open))
+
+    # CONDITIONAL: Gate expectation explanation (only when session closed)
+    if strategy_session_open is False:
+        lines.append("   ℹ️ Signals suppressed (session closed)")
+    elif futures_market_open is False and strategy_session_open is not False:
+        lines.append("   ℹ️ Data may be delayed (market closed)")
 
     lines.append("")  # Blank line separator
 
@@ -378,6 +441,10 @@ def format_home_card(
         buffer_size=buffer_size,
         buffer_target=buffer_target,
     ))
+
+    # CONDITIONAL: Error/failure cue (only when non-zero)
+    if signal_send_failures > 0:
+        lines.append(f"⚠️ {signal_send_failures} signal send failures")
 
     # Last signal age (if available)
     if last_signal_age:
@@ -394,6 +461,11 @@ def format_home_card(
             lines.append("")  # Blank line
             lines.append(f"*7d Performance:*")
             lines.append(format_performance_line(wins, losses, win_rate, total_pnl))
+
+    # CONDITIONAL: Action cue (only for stopped state)
+    if not agent_running and not paused:
+        lines.append("")
+        lines.append("💡 *Start agent to begin*")
 
     return "\n".join(lines)
 

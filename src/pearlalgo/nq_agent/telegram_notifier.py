@@ -1326,13 +1326,22 @@ class NQAgentTelegramNotifier:
                 sparkline = generate_sparkline(recent_closes, width=20)
             
             # Build Home Card using unified format
-            # Note: agent/gateway running status not available in push dashboard context
-            # (the service is running if it's sending dashboards)
+            # Note: Push dashboard context cannot directly measure gateway status.
+            # Mark gateway_unknown=True to avoid false confidence in UI.
+            # Agent is running if sending dashboards; gateway status is inferred from data flow.
+            
+            # Extract signal send failures from status for error cue
+            signal_send_failures = 0
+            try:
+                signal_send_failures = int(status.get("signals_send_failures", 0) or 0)
+            except Exception:
+                signal_send_failures = 0
+            
             message = format_home_card(
                 symbol=symbol,
                 time_str=time_str,
                 agent_running=True,  # If sending dashboard, agent is running
-                gateway_running=True,  # Assumed running if data is flowing
+                gateway_running=True,  # Best guess based on data flow
                 futures_market_open=futures_market_open,
                 strategy_session_open=strategy_session_open,
                 paused=paused,
@@ -1348,6 +1357,11 @@ class NQAgentTelegramNotifier:
                 performance=performance,
                 sparkline=sparkline,
                 price_change_str=price_change_str,
+                # v2 fields for enhanced confidence/clarity
+                signal_send_failures=signal_send_failures,
+                # Note: gateway_unknown=False here because if we're getting data, 
+                # gateway is likely working. Use gateway_unknown=True only when status
+                # cannot be inferred at all.
             )
             
             # Add MTF snapshot (push-specific enhancement)

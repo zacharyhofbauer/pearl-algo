@@ -399,6 +399,21 @@ class TelegramCommandHandler:
             except Exception:
                 buffer_target = None
             
+            # Signal send failures (for error cue in Home Card)
+            signal_send_failures = 0
+            try:
+                signal_send_failures = int(state.get("signals_send_failures", 0) or 0)
+            except Exception:
+                signal_send_failures = 0
+            
+            # Compute state file freshness (for liveness cue)
+            state_age_seconds = None
+            try:
+                mtime = state_file.stat().st_mtime
+                state_age_seconds = (datetime.now(timezone.utc).timestamp() - mtime)
+            except Exception:
+                state_age_seconds = None
+            
             # Gate status
             futures_market_open = state.get("futures_market_open")
             strategy_session_open = state.get("strategy_session_open")
@@ -444,7 +459,7 @@ class TelegramCommandHandler:
             except Exception as e:
                 logger.debug(f"Could not get last signal age: {e}")
             
-            # Build Home Card message
+            # Build Home Card message with enhanced confidence/clarity cues
             message = format_home_card(
                 symbol=state.get("symbol", "MNQ"),
                 time_str=self._get_current_time_str(),
@@ -464,11 +479,11 @@ class TelegramCommandHandler:
                 latest_price=latest_price,
                 performance=perf,
                 last_signal_age=last_signal_age,
+                # New v2 fields for confidence/clarity
+                state_age_seconds=state_age_seconds,
+                state_stale_threshold=120.0,  # 2 minutes; warn if state file is older
+                signal_send_failures=signal_send_failures,
             )
-            
-            # Add process not running warning if applicable
-            if not process_running:
-                message += "\n\n⚠️ *Note:* Process not running. Showing last saved state."
             
             # Use consistent main menu buttons
             reply_markup = self._get_main_menu_buttons(
@@ -3591,55 +3606,93 @@ class TelegramCommandHandler:
         reply_markup: Optional[InlineKeyboardMarkup] = None,
         parse_mode: str = "Markdown",
     ):
-        """Helper to send message for commands or edit for callbacks."""
-        try:
-            if update.callback_query:
-                try:
-                    await update.callback_query.edit_message_text(
-                        text=message,
-                        reply_markup=reply_markup,
-                        parse_mode=parse_mode,
-                    )
-                    logger.debug(f"Edited message with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows")
-                except Exception as e:
-                    # If edit fails (e.g., message unchanged), send new message
-                    logger.debug(f"Could not edit message, sending new: {e}")
-                    await context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text=message,
-                        reply_markup=reply_markup,
-                        parse_mode=parse_mode,
-                    )
-                    logger.debug(f"Sent new message with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows")
-            else:
-                if update.message:
-                    await update.message.reply_text(
-                        message,
-                        reply_markup=reply_markup,
-                        parse_mode=parse_mode,
-                    )
-                    logger.info(f"Sent message with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows to chat {update.effective_chat.id}")
-                else:
-                    # Fallback: send directly via bot
-                    logger.warning("No update.message, sending directly via bot")
-                    await context.bot.send_message(
-                        chat_id=update.effective_chat.id,
-                        text=message,
-                        reply_markup=reply_markup,
-                        parse_mode=parse_mode,
-                    )
-                    logger.info(f"Sent message directly with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows")
-        except Exception as e:
-            logger.error(f"Error sending message: {e}", exc_info=True)
-            # Try to send error message without markup
+        """
+        Helper to send message for commands or edit for callbacks.
+        
+        Includes Markdown parse fallback: if Markdown parsing fails, retries
+        as plain text to ensure the UI never fails silently due to formatting.
+        """
+        async def _try_send(text: str, mode: str | None) -> bool:
+            """Try to send/edit with given parse mode. Returns True on success."""
             try:
-                error_msg = f"❌ Error sending message: {str(e)[:100]}"
-                if update.message:
-                    await update.message.reply_text(error_msg)
+                if update.callback_query:
+                    try:
+                        await update.callback_query.edit_message_text(
+                            text=text,
+                            reply_markup=reply_markup,
+                            parse_mode=mode,
+                        )
+                        logger.debug(f"Edited message with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows")
+                        return True
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        # Check for Markdown parsing errors
+                        if "parse entities" in error_str or "can't parse" in error_str:
+                            raise  # Propagate to trigger fallback
+                        # If edit fails for other reasons (e.g., message unchanged), send new message
+                        logger.debug(f"Could not edit message, sending new: {e}")
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text=text,
+                            reply_markup=reply_markup,
+                            parse_mode=mode,
+                        )
+                        logger.debug(f"Sent new message with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows")
+                        return True
                 else:
-                    await context.bot.send_message(chat_id=update.effective_chat.id, text=error_msg)
-            except Exception as e2:
-                logger.error(f"Could not send error message: {e2}")
+                    if update.message:
+                        await update.message.reply_text(
+                            text,
+                            reply_markup=reply_markup,
+                            parse_mode=mode,
+                        )
+                        logger.info(f"Sent message with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows to chat {update.effective_chat.id}")
+                        return True
+                    else:
+                        # Fallback: send directly via bot
+                        logger.warning("No update.message, sending directly via bot")
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text=text,
+                            reply_markup=reply_markup,
+                            parse_mode=mode,
+                        )
+                        logger.info(f"Sent message directly with {len(reply_markup.inline_keyboard) if reply_markup else 0} button rows")
+                        return True
+            except Exception as e:
+                error_str = str(e).lower()
+                if "parse entities" in error_str or "can't parse" in error_str:
+                    raise  # Propagate Markdown errors for fallback handling
+                logger.error(f"Error sending message: {e}", exc_info=True)
+                return False
+            return False
+
+        try:
+            # First attempt with requested parse mode
+            if await _try_send(message, parse_mode):
+                return
+        except Exception as e:
+            error_str = str(e).lower()
+            if "parse entities" in error_str or "can't parse" in error_str:
+                # Markdown parsing error - fallback to plain text
+                logger.warning(f"Markdown parsing error, retrying as plain text: {e}")
+                try:
+                    # Strip Markdown formatting and retry
+                    plain_message = message.replace('*', '').replace('_', '').replace('`', '').replace('[', '').replace(']', '')
+                    if await _try_send(plain_message, None):
+                        return
+                except Exception as e2:
+                    logger.error(f"Plain text fallback also failed: {e2}")
+        
+        # Final fallback: try to send error message without markup
+        try:
+            error_msg = f"❌ Error sending message (see logs for details)"
+            if update.message:
+                await update.message.reply_text(error_msg)
+            else:
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=error_msg)
+        except Exception as e2:
+            logger.error(f"Could not send error message: {e2}")
     
     async def _handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle inline button callbacks."""
