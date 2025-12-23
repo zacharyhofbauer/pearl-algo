@@ -983,18 +983,14 @@ class ChartGenerator:
                     )
 
                 panel_ratios = (6, 2, 2) if volume_on else (7, 3)
-            else:
-                panel_ratios = None
 
             # Wider candles + thicker wicks for Telegram visibility
-            fig, axlist = mpf.plot(
-                df,
+            # Build kwargs - only include panel_ratios if RSI is enabled (mplfinance rejects None)
+            plot_kwargs = dict(
                 type='candle',
                 style=self.style,
                 addplot=addplot if addplot else None,
                 volume=volume_on,
-                volume_panel=1 if volume_on else None,
-                panel_ratios=panel_ratios,
                 title=title,
                 ylabel='Price ($)',
                 ylabel_lower='Volume',
@@ -1005,6 +1001,12 @@ class ChartGenerator:
                 scale_width_adjustment=dict(candle=1.5, volume=0.8, lines=1.0),
                 update_width_config=dict(candle_linewidth=1.4, candle_width=0.8),
             )
+            if volume_on:
+                plot_kwargs['volume_panel'] = 1
+            if self.config.show_rsi:
+                plot_kwargs['panel_ratios'] = panel_ratios
+
+            fig, axlist = mpf.plot(df, **plot_kwargs)
 
             # Apply HUD overlays on the price axis.
             try:
@@ -1120,18 +1122,14 @@ class ChartGenerator:
                         )
                     )
                 panel_ratios = (6, 2, 2) if volume_on else (7, 3)
-            else:
-                panel_ratios = None
 
             # Wider candles + thicker wicks for Telegram visibility
-            fig, axlist = mpf.plot(
-                df,
+            # Build kwargs - only include panel_ratios if RSI is enabled (mplfinance rejects None)
+            plot_kwargs = dict(
                 type='candle',
                 style=self.style,
                 addplot=addplot if addplot else None,
                 volume=volume_on,
-                volume_panel=1 if volume_on else None,
-                panel_ratios=panel_ratios,
                 title=title,
                 ylabel='Price ($)',
                 ylabel_lower='Volume',
@@ -1142,6 +1140,12 @@ class ChartGenerator:
                 scale_width_adjustment=dict(candle=1.5, volume=0.8, lines=1.0),
                 update_width_config=dict(candle_linewidth=1.4, candle_width=0.8),
             )
+            if volume_on:
+                plot_kwargs['volume_panel'] = 1
+            if self.config.show_rsi:
+                plot_kwargs['panel_ratios'] = panel_ratios
+
+            fig, axlist = mpf.plot(df, **plot_kwargs)
 
             # Apply HUD overlays, including an Exit right-label.
             try:
@@ -1487,15 +1491,13 @@ class ChartGenerator:
             temp_path = Path(temp_file.name)
             temp_file.close()
 
-            # Wider candles for Telegram visibility (scale_width_adjustment)
-            fig, axlist = mpf.plot(
-                df,
+            # Wider candles for Telegram visibility
+            # Build kwargs - only include panel_ratios if RSI added successfully (mplfinance rejects None)
+            plot_kwargs = dict(
                 type="candle",
                 style=self.style,
                 addplot=addplot if addplot else None,
                 volume=volume_on,
-                volume_panel=1 if volume_on else None,
-                panel_ratios=panel_ratios,
                 title=title,
                 ylabel="Price ($)",
                 ylabel_lower="Volume" if volume_on else None,
@@ -1507,6 +1509,12 @@ class ChartGenerator:
                 update_width_config=dict(candle_linewidth=1.2, candle_width=0.75),
                 warn_too_much_data=500,
             )
+            if volume_on:
+                plot_kwargs['volume_panel'] = 1
+            if panel_ratios is not None:
+                plot_kwargs['panel_ratios'] = panel_ratios
+
+            fig, axlist = mpf.plot(df, **plot_kwargs)
 
             # HUD overlays (sessions, key levels)
             try:
