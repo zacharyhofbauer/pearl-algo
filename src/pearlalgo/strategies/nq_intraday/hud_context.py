@@ -87,11 +87,11 @@ class SessionDef:
 
 
 def default_sessions() -> List[SessionDef]:
-    """Matches the Trading Sessions Pine defaults you provided."""
+    """Matches the Key Levels SpacemanBTC Pine defaults (UTC-based sessions)."""
     return [
-        SessionDef("Tokyo", "0900-1500", "Asia/Tokyo", "#2962FF"),
-        SessionDef("London", "0830-1630", "Europe/London", "#FF9800"),
-        SessionDef("New York", "0930-1600", "America/New_York", "#089981"),
+        SessionDef("Tokyo", "0000-0900", "UTC", "#2962FF"),
+        SessionDef("London", "0800-1600", "UTC", "#FF9800"),
+        SessionDef("New York", "1400-2100", "UTC", "#089981"),
     ]
 
 

@@ -509,6 +509,8 @@ class ChartGenerator:
             _add(sr.get("strongest_resistance"), "Resist", TEXT_SECONDARY, priority=25, linestyle=":", lw=1.0, alpha=0.55)
 
         # RTH + ETH key levels
+        # ETH (18:00→17:00 ET) represents the CME trading day, so we use Pine-style
+        # daily labels: DO (Daily Open), PDH/PDL/PDM (Prev Day High/Low/Mid).
         kl = hud.get("key_levels") if isinstance(hud, dict) else None
         if isinstance(kl, dict):
             rth = (kl.get("rth") or {})
@@ -519,16 +521,18 @@ class ChartGenerator:
             eth_cur = eth.get("current") or {}
             eth_prev = eth.get("previous") or {}
 
-            _add(rth_cur.get("open"), "RTH Open", ENTRY_COLOR, priority=55, linestyle="--", lw=1.0, alpha=0.35)
-            _add(eth_cur.get("open"), "ETH Open", ENTRY_COLOR, priority=55, linestyle="--", lw=1.0, alpha=0.35)
+            # RTH session levels (regular trading hours 09:30-16:00 ET)
+            _add(rth_cur.get("open"), "RTH Open", ENTRY_COLOR, priority=50, linestyle="--", lw=1.0, alpha=0.35)
+            _add(rth_prev.get("high"), "RTH PDH", TEXT_SECONDARY, priority=45, linestyle="--", lw=1.0, alpha=0.30)
+            _add(rth_prev.get("mid"), "RTH PDM", TEXT_SECONDARY, priority=40, linestyle=":", lw=1.0, alpha=0.25)
+            _add(rth_prev.get("low"), "RTH PDL", TEXT_SECONDARY, priority=45, linestyle="--", lw=1.0, alpha=0.30)
 
-            _add(rth_prev.get("high"), "RTH PDH", TEXT_SECONDARY, priority=50, linestyle="--", lw=1.0, alpha=0.35)
-            _add(rth_prev.get("mid"), "RTH PDM", TEXT_SECONDARY, priority=45, linestyle=":", lw=1.0, alpha=0.30)
-            _add(rth_prev.get("low"), "RTH PDL", TEXT_SECONDARY, priority=50, linestyle="--", lw=1.0, alpha=0.35)
-
-            _add(eth_prev.get("high"), "ETH PDH", TEXT_SECONDARY, priority=45, linestyle="--", lw=1.0, alpha=0.30)
-            _add(eth_prev.get("mid"), "ETH PDM", TEXT_SECONDARY, priority=40, linestyle=":", lw=1.0, alpha=0.25)
-            _add(eth_prev.get("low"), "ETH PDL", TEXT_SECONDARY, priority=45, linestyle="--", lw=1.0, alpha=0.30)
+            # Pine-style Daily key levels (ETH = CME trading day 18:00→17:00 ET)
+            # DO = Daily Open, PDH/PDL/PDM = Prev Day High/Low/Mid
+            _add(eth_cur.get("open"), "DO", ENTRY_COLOR, priority=60, linestyle="-", lw=1.2, alpha=0.50)
+            _add(eth_prev.get("high"), "PDH", TEXT_SECONDARY, priority=58, linestyle="--", lw=1.1, alpha=0.45)
+            _add(eth_prev.get("low"), "PDL", TEXT_SECONDARY, priority=58, linestyle="--", lw=1.1, alpha=0.45)
+            _add(eth_prev.get("mid"), "PDM", TEXT_SECONDARY, priority=52, linestyle=":", lw=1.0, alpha=0.35)
 
         return levels, current_price
 
@@ -597,8 +601,28 @@ class ChartGenerator:
         current_price: float,
         max_labels: int,
     ) -> None:
-        """Draw TradingView-style right-side level labels with minimal clutter."""
+        """Draw TradingView-style right-side level labels with minimal clutter.
+        
+        Only draws levels that fall within the current visible y-range to avoid
+        expanding the chart scale or cluttering with out-of-view levels.
+        """
         if not merged_levels:
+            return
+
+        # Capture current y-limits BEFORE drawing - only show levels in visible range
+        try:
+            ymin, ymax = ax.get_ylim()
+        except Exception:
+            ymin, ymax = 0.0, float("inf")
+
+        # Filter to levels within visible y-range (with small margin for edge labels)
+        margin = (ymax - ymin) * 0.02 if ymax > ymin else 0.0
+        visible_levels = [
+            lvl for lvl in merged_levels
+            if (ymin - margin) <= float(lvl.get("price", 0.0)) <= (ymax + margin)
+        ]
+
+        if not visible_levels:
             return
 
         # Pick most relevant levels (priority first, then proximity to current price)
@@ -610,7 +634,7 @@ class ChartGenerator:
                 dist = 1e9
             return (-pri, dist)
 
-        selected = sorted(merged_levels, key=_score)[: max(1, int(max_labels))]
+        selected = sorted(visible_levels, key=_score)[: max(1, int(max_labels))]
 
         # Create extra right margin so labels aren't clipped
         try:
@@ -649,6 +673,12 @@ class ChartGenerator:
                 bbox=dict(facecolor=rgba, edgecolor="none", boxstyle="round,pad=0.25"),
                 clip_on=False,
             )
+
+        # Restore original y-limits to prevent autoscale from level lines
+        try:
+            ax.set_ylim(ymin, ymax)
+        except Exception:
+            pass
 
     def _draw_sessions_overlay(self, ax, hud: Dict, *, idx: Optional[pd.DatetimeIndex] = None) -> None:
         """Draw session shading/labels in mplfinance x-coordinate space (0..N).
@@ -1623,58 +1653,13 @@ class ChartGenerator:
                     if show_sessions:
                         self._draw_sessions_overlay(ax_price, hud, idx=df.index if isinstance(df.index, pd.DatetimeIndex) else None)
 
-                    # Key levels (RTH/ETH PDH/PDL/Open) via right labels
+                    # Key levels (DO/PDH/PDL/PDM, RTH, VWAP, POC) via shared pipeline
+                    # Reuses _collect_level_candidates for consistency with entry/exit charts
                     if show_key_levels and self.config.show_right_labels:
-                        # Build level candidates from hud
-                        levels: List[Dict[str, Any]] = []
-                        current_price = float(df["Close"].iloc[-1])
-
-                        def _add_level(price: Any, label: str, color: str, priority: int, ls: str = "--", lw: float = 1.0, alpha: float = 0.5):
-                            try:
-                                p = float(price)
-                            except Exception:
-                                return
-                            if not np.isfinite(p) or p <= 0:
-                                return
-                            levels.append({
-                                "price": p,
-                                "label": label,
-                                "color": color,
-                                "priority": priority,
-                                "linestyle": ls,
-                                "lw": lw,
-                                "alpha": alpha,
-                            })
-
-                        # VWAP (already plotted as line, add label)
-                        vwap_hud = hud.get("vwap") or {}
-                        if isinstance(vwap_hud, dict):
-                            _add_level(vwap_hud.get("vwap"), "VWAP", VWAP_COLOR, 60, "-", 1.2, 0.65)
-
-                        # Key levels from hud_context
-                        kl = hud.get("key_levels") or {}
-                        if isinstance(kl, dict):
-                            rth = kl.get("rth") or {}
-                            eth = kl.get("eth") or {}
-                            rth_cur = rth.get("current") or {}
-                            rth_prev = rth.get("previous") or {}
-                            eth_cur = eth.get("current") or {}
-                            eth_prev = eth.get("previous") or {}
-
-                            _add_level(rth_cur.get("open"), "RTH Open", ENTRY_COLOR, 55, "--", 1.0, 0.4)
-                            _add_level(eth_cur.get("open"), "ETH Open", ENTRY_COLOR, 55, "--", 1.0, 0.4)
-                            _add_level(rth_prev.get("high"), "RTH PDH", TEXT_SECONDARY, 50, "--", 1.0, 0.35)
-                            _add_level(rth_prev.get("low"), "RTH PDL", TEXT_SECONDARY, 50, "--", 1.0, 0.35)
-                            _add_level(eth_prev.get("high"), "ETH PDH", TEXT_SECONDARY, 45, "--", 1.0, 0.3)
-                            _add_level(eth_prev.get("low"), "ETH PDL", TEXT_SECONDARY, 45, "--", 1.0, 0.3)
-
-                        # Volume profile POC
-                        vp = hud.get("volume_profile") or {}
-                        if isinstance(vp, dict):
-                            _add_level(vp.get("poc"), "POC", TEXT_SECONDARY, 40, ":", 1.1, 0.45)
-
-                        if levels:
-                            merged = self._merge_levels(levels, tick_size=0.25, merge_ticks=4)
+                        # Use shared level collection (signal={} since this is a dashboard, not a trade)
+                        candidates, current_price = self._collect_level_candidates(df, {}, hud)
+                        if candidates:
+                            merged = self._merge_levels(candidates, tick_size=0.25, merge_ticks=4)
                             self._draw_right_labels(fig, ax_price, merged, current_price=current_price, max_labels=10)
             except Exception as e:
                 logger.debug(f"Error applying HUD to dashboard chart: {e}")

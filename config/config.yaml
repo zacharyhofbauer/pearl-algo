@@ -109,18 +109,19 @@ hud:
   rsi_period: 14
 
 # Session definitions (for chart HUD shading)
+# Using Key Levels SpacemanBTC Pine defaults (UTC-based sessions)
 sessions:
   - name: "Tokyo"
-    session: "0900-1500"
-    timezone: "Asia/Tokyo"
+    session: "0000-0900"
+    timezone: "UTC"
     color: "#2962FF"
   - name: "London"
-    session: "0830-1630"
-    timezone: "Europe/London"
+    session: "0800-1600"
+    timezone: "UTC"
     color: "#FF9800"
   - name: "New York"
-    session: "0930-1600"
-    timezone: "America/New_York"
+    session: "1400-2100"
+    timezone: "UTC"
     color: "#089981"
 
 # Prop Firm Trading Assumptions (MNQ-native)
