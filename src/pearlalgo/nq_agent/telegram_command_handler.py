@@ -1120,8 +1120,21 @@ class TelegramCommandHandler:
                 settings = get_settings()
                 # Try to get provider from config, default to 'ibkr'
                 provider_name = getattr(settings, 'data_provider', 'ibkr') if hasattr(settings, 'data_provider') else 'ibkr'
-                self._data_provider = create_data_provider(provider_name, settings=settings)
-                logger.info(f"Initialized data provider: {provider_name}")
+                # Use a dedicated client_id for the command handler to avoid colliding with the main service.
+                # Prefer IBKR_DATA_CLIENT_ID if set; otherwise offset the default client id by +1.
+                client_id = None
+                try:
+                    base = getattr(settings, "ib_client_id", 1)
+                    data_cid = getattr(settings, "ib_data_client_id", None)
+                    if data_cid is not None:
+                        client_id = int(data_cid)
+                    else:
+                        client_id = min(100, max(0, int(base) + 1))
+                except Exception:
+                    client_id = None
+
+                self._data_provider = create_data_provider(provider_name, settings=settings, client_id=client_id)
+                logger.info(f"Initialized data provider: {provider_name} (client_id={client_id})")
             except Exception as e:
                 logger.warning(f"Could not initialize data provider: {e}")
                 return None
@@ -1197,53 +1210,76 @@ class TelegramCommandHandler:
                 logger.warning(f"Error reading cache: {e}")
 
         # If an exact cache file doesn't exist (or was invalid), try deriving it from a *larger* cached file.
-        # Example: if MNQ_1m_6w.parquet exists, we can slice it to create MNQ_1m_2w.parquet instantly.
+        # This supports both new week caches (e.g. *_6w.parquet) and legacy month caches (e.g. *_2m.parquet).
         try:
-            superset_files = list(self._historical_cache_dir.glob(f"{symbol}_{timeframe}_*w.parquet"))
-            candidates = []
+            superset_files: List[Path] = []
+            superset_files.extend(self._historical_cache_dir.glob(f"{symbol}_{timeframe}_*w.parquet"))
+            superset_files.extend(self._historical_cache_dir.glob(f"{symbol}_{timeframe}_*m.parquet"))
+
+            candidates: List[tuple[float, Path]] = []
             for f in superset_files:
                 if f == cache_file:
                     continue
-                tail = f.name.split("_")[-1]  # e.g. "6w.parquet"
-                if not tail.endswith("w.parquet"):
-                    continue
-                try:
-                    k = int(tail[:-9])  # strip "w.parquet"
-                except ValueError:
-                    continue
-                if k >= weeks:
-                    candidates.append((k, f))
+                tail = f.name.split("_")[-1]  # e.g. "6w.parquet" or "2m.parquet"
+                dur_weeks = None
+                if tail.endswith("w.parquet"):
+                    try:
+                        dur_weeks = float(int(tail[:-9]))
+                    except Exception:
+                        dur_weeks = None
+                elif tail.endswith("m.parquet"):
+                    try:
+                        m = int(tail[:-9])
+                        dur_weeks = float(m * 30) / 7.0
+                    except Exception:
+                        dur_weeks = None
+                if dur_weeks is None:
+                    dur_weeks = 1e9
+                if dur_weeks >= float(weeks):
+                    candidates.append((dur_weeks, f))
+
+            if not candidates:
+                # If we can't parse durations, try any existing cache file as a last resort.
+                candidates = [(1e9, f) for f in superset_files if f != cache_file]
 
             if candidates:
-                # Prefer the smallest superset (closest to requested weeks)
+                # Prefer the smallest superset (closest to requested duration)
                 candidates.sort(key=lambda x: x[0])
-                _, superset_file = candidates[0]
-                superset_df = pd.read_parquet(superset_file)
-                if not superset_df.empty:
+                for _, superset_file in candidates:
+                    superset_df = pd.read_parquet(superset_file)
+                    if superset_df is None or superset_df.empty:
+                        continue
+
                     if "timestamp" not in superset_df.columns and isinstance(superset_df.index, pd.DatetimeIndex):
                         superset_df = superset_df.reset_index()
                         if "timestamp" not in superset_df.columns and len(superset_df.columns) > 0:
                             first_col = superset_df.columns[0]
                             superset_df = superset_df.rename(columns={first_col: "timestamp"})
-                    if "timestamp" in superset_df.columns:
-                        superset_df["timestamp"] = pd.to_datetime(superset_df["timestamp"])
-                        superset_df = superset_df.dropna(subset=["timestamp"])
-                        derived = superset_df[
-                            (superset_df["timestamp"] >= start) & (superset_df["timestamp"] <= end)
-                        ].copy()
-                        if not derived.empty:
-                            derived = derived.sort_values("timestamp")
-                            derived = derived.drop_duplicates(subset=["timestamp"], keep="first")
-                            derived = derived.set_index("timestamp", drop=False)
-                            try:
-                                derived.to_parquet(cache_file, index=False)
-                                logger.info(
-                                    f"💾 Derived cache {cache_file.name} from {superset_file.name} "
-                                    f"({len(derived):,} bars)"
-                                )
-                            except Exception as e:
-                                logger.warning(f"Could not write derived cache: {e}")
-                            return derived
+
+                    if "timestamp" not in superset_df.columns:
+                        continue
+
+                    superset_df["timestamp"] = pd.to_datetime(superset_df["timestamp"], errors="coerce", utc=True)
+                    superset_df = superset_df.dropna(subset=["timestamp"])
+
+                    derived = superset_df[
+                        (superset_df["timestamp"] >= start) & (superset_df["timestamp"] <= end)
+                    ].copy()
+                    if derived.empty:
+                        continue
+
+                    derived = derived.sort_values("timestamp")
+                    derived = derived.drop_duplicates(subset=["timestamp"], keep="first")
+                    derived = derived.set_index("timestamp", drop=False)
+                    try:
+                        derived.to_parquet(cache_file, index=False)
+                        logger.info(
+                            f"💾 Derived cache {cache_file.name} from {superset_file.name} "
+                            f"({len(derived):,} bars)"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not write derived cache: {e}")
+                    return derived
         except Exception as e:
             logger.debug(f"Could not derive cache from superset: {e}")
         
@@ -2027,87 +2063,171 @@ class TelegramCommandHandler:
                     reply_markup=reply_markup
                 )
                 return
-            
-            # Generate test data with realistic MNQ-sized candles
-            def create_sample_data(num_bars=100):
-                """Create sample OHLCV data with realistic MNQ volatility."""
-                base_price = 25000.0
-                dates = pd.date_range(
-                    end=datetime.now(timezone.utc),
-                    periods=num_bars,
-                    freq='5min'  # 5-minute bars for better visual
-                )
-                
-                # Generate realistic MNQ price data with visible candles
+
+            symbol = "MNQ"
+
+            # Prefer a real historical slice (cached) so the chart looks identical to production.
+            # This avoids synthetic candle edge cases and avoids hammering IBKR.
+            def _load_cached_history() -> tuple[Optional[pd.DataFrame], Optional[str], Optional[str]]:
+                """Return (df, source_name, inferred_tf) where df has a DateTimeIndex + lowercase OHLCV."""
+                try:
+                    candidates = []
+                    candidates.extend(self._historical_cache_dir.glob(f"{symbol}_1m_*.parquet"))
+                    candidates.extend(self._historical_cache_dir.glob(f"{symbol}_5m_*.parquet"))
+                    files = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
+                except Exception:
+                    files = []
+
+                for f in files:
+                    try:
+                        tmp = pd.read_parquet(f)
+                        if tmp is None or tmp.empty:
+                            continue
+
+                        inferred_tf = "1m" if "_1m_" in f.name else "5m" if "_5m_" in f.name else None
+
+                        # Normalize timestamp/index
+                        if "timestamp" in tmp.columns:
+                            tmp["timestamp"] = pd.to_datetime(tmp["timestamp"], errors="coerce", utc=True)
+                            tmp = tmp.dropna(subset=["timestamp"])
+                            tmp = tmp.sort_values("timestamp")
+                            tmp = tmp.drop_duplicates(subset=["timestamp"], keep="first")
+                            tmp = tmp.set_index("timestamp")
+                        elif isinstance(tmp.index, pd.DatetimeIndex):
+                            if tmp.index.tz is None:
+                                tmp.index = tmp.index.tz_localize(timezone.utc)
+                            tmp = tmp.sort_index()
+                        else:
+                            continue
+
+                        # Normalize column names to lowercase
+                        col_map = {"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}
+                        for old, new in col_map.items():
+                            if old in tmp.columns and new not in tmp.columns:
+                                tmp = tmp.rename(columns={old: new})
+
+                        if not all(c in tmp.columns for c in ("open", "high", "low", "close")):
+                            continue
+
+                        return tmp, f.name, inferred_tf
+                    except Exception:
+                        continue
+
+                return None, None, None
+
+            hist_df, hist_src, hist_tf = _load_cached_history()
+
+            # Fallback: synthetic data (should be rare)
+            def _create_synthetic_5m(num_bars: int = 160) -> pd.DataFrame:
                 np.random.seed(42)
-                # MNQ typically moves 5-15 points per 5m bar, with occasional 20-30 point bars
-                price_changes = np.random.randn(num_bars) * 8  # Larger moves
+                base_price = 25000.0
+                dates = pd.date_range(end=datetime.now(timezone.utc), periods=num_bars, freq="5min")
+                price_changes = np.random.randn(num_bars) * 8
                 prices = base_price + np.cumsum(price_changes)
-                
-                data = []
-                for i, (date, price) in enumerate(zip(dates, prices)):
-                    # Realistic candle range: 5-20 points (MNQ typical 5m range)
-                    candle_range = abs(np.random.randn() * 8) + 5  # min 5 points
-                    
-                    # Random direction for candle body
+                rows = []
+                for date, price in zip(dates, prices):
+                    candle_range = abs(np.random.randn() * 8) + 5
                     if np.random.random() > 0.5:
-                        # Bullish candle
                         open_price = price - candle_range * 0.3
                         close_price = price + candle_range * 0.3
                     else:
-                        # Bearish candle
                         open_price = price + candle_range * 0.3
                         close_price = price - candle_range * 0.3
-                    
-                    # Wicks extend beyond body
                     high = max(open_price, close_price) + abs(np.random.randn() * 3) + 2
                     low = min(open_price, close_price) - abs(np.random.randn() * 3) - 2
-                    
-                    data.append({
-                        'timestamp': date,
-                        'open': open_price,
-                        'high': high,
-                        'low': low,
-                        'close': close_price,
-                        'volume': int(np.random.uniform(1000, 5000))
-                    })
-                
-                return pd.DataFrame(data)
-            
-            # Create sample data with visible candles
-            test_data = create_sample_data(100)
-            
-            # Calculate signal prices within the actual data range
-            data_high = test_data['high'].max()
-            data_low = test_data['low'].min()
-            data_range = data_high - data_low
-            data_close = test_data['close'].iloc[-1]
-            
-            # Entry price: near current close (within visible range)
-            entry_price = data_close
-            
-            # Stop loss: 20 points below entry (realistic MNQ stop)
-            stop_loss = entry_price - 20.0
-            
-            # Take profit: 30 points above entry (1.5:1 R:R)
-            take_profit = entry_price + 30.0
-            
-            # Create test signal with prices based on actual data
-            test_signal = {
-                'entry_price': round(entry_price, 2),
-                'stop_loss': round(stop_loss, 2),
-                'take_profit': round(take_profit, 2),
-                'direction': 'long',
-                'type': 'momentum_breakout',
-                'symbol': 'MNQ',
-                'confidence': 0.75,
-                'reason': 'Test signal for chart visualization',
+                    rows.append(
+                        {
+                            "timestamp": date,
+                            "open": open_price,
+                            "high": high,
+                            "low": low,
+                            "close": close_price,
+                            "volume": int(np.random.uniform(1000, 5000)),
+                        }
+                    )
+                df = pd.DataFrame(rows)
+                df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+                return df.set_index("timestamp")
+
+            # Convert to 5m bars for charting
+            df_5m: pd.DataFrame
+            src_label = hist_src or "synthetic"
+            if hist_df is None or hist_df.empty:
+                df_5m = _create_synthetic_5m(220)
+                src_label = "synthetic"
+            else:
+                if hist_tf == "5m":
+                    df_5m = hist_df.copy()
+                else:
+                    # Resample 1m → 5m
+                    df_5m = (
+                        hist_df.resample("5min")
+                        .agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
+                        .dropna()
+                    )
+
+            # Choose a recent random window so it feels like a real trade snapshot
+            window_bars = 160
+            if len(df_5m) < window_bars + 10:
+                df_5m = df_5m.tail(window_bars + 10)
+
+            max_end = len(df_5m) - 1
+            min_end = max(window_bars, max_end - 3000)  # ~last 10 days of 5m bars
+            end_i = random.randint(min_end, max_end) if max_end > min_end else max_end
+            window = df_5m.iloc[end_i - window_bars : end_i + 1].copy()
+
+            # Simple ATR-based risk sizing for realistic SL/TP distances
+            def _atr(d: pd.DataFrame, period: int = 14) -> float:
+                try:
+                    h = d["high"].astype(float)
+                    l = d["low"].astype(float)
+                    c = d["close"].astype(float)
+                    pc = c.shift(1)
+                    tr = pd.concat([(h - l).abs(), (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
+                    v = tr.rolling(period).mean().iloc[-1]
+                    return float(v) if v is not None and np.isfinite(v) else 0.0
+                except Exception:
+                    return 0.0
+
+            entry_price = float(window["close"].iloc[-1])
+            atr_val = _atr(window)
+            stop_dist = max(10.0, atr_val * 1.5 if atr_val > 0 else 15.0)
+            direction = random.choice(["long", "short"])
+
+            if direction == "long":
+                stop_loss = entry_price - stop_dist
+                take_profit = entry_price + (stop_dist * 1.5)
+            else:
+                stop_loss = entry_price + stop_dist
+                take_profit = entry_price - (stop_dist * 1.5)
+
+            sig_type = random.choice(["momentum_breakout", "trend_continuation", "mean_reversion"])
+            confidence = float(round(random.uniform(0.58, 0.86), 2))
+
+            test_signal: Dict[str, Any] = {
+                "entry_price": round(entry_price, 2),
+                "stop_loss": round(stop_loss, 2),
+                "take_profit": round(take_profit, 2),
+                "direction": direction,
+                "type": sig_type,
+                "symbol": symbol,
+                "confidence": confidence,
+                "reason": f"Test signal (replica) from {src_label}",
+                # Used by chart HUD RR box
+                "tick_value": 2.0,  # MNQ ~$2/point
+                "position_size": 1,
             }
-            
-            # Generate chart
-            chart_path = self.chart_generator.generate_entry_chart(
-                test_signal, test_data, 'MNQ'
-            )
+
+            # Optional: enrich with HUD context (sessions/key levels/etc.)
+            try:
+                from pearlalgo.strategies.nq_intraday.hud_context import build_hud_context
+
+                test_signal["hud_context"] = build_hud_context(window, symbol=symbol, tick_size=0.25)
+            except Exception:
+                pass
+
+            # Generate entry chart (production generator)
+            chart_path = self.chart_generator.generate_entry_chart(test_signal, window, symbol)
             
             if chart_path and chart_path.exists():
                 # Calculate R:R ratio
@@ -2116,14 +2236,16 @@ class TelegramCommandHandler:
                 rr_ratio = reward / risk if risk > 0 else 0
                 
                 # Send test signal message
+                side = "LONG" if direction == "long" else "SHORT"
+                type_label = sig_type.replace("_", " ").title()
                 message = (
                     "🧪 *Test Signal Generated*\n\n"
-                    f"*Type:* Momentum Breakout (LONG)\n"
+                    f"*Type:* {type_label} ({side})\n"
                     f"*Entry:* ${entry_price:,.2f}\n"
                     f"*Stop:* ${stop_loss:,.2f}\n"
                     f"*TP:* ${take_profit:,.2f}\n"
                     f"*R:R:* {rr_ratio:.2f}:1\n\n"
-                    "📊 Chart generated below!"
+                    "📊 Entry chart generated below!"
                 )
                 
                 reply_markup = InlineKeyboardMarkup([[
@@ -2136,21 +2258,64 @@ class TelegramCommandHandler:
                 # Send chart
                 try:
                     with open(chart_path, 'rb') as photo:
-                        if update.callback_query:
-                            await context.bot.send_photo(
-                                chat_id=update.effective_chat.id,
-                                photo=photo,
-                                caption="📊 Test Signal Chart"
-                            )
-                        else:
-                            await update.message.reply_photo(
-                                photo=photo,
-                                caption="📊 Test Signal Chart"
-                            )
+                        await context.bot.send_photo(
+                            chat_id=update.effective_chat.id,
+                            photo=photo,
+                            caption="📊 Test Signal Entry Chart",
+                        )
                     
                     # Clean up
                     chart_path.unlink()
                     logger.info("Test signal chart sent successfully")
+
+                    # Auto-send a simulated exit after 10 seconds (replica lifecycle)
+                    chat_id = update.effective_chat.id
+                    bot = context.bot
+
+                    exit_win = random.random() < 0.55
+                    exit_reason = "take_profit" if exit_win else "stop_loss"
+                    exit_price = float(take_profit if exit_win else stop_loss)
+
+                    # PnL in USD (approx, MNQ: $2/point)
+                    pnl_points = (exit_price - entry_price) if direction == "long" else (entry_price - exit_price)
+                    pnl_usd = float(pnl_points) * float(test_signal.get("tick_value") or 2.0) * float(test_signal.get("position_size") or 1.0)
+
+                    async def _send_test_exit():
+                        await asyncio.sleep(10)
+                        try:
+                            result = "WIN" if exit_reason == "take_profit" else "LOSS"
+                            msg = (
+                                f"🧪 *Test Exit ({result})*\n\n"
+                                f"*Exit:* ${exit_price:,.2f} ({exit_reason.replace('_', ' ').title()})\n"
+                                f"*P&L:* ${pnl_usd:,.2f}\n\n"
+                                "📉 Exit chart below!"
+                            )
+                            await bot.send_message(chat_id=chat_id, text=msg, parse_mode="Markdown")
+
+                            exit_chart = self.chart_generator.generate_exit_chart(
+                                test_signal,
+                                exit_price=exit_price,
+                                exit_reason=exit_reason,
+                                pnl=pnl_usd,
+                                buffer_data=window,
+                                symbol=symbol,
+                                timeframe="5m",
+                            )
+                            if exit_chart and exit_chart.exists():
+                                with open(exit_chart, "rb") as photo2:
+                                    await bot.send_photo(
+                                        chat_id=chat_id,
+                                        photo=photo2,
+                                        caption="📉 Test Signal Exit Chart",
+                                    )
+                                try:
+                                    exit_chart.unlink()
+                                except Exception:
+                                    pass
+                        except Exception as e:
+                            logger.error(f"Error sending test exit: {e}", exc_info=True)
+
+                    asyncio.create_task(_send_test_exit())
                     
                 except Exception as e:
                     logger.error(f"Error sending test chart: {e}", exc_info=True)
