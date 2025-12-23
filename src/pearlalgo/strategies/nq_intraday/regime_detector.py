@@ -302,7 +302,9 @@ class RegimeDetector:
         Adjust signal confidence based on regime alignment.
         
         Args:
-            signal_type: Signal type ("momentum_long", "mean_reversion_long", "breakout_long")
+            signal_type: Signal type (e.g., "momentum_long", "momentum_short", 
+                         "mean_reversion_long", "mean_reversion_short",
+                         "breakout_long", "breakout_short")
             signal_confidence: Base signal confidence (0-1)
             regime: Regime dictionary from detect_regime()
             
@@ -316,26 +318,50 @@ class RegimeDetector:
 
         # Momentum signals
         if "momentum" in signal_type:
-            if "trending_bullish" in regime_type and "long" in signal_type:
-                adjusted += 0.15  # Momentum long in bullish trend
-            elif "trending_bearish" in regime_type and "long" in signal_type:
-                adjusted -= 0.20  # Momentum long in bearish trend (fighting trend)
-            elif "ranging" in regime_type:
-                adjusted -= 0.20  # Momentum in ranging market (whipsaws)
+            if "long" in signal_type:
+                if "trending_bullish" in regime_type:
+                    adjusted += 0.15  # Momentum long in bullish trend
+                elif "trending_bearish" in regime_type:
+                    adjusted -= 0.20  # Momentum long in bearish trend (fighting trend)
+                elif "ranging" in regime_type:
+                    adjusted -= 0.20  # Momentum in ranging market (whipsaws)
+            elif "short" in signal_type:
+                if "trending_bearish" in regime_type:
+                    adjusted += 0.15  # Momentum short in bearish trend
+                elif "trending_bullish" in regime_type:
+                    adjusted -= 0.20  # Momentum short in bullish trend (fighting trend)
+                elif "ranging" in regime_type:
+                    adjusted -= 0.20  # Momentum in ranging market (whipsaws)
 
         # Mean reversion signals
         elif "mean_reversion" in signal_type:
             if "ranging" in regime_type:
                 adjusted += 0.15  # Mean reversion in ranging market
             elif "trending" in regime_type:
-                adjusted -= 0.25  # Mean reversion in trending market (fighting trend)
+                # Mean reversion against trend is risky, but less so for the trend direction
+                if "long" in signal_type and "trending_bullish" in regime_type:
+                    adjusted -= 0.15  # Long mean reversion in bullish trend (less risky)
+                elif "short" in signal_type and "trending_bearish" in regime_type:
+                    adjusted -= 0.15  # Short mean reversion in bearish trend (less risky)
+                else:
+                    adjusted -= 0.25  # Mean reversion against strong trend
 
         # Breakout signals
         elif "breakout" in signal_type:
-            if "trending" in regime_type:
-                adjusted += 0.10  # Breakout in trending market
-            elif "ranging" in regime_type:
-                adjusted -= 0.10  # Breakout in ranging market (false breakouts)
+            if "long" in signal_type:
+                if "trending_bullish" in regime_type:
+                    adjusted += 0.10  # Breakout long in bullish trend
+                elif "trending_bearish" in regime_type:
+                    adjusted -= 0.15  # Breakout long in bearish trend
+                elif "ranging" in regime_type:
+                    adjusted -= 0.10  # Breakout in ranging market (false breakouts)
+            elif "short" in signal_type:
+                if "trending_bearish" in regime_type:
+                    adjusted += 0.10  # Breakout short in bearish trend
+                elif "trending_bullish" in regime_type:
+                    adjusted -= 0.15  # Breakout short in bullish trend
+                elif "ranging" in regime_type:
+                    adjusted -= 0.10  # Breakout in ranging market (false breakouts)
 
             # Volatility adjustment for breakouts
             if volatility == "low":

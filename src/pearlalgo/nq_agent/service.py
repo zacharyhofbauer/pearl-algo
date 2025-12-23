@@ -133,6 +133,12 @@ class NQAgentService:
         self.last_successful_cycle: Optional[datetime] = None
         self.last_data_quality_alert: Optional[datetime] = None
         self._last_stale_data_alert_type: Optional[str] = None  # Track last alert type to prevent duplicates
+        # Smarter alert cadence state (reduce Telegram spam)
+        self._last_stale_bucket: Optional[int] = None
+        self._last_buffer_severity: Optional[str] = None
+        self._was_stale_during_market: bool = False
+        self._was_data_gap: bool = False
+        self._was_buffer_inadequate: bool = False
         self.stale_data_threshold_minutes = data_settings.get("stale_data_threshold_minutes", 10)
         self.connection_timeout_minutes = data_settings.get("connection_timeout_minutes", 30)
         
@@ -660,12 +666,37 @@ class NQAgentService:
 
     def _save_state(self) -> None:
         """Save current service state."""
+        # Include lightweight data freshness metadata for Telegram UI / operators.
+        latest_bar_timestamp = None
+        latest_bar_age_minutes = None
+        data_fresh = None
+        try:
+            last_market_data = getattr(self.data_fetcher, "_last_market_data", None) or {}
+            freshness = self.data_quality_checker.check_data_freshness(
+                last_market_data.get("latest_bar"),
+                last_market_data.get("df"),
+            )
+            ts = freshness.get("timestamp")
+            if ts:
+                latest_bar_timestamp = ts.isoformat()
+                latest_bar_age_minutes = float(freshness.get("age_minutes", 0.0))
+                data_fresh = bool(freshness.get("is_fresh", False))
+        except Exception:
+            # Never let status persistence fail due to optional metadata.
+            pass
+
         state = {
             "running": self.running,
             "start_time": self.start_time.isoformat() if self.start_time else None,
             "cycle_count": self.cycle_count,
             "signal_count": self.signal_count,
             "buffer_size": self.data_fetcher.get_buffer_size(),
+            "data_fresh": data_fresh,
+            "latest_bar_timestamp": latest_bar_timestamp,
+            "latest_bar_age_minutes": latest_bar_age_minutes,
+            "last_successful_cycle": (
+                self.last_successful_cycle.isoformat() if self.last_successful_cycle else None
+            ),
             "config": {
                 "symbol": self.config.symbol,
                 "timeframe": self.config.timeframe,
@@ -711,52 +742,88 @@ class NQAgentService:
         """Check data quality and send alerts if needed."""
         now = datetime.now(timezone.utc)
 
-        # Check if we should send data quality alerts (throttle)
-        if (
-            self.last_data_quality_alert is not None
-            and (now - self.last_data_quality_alert).total_seconds() < self.data_quality_alert_interval
-        ):
-            return
-
         # Use DataQualityChecker for validation
         validation = self.data_quality_checker.validate_market_data(market_data)
 
-        # Check for stale data
-        if not validation["freshness"]["is_fresh"]:
-            age_minutes = validation["freshness"]["age_minutes"]
-            
-            # Don't alert on stale data if market is closed (expected behavior)
+        # Global throttling (safety): don’t emit too often even if state oscillates.
+        throttled = (
+            self.last_data_quality_alert is not None
+            and (now - self.last_data_quality_alert).total_seconds() < self.data_quality_alert_interval
+        )
+
+        # Market open/closed matters for stale data interpretation
+        is_market_open = False
+        try:
             from pearlalgo.utils.market_hours import get_market_hours
-            market_hours = get_market_hours()
-            is_market_open = market_hours.is_market_open()
-            
-            # Only alert if market is open and data is stale (indicates a real problem)
+
+            is_market_open = bool(get_market_hours().is_market_open())
+        except Exception:
+            # Fail quiet to avoid spam outside market hours if market-hours util breaks
+            is_market_open = False
+
+        def _stale_bucket(age_min: float) -> int:
+            # Send only when age crosses key thresholds to reduce spam.
+            base = [5, 10, 20, 40, 60, int(self.stale_data_threshold_minutes)]
+            thresholds = sorted({t for t in base if t > 0})
+            for t in reversed(thresholds):
+                if age_min >= t:
+                    return t
+            return int(self.stale_data_threshold_minutes)
+
+        def _buffer_severity(buf: int) -> str:
+            # Buffer is “inadequate” only when < 10 bars (DataQualityChecker default).
+            if buf <= 0:
+                return "empty"
+            if buf <= 3:
+                return "critical"
+            if buf <= 7:
+                return "warning"
+            return "low"
+
+        # 1) Stale data (only alert during market hours)
+        if not validation["freshness"]["is_fresh"]:
+            age_minutes = float(validation["freshness"].get("age_minutes", 0.0) or 0.0)
             if is_market_open:
-                # Check throttling - only send if enough time has passed since last alert
-                should_alert = (
-                    self.last_data_quality_alert is None or
-                    (now - self.last_data_quality_alert).total_seconds() >= self.data_quality_alert_interval
-                )
-                
-                if should_alert:
+                bucket = _stale_bucket(age_minutes)
+                # Only send when bucket changes (10→20→40→60...) AND we’re not throttled.
+                if (self._last_stale_bucket != bucket) and (not throttled):
                     await self.telegram_notifier.send_data_quality_alert(
                         "stale_data",
                         f"Data is {age_minutes:.1f} minutes old",
-                        {"age_minutes": age_minutes},
+                        {"age_minutes": age_minutes, "bucket": bucket},
                     )
                     self.last_data_quality_alert = now
                     self._last_stale_data_alert_type = "stale_data"
+                self._last_stale_bucket = bucket
+                self._was_stale_during_market = True
             else:
-                # Market is closed - stale data is expected, just log it
-                logger.debug(f"Data is {age_minutes:.1f} minutes old but market is closed - this is expected")
+                logger.debug(
+                    f"Data is {age_minutes:.1f} minutes old but market is closed - expected"
+                )
             return
 
-        # Check for empty data
+        # Recovery: data is fresh again after being stale during market hours.
+        if self._was_stale_during_market and is_market_open:
+            # Avoid “flapping” recovery spam; allow recovery after 60s even if main throttle is 5m.
+            can_recover = (
+                self.last_data_quality_alert is None
+                or (now - self.last_data_quality_alert).total_seconds() >= 60
+            )
+            if can_recover:
+                await self.telegram_notifier.send_data_quality_alert(
+                    "recovery",
+                    "Market data recovered (fresh bars again)",
+                    {},
+                )
+                self.last_data_quality_alert = now
+            self._was_stale_during_market = False
+            self._last_stale_bucket = None
+
+        # 2) Data gap (empty dataframe)
         df = market_data.get("df")
         if df is not None and df.empty:
-            if (self._last_stale_data_alert_type != "data_gap" or 
-                self.last_data_quality_alert is None or
-                (now - self.last_data_quality_alert).total_seconds() >= self.data_quality_alert_interval):
+            self._was_data_gap = True
+            if (self._last_stale_data_alert_type != "data_gap") and (not throttled):
                 await self.telegram_notifier.send_data_quality_alert(
                     "data_gap",
                     "No market data available",
@@ -765,20 +832,51 @@ class NQAgentService:
                 self.last_data_quality_alert = now
                 self._last_stale_data_alert_type = "data_gap"
             return
+        if self._was_data_gap:
+            can_recover = (
+                self.last_data_quality_alert is None
+                or (now - self.last_data_quality_alert).total_seconds() >= 60
+            )
+            if can_recover:
+                await self.telegram_notifier.send_data_quality_alert(
+                    "recovery",
+                    "Market data gap recovered",
+                    {},
+                )
+                self.last_data_quality_alert = now
+            self._was_data_gap = False
 
-        # Check buffer size
+        # 3) Buffer size issues (only send when severity changes)
         if not validation["buffer_size"]["is_adequate"]:
-            buffer_size = validation["buffer_size"]["buffer_size"]
-            if (self._last_stale_data_alert_type != "buffer_issue" or 
-                self.last_data_quality_alert is None or
-                (now - self.last_data_quality_alert).total_seconds() >= self.data_quality_alert_interval):
+            buffer_size = int(validation["buffer_size"].get("buffer_size", 0) or 0)
+            severity = _buffer_severity(buffer_size)
+            if (self._last_buffer_severity != severity) and (not throttled):
                 await self.telegram_notifier.send_data_quality_alert(
                     "buffer_issue",
                     f"Buffer size is low: {buffer_size} bars",
-                    {"buffer_size": buffer_size},
+                    {"buffer_size": buffer_size, "severity": severity},
                 )
                 self.last_data_quality_alert = now
                 self._last_stale_data_alert_type = "buffer_issue"
+            self._last_buffer_severity = severity
+            self._was_buffer_inadequate = True
+            return
+
+        # Recovery: buffer is adequate again
+        if self._was_buffer_inadequate:
+            can_recover = (
+                self.last_data_quality_alert is None
+                or (now - self.last_data_quality_alert).total_seconds() >= 60
+            )
+            if can_recover:
+                await self.telegram_notifier.send_data_quality_alert(
+                    "recovery",
+                    "Buffer recovered (enough bars for strategy)",
+                    {},
+                )
+                self.last_data_quality_alert = now
+            self._was_buffer_inadequate = False
+            self._last_buffer_severity = None
 
 
     async def _handle_connection_failure(self) -> None:

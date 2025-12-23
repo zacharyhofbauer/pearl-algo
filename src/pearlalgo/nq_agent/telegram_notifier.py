@@ -911,55 +911,101 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
-            # Format message EXACTLY like startup message - copy the exact pattern
-            # Startup uses: title, \n\n, key-value pairs, \n\n, section header, items, \n\n, status
-            # Use 'msg' to avoid conflict with parameter 'message'
-            msg = "⚠️ *Risk Warning*\n\n"
-            
-            # Add alert type (same as startup's title format)
-            if alert_type == "stale_data":
-                msg += "⏰ *Stale Data*\n"
-            elif alert_type == "data_gap":
-                msg += "📉 *Data Gap*\n"
-            elif alert_type == "fetch_failure":
-                msg += "❌ *Fetch Failure*\n"
-            elif alert_type == "buffer_issue":
-                msg += "⚠️ *Buffer Issue*\n"
+            is_recovery = alert_type == "recovery"
+
+            # Recovery messages should be positive + not labeled as risk warnings.
+            if is_recovery:
+                msg = "✅ *Recovery*\n\n"
+                msg += f"{message}\n" if message else "Data quality recovered.\n"
+                msg += "\n*Status:* OK"
             else:
-                title_text = alert_type.replace('_', ' ').title()
-                msg += f"⚠️ *{title_text}*\n"
-            
-            # Add details - EXACT same format as startup: emoji + *Key:* value (no extra spaces)
-            # Use 🕐 (clock) instead of ⏱️ (stopwatch) to avoid Markdown parsing issues with variation selector
-            if alert_type == "stale_data" and details and "age_minutes" in details:
-                age_val = details['age_minutes']
-                msg += f"🕐 *Age:* {age_val:.1f} minutes\n"
-            elif message and alert_type != "stale_data":
-                msg += f"{message}\n"
-            
-            # Add other details if present (same format)
-            if details:
-                detail_lines = []
-                if "consecutive_failures" in details:
-                    detail_lines.append(f"❌ *Failures:* {details['consecutive_failures']}")
-                if "connection_failures" in details:
-                    detail_lines.append(f"🔌 *Connection Failures:* {details['connection_failures']}")
-                if "buffer_size" in details:
-                    detail_lines.append(f"📊 *Buffer:* {details['buffer_size']} bars")
-                if "error_type" in details:
-                    detail_lines.append(f"⚠️ *Error Type:* {details['error_type']}")
-                if "suggestion" in details:
-                    detail_lines.append(f"💡 *Suggestion:* {details['suggestion']}")
-                
-                if detail_lines:
-                    msg += "\n" + "\n".join(detail_lines) + "\n"
-            
-            # Add status - EXACT same format as startup's *Config:* section
-            # Escape underscore in DATA_QUALITY to prevent Markdown italic parsing
-            msg += "\n*Status:* DATA\\_QUALITY"
-            
-            # Send using send_message - EXACTLY like startup does
-            await self.telegram.send_message(msg)
+                # Risk warning format (mobile-friendly)
+                msg = "⚠️ *Risk Warning*\n\n"
+
+                # Add alert type (same as startup's title format)
+                if alert_type == "stale_data":
+                    msg += "⏰ *Stale Data*\n"
+                elif alert_type == "data_gap":
+                    msg += "📉 *Data Gap*\n"
+                elif alert_type == "fetch_failure":
+                    msg += "❌ *Fetch Failure*\n"
+                elif alert_type == "buffer_issue":
+                    msg += "⚠️ *Buffer Issue*\n"
+                else:
+                    title_text = alert_type.replace('_', ' ').title()
+                    msg += f"⚠️ *{title_text}*\n"
+
+                # Add details
+                if alert_type == "stale_data" and details and "age_minutes" in details:
+                    age_val = details["age_minutes"]
+                    msg += f"🕐 *Age:* {age_val:.1f} minutes\n"
+                elif message and alert_type != "stale_data":
+                    msg += f"{message}\n"
+
+                if details:
+                    detail_lines = []
+                    if "consecutive_failures" in details:
+                        detail_lines.append(f"❌ *Failures:* {details['consecutive_failures']}")
+                    if "connection_failures" in details:
+                        detail_lines.append(f"🔌 *Connection Failures:* {details['connection_failures']}")
+                    if "buffer_size" in details:
+                        detail_lines.append(f"📊 *Buffer:* {details['buffer_size']} bars")
+                    if "severity" in details:
+                        detail_lines.append(f"🧭 *Severity:* {details['severity']}")
+                    if "error_type" in details:
+                        detail_lines.append(f"⚠️ *Error Type:* {details['error_type']}")
+                    if "suggestion" in details:
+                        detail_lines.append(f"💡 *Suggestion:* {details['suggestion']}")
+
+                    if detail_lines:
+                        msg += "\n" + "\n".join(detail_lines) + "\n"
+
+                # Escape underscore in DATA_QUALITY to prevent Markdown italic parsing
+                msg += "\n*Status:* DATA\\_QUALITY"
+
+            # Tap-to-fix buttons (only if command handler is likely running)
+            reply_markup = None
+            try:
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                from pathlib import Path
+                import os
+
+                project_root = Path(__file__).parent.parent.parent.parent
+                pid_file = project_root / "logs" / "telegram_handler.pid"
+                handler_running = False
+                if pid_file.exists():
+                    try:
+                        pid = int(pid_file.read_text().strip())
+                        os.kill(pid, 0)
+                        handler_running = True
+                    except Exception:
+                        handler_running = False
+
+                if handler_running:
+                    keyboard = []
+                    if is_recovery:
+                        keyboard.append([
+                            InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
+                            InlineKeyboardButton("📊 Status", callback_data="status"),
+                        ])
+                    else:
+                        keyboard.append([
+                            InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
+                            InlineKeyboardButton("🔁 Restart Agent", callback_data="confirm:restart_agent"),
+                        ])
+                        if alert_type in ("stale_data", "fetch_failure", "data_gap"):
+                            keyboard.append([
+                                InlineKeyboardButton("🔁 Restart Gateway", callback_data="confirm:restart_gateway"),
+                                InlineKeyboardButton("🔌 Gateway Status", callback_data="gateway_status"),
+                            ])
+
+                    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+            except Exception:
+                reply_markup = None
+
+            # Send using send_message (includes retry + dedupe)
+            await self.telegram.send_message(msg, reply_markup=reply_markup)
             return True
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_data_quality_alert")

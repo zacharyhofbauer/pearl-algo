@@ -7,7 +7,7 @@ Scans NQ futures for intraday trading opportunities using real-time data.
 from __future__ import annotations
 
 from datetime import datetime, time, timezone
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -311,7 +311,7 @@ class NQScanner:
             return stop_loss, take_profit
 
         def calculate_signal_score(signal_type: str, latest: pd.Series, df: pd.DataFrame) -> float:
-            """Calculate signal quality score (0-1)."""
+            """Calculate signal quality score (0-1) for both LONG and SHORT signals."""
             # Detect volatility expansion (ATR increased >20% in last 5 bars)
             atr_expansion = False
             current_atr = latest.get("atr", 0)
@@ -359,22 +359,63 @@ class NQScanner:
                     score += 0.12
                     if rsi_momentum:
                         logger.debug(f"RSI momentum detected (+{rsi - rsi_3bars_ago:.1f} points in 3 bars), using relative movement")
+            elif signal_type == "momentum_short":
+                # For SHORT momentum: RSI dropping or in bearish range
+                rsi_momentum = False
+                if len(df) >= 3 and "rsi" in df.columns:
+                    rsi_3bars_ago = df.iloc[-3].get("rsi", rsi) if len(df) >= 3 else rsi
+                    rsi_momentum = (rsi_3bars_ago - rsi) > 5  # RSI decreased >5 points in 3 bars
+                
+                # Accept if RSI momentum down OR in bearish range
+                if rsi_momentum or (25 < rsi < 65):
+                    score += 0.12
+                    if rsi_momentum:
+                        logger.debug(f"RSI momentum down detected (-{rsi_3bars_ago - rsi:.1f} points in 3 bars), using relative movement")
             elif signal_type == "mean_reversion_long" and rsi < 35:  # Slightly higher threshold
                 score += 0.18  # Strong confirmation for mean reversion
+            elif signal_type == "mean_reversion_short" and rsi > 65:  # RSI overbought for short
+                score += 0.18  # Strong confirmation for mean reversion short
             elif signal_type == "breakout_long" and rsi > 45:  # Lower threshold
                 score += 0.12
+            elif signal_type == "breakout_short" and rsi < 55:  # RSI below neutral for short breakout
+                score += 0.12
+            # New pattern types
+            elif signal_type in ("sr_bounce_long", "vwap_reversion_long") and rsi < 40:
+                score += 0.15  # Oversold for bounce/reversion
+            elif signal_type in ("sr_bounce_short", "vwap_reversion_short") and rsi > 60:
+                score += 0.15  # Overbought for rejection/reversion
+            elif signal_type == "engulfing_long" and 30 < rsi < 50:
+                score += 0.12  # Not too extreme for reversal
+            elif signal_type == "engulfing_short" and 50 < rsi < 70:
+                score += 0.12  # Not too extreme for reversal
 
             # MACD confirmation
             if "macd_histogram" in latest:
                 macd_hist = latest.get("macd_histogram", 0)
                 if signal_type == "momentum_long" and macd_hist > 0:
                     score += 0.12
+                elif signal_type == "momentum_short" and macd_hist < 0:
+                    score += 0.12
                 elif signal_type == "mean_reversion_long" and macd_hist < 0:
                     score += 0.12
+                elif signal_type == "mean_reversion_short" and macd_hist > 0:
+                    score += 0.12  # For short mean reversion, MACD should be positive (overbought)
+                elif signal_type == "breakout_short" and macd_hist < 0:
+                    score += 0.12
+                # New pattern types - MACD momentum alignment
+                elif signal_type in ("sr_bounce_long", "vwap_reversion_long", "engulfing_long") and macd_hist > -0.5:
+                    score += 0.08  # Not strongly bearish
+                elif signal_type in ("sr_bounce_short", "vwap_reversion_short", "engulfing_short") and macd_hist < 0.5:
+                    score += 0.08  # Not strongly bullish
 
             # Price position relative to MAs (trend filter)
-            if "sma_50" in latest and latest["close"] > latest.get("sma_50", 0):
-                score += 0.08  # Slightly more weight for trend alignment
+            # For LONG: price above SMA_50 is good
+            # For SHORT: price below SMA_50 is good
+            if "sma_50" in latest:
+                if signal_type.endswith("_long") and latest["close"] > latest.get("sma_50", 0):
+                    score += 0.08  # Slightly more weight for trend alignment
+                elif signal_type.endswith("_short") and latest["close"] < latest.get("sma_50", float("inf")):
+                    score += 0.08  # Price below SMA_50 for short signals
 
             return min(score, 1.0)
 
@@ -465,6 +506,80 @@ class NQScanner:
                     else:
                         # Reject signal if MTF is strongly conflicting
                         logger.debug("Momentum long signal rejected due to MTF conflict")
+
+        # Momentum SHORT signal (fast MA crosses below slow MA with MACD confirmation)
+        if self.config.enable_momentum and session != "lunch_lull":
+            if len(df) >= 2:
+                prev = df.iloc[-2]
+                if (
+                    prev["sma_fast"] > prev["sma_slow"]
+                    and latest["sma_fast"] < latest["sma_slow"]
+                    and latest["close"] < latest["sma_fast"]
+                    and latest.get("volume_ratio", 0) > 1.2  # Volume confirmation
+                    and latest.get("macd_histogram", 0) < 0  # MACD bearish
+                ):
+                    stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+                    confidence = calculate_signal_score("momentum_short", latest, df)
+
+                    # Adjust confidence based on regime
+                    confidence = self.regime_detector.adjust_confidence_by_regime(
+                        "momentum_short", confidence, regime
+                    )
+
+                    # Check MTF alignment for SHORT
+                    is_aligned, mtf_adjustment = self.mtf_analyzer.check_signal_alignment(
+                        "short", mtf_analysis
+                    )
+
+                    # During volatility expansion, relax MTF conflict threshold
+                    atr_expansion = regime.get("atr_expansion", False)
+                    if atr_expansion and volatility == "high":
+                        mtf_threshold = -0.20
+                    else:
+                        mtf_threshold = -0.15
+
+                    if is_aligned or mtf_adjustment >= mtf_threshold:
+                        confidence = max(0.0, min(1.0, confidence + mtf_adjustment))
+
+                        # Adjust confidence based on VWAP position
+                        confidence = self.vwap_calculator.adjust_confidence_by_vwap(
+                            "short", confidence, vwap_data
+                        )
+
+                        # Adjust confidence based on volume profile proximity
+                        proximity = self.volume_profile.get_proximity_to_key_levels(
+                            current_price, volume_profile_data
+                        )
+                        confidence = self.volume_profile.adjust_confidence_by_proximity(
+                            confidence, proximity
+                        )
+
+                        # Check order flow alignment for SHORT
+                        is_flow_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
+                            "short", order_flow_data
+                        )
+
+                        if is_flow_aligned:
+                            confidence = max(0.0, min(1.0, confidence + flow_adjustment))
+
+                            signals.append({
+                                "type": "momentum_short",
+                                "direction": "short",
+                                "confidence": confidence,
+                                "entry_price": current_price,
+                                "stop_loss": stop_loss,
+                                "take_profit": take_profit,
+                                "reason": "Fast MA crossed below slow MA with volume and MACD confirmation",
+                                "regime": regime,
+                                "mtf_analysis": mtf_analysis,
+                                "vwap_data": vwap_data,
+                                "volume_profile": volume_profile_data,
+                                "order_flow": order_flow_data,
+                            })
+                        else:
+                            logger.debug("Momentum short signal rejected due to order flow conflict")
+                    else:
+                        logger.debug("Momentum short signal rejected due to MTF conflict")
 
         # Mean reversion signal (RSI oversold with multiple confirmations)
         if self.config.enable_mean_reversion and session != "opening":
@@ -569,6 +684,98 @@ class NQScanner:
                 else:
                     # Only reject if strongly conflicting
                     logger.debug("Mean reversion long signal rejected due to strong MTF conflict")
+
+        # Mean reversion SHORT signal (RSI overbought with price at upper Bollinger Band)
+        if self.config.enable_mean_reversion and session != "opening":
+            # Mean reversion SHORT: check relative RSI movement up OR absolute overbought
+            rsi = latest.get("rsi", 50)
+            rsi_momentum_up = False
+            if len(df) >= 3 and "rsi" in df.columns:
+                rsi_3bars_ago = df.iloc[-3].get("rsi", rsi) if len(df) >= 3 else rsi
+                rsi_momentum_up = (rsi - rsi_3bars_ago) > 5  # RSI rose >5 points in 3 bars
+            
+            # Accept if RSI momentum up OR absolute overbought
+            rsi_ok = rsi_momentum_up or rsi > 65
+            
+            if (
+                rsi_ok  # Relative RSI movement up OR absolute overbought
+                and latest["close"] > latest.get("bb_upper", current_price)
+                and latest.get("volume_ratio", 0) > 1.0
+            ):
+                if rsi_momentum_up:
+                    logger.debug(f"Mean reversion short: RSI momentum up detected (+{rsi - rsi_3bars_ago:.1f} points in 3 bars), using relative movement")
+                
+                stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+                # Adjust stop to be above upper BB
+                if stop_loss < latest.get("bb_upper", stop_loss):
+                    stop_loss = float(latest.get("bb_upper", stop_loss)) + (atr * 0.5)
+                confidence = calculate_signal_score("mean_reversion_short", latest, df)
+
+                # Adjust confidence based on regime
+                confidence = self.regime_detector.adjust_confidence_by_regime(
+                    "mean_reversion_short", confidence, regime
+                )
+
+                # Check MTF alignment (mean reversion less strict on MTF)
+                is_aligned, mtf_adjustment = self.mtf_analyzer.check_signal_alignment(
+                    "short", mtf_analysis
+                )
+
+                # During volatility expansion, relax MTF conflict threshold further
+                atr_expansion = regime.get("atr_expansion", False)
+                if atr_expansion and volatility == "high":
+                    mtf_threshold = -0.30
+                else:
+                    mtf_threshold = -0.25
+
+                # Allow mean reversion even with partial MTF conflict (it's counter-trend by nature)
+                if is_aligned or mtf_adjustment >= mtf_threshold:
+                    confidence = max(0.0, min(1.0, confidence + mtf_adjustment * 0.5))
+
+                    # Adjust confidence based on VWAP position (mean reversion less sensitive to VWAP)
+                    confidence = self.vwap_calculator.adjust_confidence_by_vwap(
+                        "short", confidence, vwap_data
+                    ) * 0.9
+
+                    # Adjust confidence based on volume profile proximity
+                    proximity = self.volume_profile.get_proximity_to_key_levels(
+                        current_price, volume_profile_data
+                    )
+                    confidence = self.volume_profile.adjust_confidence_by_proximity(
+                        confidence, proximity
+                    )
+
+                    # Check order flow alignment (mean reversion less strict)
+                    is_flow_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
+                        "short", order_flow_data
+                    )
+
+                    if regime.get("volatility") == "high":
+                        flow_threshold = -0.20
+                    else:
+                        flow_threshold = -0.12
+
+                    if is_flow_aligned or flow_adjustment >= flow_threshold:
+                        confidence = max(0.0, min(1.0, confidence + flow_adjustment * 0.5))
+
+                        signals.append({
+                            "type": "mean_reversion_short",
+                            "direction": "short",
+                            "confidence": confidence,
+                            "entry_price": current_price,
+                            "stop_loss": stop_loss,
+                            "take_profit": float(latest.get("bb_middle", take_profit)),
+                            "reason": "RSI overbought with price at upper Bollinger Band and volume confirmation",
+                            "regime": regime,
+                            "mtf_analysis": mtf_analysis,
+                            "vwap_data": vwap_data,
+                            "volume_profile": volume_profile_data,
+                            "order_flow": order_flow_data,
+                        })
+                    else:
+                        logger.debug("Mean reversion short signal rejected due to strong order flow conflict")
+                else:
+                    logger.debug("Mean reversion short signal rejected due to strong MTF conflict")
 
         # Breakout signal (price breaks above recent high with volume)
         if self.config.enable_breakout:
@@ -693,5 +900,555 @@ class NQScanner:
                     else:
                         # Reject if strongly conflicting
                         logger.debug("Breakout long signal rejected due to MTF conflict")
+
+        # Breakout SHORT signal (price breaks below recent low with volume)
+        if self.config.enable_breakout:
+            if len(df) >= 5:
+                recent_low = df["low"].tail(5).min()
+                
+                # Structure-first gate: check if this is a fresh breakdown (within 0.3% of level)
+                is_fresh_breakdown = False
+                if latest["close"] < recent_low:
+                    is_fresh_breakdown = abs(current_price - recent_low) / recent_low < 0.003
+                
+                # For fresh breakdowns, relax RSI requirement
+                rsi = latest.get("rsi", 50)
+                if is_fresh_breakdown:
+                    rsi_ok = rsi < 60  # Higher threshold for fresh breakdowns
+                else:
+                    rsi_ok = rsi < 55  # Original threshold for established breakdowns
+                
+                if (
+                    latest["close"] < recent_low
+                    and latest.get("volume_ratio", 0) > 1.3  # Volume confirmation
+                    and rsi_ok  # Conditional RSI threshold based on fresh breakdown
+                    and latest.get("macd_histogram", 0) < 0  # MACD bearish
+                ):
+                    stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+                    # Stop loss above recent low
+                    stop_loss = max(stop_loss, float(recent_low) + (atr * 0.5))
+                    confidence = calculate_signal_score("breakout_short", latest, df)
+
+                    if is_fresh_breakdown:
+                        logger.debug(f"Fresh breakdown detected (within 0.3% of level {recent_low:.2f}), applying structure-first gate with relaxed RSI threshold")
+                    
+                    # Adjust confidence based on regime
+                    confidence = self.regime_detector.adjust_confidence_by_regime(
+                        "breakout_short", confidence, regime
+                    )
+
+                    # Check MTF alignment (breakouts need strong MTF confirmation)
+                    is_aligned, mtf_adjustment = self.mtf_analyzer.check_signal_alignment(
+                        "short", mtf_analysis
+                    )
+
+                    # For breakdowns, check if we're breaking 5m/15m support
+                    breakout_levels = self.mtf_analyzer.get_breakout_levels(mtf_analysis)
+                    support_5m = breakout_levels.get("support_5m")
+                    support_15m = breakout_levels.get("support_15m")
+
+                    # Breakdown should break higher timeframe support
+                    if support_5m and current_price > support_5m:
+                        # Not breaking 5m support - reduce confidence
+                        mtf_adjustment -= 0.15
+                    elif support_5m and current_price < support_5m:
+                        # Breaking 5m support - boost confidence
+                        mtf_adjustment += 0.10
+
+                    # Structure-first: allow fresh breakdowns even with MTF conflicts
+                    atr_expansion = regime.get("atr_expansion", False)
+                    if is_fresh_breakdown:
+                        mtf_threshold = -0.25
+                        logger.debug(f"Fresh breakdown detected (within 0.3% of level), applying structure-first gate")
+                    elif atr_expansion and volatility == "high":
+                        mtf_threshold = -0.25
+                    else:
+                        mtf_threshold = -0.20
+
+                    if is_aligned or mtf_adjustment >= mtf_threshold:
+                        confidence = max(0.0, min(1.0, confidence + mtf_adjustment))
+
+                        # Adjust confidence based on VWAP position
+                        confidence = self.vwap_calculator.adjust_confidence_by_vwap(
+                            "short", confidence, vwap_data
+                        )
+
+                        # Adjust confidence based on volume profile proximity
+                        proximity = self.volume_profile.get_proximity_to_key_levels(
+                            current_price, volume_profile_data
+                        )
+                        confidence = self.volume_profile.adjust_confidence_by_proximity(
+                            confidence, proximity
+                        )
+
+                        # Check order flow alignment (breakouts need strong order flow)
+                        is_flow_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
+                            "short", order_flow_data
+                        )
+
+                        # Structure-first: for fresh breakdowns, relax order flow conflict threshold
+                        if is_fresh_breakdown:
+                            flow_threshold = -0.20
+                        else:
+                            flow_threshold = -0.12
+
+                        if is_flow_aligned or flow_adjustment >= flow_threshold:
+                            confidence = max(0.0, min(1.0, confidence + flow_adjustment))
+
+                            signals.append({
+                                "type": "breakout_short",
+                                "direction": "short",
+                                "confidence": confidence,
+                                "entry_price": current_price,
+                                "stop_loss": stop_loss,
+                                "take_profit": take_profit,
+                                "reason": f"Price broke below recent low ({recent_low:.2f}) with strong volume and MACD confirmation",
+                                "regime": regime,
+                                "mtf_analysis": mtf_analysis,
+                                "vwap_data": vwap_data,
+                                "volume_profile": volume_profile_data,
+                                "order_flow": order_flow_data,
+                            })
+                        else:
+                            logger.debug("Breakout short signal rejected due to order flow conflict")
+                    else:
+                        logger.debug("Breakout short signal rejected due to MTF conflict")
+
+        # VWAP reversion signals (price returning to VWAP)
+        if self.config.enable_mean_reversion and vwap_data.get("vwap", 0) > 0:
+            vwap_signals = self._scan_vwap_reversion(
+                df, latest, current_price, atr, vwap_data, regime,
+                mtf_analysis, volume_profile_data, order_flow_data,
+                calculate_stop_take, calculate_signal_score
+            )
+            signals.extend(vwap_signals)
+
+        # Support/Resistance bounce signals
+        sr_levels = self._identify_support_resistance(df)
+        if sr_levels:
+            sr_signals = self._scan_sr_levels(
+                df, latest, current_price, atr, sr_levels, regime,
+                mtf_analysis, vwap_data, volume_profile_data, order_flow_data,
+                calculate_stop_take, calculate_signal_score
+            )
+            signals.extend(sr_signals)
+
+        # Engulfing candle pattern signals
+        engulfing_signals = self._scan_engulfing_patterns(
+            df, latest, current_price, atr, regime,
+            mtf_analysis, vwap_data, volume_profile_data, order_flow_data,
+            calculate_stop_take, calculate_signal_score
+        )
+        signals.extend(engulfing_signals)
+
+        return signals
+
+    def _identify_support_resistance(
+        self,
+        df: pd.DataFrame,
+        lookback: int = 50,
+        min_touches: int = 2,
+    ) -> Dict:
+        """
+        Identify key support and resistance levels from price action.
+        
+        Uses swing high/low pivots to find levels with multiple touches.
+        
+        Args:
+            df: DataFrame with OHLCV data
+            lookback: Number of bars to analyze
+            min_touches: Minimum touches required for a valid level
+            
+        Returns:
+            Dictionary with support and resistance levels:
+            {
+                "support_levels": [float, ...],
+                "resistance_levels": [float, ...],
+                "strongest_support": float,
+                "strongest_resistance": float,
+            }
+        """
+        if df.empty or len(df) < lookback:
+            return {}
+
+        df_recent = df.tail(lookback)
+        
+        # Find swing highs (local maxima)
+        swing_highs = []
+        for i in range(2, len(df_recent) - 2):
+            if (df_recent["high"].iloc[i] > df_recent["high"].iloc[i-1] and
+                df_recent["high"].iloc[i] > df_recent["high"].iloc[i-2] and
+                df_recent["high"].iloc[i] > df_recent["high"].iloc[i+1] and
+                df_recent["high"].iloc[i] > df_recent["high"].iloc[i+2]):
+                swing_highs.append(float(df_recent["high"].iloc[i]))
+
+        # Find swing lows (local minima)
+        swing_lows = []
+        for i in range(2, len(df_recent) - 2):
+            if (df_recent["low"].iloc[i] < df_recent["low"].iloc[i-1] and
+                df_recent["low"].iloc[i] < df_recent["low"].iloc[i-2] and
+                df_recent["low"].iloc[i] < df_recent["low"].iloc[i+1] and
+                df_recent["low"].iloc[i] < df_recent["low"].iloc[i+2]):
+                swing_lows.append(float(df_recent["low"].iloc[i]))
+
+        # Cluster nearby levels (within 0.2% of each other)
+        def cluster_levels(levels: List[float], threshold_pct: float = 0.002) -> List[float]:
+            if not levels:
+                return []
+            levels = sorted(levels)
+            clusters = []
+            current_cluster = [levels[0]]
+            
+            for level in levels[1:]:
+                if abs(level - current_cluster[-1]) / current_cluster[-1] < threshold_pct:
+                    current_cluster.append(level)
+                else:
+                    clusters.append(sum(current_cluster) / len(current_cluster))
+                    current_cluster = [level]
+            clusters.append(sum(current_cluster) / len(current_cluster))
+            return clusters
+
+        resistance_levels = cluster_levels(swing_highs)
+        support_levels = cluster_levels(swing_lows)
+
+        # Find strongest levels (most touches)
+        current_price = df_recent["close"].iloc[-1]
+        
+        strongest_resistance = None
+        if resistance_levels:
+            # Closest resistance above current price
+            above = [r for r in resistance_levels if r > current_price]
+            if above:
+                strongest_resistance = min(above)
+
+        strongest_support = None
+        if support_levels:
+            # Closest support below current price
+            below = [s for s in support_levels if s < current_price]
+            if below:
+                strongest_support = max(below)
+
+        return {
+            "support_levels": support_levels[-5:] if len(support_levels) > 5 else support_levels,
+            "resistance_levels": resistance_levels[-5:] if len(resistance_levels) > 5 else resistance_levels,
+            "strongest_support": strongest_support,
+            "strongest_resistance": strongest_resistance,
+        }
+
+    def _scan_sr_levels(
+        self,
+        df: pd.DataFrame,
+        latest: pd.Series,
+        current_price: float,
+        atr: float,
+        sr_levels: Dict,
+        regime: Dict,
+        mtf_analysis: Dict,
+        vwap_data: Dict,
+        volume_profile_data: Dict,
+        order_flow_data: Dict,
+        calculate_stop_take,
+        calculate_signal_score,
+    ) -> List[Dict]:
+        """
+        Scan for signals at support/resistance levels.
+        
+        Generates signals when price bounces off support (long) or resistance (short).
+        """
+        signals = []
+
+        strongest_support = sr_levels.get("strongest_support")
+        strongest_resistance = sr_levels.get("strongest_resistance")
+        
+        if not strongest_support and not strongest_resistance:
+            return signals
+
+        # Check for support bounce (long signal)
+        if strongest_support:
+            # Price is at or near support (within 0.3%)
+            distance_to_support = abs(current_price - strongest_support) / strongest_support
+            
+            if distance_to_support < 0.003:
+                # Check for bounce conditions
+                is_bouncing = (
+                    latest.get("close") > latest.get("open")  # Up bar
+                    and latest.get("low") <= strongest_support * 1.002  # Touched support
+                    and latest.get("volume_ratio", 0) > 1.0  # Volume present
+                )
+                
+                if is_bouncing:
+                    stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
+                    # Place stop below support
+                    stop_loss = min(stop_loss, strongest_support - (atr * 0.5))
+                    
+                    confidence = calculate_signal_score("sr_bounce_long", latest, df)
+                    
+                    # Adjust for regime
+                    confidence = self.regime_detector.adjust_confidence_by_regime(
+                        "mean_reversion_long", confidence, regime
+                    )
+                    
+                    if confidence >= 0.45:  # Slightly lower threshold for S/R
+                        signals.append({
+                            "type": "sr_bounce_long",
+                            "direction": "long",
+                            "confidence": confidence,
+                            "entry_price": current_price,
+                            "stop_loss": stop_loss,
+                            "take_profit": take_profit,
+                            "reason": f"Price bouncing off support level at {strongest_support:.2f}",
+                            "regime": regime,
+                            "mtf_analysis": mtf_analysis,
+                            "vwap_data": vwap_data,
+                            "volume_profile": volume_profile_data,
+                            "order_flow": order_flow_data,
+                            "sr_levels": sr_levels,
+                        })
+
+        # Check for resistance rejection (short signal)
+        if strongest_resistance:
+            # Price is at or near resistance (within 0.3%)
+            distance_to_resistance = abs(current_price - strongest_resistance) / strongest_resistance
+            
+            if distance_to_resistance < 0.003:
+                # Check for rejection conditions
+                is_rejecting = (
+                    latest.get("close") < latest.get("open")  # Down bar
+                    and latest.get("high") >= strongest_resistance * 0.998  # Touched resistance
+                    and latest.get("volume_ratio", 0) > 1.0  # Volume present
+                )
+                
+                if is_rejecting:
+                    stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+                    # Place stop above resistance
+                    stop_loss = max(stop_loss, strongest_resistance + (atr * 0.5))
+                    
+                    confidence = calculate_signal_score("sr_bounce_short", latest, df)
+                    
+                    # Adjust for regime
+                    confidence = self.regime_detector.adjust_confidence_by_regime(
+                        "mean_reversion_short", confidence, regime
+                    )
+                    
+                    if confidence >= 0.45:
+                        signals.append({
+                            "type": "sr_bounce_short",
+                            "direction": "short",
+                            "confidence": confidence,
+                            "entry_price": current_price,
+                            "stop_loss": stop_loss,
+                            "take_profit": take_profit,
+                            "reason": f"Price rejecting from resistance level at {strongest_resistance:.2f}",
+                            "regime": regime,
+                            "mtf_analysis": mtf_analysis,
+                            "vwap_data": vwap_data,
+                            "volume_profile": volume_profile_data,
+                            "order_flow": order_flow_data,
+                            "sr_levels": sr_levels,
+                        })
+
+        return signals
+
+    def _scan_vwap_reversion(
+        self,
+        df: pd.DataFrame,
+        latest: pd.Series,
+        current_price: float,
+        atr: float,
+        vwap_data: Dict,
+        regime: Dict,
+        mtf_analysis: Dict,
+        volume_profile_data: Dict,
+        order_flow_data: Dict,
+        calculate_stop_take,
+        calculate_signal_score,
+    ) -> List[Dict]:
+        """
+        Scan for VWAP reversion signals.
+        
+        Generates signals when price returns to VWAP after extended move.
+        """
+        signals = []
+        
+        vwap = vwap_data.get("vwap", 0)
+        if vwap == 0:
+            return signals
+
+        distance_pct = vwap_data.get("distance_pct", 0)
+        
+        # Only look for VWAP reversion when price is extended from VWAP
+        # and moving back toward it
+        
+        if len(df) < 3:
+            return signals
+
+        prev = df.iloc[-2]
+        prev_close = prev.get("close", 0)
+        
+        # Long: Price was below VWAP, now crossing back up
+        if distance_pct > -0.5 and distance_pct < 0.1:  # Near VWAP from below
+            prev_distance = ((prev_close - vwap) / vwap * 100) if vwap > 0 else 0
+            if prev_distance < -0.3 and current_price > prev_close:  # Was further below, now rising
+                # VWAP long reversion
+                stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
+                confidence = calculate_signal_score("vwap_reversion_long", latest, df)
+                
+                # Adjust for regime
+                confidence = self.regime_detector.adjust_confidence_by_regime(
+                    "mean_reversion_long", confidence, regime
+                )
+                
+                if confidence >= 0.50 and latest.get("volume_ratio", 0) > 1.0:
+                    signals.append({
+                        "type": "vwap_reversion_long",
+                        "direction": "long",
+                        "confidence": confidence,
+                        "entry_price": current_price,
+                        "stop_loss": stop_loss,
+                        "take_profit": vwap + (atr * 0.5),  # Target slightly above VWAP
+                        "reason": f"Price reverting to VWAP ({vwap:.2f}) from below",
+                        "regime": regime,
+                        "mtf_analysis": mtf_analysis,
+                        "vwap_data": vwap_data,
+                        "volume_profile": volume_profile_data,
+                        "order_flow": order_flow_data,
+                    })
+
+        # Short: Price was above VWAP, now crossing back down
+        if distance_pct > -0.1 and distance_pct < 0.5:  # Near VWAP from above
+            prev_distance = ((prev_close - vwap) / vwap * 100) if vwap > 0 else 0
+            if prev_distance > 0.3 and current_price < prev_close:  # Was further above, now falling
+                # VWAP short reversion
+                stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+                confidence = calculate_signal_score("vwap_reversion_short", latest, df)
+                
+                # Adjust for regime
+                confidence = self.regime_detector.adjust_confidence_by_regime(
+                    "mean_reversion_short", confidence, regime
+                )
+                
+                if confidence >= 0.50 and latest.get("volume_ratio", 0) > 1.0:
+                    signals.append({
+                        "type": "vwap_reversion_short",
+                        "direction": "short",
+                        "confidence": confidence,
+                        "entry_price": current_price,
+                        "stop_loss": stop_loss,
+                        "take_profit": vwap - (atr * 0.5),  # Target slightly below VWAP
+                        "reason": f"Price reverting to VWAP ({vwap:.2f}) from above",
+                        "regime": regime,
+                        "mtf_analysis": mtf_analysis,
+                        "vwap_data": vwap_data,
+                        "volume_profile": volume_profile_data,
+                        "order_flow": order_flow_data,
+                    })
+
+        return signals
+
+    def _scan_engulfing_patterns(
+        self,
+        df: pd.DataFrame,
+        latest: pd.Series,
+        current_price: float,
+        atr: float,
+        regime: Dict,
+        mtf_analysis: Dict,
+        vwap_data: Dict,
+        volume_profile_data: Dict,
+        order_flow_data: Dict,
+        calculate_stop_take,
+        calculate_signal_score,
+    ) -> List[Dict]:
+        """
+        Scan for engulfing candle patterns.
+        
+        Bullish engulfing: Down bar followed by up bar that completely engulfs it
+        Bearish engulfing: Up bar followed by down bar that completely engulfs it
+        """
+        signals = []
+        
+        if len(df) < 3:
+            return signals
+
+        prev = df.iloc[-2]
+        prev2 = df.iloc[-3]
+        
+        # Bullish engulfing
+        prev_is_down = prev.get("close") < prev.get("open")
+        curr_is_up = latest.get("close") > latest.get("open")
+        bullish_engulf = (
+            prev_is_down and curr_is_up and
+            latest.get("open") <= prev.get("close") and
+            latest.get("close") >= prev.get("open") and
+            latest.get("volume_ratio", 0) > 1.2  # Strong volume
+        )
+        
+        if bullish_engulf:
+            stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
+            stop_loss = min(stop_loss, latest.get("low") - (atr * 0.25))  # Stop below engulfing low
+            
+            confidence = calculate_signal_score("engulfing_long", latest, df)
+            confidence = self.regime_detector.adjust_confidence_by_regime(
+                "momentum_long", confidence, regime
+            )
+            
+            # Boost if after a downtrend (reversal pattern)
+            if prev2.get("close", 0) > prev.get("close", 0):
+                confidence = min(1.0, confidence + 0.05)
+            
+            if confidence >= 0.50:
+                signals.append({
+                    "type": "engulfing_long",
+                    "direction": "long",
+                    "confidence": confidence,
+                    "entry_price": current_price,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                    "reason": "Bullish engulfing pattern with volume confirmation",
+                    "regime": regime,
+                    "mtf_analysis": mtf_analysis,
+                    "vwap_data": vwap_data,
+                    "volume_profile": volume_profile_data,
+                    "order_flow": order_flow_data,
+                })
+
+        # Bearish engulfing
+        prev_is_up = prev.get("close") > prev.get("open")
+        curr_is_down = latest.get("close") < latest.get("open")
+        bearish_engulf = (
+            prev_is_up and curr_is_down and
+            latest.get("open") >= prev.get("close") and
+            latest.get("close") <= prev.get("open") and
+            latest.get("volume_ratio", 0) > 1.2  # Strong volume
+        )
+        
+        if bearish_engulf:
+            stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+            stop_loss = max(stop_loss, latest.get("high") + (atr * 0.25))  # Stop above engulfing high
+            
+            confidence = calculate_signal_score("engulfing_short", latest, df)
+            confidence = self.regime_detector.adjust_confidence_by_regime(
+                "momentum_short", confidence, regime
+            )
+            
+            # Boost if after an uptrend (reversal pattern)
+            if prev2.get("close", 0) < prev.get("close", 0):
+                confidence = min(1.0, confidence + 0.05)
+            
+            if confidence >= 0.50:
+                signals.append({
+                    "type": "engulfing_short",
+                    "direction": "short",
+                    "confidence": confidence,
+                    "entry_price": current_price,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                    "reason": "Bearish engulfing pattern with volume confirmation",
+                    "regime": regime,
+                    "mtf_analysis": mtf_analysis,
+                    "vwap_data": vwap_data,
+                    "volume_profile": volume_profile_data,
+                    "order_flow": order_flow_data,
+                })
 
         return signals

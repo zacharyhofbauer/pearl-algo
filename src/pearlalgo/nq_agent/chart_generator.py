@@ -238,6 +238,69 @@ class ChartGenerator:
             ))
         
         return lines
+
+    def _add_context_levels(self, data: pd.DataFrame, signal: Dict) -> List:
+        """Add lightweight context levels (S/R + VWAP bands) for mobile readability."""
+        lines: List = []
+
+        try:
+            # Support/Resistance levels (if available)
+            sr = signal.get("sr_levels") or {}
+            support = sr.get("strongest_support")
+            resistance = sr.get("strongest_resistance")
+
+            if support:
+                sup_series = pd.Series([float(support)] * len(data), index=data.index)
+                lines.append(
+                    mpf.make_addplot(
+                        sup_series,
+                        color=TEXT_SECONDARY,
+                        width=1.4,
+                        linestyle=":",
+                        alpha=0.7,
+                        label=f"Support: {float(support):.2f}",
+                    )
+                )
+            if resistance:
+                res_series = pd.Series([float(resistance)] * len(data), index=data.index)
+                lines.append(
+                    mpf.make_addplot(
+                        res_series,
+                        color=TEXT_SECONDARY,
+                        width=1.4,
+                        linestyle=":",
+                        alpha=0.7,
+                        label=f"Resistance: {float(resistance):.2f}",
+                    )
+                )
+
+            # VWAP bands (if computed by the scanner)
+            vwap = signal.get("vwap_data") or {}
+            vwap_val = vwap.get("vwap")
+            if vwap_val and float(vwap_val) > 0:
+                for k, lbl, alpha in (
+                    ("vwap_upper_1", "VWAP +1", 0.35),
+                    ("vwap_lower_1", "VWAP -1", 0.35),
+                    ("vwap_upper_2", "VWAP +2", 0.25),
+                    ("vwap_lower_2", "VWAP -2", 0.25),
+                ):
+                    level = vwap.get(k)
+                    if level and float(level) > 0 and float(level) != float(vwap_val):
+                        series = pd.Series([float(level)] * len(data), index=data.index)
+                        lines.append(
+                            mpf.make_addplot(
+                                series,
+                                color=VWAP_COLOR,
+                                width=1.0,
+                                linestyle="--",
+                                alpha=alpha,
+                                label=lbl,
+                            )
+                        )
+        except Exception as e:
+            logger.debug(f"Error adding context levels: {e}")
+
+        return lines
     
     def generate_entry_chart(
         self,
@@ -274,6 +337,9 @@ class ChartGenerator:
             # Add Entry/SL/TP lines
             entry_lines = self._add_entry_sl_tp_lines(df, entry_price, stop_loss, take_profit, direction)
             addplot.extend(entry_lines)
+
+            # Add context levels (S/R + VWAP bands if present)
+            addplot.extend(self._add_context_levels(df, signal))
             
             # Create title
             signal_type = signal.get("type", "unknown").replace("_", " ").title()
@@ -354,6 +420,9 @@ class ChartGenerator:
             # Add Entry/SL/TP lines
             entry_lines = self._add_entry_sl_tp_lines(df, entry_price, stop_loss, take_profit, direction)
             addplot.extend(entry_lines)
+
+            # Add context levels (S/R + VWAP bands if present)
+            addplot.extend(self._add_context_levels(df, signal))
             
             # Add exit line
             exit_series = pd.Series([exit_price] * len(df), index=df.index)

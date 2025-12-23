@@ -12,7 +12,7 @@ import json
 import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Dict, Optional, Callable, Awaitable
+from typing import Dict, Optional, Callable, Awaitable, List
 
 import pandas as pd
 import numpy as np
@@ -137,6 +137,7 @@ class TelegramCommandHandler:
         # Read-only operational helpers
         self.application.add_handler(CommandHandler("config", self._handle_config))
         self.application.add_handler(CommandHandler("health", self._handle_health))
+        self.application.add_handler(CommandHandler("data_quality", self._handle_data_quality))
         
         # Service control commands (start/stop gateway and agent)
         self.application.add_handler(CommandHandler("start_gateway", self._handle_start_gateway))
@@ -567,45 +568,129 @@ class TelegramCommandHandler:
                 )
                 return
             
-            # Get last 10
-            recent_signals = signals[-10:]
-            recent_signals.reverse()  # Show newest first
-            
+            # Filters (persist per-chat; single-admin setup makes this straightforward)
+            user_data = context.user_data if hasattr(context, "user_data") else {}
+            dir_filter = (user_data.get("signals_dir") or "all").lower()
+            type_filter = (user_data.get("signals_type") or "all").lower()
+            try:
+                min_conf = float(user_data.get("signals_min_conf", 0.0) or 0.0)
+            except Exception:
+                min_conf = 0.0
+
+            if dir_filter not in ("all", "long", "short"):
+                dir_filter = "all"
+            if type_filter not in ("all", "momentum", "mean_reversion", "breakout", "other"):
+                type_filter = "all"
+            if min_conf not in (0.0, 0.5, 0.6, 0.7):
+                # Keep it predictable (button presets)
+                min_conf = 0.0
+
+            def _bucket_type(t: str) -> str:
+                t = (t or "").lower()
+                if "momentum" in t:
+                    return "momentum"
+                if "breakout" in t:
+                    return "breakout"
+                if "mean_reversion" in t or "vwap_reversion" in t or "sr_bounce" in t or "engulfing" in t:
+                    return "mean_reversion"
+                return "other"
+
+            filtered: List[Dict] = []
+            for sig_data in signals:
+                signal = sig_data.get("signal", {}) or {}
+                sig_dir = (signal.get("direction", "long") or "long").lower()
+                sig_type = signal.get("type", "unknown")
+                try:
+                    conf_val = float(signal.get("confidence", 0.0) or 0.0)
+                except Exception:
+                    conf_val = 0.0
+
+                if dir_filter != "all" and sig_dir != dir_filter:
+                    continue
+                if conf_val < min_conf:
+                    continue
+                if type_filter != "all" and _bucket_type(sig_type) != type_filter:
+                    continue
+                filtered.append(sig_data)
+
+            # Show newest first (last 10 of filtered)
+            recent_signals = filtered[-10:]
+            recent_signals.reverse()
+
             total_count = len(signals)
-            message = f"🔔 *Signals*\n\n"
-            message += f"*Total:* {total_count} signal(s) stored\n"
-            message += f"*Showing:* Last {len(recent_signals)} signal(s)\n\n"
-            
-            keyboard = []
-            for i, sig_data in enumerate(recent_signals, 1):
-                signal = sig_data.get("signal", {})
-                signal_type = signal.get("type", "unknown")
-                direction = signal.get("direction", "long").upper()
-                entry_price = signal.get("entry_price", 0)
-                status = sig_data.get("status", "unknown")
-                signal_id = sig_data.get("signal_id", "")
-                
-                status_emoji = {
-                    "generated": "🆕",
-                    "entered": "✅",
-                    "exited": "🏁",
-                    "expired": "⏰",
-                }.get(status, "⚪")
-                
-                message += f"{i}. {status_emoji} {signal_type} {direction}\n"
-                message += f"   Entry: ${entry_price:.2f} | Status: {status}\n\n"
-                
-                # Add chart button for each signal
-                if signal_id:
-                    keyboard.append([
-                        InlineKeyboardButton(
-                            f"📊 Chart {i}",
-                            callback_data=f"signal_chart_{signal_id[:16]}"
-                        )
-                    ])
-            
-            reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
-            
+            filtered_count = len(filtered)
+
+            message = "🔔 *Signals*\n\n"
+            message += f"*Stored:* {total_count}  |  *Matching filters:* {filtered_count}\n"
+            message += f"*Showing:* {len(recent_signals)} newest\n\n"
+            message += f"*Filters:* dir={dir_filter}, type={type_filter}, conf≥{int(min_conf*100)}%\n\n"
+
+            keyboard: List[List[InlineKeyboardButton]] = []
+
+            # Filter controls
+            keyboard.append([
+                InlineKeyboardButton("✅ All" if dir_filter == "all" else "All", callback_data="signals:setdir:all"),
+                InlineKeyboardButton("✅ Long" if dir_filter == "long" else "Long", callback_data="signals:setdir:long"),
+                InlineKeyboardButton("✅ Short" if dir_filter == "short" else "Short", callback_data="signals:setdir:short"),
+            ])
+            keyboard.append([
+                InlineKeyboardButton("✅ 0%" if min_conf == 0.0 else "0%", callback_data="signals:setconf:0.0"),
+                InlineKeyboardButton("✅ 50%" if min_conf == 0.5 else "50%", callback_data="signals:setconf:0.5"),
+                InlineKeyboardButton("✅ 60%" if min_conf == 0.6 else "60%", callback_data="signals:setconf:0.6"),
+                InlineKeyboardButton("✅ 70%" if min_conf == 0.7 else "70%", callback_data="signals:setconf:0.7"),
+            ])
+            keyboard.append([
+                InlineKeyboardButton("✅ All" if type_filter == "all" else "All", callback_data="signals:settype:all"),
+                InlineKeyboardButton("✅ Mom" if type_filter == "momentum" else "Mom", callback_data="signals:settype:momentum"),
+            ])
+            keyboard.append([
+                InlineKeyboardButton("✅ MeanRev" if type_filter == "mean_reversion" else "MeanRev", callback_data="signals:settype:mean_reversion"),
+                InlineKeyboardButton("✅ BO" if type_filter == "breakout" else "BO", callback_data="signals:settype:breakout"),
+                InlineKeyboardButton("✅ Other" if type_filter == "other" else "Other", callback_data="signals:settype:other"),
+            ])
+
+            if not recent_signals:
+                message += "📭 No signals match these filters.\n"
+            else:
+                for i, sig_data in enumerate(recent_signals, 1):
+                    signal = sig_data.get("signal", {}) or {}
+                    signal_type = signal.get("type", "unknown")
+                    direction = (signal.get("direction", "long") or "long").upper()
+                    entry_price = float(signal.get("entry_price", 0.0) or 0.0)
+                    status = sig_data.get("status", "unknown")
+                    signal_id = sig_data.get("signal_id", "")
+                    try:
+                        conf_val = float(signal.get("confidence", 0.0) or 0.0)
+                    except Exception:
+                        conf_val = 0.0
+
+                    status_emoji = {
+                        "generated": "🆕",
+                        "entered": "✅",
+                        "exited": "🏁",
+                        "expired": "⏰",
+                    }.get(status, "⚪")
+
+                    message += f"{i}. {status_emoji} {signal_type} {direction} • {conf_val:.0%}\n"
+                    message += f"   Entry: ${entry_price:.2f} | Status: {status} | ID: {signal_id[:10]}...\n\n"
+
+                    # Per-signal actions
+                    row: List[InlineKeyboardButton] = []
+                    if signal_id and self.chart_generator:
+                        row.append(InlineKeyboardButton(f"📊 {i}", callback_data=f"signal_chart_{signal_id[:16]}"))
+                    if signal_id:
+                        row.append(InlineKeyboardButton(f"ℹ️ {i}", callback_data=f"signal_detail_{signal_id[:16]}"))
+                    if row:
+                        keyboard.append(row)
+
+            # Navigation
+            keyboard.append([
+                InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
+                InlineKeyboardButton("📈 Performance", callback_data="performance"),
+            ])
+            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             
         except Exception as e:
@@ -1119,9 +1204,21 @@ class TelegramCommandHandler:
                 mode = "5m"
             mode_label = "5m decision (recommended)" if mode == "5m" else "1m (legacy)"
 
+            # Preset parameters (persist per-chat)
+            user_data = context.user_data if hasattr(context, "user_data") else {}
+            try:
+                pos_size = int(user_data.get("backtest_contracts", 5) or 5)
+            except Exception:
+                pos_size = 5
+            try:
+                slippage_ticks = float(user_data.get("backtest_slippage_ticks", 0.5) or 0.5)
+            except Exception:
+                slippage_ticks = 0.5
+
             message = (
                 "📊 *Backtest Strategy*\n\n"
                 f"*Mode:* {mode_label}\n\n"
+                f"*Contracts:* {pos_size} MNQ  |  *Slippage:* {slippage_ticks} ticks\n\n"
                 "Select backtest duration:\n\n"
                 "Tip: 2 months is a great default. 6 months is for deeper checks."
             )
@@ -1148,6 +1245,30 @@ class TelegramCommandHandler:
                         callback_data="backtest_setmode_1m",
                     ),
                 ],
+                [
+                    InlineKeyboardButton(
+                        "✅ 1x" if pos_size == 1 else "1x",
+                        callback_data="backtest_setpos_1",
+                    ),
+                    InlineKeyboardButton(
+                        "✅ 5x" if pos_size == 5 else "5x",
+                        callback_data="backtest_setpos_5",
+                    ),
+                    InlineKeyboardButton(
+                        "✅ 10x" if pos_size == 10 else "10x",
+                        callback_data="backtest_setpos_10",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        "✅ slip 0.5" if slippage_ticks == 0.5 else "slip 0.5",
+                        callback_data="backtest_setslip_0.5",
+                    ),
+                    InlineKeyboardButton(
+                        "✅ slip 1.0" if slippage_ticks == 1.0 else "slip 1.0",
+                        callback_data="backtest_setslip_1.0",
+                    ),
+                ],
                 [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
             ])
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -1157,8 +1278,9 @@ class TelegramCommandHandler:
         
         try:
             from pearlalgo.strategies.nq_intraday.backtest_adapter import (
-                run_signal_backtest,
-                run_signal_backtest_5m_decision,
+                export_trade_journal,
+                run_full_backtest,
+                run_full_backtest_5m_decision,
             )
             from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
             
@@ -1220,29 +1342,61 @@ class TelegramCommandHandler:
                 if not isinstance(backtest_data.index, pd.DatetimeIndex):
                     raise ValueError(f"Could not convert data index to DatetimeIndex. Index type: {type(backtest_data.index)}")
                 
-                # Ensure required columns exist (uppercase for backtest)
+                # Ensure required OHLCV columns exist (prefer lowercase for strategy/backtest stack)
                 column_mapping = {
-                    'open': 'Open', 'high': 'High', 'low': 'Low',
-                    'close': 'Close', 'volume': 'Volume'
+                    "open": "Open",
+                    "high": "High",
+                    "low": "Low",
+                    "close": "Close",
+                    "volume": "Volume",
                 }
                 for lower, upper in column_mapping.items():
+                    # If provider returned uppercase, mirror to lowercase
+                    if upper in backtest_data.columns and lower not in backtest_data.columns:
+                        backtest_data[lower] = backtest_data[upper]
+                    # If lowercase exists, optionally mirror to uppercase for any charting helpers
                     if lower in backtest_data.columns and upper not in backtest_data.columns:
                         backtest_data[upper] = backtest_data[lower]
                 
-                # Running backtest (no progress updates - they interfere)
-                
+                # Run backtest (default: full trade simulation)
+                user_data = context.user_data if hasattr(context, "user_data") else {}
+                try:
+                    pos_size = int(user_data.get("backtest_contracts", 5) or 5)
+                except Exception:
+                    pos_size = 5
+                if pos_size not in (1, 5, 10):
+                    pos_size = 5
+                try:
+                    slippage_ticks = float(user_data.get("backtest_slippage_ticks", 0.5) or 0.5)
+                except Exception:
+                    slippage_ticks = 0.5
+                if slippage_ticks not in (0.5, 1.0):
+                    slippage_ticks = 0.5
+
                 config = NQIntradayConfig()
+                tick_value = float(getattr(config, "tick_value", 2.0) or 2.0)
+
                 if mode == "5m":
-                    result = run_signal_backtest_5m_decision(
+                    result = run_full_backtest_5m_decision(
                         backtest_data,
                         config=config,
-                        return_signals=True,
+                        position_size=pos_size,
+                        tick_value=tick_value,
+                        slippage_ticks=slippage_ticks,
+                        return_trades=True,
                         decision_rule="5min",
                         context_rule_1="1h",
                         context_rule_2="4h",
                     )
                 else:
-                    result = run_signal_backtest(backtest_data, config=config, return_signals=True)
+                    result = run_full_backtest(
+                        backtest_data,
+                        config=config,
+                        position_size=pos_size,
+                        tick_value=tick_value,
+                        slippage_ticks=slippage_ticks,
+                        return_trades=True,
+                    )
                         
                 # Use actual signals from backtest if available
                 if result.signals and len(result.signals) > 0:
@@ -1278,6 +1432,10 @@ class TelegramCommandHandler:
                         "avg_risk_reward": result.avg_risk_reward,
                         "win_rate": result.win_rate if result.win_rate is not None else 0.0,
                         "total_pnl": result.total_pnl if result.total_pnl is not None else 0.0,
+                        "total_trades": result.total_trades if result.total_trades is not None else 0,
+                        "profit_factor": result.profit_factor if result.profit_factor is not None else 0.0,
+                        "max_drawdown": result.max_drawdown if result.max_drawdown is not None else 0.0,
+                        "sharpe_ratio": result.sharpe_ratio if result.sharpe_ratio is not None else 0.0,
                     }
                     
                     # Convert back to format expected by chart generator (reset index to get timestamp column)
@@ -1308,17 +1466,22 @@ class TelegramCommandHandler:
                     
                     win_rate_display = f"{result.win_rate:.1%}" if result.win_rate is not None else "N/A"
                     total_pnl_display = f"${result.total_pnl:.2f}" if result.total_pnl is not None else "N/A"
+                    profit_factor_display = f"{result.profit_factor:.2f}" if result.profit_factor is not None else "N/A"
+                    max_dd_display = f"${result.max_drawdown:.2f}" if result.max_drawdown is not None else "N/A"
+                    sharpe_display = f"{result.sharpe_ratio:.2f}" if result.sharpe_ratio is not None else "N/A"
+                    trades_display = f"{result.total_trades}" if result.total_trades is not None else "0"
 
                     message = (
                         f"📊 *Backtest Results ({months} Month{'s' if months > 1 else ''})*\n\n"
                         f"*Period:* {data_start} to {data_end}\n"
                         f"*Bars Analyzed:* {result.total_bars:,}\n"
                         f"*Signals Generated:* {result.total_signals}\n"
-                        f"*Signals on Chart:* {signals_shown}\n"
+                        f"*Signals on Chart:* {signals_shown}\n\n"
+                        f"*Contracts:* {pos_size} MNQ  |  *Slippage:* {slippage_ticks} ticks\n"
+                        f"*Trades:* {trades_display}  |  *Win Rate:* {win_rate_display}  |  *PF:* {profit_factor_display}\n"
                         f"*Avg Confidence:* {result.avg_confidence:.2f}\n"
                         f"*Avg R:R:* {result.avg_risk_reward:.2f}:1\n"
-                        f"*Win Rate:* {win_rate_display}\n"
-                        f"*Total P&L:* {total_pnl_display}\n\n"
+                        f"*Total P&L:* {total_pnl_display}  |  *Max DD:* {max_dd_display}  |  *Sharpe:* {sharpe_display}\n\n"
                         "📈 *Chart Components:*\n"
                         "• Green/Red candlesticks = Price action\n"
                         "• 🔼 Green triangles = Long entry signals\n"
@@ -1328,10 +1491,69 @@ class TelegramCommandHandler:
                         "• Moving averages (blue/purple)"
                     )
                             
-                    reply_markup = InlineKeyboardMarkup([[
-                        InlineKeyboardButton("🔄 Run Again", callback_data='backtest'),
-                        InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
-                    ]])
+                    # Export artifacts (trade journal + metrics)
+                    export_paths: Dict[str, str] = {}
+                    try:
+                        exports_dir = self.state_dir / "exports"
+                        exports_dir.mkdir(parents=True, exist_ok=True)
+                        ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                        base_name = f"backtest_{mode}_{months}m_{ts_tag}"
+
+                        # Metrics JSON (always)
+                        metrics_path = exports_dir / f"{base_name}_metrics.json"
+                        metrics_obj = {
+                            "mode": mode,
+                            "months": months,
+                            "contracts": pos_size,
+                            "slippage_ticks": slippage_ticks,
+                            "total_bars": result.total_bars,
+                            "total_signals": result.total_signals,
+                            "avg_confidence": result.avg_confidence,
+                            "avg_risk_reward": result.avg_risk_reward,
+                            "total_trades": result.total_trades,
+                            "win_rate": result.win_rate,
+                            "total_pnl": result.total_pnl,
+                            "profit_factor": result.profit_factor,
+                            "max_drawdown": result.max_drawdown,
+                            "max_drawdown_pct": result.max_drawdown_pct,
+                            "sharpe_ratio": result.sharpe_ratio,
+                            "avg_win": result.avg_win,
+                            "avg_loss": result.avg_loss,
+                            "avg_hold_time_minutes": result.avg_hold_time_minutes,
+                        }
+                        with open(metrics_path, "w") as f:
+                            json.dump(metrics_obj, f, indent=2)
+                        export_paths["metrics"] = str(metrics_path)
+
+                        # Trades (if available)
+                        if getattr(result, "trades", None):
+                            trades_csv = exports_dir / f"{base_name}_trades.csv"
+                            trades_json = exports_dir / f"{base_name}_trades.json"
+                            export_trade_journal(result.trades, str(trades_csv), format="csv")
+                            export_trade_journal(result.trades, str(trades_json), format="json")
+                            export_paths["csv"] = str(trades_csv)
+                            export_paths["json"] = str(trades_json)
+
+                        if hasattr(context, "user_data"):
+                            context.user_data["backtest_export_paths"] = export_paths
+                    except Exception as e:
+                        logger.warning(f"Could not create export artifacts: {e}")
+
+                    # Buttons
+                    keyboard = []
+                    export_row = []
+                    if export_paths.get("csv"):
+                        export_row.append(InlineKeyboardButton("📄 Trades CSV", callback_data="backtest_export:csv"))
+                    if export_paths.get("json"):
+                        export_row.append(InlineKeyboardButton("🧾 Trades JSON", callback_data="backtest_export:json"))
+                    if export_row:
+                        keyboard.append(export_row)
+                    keyboard.append([
+                        InlineKeyboardButton("📊 Metrics JSON", callback_data="backtest_export:metrics"),
+                        InlineKeyboardButton("🔄 Run Again", callback_data="backtest"),
+                    ])
+                    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+                    reply_markup = InlineKeyboardMarkup(keyboard)
                     
                     await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
                     
@@ -1343,12 +1565,12 @@ class TelegramCommandHandler:
                                     await context.bot.send_photo(
                                         chat_id=update.effective_chat.id,
                                         photo=photo,
-                                        caption="📊 Backtest Chart (6 Months Historical Data)"
+                                        caption=f"📊 Backtest Chart ({months} Month{'s' if months > 1 else ''}, {mode} mode)"
                                     )
                                 else:
                                     await update.message.reply_photo(
                                         photo=photo,
-                                        caption="📊 Backtest Chart (6 Months Historical Data)"
+                                        caption=f"📊 Backtest Chart ({months} Month{'s' if months > 1 else ''}, {mode} mode)"
                                     )
                             chart_path.unlink()
                         except Exception as e:
@@ -1416,6 +1638,139 @@ class TelegramCommandHandler:
                 f"❌ *Error:* {str(e)}",
                 reply_markup=reply_markup
             )
+
+    async def _handle_backtest_export(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        kind: str,
+    ) -> None:
+        """Send the most recent backtest export artifact (CSV/JSON)."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        paths = {}
+        if hasattr(context, "user_data"):
+            paths = context.user_data.get("backtest_export_paths", {}) or {}
+
+        key = kind.lower().strip()
+        if key not in ("csv", "json", "metrics"):
+            key = "metrics"
+
+        target = paths.get(key)
+        if not target:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "❌ *No export available*\n\nRun a backtest first, then try export again.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📉 Backtest", callback_data="backtest")],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                ]),
+            )
+            return
+
+        try:
+            p = Path(target)
+            if not p.exists() or not p.is_file():
+                raise FileNotFoundError(str(p))
+
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_document")
+            with open(p, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=f,
+                    filename=p.name,
+                )
+
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"✅ Sent `{p.name}`",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
+                        InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
+                    ]
+                ]),
+            )
+        except Exception as e:
+            logger.error(f"Error exporting backtest artifact: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"❌ *Export failed*\n\n`{str(e)}`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+
+    async def _handle_performance_export(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        kind: str,
+    ) -> None:
+        """Send the most recent performance export artifact."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        paths = {}
+        if hasattr(context, "user_data"):
+            paths = context.user_data.get("performance_export_paths", {}) or {}
+
+        key = kind.lower().strip()
+        if key == "signals":
+            target = paths.get("signals_jsonl")
+        elif key == "exited":
+            target = paths.get("exited_csv")
+        else:
+            target = paths.get("metrics")
+
+        if not target:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "❌ *No export available*\n\nOpen `/performance` first to generate export files.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📈 Performance", callback_data="performance")],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                ]),
+            )
+            return
+
+        try:
+            p = Path(target)
+            if not p.exists() or not p.is_file():
+                raise FileNotFoundError(str(p))
+
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_document")
+            with open(p, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=f,
+                    filename=p.name,
+                )
+
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"✅ Sent `{p.name}`",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("📈 Performance", callback_data="performance"),
+                        InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
+                    ]
+                ]),
+            )
+        except Exception as e:
+            logger.error(f"Error exporting performance artifact: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"❌ *Export failed*\n\n`{str(e)}`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
     
     async def _handle_test_signal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /test_signal command - generate a test signal with chart for testing."""
@@ -1424,7 +1779,7 @@ class TelegramCommandHandler:
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
         
-            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
         try:
             if not self.chart_generator:
@@ -1582,7 +1937,7 @@ class TelegramCommandHandler:
     async def _handle_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /performance command."""
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
         
         # Send typing indicator
@@ -1608,10 +1963,137 @@ class TelegramCommandHandler:
                 message += f"📊 Win Rate: {win_rate:.1f}%\n"
                 message += f"💰 Total P&L: ${total_pnl:,.2f}\n"
                 message += f"📊 Avg P&L: ${avg_pnl:,.2f}\n"
+                message += f"⏱️ Avg Hold: {performance.get('avg_hold_minutes', 0.0):.1f} min\n"
             else:
                 message += "⏳ No completed trades yet\n"
+
+            # Breakdown by signal type (top 6 by count)
+            by_type = performance.get("by_signal_type", {}) or {}
+            if by_type:
+                message += "\n🧾 *By Signal Type*\n"
+                items = []
+                for sig_type, m in by_type.items():
+                    items.append(
+                        (
+                            int(m.get("count", 0) or 0),
+                            str(sig_type),
+                            float(m.get("win_rate", 0.0) or 0.0),
+                            float(m.get("total_pnl", 0.0) or 0.0),
+                        )
+                    )
+                items.sort(key=lambda x: x[0], reverse=True)
+                for count, sig_type, wr, pnl in items[:6]:
+                    message += f"- `{sig_type}`: {count} • {wr*100:.0f}% • ${pnl:,.2f}\n"
+
+            # Prepare export artifacts (signals + metrics)
+            export_paths: Dict[str, str] = {}
+            try:
+                exports_dir = self.state_dir / "exports"
+                exports_dir.mkdir(parents=True, exist_ok=True)
+                ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                base_name = f"performance_7d_{ts_tag}"
+
+                # Metrics JSON
+                metrics_path = exports_dir / f"{base_name}_metrics.json"
+                with open(metrics_path, "w") as f:
+                    json.dump(performance, f, indent=2)
+                export_paths["metrics"] = str(metrics_path)
+
+                # Export last 7d signals (JSONL) + exited signals CSV
+                signals_file = get_signals_file(self.state_dir)
+                if signals_file.exists():
+                    cutoff = datetime.now(timezone.utc).timestamp() - (7 * 24 * 60 * 60)
+                    kept = []
+                    with open(signals_file, "r") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                rec = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            ts_str = rec.get("timestamp") or rec.get("signal", {}).get("timestamp") or ""
+                            try:
+                                ts = pd.to_datetime(ts_str).timestamp() if ts_str else None
+                            except Exception:
+                                ts = None
+                            if ts is None or ts < cutoff:
+                                continue
+                            kept.append(rec)
+
+                    if kept:
+                        signals_jsonl = exports_dir / f"{base_name}_signals.jsonl"
+                        with open(signals_jsonl, "w") as f:
+                            for rec in kept:
+                                f.write(json.dumps(rec) + "\n")
+                        export_paths["signals_jsonl"] = str(signals_jsonl)
+
+                        # Exited-only CSV (best-effort)
+                        exited = [r for r in kept if r.get("status") == "exited"]
+                        if exited:
+                            rows = []
+                            for r in exited:
+                                s = r.get("signal", {}) or {}
+                                rows.append(
+                                    {
+                                        "timestamp": r.get("timestamp"),
+                                        "signal_id": r.get("signal_id"),
+                                        "type": s.get("type"),
+                                        "direction": s.get("direction"),
+                                        "confidence": s.get("confidence"),
+                                        "entry_price": s.get("entry_price"),
+                                        "stop_loss": s.get("stop_loss"),
+                                        "take_profit": s.get("take_profit"),
+                                        "exit_price": r.get("exit_price"),
+                                        "exit_reason": r.get("exit_reason"),
+                                        "pnl": r.get("pnl"),
+                                        "is_win": r.get("is_win"),
+                                        "hold_minutes": r.get("hold_duration_minutes"),
+                                    }
+                                )
+                            df_out = pd.DataFrame(rows)
+                            csv_path = exports_dir / f"{base_name}_exited.csv"
+                            df_out.to_csv(csv_path, index=False)
+                            export_paths["exited_csv"] = str(csv_path)
+
+                if hasattr(context, "user_data"):
+                    context.user_data["performance_export_paths"] = export_paths
+            except Exception as e:
+                logger.warning(f"Could not create performance export artifacts: {e}")
+
+            # Buttons (exports)
+            keyboard = []
+            export_row = []
+            if export_paths.get("signals_jsonl"):
+                export_row.append(
+                    InlineKeyboardButton(
+                        "📄 Signals JSONL",
+                        callback_data="performance_export:signals",
+                    )
+                )
+            if export_paths.get("exited_csv"):
+                export_row.append(
+                    InlineKeyboardButton(
+                        "📄 Exited CSV",
+                        callback_data="performance_export:exited",
+                    )
+                )
+            if export_row:
+                keyboard.append(export_row)
+
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        "📊 Metrics JSON",
+                        callback_data="performance_export:metrics",
+                    ),
+                    InlineKeyboardButton("🔄 Refresh", callback_data="performance"),
+                ]
+            )
+            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
             
-            reply_markup = self._get_back_to_menu_button(include_refresh=True)
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             
         except Exception as e:
@@ -1725,16 +2207,191 @@ class TelegramCommandHandler:
             )
             reply_markup = self._get_back_to_menu_button()
             await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
+
+    async def _handle_data_quality(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        diagnose: bool = False,
+    ):
+        """Handle /data_quality command (data freshness + buffer + gateway triage)."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        # Load state file (written by agent service)
+        state_file = get_state_file(self.state_dir)
+        state: Dict = {}
+        if state_file.exists():
+            try:
+                with open(state_file) as f:
+                    state = json.load(f)
+            except Exception:
+                state = {}
+
+        agent_running = self._is_agent_process_running()
+        gateway_status = self.service_controller.get_gateway_status()
+        gateway_running = gateway_status.get("process_running", False)
+        gateway_api_ready = gateway_status.get("port_listening", False)
+
+        # Compute state file freshness (operator signal)
+        state_last_updated_utc = None
+        state_age_seconds = None
+        if state_file.exists():
+            try:
+                mtime = state_file.stat().st_mtime
+                state_last_updated_utc = datetime.fromtimestamp(mtime, tz=timezone.utc)
+                state_age_seconds = (datetime.now(timezone.utc) - state_last_updated_utc).total_seconds()
+            except Exception:
+                state_last_updated_utc = None
+                state_age_seconds = None
+
+        # Market open/closed is relevant for stale-data interpretation
+        market_open = None
+        try:
+            from pearlalgo.utils.market_hours import get_market_hours
+
+            market_open = bool(get_market_hours().is_market_open())
+        except Exception:
+            market_open = None
+
+        # Data freshness metadata (populated by service._save_state)
+        data_fresh = state.get("data_fresh")
+        latest_bar_timestamp = state.get("latest_bar_timestamp")
+        latest_bar_age_minutes = state.get("latest_bar_age_minutes")
+
+        # Backward-compatible: if age isn't persisted but timestamp is, compute age.
+        if latest_bar_age_minutes is None and latest_bar_timestamp:
+            try:
+                ts = datetime.fromisoformat(str(latest_bar_timestamp).replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                latest_bar_age_minutes = (datetime.now(timezone.utc) - ts).total_seconds() / 60.0
+            except Exception:
+                latest_bar_age_minutes = None
+
+        buffer_size = int(state.get("buffer_size", 0) or 0)
+
+        # Identify issues (keep short; top 3 shown)
+        issues: list[str] = []
+        if not agent_running:
+            issues.append("Agent process not running")
+        if not gateway_running:
+            issues.append("IBKR Gateway not running")
+        elif not gateway_api_ready:
+            issues.append("Gateway running but API not ready (port 4002 not listening)")
+
+        # State file should update frequently when agent is healthy
+        if state_age_seconds is not None and state_age_seconds > 60:
+            issues.append(f"State file update lag ({int(state_age_seconds)}s)")
+
+        if data_fresh is False:
+            issues.append("Market data appears stale while market is open")
+        if buffer_size < 10:
+            issues.append(f"Buffer low ({buffer_size} bars; min 10)")
+
+        # Heuristics: likely causes (prioritized)
+        likely_causes: list[str] = []
+        if not agent_running:
+            likely_causes.append("Agent stopped/crashed (restart agent)")
+        if not gateway_running:
+            likely_causes.append("Gateway down (start/restart gateway)")
+        if gateway_running and not gateway_api_ready:
+            likely_causes.append("Gateway still authenticating / 2FA / API not ready")
+        if data_fresh is False and (market_open is True or market_open is None):
+            likely_causes.append("IBKR market data entitlement / delayed feed / connectivity issue")
+        if buffer_size < 10:
+            likely_causes.append("Historical fetch failing (HMDS pacing/outage) or connection issue")
+
+        # Render message
+        title = "🛡 *Data Quality*" + (" (diagnose)" if diagnose else "")
+        message = f"{title}\n\n"
+
+        message += f"🤖 *Agent:* {'🟢 RUNNING' if agent_running else '🔴 STOPPED'}\n"
+        message += (
+            f"🔌 *Gateway:* {'🟢 RUNNING' if gateway_running else '🔴 STOPPED'}"
+            + (f" • API {'🟢 READY' if gateway_api_ready else '🔴 NOT READY'}" if gateway_running else "")
+            + "\n"
+        )
+        message += f"📊 *Buffer:* {buffer_size} bars\n"
+
+        if latest_bar_age_minutes is not None:
+            freshness_emoji = "🟢" if data_fresh is True else "🔴" if data_fresh is False else "⚪"
+            message += f"{freshness_emoji} *Latest Bar Age:* {float(latest_bar_age_minutes):.1f} min\n"
+        else:
+            message += "⚪ *Latest Bar Age:* unknown\n"
+
+        if market_open is True:
+            message += "🟢 *Market:* OPEN\n"
+        elif market_open is False:
+            message += "🔴 *Market:* CLOSED\n"
+        else:
+            message += "⚪ *Market:* UNKNOWN\n"
+
+        if state_last_updated_utc:
+            message += f"\n🗂️ *State Updated:* {state_last_updated_utc.isoformat(timespec='seconds')}\n"
+
+        if issues:
+            message += "\n⚠️ *Issues:*\n"
+            for i, issue in enumerate(issues[:3], start=1):
+                message += f"{i}. {issue}\n"
+
+        if likely_causes:
+            message += "\n💡 *Likely causes:*\n"
+            for i, cause in enumerate(likely_causes[:3], start=1):
+                message += f"{i}. {cause}\n"
+
+        if diagnose:
+            try:
+                from pearlalgo.config.config_loader import load_service_config
+
+                cfg = load_service_config()
+                data_cfg = cfg.get("data", {})
+                svc_cfg = cfg.get("service", {})
+                stale_thr = data_cfg.get("stale_data_threshold_minutes", 10)
+                alert_int = svc_cfg.get("data_quality_alert_interval", 300)
+                buf_target = data_cfg.get("buffer_size", 100)
+                message += "\n🔎 *Diagnostics:*\n"
+                message += f"- stale_threshold_minutes: {stale_thr}\n"
+                message += f"- data_quality_alert_interval_sec: {alert_int}\n"
+                message += f"- configured_buffer_size: {buf_target}\n"
+            except Exception:
+                pass
+
+        # Buttons
+        keyboard = [
+            [
+                InlineKeyboardButton("🔎 Diagnose", callback_data="data_quality:diagnose"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="data_quality"),
+            ],
+            [
+                InlineKeyboardButton("🔁 Restart Agent", callback_data="confirm:restart_agent"),
+                InlineKeyboardButton("🔁 Restart Gateway", callback_data="confirm:restart_gateway"),
+            ],
+            [
+                InlineKeyboardButton("🔌 Gateway Status", callback_data="gateway_status"),
+                InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
     
     async def _handle_start_gateway(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start_gateway command."""
         logger.info(f"Received /start_gateway command from chat {update.effective_chat.id}")
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
 
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        await update.message.reply_text("🔄 Starting IBKR Gateway... This may take up to 60 seconds.")
+        await self._send_message_or_edit(
+            update,
+            context,
+            "🔄 Starting *IBKR Gateway*...\n\nThis may take up to 60–120 seconds.",
+            reply_markup=None,
+        )
 
         result = await self.service_controller.start_gateway()
 
@@ -1742,17 +2399,19 @@ class TelegramCommandHandler:
         if result.get("details"):
             message += f"\n{result['details']}"
 
-        await update.message.reply_text(message, parse_mode="Markdown")
+        gateway_status = self.service_controller.get_gateway_status()
+        reply_markup = self._get_gateway_buttons(gateway_running=gateway_status.get("process_running", False))
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
 
     async def _handle_stop_gateway(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /stop_gateway command."""
         logger.info(f"Received /stop_gateway command from chat {update.effective_chat.id}")
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
 
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        await update.message.reply_text("🔄 Stopping IBKR Gateway...")
+        await self._send_message_or_edit(update, context, "🔄 Stopping *IBKR Gateway*...", reply_markup=None)
 
         result = await self.service_controller.stop_gateway()
 
@@ -1771,7 +2430,7 @@ class TelegramCommandHandler:
         """Handle /gateway_status command."""
         logger.info(f"Received /gateway_status command from chat {update.effective_chat.id}")
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
 
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -1793,11 +2452,11 @@ class TelegramCommandHandler:
         """Handle /start_agent command."""
         logger.info(f"Received /start_agent command from chat {update.effective_chat.id}")
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
 
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        await update.message.reply_text("🔄 Starting NQ Agent Service...")
+        await self._send_message_or_edit(update, context, "🔄 Starting *NQ Agent Service*...", reply_markup=None)
 
         result = await self.service_controller.start_agent(background=True)
 
@@ -1810,17 +2469,21 @@ class TelegramCommandHandler:
         if not gateway_status["process_running"]:
             message += "\n\n⚠️ *Warning:* IBKR Gateway is not running. Agent may not receive data."
 
-        await update.message.reply_text(message, parse_mode="Markdown")
+        reply_markup = self._get_main_menu_buttons(
+            agent_running=self._is_agent_process_running(),
+            gateway_running=gateway_status.get("process_running", False),
+        )
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
 
     async def _handle_stop_agent(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /stop_agent command."""
         logger.info(f"Received /stop_agent command from chat {update.effective_chat.id}")
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
 
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        await update.message.reply_text("🔄 Stopping NQ Agent Service...")
+        await self._send_message_or_edit(update, context, "🔄 Stopping *NQ Agent Service*...", reply_markup=None)
 
         result = await self.service_controller.stop_agent()
 
@@ -1837,11 +2500,11 @@ class TelegramCommandHandler:
         """Handle /restart_agent command."""
         logger.info(f"Received /restart_agent command from chat {update.effective_chat.id}")
         if not await self._check_authorized(update):
-            await update.message.reply_text("❌ Unauthorized access")
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
 
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        await update.message.reply_text("🔄 Restarting NQ Agent Service...")
+        await self._send_message_or_edit(update, context, "🔄 Restarting *NQ Agent Service*...", reply_markup=None)
 
         # Stop first
         stop_result = await self.service_controller.stop_agent()
@@ -1871,6 +2534,185 @@ class TelegramCommandHandler:
         gateway_running = gateway_status.get("process_running", False)
         reply_markup = self._get_main_menu_buttons(agent_running=True, gateway_running=gateway_running)
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+
+    async def _handle_signal_detail(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        signal_id_prefix: str,
+    ) -> None:
+        """Show a rich, text-only signal detail view (fast; chart optional)."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        try:
+            signals_file = get_signals_file(self.state_dir)
+            if not signals_file.exists():
+                await self._send_message_or_edit(
+                    update,
+                    context,
+                    "📭 *No signals found*\n\nSignals will appear here once the agent generates opportunities.",
+                    reply_markup=self._get_back_to_menu_button(),
+                )
+                return
+
+            # Search recent signals (tail) for matching prefix
+            found: Optional[Dict] = None
+            with open(signals_file, "r") as f:
+                lines = f.readlines()[-500:]
+            for line in reversed(lines):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                if "signal" in raw:
+                    record = raw
+                else:
+                    record = {
+                        "signal_id": raw.get("signal_id", ""),
+                        "timestamp": raw.get("timestamp", ""),
+                        "status": raw.get("status", "generated"),
+                        "signal": raw,
+                    }
+
+                sig_id = record.get("signal_id", "") or ""
+                if sig_id.startswith(signal_id_prefix):
+                    found = record
+                    break
+
+            if not found:
+                await self._send_message_or_edit(
+                    update,
+                    context,
+                    f"❌ *Signal not found*\n\nNo signal matching `{signal_id_prefix}` in recent history.",
+                    reply_markup=self._get_back_to_menu_button(),
+                )
+                return
+
+            signal = found.get("signal", {}) or {}
+            sig_type = str(signal.get("type", "unknown"))
+            direction = str(signal.get("direction", "long")).upper()
+            status = str(found.get("status", "unknown"))
+            sig_id = str(found.get("signal_id", "")) or ""
+
+            entry = float(signal.get("entry_price", 0.0) or 0.0)
+            stop = float(signal.get("stop_loss", 0.0) or 0.0)
+            tp = float(signal.get("take_profit", 0.0) or 0.0)
+            conf = float(signal.get("confidence", 0.0) or 0.0)
+
+            rr = None
+            if entry > 0 and stop > 0 and tp > 0:
+                if direction == "LONG":
+                    risk = entry - stop
+                    reward = tp - entry
+                else:
+                    risk = stop - entry
+                    reward = entry - tp
+                if risk > 0:
+                    rr = reward / risk
+
+            # Optional enhanced context
+            regime = signal.get("regime", {}) or {}
+            mtf = signal.get("mtf_analysis", {}) or {}
+            vwap = signal.get("vwap_data", {}) or {}
+            flow = signal.get("order_flow", {}) or {}
+            quality = signal.get("quality_score", {}) or {}
+            sr_levels = signal.get("sr_levels", {}) or {}
+
+            message = "ℹ️ *Signal Detail*\n\n"
+            message += f"*Type:* `{sig_type}`\n"
+            message += f"*Direction:* {direction}\n"
+            if entry:
+                message += f"*Entry:* ${entry:.2f}\n"
+            if stop:
+                message += f"*Stop:* ${stop:.2f}\n"
+            if tp:
+                message += f"*TP:* ${tp:.2f}\n"
+            if rr is not None:
+                message += f"*R:R:* {rr:.2f}:1\n"
+            message += f"*Confidence:* {conf:.0%}\n"
+            message += f"*Status:* `{status}`\n"
+            message += f"*ID:* `{sig_id[:16]}...`\n"
+
+            if quality:
+                message += "\n🧠 *Quality*\n"
+                if "quality_score" in quality:
+                    message += f"- score: {float(quality.get('quality_score', 0.0)):.2f}\n"
+                if "confluence_score" in quality:
+                    message += f"- confluence: {float(quality.get('confluence_score', 0.0)):.2f}\n"
+                if "historical_wr" in quality:
+                    message += f"- historical_wr: {float(quality.get('historical_wr', 0.0)):.0%}\n"
+                if "information_ratio" in quality:
+                    message += f"- info_ratio: {float(quality.get('information_ratio', 0.0)):.2f}\n"
+
+            if regime:
+                message += "\n🧭 *Regime*\n"
+                message += f"- regime: `{regime.get('regime', 'unknown')}`\n"
+                message += f"- volatility: `{regime.get('volatility', 'unknown')}`\n"
+                message += f"- session: `{regime.get('session', 'unknown')}`\n"
+                if regime.get("atr_expansion") is not None:
+                    message += f"- atr_expansion: `{bool(regime.get('atr_expansion'))}`\n"
+
+            alignment = mtf.get("alignment")
+            if alignment:
+                message += "\n🧩 *MTF*\n"
+                message += f"- alignment: `{alignment}`\n"
+                if mtf.get("alignment_score") is not None:
+                    message += f"- alignment_score: {float(mtf.get('alignment_score', 0.0)):.2f}\n"
+                div = mtf.get("divergences") or {}
+                if div.get("rsi_divergence") or div.get("macd_divergence"):
+                    message += f"- divergences: rsi={div.get('rsi_divergence')}, macd={div.get('macd_divergence')}\n"
+
+            if vwap:
+                if vwap.get("vwap"):
+                    message += "\n📍 *VWAP*\n"
+                    message += f"- vwap: {float(vwap.get('vwap', 0.0)):.2f}\n"
+                    if vwap.get("distance_pct") is not None:
+                        message += f"- distance: {float(vwap.get('distance_pct', 0.0)):.2f}%\n"
+
+            if flow and flow.get("recent_trend"):
+                message += "\n🌊 *Order Flow*\n"
+                message += f"- trend: `{flow.get('recent_trend')}`\n"
+                if flow.get("net_pressure") is not None:
+                    message += f"- net: {float(flow.get('net_pressure', 0.0)):.2f}\n"
+                if flow.get("delta_divergence") is not None:
+                    message += f"- delta_divergence: `{flow.get('delta_divergence')}`\n"
+                if flow.get("large_volume_detected") is not None:
+                    message += f"- large_volume: `{bool(flow.get('large_volume_detected'))}`\n"
+
+            if sr_levels and (sr_levels.get("strongest_support") or sr_levels.get("strongest_resistance")):
+                message += "\n🧱 *Levels*\n"
+                if sr_levels.get("strongest_support"):
+                    message += f"- support: {float(sr_levels.get('strongest_support')):.2f}\n"
+                if sr_levels.get("strongest_resistance"):
+                    message += f"- resistance: {float(sr_levels.get('strongest_resistance')):.2f}\n"
+
+            keyboard = []
+            if sig_id and self.chart_generator:
+                keyboard.append([
+                    InlineKeyboardButton("📊 View Chart", callback_data=f"signal_chart_{sig_id[:16]}"),
+                    InlineKeyboardButton("🔔 Signals", callback_data="signals"),
+                ])
+            else:
+                keyboard.append([InlineKeyboardButton("🔔 Signals", callback_data="signals")])
+            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+            await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
+
+        except Exception as e:
+            logger.error(f"Error handling signal detail: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"❌ *Error*\n\n`{str(e)}`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
 
     async def _handle_signal_chart(
         self,
@@ -2013,6 +2855,9 @@ class TelegramCommandHandler:
             InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
             InlineKeyboardButton("🔄 Refresh", callback_data='status'),
         ])
+
+        # Data quality triage (high-signal operator view)
+        keyboard.append([InlineKeyboardButton("🛡 Data Quality", callback_data='data_quality')])
         
         # Quick monitoring row
         keyboard.append([
@@ -2093,6 +2938,112 @@ class TelegramCommandHandler:
             InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
         ])
         return InlineKeyboardMarkup(keyboard)
+
+    def _get_confirm_buttons(
+        self,
+        action: str,
+        cancel_callback: str = "data_quality",
+    ) -> InlineKeyboardMarkup:
+        """Generic confirm buttons for dangerous operations."""
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Confirm", callback_data=f"do:{action}"),
+                InlineKeyboardButton("❌ Cancel", callback_data=cancel_callback),
+            ],
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
+    def _format_confirm_message(self, action: str) -> str:
+        """Format confirm message for a dangerous operation."""
+        if action == "restart_agent":
+            return (
+                "⚠️ *Confirm: Restart Agent*\n\n"
+                "This will *stop* and then *start* the NQ Agent service.\n"
+                "You may miss signals during the restart.\n\n"
+                "Proceed?"
+            )
+        if action == "restart_gateway":
+            return (
+                "⚠️ *Confirm: Restart Gateway*\n\n"
+                "This will *stop* and then *start* the IBKR Gateway.\n"
+                "The gateway may take 60–120s to become API-ready.\n\n"
+                "Proceed?"
+            )
+        return (
+            "⚠️ *Confirm Action*\n\n"
+            f"Proceed with: `{action}`?"
+        )
+
+    async def _run_confirmed_action(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        action: str,
+    ) -> None:
+        """Execute a confirmed operation and report results."""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        if action == "restart_agent":
+            await self._send_message_or_edit(
+                update,
+                context,
+                "🔄 Restarting *Agent*...\n\n"
+                "Stopping service, then starting again. This should take ~10–20s.",
+                reply_markup=None,
+            )
+            stop_result = await self.service_controller.stop_agent()
+            await asyncio.sleep(2)
+            start_result = await self.service_controller.start_agent(background=True)
+
+            message = "🔄 *Restart Agent Complete*\n\n"
+            message += f"*Stop:* {stop_result.get('message', 'N/A')}\n"
+            message += f"*Start:* {start_result.get('message', 'N/A')}\n"
+            if start_result.get("details"):
+                message += f"\n{start_result['details']}"
+
+            reply_markup = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
+                    InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
+                ],
+            ])
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+            return
+
+        if action == "restart_gateway":
+            await self._send_message_or_edit(
+                update,
+                context,
+                "🔄 Restarting *Gateway*...\n\n"
+                "Stopping gateway, then starting again. This can take up to ~2 minutes.",
+                reply_markup=None,
+            )
+            stop_result = await self.service_controller.stop_gateway()
+            await asyncio.sleep(2)
+            start_result = await self.service_controller.start_gateway()
+
+            message = "🔄 *Restart Gateway Complete*\n\n"
+            message += f"*Stop:* {stop_result.get('message', 'N/A')}\n"
+            message += f"*Start:* {start_result.get('message', 'N/A')}\n"
+            if start_result.get("details"):
+                message += f"\n{start_result['details']}"
+
+            reply_markup = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
+                    InlineKeyboardButton("🔌 Gateway Status", callback_data="gateway_status"),
+                ],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ])
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+            return
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            f"❌ Unknown confirmed action: `{action}`",
+            reply_markup=self._get_back_to_menu_button(),
+        )
     
     async def _send_message_or_edit(
         self,
@@ -2170,12 +3121,35 @@ class TelegramCommandHandler:
             await self._handle_status(update, context)
         elif callback_data == 'performance':
             await self._handle_performance(update, context)
+        elif callback_data.startswith("performance_export:"):
+            kind = callback_data.split("performance_export:", 1)[1].strip()
+            await self._handle_performance_export(update, context, kind)
         elif callback_data == 'signals':
+            await self._handle_signals(update, context)
+        elif callback_data.startswith("signals:setdir:"):
+            if hasattr(context, "user_data"):
+                context.user_data["signals_dir"] = callback_data.split("signals:setdir:", 1)[1]
+            await self._handle_signals(update, context)
+        elif callback_data.startswith("signals:setconf:"):
+            if hasattr(context, "user_data"):
+                raw = callback_data.split("signals:setconf:", 1)[1]
+                try:
+                    context.user_data["signals_min_conf"] = float(raw)
+                except Exception:
+                    context.user_data["signals_min_conf"] = 0.0
+            await self._handle_signals(update, context)
+        elif callback_data.startswith("signals:settype:"):
+            if hasattr(context, "user_data"):
+                context.user_data["signals_type"] = callback_data.split("signals:settype:", 1)[1]
             await self._handle_signals(update, context)
         elif callback_data == 'config':
             await self._handle_config(update, context)
         elif callback_data == 'health':
             await self._handle_health(update, context)
+        elif callback_data == 'data_quality':
+            await self._handle_data_quality(update, context)
+        elif callback_data == 'data_quality:diagnose':
+            await self._handle_data_quality(update, context, diagnose=True)
         elif callback_data == 'start_agent':
             await self._handle_start_agent(update, context)
         elif callback_data == 'stop_agent':
@@ -2186,15 +3160,25 @@ class TelegramCommandHandler:
             await self._handle_start_gateway(update, context)
         elif callback_data == 'stop_gateway':
             await self._handle_stop_gateway(update, context)
+        elif callback_data == 'restart_agent':
+            # Route menu restart button through confirm flow
+            message = self._format_confirm_message("restart_agent")
+            reply_markup = self._get_confirm_buttons("restart_agent", cancel_callback="data_quality")
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
         elif callback_data == 'start' or callback_data == 'main_menu':
             # Main menu - always return to start
             await self._handle_start(update, context)
         elif callback_data == 'help':
             await self._handle_help(update, context)
+        elif callback_data == 'last_signal':
+            await self._handle_last_signal(update, context)
         elif callback_data == 'test_signal':
             await self._handle_test_signal(update, context)
         elif callback_data == 'backtest':
             await self._handle_backtest(update, context)
+        elif callback_data.startswith("backtest_export:"):
+            kind = callback_data.split("backtest_export:", 1)[1].strip()
+            await self._handle_backtest_export(update, context, kind)
         elif callback_data.startswith('backtest_setmode_'):
             # Toggle backtest mode (5m recommended vs 1m legacy)
             mode = callback_data.replace('backtest_setmode_', '')
@@ -2202,6 +3186,29 @@ class TelegramCommandHandler:
                 mode = "5m"
             if hasattr(context, "user_data"):
                 context.user_data["backtest_mode"] = mode
+            await self._handle_backtest(update, context, months=None)
+        elif callback_data.startswith("backtest_setpos_"):
+            # Set position size (contracts) for backtest simulation
+            try:
+                pos = int(callback_data.replace("backtest_setpos_", ""))
+            except Exception:
+                pos = 5
+            if pos not in (1, 5, 10):
+                pos = 5
+            if hasattr(context, "user_data"):
+                context.user_data["backtest_contracts"] = pos
+            await self._handle_backtest(update, context, months=None)
+        elif callback_data.startswith("backtest_setslip_"):
+            # Set slippage ticks for backtest simulation
+            raw = callback_data.replace("backtest_setslip_", "")
+            try:
+                slip = float(raw)
+            except Exception:
+                slip = 0.5
+            if slip not in (0.5, 1.0):
+                slip = 0.5
+            if hasattr(context, "user_data"):
+                context.user_data["backtest_slippage_ticks"] = slip
             await self._handle_backtest(update, context, months=None)
         elif callback_data.startswith('backtest_'):
             # Handle backtest duration selection (backtest_1m, backtest_2m, etc.)
@@ -2226,6 +3233,17 @@ class TelegramCommandHandler:
             # Handle signal chart viewing
             signal_id_prefix = callback_data.replace('signal_chart_', '')
             await self._handle_signal_chart(update, context, signal_id_prefix)
+        elif callback_data.startswith('signal_detail_'):
+            signal_id_prefix = callback_data.replace('signal_detail_', '')
+            await self._handle_signal_detail(update, context, signal_id_prefix)
+        elif callback_data.startswith('confirm:'):
+            action = callback_data.replace('confirm:', '', 1).strip()
+            message = self._format_confirm_message(action)
+            reply_markup = self._get_confirm_buttons(action, cancel_callback="data_quality")
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+        elif callback_data.startswith('do:'):
+            action = callback_data.replace('do:', '', 1).strip()
+            await self._run_confirmed_action(update, context, action)
         elif callback_data in ('pause', 'resume'):
             await query.edit_message_text(
                 f"⚠️ {callback_data.title()} requires service integration.\n"

@@ -82,7 +82,11 @@ class TelegramAlerts:
             self.enabled = False
 
     async def send_message(
-        self, message: str, parse_mode: str = "Markdown", max_retries: int = 3
+        self,
+        message: str,
+        parse_mode: str = "Markdown",
+        max_retries: int = 3,
+        reply_markup=None,
     ) -> bool:
         """
         Send a message to Telegram with retry logic and deduplication.
@@ -91,6 +95,7 @@ class TelegramAlerts:
             message: Message text
             parse_mode: Telegram parse mode (default: Markdown)
             max_retries: Maximum retry attempts (default: 3)
+            reply_markup: Optional Telegram reply markup (inline buttons)
 
         Returns:
             True if sent successfully, False otherwise
@@ -137,6 +142,7 @@ class TelegramAlerts:
                     chat_id=self.chat_id,
                     text=message,
                     parse_mode=parse_mode,
+                    reply_markup=reply_markup,
                 )
                 # Mark as sent successfully
                 self._last_message_hash = message_hash
@@ -166,6 +172,7 @@ class TelegramAlerts:
                                 chat_id=self.chat_id,
                                 text=message,
                                 parse_mode=None,  # Plain text
+                                reply_markup=reply_markup,
                             )
                             return True
                         except Exception as e2:
@@ -178,6 +185,7 @@ class TelegramAlerts:
                                 chat_id=self.chat_id,
                                 text=message.replace('*', '').replace('_', '').replace('`', ''),
                                 parse_mode=None,
+                                reply_markup=reply_markup,
                             )
                             return True
                         except Exception as plain_error:

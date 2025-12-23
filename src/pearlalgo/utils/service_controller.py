@@ -356,3 +356,107 @@ class ServiceController:
             "status": "RUNNING" if is_running else "STOPPED",
             "message": "🟢 Agent is RUNNING" if is_running else "🔴 Agent is STOPPED",
         }
+
+    async def restart_agent(self, background: bool = True) -> Dict[str, Any]:
+        """Restart NQ Agent Service (stop then start).
+
+        Args:
+            background: If True, start in background mode
+
+        Returns:
+            Dictionary with success status and message/details
+        """
+        logger.info("Restarting NQ Agent Service via Telegram command", extra={"background": background})
+
+        stop_result = await self.stop_agent()
+        # If it wasn't running, continue to start anyway
+        if not stop_result.get("success") and "not running" not in str(stop_result.get("message", "")).lower():
+            return {
+                "success": False,
+                "message": "❌ Failed to restart agent (stop step failed)",
+                "details": stop_result.get("details") or stop_result.get("message"),
+            }
+
+        await asyncio.sleep(2)
+        start_result = await self.start_agent(background=background)
+
+        overall_success = bool(start_result.get("success"))
+        message = "✅ Agent restarted successfully" if overall_success else "⚠️ Agent restart attempted but service not detected"
+        details = "\n".join(
+            [
+                f"Stop: {stop_result.get('message', 'N/A')}",
+                f"Start: {start_result.get('message', 'N/A')}",
+            ]
+        )
+        if start_result.get("details"):
+            details += f"\n{start_result['details']}"
+
+        return {"success": overall_success, "message": message, "details": details}
+
+    async def restart_gateway(self) -> Dict[str, Any]:
+        """Restart IBKR Gateway (stop then start)."""
+        logger.info("Restarting IBKR Gateway via Telegram command")
+
+        stop_result = await self.stop_gateway()
+        # If it wasn't running, continue to start anyway
+        if not stop_result.get("success") and "not running" not in str(stop_result.get("message", "")).lower():
+            return {
+                "success": False,
+                "message": "❌ Failed to restart gateway (stop step failed)",
+                "details": stop_result.get("details") or stop_result.get("message"),
+            }
+
+        await asyncio.sleep(2)
+        start_result = await self.start_gateway()
+
+        overall_success = bool(start_result.get("success"))
+        message = "✅ Gateway restarted successfully" if overall_success else "⚠️ Gateway restart attempted but process not detected"
+        details = "\n".join(
+            [
+                f"Stop: {stop_result.get('message', 'N/A')}",
+                f"Start: {start_result.get('message', 'N/A')}",
+            ]
+        )
+        if start_result.get("details"):
+            details += f"\n{start_result['details']}"
+
+        return {"success": overall_success, "message": message, "details": details}
+
+    def tail_log(self, log_filename: str, lines: int = 200) -> Dict[str, Any]:
+        """Return the last N lines of a log file under ./logs (safe, read-only)."""
+        try:
+            logs_dir = (self.project_root / "logs").resolve()
+            target = (logs_dir / log_filename).resolve()
+            if logs_dir not in target.parents and target != logs_dir:
+                return {"success": False, "message": "❌ Invalid log path", "details": "Log must be under ./logs"}
+            if not target.exists():
+                return {"success": False, "message": "❌ Log not found", "details": str(target)}
+            if not target.is_file():
+                return {"success": False, "message": "❌ Not a file", "details": str(target)}
+
+            # Read last N lines efficiently
+            with open(target, "r", errors="ignore") as f:
+                all_lines = f.readlines()
+            tail = "".join(all_lines[-max(1, int(lines)) :])
+            return {"success": True, "message": f"📄 Tail of {log_filename}", "details": tail}
+        except Exception as e:
+            return {"success": False, "message": "❌ Failed to tail log", "details": str(e)}
+
+    async def check_api_ready(self) -> Dict[str, Any]:
+        """Check whether IBKR Gateway API is ready (script if present, else port probe)."""
+        script = self.scripts_dir / "gateway" / "check_api_ready.sh"
+        if script.exists():
+            success, stdout, stderr = self._run_script(script, timeout=30, check=False)
+            return {
+                "success": success,
+                "message": "🟢 API READY" if success else "🔴 API NOT READY",
+                "details": (stdout.strip() if stdout else stderr.strip()),
+            }
+
+        # Fallback: port check
+        port_listening = self._is_port_listening(4002)
+        return {
+            "success": port_listening,
+            "message": "🟢 API READY" if port_listening else "🔴 API NOT READY",
+            "details": "Checked TCP port 4002",
+        }

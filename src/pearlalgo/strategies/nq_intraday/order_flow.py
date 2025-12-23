@@ -3,13 +3,20 @@ Order Flow Approximation
 
 Approximates order flow (buying/selling pressure) from bar characteristics
 when full DOM data is not available.
+
+Enhanced with:
+- Volume Delta analysis (buying vs selling pressure per bar)
+- Cumulative Delta tracking (running total of delta)
+- Delta divergence detection (price vs delta divergence)
+- Large trade detection (identify potential institutional activity)
 """
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+import numpy as np
 
 from pearlalgo.utils.logger import logger
 
@@ -39,7 +46,7 @@ class OrderFlowApproximator:
 
     def analyze_order_flow(self, df: pd.DataFrame) -> Dict:
         """
-        Analyze order flow from bar characteristics.
+        Analyze order flow from bar characteristics with enhanced delta analysis.
         
         Args:
             df: DataFrame with OHLCV data
@@ -50,8 +57,11 @@ class OrderFlowApproximator:
                 "buying_pressure": float (0-1),  # Buying pressure strength
                 "selling_pressure": float (0-1),  # Selling pressure strength
                 "net_pressure": float (-1 to 1),  # Net pressure (positive = buying)
-                "cumulative_delta": float,  # Approximate cumulative delta
+                "cumulative_delta": float,  # Running cumulative delta
+                "volume_delta": float,  # Per-bar volume delta
+                "delta_divergence": "bullish" | "bearish" | None,
                 "recent_trend": "buying" | "selling" | "neutral",  # Recent trend
+                "large_volume_detected": bool,  # Large volume bar detection
             }
         """
         if df.empty or len(df) < 2:
@@ -66,6 +76,14 @@ class OrderFlowApproximator:
         df["body_size"] = abs(df["close"] - df["open"])
         df["upper_wick"] = df["high"] - df[["open", "close"]].max(axis=1)
         df["lower_wick"] = df[["open", "close"]].min(axis=1) - df["low"]
+
+        # Calculate volume delta per bar
+        # Volume delta approximation: use close position within range
+        df["close_position"] = (df["close"] - df["low"]) / df["bar_range"].replace(0, 1)
+        df["volume_delta"] = self._calculate_volume_delta(df)
+        
+        # Calculate cumulative delta
+        df["cumulative_delta"] = df["volume_delta"].cumsum()
 
         # Calculate price movement
         df["price_change"] = df["close"].diff()
@@ -93,24 +111,30 @@ class OrderFlowApproximator:
         new_highs = (recent["high_change"] > 0).sum()
         new_lows = (recent["low_change"] < 0).sum()
 
-        # Calculate buying pressure (0-1)
+        # Calculate buying pressure (0-1) with enhanced delta weighting
         buying_pressure = 0.0
 
         # Up bars ratio
         if total_bars > 0:
-            buying_pressure += (up_bars / total_bars) * 0.3
+            buying_pressure += (up_bars / total_bars) * 0.25
 
         # Volume-weighted
         if total_volume > 0:
-            buying_pressure += (up_volume / total_volume) * 0.3
+            buying_pressure += (up_volume / total_volume) * 0.25
 
         # Price movement
         if total_bars > 0:
-            buying_pressure += (positive_changes / total_bars) * 0.2
+            buying_pressure += (positive_changes / total_bars) * 0.15
 
         # New highs
         if total_bars > 0:
-            buying_pressure += (new_highs / total_bars) * 0.2
+            buying_pressure += (new_highs / total_bars) * 0.15
+
+        # Volume delta contribution
+        recent_delta = recent["volume_delta"].sum()
+        if total_volume > 0:
+            delta_ratio = max(0, min(1, (recent_delta / total_volume + 1) / 2))
+            buying_pressure += delta_ratio * 0.20
 
         buying_pressure = min(1.0, buying_pressure)
 
@@ -119,30 +143,41 @@ class OrderFlowApproximator:
 
         # Down bars ratio
         if total_bars > 0:
-            selling_pressure += (down_bars / total_bars) * 0.3
+            selling_pressure += (down_bars / total_bars) * 0.25
 
         # Volume-weighted
         if total_volume > 0:
-            selling_pressure += (down_volume / total_volume) * 0.3
+            selling_pressure += (down_volume / total_volume) * 0.25
 
         # Price movement
         if total_bars > 0:
-            selling_pressure += (negative_changes / total_bars) * 0.2
+            selling_pressure += (negative_changes / total_bars) * 0.15
 
         # New lows
         if total_bars > 0:
-            selling_pressure += (new_lows / total_bars) * 0.2
+            selling_pressure += (new_lows / total_bars) * 0.15
+
+        # Volume delta contribution (inverse for selling)
+        if total_volume > 0:
+            delta_ratio = max(0, min(1, (-recent_delta / total_volume + 1) / 2))
+            selling_pressure += delta_ratio * 0.20
 
         selling_pressure = min(1.0, selling_pressure)
 
         # Net pressure (-1 to 1)
         net_pressure = buying_pressure - selling_pressure
 
-        # Cumulative delta approximation
-        # Approximate: up volume - down volume (normalized)
-        cumulative_delta = 0.0
-        if total_volume > 0:
-            cumulative_delta = (up_volume - down_volume) / total_volume
+        # Latest cumulative delta
+        cumulative_delta = float(recent["cumulative_delta"].iloc[-1]) if not recent.empty else 0.0
+        
+        # Latest volume delta
+        volume_delta = float(recent["volume_delta"].iloc[-1]) if not recent.empty else 0.0
+
+        # Detect delta divergence
+        delta_divergence = self._detect_delta_divergence(df)
+
+        # Detect large volume bars
+        large_volume_detected = self._detect_large_volume(df)
 
         # Recent trend
         if net_pressure > 0.2:
@@ -157,8 +192,109 @@ class OrderFlowApproximator:
             "selling_pressure": float(selling_pressure),
             "net_pressure": float(net_pressure),
             "cumulative_delta": float(cumulative_delta),
+            "volume_delta": float(volume_delta),
+            "delta_divergence": delta_divergence,
             "recent_trend": recent_trend,
+            "large_volume_detected": large_volume_detected,
         }
+
+    def _calculate_volume_delta(self, df: pd.DataFrame) -> pd.Series:
+        """
+        Calculate volume delta per bar using close position method.
+        
+        Volume delta approximates buying vs selling volume:
+        - If close is at high: all volume is buying
+        - If close is at low: all volume is selling
+        - If close is at mid: volume is neutral
+        
+        Args:
+            df: DataFrame with OHLCV data
+            
+        Returns:
+            Series with volume delta per bar
+        """
+        # Close position: 0 = at low, 1 = at high
+        bar_range = df["high"] - df["low"]
+        close_position = (df["close"] - df["low"]) / bar_range.replace(0, 1)
+        
+        # Delta = (2 * close_position - 1) * volume
+        # If close at high: (2*1 - 1) * vol = +vol (all buying)
+        # If close at low: (2*0 - 1) * vol = -vol (all selling)
+        volume_delta = (2 * close_position - 1) * df["volume"]
+        
+        return volume_delta
+
+    def _detect_delta_divergence(self, df: pd.DataFrame, lookback: int = 10) -> Optional[str]:
+        """
+        Detect divergence between price and cumulative delta.
+        
+        - Bullish divergence: Price makes lower low, delta makes higher low
+        - Bearish divergence: Price makes higher high, delta makes lower high
+        
+        Args:
+            df: DataFrame with cumulative delta calculated
+            lookback: Number of bars to check
+            
+        Returns:
+            "bullish", "bearish", or None
+        """
+        if len(df) < lookback or "cumulative_delta" not in df.columns:
+            return None
+
+        try:
+            recent = df.tail(lookback)
+            
+            # Find price extremes
+            price_min_idx = recent["close"].idxmin()
+            price_max_idx = recent["close"].idxmax()
+            
+            current_price = recent["close"].iloc[-1]
+            current_delta = recent["cumulative_delta"].iloc[-1]
+            
+            min_price = recent["close"].min()
+            delta_at_min = recent.loc[price_min_idx, "cumulative_delta"] if price_min_idx in recent.index else None
+            
+            max_price = recent["close"].max()
+            delta_at_max = recent.loc[price_max_idx, "cumulative_delta"] if price_max_idx in recent.index else None
+            
+            # Bullish divergence: price lower low, delta higher low
+            if delta_at_min is not None:
+                if current_price < min_price and current_delta > delta_at_min:
+                    return "bullish"
+            
+            # Bearish divergence: price higher high, delta lower high
+            if delta_at_max is not None:
+                if current_price > max_price and current_delta < delta_at_max:
+                    return "bearish"
+
+        except Exception as e:
+            logger.debug(f"Error detecting delta divergence: {e}")
+
+        return None
+
+    def _detect_large_volume(self, df: pd.DataFrame, threshold: float = 2.0) -> bool:
+        """
+        Detect if recent bars have unusually large volume.
+        
+        Large volume can indicate institutional activity.
+        
+        Args:
+            df: DataFrame with volume data
+            threshold: Multiplier above average (2.0 = 2x average)
+            
+        Returns:
+            True if large volume detected in last 3 bars
+        """
+        if len(df) < 20:
+            return False
+
+        try:
+            avg_volume = df["volume"].tail(20).mean()
+            recent_max_volume = df["volume"].tail(3).max()
+            
+            return recent_max_volume > avg_volume * threshold
+        except Exception:
+            return False
 
     def check_signal_alignment(
         self,
