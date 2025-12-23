@@ -1,5 +1,10 @@
 # IBKR Gateway Guide
 
+## Prerequisites
+
+- **Java 17+** installed and available on `$PATH` (required by IB Gateway/IBC).
+- IB Gateway and IBC installed under `ibkr/` per `scripts/gateway/setup_ibgateway.sh`.
+
 ## 🚀 Start Gateway (Headless)
 
 ```bash

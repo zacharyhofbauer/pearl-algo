@@ -3,10 +3,16 @@ __pycache__/
 *.py[cod]
 .venv/
 
+# Build/test caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
 # Secrets / local environment (never commit)
 .env
 .env.*
-!.env.example
 
 src/pearlalgo_dev_ai_agents.egg-info/
 legacy/

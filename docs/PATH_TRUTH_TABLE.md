@@ -32,7 +32,6 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Logical component**: IBKR Gateway + API connectivity
 - **Python modules**:
   - `pearlalgo.data_providers.ibkr.ibkr_provider`
-  - `pearlalgo.data_providers.ibkr.connection_manager`
   - `pearlalgo.data_providers.ibkr.entitlements`
   - `pearlalgo.data_providers.ibkr_executor`
 - **Shell scripts** (`scripts/gateway/`):
@@ -55,6 +54,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `run_tests.sh` – convenience wrapper
   - `validate_strategy.py`
   - `smoke_test_ibkr.py`
+  - `check_no_secrets.py` – secret detection guardrail
   - `test_signal_starvation_fixes.py`
   - `test_data_quality.py`, `test_e2e_simulation.py`
   - `test_mplfinance_chart.py`

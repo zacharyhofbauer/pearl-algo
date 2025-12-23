@@ -1,7 +1,7 @@
 # Project Summary - PearlAlgo MNQ Trading Agent
 
-**Version:** 0.2.0  
-**Last Updated:** 2025-12-16 (Cleanup & Consolidation)  
+**Version:** 0.2.1  
+**Last Updated:** 2025-12-23 (Hygiene Pass)  
 **Status:** Production-Ready  
 **Trading Style:** Prop Firm - Intraday Swings & Quick Scalps
 
@@ -226,11 +226,6 @@ The MNQ Trading Agent is designed to:
 - Handles reconnection logic
 - Task queue for async operations
 
-**Connection Manager** (`ibkr/connection_manager.py`):
-- Manages IB Gateway connection
-- Automatic reconnection
-- Connection health monitoring
-
 **Entitlements** (`ibkr/entitlements.py`):
 - Validates market data subscriptions
 - Checks data permissions
@@ -392,13 +387,19 @@ pearlalgo-dev-ai-agents/
 │   │   ├── strategy.py         # Main strategy class
 │   │   ├── scanner.py          # Market scanning
 │   │   ├── signal_generator.py # Signal generation
-│   │   └── config.py           # Strategy configuration
-│   ├── data_providers/         # Data Providers (4 files)
+│   │   ├── signal_quality.py   # Signal quality scoring
+│   │   ├── config.py           # Strategy configuration
+│   │   ├── hud_context.py      # HUD/display context builder
+│   │   ├── mtf_analyzer.py     # Multi-timeframe analysis
+│   │   ├── regime_detector.py  # Market regime detection
+│   │   ├── volume_profile.py   # Volume profile analysis
+│   │   ├── order_flow.py       # Order flow analysis
+│   │   └── backtest_adapter.py # Backtesting adapter
+│   ├── data_providers/         # Data Providers
 │   │   ├── base.py             # Abstract interface
 │   │   ├── factory.py          # Provider factory
 │   │   ├── ibkr/               # IBKR provider
 │   │   │   ├── ibkr_provider.py
-│   │   │   ├── connection_manager.py
 │   │   │   └── entitlements.py
 │   │   └── ibkr_executor.py    # Thread-safe executor
 │   ├── utils/                  # Utilities (cross-cutting)
@@ -433,12 +434,23 @@ pearlalgo-dev-ai-agents/
 │       ├── test_all.py                  # Unified test runner
 │       ├── validate_strategy.py         # Comprehensive validation
 │       ├── run_tests.sh                 # Run all tests
-│       └── smoke_test_ibkr.py           # IBKR smoke test
+│       ├── smoke_test_ibkr.py           # IBKR smoke test
+│       ├── check_no_secrets.py          # Secret detection guardrail
+│       ├── backtest_nq_strategy.py      # Strategy backtesting
+│       ├── test_data_quality.py         # Data quality validation
+│       └── test_e2e_simulation.py       # End-to-end simulation
 │
 ├── tests/                       # Pytest suite (fast, assertion-driven)
 │   ├── mock_data_provider.py   # Synthetic OHLCV for tests (no external deps)
+│   ├── test_config_loader.py   # Config loading/merging tests
+│   ├── test_config_wiring.py   # Config wiring to service/data fetcher
+│   ├── test_market_hours.py    # CME market hours logic
+│   ├── test_strategy_session_hours.py  # Strategy session window tests
+│   ├── test_mtf_cache.py       # Multi-timeframe cache behavior
 │   ├── test_edge_cases.py      # Data fetcher + short-run service lifecycle
-│   └── test_error_recovery.py  # Circuit breaker / pause behavior
+│   ├── test_error_recovery.py  # Circuit breaker / pause behavior
+│   ├── test_telegram_authorization.py  # Telegram auth guards
+│   └── test_telegram_message_limits.py # Telegram message sizing
 │
 ├── docs/                        # Documentation
 │   ├── PROJECT_SUMMARY.md      # This file (single source of truth)
@@ -1051,7 +1063,7 @@ The system is ready for production use and optimized for prop firm trading with 
 - `docs/GATEWAY.md` - IBKR Gateway setup
 - `docs/MARKET_DATA_SUBSCRIPTION.md` - How to get live market data (fix Error 354)
 
-**Last Updated:** 2025-12-16  
+**Last Updated:** 2025-12-23  
 **Current Configuration:** MNQ (Mini NQ) - Prop Firm Style Trading
 
 
