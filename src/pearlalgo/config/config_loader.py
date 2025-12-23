@@ -57,6 +57,8 @@ def load_service_config(config_path: Optional[Path] = None) -> Dict:
             "status_update_interval": 1800,
             "heartbeat_interval": 3600,
             "state_save_interval": 10,
+            # Cadence mode: "fixed" (start-to-start timing) or "sleep_after" (legacy)
+            "cadence_mode": "fixed",
         },
         "circuit_breaker": {
             "max_consecutive_errors": 10,

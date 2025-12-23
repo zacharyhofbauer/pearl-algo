@@ -509,6 +509,10 @@ def format_home_card(
     # New fields for UX improvements (v3)
     last_cycle_seconds: float | None = None,  # For activity pulse
     previous_pnl: float | None = None,  # For performance trend
+    # New field for quiet reason (v4)
+    quiet_reason: str | None = None,  # Why agent is quiet (e.g., "StrategySessionClosed")
+    # Signal diagnostics (when no signals)
+    signal_diagnostics: str | None = None,  # Compact summary like "Raw: 3 → Valid: 0 | Filtered: 2 conf, 1 R:R"
 ) -> str:
     """
     Build unified Home Card message for status/dashboard (balanced verbosity).
@@ -571,6 +575,7 @@ def format_home_card(
         gateway_unknown: True if gateway status couldn't be determined
         last_cycle_seconds: Seconds since last cycle (for activity pulse)
         previous_pnl: Previous period P&L for trend comparison
+        quiet_reason: Why agent is quiet (e.g., "StrategySessionClosed", "NoOpportunity")
 
     Returns:
         Formatted Home Card message string
@@ -634,6 +639,28 @@ def format_home_card(
         lines.append(f"   ℹ️ Signals suppressed • {next_session}")
     elif futures_market_open is False and strategy_session_open is not False:
         lines.append("   ℹ️ Data may be delayed (market closed)")
+    
+    # CONDITIONAL: Quiet reason (when agent is quiet but running)
+    if quiet_reason and agent_running and not paused:
+        # Map reason codes to user-friendly display
+        reason_display = {
+            "StrategySessionClosed": "📴 Session closed",
+            "FuturesMarketClosed": "🌙 Market closed",
+            "StaleData": "⏰ Data stale",
+            "DataGap": "📉 Data gap detected",
+            "NoData": "📭 Waiting for data",
+            "NoOpportunity": "👀 Scanning (no setups)",
+            "Active": None,  # Don't show when active
+            "Unknown": "❓ Status unknown",
+        }.get(quiet_reason, f"ℹ️ {quiet_reason}")
+        if reason_display:
+            lines.append(f"   {reason_display}")
+    
+    # CONDITIONAL: Signal diagnostics (when quiet reason is NoOpportunity and we have details)
+    if signal_diagnostics and agent_running and not paused:
+        # Only show if not a simple "no patterns" or "session closed" message
+        if signal_diagnostics not in ("Session closed", "No patterns detected"):
+            lines.append(f"   🔍 {signal_diagnostics}")
 
     lines.append("")  # Blank line separator
 

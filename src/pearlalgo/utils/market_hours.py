@@ -27,27 +27,50 @@ class MarketHours:
     - Open: Sunday 6:00 PM ET - Friday 5:00 PM ET
     - Closed: Friday 5:00 PM ET - Sunday 6:00 PM ET
     - Also closed on certain holidays
+
+    KNOWN LIMITATIONS:
+    - Holiday coverage is intentionally incomplete (fixed-date list only)
+    - Does not handle: Good Friday, Memorial Day, Labor Day, Thanksgiving
+    - Does not handle early closes (e.g., day before holidays)
+    
+    For accurate holiday handling, consider integrating with CME holiday calendar
+    or using the optional `holiday_overrides` parameter.
     """
 
     # Market holidays (approximate - check exchange calendar for exact dates)
+    # NOTE: This is a STATIC list and does not account for:
+    # - Variable holidays (Thanksgiving, Easter, etc.)
+    # - Holiday observance rules (weekend → Monday)
+    # - Early closes
     MARKET_HOLIDAYS = [
         # New Year's Day
         (1, 1),
         # Independence Day
         (7, 4),
-        # Thanksgiving (4th Thursday of November)
         # Christmas
         (12, 25),
     ]
 
-    def __init__(self, timezone_str: str = "America/New_York"):
+    def __init__(
+        self,
+        timezone_str: str = "America/New_York",
+        holiday_overrides: Optional[list] = None,
+        early_closes: Optional[dict] = None,
+    ):
         """
         Initialize market hours checker.
 
         Args:
             timezone_str: Timezone string (default: America/New_York)
+            holiday_overrides: Optional list of (year, month, day) tuples for
+                               additional holidays to treat as closed.
+                               Example: [(2025, 11, 27), (2025, 3, 28)]
+            early_closes: Optional dict mapping (year, month, day) to close_hour (int).
+                          Example: {(2025, 11, 26): 13} for 1 PM close
         """
         self.tz = pytz.timezone(timezone_str)
+        self.holiday_overrides = set(holiday_overrides or [])
+        self.early_closes = early_closes or {}
 
     def is_market_open(
         self, dt: Optional[datetime] = None, symbol: Optional[str] = None
@@ -77,10 +100,22 @@ class MarketHours:
         et_time = et_dt.time()
         weekday = et_dt.weekday()  # 0=Monday, 6=Sunday
 
-        # Check if it's a holiday
+        # Check if it's a static holiday (month, day)
         if (et_date.month, et_date.day) in self.MARKET_HOLIDAYS:
             logger.debug(f"Market closed: Holiday ({et_date.month}/{et_date.day})")
             return False
+
+        # Check if it's in the holiday overrides (year, month, day)
+        if (et_date.year, et_date.month, et_date.day) in self.holiday_overrides:
+            logger.debug(f"Market closed: Holiday override ({et_date.year}-{et_date.month}-{et_date.day})")
+            return False
+
+        # Check for early close
+        early_close_hour = self.early_closes.get((et_date.year, et_date.month, et_date.day))
+        if early_close_hour is not None:
+            if et_time >= time(early_close_hour, 0):
+                logger.debug(f"Market closed: Early close at {early_close_hour}:00 ET")
+                return False
 
         # CME futures daily maintenance break (Mon–Thu 17:00–18:00 ET).
         # This primarily affects data freshness expectations and Error 354 interpretation.

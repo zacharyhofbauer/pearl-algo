@@ -26,6 +26,7 @@ from pearlalgo.nq_agent.state_manager import NQAgentStateManager
 from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
+from pearlalgo.utils.cadence import CadenceMetrics, CadenceScheduler
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import get_market_hours
@@ -164,6 +165,23 @@ class NQAgentService:
         self.data_quality_checker = DataQualityChecker(
             stale_data_threshold_minutes=self.stale_data_threshold_minutes
         )
+
+        # Cadence scheduler for fixed-interval timing (start-to-start)
+        # "fixed" = start-to-start timing with skip-ahead for missed cycles
+        # "sleep_after" = legacy sleep-after-work semantics
+        self.cadence_mode = service_settings.get("cadence_mode", "fixed")
+        self.cadence_scheduler: Optional[CadenceScheduler] = None
+        if self.cadence_mode == "fixed":
+            self.cadence_scheduler = CadenceScheduler(
+                interval_seconds=float(self.config.scan_interval),
+            )
+            logger.info(
+                f"Cadence scheduler initialized: mode=fixed, interval={self.config.scan_interval}s"
+            )
+        else:
+            logger.info(
+                f"Cadence scheduler disabled: mode={self.cadence_mode} (legacy sleep-after-work)"
+            )
 
         logger.info("NQAgentService initialized")
 
@@ -310,10 +328,20 @@ class NQAgentService:
                 "scan_interval": self.config.scan_interval,
                 "symbol": self.config.symbol,
                 "timeframe": self.config.timeframe,
+                "cadence_mode": self.cadence_mode,
             },
         )
 
         while not self.shutdown_requested:
+            # Mark cycle start for cadence tracking (fixed-cadence mode)
+            if self.cadence_scheduler:
+                cadence_lag = self.cadence_scheduler.mark_cycle_start()
+                if cadence_lag > 1000:  # More than 1s lag
+                    logger.warning(
+                        f"Cadence lag detected: {cadence_lag:.0f}ms behind schedule",
+                        extra={"cycle": self.cycle_count, "cadence_lag_ms": cadence_lag},
+                    )
+
             try:
                 # Skip if paused
                 if self.paused:
@@ -324,6 +352,9 @@ class NQAgentService:
                             "pause_reason": self.pause_reason,
                         },
                     )
+                    # Reset cadence scheduler on pause to avoid catch-up storm on resume
+                    if self.cadence_scheduler:
+                        self.cadence_scheduler.reset()
                     await asyncio.sleep(self.config.scan_interval)
                     continue
 
@@ -368,7 +399,7 @@ class NQAgentService:
                             self.paused = True
                             self.pause_reason = "connection_failures"
 
-                        await asyncio.sleep(self.config.scan_interval)
+                        await self._sleep_until_next_cycle()
                         continue
 
                     # Success - reset error counters
@@ -413,9 +444,12 @@ class NQAgentService:
                             },
                         )
                         await self._notify_error("Data fetch failures", f"{self.data_fetch_errors} consecutive errors")
+                        # Backoff: sleep longer than normal cycle, reset cadence scheduler
+                        if self.cadence_scheduler:
+                            self.cadence_scheduler.reset()
                         await asyncio.sleep(self.config.scan_interval * 2)
                     else:
-                        await asyncio.sleep(self.config.scan_interval)
+                        await self._sleep_until_next_cycle()
                     continue
 
                 if market_data["df"].empty:
@@ -428,14 +462,23 @@ class NQAgentService:
                             logger.warning(f"No market data for {self.connection_timeout_minutes}+ minutes - possible connection issue")
                             await self._handle_connection_failure()
 
+                    # Determine quiet reason for observability
+                    quiet_reason = self._get_quiet_reason(market_data, has_data=False)
+                    
                     logger.debug(
                         "No market data available, waiting",
                         extra={
                             "cycle": self.cycle_count,
                             "connection_failures": self.connection_failures,
+                            "quiet_reason": quiet_reason,
                         },
                     )
-                    await asyncio.sleep(self.config.scan_interval)
+                    
+                    # Still emit dashboard even when quiet (observability)
+                    await self._check_dashboard(market_data, quiet_reason=quiet_reason)
+                    self.cycle_count += 1
+                    
+                    await self._sleep_until_next_cycle()
                     continue
 
                 # Generate signals
@@ -503,7 +546,15 @@ class NQAgentService:
                     logger.debug(f"Virtual exit update failed (non-fatal): {e}")
 
                 # Send periodic dashboard (replaces status + heartbeat)
-                await self._check_dashboard(market_data)
+                # Determine quiet reason if no signals (for observability)
+                quiet_reason = None
+                signal_diagnostics = None
+                if not signals:
+                    quiet_reason = self._get_quiet_reason(market_data, has_data=True, no_signals=True)
+                    # Get signal diagnostics for no-signal observability
+                    if hasattr(self.strategy, 'generator') and hasattr(self.strategy.generator, 'last_diagnostics'):
+                        signal_diagnostics = self.strategy.generator.last_diagnostics
+                await self._check_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
 
                 # Save state periodically
                 if self.cycle_count % self.state_save_interval == 0:
@@ -511,8 +562,8 @@ class NQAgentService:
 
                 self.cycle_count += 1
 
-                # Wait for next cycle
-                await asyncio.sleep(self.config.scan_interval)
+                # Wait for next cycle (fixed-cadence or legacy sleep-after-work)
+                await self._sleep_until_next_cycle()
 
             except asyncio.CancelledError:
                 logger.info("Service loop cancelled", extra={"cycle": self.cycle_count})
@@ -547,7 +598,7 @@ class NQAgentService:
                     self.paused = True
                     self.pause_reason = "consecutive_errors"
 
-                await asyncio.sleep(self.config.scan_interval)
+                await self._sleep_until_next_cycle()
             else:
                 # Reset consecutive errors on successful cycle
                 had_errors = self.consecutive_errors > 0
@@ -630,11 +681,14 @@ class NQAgentService:
         """
         Update virtual trade exits for any `entered` signals when TP/SL is touched.
 
-        Rules (v1 defaults):
+        Rules:
         - Entry is immediate at signal generation time.
         - Exit occurs on first *touch* of TP/SL using latest bar OHLC.
-        - If TP and SL are both touched in the same bar, exit is **conservative** (SL first).
+        - If TP and SL are both touched in the same bar, tiebreak is determined by
+          config.virtual_pnl_tiebreak ("stop_loss" = conservative, "take_profit" = optimistic).
         """
+        # Get tiebreak preference from config (default to conservative "stop_loss")
+        tiebreak = getattr(self.config, "virtual_pnl_tiebreak", "stop_loss")
         latest_bar = market_data.get("latest_bar") if isinstance(market_data, dict) else None
         if not isinstance(latest_bar, dict):
             return
@@ -700,8 +754,13 @@ class NQAgentService:
                     hit_tp = bar_low <= target
                     hit_sl = bar_high >= stop
                     if hit_tp and hit_sl:
-                        exit_reason = "stop_loss"
-                        exit_price = stop
+                        # Both touched in same bar - use configured tiebreak
+                        if tiebreak == "take_profit":
+                            exit_reason = "take_profit"
+                            exit_price = target
+                        else:  # Default to conservative "stop_loss"
+                            exit_reason = "stop_loss"
+                            exit_price = stop
                     elif hit_sl:
                         exit_reason = "stop_loss"
                         exit_price = stop
@@ -712,8 +771,13 @@ class NQAgentService:
                     hit_tp = bar_high >= target
                     hit_sl = bar_low <= stop
                     if hit_tp and hit_sl:
-                        exit_reason = "stop_loss"
-                        exit_price = stop
+                        # Both touched in same bar - use configured tiebreak
+                        if tiebreak == "take_profit":
+                            exit_reason = "take_profit"
+                            exit_price = target
+                        else:  # Default to conservative "stop_loss"
+                            exit_reason = "stop_loss"
+                            exit_price = stop
                     elif hit_sl:
                         exit_reason = "stop_loss"
                         exit_price = stop
@@ -740,8 +804,20 @@ class NQAgentService:
             except Exception:
                 continue
 
-    async def _check_dashboard(self, market_data: Optional[Dict] = None) -> None:
-        """Send periodic dashboard message (replaces status + heartbeat)."""
+    async def _check_dashboard(
+        self,
+        market_data: Optional[Dict] = None,
+        quiet_reason: Optional[str] = None,
+        signal_diagnostics=None,
+    ) -> None:
+        """
+        Send periodic dashboard message (replaces status + heartbeat).
+        
+        Args:
+            market_data: Current market data (may be empty)
+            quiet_reason: Why the agent is quiet (e.g., "StrategySessionClosed")
+            signal_diagnostics: SignalDiagnostics from the signal generator
+        """
         now = datetime.now(timezone.utc)
 
         # Check if it's time for a text dashboard update (every 15m by default)
@@ -749,7 +825,7 @@ class NQAgentService:
             self.last_status_update is None
             or (now - self.last_status_update).total_seconds() >= self.status_update_interval
         ):
-            await self._send_dashboard(market_data)
+            await self._send_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
             self.last_status_update = now
 
         # Check if it's time for a dashboard chart (every 60m by default)
@@ -832,8 +908,20 @@ class NQAgentService:
         except Exception as e:
             logger.error(f"Error generating/sending dashboard chart: {e}", exc_info=True)
 
-    async def _send_dashboard(self, market_data: Optional[Dict] = None) -> None:
-        """Send consolidated dashboard to Telegram."""
+    async def _send_dashboard(
+        self,
+        market_data: Optional[Dict] = None,
+        quiet_reason: Optional[str] = None,
+        signal_diagnostics=None,
+    ) -> None:
+        """
+        Send consolidated dashboard to Telegram.
+        
+        Args:
+            market_data: Current market data (may be empty)
+            quiet_reason: Why the agent is quiet (for observability)
+            signal_diagnostics: SignalDiagnostics from the signal generator
+        """
         try:
             # Get base status
             status = self.get_status()
@@ -841,6 +929,15 @@ class NQAgentService:
             # Add current time
             status["current_time"] = datetime.now(timezone.utc)
             status["symbol"] = self.config.symbol
+            
+            # Add quiet reason for observability (why no signals)
+            if quiet_reason:
+                status["quiet_reason"] = quiet_reason
+            
+            # Add signal diagnostics when no signals (for observability)
+            if signal_diagnostics is not None:
+                status["signal_diagnostics"] = signal_diagnostics.format_compact()
+                status["signal_diagnostics_raw"] = signal_diagnostics.to_dict()
             
             # Try to get latest price
             try:
@@ -941,6 +1038,69 @@ class NQAgentService:
         
         return trends
 
+    def _get_quiet_reason(
+        self,
+        market_data: Optional[Dict] = None,
+        has_data: bool = True,
+        no_signals: bool = False,
+    ) -> str:
+        """
+        Determine why the agent is quiet (not generating signals).
+        
+        Returns a human-readable reason for observability.
+        
+        Args:
+            market_data: Current market data
+            has_data: Whether we have any data (False = empty DataFrame)
+            no_signals: Whether we had data but no signals were generated
+            
+        Returns:
+            String reason code like "StrategySessionClosed", "FuturesMarketClosed", etc.
+        """
+        try:
+            # Check strategy session first (more specific)
+            strategy_session_open = self.strategy.scanner.is_market_hours()
+            if not strategy_session_open:
+                return "StrategySessionClosed"
+            
+            # Check futures market hours
+            futures_market_open = get_market_hours().is_market_open()
+            if not futures_market_open:
+                return "FuturesMarketClosed"
+            
+            # Check if we have no data
+            if not has_data or (market_data and market_data.get("df") is not None and market_data["df"].empty):
+                # Could be a data gap or stale data
+                if self.last_successful_cycle:
+                    time_since_success = (datetime.now(timezone.utc) - self.last_successful_cycle).total_seconds()
+                    if time_since_success > self.stale_data_threshold_minutes * 60:
+                        return "StaleData"
+                    elif time_since_success > 60:
+                        return "DataGap"
+                return "NoData"
+            
+            # We have data but no signals
+            if no_signals:
+                # Check data freshness
+                latest_bar = market_data.get("latest_bar") if market_data else None
+                if latest_bar:
+                    bar_time = latest_bar.get("timestamp")
+                    if bar_time:
+                        if isinstance(bar_time, str):
+                            bar_time = parse_utc_timestamp(bar_time)
+                        age_seconds = (datetime.now(timezone.utc) - bar_time.replace(tzinfo=timezone.utc)).total_seconds()
+                        if age_seconds > self.stale_data_threshold_minutes * 60:
+                            return "StaleData"
+                
+                # No signals but data is fresh - strategy just didn't find opportunities
+                return "NoOpportunity"
+            
+            return "Active"
+            
+        except Exception as e:
+            logger.debug(f"Could not determine quiet reason: {e}")
+            return "Unknown"
+
     async def _check_status_update(self) -> None:
         """Send periodic status updates to Telegram (legacy, now uses dashboard)."""
         # Kept for backward compatibility - now handled by _check_dashboard
@@ -965,7 +1125,35 @@ class NQAgentService:
         """Resume the service."""
         self.paused = False
         self.pause_reason = None
+        # Reset cadence scheduler to avoid catch-up storm
+        if self.cadence_scheduler:
+            self.cadence_scheduler.reset()
         logger.info("Service resumed")
+
+    async def _sleep_until_next_cycle(self) -> None:
+        """
+        Sleep until the next cycle should start.
+        
+        In fixed-cadence mode, computes sleep time to maintain start-to-start timing.
+        In legacy mode, sleeps for the full scan_interval after work completes.
+        """
+        if self.cadence_scheduler:
+            # Fixed-cadence mode: compute sleep time based on cycle end
+            sleep_time = self.cadence_scheduler.mark_cycle_end()
+            metrics = self.cadence_scheduler.get_metrics()
+            
+            # Log if we're running behind schedule
+            if metrics.missed_cycles > 0:
+                logger.debug(
+                    f"Cadence: {metrics.cycle_duration_ms:.0f}ms work, "
+                    f"sleeping {sleep_time*1000:.0f}ms, "
+                    f"{metrics.missed_cycles} cycles skipped total"
+                )
+            
+            await asyncio.sleep(sleep_time)
+        else:
+            # Legacy mode: sleep full interval after work
+            await asyncio.sleep(self.config.scan_interval)
 
     async def _notify_error(self, title: str, message: str) -> None:
         """Notify about errors via Telegram."""
@@ -1087,6 +1275,13 @@ class NQAgentService:
                 "timeframe": self.config.timeframe,
                 "scan_interval": self.config.scan_interval,
             },
+            # Cadence metrics for observability
+            "cadence_mode": self.cadence_mode,
+            "cadence_metrics": (
+                self.cadence_scheduler.get_metrics().to_dict()
+                if self.cadence_scheduler
+                else None
+            ),
         }
 
     def _save_state(self) -> None:
@@ -1159,6 +1354,13 @@ class NQAgentService:
                 "timeframe": self.config.timeframe,
                 "scan_interval": self.config.scan_interval,
             },
+            # Cadence metrics for observability
+            "cadence_mode": self.cadence_mode,
+            "cadence_metrics": (
+                self.cadence_scheduler.get_metrics().to_dict()
+                if self.cadence_scheduler
+                else None
+            ),
         }
         try:
             state["futures_market_open"] = bool(get_market_hours().is_market_open())

@@ -6,6 +6,7 @@ Generates trading signals from scanner results with validation and filtering.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -17,6 +18,89 @@ from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner
 from pearlalgo.strategies.nq_intraday.signal_quality import SignalQualityScorer
+
+
+@dataclass
+class SignalDiagnostics:
+    """Per-cycle diagnostics for signal generation.
+    
+    Tracks why signals were or weren't generated for observability.
+    """
+    
+    # Counts
+    raw_signals: int = 0
+    validated_signals: int = 0
+    duplicates_filtered: int = 0
+    
+    # Rejection reasons
+    rejected_market_hours: bool = False  # Filtered by market hours gate
+    rejected_confidence: int = 0  # Below min_confidence
+    rejected_risk_reward: int = 0  # Below min_risk_reward
+    rejected_quality_scorer: int = 0  # Failed quality score threshold
+    rejected_order_book: int = 0  # Filtered by order book imbalance
+    rejected_invalid_prices: int = 0  # Invalid entry/stop/target prices
+    
+    # Context
+    market_hours_checked: bool = False
+    order_book_available: bool = False
+    timestamp: Optional[str] = None
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary for state persistence."""
+        return {
+            "raw_signals": self.raw_signals,
+            "validated_signals": self.validated_signals,
+            "duplicates_filtered": self.duplicates_filtered,
+            "rejected_market_hours": self.rejected_market_hours,
+            "rejected_confidence": self.rejected_confidence,
+            "rejected_risk_reward": self.rejected_risk_reward,
+            "rejected_quality_scorer": self.rejected_quality_scorer,
+            "rejected_order_book": self.rejected_order_book,
+            "rejected_invalid_prices": self.rejected_invalid_prices,
+            "market_hours_checked": self.market_hours_checked,
+            "order_book_available": self.order_book_available,
+            "timestamp": self.timestamp,
+        }
+    
+    def format_compact(self) -> str:
+        """
+        Format as compact string for Telegram dashboard.
+        
+        Returns a one-line summary like:
+        "Raw: 3 → Valid: 1 | Filtered: 1 dup, 1 conf"
+        """
+        if self.rejected_market_hours:
+            return "Session closed"
+        
+        if self.raw_signals == 0:
+            return "No patterns detected"
+        
+        parts = []
+        
+        # Main flow
+        parts.append(f"Raw: {self.raw_signals}")
+        if self.validated_signals > 0:
+            parts.append(f"→ Valid: {self.validated_signals}")
+        
+        # Rejections
+        rejections = []
+        if self.duplicates_filtered > 0:
+            rejections.append(f"{self.duplicates_filtered} dup")
+        if self.rejected_confidence > 0:
+            rejections.append(f"{self.rejected_confidence} conf")
+        if self.rejected_risk_reward > 0:
+            rejections.append(f"{self.rejected_risk_reward} R:R")
+        if self.rejected_quality_scorer > 0:
+            rejections.append(f"{self.rejected_quality_scorer} qual")
+        if self.rejected_order_book > 0:
+            rejections.append(f"{self.rejected_order_book} OB")
+        if self.rejected_invalid_prices > 0:
+            rejections.append(f"{self.rejected_invalid_prices} price")
+        
+        if rejections:
+            parts.append(f"| Filtered: {', '.join(rejections)}")
+        
+        return " ".join(parts)
 
 
 class NQSignalGenerator:
@@ -53,6 +137,9 @@ class NQSignalGenerator:
             signal_settings.get("duplicate_price_threshold_pct", 0.5) / 100.0
         )
 
+        # Per-cycle diagnostics for observability
+        self.last_diagnostics: Optional[SignalDiagnostics] = None
+
         logger.info("NQSignalGenerator initialized")
 
     def generate(self, market_data: Dict) -> List[Dict]:
@@ -64,8 +151,14 @@ class NQSignalGenerator:
         Returns:
             List of validated signal dictionaries
         """
+        # Initialize diagnostics for this cycle
+        diagnostics = SignalDiagnostics(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+        
         df = market_data.get("df")
         if df is None or df.empty:
+            self.last_diagnostics = diagnostics
             return []
 
         # Check market hours using the *bar timestamp* (critical for backtests).
@@ -88,7 +181,10 @@ class NQSignalGenerator:
             except Exception:
                 dt = None
 
+        diagnostics.market_hours_checked = True
         if not self.scanner.is_market_hours(dt):
+            diagnostics.rejected_market_hours = True
+            self.last_diagnostics = diagnostics
             return []
 
         # Get multi-timeframe data
@@ -97,6 +193,9 @@ class NQSignalGenerator:
 
         # Scan for signals with MTF context and order book data
         raw_signals = self.scanner.scan(df, df_5m=df_5m, df_15m=df_15m, market_data=market_data)
+
+        # Track raw signal count for diagnostics
+        diagnostics.raw_signals = len(raw_signals)
 
         # Log raw signal count at INFO level for observability
         logger.info(f"Raw signals from scanner: {len(raw_signals)}")
@@ -120,6 +219,7 @@ class NQSignalGenerator:
             and latest_bar.get("order_book")
             and latest_bar["order_book"].get("bids")
         )
+        diagnostics.order_book_available = order_book_available
 
         # Validate and filter signals
         validated_signals = []
@@ -136,98 +236,125 @@ class NQSignalGenerator:
                         "Signal filtered by order book: long signal rejected (imbalance: %.2f, strong ask pressure)",
                         order_book_imbalance,
                     )
+                    diagnostics.rejected_order_book += 1
                     continue
                 if signal_direction == "short" and order_book_imbalance > 0.2:
                     logger.debug(
                         "Signal filtered by order book: short signal rejected (imbalance: %.2f, strong bid pressure)",
                         order_book_imbalance,
                     )
+                    diagnostics.rejected_order_book += 1
                     continue
 
-            if self._validate_signal(signal):
-                validated_signal = self._format_signal(signal, market_data)
+            # Track validation result with rejection reason
+            validation_result = self._validate_signal_with_reason(signal)
+            if not validation_result["valid"]:
+                reason = validation_result.get("reason", "unknown")
+                if reason == "confidence":
+                    diagnostics.rejected_confidence += 1
+                elif reason == "risk_reward":
+                    diagnostics.rejected_risk_reward += 1
+                elif reason == "invalid_prices":
+                    diagnostics.rejected_invalid_prices += 1
+                continue
 
-                # Apply order book confidence adjustment if available
-                if order_book_available:
-                    order_book_imbalance = latest_bar.get("imbalance", 0.0)
-                    signal_direction = validated_signal.get("direction", "")
-                    current_confidence = validated_signal.get("confidence", 0.5)
+            validated_signal = self._format_signal(signal, market_data)
 
-                    # Boost confidence when order book aligns with signal
-                    if signal_direction == "long" and order_book_imbalance > 0.15:
-                        confidence_boost = min(0.10, order_book_imbalance * 0.3)
-                        validated_signal["confidence"] = min(
-                            1.0,
-                            current_confidence + confidence_boost,
-                        )
-                        logger.debug(
-                            "Order book confidence boost: +%.3f (imbalance: %.2f)",
-                            confidence_boost,
-                            order_book_imbalance,
-                        )
-                    elif signal_direction == "short" and order_book_imbalance < -0.15:
-                        confidence_boost = min(0.10, abs(order_book_imbalance) * 0.3)
-                        validated_signal["confidence"] = min(
-                            1.0,
-                            current_confidence + confidence_boost,
-                        )
-                        logger.debug(
-                            "Order book confidence boost: +%.3f (imbalance: %.2f)",
-                            confidence_boost,
-                            order_book_imbalance,
-                        )
+            # Apply order book confidence adjustment if available
+            if order_book_available:
+                order_book_imbalance = latest_bar.get("imbalance", 0.0)
+                signal_direction = validated_signal.get("direction", "")
+                current_confidence = validated_signal.get("confidence", 0.5)
 
-                if not self._is_duplicate(validated_signal):
-                    logger.debug(
-                        "Signal passed validation: type=%s, confidence=%.3f, entry=%.2f",
-                        validated_signal.get("type"),
-                        validated_signal.get("confidence", 0.0),
-                        validated_signal.get("entry_price", 0.0),
+                # Boost confidence when order book aligns with signal
+                if signal_direction == "long" and order_book_imbalance > 0.15:
+                    confidence_boost = min(0.10, order_book_imbalance * 0.3)
+                    validated_signal["confidence"] = min(
+                        1.0,
+                        current_confidence + confidence_boost,
                     )
-                    # Score signal quality
-                    quality_score = self.quality_scorer.score_signal(validated_signal)
+                    logger.debug(
+                        "Order book confidence boost: +%.3f (imbalance: %.2f)",
+                        confidence_boost,
+                        order_book_imbalance,
+                    )
+                elif signal_direction == "short" and order_book_imbalance < -0.15:
+                    confidence_boost = min(0.10, abs(order_book_imbalance) * 0.3)
+                    validated_signal["confidence"] = min(
+                        1.0,
+                        current_confidence + confidence_boost,
+                    )
+                    logger.debug(
+                        "Order book confidence boost: +%.3f (imbalance: %.2f)",
+                        confidence_boost,
+                        order_book_imbalance,
+                    )
 
-                    # Only send if meets quality threshold
-                    if quality_score.get("should_send", True):
-                        # Add quality score to signal
-                        validated_signal["quality_score"] = quality_score
-                        validated_signals.append(validated_signal)
-                        self._recent_signals.append(validated_signal)
-                    else:
-                        # Near-miss diagnostic logging: track signals that fail quality scorer
-                        signal_type = validated_signal.get("type", "unknown")
-                        signal_confidence = validated_signal.get("confidence", 0.0)
-                        historical_wr = quality_score.get("historical_wr", 0.0)
-                        meets_threshold = quality_score.get("meets_threshold", False)
-                        information_ratio = quality_score.get("information_ratio", 0.0)
-                        regime = validated_signal.get("regime", {})
-                        volatility = regime.get("volatility", "normal")
-                        atr_expansion = regime.get("atr_expansion", False)
+            if self._is_duplicate(validated_signal):
+                diagnostics.duplicates_filtered += 1
+                continue
+                
+            logger.debug(
+                "Signal passed validation: type=%s, confidence=%.3f, entry=%.2f",
+                validated_signal.get("type"),
+                validated_signal.get("confidence", 0.0),
+                validated_signal.get("entry_price", 0.0),
+            )
+            # Score signal quality
+            quality_score = self.quality_scorer.score_signal(validated_signal)
 
-                        logger.info(
-                            "NEAR_MISS: quality_scorer_rejection | type=%s | confidence=%.3f | "
-                            "historical_wr=%.0f%% | meets_threshold=%s | information_ratio=%.3f | "
-                            "volatility=%s | atr_expansion=%s",
-                            signal_type,
-                            signal_confidence,
-                            historical_wr * 100.0,
-                            meets_threshold,
-                            information_ratio,
-                            volatility,
-                            atr_expansion,
-                        )
-                        logger.debug(
-                            "Signal context: entry=%.2f, regime=%s, indicators=%s",
-                            validated_signal.get("entry_price", 0.0),
-                            regime.get("regime", "unknown"),
-                            validated_signal.get("indicators", {}),
-                        )
+            # Only send if meets quality threshold
+            if quality_score.get("should_send", True):
+                # Add quality score to signal
+                validated_signal["quality_score"] = quality_score
+                validated_signals.append(validated_signal)
+                self._recent_signals.append(validated_signal)
+            else:
+                diagnostics.rejected_quality_scorer += 1
+                # Near-miss diagnostic logging: track signals that fail quality scorer
+                signal_type = validated_signal.get("type", "unknown")
+                signal_confidence = validated_signal.get("confidence", 0.0)
+                historical_wr = quality_score.get("historical_wr", 0.0)
+                meets_threshold = quality_score.get("meets_threshold", False)
+                information_ratio = quality_score.get("information_ratio", 0.0)
+                regime = validated_signal.get("regime", {})
+                volatility = regime.get("volatility", "normal")
+                atr_expansion = regime.get("atr_expansion", False)
+
+                logger.info(
+                    "NEAR_MISS: quality_scorer_rejection | type=%s | confidence=%.3f | "
+                    "historical_wr=%.0f%% | meets_threshold=%s | information_ratio=%.3f | "
+                    "volatility=%s | atr_expansion=%s",
+                    signal_type,
+                    signal_confidence,
+                    historical_wr * 100.0,
+                    meets_threshold,
+                    information_ratio,
+                    volatility,
+                    atr_expansion,
+                )
+                logger.debug(
+                    "Signal context: entry=%.2f, regime=%s, indicators=%s",
+                    validated_signal.get("entry_price", 0.0),
+                    regime.get("regime", "unknown"),
+                    validated_signal.get("indicators", {}),
+                )
 
         # Clean up old signals from recent list
         self._cleanup_recent_signals()
 
+        # Finalize diagnostics
+        diagnostics.validated_signals = len(validated_signals)
+        self.last_diagnostics = diagnostics
+
         if validated_signals:
             logger.info("Generated %d validated signal(s)", len(validated_signals))
+        else:
+            # Log diagnostics summary when no signals
+            logger.debug(
+                "Signal diagnostics: %s",
+                diagnostics.format_compact(),
+            )
 
         return validated_signals
 
@@ -353,6 +480,69 @@ class NQSignalGenerator:
                     return False
 
         return True
+
+    def _validate_signal_with_reason(self, signal: Dict) -> Dict:
+        """Validate a signal and return rejection reason.
+
+        Args:
+            signal: Signal dictionary
+
+        Returns:
+            Dict with "valid" (bool) and "reason" (str) keys
+        """
+        # Volatility-aware confidence floor: during high volatility expansion,
+        # apply a floor to prevent valid structure-based signals from being
+        # killed by confidence stacking penalties
+        regime = signal.get("regime", {})
+        volatility = regime.get("volatility", "normal")
+        signal_confidence = signal.get("confidence", 0.0)
+        atr_expansion = regime.get("atr_expansion", False)
+
+        if volatility == "high" and atr_expansion:
+            effective_confidence = max(signal_confidence, 0.48)
+            if effective_confidence > signal_confidence:
+                signal["confidence"] = effective_confidence
+                signal_confidence = effective_confidence
+
+        # Check confidence threshold
+        if signal_confidence < self._min_confidence:
+            return {"valid": False, "reason": "confidence"}
+
+        # Check entry price is valid
+        entry_price = signal.get("entry_price")
+        if not entry_price or entry_price <= 0:
+            return {"valid": False, "reason": "invalid_prices"}
+
+        # Check stop loss and take profit are valid
+        stop_loss = signal.get("stop_loss")
+        take_profit = signal.get("take_profit")
+
+        if signal["direction"] == "long":
+            if stop_loss and stop_loss >= entry_price:
+                return {"valid": False, "reason": "invalid_prices"}
+            if take_profit and take_profit <= entry_price:
+                return {"valid": False, "reason": "invalid_prices"}
+        else:  # short
+            if stop_loss and stop_loss <= entry_price:
+                return {"valid": False, "reason": "invalid_prices"}
+            if take_profit and take_profit >= entry_price:
+                return {"valid": False, "reason": "invalid_prices"}
+
+        # Validate risk/reward ratio meets minimum
+        if stop_loss and take_profit:
+            if signal["direction"] == "long":
+                risk = entry_price - stop_loss
+                reward = take_profit - entry_price
+            else:
+                risk = stop_loss - entry_price
+                reward = entry_price - take_profit
+
+            if risk > 0:
+                risk_reward = reward / risk
+                if risk_reward < self._min_risk_reward:
+                    return {"valid": False, "reason": "risk_reward"}
+
+        return {"valid": True, "reason": None}
 
     def _format_signal(self, signal: Dict, market_data: Dict) -> Dict:
         """Format signal with additional metadata.

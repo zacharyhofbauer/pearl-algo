@@ -1387,6 +1387,10 @@ class NQAgentTelegramNotifier:
             except Exception:
                 signal_send_failures = 0
             
+            # Extract quiet_reason and signal_diagnostics for observability
+            quiet_reason = status.get("quiet_reason")
+            signal_diagnostics = status.get("signal_diagnostics")
+            
             message = format_home_card(
                 symbol=symbol,
                 time_str=time_str,
@@ -1412,6 +1416,9 @@ class NQAgentTelegramNotifier:
                 # Note: gateway_unknown=False here because if we're getting data, 
                 # gateway is likely working. Use gateway_unknown=True only when status
                 # cannot be inferred at all.
+                # v4 fields for quiet reason and signal diagnostics
+                quiet_reason=quiet_reason,
+                signal_diagnostics=signal_diagnostics,
             )
             
             # Add MTF snapshot (push-specific enhancement)
