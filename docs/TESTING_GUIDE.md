@@ -679,18 +679,18 @@ This section summarizes the current test coverage and highlights areas for futur
 #### Tests under `tests/`
 
 - `mock_data_provider.py` – common mock provider for unit/integration tests
-- `test_edge_cases.py` – edge case placeholders and basic data‑fetch edge tests
-- `test_error_recovery.py` – error recovery and circuit‑breaker behavior (partially)
+- `test_edge_cases.py` – focused edge-case tests (no-data fetch + short-run service lifecycle)
+- `test_error_recovery.py` – circuit-breaker behavior (connection-failure pause) using a stub provider
 
 ### Observed Gaps
 
 These gaps are **observational only** and do not change behavior.
 
 1. **Market hours edge cases** (`test_edge_cases.py`)
-   - Several tests are placeholders (e.g., DST transitions, holidays, connection errors) and do not assert concrete behavior yet.
+   - DST transitions and holiday calendar behavior are not explicitly tested yet.
 
 2. **Circuit breaker thresholds** (`test_error_recovery.py`)
-   - Tests set thresholds and flags but currently do not drive the full `_run_loop` logic; they mainly assert attribute changes.
+   - Connection-failure pause behavior is tested, but other breaker paths are not yet directly covered (e.g., consecutive errors pause, data-fetch backoff).
 
 3. **Configuration wiring**
    - There are no explicit tests verifying that values from `config/config.yaml` and `Settings` correctly propagate into `NQAgentService` (intervals, thresholds) and data providers.
@@ -709,11 +709,13 @@ These gaps are **observational only** and do not change behavior.
      - Instantiate `NQAgentService` and assert that service intervals, circuit breaker thresholds, and buffer sizes match config values.
 
 2. **Settings/IBKR normalization tests**
-   - Unit tests for `Settings.from_profile` and env normalization paths, ensuring `IBKR_*` and `PEARLALGO_*` precedence behaves as documented.
+   - Unit tests for `get_settings()` and env normalization paths, ensuring `IBKR_*` and `PEARLALGO_IB_*` precedence behaves as documented.
 
 3. **Circuit breaker integration tests**
    - Controlled tests that simulate repeated errors through a stub data provider and assert:
-     - `connection_failures` / `data_fetch_errors` thresholds trigger pause
+     - `connection_failures` threshold triggers pause
+     - consecutive error pause triggers when strategy/processing raises repeatedly
+     - data-fetch error backoff behavior activates at `max_data_fetch_errors`
      - Telegram circuit‑breaker alerts are sent (using a mock notifier).
 
 4. **Command handler tests**
@@ -723,11 +725,11 @@ These gaps are **observational only** and do not change behavior.
      - Unauthorized chat IDs are rejected.
 
 5. **Market hours / data quality edge cases**
-   - Replace placeholders in `test_edge_cases.py` with real tests using mocked `market_hours` and timestamped data frames.
+   - Add DST/holiday tests using mocked `market_hours` and timestamped data frames (no placeholders).
 
 ### Tests Potentially Safe to Refine
 
-- Placeholder tests in `test_edge_cases.py` and simple attribute‑only assertions in `test_error_recovery.py` can be gradually strengthened to assert real behavior.
+- Existing tests can be expanded to cover additional circuit breaker paths and market-hours corner cases.
 - No tests are currently marked for deletion; all files remain part of the suite as of this audit.
 
 ---

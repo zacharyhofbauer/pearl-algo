@@ -9,7 +9,7 @@
 
 - **Create venv & install**
   ```bash
-  cd ~/pearlalgo-dev-ai-agents
+  cd /path/to/pearlalgo-dev-ai-agents
   python3 -m venv .venv
   source .venv/bin/activate
   pip install -e .
@@ -54,7 +54,7 @@
 
 1. **Open terminal & activate venv**
    ```bash
-   cd ~/pearlalgo-dev-ai-agents
+   cd /path/to/pearlalgo-dev-ai-agents
    source .venv/bin/activate
    ```
 

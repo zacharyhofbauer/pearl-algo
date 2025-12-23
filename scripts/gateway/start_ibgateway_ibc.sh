@@ -5,6 +5,12 @@
 # Usage: ./scripts/gateway/start_ibgateway_ibc.sh
 # ============================================================================
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+IBC_DIR="$PROJECT_DIR/ibkr/ibc"
+
+cd "$PROJECT_DIR"
+
 echo "=== Starting IB Gateway with IBC (Read-Only Mode) ==="
 echo ""
 
@@ -13,14 +19,14 @@ if pgrep -f "java.*IBC.jar" > /dev/null; then
     echo "⚠️  IB Gateway is already running!"
     ps aux | grep "IBC.jar" | grep -v grep
     echo ""
-    echo "To stop it: ~/pearlalgo-dev-ai-agents/ibkr/ibc/stop.sh"
+    echo "To stop it: ./scripts/gateway/stop_ibgateway_ibc.sh"
     exit 1
 fi
 
 # Check if IBC is configured
-if [ ! -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/config-auto.ini ]; then
-    echo "❌ IBC not configured. Run:"
-    echo "   ~/pearlalgo-dev-ai-agents/scripts/configure_ibc_readonly.sh"
+if [ ! -f "$IBC_DIR/config-auto.ini" ]; then
+    echo "❌ IBC not configured."
+    echo "   Run: ./scripts/gateway/setup_ibgateway.sh"
     exit 1
 fi
 
@@ -37,7 +43,7 @@ fi
 
 # Start IBC
 echo "Starting IB Gateway..."
-cd ~/pearlalgo-dev-ai-agents/ibkr/ibc
+cd "$IBC_DIR"
 
 # Use headless version that ensures DISPLAY is set
 export DISPLAY=:99
@@ -47,7 +53,7 @@ nohup ./gatewaystart.sh -inline > "$LOG_FILE" 2>&1 &
 IBC_PID=$!
 
 echo "IB Gateway starting (PID: $IBC_PID)"
-echo "Log file: ~/pearlalgo-dev-ai-agents/ibkr/ibc/$LOG_FILE"
+echo "Log file: $IBC_DIR/$LOG_FILE"
 echo ""
 
 # Wait for Gateway to start and authenticate
@@ -59,7 +65,7 @@ if ! ps -p $IBC_PID > /dev/null 2>&1; then
     echo "⚠️  Process exited - checking logs..."
     tail -30 "$LOG_FILE" 2>/dev/null | tail -15
     echo ""
-    echo "Check full log: tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/$LOG_FILE"
+    echo "Check full log: tail -f $IBC_DIR/$LOG_FILE"
     exit 1
 fi
 
@@ -77,12 +83,12 @@ for i in {1..12}; do
         echo "Gateway is running and authenticated."
         echo "It will stay running until you stop it."
         echo ""
-        echo "To stop Gateway: ~/pearlalgo-dev-ai-agents/ibkr/ibc/stop.sh"
-        echo "To view logs: tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/$LOG_FILE"
+        echo "To stop Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh"
+        echo "To view logs: tail -f $IBC_DIR/$LOG_FILE"
         echo ""
         echo "Test connection:"
-        echo "  cd ~/pearlalgo-dev-ai-agents"
-        echo "  python3 test_ibkr_connection.py"
+        echo "  cd $PROJECT_DIR"
+        echo "  python3 scripts/testing/smoke_test_ibkr.py"
         exit 0
     fi
     echo "  Still waiting... ($i/12)"
@@ -104,9 +110,9 @@ echo "  ps aux | grep -E '(java.*IBC|IBC.jar)' | grep -v grep"
 echo "  ss -tuln | grep 4002"
 echo ""
 echo "View logs:"
-echo "  tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/$LOG_FILE"
-echo "  tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/ibc-3.23.0_GATEWAY-1041_*.txt"
+echo "  tail -f $IBC_DIR/$LOG_FILE"
+echo "  tail -f $IBC_DIR/logs/ibc-*.txt"
 
 echo ""
-    echo "To stop IB Gateway: ~/pearlalgo-dev-ai-agents/ibkr/ibc/stop.sh"
-    echo "To view logs: tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway_*.log"
+echo "To stop IB Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh"
+echo "To view logs: tail -f $IBC_DIR/logs/gateway_*.log"

@@ -2,6 +2,11 @@
 # Complete 2FA authentication for IBKR Gateway via VNC
 # Use this when Gateway is waiting for 2FA input
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+cd "$PROJECT_DIR"
+
 echo "=== Complete 2FA Authentication for IBKR Gateway ==="
 echo ""
 

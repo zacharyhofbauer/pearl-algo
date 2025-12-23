@@ -1,131 +1,70 @@
 """
-Error recovery tests for NQ Agent.
+Error recovery tests for the NQ Agent.
 
-Tests error recovery scenarios including:
-- Circuit breaker behavior
-- Recovery after errors
-- Connection failure recovery
+These tests target *observable behavior* (pause reason / circuit breaker state),
+not internal attribute twiddling.
 """
 
-import asyncio
-import pytest
-from datetime import datetime, timezone
-from unittest.mock import Mock, patch, AsyncMock
+from __future__ import annotations
 
+import asyncio
+from datetime import datetime
+
+import pandas as pd
+import pytest
+
+from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.nq_agent.service import NQAgentService
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
-from tests.mock_data_provider import MockDataProvider
 
 
-@pytest.mark.unit
-class TestCircuitBreaker:
-    """Test circuit breaker behavior."""
-
-    @pytest.mark.asyncio
-    async def test_circuit_breaker_activation(self):
-        """Test circuit breaker activates after too many errors."""
-        provider = MockDataProvider(base_price=17500.0, volatility=50.0, trend=0.0)
-        service = NQAgentService(data_provider=provider, config=NQIntradayConfig())
-        
-        # Set low threshold for testing
-        service.max_consecutive_errors = 3
-        
-        # Simulate errors
-        service.consecutive_errors = 2
-        
-        # Should not be paused yet
-        assert not service.paused
-        
-        # One more error should trigger circuit breaker
-        # Note: Actual circuit breaker logic is in _run_loop
-        # This test verifies the threshold exists
-
-    @pytest.mark.asyncio
-    async def test_circuit_breaker_reset(self):
-        """Test circuit breaker resets after successful cycle."""
-        provider = MockDataProvider(base_price=17500.0, volatility=50.0, trend=0.0)
-        service = NQAgentService(data_provider=provider, config=NQIntradayConfig())
-        
-        # Set some errors
-        service.consecutive_errors = 5
-        
-        # Successful cycle should reset
-        service.consecutive_errors = 0
-        
-        # Should not be paused
-        assert not service.paused
+class _DisconnectedExecutor:
+    def is_connected(self) -> bool:  # pragma: no cover (simple stub)
+        return False
 
 
-@pytest.mark.unit
-class TestErrorRecovery:
-    """Test error recovery scenarios."""
+class StubIBKRProvider(DataProvider):
+    """Minimal provider that looks like a disconnected IBKR provider to ErrorHandler."""
 
-    @pytest.mark.asyncio
-    async def test_recovery_after_data_fetch_error(self):
-        """Test recovery after data fetch errors."""
-        provider = MockDataProvider(base_price=17500.0, volatility=50.0, trend=0.0)
-        service = NQAgentService(data_provider=provider, config=NQIntradayConfig())
-        
-        # Simulate data fetch errors
-        service.data_fetch_errors = 3
-        
-        # After successful fetch, errors should reset
-        service.data_fetch_errors = 0
-        
-        # Should be able to continue
-        assert service.data_fetch_errors == 0
+    def __init__(self) -> None:
+        self._executor = _DisconnectedExecutor()
 
-    @pytest.mark.asyncio
-    async def test_recovery_after_connection_failure(self):
-        """Test recovery after connection failures."""
-        provider = MockDataProvider(base_price=17500.0, volatility=50.0, trend=0.0)
-        service = NQAgentService(data_provider=provider, config=NQIntradayConfig())
-        
-        # Simulate connection failures
-        service.connection_failures = 5
-        
-        # After successful connection, failures should reset
-        service.connection_failures = 0
-        
-        # Should be able to continue
-        assert service.connection_failures == 0
+    def fetch_historical(
+        self,
+        symbol: str,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        timeframe: str | None = None,
+    ) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    async def get_latest_bar(self, symbol: str):  # matches fetcher hasattr() usage
+        return None
 
 
-@pytest.mark.integration
-class TestServiceRecovery:
-    """Test service-level recovery."""
+@pytest.mark.asyncio
+async def test_connection_failure_circuit_breaker_pauses_service(tmp_path) -> None:
+    provider = StubIBKRProvider()
 
-    @pytest.mark.asyncio
-    async def test_service_recovery_after_pause(self):
-        """Test service recovers after being paused."""
-        provider = MockDataProvider(base_price=17500.0, volatility=50.0, trend=0.0)
-        service = NQAgentService(data_provider=provider, config=NQIntradayConfig())
-        
-        # Pause service
-        service.pause()
-        assert service.paused
-        
-        # Resume service
-        service.resume()
-        assert not service.paused
+    config = NQIntradayConfig()
+    config.scan_interval = 0.05  # type: ignore[assignment]
 
-    @pytest.mark.asyncio
-    async def test_service_handles_transient_errors(self):
-        """Test service handles transient errors gracefully."""
-        provider = MockDataProvider(base_price=17500.0, volatility=50.0, trend=0.0)
-        service = NQAgentService(data_provider=provider, config=NQIntradayConfig())
-        
-        # Service should continue running despite transient errors
-        # This is tested implicitly by the service continuing to run
-        # after encountering errors in the main loop
-        
-        # For explicit test, we verify error handling doesn't crash service
-        try:
-            await service.start()
-            await asyncio.sleep(0.5)
-            await service.stop()
-        except Exception as e:
-            pytest.fail(f"Service should handle errors gracefully: {e}")
+    service = NQAgentService(data_provider=provider, config=config, state_dir=tmp_path)
+    service.max_connection_failures = 1  # trigger immediately
+
+    task = asyncio.create_task(service.start())
+
+    # Wait until the service pauses due to connection failures.
+    for _ in range(40):
+        if service.paused:
+            break
+        await asyncio.sleep(0.05)
+
+    assert service.paused
+    assert service.pause_reason == "connection_failures"
+
+    await service.stop("test")
+    await asyncio.wait_for(task, timeout=2.0)
 
 
 

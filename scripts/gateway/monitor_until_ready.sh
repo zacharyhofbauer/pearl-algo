@@ -1,6 +1,11 @@
 #!/bin/bash
 # Monitor Gateway until API is ready
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+cd "$PROJECT_DIR"
+
 echo "=== Monitoring Gateway until API is ready ==="
 echo ""
 

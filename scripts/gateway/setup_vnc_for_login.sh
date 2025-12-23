@@ -2,6 +2,9 @@
 # Quick VNC setup for one-time IBKR Gateway manual login
 # After this one login, Gateway can run headless forever
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 echo "=== VNC Setup for IBKR Gateway Manual Login ==="
 echo ""
 
@@ -35,7 +38,7 @@ if [ $? -eq 0 ]; then
     echo "   Then: vncviewer localhost:5901"
     echo ""
     echo "2. In the VNC session, start Gateway:"
-    echo "   cd /home/pearlalgo/pearlalgo-dev-ai-agents/ibkr/ibc"
+    echo "   cd $PROJECT_DIR/ibkr/ibc"
     echo "   export DISPLAY=:1"
     echo "   ./gatewaystart.sh"
     echo ""

@@ -42,7 +42,7 @@ The command handler is a **separate service** that listens for `/status`, `/sign
 #### Option 1: Standalone (recommended for testing)
 
 ```bash
-cd ~/pearlalgo-dev-ai-agents
+cd /path/to/pearlalgo-dev-ai-agents
 python3 -m pearlalgo.nq_agent.telegram_command_handler
 ```
 
@@ -57,7 +57,7 @@ Press Ctrl+C to stop
 #### Option 2: Use the helper script
 
 ```bash
-cd ~/pearlalgo-dev-ai-agents
+cd /path/to/pearlalgo-dev-ai-agents
 ./scripts/telegram/start_command_handler.sh
 ```
 
@@ -87,7 +87,7 @@ Instead of BotFather, you can set commands using the Telegram API.
 A helper script is provided:
 
 ```bash
-cd ~/pearlalgo-dev-ai-agents
+cd /path/to/pearlalgo-dev-ai-agents
 python3 scripts/telegram/set_bot_commands.py
 ```
 
@@ -448,7 +448,7 @@ This means:
 **Gateway Won't Start:**
 - Check IBKR account is active
 - Verify 2FA approval on mobile app
-- Check Gateway logs: `tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway_*.log`
+- Check Gateway logs: `tail -f ibkr/ibc/logs/gateway_*.log`
 
 **Agent Won't Start:**
 - Check Gateway is running: `/gateway_status`

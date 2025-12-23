@@ -2,6 +2,12 @@
 # Monitor Gateway and wait for 2FA approval via mobile app
 # This script watches for when you approve the login in your IBKR mobile app
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+IBC_LOG_DIR="$PROJECT_DIR/ibkr/ibc/logs"
+
+cd "$PROJECT_DIR"
+
 echo "=== Waiting for IBKR Mobile App 2FA Approval ==="
 echo ""
 
@@ -17,7 +23,7 @@ echo "✅ Gateway is running (PID: $GATEWAY_PID)"
 echo ""
 
 # Find the latest IBC log file
-LATEST_LOG=$(ls -t ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/ibc-*.txt 2>/dev/null | head -1)
+LATEST_LOG=$(ls -t "$IBC_LOG_DIR"/ibc-*.txt 2>/dev/null | head -1)
 
 if [ -z "$LATEST_LOG" ]; then
     echo "⚠️  Could not find IBC log file"

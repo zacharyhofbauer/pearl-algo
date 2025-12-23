@@ -1,6 +1,9 @@
 #!/bin/bash
 # Test API connection to trigger any pending dialogs
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 echo "=== Testing API Connection ==="
 echo ""
 
@@ -16,7 +19,7 @@ echo "Attempting API connection to trigger any pending dialogs..."
 echo ""
 
 # Try to connect using Python
-cd ~/pearlalgo-dev-ai-agents
+cd "$PROJECT_DIR"
 
 python3 << 'EOF'
 from ib_insync import IB

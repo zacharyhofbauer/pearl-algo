@@ -5,6 +5,12 @@
 # Usage: ./scripts/gateway/check_gateway_status.sh
 # ============================================================================
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+IBC_LOG_DIR="$PROJECT_DIR/ibkr/ibc/logs"
+
+cd "$PROJECT_DIR"
+
 echo "=== IBKR Gateway Status ==="
 echo ""
 
@@ -29,7 +35,7 @@ fi
 echo ""
 
 # Show latest log file
-LATEST_LOG=$(ls -t ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway_*.log 2>/dev/null | head -1)
+LATEST_LOG=$(ls -t "$IBC_LOG_DIR"/gateway_*.log 2>/dev/null | head -1)
 if [ -n "$LATEST_LOG" ]; then
     echo "📄 Latest Log: $LATEST_LOG"
     echo "   Last modified: $(stat -c %y "$LATEST_LOG" 2>/dev/null | cut -d. -f1)"

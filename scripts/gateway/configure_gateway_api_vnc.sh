@@ -2,6 +2,11 @@
 # Configure Gateway API settings via VNC (one-time setup)
 # After this, Gateway should work headlessly
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+cd "$PROJECT_DIR"
+
 echo "=== Configure Gateway API Settings (One-Time VNC Setup) ==="
 echo ""
 

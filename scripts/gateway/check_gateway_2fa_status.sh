@@ -1,6 +1,12 @@
 #!/bin/bash
 # Check Gateway 2FA status - run from SSH terminal (not VNC)
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+IBC_LOG_DIR="$PROJECT_DIR/ibkr/ibc/logs"
+
+cd "$PROJECT_DIR"
+
 echo "=== IBKR Gateway 2FA Status Check ==="
 echo ""
 
@@ -27,7 +33,7 @@ else
 fi
 
 # Check latest IBC log for 2FA status
-LATEST_LOG=$(ls -t ibkr/ibc/logs/ibc-*.txt 2>/dev/null | head -1)
+LATEST_LOG=$(ls -t "$IBC_LOG_DIR"/ibc-*.txt 2>/dev/null | head -1)
 if [ -n "$LATEST_LOG" ]; then
     echo "📋 Recent Gateway activity:"
     echo ""

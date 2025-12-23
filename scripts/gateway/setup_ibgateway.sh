@@ -1,8 +1,15 @@
 #!/bin/bash
 # Complete IB Gateway setup script
-# Merges functionality from setup_ibgateway_readonly.sh, configure_ibgateway_api.sh, and configure_ibc_readonly.sh
+# Consolidates one-time Gateway setup:
+# - `ibkr/Jts/jts.ini` API settings (SocketPort, trusted IPs, read-only mode)
+# - `ibkr/ibc/config-auto.ini` IBC configuration pointing at the Jts directory
 
 set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+JTS_DIR="$PROJECT_DIR/ibkr/Jts"
+IBC_DIR="$PROJECT_DIR/ibkr/ibc"
 
 echo "=== IB Gateway Complete Setup ==="
 echo ""
@@ -17,12 +24,12 @@ echo ""
 
 # 1. Configure jts.ini for API access
 echo "1. Configuring jts.ini for API access..."
-mkdir -p ~/pearlalgo-dev-ai-agents/ibkr/Jts
+mkdir -p "$JTS_DIR"
 
 # Check if SocketPort already exists
-if ! grep -q "SocketPort" ~/pearlalgo-dev-ai-agents/ibkr/Jts/jts.ini 2>/dev/null; then
+if ! grep -q "SocketPort" "$JTS_DIR/jts.ini" 2>/dev/null; then
     echo "   Adding API port settings..."
-    cat >> ~/pearlalgo-dev-ai-agents/ibkr/Jts/jts.ini << 'EOF'
+    cat >> "$JTS_DIR/jts.ini" << 'EOF'
 
 # API Configuration for Read-Only Data Access (added automatically)
 SocketPort=4002
@@ -42,7 +49,7 @@ fi
 if [ "$IBC_MODE" = "yes" ]; then
     echo ""
     echo "2. Configuring IBC (IB Controller)..."
-    cd ~/pearlalgo-dev-ai-agents/ibkr/ibc || exit 1
+    cd "$IBC_DIR" || exit 1
     
     # Backup existing config
     if [ -f config-auto.ini ]; then
@@ -50,7 +57,7 @@ if [ "$IBC_MODE" = "yes" ]; then
     fi
     
     # Create/update config for read-only API
-    cat > config-auto.ini << 'EOF'
+    cat > config-auto.ini << EOF
 # IB Controller Configuration - Read-Only Data Access
 # This configuration enables API access for data retrieval only (no trading)
 
@@ -62,7 +69,7 @@ ReadOnlyApi=yes
 EnableAPI=yes
 
 # IB Directory (where Gateway settings are stored)
-IbDir=/home/pearlalgo/pearlalgo-dev-ai-agents/ibkr/Jts
+IbDir=$JTS_DIR
 
 # Auto-restart settings (optional - keeps Gateway running)
 AutoRestart=yes
@@ -92,7 +99,7 @@ echo ""
 echo "Next steps:"
 echo "  1. Start IB Gateway:"
 if [ "$IBC_MODE" = "yes" ]; then
-    echo "     cd ~/pearlalgo-dev-ai-agents/ibkr/ibc"
+    echo "     cd $IBC_DIR"
     echo "     ./gatewaystart.sh -inline"
 else
     echo "     ./scripts/gateway/start_ibgateway_ibc.sh"

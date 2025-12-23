@@ -22,7 +22,7 @@
 ## 🚀 Quick Start
 
 ```bash
-cd ~/pearlalgo-dev-ai-agents
+cd /path/to/pearlalgo-dev-ai-agents
 
 # 1. Ensure IBKR Gateway is running
 ./scripts/gateway/check_gateway_status.sh
@@ -49,7 +49,7 @@ cd ~/pearlalgo-dev-ai-agents
 
 ### 1. Install Dependencies
 ```bash
-cd ~/pearlalgo-dev-ai-agents
+cd /path/to/pearlalgo-dev-ai-agents
 pip install -e .
 ```
 

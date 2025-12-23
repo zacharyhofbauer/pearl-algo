@@ -37,9 +37,9 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.data_providers.ibkr_executor`
 - **Shell scripts** (`scripts/gateway/`):
   - Startup / shutdown: `start_ibgateway_ibc.sh`, `stop_ibgateway_ibc.sh`, `start_ibgateway_ibc_vnc.sh`
-  - Status / checks: `check_gateway_status.sh`, `check_api_ready.sh`, `test_api_connection.sh`, `check_tws_conflict.sh`
+  - Status / checks: `check_gateway_status.sh`, `check_api_ready.sh`, `check_gateway_2fa_status.sh`, `test_api_connection.sh`, `check_tws_conflict.sh`
   - 2FA + VNC helpers: `auto_2fa.sh`, `wait_for_2fa_approval.sh`, `complete_2fa_vnc.sh`, `setup_vnc_for_login.sh`, `configure_gateway_api_vnc.sh`, `monitor_until_ready.sh`
-  - System helpers: `disable_auto_sleep.sh`, `setup_ibgateway.sh`, `fix_api_connection.sh`
+  - System helpers: `disable_auto_sleep.sh`, `setup_ibgateway.sh`
 - **Docs**:
   - `docs/GATEWAY.md`
   - `docs/MARKET_DATA_SUBSCRIPTION.md`

@@ -1,6 +1,12 @@
 #!/bin/bash
 # Start IB Gateway with IBC on VNC display for manual configuration
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+IBC_DIR="$PROJECT_DIR/ibkr/ibc"
+
+cd "$PROJECT_DIR"
+
 echo "=== Starting IB Gateway with IBC on VNC Display ==="
 echo ""
 
@@ -25,15 +31,15 @@ if pgrep -f "java.*IBC.jar" > /dev/null; then
 fi
 
 # Check if IBC is configured
-if [ ! -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/config-auto.ini ]; then
-    echo "❌ IBC not configured. Run:"
-    echo "   ~/pearlalgo-dev-ai-agents/scripts/configure_ibc_readonly.sh"
+if [ ! -f "$IBC_DIR/config-auto.ini" ]; then
+    echo "❌ IBC not configured."
+    echo "   Run: ./scripts/gateway/setup_ibgateway.sh"
     exit 1
 fi
 
 # Start IBC on VNC display
 echo "Starting IB Gateway on VNC display :1..."
-cd ~/pearlalgo-dev-ai-agents/ibkr/ibc
+cd "$IBC_DIR"
 
 # Use VNC display instead of Xvfb
 export DISPLAY=:1
@@ -44,13 +50,14 @@ nohup ./gatewaystart.sh -inline > "$LOG_FILE" 2>&1 &
 IBC_PID=$!
 
 echo "IB Gateway starting on VNC display :1 (PID: $IBC_PID)"
-echo "Log file: ~/pearlalgo-dev-ai-agents/ibkr/ibc/$LOG_FILE"
+echo "Log file: $IBC_DIR/$LOG_FILE"
 echo ""
 echo "✅ Gateway should now be visible in your VNC viewer!"
 echo ""
 echo "Connect to VNC:"
-echo "  vncviewer 192.168.1.19:5901"
-echo "  (or use SSH tunnel: ssh -L 5901:localhost:5901 pearlalgo@192.168.1.19)"
+SERVER_IP=$(hostname -I | awk '{print $1}')
+echo "  vncviewer ${SERVER_IP}:5901"
+echo "  (or use SSH tunnel: ssh -L 5901:localhost:5901 <user>@${SERVER_IP})"
 echo ""
 echo "In VNC, you should see the Gateway window where you can:"
 echo "  1. Approve 2FA if needed"
@@ -60,7 +67,7 @@ echo "  4. Set port to 4002"
 echo "  5. Uncheck 'Read-Only API'"
 echo ""
 echo "Monitor Gateway:"
-echo "  tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/$LOG_FILE"
+echo "  tail -f $IBC_DIR/$LOG_FILE"
 echo ""
 echo "Check API status:"
 echo "  ./scripts/gateway/check_api_ready.sh"

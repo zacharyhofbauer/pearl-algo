@@ -17,7 +17,7 @@ if [ -z "$PIDS" ]; then
     echo "❌ Command Handler is NOT running"
     echo ""
     echo "To start it, run:"
-    echo "  cd ~/pearlalgo-dev-ai-agents"
+    echo "  cd $PROJECT_DIR"
     echo "  python3 -m pearlalgo.nq_agent.telegram_command_handler"
     echo ""
     echo "Or use the helper script:"

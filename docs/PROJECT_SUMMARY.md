@@ -696,7 +696,7 @@ The `tests/mock_data_provider.py` provides:
 
 ```bash
 # 1. Clone repository
-cd ~/pearlalgo-dev-ai-agents
+cd /path/to/pearlalgo-dev-ai-agents
 
 # 2. Install dependencies
 pip install -e .
@@ -749,10 +749,10 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/pearlalgo/pearlalgo-dev-ai-agents
+WorkingDirectory=/path/to/pearlalgo-dev-ai-agents
 Environment=\"PYTHONUNBUFFERED=1\"
-EnvironmentFile=/home/pearlalgo/pearlalgo-dev-ai-agents/.env
-ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin/python -m pearlalgo.nq_agent.main
+EnvironmentFile=/path/to/pearlalgo-dev-ai-agents/.env
+ExecStart=/path/to/pearlalgo-dev-ai-agents/.venv/bin/python -m pearlalgo.nq_agent.main
 Restart=on-failure
 RestartSec=10
 
@@ -773,7 +773,7 @@ sudo systemctl status pearlalgo-mnq.service
 A minimal `Dockerfile` is provided in the project root. To build and run:
 
 ```bash
-cd ~/pearlalgo-dev-ai-agents
+cd /path/to/pearlalgo-dev-ai-agents
 docker build -t pearlalgo-mnq .
 
 # IBKR Gateway must be reachable from inside the container (host network or a separate container)
