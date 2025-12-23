@@ -92,6 +92,21 @@ class NQIntradayConfig:
                     if "scan_interval" in config_data:
                         config.scan_interval = config_data["scan_interval"]
 
+                    # Load strategy session window (NY time / ET).
+                    # Supports either:
+                    # - session.start_time / session.end_time (preferred)
+                    # - top-level start_time / end_time (backward-compatible)
+                    session_cfg = config_data.get("session", {}) or {}
+                    if "start_time" in session_cfg:
+                        config.start_time = session_cfg["start_time"]
+                    elif "start_time" in config_data:
+                        config.start_time = config_data["start_time"]
+
+                    if "end_time" in session_cfg:
+                        config.end_time = session_cfg["end_time"]
+                    elif "end_time" in config_data:
+                        config.end_time = config_data["end_time"]
+
                     # Load risk parameters
                     risk_config = config_data.get("risk", {})
                     if "stop_loss_atr_multiplier" in risk_config:
@@ -115,6 +130,8 @@ class NQIntradayConfig:
 
                     config.symbol = substitute_env(config.symbol) or config.symbol
                     config.timeframe = substitute_env(config.timeframe) or config.timeframe
+                    config.start_time = substitute_env(config.start_time) or config.start_time
+                    config.end_time = substitute_env(config.end_time) or config.end_time
 
             except Exception as e:  # pragma: no cover - defensive logging
                 import logging

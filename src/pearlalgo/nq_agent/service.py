@@ -198,6 +198,16 @@ class NQAgentService:
                 "max_risk_per_trade": self.config.max_risk_per_trade,
                 "current_time": get_utc_timestamp(),
             }
+
+            # Include explicit market/session gates so startup never shows UNKNOWN in Telegram UI.
+            try:
+                config_dict["futures_market_open"] = bool(get_market_hours().is_market_open())
+            except Exception:
+                config_dict["futures_market_open"] = None
+            try:
+                config_dict["strategy_session_open"] = bool(self.strategy.scanner.is_market_hours())
+            except Exception:
+                config_dict["strategy_session_open"] = None
             
             # Try to get latest price for startup message (non-blocking, timeout quickly)
             try:

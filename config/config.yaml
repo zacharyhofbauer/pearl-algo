@@ -11,6 +11,13 @@ timeframe: "1m"  # 1-minute bars for intraday scalping/swings
 # Scan Interval (seconds)
 scan_interval: 30  # Check for signals every 30 seconds (faster for scalping)
 
+# Strategy session window (NY time / ET).
+# This controls when the strategy is allowed to generate signals.
+# Your prop-firm rule: positions must be flat by 16:10 ET, so we stop signals at 16:10.
+session:
+  start_time: "18:00"  # Session opens at 6:00 PM ET (Sunday 18:00 aligns with CME ETH reopen)
+  end_time: "16:10"    # Session closes at 4:10 PM ET (before CME 17:00 close)
+
 # Telegram Notifications
 telegram:
   enabled: true
