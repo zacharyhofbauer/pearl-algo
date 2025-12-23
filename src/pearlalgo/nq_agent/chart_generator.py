@@ -1383,27 +1383,31 @@ class ChartGenerator:
         timeframe: str = "5m",
         *,
         lookback_bars: int = 288,
+        range_label: Optional[str] = None,
         figsize: Tuple[float, float] = (16, 7),
         dpi: int = 150,
         show_sessions: bool = True,
         show_key_levels: bool = True,
         show_vwap: bool = True,
         show_rsi: bool = True,
+        show_pressure: bool = True,
     ) -> Optional[Path]:
         """
-        Generate a TradingView-style 24h dashboard chart.
+        Generate a TradingView-style dashboard chart.
 
         Args:
             data: OHLCV DataFrame (expects 5m bars with timestamp/DatetimeIndex)
             symbol: Symbol name for title
             timeframe: Timeframe label for title (e.g. "5m")
-            lookback_bars: Number of bars to display (288 = 24h of 5m bars)
+            lookback_bars: Number of bars to display
+            range_label: Optional range label for title (e.g., "24h", "48h", "3d")
             figsize: Figure size (width, height) – wider for mobile landscape
             dpi: Resolution for Telegram delivery
             show_sessions: Shade Tokyo/London/NY sessions
             show_key_levels: Show RTH/ETH PDH/PDL/Open levels
             show_vwap: Show VWAP line + bands
             show_rsi: Show RSI panel
+            show_pressure: Show buy/sell pressure proxy panel (signed volume histogram)
 
         Returns:
             Path to generated PNG, or None on failure
@@ -1496,8 +1500,35 @@ class ChartGenerator:
                 except Exception as e:
                     logger.debug(f"Error adding VWAP to dashboard chart: {e}")
 
-            # RSI panel
             volume_on = "Volume" in df.columns
+            # Pressure panel (buy/sell proxy): signed volume histogram (+vol for up candles, -vol for down candles)
+            pressure_enabled = bool(show_pressure and volume_on)
+            if pressure_enabled:
+                try:
+                    close = df["Close"]
+                    open_ = df["Open"]
+                    vol = df["Volume"].fillna(0.0)
+                    sign = np.sign((close - open_).fillna(0.0))
+                    signed_vol = vol * sign
+                    addplot.append(
+                        mpf.make_addplot(
+                            signed_vol,
+                            panel=2,  # price=0, volume=1, pressure=2
+                            type="bar",
+                            width=0.8,
+                            alpha=0.65,
+                            color=[
+                                (CANDLE_UP if v >= 0 else CANDLE_DOWN)
+                                for v in signed_vol.fillna(0.0).tolist()
+                            ],
+                            ylabel="Pressure",
+                        )
+                    )
+                except Exception as e:
+                    pressure_enabled = False
+                    logger.debug(f"Error adding pressure panel to dashboard chart: {e}")
+
+            # RSI panel (shift down if pressure is enabled)
             panel_ratios = None
             if show_rsi:
                 try:
@@ -1508,7 +1539,12 @@ class ChartGenerator:
                     rs = gain / loss.replace(0, np.nan)
                     rsi = 100 - (100 / (1 + rs))
 
-                    rsi_panel = 2 if volume_on else 1
+                    # Panel allocation:
+                    # - price: 0
+                    # - volume: 1 (built-in)
+                    # - pressure: 2 (optional)
+                    # - rsi: 3 (if pressure enabled) else 2
+                    rsi_panel = 3 if (volume_on and pressure_enabled) else (2 if volume_on else 1)
                     addplot.append(
                         mpf.make_addplot(
                             rsi,
@@ -1530,16 +1566,24 @@ class ChartGenerator:
                                 alpha=a,
                             )
                         )
-                    panel_ratios = (6, 2, 2) if volume_on else (7, 3)
+                    if volume_on and pressure_enabled:
+                        panel_ratios = (6, 2, 1.6, 1.6)
+                    else:
+                        panel_ratios = (6, 2, 2) if volume_on else (7, 3)
                 except Exception as e:
                     logger.debug(f"Error adding RSI to dashboard chart: {e}")
+
+            # If RSI is off but pressure is on, still provide panel ratios for stable layout
+            if panel_ratios is None and volume_on and pressure_enabled:
+                panel_ratios = (7, 2, 2)
 
             # Title
             try:
                 now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
             except Exception:
                 now_str = ""
-            title = f"{symbol} Dashboard - 24h ({timeframe}) • {now_str}"
+            label = range_label or "Dashboard"
+            title = f"{symbol} {label} ({timeframe}) • {now_str}"
 
             # Temp file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")

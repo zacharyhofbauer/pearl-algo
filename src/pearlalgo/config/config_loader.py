@@ -59,6 +59,14 @@ def load_service_config(config_path: Optional[Path] = None) -> Dict:
             "state_save_interval": 10,
             # Cadence mode: "fixed" (start-to-start timing) or "sleep_after" (legacy)
             "cadence_mode": "fixed",
+            # Dashboard observability (15m push)
+            "pressure_lookback_bars": 24,   # ~2h on 5m bars
+            "pressure_baseline_bars": 120,  # ~10h on 5m bars
+            # Dashboard chart (hourly image)
+            "dashboard_chart_lookback_hours": 48,  # show more context for key levels
+            "dashboard_chart_timeframe": "auto",   # "auto" | "5m" | "15m" | "30m" | "1h"
+            "dashboard_chart_max_bars": 420,       # cap candles for readability/Telegram
+            "dashboard_chart_show_pressure": True, # show signed-volume pressure panel
         },
         "circuit_breaker": {
             "max_consecutive_errors": 10,

@@ -484,6 +484,7 @@ class TelegramCommandHandler:
                 state_age_seconds=state_age_seconds,
                 state_stale_threshold=120.0,  # 2 minutes; warn if state file is older
                 signal_send_failures=signal_send_failures,
+                buy_sell_pressure=state.get("buy_sell_pressure"),
             )
             
             # Use consistent main menu buttons

@@ -513,6 +513,8 @@ def format_home_card(
     quiet_reason: str | None = None,  # Why agent is quiet (e.g., "StrategySessionClosed")
     # Signal diagnostics (when no signals)
     signal_diagnostics: str | None = None,  # Compact summary like "Raw: 3 → Valid: 0 | Filtered: 2 conf, 1 R:R"
+    # Buy/Sell pressure (volume-based proxy)
+    buy_sell_pressure: str | None = None,  # e.g. "🟢 Pressure: BUYERS ▲▲ (Δ +18%, Vol 1.3x, 2h)"
 ) -> str:
     """
     Build unified Home Card message for status/dashboard (balanced verbosity).
@@ -576,6 +578,7 @@ def format_home_card(
         last_cycle_seconds: Seconds since last cycle (for activity pulse)
         previous_pnl: Previous period P&L for trend comparison
         quiet_reason: Why agent is quiet (e.g., "StrategySessionClosed", "NoOpportunity")
+        buy_sell_pressure: Buy/Sell pressure proxy string (volume-based)
 
     Returns:
         Formatted Home Card message string
@@ -661,6 +664,10 @@ def format_home_card(
         # Only show if not a simple "no patterns" or "session closed" message
         if signal_diagnostics not in ("Session closed", "No patterns detected"):
             lines.append(f"   🔍 {signal_diagnostics}")
+
+    # CONDITIONAL: Buy/Sell pressure (show only when agent running and not paused)
+    if buy_sell_pressure and agent_running and not paused:
+        lines.append(f"   {buy_sell_pressure}")
 
     lines.append("")  # Blank line separator
 

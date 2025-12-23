@@ -30,6 +30,11 @@ from pearlalgo.utils.cadence import CadenceMetrics, CadenceScheduler
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import get_market_hours
+from pearlalgo.utils.volume_pressure import (
+    compute_volume_pressure_summary,
+    format_volume_pressure,
+    timeframe_to_minutes,
+)
 
 
 class NQAgentService:
@@ -138,6 +143,13 @@ class NQAgentService:
         # Dashboard chart (hourly mplfinance screenshot)
         self.last_dashboard_chart_sent: Optional[datetime] = None
         self.dashboard_chart_interval = service_settings.get("dashboard_chart_interval", 3600)  # 1 hour default
+        self.dashboard_chart_lookback_hours = float(service_settings.get("dashboard_chart_lookback_hours", 48) or 48)
+        self.dashboard_chart_timeframe = str(service_settings.get("dashboard_chart_timeframe", "auto") or "auto")
+        self.dashboard_chart_max_bars = int(service_settings.get("dashboard_chart_max_bars", 420) or 420)
+        self.dashboard_chart_show_pressure = bool(service_settings.get("dashboard_chart_show_pressure", True))
+        # Buy/Sell pressure (dashboard observability)
+        self.pressure_lookback_bars = int(service_settings.get("pressure_lookback_bars", 24) or 24)
+        self.pressure_baseline_bars = int(service_settings.get("pressure_baseline_bars", 120) or 120)
         self.state_save_interval = service_settings.get("state_save_interval", 10)
         self.connection_failure_alert_interval = service_settings.get("connection_failure_alert_interval", 600)
         self.data_quality_alert_interval = service_settings.get("data_quality_alert_interval", 300)
@@ -848,26 +860,67 @@ class NQAgentService:
                 logger.debug("Chart generator not available for dashboard chart")
                 return
 
-            # Fetch 24h of 5m data (288 bars = 24h * 12 bars/hour)
-            logger.debug("Fetching 24h/5m data for dashboard chart...")
-            
-            # Use the data fetcher to get 5m data
-            # We need to resample from the 5m buffer or fetch directly
+            # Fetch lookback window for chart (prefer direct historical fetch; fallback to buffers)
+            lookback_hours = float(self.dashboard_chart_lookback_hours or 48)
+            chart_tf = (self.dashboard_chart_timeframe or "auto").strip().lower()
+
+            def _choose_timeframe(hours: float, max_bars: int) -> str:
+                # Keep candle count under max_bars for readability.
+                candidates = ["5m", "15m", "30m", "1h"]
+                if chart_tf in candidates:
+                    return chart_tf
+                # auto
+                for tf in candidates:
+                    mins = timeframe_to_minutes(tf) or 0
+                    if mins <= 0:
+                        continue
+                    bars = int((hours * 60.0) / float(mins))
+                    if bars <= max_bars:
+                        return tf
+                return "1h"
+
+            chosen_tf = _choose_timeframe(lookback_hours, int(self.dashboard_chart_max_bars or 420))
+            max_bars = int(self.dashboard_chart_max_bars or 420)
+            bars_target = int((lookback_hours * 60.0) / float(timeframe_to_minutes(chosen_tf) or 5))
+            bars_target = max(50, min(max_bars, bars_target))
+
+            logger.debug(
+                f"Fetching dashboard chart data: lookback_hours={lookback_hours}, timeframe={chosen_tf}, bars={bars_target}"
+            )
+
             chart_data = None
+            try:
+                end = datetime.now(timezone.utc)
+                start = end - timedelta(hours=lookback_hours)
+                loop = asyncio.get_event_loop()
+                df_hist = await loop.run_in_executor(
+                    None,
+                    lambda: self.data_fetcher.data_provider.fetch_historical(
+                        self.config.symbol,
+                        start=start,
+                        end=end,
+                        timeframe=chosen_tf,
+                    ),
+                )
+                if isinstance(df_hist, pd.DataFrame) and not df_hist.empty:
+                    chart_data = df_hist.tail(bars_target).copy()
+            except Exception as e:
+                logger.debug(f"Direct historical fetch for dashboard chart failed: {e}")
             
             # Try to get from the 5m buffer first (already resampled by data_fetcher)
-            if hasattr(self.data_fetcher, '_data_buffer_5m') and self.data_fetcher._data_buffer_5m is not None:
-                df_5m = self.data_fetcher._data_buffer_5m
-                if not df_5m.empty and len(df_5m) >= 50:
-                    chart_data = df_5m.tail(288).copy()  # Last 24h
-                    logger.debug(f"Using 5m buffer: {len(chart_data)} bars")
+            if chart_data is None or chart_data.empty:
+                if hasattr(self.data_fetcher, '_data_buffer_5m') and self.data_fetcher._data_buffer_5m is not None:
+                    df_5m = self.data_fetcher._data_buffer_5m
+                    if not df_5m.empty and len(df_5m) >= 50:
+                        chart_data = df_5m.tail(bars_target).copy()
+                        logger.debug(f"Using 5m buffer: {len(chart_data)} bars")
             
             # Fallback: resample from the primary buffer (which is now 5m)
             if chart_data is None or chart_data.empty:
                 if self.data_fetcher._data_buffer is not None and not self.data_fetcher._data_buffer.empty:
                     df = self.data_fetcher._data_buffer
                     # The primary buffer is already 5m, so just use it directly
-                    chart_data = df.tail(288).copy()
+                    chart_data = df.tail(bars_target).copy()
                     logger.debug(f"Using primary buffer: {len(chart_data)} bars")
             
             if chart_data is None or chart_data.empty or len(chart_data) < 20:
@@ -875,13 +928,16 @@ class NQAgentService:
                 return
             
             # Generate the chart
+            range_label = f"{int(lookback_hours)}h" if lookback_hours < 72 else f"{int(round(lookback_hours/24))}d"
             chart_path = self.telegram_notifier.chart_generator.generate_dashboard_chart(
                 data=chart_data,
                 symbol=self.config.symbol,
-                timeframe="5m",
-                lookback_bars=min(288, len(chart_data)),
+                timeframe=chosen_tf,
+                lookback_bars=min(int(bars_target), len(chart_data)),
+                range_label=range_label,
                 figsize=(16, 7),
                 dpi=150,
+                show_pressure=self.dashboard_chart_show_pressure,
             )
             
             if chart_path and chart_path.exists():
@@ -889,7 +945,8 @@ class NQAgentService:
                 success = await self.telegram_notifier.send_dashboard_chart(
                     chart_path=chart_path,
                     symbol=self.config.symbol,
-                    timeframe="5m",
+                    timeframe=chosen_tf,
+                    range_label=range_label,
                 )
                 
                 # Clean up temp file
@@ -955,6 +1012,35 @@ class NQAgentService:
             # Get MTF trend arrows
             mtf_trends = self._compute_mtf_trends(market_data)
             status["mtf_trends"] = mtf_trends
+
+            # Buy/Sell pressure (volume-based proxy) for 15m dashboard notifications
+            try:
+                df_for_pressure = None
+                if market_data and "df" in market_data and market_data["df"] is not None:
+                    df_for_pressure = market_data["df"]
+                elif getattr(self.data_fetcher, "_data_buffer", None) is not None:
+                    df_for_pressure = getattr(self.data_fetcher, "_data_buffer")
+
+                if isinstance(df_for_pressure, pd.DataFrame) and not df_for_pressure.empty:
+                    summary = compute_volume_pressure_summary(
+                        df_for_pressure,
+                        lookback_bars=self.pressure_lookback_bars,
+                        baseline_bars=self.pressure_baseline_bars,
+                        open_col="open",
+                        close_col="close",
+                        volume_col="volume",
+                    )
+                    if summary is not None:
+                        tf_min = timeframe_to_minutes(getattr(self.config, "timeframe", "") or "")
+                        status["buy_sell_pressure_raw"] = summary.to_dict()
+                        status["buy_sell_pressure"] = format_volume_pressure(
+                            summary,
+                            timeframe_minutes=tf_min,
+                            data_fresh=status.get("data_fresh"),
+                        )
+            except Exception:
+                # Never let optional observability break the dashboard.
+                pass
             
             await self.telegram_notifier.send_dashboard(status)
         except Exception as e:
@@ -1361,6 +1447,9 @@ class NQAgentService:
                 if self.cadence_scheduler
                 else None
             ),
+            # Buy/Sell pressure (volume-based proxy) for /status parity with push dashboard
+            "buy_sell_pressure": None,
+            "buy_sell_pressure_raw": None,
         }
         try:
             state["futures_market_open"] = bool(get_market_hours().is_market_open())
@@ -1370,6 +1459,31 @@ class NQAgentService:
             state["strategy_session_open"] = bool(self.strategy.scanner.is_market_hours())
         except Exception:
             state["strategy_session_open"] = None
+
+        # Compute and persist buy/sell pressure from last market data (best-effort)
+        try:
+            last_market_data = getattr(self.data_fetcher, "_last_market_data", None) or {}
+            df_for_pressure = last_market_data.get("df")
+            if isinstance(df_for_pressure, pd.DataFrame) and not df_for_pressure.empty:
+                summary = compute_volume_pressure_summary(
+                    df_for_pressure,
+                    lookback_bars=self.pressure_lookback_bars,
+                    baseline_bars=self.pressure_baseline_bars,
+                    open_col="open",
+                    close_col="close",
+                    volume_col="volume",
+                )
+                if summary is not None:
+                    tf_min = timeframe_to_minutes(getattr(self.config, "timeframe", "") or "")
+                    state["buy_sell_pressure_raw"] = summary.to_dict()
+                    state["buy_sell_pressure"] = format_volume_pressure(
+                        summary,
+                        timeframe_minutes=tf_min,
+                        data_fresh=data_fresh,
+                    )
+        except Exception:
+            pass
+
         self.state_manager.save_state(state)
 
     async def _check_heartbeat(self) -> None:

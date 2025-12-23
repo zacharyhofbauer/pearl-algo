@@ -392,6 +392,7 @@ class NQAgentTelegramNotifier:
         chart_path: Path,
         symbol: str = "MNQ",
         timeframe: str = "5m",
+        range_label: str | None = None,
     ) -> bool:
         """
         Send dashboard chart to Telegram with minimal caption.
@@ -413,7 +414,10 @@ class NQAgentTelegramNotifier:
         
         try:
             # Minimal caption (dashboard text message already has full details)
-            caption = f"📊 *{symbol}* 24h ({timeframe})"
+            if range_label:
+                caption = f"📊 *{symbol}* {range_label} ({timeframe})"
+            else:
+                caption = f"📊 *{symbol}* ({timeframe})"
             
             success = await self._send_photo(chart_path, caption=caption)
             
@@ -1390,6 +1394,7 @@ class NQAgentTelegramNotifier:
             # Extract quiet_reason and signal_diagnostics for observability
             quiet_reason = status.get("quiet_reason")
             signal_diagnostics = status.get("signal_diagnostics")
+            buy_sell_pressure = status.get("buy_sell_pressure")
             
             message = format_home_card(
                 symbol=symbol,
@@ -1419,6 +1424,7 @@ class NQAgentTelegramNotifier:
                 # v4 fields for quiet reason and signal diagnostics
                 quiet_reason=quiet_reason,
                 signal_diagnostics=signal_diagnostics,
+                buy_sell_pressure=buy_sell_pressure,
             )
             
             # Add MTF snapshot (push-specific enhancement)
