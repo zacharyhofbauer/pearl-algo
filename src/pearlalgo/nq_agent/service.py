@@ -134,6 +134,9 @@ class NQAgentService:
         self.status_update_interval = service_settings.get("status_update_interval", 1800)
         self.last_heartbeat: Optional[datetime] = None
         self.heartbeat_interval = service_settings.get("heartbeat_interval", 3600)
+        # Dashboard chart (hourly mplfinance screenshot)
+        self.last_dashboard_chart_sent: Optional[datetime] = None
+        self.dashboard_chart_interval = service_settings.get("dashboard_chart_interval", 3600)  # 1 hour default
         self.state_save_interval = service_settings.get("state_save_interval", 10)
         self.connection_failure_alert_interval = service_settings.get("connection_failure_alert_interval", 600)
         self.data_quality_alert_interval = service_settings.get("data_quality_alert_interval", 300)
@@ -741,13 +744,93 @@ class NQAgentService:
         """Send periodic dashboard message (replaces status + heartbeat)."""
         now = datetime.now(timezone.utc)
 
-        # Check if it's time for a dashboard update
+        # Check if it's time for a text dashboard update (every 15m by default)
         if (
             self.last_status_update is None
             or (now - self.last_status_update).total_seconds() >= self.status_update_interval
         ):
             await self._send_dashboard(market_data)
             self.last_status_update = now
+
+        # Check if it's time for a dashboard chart (every 60m by default)
+        if (
+            self.last_dashboard_chart_sent is None
+            or (now - self.last_dashboard_chart_sent).total_seconds() >= self.dashboard_chart_interval
+        ):
+            await self._send_dashboard_chart()
+            self.last_dashboard_chart_sent = now
+
+    async def _send_dashboard_chart(self) -> None:
+        """
+        Generate and send a 24h/5m mplfinance dashboard chart.
+        
+        Fetches 24h of 5m historical data and generates a TradingView-style chart.
+        """
+        try:
+            # Check if chart generator is available
+            if not self.telegram_notifier.chart_generator:
+                logger.debug("Chart generator not available for dashboard chart")
+                return
+
+            # Fetch 24h of 5m data (288 bars = 24h * 12 bars/hour)
+            logger.debug("Fetching 24h/5m data for dashboard chart...")
+            
+            # Use the data fetcher to get 5m data
+            # We need to resample from the 5m buffer or fetch directly
+            chart_data = None
+            
+            # Try to get from the 5m buffer first (already resampled by data_fetcher)
+            if hasattr(self.data_fetcher, '_data_buffer_5m') and self.data_fetcher._data_buffer_5m is not None:
+                df_5m = self.data_fetcher._data_buffer_5m
+                if not df_5m.empty and len(df_5m) >= 50:
+                    chart_data = df_5m.tail(288).copy()  # Last 24h
+                    logger.debug(f"Using 5m buffer: {len(chart_data)} bars")
+            
+            # Fallback: resample from the primary buffer (which is now 5m)
+            if chart_data is None or chart_data.empty:
+                if self.data_fetcher._data_buffer is not None and not self.data_fetcher._data_buffer.empty:
+                    df = self.data_fetcher._data_buffer
+                    # The primary buffer is already 5m, so just use it directly
+                    chart_data = df.tail(288).copy()
+                    logger.debug(f"Using primary buffer: {len(chart_data)} bars")
+            
+            if chart_data is None or chart_data.empty or len(chart_data) < 20:
+                logger.debug("Not enough data for dashboard chart (need at least 20 bars)")
+                return
+            
+            # Generate the chart
+            chart_path = self.telegram_notifier.chart_generator.generate_dashboard_chart(
+                data=chart_data,
+                symbol=self.config.symbol,
+                timeframe="5m",
+                lookback_bars=min(288, len(chart_data)),
+                figsize=(16, 7),
+                dpi=150,
+            )
+            
+            if chart_path and chart_path.exists():
+                # Send the chart
+                success = await self.telegram_notifier.send_dashboard_chart(
+                    chart_path=chart_path,
+                    symbol=self.config.symbol,
+                    timeframe="5m",
+                )
+                
+                # Clean up temp file
+                try:
+                    chart_path.unlink()
+                except Exception:
+                    pass
+                
+                if success:
+                    logger.info("Dashboard chart sent to Telegram")
+                else:
+                    logger.warning("Failed to send dashboard chart")
+            else:
+                logger.debug("Dashboard chart generation returned no path")
+                
+        except Exception as e:
+            logger.error(f"Error generating/sending dashboard chart: {e}", exc_info=True)
 
     async def _send_dashboard(self, market_data: Optional[Dict] = None) -> None:
         """Send consolidated dashboard to Telegram."""

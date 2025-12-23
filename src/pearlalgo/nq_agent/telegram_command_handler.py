@@ -1105,7 +1105,7 @@ class TelegramCommandHandler:
     async def _fetch_historical_data_for_backtest(
         self, 
         symbol: str = "MNQ", 
-        months: int = 6,
+        weeks: int = 2,
         timeframe: str = "1m",
     ) -> Optional[pd.DataFrame]:
         """
@@ -1113,13 +1113,13 @@ class TelegramCommandHandler:
         
         Args:
             symbol: Symbol to fetch (default: MNQ)
-            months: Number of months to fetch (default: 6)
+            weeks: Number of weeks to fetch (default: 2)
             timeframe: Data timeframe (default: 1m)
             
         Returns:
             DataFrame with historical OHLCV data, or None if fetch failed
         """
-        cache_file = self._historical_cache_dir / f"{symbol}_{timeframe}_{months}m.parquet"
+        cache_file = self._historical_cache_dir / f"{symbol}_{timeframe}_{weeks}w.parquet"
         # Backtests should use *completed* historical data only.
         # If today is Monday, "yesterday" is Sunday (no session) which can cause HMDS weirdness/timeouts.
         # Clamp to the most recent weekday (Mon-Fri) at 23:59 UTC.
@@ -1128,9 +1128,9 @@ class TelegramCommandHandler:
         )
         while end.weekday() >= 5:  # Sat/Sun
             end = end - timedelta(days=1)
-        start = end - timedelta(days=months * 30)
+        start = end - timedelta(days=weeks * 7)
         
-        logger.info(f"Fetching {months} months of historical data for {symbol}...")
+        logger.info(f"Fetching {weeks} weeks of historical data for {symbol}...")
         
         # Check for cached data first
         if cache_file.exists():
@@ -1172,25 +1172,25 @@ class TelegramCommandHandler:
                 logger.warning(f"Error reading cache: {e}")
 
         # If an exact cache file doesn't exist (or was invalid), try deriving it from a *larger* cached file.
-        # Example: if MNQ_1m_6m.parquet exists, we can slice it to create MNQ_1m_2m.parquet instantly.
+        # Example: if MNQ_1m_6w.parquet exists, we can slice it to create MNQ_1m_2w.parquet instantly.
         try:
-            superset_files = list(self._historical_cache_dir.glob(f"{symbol}_{timeframe}_*m.parquet"))
+            superset_files = list(self._historical_cache_dir.glob(f"{symbol}_{timeframe}_*w.parquet"))
             candidates = []
             for f in superset_files:
                 if f == cache_file:
                     continue
-                tail = f.name.split("_")[-1]  # e.g. "6m.parquet"
-                if not tail.endswith("m.parquet"):
+                tail = f.name.split("_")[-1]  # e.g. "6w.parquet"
+                if not tail.endswith("w.parquet"):
                     continue
                 try:
-                    k = int(tail[:-9])  # strip "m.parquet"
+                    k = int(tail[:-9])  # strip "w.parquet"
                 except ValueError:
                     continue
-                if k >= months:
+                if k >= weeks:
                     candidates.append((k, f))
 
             if candidates:
-                # Prefer the smallest superset (closest to requested months)
+                # Prefer the smallest superset (closest to requested weeks)
                 candidates.sort(key=lambda x: x[0])
                 _, superset_file = candidates[0]
                 superset_df = pd.read_parquet(superset_file)
@@ -1230,7 +1230,7 @@ class TelegramCommandHandler:
         
         try:
             # If the most recent window fails (often due to expiry/roll), automatically shift further back in time.
-            # This matches your request: "pick past months if that's the only thing that works".
+            # This matches your request: "pick past weeks if that's the only thing that works".
             max_window_shifts = 3
             all_chunks = []
             window_end = end
@@ -1242,11 +1242,11 @@ class TelegramCommandHandler:
 
             for shift_idx in range(max_window_shifts + 1):
                 if shift_idx > 0:
-                    window_end = end - timedelta(days=shift_idx * 30)
+                    window_end = end - timedelta(days=shift_idx * 7)
                     window_end = window_end.replace(hour=23, minute=59, second=0, microsecond=0)
                     while window_end.weekday() >= 5:  # Sat/Sun
                         window_end = window_end - timedelta(days=1)
-                    window_start = window_end - timedelta(days=months * 30)
+                    window_start = window_end - timedelta(days=weeks * 7)
                     logger.warning(
                         f"No data fetched for requested window; trying earlier window: "
                         f"{window_start.date()} to {window_end.date()}"
@@ -1327,7 +1327,7 @@ class TelegramCommandHandler:
                     if not all_chunks:
                         logger.error(
                             f"⚠️ No data fetched for first chunk of window ({chunk_start.date()} to {chunk_end.date()}); "
-                            f"trying earlier months..."
+                            f"trying earlier weeks..."
                         )
                         break
 
@@ -1401,15 +1401,15 @@ class TelegramCommandHandler:
             logger.error(f"Error fetching data: {e}", exc_info=True)
             return None
     
-    async def _handle_backtest(self, update: Update, context: ContextTypes.DEFAULT_TYPE, months: Optional[int] = None):
+    async def _handle_backtest(self, update: Update, context: ContextTypes.DEFAULT_TYPE, weeks: Optional[int] = None):
         """Handle /backtest command - run backtest and show results with chart."""
         logger.info(f"Received /backtest command from chat {update.effective_chat.id}")
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
         
-        # If no months specified, show duration selection menu
-        if months is None:
+        # If no weeks specified, show duration selection menu
+        if weeks is None:
             mode = (context.user_data.get("backtest_mode") or "5m") if hasattr(context, "user_data") else "5m"
             if mode not in ("5m", "1m"):
                 mode = "5m"
@@ -1431,20 +1431,20 @@ class TelegramCommandHandler:
                 f"*Mode:* {mode_label}\n\n"
                 f"*Contracts:* {pos_size} MNQ  |  *Slippage:* {slippage_ticks} ticks\n\n"
                 "Select backtest duration:\n\n"
-                "Tip: 2 months is a great default. 6 months is for deeper checks."
+                "Tip: 2 weeks is a good starting point. 4-6 weeks for deeper validation."
             )
             reply_markup = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("1 Month", callback_data='backtest_1m'),
-                    InlineKeyboardButton("2 Months", callback_data='backtest_2m'),
+                    InlineKeyboardButton("1 Week", callback_data='backtest_1w'),
+                    InlineKeyboardButton("2 Weeks", callback_data='backtest_2w'),
                 ],
                 [
-                    InlineKeyboardButton("3 Months", callback_data='backtest_3m'),
-                    InlineKeyboardButton("4 Months", callback_data='backtest_4m'),
+                    InlineKeyboardButton("3 Weeks", callback_data='backtest_3w'),
+                    InlineKeyboardButton("4 Weeks", callback_data='backtest_4w'),
                 ],
                 [
-                    InlineKeyboardButton("5 Months", callback_data='backtest_5m'),
-                    InlineKeyboardButton("6 Months", callback_data='backtest_6m'),
+                    InlineKeyboardButton("5 Weeks", callback_data='backtest_5w'),
+                    InlineKeyboardButton("6 Weeks", callback_data='backtest_6w'),
                 ],
                 [
                     InlineKeyboardButton(
@@ -1504,15 +1504,15 @@ class TelegramCommandHandler:
                 update, context,
                 f"📊 *Fetching Historical Data*\n\n"
                 f"Mode: {'5m decision' if mode == '5m' else '1m legacy'}\n"
-                f"Fetching {months} month{'s' if months > 1 else ''} of historical data for backtest...\n"
-                f"This may take a minute...",
+                f"Fetching {weeks} week{'s' if weeks > 1 else ''} of historical data for backtest...\n"
+                f"This may take a moment...",
                 reply_markup=None
             )
             
             # Fetch data (no progress callbacks - they interfere)
             historical_data = await self._fetch_historical_data_for_backtest(
                 symbol="MNQ",
-                months=months,
+                weeks=weeks,
                 timeframe="1m",
             )
             
@@ -1683,7 +1683,7 @@ class TelegramCommandHandler:
                     trades_display = f"{result.total_trades}" if result.total_trades is not None else "0"
 
                     message = (
-                        f"📊 *Backtest Results ({months} Month{'s' if months > 1 else ''})*\n\n"
+                        f"📊 *Backtest Results ({weeks} Week{'s' if weeks > 1 else ''})*\n\n"
                         f"*Period:* {data_start} to {data_end}\n"
                         f"*Bars Analyzed:* {result.total_bars:,}\n"
                         f"*Signals Generated:* {result.total_signals}\n"
@@ -1708,13 +1708,13 @@ class TelegramCommandHandler:
                         exports_dir = self.state_dir / "exports"
                         exports_dir.mkdir(parents=True, exist_ok=True)
                         ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                        base_name = f"backtest_{mode}_{months}m_{ts_tag}"
+                        base_name = f"backtest_{mode}_{weeks}w_{ts_tag}"
 
                         # Metrics JSON (always)
                         metrics_path = exports_dir / f"{base_name}_metrics.json"
                         metrics_obj = {
                             "mode": mode,
-                            "months": months,
+                            "weeks": weeks,
                             "contracts": pos_size,
                             "slippage_ticks": slippage_ticks,
                             "total_bars": result.total_bars,
@@ -1776,12 +1776,12 @@ class TelegramCommandHandler:
                                     await context.bot.send_photo(
                                         chat_id=update.effective_chat.id,
                                         photo=photo,
-                                        caption=f"📊 Backtest Chart ({months} Month{'s' if months > 1 else ''}, {mode} mode)"
+                                        caption=f"📊 Backtest Chart ({weeks} Week{'s' if weeks > 1 else ''}, {mode} mode)"
                                     )
                                 else:
                                     await update.message.reply_photo(
                                         photo=photo,
-                                        caption=f"📊 Backtest Chart ({months} Month{'s' if months > 1 else ''}, {mode} mode)"
+                                        caption=f"📊 Backtest Chart ({weeks} Week{'s' if weeks > 1 else ''}, {mode} mode)"
                                     )
                             chart_path.unlink()
                         except Exception as e:
@@ -1828,7 +1828,7 @@ class TelegramCommandHandler:
                     f"{cache_info}\n\n"
                     "*Solutions:*\n"
                     "1. Try again (sometimes HMDS recovers within minutes)\n"
-                    "2. Choose a shorter backtest window (1–2 months)\n"
+                    "2. Choose a shorter backtest window (1–2 weeks)\n"
                     "3. Use command line with an existing data file:\n"
                     "```bash\n"
                     "python3 scripts/testing/backtest_nq_strategy.py data.parquet\n"
@@ -3478,7 +3478,7 @@ class TelegramCommandHandler:
                 mode = "5m"
             if hasattr(context, "user_data"):
                 context.user_data["backtest_mode"] = mode
-            await self._handle_backtest(update, context, months=None)
+            await self._handle_backtest(update, context, weeks=None)
         elif callback_data.startswith("backtest_setpos_"):
             # Set position size (contracts) for backtest simulation
             try:
@@ -3489,7 +3489,7 @@ class TelegramCommandHandler:
                 pos = 5
             if hasattr(context, "user_data"):
                 context.user_data["backtest_contracts"] = pos
-            await self._handle_backtest(update, context, months=None)
+            await self._handle_backtest(update, context, weeks=None)
         elif callback_data.startswith("backtest_setslip_"):
             # Set slippage ticks for backtest simulation
             raw = callback_data.replace("backtest_setslip_", "")
@@ -3501,18 +3501,18 @@ class TelegramCommandHandler:
                 slip = 0.5
             if hasattr(context, "user_data"):
                 context.user_data["backtest_slippage_ticks"] = slip
-            await self._handle_backtest(update, context, months=None)
+            await self._handle_backtest(update, context, weeks=None)
         elif callback_data.startswith('backtest_'):
-            # Handle backtest duration selection (backtest_1m, backtest_2m, etc.)
+            # Handle backtest duration selection (backtest_1w, backtest_2w, etc.)
             try:
-                months_str = callback_data.replace('backtest_', '').replace('m', '')
-                months = int(months_str)
-                if 1 <= months <= 6:
-                    await self._handle_backtest(update, context, months=months)
+                weeks_str = callback_data.replace('backtest_', '').replace('w', '')
+                weeks = int(weeks_str)
+                if 1 <= weeks <= 6:
+                    await self._handle_backtest(update, context, weeks=weeks)
                 else:
                     await self._send_message_or_edit(
                         update, context,
-                        f"❌ Invalid duration: {months} months. Please select 1-6 months.",
+                        f"❌ Invalid duration: {weeks} weeks. Please select 1-6 weeks.",
                         reply_markup=self._get_back_to_menu_button()
                     )
             except ValueError:

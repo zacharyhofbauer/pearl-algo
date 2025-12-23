@@ -943,10 +943,10 @@ class ChartGenerator:
 
             # NOTE: Context levels are rendered via HUD (right labels + merged lines) instead of legend lines.
             
-            # Create title
+            # Create title (no emoji to avoid font rendering issues)
             signal_type = signal.get("type", "unknown").replace("_", " ").title()
             is_test = signal.get("reason", "").lower().startswith("test")
-            title_prefix = "🧪 TEST: " if is_test else ""
+            title_prefix = "[TEST] " if is_test else ""
             tf_label = timeframe or self.config.timeframe
             title = f"{title_prefix}{symbol} {direction.upper()} {signal_type} - Entry Chart ({tf_label})"
             
@@ -986,6 +986,7 @@ class ChartGenerator:
             else:
                 panel_ratios = None
 
+            # Wider candles + thicker wicks for Telegram visibility
             fig, axlist = mpf.plot(
                 df,
                 type='candle',
@@ -997,10 +998,12 @@ class ChartGenerator:
                 title=title,
                 ylabel='Price ($)',
                 ylabel_lower='Volume',
-                figsize=(12, 8),
+                figsize=(14, 9),
                 show_nontrading=False,
                 tight_layout=True,
-                returnfig=True
+                returnfig=True,
+                scale_width_adjustment=dict(candle=1.5, volume=0.8, lines=1.0),
+                update_width_config=dict(candle_linewidth=1.4, candle_width=0.8),
             )
 
             # Apply HUD overlays on the price axis.
@@ -1120,6 +1123,7 @@ class ChartGenerator:
             else:
                 panel_ratios = None
 
+            # Wider candles + thicker wicks for Telegram visibility
             fig, axlist = mpf.plot(
                 df,
                 type='candle',
@@ -1131,10 +1135,12 @@ class ChartGenerator:
                 title=title,
                 ylabel='Price ($)',
                 ylabel_lower='Volume',
-                figsize=(12, 8),
+                figsize=(14, 9),
                 show_nontrading=False,
                 tight_layout=True,
-                returnfig=True
+                returnfig=True,
+                scale_width_adjustment=dict(candle=1.5, volume=0.8, lines=1.0),
+                update_width_config=dict(candle_linewidth=1.4, candle_width=0.8),
             )
 
             # Apply HUD overlays, including an Exit right-label.
@@ -1278,7 +1284,7 @@ class ChartGenerator:
             temp_path = Path(temp_file.name)
             temp_file.close()
             
-            # Plot with mplfinance
+            # Plot with mplfinance (wider candles, suppress too-much-data warning)
             mpf.plot(
                 df,
                 type='candle',
@@ -1288,7 +1294,7 @@ class ChartGenerator:
                 title=chart_title,
                 ylabel='Price ($)',
                 ylabel_lower='Volume',
-                figsize=(12, 8),
+                figsize=(14, 9),
                 savefig=dict(
                     fname=str(temp_path),
                     dpi=self.dpi,
@@ -1298,7 +1304,10 @@ class ChartGenerator:
                 ),
                 show_nontrading=False,
                 tight_layout=True,
-                returnfig=False
+                returnfig=False,
+                scale_width_adjustment=dict(candle=1.4, volume=0.8, lines=1.0),
+                update_width_config=dict(candle_linewidth=1.2, candle_width=0.7),
+                warn_too_much_data=5000,
             )
             
             logger.debug(f"Generated backtest chart with mplfinance: {temp_path}")
@@ -1306,4 +1315,277 @@ class ChartGenerator:
             
         except Exception as e:
             logger.error(f"Error generating backtest chart with mplfinance: {e}", exc_info=True)
+            return None
+
+    def generate_dashboard_chart(
+        self,
+        data: pd.DataFrame,
+        symbol: str = "MNQ",
+        timeframe: str = "5m",
+        *,
+        lookback_bars: int = 288,
+        figsize: Tuple[float, float] = (16, 7),
+        dpi: int = 150,
+        show_sessions: bool = True,
+        show_key_levels: bool = True,
+        show_vwap: bool = True,
+        show_rsi: bool = True,
+    ) -> Optional[Path]:
+        """
+        Generate a TradingView-style 24h dashboard chart.
+
+        Args:
+            data: OHLCV DataFrame (expects 5m bars with timestamp/DatetimeIndex)
+            symbol: Symbol name for title
+            timeframe: Timeframe label for title (e.g. "5m")
+            lookback_bars: Number of bars to display (288 = 24h of 5m bars)
+            figsize: Figure size (width, height) – wider for mobile landscape
+            dpi: Resolution for Telegram delivery
+            show_sessions: Shade Tokyo/London/NY sessions
+            show_key_levels: Show RTH/ETH PDH/PDL/Open levels
+            show_vwap: Show VWAP line + bands
+            show_rsi: Show RSI panel
+
+        Returns:
+            Path to generated PNG, or None on failure
+        """
+        if not MPLFINANCE_AVAILABLE:
+            logger.warning("mplfinance not available for dashboard chart")
+            return None
+
+        try:
+            if data is None or data.empty:
+                logger.warning("Cannot generate dashboard chart: data is empty")
+                return None
+
+            # Limit to lookback_bars (default 288 = 24h of 5m)
+            chart_data = data.tail(int(lookback_bars)).copy()
+            df = self._prepare_data(chart_data)
+
+            if df.empty:
+                logger.warning("Cannot generate dashboard chart: prepared data is empty")
+                return None
+
+            # Build HUD context for overlays
+            hud: Dict[str, Any] = {}
+            try:
+                from pearlalgo.strategies.nq_intraday.hud_context import build_hud_context
+
+                # Convert back to lowercase for hud_context (it expects lowercase OHLCV)
+                hud_df = df.reset_index().copy()
+                hud_df = hud_df.rename(columns={
+                    "Open": "open",
+                    "High": "high",
+                    "Low": "low",
+                    "Close": "close",
+                })
+                if "Volume" in hud_df.columns:
+                    hud_df = hud_df.rename(columns={"Volume": "volume"})
+                # Rename index column to timestamp if needed
+                if "index" in hud_df.columns:
+                    hud_df = hud_df.rename(columns={"index": "timestamp"})
+
+                hud = build_hud_context(hud_df, symbol=symbol, tick_size=0.25)
+            except Exception as e:
+                logger.debug(f"Could not build HUD context for dashboard chart: {e}")
+
+            # Addplots
+            addplot: List = []
+
+            # VWAP
+            if show_vwap:
+                try:
+                    from pearlalgo.utils.vwap import VWAPCalculator
+
+                    vwap_calc = VWAPCalculator()
+                    vwap_df = df.reset_index().copy()
+                    vwap_df = vwap_df.rename(columns={
+                        "Open": "open",
+                        "High": "high",
+                        "Low": "low",
+                        "Close": "close",
+                    })
+                    if "Volume" in vwap_df.columns:
+                        vwap_df = vwap_df.rename(columns={"Volume": "volume"})
+                    vwap_data = vwap_calc.calculate_vwap(vwap_df)
+                    vwap_val = vwap_data.get("vwap", 0)
+                    if vwap_val and vwap_val > 0:
+                        vwap_series = pd.Series([float(vwap_val)] * len(df), index=df.index)
+                        addplot.append(
+                            mpf.make_addplot(
+                                vwap_series,
+                                color=VWAP_COLOR,
+                                width=1.8,
+                                alpha=0.75,
+                                label="VWAP",
+                            )
+                        )
+                        # VWAP bands
+                        for key, alpha in (("vwap_upper_1", 0.35), ("vwap_lower_1", 0.35)):
+                            band = vwap_data.get(key, 0)
+                            if band and float(band) > 0 and float(band) != float(vwap_val):
+                                band_series = pd.Series([float(band)] * len(df), index=df.index)
+                                addplot.append(
+                                    mpf.make_addplot(
+                                        band_series,
+                                        color=VWAP_COLOR,
+                                        width=1.0,
+                                        linestyle="--",
+                                        alpha=alpha,
+                                    )
+                                )
+                except Exception as e:
+                    logger.debug(f"Error adding VWAP to dashboard chart: {e}")
+
+            # RSI panel
+            volume_on = "Volume" in df.columns
+            panel_ratios = None
+            if show_rsi:
+                try:
+                    close = df["Close"]
+                    delta = close.diff()
+                    gain = delta.clip(lower=0).rolling(self.config.rsi_period).mean()
+                    loss = (-delta.clip(upper=0)).rolling(self.config.rsi_period).mean()
+                    rs = gain / loss.replace(0, np.nan)
+                    rsi = 100 - (100 / (1 + rs))
+
+                    rsi_panel = 2 if volume_on else 1
+                    addplot.append(
+                        mpf.make_addplot(
+                            rsi,
+                            panel=rsi_panel,
+                            color="#b388ff",
+                            width=1.2,
+                            ylabel="RSI",
+                            alpha=0.9,
+                        )
+                    )
+                    for lvl, a in ((30, 0.25), (50, 0.18), (70, 0.25)):
+                        addplot.append(
+                            mpf.make_addplot(
+                                pd.Series([lvl] * len(df), index=df.index),
+                                panel=rsi_panel,
+                                color=TEXT_SECONDARY,
+                                width=1.0,
+                                linestyle="--",
+                                alpha=a,
+                            )
+                        )
+                    panel_ratios = (6, 2, 2) if volume_on else (7, 3)
+                except Exception as e:
+                    logger.debug(f"Error adding RSI to dashboard chart: {e}")
+
+            # Title
+            try:
+                now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
+            except Exception:
+                now_str = ""
+            title = f"{symbol} Dashboard - 24h ({timeframe}) • {now_str}"
+
+            # Temp file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            temp_path = Path(temp_file.name)
+            temp_file.close()
+
+            # Wider candles for Telegram visibility (scale_width_adjustment)
+            fig, axlist = mpf.plot(
+                df,
+                type="candle",
+                style=self.style,
+                addplot=addplot if addplot else None,
+                volume=volume_on,
+                volume_panel=1 if volume_on else None,
+                panel_ratios=panel_ratios,
+                title=title,
+                ylabel="Price ($)",
+                ylabel_lower="Volume" if volume_on else None,
+                figsize=figsize,
+                show_nontrading=False,
+                tight_layout=True,
+                returnfig=True,
+                scale_width_adjustment=dict(candle=1.4, volume=0.8, lines=1.0),
+                update_width_config=dict(candle_linewidth=1.2, candle_width=0.75),
+                warn_too_much_data=500,
+            )
+
+            # HUD overlays (sessions, key levels)
+            try:
+                ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
+                if ax_price is not None:
+                    # Sessions shading
+                    if show_sessions:
+                        self._draw_sessions_overlay(ax_price, hud)
+
+                    # Key levels (RTH/ETH PDH/PDL/Open) via right labels
+                    if show_key_levels and self.config.show_right_labels:
+                        # Build level candidates from hud
+                        levels: List[Dict[str, Any]] = []
+                        current_price = float(df["Close"].iloc[-1])
+
+                        def _add_level(price: Any, label: str, color: str, priority: int, ls: str = "--", lw: float = 1.0, alpha: float = 0.5):
+                            try:
+                                p = float(price)
+                            except Exception:
+                                return
+                            if not np.isfinite(p) or p <= 0:
+                                return
+                            levels.append({
+                                "price": p,
+                                "label": label,
+                                "color": color,
+                                "priority": priority,
+                                "linestyle": ls,
+                                "lw": lw,
+                                "alpha": alpha,
+                            })
+
+                        # VWAP (already plotted as line, add label)
+                        vwap_hud = hud.get("vwap") or {}
+                        if isinstance(vwap_hud, dict):
+                            _add_level(vwap_hud.get("vwap"), "VWAP", VWAP_COLOR, 60, "-", 1.2, 0.65)
+
+                        # Key levels from hud_context
+                        kl = hud.get("key_levels") or {}
+                        if isinstance(kl, dict):
+                            rth = kl.get("rth") or {}
+                            eth = kl.get("eth") or {}
+                            rth_cur = rth.get("current") or {}
+                            rth_prev = rth.get("previous") or {}
+                            eth_cur = eth.get("current") or {}
+                            eth_prev = eth.get("previous") or {}
+
+                            _add_level(rth_cur.get("open"), "RTH Open", ENTRY_COLOR, 55, "--", 1.0, 0.4)
+                            _add_level(eth_cur.get("open"), "ETH Open", ENTRY_COLOR, 55, "--", 1.0, 0.4)
+                            _add_level(rth_prev.get("high"), "RTH PDH", TEXT_SECONDARY, 50, "--", 1.0, 0.35)
+                            _add_level(rth_prev.get("low"), "RTH PDL", TEXT_SECONDARY, 50, "--", 1.0, 0.35)
+                            _add_level(eth_prev.get("high"), "ETH PDH", TEXT_SECONDARY, 45, "--", 1.0, 0.3)
+                            _add_level(eth_prev.get("low"), "ETH PDL", TEXT_SECONDARY, 45, "--", 1.0, 0.3)
+
+                        # Volume profile POC
+                        vp = hud.get("volume_profile") or {}
+                        if isinstance(vp, dict):
+                            _add_level(vp.get("poc"), "POC", TEXT_SECONDARY, 40, ":", 1.1, 0.45)
+
+                        if levels:
+                            merged = self._merge_levels(levels, tick_size=0.25, merge_ticks=4)
+                            self._draw_right_labels(fig, ax_price, merged, current_price=current_price, max_labels=10)
+            except Exception as e:
+                logger.debug(f"Error applying HUD to dashboard chart: {e}")
+
+            # Save
+            fig.savefig(
+                str(temp_path),
+                dpi=dpi,
+                facecolor=DARK_BG,
+                edgecolor="none",
+                bbox_inches="tight",
+                pad_inches=0.25,
+            )
+            plt.close(fig)
+
+            logger.debug(f"Generated dashboard chart: {temp_path}")
+            return temp_path
+
+        except Exception as e:
+            logger.error(f"Error generating dashboard chart: {e}", exc_info=True)
             return None

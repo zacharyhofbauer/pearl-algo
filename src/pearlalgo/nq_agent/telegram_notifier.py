@@ -208,7 +208,7 @@ class NQAgentTelegramNotifier:
             lines.append(f"id={sid_short}")
         return "\n".join(lines)
     
-    async def _send_photo(self, photo_path: Path) -> bool:
+    async def _send_photo(self, photo_path: Path, caption: Optional[str] = None) -> bool:
         """Send photo to Telegram."""
         if not self.enabled or not self.telegram or not self.telegram.bot:
             return False
@@ -218,10 +218,52 @@ class NQAgentTelegramNotifier:
                 await self.telegram.bot.send_photo(
                     chat_id=self.chat_id,
                     photo=photo,
+                    caption=caption,
+                    parse_mode="Markdown" if caption else None,
                 )
             return True
         except Exception as e:
             logger.warning(f"Error sending photo: {e}")
+            return False
+
+    async def send_dashboard_chart(
+        self,
+        chart_path: Path,
+        symbol: str = "MNQ",
+        timeframe: str = "5m",
+    ) -> bool:
+        """
+        Send dashboard chart to Telegram with minimal caption.
+        
+        Args:
+            chart_path: Path to the generated chart image
+            symbol: Symbol for caption
+            timeframe: Timeframe for caption
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+        
+        if not chart_path or not chart_path.exists():
+            logger.warning("Dashboard chart path does not exist")
+            return False
+        
+        try:
+            # Minimal caption (dashboard text message already has full details)
+            caption = f"📊 *{symbol}* 24h ({timeframe})"
+            
+            success = await self._send_photo(chart_path, caption=caption)
+            
+            if success:
+                logger.debug(f"Dashboard chart sent to Telegram: {chart_path}")
+            else:
+                logger.warning("Failed to send dashboard chart to Telegram")
+            
+            return success
+        except Exception as e:
+            logger.error(f"Error sending dashboard chart: {e}", exc_info=True)
             return False
 
     def _format_professional_signal(self, signal: Dict) -> str:
