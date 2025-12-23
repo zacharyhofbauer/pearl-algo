@@ -142,7 +142,7 @@ Returns the current agent status, including:
 - Pause reason (if paused)
 - Futures/session gates:
   - **FuturesMarketOpen** (CME ETH + maintenance break; affects data freshness)
-  - **StrategySessionOpen** (09:30–16:00 ET; when signals are allowed)
+  - **StrategySessionOpen** (prop-firm window: 18:00–16:10 ET; when signals are allowed)
 - Cycles and signals (clarified):
   - **Cycles**: session/total (total persists across restarts)
   - **Signals**: generated vs delivered vs failed

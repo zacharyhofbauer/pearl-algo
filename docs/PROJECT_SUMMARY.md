@@ -59,7 +59,7 @@ The MNQ Trading Agent is designed to:
 
 - **Symbol**: Mini E-mini NASDAQ-100 Futures (MNQ) - 1/10th size of NQ
 - **Timeframe**: 1-minute bars for intraday scalping/swings
-- **Trading session (StrategySessionOpen)**: 09:30 - 16:00 ET (avoids lunch lull 11:30-13:00)
+- **Trading session (StrategySessionOpen)**: Prop-firm window 18:00 - 16:10 ET (NY time). Positions must be flat by 16:10.
 - **Futures market window (FuturesMarketOpen)**: CME ETH Sun 18:00 ET → Fri 17:00 ET (Mon–Thu 17:00–18:00 ET maintenance break)
 - **Market**: CME Group futures exchange
 - **Trading Style**: Prop firm - 5-15 contracts per trade, 1% risk, quick scalps
@@ -179,7 +179,7 @@ The MNQ Trading Agent is designed to:
 - Main entry point for strategy analysis
 
 **Scanner** (`scanner.py`):
-- Market hours detection (09:30-16:00 ET)
+- Strategy session detection (configurable; default 18:00–16:10 ET, NY time)
 - Technical indicator calculations:
   - RSI (Relative Strength Index)
   - MACD (Moving Average Convergence Divergence)
@@ -917,7 +917,7 @@ cat data/nq_agent_state/performance.json | jq
    - **Guide**: See [MARKET_DATA_SUBSCRIPTION.md](MARKET_DATA_SUBSCRIPTION.md) for detailed instructions
 
 2. **Signal Generation**:
-   - Only generates signals during market hours (09:30-16:00 ET)
+   - Only generates signals during the configured strategy session window (default 18:00–16:10 ET, NY time)
    - **Status**: Working as designed
    - Signals require specific market conditions
 

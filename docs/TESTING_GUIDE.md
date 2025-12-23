@@ -455,7 +455,7 @@ Verify session filters work:
 - Momentum signals should be disabled
 - Mean reversion may be favored
 
-**Closing (15:30-16:00 ET):**
+**Closing (15:30-16:10 ET):**
 - Reversal signals may be favored
 - Tight stops recommended
 
@@ -490,7 +490,7 @@ Always validate strategy performance with **real market data** (IB Gateway + NQ 
 4. Market is closed
 
 **Solutions:**
-1. Check market hours (09:30-16:00 ET)
+1. Check strategy session window (default 18:00–16:10 ET, NY time)
 2. Review confidence thresholds in `config.yaml`
 3. Check data quality logs
 4. Adjust filter parameters if needed

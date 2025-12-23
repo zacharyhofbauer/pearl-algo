@@ -61,13 +61,13 @@ class NQScanner:
 
     def is_market_hours(self, dt: Optional[datetime] = None) -> bool:
         """
-        Check if current time is within market hours (ET timezone).
+        Check if current time is within the configured strategy session window (ET timezone).
         
         Args:
             dt: Datetime to check in UTC (default: now)
             
         Returns:
-            True if within market hours (09:30-16:00 ET)
+            True if within the configured session window (start_time/end_time in config).
         """
         if dt is None:
             dt = datetime.now(timezone.utc)
@@ -100,11 +100,27 @@ class NQScanner:
         start = time.fromisoformat(self.config.start_time)
         end = time.fromisoformat(self.config.end_time)
 
-        # Check if current time is within market hours
-        # Also check if it's a weekday (market closed on weekends)
-        is_weekday = et_dt.weekday() < 5  # Monday=0, Friday=4
+        weekday = et_dt.weekday()  # 0=Monday, 6=Sunday
 
-        return is_weekday and start <= et_time <= end
+        # Simple same-day window (e.g., 09:30–16:10 ET).
+        # For strategy sessions we keep this weekday-only (Mon–Fri).
+        if start <= end:
+            is_weekday = weekday < 5
+            return is_weekday and start <= et_time <= end
+
+        # Cross-midnight window (e.g., 18:00–16:10 ET).
+        # Intended for prop-firm style futures sessions:
+        # - Opens Sunday evening at start_time
+        # - Closed Friday after end_time until Sunday start_time
+        if weekday == 5:  # Saturday
+            return False
+        if weekday == 6:  # Sunday
+            return et_time >= start
+        if weekday == 4:  # Friday
+            return et_time <= end
+
+        # Monday–Thursday: open from midnight->end and from start->midnight.
+        return (et_time >= start) or (et_time <= end)
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
