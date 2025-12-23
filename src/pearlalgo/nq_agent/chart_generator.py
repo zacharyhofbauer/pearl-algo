@@ -81,6 +81,39 @@ class ChartConfig:
     show_rsi: bool = True
     rsi_period: int = 14
 
+    @classmethod
+    def from_strategy_config(cls, strategy_config) -> "ChartConfig":
+        """Create ChartConfig from NQIntradayConfig (or any object with hud_* attrs)."""
+        config = cls()
+        
+        # Map NQIntradayConfig.hud_* attributes to ChartConfig
+        attr_map = {
+            "hud_enabled": "show_hud",
+            "hud_show_rr_box": "show_rr_box",
+            "hud_rr_box_forward_bars": "rr_box_forward_bars",
+            "hud_right_pad_bars": "right_pad_bars",
+            "hud_show_sessions": "show_sessions",
+            "hud_show_session_names": "show_session_names",
+            "hud_show_session_oc": "show_session_oc",
+            "hud_show_session_tick_range": "show_session_tick_range",
+            "hud_show_session_average": "show_session_average",
+            "hud_show_supply_demand": "show_supply_demand",
+            "hud_show_power_channel": "show_power_channel",
+            "hud_show_tbt_targets": "show_tbt_targets",
+            "hud_show_key_levels": "show_key_levels",
+            "hud_show_right_labels": "show_right_labels",
+            "hud_max_right_labels": "max_right_labels",
+            "hud_right_label_merge_ticks": "right_label_merge_ticks",
+            "hud_show_rsi": "show_rsi",
+            "hud_rsi_period": "rsi_period",
+        }
+        
+        for src_attr, dst_attr in attr_map.items():
+            if hasattr(strategy_config, src_attr):
+                setattr(config, dst_attr, getattr(strategy_config, src_attr))
+        
+        return config
+
 
 class ChartGenerator:
     """Generates TradingView-style charts using mplfinance."""

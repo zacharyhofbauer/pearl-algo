@@ -819,15 +819,27 @@ class TelegramCommandHandler:
                     except Exception:
                         conf_val = 0.0
 
-                    status_emoji = {
-                        "generated": "🆕",
-                        "entered": "✅",
-                        "exited": "🏁",
-                        "expired": "⏰",
-                    }.get(status, "⚪")
+                    # Enhanced status emoji with win/loss for exited
+                    if status == "exited":
+                        is_win = sig_data.get("is_win", False)
+                        status_emoji = "✅" if is_win else "❌"
+                    else:
+                        status_emoji = {
+                            "generated": "🆕",
+                            "entered": "🎯",
+                            "expired": "⏰",
+                        }.get(status, "⚪")
 
                     message += f"{i}. {status_emoji} {signal_type} {direction} • {conf_val:.0%}\n"
-                    message += f"   Entry: ${entry_price:.2f} | Status: {status} | ID: {signal_id[:10]}...\n\n"
+                    
+                    # Show PnL for exited signals, entry for others
+                    if status == "exited":
+                        pnl = float(sig_data.get("pnl", 0.0) or 0.0)
+                        exit_reason = str(sig_data.get("exit_reason", "") or "")[:8]
+                        pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+                        message += f"   PnL: {pnl_str} ({exit_reason}) | Entry: ${entry_price:.2f}\n\n"
+                    else:
+                        message += f"   Entry: ${entry_price:.2f} | Status: {status} | ID: {signal_id[:10]}...\n\n"
 
                     # Per-signal actions
                     row: List[InlineKeyboardButton] = []
@@ -999,24 +1011,68 @@ class TelegramCommandHandler:
             
             message = f"📊 *Active Trades ({len(active_trades)})*\n\n"
             
+            # Try to get current price for unrealized PnL
+            current_price = None
+            try:
+                data_provider = self._get_data_provider()
+                if data_provider is not None:
+                    loop = asyncio.get_running_loop()
+                    latest = await asyncio.wait_for(
+                        loop.run_in_executor(None, data_provider.get_latest_bar, "MNQ"),
+                        timeout=5.0,
+                    )
+                    if isinstance(latest, dict) and "close" in latest:
+                        current_price = float(latest["close"])
+                        message += f"*Current Price:* ${current_price:.2f}\n\n"
+            except Exception as e:
+                logger.debug(f"Could not fetch current price for active trades: {e}")
+            
             for i, trade_data in enumerate(active_trades, 1):
                 signal = trade_data.get("signal", {})
                 signal_type = signal.get("type", "unknown")
-                direction = signal.get("direction", "long").upper()
-                entry_price = signal.get("entry_price", 0)
-                stop_loss = signal.get("stop_loss", 0)
-                take_profit = signal.get("take_profit", 0)
+                direction = (signal.get("direction", "long") or "long").upper()
+                entry_price = float(signal.get("entry_price", 0) or 0)
+                stop_loss = float(signal.get("stop_loss", 0) or 0)
+                take_profit = float(signal.get("take_profit", 0) or 0)
                 signal_id = trade_data.get("signal_id", "")
+                tick_value = float(signal.get("tick_value", 2.0) or 2.0)
+                position_size = float(signal.get("position_size", 1.0) or 1.0)
                 
-                message += f"{i}. {signal_type} {direction}\n"
-                message += f"   Entry: ${entry_price:.2f}\n"
+                message += f"{i}. 🎯 {signal_type} {direction}\n"
+                message += f"   Entry: ${entry_price:.2f}"
+                
+                # Show unrealized PnL if we have current price
+                if current_price is not None and entry_price > 0:
+                    if direction == "LONG":
+                        pnl_pts = current_price - entry_price
+                    else:
+                        pnl_pts = entry_price - current_price
+                    unrealized_pnl = pnl_pts * tick_value * position_size
+                    pnl_emoji = "🟢" if unrealized_pnl >= 0 else "🔴"
+                    pnl_str = f"+${unrealized_pnl:.2f}" if unrealized_pnl >= 0 else f"-${abs(unrealized_pnl):.2f}"
+                    message += f" | {pnl_emoji} {pnl_str}"
+                message += "\n"
+                
                 if stop_loss:
-                    message += f"   Stop: ${stop_loss:.2f}\n"
+                    message += f"   Stop: ${stop_loss:.2f}"
+                    if current_price is not None:
+                        dist_to_stop = abs(current_price - stop_loss)
+                        message += f" ({dist_to_stop:.2f} pts away)"
+                    message += "\n"
                 if take_profit:
-                    message += f"   TP: ${take_profit:.2f}\n"
+                    message += f"   TP: ${take_profit:.2f}"
+                    if current_price is not None:
+                        dist_to_tp = abs(take_profit - current_price)
+                        message += f" ({dist_to_tp:.2f} pts away)"
+                    message += "\n"
                 message += f"   ID: {signal_id[:16]}...\n\n"
             
-            reply_markup = self._get_back_to_menu_button(include_refresh=True)
+            keyboard = [
+                [InlineKeyboardButton("🔄 Refresh", callback_data="active_trades")],
+                [InlineKeyboardButton("🔔 All Signals", callback_data="signals")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             
         except Exception as e:
@@ -2879,7 +2935,7 @@ class TelegramCommandHandler:
         context: ContextTypes.DEFAULT_TYPE,
         signal_id_prefix: str,
     ):
-        """Handle signal chart viewing."""
+        """Handle signal chart viewing with historical data fetch and exit chart support."""
         if not await self._check_authorized(update):
             if update.callback_query:
                 await update.callback_query.edit_message_text("❌ Unauthorized access")
@@ -2934,27 +2990,84 @@ class TelegramCommandHandler:
                 return
             
             signal = signal_data.get("signal", {})
-            
-            # Try to get buffer data from state
-            # Note: This is a simplified approach - in production, you might want to
-            # store buffer data or fetch it from the service
-            buffer_data = None
-            state_file = get_state_file(self.state_dir)
-            if state_file.exists():
-                try:
-                    with open(state_file) as f:
-                        state = json.load(f)
-                        # Check if buffer data is stored in state (it might not be)
-                        # For now, we'll generate chart without buffer data if not available
-                        # The chart generator will handle empty data gracefully
-                except Exception:
-                    pass
-            
-            # Generate chart (will work even without buffer data, just won't show price action)
+            status = signal_data.get("status", "generated")
             symbol = signal.get("symbol", "MNQ")
-            chart_path = self.chart_generator.generate_entry_chart(
-                signal, buffer_data if buffer_data is not None else pd.DataFrame(), symbol
-            )
+            
+            # Fetch historical data around signal time for chart rendering
+            buffer_data = pd.DataFrame()
+            try:
+                signal_ts = signal_data.get("timestamp") or signal.get("timestamp")
+                if signal_ts:
+                    from pearlalgo.utils.paths import parse_utc_timestamp
+                    signal_time = parse_utc_timestamp(str(signal_ts))
+                    
+                    # Fetch 2 hours before and 1 hour after signal (or until now)
+                    start_time = signal_time - timedelta(hours=2)
+                    end_time = min(signal_time + timedelta(hours=1), datetime.now(timezone.utc))
+                    
+                    data_provider = self._get_data_provider()
+                    if data_provider is not None:
+                        try:
+                            loop = asyncio.get_running_loop()
+                            buffer_data = await asyncio.wait_for(
+                                loop.run_in_executor(
+                                    None,
+                                    lambda: data_provider.fetch_historical(
+                                        symbol=symbol,
+                                        start=start_time,
+                                        end=end_time,
+                                        bar_size="1 min",
+                                    ),
+                                ),
+                                timeout=30.0,
+                            )
+                            if buffer_data is not None and not buffer_data.empty:
+                                logger.info(f"Fetched {len(buffer_data)} bars for signal chart")
+                        except asyncio.TimeoutError:
+                            logger.warning("Timeout fetching historical data for signal chart")
+                        except Exception as e:
+                            logger.warning(f"Could not fetch historical data for signal chart: {e}")
+            except Exception as e:
+                logger.warning(f"Error preparing historical fetch for signal chart: {e}")
+            
+            # Generate chart based on signal status
+            chart_path = None
+            caption = ""
+            
+            if status == "exited":
+                # Exited signal: show exit chart with PnL
+                exit_price = float(signal_data.get("exit_price", 0.0) or 0.0)
+                exit_reason = str(signal_data.get("exit_reason", "unknown") or "unknown")
+                pnl = float(signal_data.get("pnl", 0.0) or 0.0)
+                is_win = signal_data.get("is_win", pnl > 0)
+                
+                if exit_price > 0:
+                    chart_path = self.chart_generator.generate_exit_chart(
+                        signal=signal,
+                        exit_price=exit_price,
+                        exit_reason=exit_reason,
+                        pnl=pnl,
+                        buffer_data=buffer_data if buffer_data is not None else pd.DataFrame(),
+                        symbol=symbol,
+                    )
+                    result_emoji = "✅" if is_win else "❌"
+                    caption = (
+                        f"{result_emoji} {signal.get('type', 'signal')} {signal.get('direction', '').upper()} | "
+                        f"Exit: {exit_reason} | PnL: ${pnl:+.2f}"
+                    )
+                else:
+                    # Fallback to entry chart if exit_price missing
+                    chart_path = self.chart_generator.generate_entry_chart(
+                        signal, buffer_data if buffer_data is not None else pd.DataFrame(), symbol
+                    )
+                    caption = f"📊 {signal.get('type', 'signal')} {signal.get('direction', '').upper()} (exited)"
+            else:
+                # Entry or active signal: show entry chart
+                chart_path = self.chart_generator.generate_entry_chart(
+                    signal, buffer_data if buffer_data is not None else pd.DataFrame(), symbol
+                )
+                status_emoji = "🎯" if status == "entered" else "📊"
+                caption = f"{status_emoji} {signal.get('type', 'signal')} {signal.get('direction', '').upper()}"
             
             if chart_path and chart_path.exists():
                 try:
@@ -2964,12 +3077,12 @@ class TelegramCommandHandler:
                             await context.bot.send_photo(
                                 chat_id=update.effective_chat.id,
                                 photo=photo,
-                                caption=f"📊 Chart for {signal.get('type', 'signal')} {signal.get('direction', '').upper()}"
+                                caption=caption
                             )
                         else:
                             await update.message.reply_photo(
                                 photo=photo,
-                                caption=f"📊 Chart for {signal.get('type', 'signal')} {signal.get('direction', '').upper()}"
+                                caption=caption
                             )
                     # Clean up
                     try:
@@ -2985,7 +3098,7 @@ class TelegramCommandHandler:
             else:
                 await self._send_message_or_edit(
                     update, context,
-                    "❌ Could not generate chart. Buffer data may not be available."
+                    "❌ Could not generate chart. Historical data may not be available."
                 )
                 
         except Exception as e:

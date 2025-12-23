@@ -74,6 +74,55 @@ performance:
   max_records: 1000
   default_lookback_days: 7
 
+# Virtual PnL tracking (signal grading without real IBKR fills)
+virtual_pnl:
+  enabled: true                       # Enable virtual TP/SL tracking for signal quality grading
+  intrabar_tiebreak: "stop_loss"      # When TP and SL both touched in same bar: "stop_loss" (conservative) or "take_profit"
+
+# Chart HUD (TradingView-style overlays)
+hud:
+  enabled: true                       # Master toggle for all HUD elements
+  show_rr_box: true                   # Risk/reward box (green TP zone, red SL zone)
+  rr_box_forward_bars: 30             # How far forward to extend RR box
+  right_pad_bars: 30                  # Right padding for labels + RR box
+
+  # Sessions (Tokyo/London/NY shading)
+  show_sessions: true
+  show_session_names: true
+  show_session_oc: true               # Session open/close lines
+  show_session_tick_range: true
+  show_session_average: true
+
+  # Zones and channels
+  show_supply_demand: true            # LuxAlgo-style supply/demand zones
+  show_power_channel: true            # ChartPrime-style power channel
+  show_tbt_targets: true              # Trendline breakout targets
+
+  # Key levels (PDH/PDL/VWAP/POC)
+  show_key_levels: true
+  show_right_labels: true             # TradingView-style right-side labels
+  max_right_labels: 12
+  right_label_merge_ticks: 4          # Merge labels within N ticks
+
+  # RSI panel
+  show_rsi: true
+  rsi_period: 14
+
+# Session definitions (for chart HUD shading)
+sessions:
+  - name: "Tokyo"
+    session: "0900-1500"
+    timezone: "Asia/Tokyo"
+    color: "#2962FF"
+  - name: "London"
+    session: "0830-1630"
+    timezone: "Europe/London"
+    color: "#FF9800"
+  - name: "New York"
+    session: "0930-1600"
+    timezone: "America/New_York"
+    color: "#089981"
+
 # Prop Firm Trading Assumptions (MNQ-native)
 prop_firm:
   # MNQ (Micro E-mini NASDAQ-100)
