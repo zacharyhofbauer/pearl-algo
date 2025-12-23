@@ -32,6 +32,10 @@ from pearlalgo.utils.telegram_alerts import (
     _format_uptime,
     _format_currency,
     _format_percentage,
+    format_signal_status,
+    format_signal_direction,
+    format_signal_confidence_tier,
+    format_pnl,
 )
 
 try:
@@ -40,6 +44,25 @@ try:
 except ImportError:
     CHART_GENERATOR_AVAILABLE = False
     ChartGenerator = None
+
+
+def _is_command_handler_running() -> bool:
+    """
+    Check if the Telegram command handler service is running.
+    
+    This is used to determine whether to include deep-link buttons in push alerts.
+    """
+    try:
+        import os
+        project_root = Path(__file__).parent.parent.parent.parent
+        pid_file = project_root / "logs" / "telegram_handler.pid"
+        if not pid_file.exists():
+            return False
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, 0)  # Check if process exists
+        return True
+    except Exception:
+        return False
 
 
 class NQAgentTelegramNotifier:
@@ -131,8 +154,28 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
-            # Format professional desk alert
-            message = self._format_professional_signal(signal)
+            # Format compact signal alert (decision-first layout)
+            message = self._format_compact_signal(signal)
+            
+            # Build optional deep-link buttons when command handler is running
+            reply_markup = None
+            if _is_command_handler_running():
+                try:
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    signal_id = str(signal.get("signal_id", "") or "")
+                    keyboard = []
+                    if signal_id:
+                        keyboard.append([
+                            InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
+                            InlineKeyboardButton("🔔 Signals", callback_data="signals"),
+                        ])
+                    else:
+                        keyboard.append([InlineKeyboardButton("🔔 Signals", callback_data="signals")])
+                    keyboard.append([InlineKeyboardButton("📊 Status", callback_data="status")])
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                except Exception as e:
+                    logger.debug(f"Could not build signal buttons: {e}")
+                    reply_markup = None
             
             # Generate and send chart if available
             chart_path = None
@@ -144,7 +187,7 @@ class NQAgentTelegramNotifier:
                     logger.warning(f"Could not generate chart for signal: {e}")
             
             # Send message (disable dedupe for signals: prices/confidence differences matter).
-            success = await self.telegram.send_message(message, dedupe=False)
+            success = await self.telegram.send_message(message, dedupe=False, reply_markup=reply_markup)
             
             # Send chart if generated
             if chart_path and chart_path.exists():
@@ -207,6 +250,102 @@ class NQAgentTelegramNotifier:
         if sid_short:
             lines.append(f"id={sid_short}")
         return "\n".join(lines)
+
+    def _format_compact_signal(self, signal: Dict) -> str:
+        """
+        Format signal as a compact, decision-first push alert.
+        
+        Trade plan appears first for fast action; context is condensed.
+        Includes signal ID prefix for cross-referencing with /signals.
+        
+        Args:
+            signal: Signal dictionary with full context
+            
+        Returns:
+            Formatted message string (under ~1500 chars for mobile)
+        """
+        symbol = str(signal.get("symbol") or "MNQ")
+        signal_type = str(signal.get("type") or "unknown").replace("_", " ").title()
+        try:
+            entry_price = float(signal.get("entry_price") or 0.0)
+        except Exception:
+            entry_price = 0.0
+        try:
+            stop_loss = float(signal.get("stop_loss") or 0.0)
+        except Exception:
+            stop_loss = 0.0
+        try:
+            take_profit = float(signal.get("take_profit") or 0.0)
+        except Exception:
+            take_profit = 0.0
+        try:
+            confidence = float(signal.get("confidence") or 0.0)
+        except Exception:
+            confidence = 0.0
+        reason = str(signal.get("reason") or "")
+        signal_id = str(signal.get("signal_id") or "")
+
+        # Use shared helpers for consistent formatting
+        dir_emoji, dir_label = format_signal_direction(signal.get("direction", "long"))
+        conf_emoji, conf_tier = format_signal_confidence_tier(confidence)
+
+        # Calculate risk/reward
+        rr = 0.0
+        if entry_price > 0 and stop_loss > 0 and take_profit > 0:
+            if dir_label == "LONG":
+                risk = entry_price - stop_loss
+                reward = take_profit - entry_price
+            else:
+                risk = stop_loss - entry_price
+                reward = entry_price - take_profit
+            if risk > 0:
+                rr = reward / risk
+
+        # Build compact message with trade plan first
+        message = f"🎯 *{symbol} {dir_emoji} {dir_label} | {signal_type}*\n"
+        message += "━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+        # Trade Plan (always first)
+        message += "📋 *Trade Plan*\n"
+        if entry_price:
+            message += f"   Entry: ${entry_price:.2f}\n"
+        if stop_loss:
+            stop_dist = abs(entry_price - stop_loss) if entry_price else 0
+            message += f"   Stop:  ${stop_loss:.2f} ({stop_dist:.2f} pts)\n"
+        if take_profit:
+            tp_dist = abs(take_profit - entry_price) if entry_price else 0
+            message += f"   TP:    ${take_profit:.2f} ({tp_dist:.2f} pts)\n"
+        if rr > 0:
+            message += f"   R:R:   {rr:.2f}:1\n"
+        message += "\n"
+
+        # Confidence
+        message += f"{conf_emoji} *Confidence:* {confidence:.0%} ({conf_tier})\n"
+
+        # Condensed context (one line each, only if available)
+        regime = signal.get("regime", {}) or {}
+        mtf = signal.get("mtf_analysis", {}) or {}
+
+        if regime.get("regime"):
+            r_regime = str(regime.get("regime", "")).replace("_", " ").title()
+            r_vol = str(regime.get("volatility", "")).title()
+            message += f"🧭 *Regime:* {r_regime} | {r_vol} Vol\n"
+
+        alignment = mtf.get("alignment")
+        if alignment:
+            mtf_emoji = "✅" if alignment == "aligned" else "⚠️" if alignment == "partial" else "❌"
+            message += f"🧩 *MTF:* {mtf_emoji} {alignment.title()}\n"
+
+        # Reason (truncated for mobile)
+        if reason:
+            reason_short = reason[:100] + "…" if len(reason) > 100 else reason
+            message += f"\n💡 {reason_short}\n"
+
+        # Signal ID for cross-referencing (always include)
+        if signal_id:
+            message += f"\n🆔 `{signal_id[:16]}…`"
+
+        return message
     
     async def _send_photo(self, photo_path: Path, caption: Optional[str] = None) -> bool:
         """Send photo to Telegram."""
@@ -538,30 +677,57 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
-            symbol = signal.get("symbol", "NQ")
+            symbol = signal.get("symbol", "MNQ")
             signal_type = signal.get("type", "unknown").replace("_", " ").title()
-            direction = signal.get("direction", "long").upper()
-            stop_loss = signal.get("stop_loss", 0)
-            take_profit = signal.get("take_profit", 0)
+            stop_loss = float(signal.get("stop_loss", 0) or 0)
+            take_profit = float(signal.get("take_profit", 0) or 0)
+            
+            # Use shared helpers
+            dir_emoji, dir_label = format_signal_direction(signal.get("direction", "long"))
             
             # Calculate risk/reward
-            if direction == "LONG" and stop_loss > 0 and take_profit > 0:
-                risk = entry_price - stop_loss
-                reward = take_profit - entry_price
-                risk_reward = reward / risk if risk > 0 else 0
-            else:
-                risk_reward = 0
+            risk_reward = 0.0
+            if entry_price > 0 and stop_loss > 0 and take_profit > 0:
+                if dir_label == "LONG":
+                    risk = entry_price - stop_loss
+                    reward = take_profit - entry_price
+                else:
+                    risk = stop_loss - entry_price
+                    reward = entry_price - take_profit
+                if risk > 0:
+                    risk_reward = reward / risk
             
-            message = f"✅ *{symbol} {direction} ENTRY*\n\n"
+            # Compact entry notification
+            message = f"🎯 *{symbol} {dir_emoji} {dir_label} ENTRY*\n\n"
             message += f"*Type:* {signal_type}\n"
-            message += f"*Entry Price:* ${entry_price:.2f}\n"
-            message += f"*Stop Loss:* ${stop_loss:.2f} ({stop_loss - entry_price:+.2f})\n"
-            message += f"*Take Profit:* ${take_profit:.2f} ({take_profit - entry_price:+.2f})\n"
-            message += f"*R:R:* {risk_reward:.2f}:1\n"
-            message += f"*Signal ID:* {signal_id[:16]}...\n"
+            message += f"*Entry:* ${entry_price:.2f}\n"
+            if stop_loss:
+                stop_dist = abs(entry_price - stop_loss)
+                message += f"*Stop:* ${stop_loss:.2f} ({stop_dist:.2f} pts)\n"
+            if take_profit:
+                tp_dist = abs(take_profit - entry_price)
+                message += f"*TP:* ${take_profit:.2f} ({tp_dist:.2f} pts)\n"
+            if risk_reward > 0:
+                message += f"*R:R:* {risk_reward:.2f}:1\n"
+            message += f"\n🆔 `{signal_id[:16]}…`\n"
+            
+            # Build optional deep-link buttons
+            reply_markup = None
+            if _is_command_handler_running():
+                try:
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
+                            InlineKeyboardButton("📊 Active", callback_data="active_trades"),
+                        ],
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                except Exception:
+                    reply_markup = None
             
             # Send message
-            success = await self.telegram.send_message(message)
+            success = await self.telegram.send_message(message, reply_markup=reply_markup)
             
             # Generate and send chart if available
             chart_path = None
@@ -614,16 +780,15 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
-            symbol = signal.get("symbol", "NQ")
+            symbol = signal.get("symbol", "MNQ")
             signal_type = signal.get("type", "unknown").replace("_", " ").title()
-            direction = signal.get("direction", "long").upper()
-            entry_price = signal.get("entry_price", 0)
+            entry_price = float(signal.get("entry_price", 0) or 0)
             
-            # Determine win/loss emoji and status
+            # Use shared helpers
+            dir_emoji, dir_label = format_signal_direction(signal.get("direction", "long"))
             is_win = pnl > 0
-            result_emoji = "✅" if is_win else "❌"
-            result_text = "WIN" if is_win else "LOSS"
-            pnl_emoji = "🟢" if is_win else "🔴"
+            status_emoji, status_label = format_signal_status("exited", is_win)
+            pnl_emoji, pnl_str = format_pnl(pnl)
             
             # Format exit reason
             exit_reason_map = {
@@ -634,31 +799,48 @@ class NQAgentTelegramNotifier:
             }
             exit_reason_display = exit_reason_map.get(exit_reason.lower(), exit_reason.title())
             
-            message = f"{result_emoji} *{symbol} {direction} EXIT - {result_text}*\n\n"
+            # Compact exit notification
+            message = f"{status_emoji} *{symbol} {dir_emoji} {dir_label} EXIT - {status_label}*\n\n"
             message += f"*Type:* {signal_type}\n"
             message += f"*Entry:* ${entry_price:.2f}\n"
-            message += f"*Exit:* ${exit_price:.2f} ({exit_price - entry_price:+.2f})\n"
+            price_change = exit_price - entry_price if entry_price else 0
+            message += f"*Exit:* ${exit_price:.2f} ({price_change:+.2f})\n"
             message += f"*Reason:* {exit_reason_display}\n"
-            message += f"{pnl_emoji} *P&L:* {_format_currency(pnl)}\n"
+            message += f"{pnl_emoji} *P&L:* {pnl_str}\n"
             
             if hold_duration_minutes is not None:
                 hold_hours = int(hold_duration_minutes // 60)
                 hold_mins = int(hold_duration_minutes % 60)
                 if hold_hours > 0:
-                    message += f"*Hold Time:* {hold_hours}h {hold_mins}m\n"
+                    message += f"*Hold:* {hold_hours}h {hold_mins}m\n"
                 else:
-                    message += f"*Hold Time:* {hold_mins}m\n"
+                    message += f"*Hold:* {hold_mins}m\n"
             
-            message += f"*Signal ID:* {signal_id[:16]}...\n"
+            message += f"\n🆔 `{signal_id[:16]}…`\n"
+            
+            # Build optional deep-link buttons
+            reply_markup = None
+            if _is_command_handler_running():
+                try:
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
+                            InlineKeyboardButton("📈 Performance", callback_data="performance"),
+                        ],
+                        [InlineKeyboardButton("🔔 Signals", callback_data="signals")],
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                except Exception:
+                    reply_markup = None
             
             # Send message
-            success = await self.telegram.send_message(message)
+            success = await self.telegram.send_message(message, reply_markup=reply_markup)
             
             # Generate and send chart if available
             chart_path = None
             if self.chart_generator and buffer_data is not None and not buffer_data.empty:
                 try:
-                    symbol = signal.get("symbol", "NQ")
                     chart_path = self.chart_generator.generate_exit_chart(
                         signal, exit_price, exit_reason, pnl, buffer_data, symbol
                     )

@@ -66,6 +66,105 @@ def _format_percentage(value: float, decimals: int = 1) -> str:
     return f"{value:.{decimals}f}%"
 
 
+# ---------------------------------------------------------------------------
+# Shared signal status semantics
+# ---------------------------------------------------------------------------
+# Canonical status values: generated, entered, exited, expired
+# These helpers ensure consistent emoji/label usage across all Telegram views.
+
+SIGNAL_STATUS_EMOJI = {
+    "generated": "🆕",
+    "entered": "🎯",
+    "exited": "🏁",
+    "expired": "⏰",
+}
+
+SIGNAL_STATUS_LABEL = {
+    "generated": "Pending",
+    "entered": "In Trade",
+    "exited": "Closed",
+    "expired": "Expired",
+}
+
+
+def format_signal_status(status: str, is_win: bool | None = None) -> tuple[str, str]:
+    """
+    Return (emoji, label) for a signal status.
+
+    For exited signals, is_win overrides the default emoji with ✅/❌.
+    """
+    status_lower = (status or "").lower()
+    if status_lower == "exited" and is_win is not None:
+        emoji = "✅" if is_win else "❌"
+        label = "Win" if is_win else "Loss"
+        return emoji, label
+    emoji = SIGNAL_STATUS_EMOJI.get(status_lower, "⚪")
+    label = SIGNAL_STATUS_LABEL.get(status_lower, status.title() if status else "Unknown")
+    return emoji, label
+
+
+def format_signal_direction(direction: str) -> tuple[str, str]:
+    """Return (emoji, label) for a signal direction."""
+    direction_lower = (direction or "").lower()
+    if direction_lower == "long":
+        return "🟢", "LONG"
+    elif direction_lower == "short":
+        return "🔴", "SHORT"
+    return "⚪", direction.upper() if direction else "N/A"
+
+
+def format_signal_confidence_tier(confidence: float) -> tuple[str, str]:
+    """Return (emoji, tier_label) for a confidence value (0-1)."""
+    if confidence >= 0.70:
+        return "🟢", "High"
+    elif confidence >= 0.55:
+        return "🟡", "Moderate"
+    else:
+        return "🔴", "Low"
+
+
+def format_pnl(pnl: float) -> tuple[str, str]:
+    """Return (emoji, formatted_string) for a P&L value."""
+    if pnl >= 0:
+        return "🟢", f"+${pnl:,.2f}"
+    else:
+        return "🔴", f"-${abs(pnl):,.2f}"
+
+
+def format_time_ago(timestamp_str: str | None) -> str:
+    """
+    Format a timestamp as a human-readable 'time ago' string.
+
+    Returns e.g. '5m ago', '2h ago', '1d ago', or '' if parsing fails.
+    """
+    if not timestamp_str:
+        return ""
+    try:
+        from datetime import datetime, timezone
+        from pearlalgo.utils.paths import parse_utc_timestamp
+
+        ts = parse_utc_timestamp(str(timestamp_str))
+        if ts is None:
+            return ""
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        delta = now - ts
+        seconds = delta.total_seconds()
+        if seconds < 0:
+            return ""
+        if seconds < 60:
+            return f"{int(seconds)}s ago"
+        elif seconds < 3600:
+            return f"{int(seconds // 60)}m ago"
+        elif seconds < 86400:
+            return f"{int(seconds // 3600)}h ago"
+        else:
+            return f"{int(seconds // 86400)}d ago"
+    except Exception:
+        return ""
+
+
 class TelegramAlerts:
     """Telegram alert sender for trading notifications."""
 

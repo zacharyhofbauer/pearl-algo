@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import random
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Optional, Callable, Awaitable, List
@@ -37,6 +38,14 @@ from pearlalgo.nq_agent.performance_tracker import PerformanceTracker
 from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
 from pearlalgo.utils.paths import get_signals_file, get_state_file, ensure_state_dir
 from pearlalgo.utils.service_controller import ServiceController
+from pearlalgo.utils.telegram_alerts import (
+    format_signal_status,
+    format_signal_direction,
+    format_signal_confidence_tier,
+    format_pnl,
+    format_time_ago,
+    _format_currency,
+)
 
 try:
     from pearlalgo.nq_agent.chart_generator import ChartGenerator
@@ -761,94 +770,91 @@ class TelegramCommandHandler:
 
             keyboard: List[List[InlineKeyboardButton]] = []
 
-            # Filter controls
+            # Compact filter controls (reduced from 4 rows to 2)
+            # Row 1: Direction + Confidence
             keyboard.append([
-                InlineKeyboardButton("✅ All" if dir_filter == "all" else "All", callback_data="signals:setdir:all"),
-                InlineKeyboardButton("✅ Long" if dir_filter == "long" else "Long", callback_data="signals:setdir:long"),
-                InlineKeyboardButton("✅ Short" if dir_filter == "short" else "Short", callback_data="signals:setdir:short"),
+                InlineKeyboardButton("✓All" if dir_filter == "all" else "All", callback_data="signals:setdir:all"),
+                InlineKeyboardButton("✓L" if dir_filter == "long" else "L", callback_data="signals:setdir:long"),
+                InlineKeyboardButton("✓S" if dir_filter == "short" else "S", callback_data="signals:setdir:short"),
+                InlineKeyboardButton("│", callback_data="signals:noop"),
+                InlineKeyboardButton("✓0%" if min_conf == 0.0 else "0%", callback_data="signals:setconf:0.0"),
+                InlineKeyboardButton("✓50" if min_conf == 0.5 else "50", callback_data="signals:setconf:0.5"),
+                InlineKeyboardButton("✓70" if min_conf == 0.7 else "70", callback_data="signals:setconf:0.7"),
             ])
+            # Row 2: Signal type filters
             keyboard.append([
-                InlineKeyboardButton("✅ 0%" if min_conf == 0.0 else "0%", callback_data="signals:setconf:0.0"),
-                InlineKeyboardButton("✅ 50%" if min_conf == 0.5 else "50%", callback_data="signals:setconf:0.5"),
-                InlineKeyboardButton("✅ 60%" if min_conf == 0.6 else "60%", callback_data="signals:setconf:0.6"),
-                InlineKeyboardButton("✅ 70%" if min_conf == 0.7 else "70%", callback_data="signals:setconf:0.7"),
-            ])
-            keyboard.append([
-                InlineKeyboardButton("✅ All" if type_filter == "all" else "All", callback_data="signals:settype:all"),
-                InlineKeyboardButton("✅ Mom" if type_filter == "momentum" else "Mom", callback_data="signals:settype:momentum"),
-            ])
-            keyboard.append([
-                InlineKeyboardButton("✅ MeanRev" if type_filter == "mean_reversion" else "MeanRev", callback_data="signals:settype:mean_reversion"),
-                InlineKeyboardButton("✅ BO" if type_filter == "breakout" else "BO", callback_data="signals:settype:breakout"),
-                InlineKeyboardButton("✅ Other" if type_filter == "other" else "Other", callback_data="signals:settype:other"),
+                InlineKeyboardButton("✓All" if type_filter == "all" else "All", callback_data="signals:settype:all"),
+                InlineKeyboardButton("✓Mom" if type_filter == "momentum" else "Mom", callback_data="signals:settype:momentum"),
+                InlineKeyboardButton("✓MR" if type_filter == "mean_reversion" else "MR", callback_data="signals:settype:mean_reversion"),
+                InlineKeyboardButton("✓BO" if type_filter == "breakout" else "BO", callback_data="signals:settype:breakout"),
+                InlineKeyboardButton("✓Oth" if type_filter == "other" else "Oth", callback_data="signals:settype:other"),
             ])
 
-            # Paging + quick actions
-            pager_row: List[InlineKeyboardButton] = []
-            if filtered_count > 0:
+            # Paging row (compact)
+            if filtered_count > 0 and total_pages > 1:
+                pager_row: List[InlineKeyboardButton] = []
                 if page < total_pages - 1:
-                    pager_row.append(InlineKeyboardButton("⬅️ Older", callback_data="signals:page:older"))
-                else:
-                    pager_row.append(InlineKeyboardButton("⬅️ Older", callback_data="signals:page:older"))
-
+                    pager_row.append(InlineKeyboardButton("◀ Older", callback_data="signals:page:older"))
                 if page > 0:
-                    pager_row.append(InlineKeyboardButton("Newer ➡️", callback_data="signals:page:newer"))
-                else:
-                    pager_row.append(InlineKeyboardButton("Newer ➡️", callback_data="signals:page:newer"))
-
-                pager_row.append(InlineKeyboardButton("🔝 Newest", callback_data="signals:page:newest"))
+                    pager_row.append(InlineKeyboardButton("Newer ▶", callback_data="signals:page:newer"))
+                pager_row.append(InlineKeyboardButton("🔝", callback_data="signals:page:newest"))
                 keyboard.append(pager_row)
 
+            # Quick actions
             keyboard.append([
-                InlineKeyboardButton("🆕 Last Signal", callback_data="last_signal"),
-                InlineKeyboardButton("📊 Active Trades", callback_data="active_trades"),
+                InlineKeyboardButton("🆕 Last", callback_data="last_signal"),
+                InlineKeyboardButton("📊 Active", callback_data="active_trades"),
+                InlineKeyboardButton("🔄", callback_data="signals"),
             ])
 
             if not page_signals:
                 message += "📭 No signals match these filters.\n"
             else:
+                # Build compact signal list with freshness indicators
                 for i, sig_data in enumerate(page_signals, 1):
                     signal = sig_data.get("signal", {}) or {}
                     signal_type = signal.get("type", "unknown")
-                    direction = (signal.get("direction", "long") or "long").upper()
-                    entry_price = float(signal.get("entry_price", 0.0) or 0.0)
                     status = sig_data.get("status", "unknown")
                     signal_id = sig_data.get("signal_id", "")
+                    entry_price = float(signal.get("entry_price", 0.0) or 0.0)
                     try:
                         conf_val = float(signal.get("confidence", 0.0) or 0.0)
                     except Exception:
                         conf_val = 0.0
 
-                    # Enhanced status emoji with win/loss for exited
-                    if status == "exited":
-                        is_win = sig_data.get("is_win", False)
-                        status_emoji = "✅" if is_win else "❌"
-                    else:
-                        status_emoji = {
-                            "generated": "🆕",
-                            "entered": "🎯",
-                            "expired": "⏰",
-                        }.get(status, "⚪")
-
-                    message += f"{i}. {status_emoji} {signal_type} {direction} • {conf_val:.0%}\n"
+                    # Use shared helpers for consistent formatting
+                    is_win = sig_data.get("is_win") if status == "exited" else None
+                    status_emoji, _ = format_signal_status(status, is_win)
+                    _, dir_label = format_signal_direction(signal.get("direction", "long"))
                     
-                    # Show PnL for exited signals, entry for others
+                    # Freshness: time since signal was generated
+                    sig_ts = sig_data.get("timestamp") or signal.get("timestamp")
+                    age_str = format_time_ago(sig_ts)
+                    age_part = f" • {age_str}" if age_str else ""
+
+                    # Compact one-liner: status, type, direction, confidence, age
+                    message += f"{i}. {status_emoji} {signal_type} {dir_label} • {conf_val:.0%}{age_part}\n"
+                    
+                    # Second line: entry price + PnL for exited, or short status for others
                     if status == "exited":
                         pnl = float(sig_data.get("pnl", 0.0) or 0.0)
+                        pnl_emoji, pnl_str = format_pnl(pnl)
                         exit_reason = str(sig_data.get("exit_reason", "") or "")[:8]
-                        pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
-                        message += f"   PnL: {pnl_str} ({exit_reason}) | Entry: ${entry_price:.2f}\n\n"
+                        message += f"   {pnl_emoji} {pnl_str} ({exit_reason}) @ ${entry_price:.2f}\n\n"
                     else:
-                        message += f"   Entry: ${entry_price:.2f} | Status: {status} | ID: {signal_id[:10]}...\n\n"
+                        message += f"   Entry: ${entry_price:.2f} | `{signal_id[:8]}…`\n\n"
 
-                    # Per-signal actions
-                    row: List[InlineKeyboardButton] = []
-                    if signal_id and self.chart_generator:
-                        row.append(InlineKeyboardButton(f"📊 {i}", callback_data=f"signal_chart_{signal_id[:16]}"))
+                # Compact numeric grid for actions (batch multiple signals per row)
+                action_buttons: List[InlineKeyboardButton] = []
+                for i, sig_data in enumerate(page_signals, 1):
+                    signal_id = sig_data.get("signal_id", "")
                     if signal_id:
-                        row.append(InlineKeyboardButton(f"ℹ️ {i}", callback_data=f"signal_detail_{signal_id[:16]}"))
-                    if row:
-                        keyboard.append(row)
+                        action_buttons.append(
+                            InlineKeyboardButton(f"ℹ️{i}", callback_data=f"signal_detail_{signal_id[:16]}")
+                        )
+                # Group action buttons in rows of 5
+                for j in range(0, len(action_buttons), 5):
+                    keyboard.append(action_buttons[j : j + 5])
 
             # Navigation
             keyboard.append([
@@ -922,27 +928,46 @@ class TelegramCommandHandler:
             status = last_signal_data.get("status", "unknown")
             
             signal_type = signal.get("type", "unknown")
-            direction = signal.get("direction", "long").upper()
-            entry_price = signal.get("entry_price", 0)
-            stop_loss = signal.get("stop_loss", 0)
-            take_profit = signal.get("take_profit", 0)
+            entry_price = float(signal.get("entry_price", 0) or 0)
+            stop_loss = float(signal.get("stop_loss", 0) or 0)
+            take_profit = float(signal.get("take_profit", 0) or 0)
+            try:
+                conf_val = float(signal.get("confidence", 0.0) or 0.0)
+            except Exception:
+                conf_val = 0.0
             
-            status_emoji = {
-                "generated": "🆕",
-                "entered": "✅",
-                "exited": "🏁",
-                "expired": "⏰",
-            }.get(status, "⚪")
+            # Use shared helpers for consistent formatting
+            is_win = last_signal_data.get("is_win") if status == "exited" else None
+            status_emoji, status_label = format_signal_status(status, is_win)
+            dir_emoji, dir_label = format_signal_direction(signal.get("direction", "long"))
+            conf_emoji, conf_tier = format_signal_confidence_tier(conf_val)
+            
+            # Freshness indicator
+            sig_ts = last_signal_data.get("timestamp") or signal.get("timestamp")
+            age_str = format_time_ago(sig_ts)
             
             message = f"{status_emoji} *Last Signal*\n\n"
-            message += f"*Type:* {signal_type} {direction}\n"
+            message += f"*Type:* {signal_type} {dir_emoji} {dir_label}\n"
             message += f"*Entry:* ${entry_price:.2f}\n"
             if stop_loss:
                 message += f"*Stop:* ${stop_loss:.2f}\n"
             if take_profit:
                 message += f"*TP:* ${take_profit:.2f}\n"
-            message += f"*Status:* {status}\n"
-            message += f"*ID:* {signal_id[:16]}...\n"
+            message += f"*Confidence:* {conf_emoji} {conf_val:.0%} ({conf_tier})\n"
+            message += f"*Status:* {status_label}\n"
+            if age_str:
+                message += f"*Age:* {age_str}\n"
+            message += f"*ID:* `{signal_id[:16]}…`\n"
+            
+            # Show PnL for exited signals
+            if status == "exited":
+                pnl = float(last_signal_data.get("pnl", 0.0) or 0.0)
+                pnl_emoji, pnl_str = format_pnl(pnl)
+                exit_reason = str(last_signal_data.get("exit_reason", "") or "")
+                message += f"\n{pnl_emoji} *P&L:* {pnl_str}"
+                if exit_reason:
+                    message += f" ({exit_reason})"
+                message += "\n"
             
             # Add chart button
             keyboard = []
@@ -2818,7 +2843,6 @@ class TelegramCommandHandler:
 
             signal = found.get("signal", {}) or {}
             sig_type = str(signal.get("type", "unknown"))
-            direction = str(signal.get("direction", "long")).upper()
             status = str(found.get("status", "unknown"))
             sig_id = str(found.get("signal_id", "")) or ""
 
@@ -2827,9 +2851,16 @@ class TelegramCommandHandler:
             tp = float(signal.get("take_profit", 0.0) or 0.0)
             conf = float(signal.get("confidence", 0.0) or 0.0)
 
+            # Use shared helpers for consistent formatting
+            is_win = found.get("is_win") if status == "exited" else None
+            status_emoji, status_label = format_signal_status(status, is_win)
+            dir_emoji, dir_label = format_signal_direction(signal.get("direction", "long"))
+            conf_emoji, conf_tier = format_signal_confidence_tier(conf)
+
+            # Calculate R:R
             rr = None
             if entry > 0 and stop > 0 and tp > 0:
-                if direction == "LONG":
+                if dir_label == "LONG":
                     risk = entry - stop
                     reward = tp - entry
                 else:
@@ -2838,6 +2869,53 @@ class TelegramCommandHandler:
                 if risk > 0:
                     rr = reward / risk
 
+            # Freshness indicator
+            sig_ts = found.get("timestamp") or signal.get("timestamp")
+            age_str = format_time_ago(sig_ts)
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # DECISION-FIRST LAYOUT: Trade plan at the top for fast action
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            message = f"{status_emoji} *Signal Detail*\n"
+            message += f"{dir_emoji} *{sig_type.replace('_', ' ').title()}* {dir_label}\n"
+            message += "━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+            # Trade Plan (always visible first)
+            message += "📋 *Trade Plan*\n"
+            if entry:
+                message += f"   Entry: ${entry:.2f}\n"
+            if stop:
+                stop_dist = abs(entry - stop) if entry else 0
+                message += f"   Stop:  ${stop:.2f} ({stop_dist:.2f} pts)\n"
+            if tp:
+                tp_dist = abs(tp - entry) if entry else 0
+                message += f"   TP:    ${tp:.2f} ({tp_dist:.2f} pts)\n"
+            if rr is not None:
+                message += f"   R:R:   {rr:.2f}:1\n"
+            message += "\n"
+
+            # Confidence + Status
+            message += f"{conf_emoji} *Confidence:* {conf:.0%} ({conf_tier})\n"
+            message += f"📌 *Status:* {status_label}"
+            if age_str:
+                message += f" • {age_str}"
+            message += "\n"
+
+            # P&L for exited signals
+            if status == "exited":
+                pnl = float(found.get("pnl", 0.0) or 0.0)
+                pnl_emoji, pnl_str = format_pnl(pnl)
+                exit_reason = str(found.get("exit_reason", "") or "")
+                message += f"{pnl_emoji} *P&L:* {pnl_str}"
+                if exit_reason:
+                    message += f" ({exit_reason})"
+                message += "\n"
+
+            message += f"🆔 `{sig_id[:16]}…`\n"
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # CONTEXT BLOCKS: Trader-facing labels, collapsible conceptually
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             # Optional enhanced context
             regime = signal.get("regime", {}) or {}
             mtf = signal.get("mtf_analysis", {}) or {}
@@ -2846,74 +2924,70 @@ class TelegramCommandHandler:
             quality = signal.get("quality_score", {}) or {}
             sr_levels = signal.get("sr_levels", {}) or {}
 
-            message = "ℹ️ *Signal Detail*\n\n"
-            message += f"*Type:* `{sig_type}`\n"
-            message += f"*Direction:* {direction}\n"
-            if entry:
-                message += f"*Entry:* ${entry:.2f}\n"
-            if stop:
-                message += f"*Stop:* ${stop:.2f}\n"
-            if tp:
-                message += f"*TP:* ${tp:.2f}\n"
-            if rr is not None:
-                message += f"*R:R:* {rr:.2f}:1\n"
-            message += f"*Confidence:* {conf:.0%}\n"
-            message += f"*Status:* `{status}`\n"
-            message += f"*ID:* `{sig_id[:16]}...`\n"
+            context_lines = []
 
+            # Quality metrics (trader-facing labels)
             if quality:
-                message += "\n🧠 *Quality*\n"
+                q_parts = []
                 if "quality_score" in quality:
-                    message += f"- score: {float(quality.get('quality_score', 0.0)):.2f}\n"
+                    q_parts.append(f"Score: {float(quality.get('quality_score', 0.0)):.2f}")
                 if "confluence_score" in quality:
-                    message += f"- confluence: {float(quality.get('confluence_score', 0.0)):.2f}\n"
+                    q_parts.append(f"Confluence: {float(quality.get('confluence_score', 0.0)):.2f}")
                 if "historical_wr" in quality:
-                    message += f"- historical_wr: {float(quality.get('historical_wr', 0.0)):.0%}\n"
-                if "information_ratio" in quality:
-                    message += f"- info_ratio: {float(quality.get('information_ratio', 0.0)):.2f}\n"
+                    q_parts.append(f"Historical WR: {float(quality.get('historical_wr', 0.0)):.0%}")
+                if q_parts:
+                    context_lines.append("🧠 *Quality:* " + " • ".join(q_parts))
 
-            if regime:
-                message += "\n🧭 *Regime*\n"
-                message += f"- regime: `{regime.get('regime', 'unknown')}`\n"
-                message += f"- volatility: `{regime.get('volatility', 'unknown')}`\n"
-                message += f"- session: `{regime.get('session', 'unknown')}`\n"
-                if regime.get("atr_expansion") is not None:
-                    message += f"- atr_expansion: `{bool(regime.get('atr_expansion'))}`\n"
+            # Regime context
+            if regime and regime.get("regime"):
+                r_regime = str(regime.get("regime", "")).replace("_", " ").title()
+                r_vol = str(regime.get("volatility", "")).title()
+                r_session = str(regime.get("session", "")).replace("_", " ").title()
+                context_lines.append(f"🧭 *Regime:* {r_regime} | {r_vol} Vol | {r_session}")
 
+            # MTF alignment
             alignment = mtf.get("alignment")
             if alignment:
-                message += "\n🧩 *MTF*\n"
-                message += f"- alignment: `{alignment}`\n"
-                if mtf.get("alignment_score") is not None:
-                    message += f"- alignment_score: {float(mtf.get('alignment_score', 0.0)):.2f}\n"
-                div = mtf.get("divergences") or {}
-                if div.get("rsi_divergence") or div.get("macd_divergence"):
-                    message += f"- divergences: rsi={div.get('rsi_divergence')}, macd={div.get('macd_divergence')}\n"
+                mtf_score = mtf.get("alignment_score")
+                mtf_str = f"🧩 *MTF:* {alignment.title()}"
+                if mtf_score is not None:
+                    mtf_str += f" ({float(mtf_score):.2f})"
+                context_lines.append(mtf_str)
 
-            if vwap:
-                if vwap.get("vwap"):
-                    message += "\n📍 *VWAP*\n"
-                    message += f"- vwap: {float(vwap.get('vwap', 0.0)):.2f}\n"
-                    if vwap.get("distance_pct") is not None:
-                        message += f"- distance: {float(vwap.get('distance_pct', 0.0)):.2f}%\n"
+            # VWAP position
+            if vwap and vwap.get("vwap"):
+                vwap_val = float(vwap.get("vwap", 0.0))
+                dist_pct = vwap.get("distance_pct")
+                vwap_str = f"📍 *VWAP:* ${vwap_val:.2f}"
+                if dist_pct is not None:
+                    vwap_str += f" ({float(dist_pct):+.2f}%)"
+                context_lines.append(vwap_str)
 
+            # Order flow
             if flow and flow.get("recent_trend"):
-                message += "\n🌊 *Order Flow*\n"
-                message += f"- trend: `{flow.get('recent_trend')}`\n"
-                if flow.get("net_pressure") is not None:
-                    message += f"- net: {float(flow.get('net_pressure', 0.0)):.2f}\n"
-                if flow.get("delta_divergence") is not None:
-                    message += f"- delta_divergence: `{flow.get('delta_divergence')}`\n"
-                if flow.get("large_volume_detected") is not None:
-                    message += f"- large_volume: `{bool(flow.get('large_volume_detected'))}`\n"
+                flow_trend = str(flow.get("recent_trend", "")).title()
+                net = flow.get("net_pressure")
+                flow_str = f"🌊 *Flow:* {flow_trend}"
+                if net is not None:
+                    flow_str += f" ({float(net):+.2f})"
+                context_lines.append(flow_str)
 
-            if sr_levels and (sr_levels.get("strongest_support") or sr_levels.get("strongest_resistance")):
-                message += "\n🧱 *Levels*\n"
-                if sr_levels.get("strongest_support"):
-                    message += f"- support: {float(sr_levels.get('strongest_support')):.2f}\n"
-                if sr_levels.get("strongest_resistance"):
-                    message += f"- resistance: {float(sr_levels.get('strongest_resistance')):.2f}\n"
+            # S/R levels
+            if sr_levels:
+                sup = sr_levels.get("strongest_support")
+                res = sr_levels.get("strongest_resistance")
+                if sup or res:
+                    lvl_parts = []
+                    if sup:
+                        lvl_parts.append(f"Sup: ${float(sup):.2f}")
+                    if res:
+                        lvl_parts.append(f"Res: ${float(res):.2f}")
+                    context_lines.append("🧱 *Levels:* " + " | ".join(lvl_parts))
 
+            if context_lines:
+                message += "\n" + "\n".join(context_lines) + "\n"
+
+            # Keyboard with chart and navigation
             keyboard = []
             if sig_id and self.chart_generator:
                 keyboard.append([
@@ -2922,7 +2996,10 @@ class TelegramCommandHandler:
                 ])
             else:
                 keyboard.append([InlineKeyboardButton("🔔 Signals", callback_data="signals")])
-            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+            keyboard.append([
+                InlineKeyboardButton("📊 Active Trades", callback_data="active_trades"),
+                InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
+            ])
             await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
 
         except Exception as e:
@@ -3437,6 +3514,9 @@ class TelegramCommandHandler:
                 context.user_data["signals_type"] = callback_data.split("signals:settype:", 1)[1]
                 context.user_data["signals_page"] = 0
             await self._handle_signals(update, context)
+        elif callback_data == "signals:noop":
+            # Noop callback for UI separator buttons - just acknowledge
+            pass
         elif callback_data == 'config':
             await self._handle_config(update, context)
         elif callback_data == 'health':

@@ -391,6 +391,44 @@ class ChartGenerator:
             return None
         return None
 
+    def _ts_to_x(
+        self,
+        idx: Optional[pd.DatetimeIndex],
+        ts: Optional[pd.Timestamp],
+        *,
+        side: str = "left",
+    ) -> Optional[float]:
+        """Convert a timestamp into mplfinance x-coordinate space (0..N).
+
+        mplfinance candlestick charts use integer x positions (0..N-1) and format
+        tick labels as datetimes. HUD overlays must use the same numeric x space.
+        """
+        if idx is None or ts is None:
+            return None
+        if not isinstance(idx, pd.DatetimeIndex) or len(idx) == 0:
+            return None
+        try:
+            if not isinstance(ts, pd.Timestamp):
+                ts = pd.to_datetime(ts, errors="coerce")
+            if ts is None or pd.isna(ts):
+                return None
+
+            # Align timezone to index timezone if needed
+            if getattr(idx, "tz", None) is not None:
+                if ts.tzinfo is None:
+                    ts = ts.tz_localize(idx.tz)
+                else:
+                    ts = ts.tz_convert(idx.tz)
+
+            pos = int(idx.searchsorted(ts, side=side))
+            if pos < 0:
+                pos = 0
+            if pos > len(idx):
+                pos = len(idx)
+            return float(pos)
+        except Exception:
+            return None
+
     def _collect_level_candidates(
         self,
         df: pd.DataFrame,
@@ -612,11 +650,18 @@ class ChartGenerator:
                 clip_on=False,
             )
 
-    def _draw_sessions_overlay(self, ax, hud: Dict) -> None:
+    def _draw_sessions_overlay(self, ax, hud: Dict, *, idx: Optional[pd.DatetimeIndex] = None) -> None:
+        """Draw session shading/labels in mplfinance x-coordinate space (0..N).
+
+        NOTE: mplfinance candle charts use integer x positions and a datetime formatter.
+        Do NOT pass datetimes directly into axvspan/hlines; it can push candles off-screen.
+        """
         if not self.config.show_sessions:
             return
         sessions = hud.get("sessions") if isinstance(hud, dict) else None
         if not isinstance(sessions, list) or not sessions:
+            return
+        if idx is None or not isinstance(idx, pd.DatetimeIndex) or len(idx) == 0:
             return
 
         for s in sessions:
@@ -626,21 +671,26 @@ class ChartGenerator:
                 if not start or not end:
                     continue
 
+                start_x = self._ts_to_x(idx, start, side="left")
+                end_x = self._ts_to_x(idx, end, side="right")
+                if start_x is None or end_x is None or end_x <= start_x:
+                    continue
+
                 color = str(s.get("color") or "#444444")
-                ax.axvspan(start, end, color=color, alpha=0.08, linewidth=0)
+                ax.axvspan(start_x, end_x, color=color, alpha=0.08, linewidth=0)
 
                 if self.config.show_session_oc:
                     open_ = float(s.get("open", 0.0) or 0.0)
                     close_ = float(s.get("close", 0.0) or 0.0)
                     if open_ > 0:
-                        ax.hlines(open_, start, end, colors=color, linestyles="--", linewidth=1.0, alpha=0.55)
+                        ax.hlines(open_, start_x, end_x, colors=color, linestyles="--", linewidth=1.0, alpha=0.55)
                     if close_ > 0:
-                        ax.hlines(close_, start, end, colors=color, linestyles="--", linewidth=1.0, alpha=0.35)
+                        ax.hlines(close_, start_x, end_x, colors=color, linestyles="--", linewidth=1.0, alpha=0.35)
 
                 if self.config.show_session_average:
                     avg = float(s.get("avg", 0.0) or 0.0)
                     if avg > 0:
-                        ax.hlines(avg, start, end, colors=color, linestyles=":", linewidth=1.2, alpha=0.55)
+                        ax.hlines(avg, start_x, end_x, colors=color, linestyles=":", linewidth=1.2, alpha=0.55)
 
                 if self.config.show_session_names:
                     parts = []
@@ -660,8 +710,9 @@ class ChartGenerator:
                         y = ax.get_ylim()[0]
                     except Exception:
                         y = float(s.get("low") or 0.0)
+                    x_label = min(max(start_x, 0.0), float(max(0, len(idx) - 1)))
                     ax.text(
-                        start,
+                        x_label,
                         y,
                         label,
                         ha="left",
@@ -784,7 +835,7 @@ class ChartGenerator:
         except Exception:
             return
 
-    def _draw_rr_box(self, ax, idx: pd.DatetimeIndex, signal: Dict, direction: str) -> Optional[pd.Timestamp]:
+    def _draw_rr_box(self, ax, idx: pd.DatetimeIndex, signal: Dict, direction: str) -> Optional[float]:
         """Draw TradingView-like risk/reward box to the right of the last bar."""
         if not self.config.show_rr_box:
             return None
@@ -800,9 +851,9 @@ class ChartGenerator:
         except Exception:
             return None
 
-        bar_dt = self._infer_bar_delta(idx)
-        x_start = pd.Timestamp(idx[-1])
-        x_end = x_start + pd.Timedelta(bar_dt * max(1, int(self.config.rr_box_forward_bars)))
+        # mplfinance uses integer x positions (0..N-1). Use that coordinate space for the RR box.
+        x_start = float(len(idx) - 1)
+        x_end = x_start + float(max(1, int(self.config.rr_box_forward_bars)))
 
         # Dollars (optional – if present in signal)
         try:
@@ -854,7 +905,7 @@ class ChartGenerator:
             bbox=dict(facecolor=mcolors.to_rgba(SIGNAL_SHORT, alpha=0.22), edgecolor="none", boxstyle="round,pad=0.25"),
         )
 
-        return x_end
+        return float(x_end)
 
     def _apply_hud(self, fig, ax_price, df: pd.DataFrame, signal: Dict, direction: str, *, extra_levels: Optional[List[Dict[str, Any]]] = None) -> None:
         """Apply TradingView-style HUD overlays to an mplfinance-rendered figure."""
@@ -867,16 +918,21 @@ class ChartGenerator:
 
         # Right padding (for RR boxes + right labels)
         idx = df.index if isinstance(df.index, pd.DatetimeIndex) else None
-        if idx is not None and len(idx) >= 2:
-            bar_dt = self._infer_bar_delta(idx)
-            x_end_pad = pd.Timestamp(idx[-1]) + pd.Timedelta(bar_dt * max(1, int(self.config.right_pad_bars)))
+        # IMPORTANT: mplfinance uses integer x-coordinates (0..N-1) for candles.
+        # HUD overlays must stay in that coordinate space, or candles will be pushed off-screen.
+        try:
+            n = int(len(df) or 0)
+        except Exception:
+            n = 0
+        if n > 0:
+            right_pad = max(0, int(self.config.right_pad_bars))
             try:
-                ax_price.set_xlim(pd.Timestamp(idx[0]), x_end_pad)
+                ax_price.set_xlim(-0.5, float((n - 1) + right_pad))
             except Exception:
                 pass
 
         # Overlays
-        self._draw_sessions_overlay(ax_price, hud)
+        self._draw_sessions_overlay(ax_price, hud, idx=idx)
         self._draw_supply_demand_overlay(ax_price, hud)
         self._draw_power_channel_overlay(ax_price, hud)
         self._draw_tbt_overlay(ax_price, hud)
@@ -886,9 +942,8 @@ class ChartGenerator:
             rr_end = self._draw_rr_box(ax_price, idx, signal, direction)
             if rr_end is not None:
                 try:
-                    left = pd.Timestamp(idx[0])
-                    right = max(rr_end, pd.Timestamp(idx[-1]))
-                    ax_price.set_xlim(left, right)
+                    left, right = ax_price.get_xlim()
+                    ax_price.set_xlim(left, max(float(right), float(rr_end)))
                 except Exception:
                     pass
 
@@ -1522,7 +1577,7 @@ class ChartGenerator:
                 if ax_price is not None:
                     # Sessions shading
                     if show_sessions:
-                        self._draw_sessions_overlay(ax_price, hud)
+                        self._draw_sessions_overlay(ax_price, hud, idx=df.index if isinstance(df.index, pd.DatetimeIndex) else None)
 
                     # Key levels (RTH/ETH PDH/PDL/Open) via right labels
                     if show_key_levels and self.config.show_right_labels:
