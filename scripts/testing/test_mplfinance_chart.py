@@ -21,26 +21,36 @@ from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
 from pearlalgo.utils.logger import logger
 
 def create_sample_data(num_bars=100):
-    """Create sample OHLCV data for testing."""
+    """Create sample OHLCV data with realistic MNQ volatility."""
     base_price = 25000.0
     dates = pd.date_range(
         end=datetime.now(timezone.utc),
         periods=num_bars,
-        freq='1min'
+        freq='5min'  # 5-minute bars for better visual
     )
     
-    # Generate realistic price data
+    # Generate realistic MNQ price data with visible candles
     np.random.seed(42)
-    price_changes = np.random.randn(num_bars) * 5
+    # MNQ typically moves 5-15 points per 5m bar
+    price_changes = np.random.randn(num_bars) * 8
     prices = base_price + np.cumsum(price_changes)
     
     data = []
     for i, (date, price) in enumerate(zip(dates, prices)):
-        volatility = abs(np.random.randn() * 2)
-        high = price + volatility
-        low = price - volatility
-        open_price = prices[i-1] if i > 0 else price
-        close_price = price
+        # Realistic candle range: 5-20 points (MNQ typical 5m range)
+        candle_range = abs(np.random.randn() * 8) + 5
+        
+        # Random direction for candle body
+        if np.random.random() > 0.5:
+            open_price = price - candle_range * 0.3
+            close_price = price + candle_range * 0.3
+        else:
+            open_price = price + candle_range * 0.3
+            close_price = price - candle_range * 0.3
+        
+        # Wicks extend beyond body
+        high = max(open_price, close_price) + abs(np.random.randn() * 3) + 2
+        low = min(open_price, close_price) - abs(np.random.randn() * 3) - 2
         
         data.append({
             'timestamp': date,
@@ -63,11 +73,12 @@ def test_mplfinance_chart():
         # Create sample data
         data = create_sample_data(100)
         
-        # Create signal
+        # Create signal within data range
+        data_close = data['close'].iloc[-1]
         signal = {
-            'entry_price': 25025.0,
-            'stop_loss': 25000.0,
-            'take_profit': 25050.0,
+            'entry_price': data_close,
+            'stop_loss': data_close - 20.0,  # 20 point stop
+            'take_profit': data_close + 30.0,  # 30 point target (1.5:1 R:R)
             'direction': 'long',
             'type': 'momentum_breakout',
             'timestamp': data['timestamp'].iloc[-20].isoformat()
@@ -127,6 +138,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

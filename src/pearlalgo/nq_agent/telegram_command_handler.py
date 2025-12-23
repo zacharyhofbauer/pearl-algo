@@ -2003,28 +2003,40 @@ class TelegramCommandHandler:
                 )
                 return
             
-            # Generate test data using same method as test_mplfinance_chart.py
+            # Generate test data with realistic MNQ-sized candles
             def create_sample_data(num_bars=100):
-                """Create sample OHLCV data for testing (same as test_mplfinance_chart.py)."""
+                """Create sample OHLCV data with realistic MNQ volatility."""
                 base_price = 25000.0
                 dates = pd.date_range(
                     end=datetime.now(timezone.utc),
                     periods=num_bars,
-                    freq='1min'
+                    freq='5min'  # 5-minute bars for better visual
                 )
                 
-                # Generate realistic price data
+                # Generate realistic MNQ price data with visible candles
                 np.random.seed(42)
-                price_changes = np.random.randn(num_bars) * 5
+                # MNQ typically moves 5-15 points per 5m bar, with occasional 20-30 point bars
+                price_changes = np.random.randn(num_bars) * 8  # Larger moves
                 prices = base_price + np.cumsum(price_changes)
                 
                 data = []
                 for i, (date, price) in enumerate(zip(dates, prices)):
-                    volatility = abs(np.random.randn() * 2)
-                    high = price + volatility
-                    low = price - volatility
-                    open_price = prices[i-1] if i > 0 else price
-                    close_price = price
+                    # Realistic candle range: 5-20 points (MNQ typical 5m range)
+                    candle_range = abs(np.random.randn() * 8) + 5  # min 5 points
+                    
+                    # Random direction for candle body
+                    if np.random.random() > 0.5:
+                        # Bullish candle
+                        open_price = price - candle_range * 0.3
+                        close_price = price + candle_range * 0.3
+                    else:
+                        # Bearish candle
+                        open_price = price + candle_range * 0.3
+                        close_price = price - candle_range * 0.3
+                    
+                    # Wicks extend beyond body
+                    high = max(open_price, close_price) + abs(np.random.randn() * 3) + 2
+                    low = min(open_price, close_price) - abs(np.random.randn() * 3) - 2
                     
                     data.append({
                         'timestamp': date,
@@ -2037,30 +2049,23 @@ class TelegramCommandHandler:
                 
                 return pd.DataFrame(data)
             
-            # Create sample data (same as test_mplfinance_chart.py)
+            # Create sample data with visible candles
             test_data = create_sample_data(100)
             
-            # Calculate signal prices based on actual data range (so they're visible on chart)
+            # Calculate signal prices within the actual data range
             data_high = test_data['high'].max()
             data_low = test_data['low'].min()
-            data_close = test_data['close'].iloc[-1]  # Use last close as reference
+            data_range = data_high - data_low
+            data_close = test_data['close'].iloc[-1]
             
-            # Entry price: slightly above current price (for long signal)
-            entry_price = data_close + (data_high - data_low) * 0.1  # 10% of range above
+            # Entry price: near current close (within visible range)
+            entry_price = data_close
             
-            # Stop loss: below entry (risk of ~$50)
-            stop_loss = entry_price - 50.0
+            # Stop loss: 20 points below entry (realistic MNQ stop)
+            stop_loss = entry_price - 20.0
             
-            # Take profit: above entry (reward of ~$75, R:R = 1.5:1)
-            take_profit = entry_price + 75.0
-            
-            # Ensure prices are within reasonable range of data
-            if stop_loss < data_low:
-                stop_loss = data_low - 10.0  # Slightly below data range
-            if entry_price > data_high:
-                entry_price = data_high + 10.0  # Slightly above data range
-            if take_profit > data_high + 50:
-                take_profit = data_high + 50.0  # Keep TP visible
+            # Take profit: 30 points above entry (1.5:1 R:R)
+            take_profit = entry_price + 30.0
             
             # Create test signal with prices based on actual data
             test_signal = {
