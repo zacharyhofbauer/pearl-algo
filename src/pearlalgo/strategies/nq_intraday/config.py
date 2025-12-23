@@ -25,7 +25,7 @@ class NQIntradayConfig:
     symbol: str = "MNQ"  # Mini NQ (1/10th size of NQ, prop-firm friendly)
 
     # Timeframe
-    timeframe: str = "1m"  # 1-minute bars for intraday scalping/swings
+    timeframe: str = "5m"  # 5-minute bars for intraday swings (primary)
 
     # Scanning interval (seconds)
     scan_interval: int = 30  # Scan every 30 seconds (faster for scalping)

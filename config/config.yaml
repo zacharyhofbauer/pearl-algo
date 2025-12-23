@@ -6,7 +6,7 @@
 symbol: "MNQ"  # Mini NQ (1/10th size of NQ, prop-firm friendly)
 
 # Timeframe
-timeframe: "1m"  # 1-minute bars for intraday scalping/swings
+timeframe: "5m"  # 5-minute bars for intraday swings (primary), with 1-2m for execution pinpointing
 
 # Scan Interval (seconds)
 scan_interval: 30  # Check for signals every 30 seconds (faster for scalping)
@@ -35,8 +35,8 @@ risk:
 
 # Service intervals
 service:
-  status_update_interval: 1800  # 30 minutes in seconds
-  heartbeat_interval: 3600      # 1 hour in seconds
+  status_update_interval: 900   # 15 minutes in seconds (dashboard interval)
+  heartbeat_interval: 86400     # Disabled (1 day) - dashboard replaces heartbeat
   state_save_interval: 10       # Save state every N cycles
   connection_failure_alert_interval: 600  # 10 minutes in seconds
   data_quality_alert_interval: 300        # 5 minutes in seconds

@@ -201,9 +201,10 @@ These notifications come directly from the NQ Agent Service via `NQAgentTelegram
 
 - Startup and shutdown notifications
 - Signal notifications
-- Status updates
-- Heartbeat messages
+- **Dashboard** (every 15 minutes) – replaces the old Status/Heartbeat messages
 - Error and circuit‑breaker alerts
+
+> **Note:** The dashboard combines price sparkline, MTF trends, session stats, and performance into one clean message every 15m.
 
 ### 4.2 Requires the command handler
 

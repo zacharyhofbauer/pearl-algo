@@ -499,11 +499,8 @@ class NQAgentService:
                 except Exception as e:
                     logger.debug(f"Virtual exit update failed (non-fatal): {e}")
 
-                # Send periodic status updates
-                await self._check_status_update()
-
-                # Send periodic heartbeats
-                await self._check_heartbeat()
+                # Send periodic dashboard (replaces status + heartbeat)
+                await self._check_dashboard(market_data)
 
                 # Save state periodically
                 if self.cycle_count % self.state_save_interval == 0:
@@ -740,20 +737,134 @@ class NQAgentService:
             except Exception:
                 continue
 
-    async def _check_status_update(self) -> None:
-        """Send periodic status updates to Telegram."""
+    async def _check_dashboard(self, market_data: Optional[Dict] = None) -> None:
+        """Send periodic dashboard message (replaces status + heartbeat)."""
         now = datetime.now(timezone.utc)
 
-        # Check if it's time for a status update
+        # Check if it's time for a dashboard update
         if (
             self.last_status_update is None
             or (now - self.last_status_update).total_seconds() >= self.status_update_interval
         ):
-            await self._send_status_update()
+            await self._send_dashboard(market_data)
             self.last_status_update = now
 
+    async def _send_dashboard(self, market_data: Optional[Dict] = None) -> None:
+        """Send consolidated dashboard to Telegram."""
+        try:
+            # Get base status
+            status = self.get_status()
+            
+            # Add current time
+            status["current_time"] = datetime.now(timezone.utc)
+            status["symbol"] = self.config.symbol
+            
+            # Try to get latest price
+            try:
+                if market_data and market_data.get("latest_bar"):
+                    latest_bar = market_data["latest_bar"]
+                    if isinstance(latest_bar, dict) and "close" in latest_bar:
+                        status["latest_price"] = latest_bar["close"]
+            except Exception:
+                pass
+            
+            # Get recent closes for sparkline
+            recent_closes = self._get_recent_closes(market_data)
+            status["recent_closes"] = recent_closes
+            
+            # Get MTF trend arrows
+            mtf_trends = self._compute_mtf_trends(market_data)
+            status["mtf_trends"] = mtf_trends
+            
+            await self.telegram_notifier.send_dashboard(status)
+        except Exception as e:
+            logger.error(f"Error sending dashboard: {e}", exc_info=True)
+    
+    def _get_recent_closes(self, market_data: Optional[Dict] = None) -> list:
+        """Extract recent close prices for sparkline."""
+        try:
+            if market_data and "df" in market_data and not market_data["df"].empty:
+                df = market_data["df"]
+                if "close" in df.columns:
+                    # Get last 50 closes (about 4 hours of 5m data)
+                    closes = df["close"].tail(50).tolist()
+                    return [float(c) for c in closes if c is not None]
+            
+            # Fallback to buffer
+            if self.data_fetcher._data_buffer is not None and not self.data_fetcher._data_buffer.empty:
+                df = self.data_fetcher._data_buffer
+                if "close" in df.columns:
+                    closes = df["close"].tail(50).tolist()
+                    return [float(c) for c in closes if c is not None]
+        except Exception as e:
+            logger.debug(f"Could not get recent closes for sparkline: {e}")
+        
+        return []
+    
+    def _compute_mtf_trends(self, market_data: Optional[Dict] = None) -> dict:
+        """
+        Compute compact trend arrows for multiple timeframes.
+        
+        Returns dict mapping timeframe -> slope value for trend_arrow() conversion.
+        """
+        trends = {}
+        
+        try:
+            # 5m trend from primary buffer (which is now 5m)
+            if self.data_fetcher._data_buffer is not None and len(self.data_fetcher._data_buffer) >= 10:
+                df = self.data_fetcher._data_buffer
+                if "close" in df.columns:
+                    closes = df["close"].tail(10)
+                    if len(closes) >= 2:
+                        slope = (closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0] * 100
+                        trends["5m"] = float(slope)
+            
+            # 15m trend from 15m buffer
+            if market_data and "df_15m" in market_data and not market_data["df_15m"].empty:
+                df_15m = market_data["df_15m"]
+                if "close" in df_15m.columns and len(df_15m) >= 5:
+                    closes = df_15m["close"].tail(5)
+                    if len(closes) >= 2:
+                        slope = (closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0] * 100
+                        trends["15m"] = float(slope)
+            
+            # Resample from available data to get longer timeframes
+            # (these will be computed from 15m data if available)
+            if market_data and "df_15m" in market_data and not market_data["df_15m"].empty:
+                df_15m = market_data["df_15m"]
+                if "close" in df_15m.columns:
+                    # 1h: look at 4 bars of 15m data
+                    if len(df_15m) >= 4:
+                        closes_1h = df_15m["close"].tail(4)
+                        if len(closes_1h) >= 2:
+                            slope = (closes_1h.iloc[-1] - closes_1h.iloc[0]) / closes_1h.iloc[0] * 100
+                            trends["1h"] = float(slope)
+                    
+                    # 4h: look at 16 bars of 15m data
+                    if len(df_15m) >= 16:
+                        closes_4h = df_15m["close"].tail(16)
+                        if len(closes_4h) >= 2:
+                            slope = (closes_4h.iloc[-1] - closes_4h.iloc[0]) / closes_4h.iloc[0] * 100
+                            trends["4h"] = float(slope)
+                    
+                    # 1D: look at all available 15m data (up to 96 bars = 24h)
+                    if len(df_15m) >= 20:
+                        closes_1d = df_15m["close"].tail(min(96, len(df_15m)))
+                        if len(closes_1d) >= 2:
+                            slope = (closes_1d.iloc[-1] - closes_1d.iloc[0]) / closes_1d.iloc[0] * 100
+                            trends["1D"] = float(slope)
+        except Exception as e:
+            logger.debug(f"Could not compute MTF trends: {e}")
+        
+        return trends
+
+    async def _check_status_update(self) -> None:
+        """Send periodic status updates to Telegram (legacy, now uses dashboard)."""
+        # Kept for backward compatibility - now handled by _check_dashboard
+        pass
+
     async def _send_status_update(self) -> None:
-        """Send status update to Telegram."""
+        """Send status update to Telegram (legacy, now uses dashboard)."""
         try:
             # Use enhanced status with performance metrics
             status = self.get_status()

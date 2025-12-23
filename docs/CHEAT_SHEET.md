@@ -143,16 +143,17 @@
 
 - **Works even without command handler:**
   - Startup / shutdown notifications
-  - Heartbeats and periodic status summaries
+  - **Dashboard** every 15 minutes (consolidated: price sparkline, MTF trends, session stats, performance)
   - Signal alerts, error/circuit‑breaker alerts
+
+> **Note:** Dashboard replaces the old separate Status/Heartbeat messages. One clean message every 15m.
 
 ### Backtesting (Telegram) ✅
 
 - **Command**:
   - `/backtest` → pick duration (1–6 months)
-- **Default mode**:
-  - **5m decision (recommended)** with **1h/4h context** (matches discretionary workflow)
-  - You can toggle **1m legacy** mode from the backtest menu
+- **Primary timeframe**: **5m** (default for strategy analysis; 1–2m available for execution pinpointing)
+- **MTF context**: 15m/1h/4h trend arrows shown in dashboard
 - **Caching (important)**:
   - Historical data is cached to: `data/historical/`
   - Files look like: `MNQ_1m_2m.parquet`, `MNQ_1m_6m.parquet`

@@ -134,7 +134,7 @@ Edit `config/config.yaml` to customize behavior:
 ```yaml
 # Trading Symbol
 symbol: "MNQ"  # Mini NQ (1/10th size of NQ, better for prop firms)
-timeframe: "1m"  # 1-minute bars for scalping/swings
+timeframe: "5m"  # 5-minute bars for intraday swings (primary), with 1-2m for execution pinpointing
 scan_interval: 30  # Check for signals every 30 seconds
 
 # Risk Management (Prop Firm Style)
@@ -148,8 +148,8 @@ risk:
 
 # Service Intervals
 service:
-  status_update_interval: 1800  # 30 minutes
-  heartbeat_interval: 3600  # 1 hour
+  status_update_interval: 900   # 15 minutes (dashboard interval)
+  heartbeat_interval: 86400     # Disabled - dashboard replaces heartbeat
   state_save_interval: 10  # cycles
 
 # Circuit Breaker
@@ -169,7 +169,7 @@ telegram:
 
 **Trading Settings:**
 - `symbol`: Trading symbol (MNQ for prop firm trading)
-- `timeframe`: Bar timeframe (1m for scalping)
+- `timeframe`: Bar timeframe (5m primary for swings; 1-2m available for execution pinpointing)
 - `scan_interval`: Scan frequency in seconds (30 for faster signals)
 
 **Risk Management:**
@@ -179,8 +179,8 @@ telegram:
 - `risk.min_position_size` / `max_position_size`: Contract range (5-15)
 
 **Service Behavior:**
-- `service.status_update_interval`: Status update frequency (seconds)
-- `service.heartbeat_interval`: Heartbeat message frequency (seconds)
+- `service.status_update_interval`: Dashboard update frequency (default: 900 = 15 minutes)
+- `service.heartbeat_interval`: Legacy heartbeat (disabled; dashboard replaces it)
 - `circuit_breaker.*`: Error threshold settings
 
 For complete configuration reference, see `PROJECT_SUMMARY.md` (Configuration section).
@@ -242,11 +242,12 @@ R:R: 1.47:1
 ## 📊 Monitoring
 
 ### Automatic Monitoring (via Telegram)
-- **Heartbeat messages**: Every 1 hour with service status
-- **Status updates**: Every 30 minutes with performance metrics
+- **Dashboard**: Every 15 minutes with price sparkline, MTF trends, session stats, performance
 - **Data quality alerts**: When data issues detected
 - **Signal notifications**: When trading signals are generated
 - **Service notifications**: Startup/shutdown/recovery alerts
+
+> **Note:** Dashboard replaces the old separate Status/Heartbeat messages. One clean message every 15m with all key info.
 
 ### Manual Monitoring Commands
 
