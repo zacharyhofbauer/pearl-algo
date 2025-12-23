@@ -260,3 +260,4 @@ async def test_dashboard_emits_when_data_empty(tmp_path) -> None:
         # Status should have been passed (could be empty dict or None)
         # The key test is that dashboard was called despite empty data
 
+

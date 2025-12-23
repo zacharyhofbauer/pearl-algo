@@ -304,3 +304,4 @@ class TestVirtualPnLConfig:
         config.virtual_pnl_tiebreak = "take_profit"
         assert config.virtual_pnl_tiebreak == "take_profit"
 
+

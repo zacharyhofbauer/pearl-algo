@@ -262,3 +262,4 @@ class TestIntegrationWithRealConfig:
             if chat_id and not str(chat_id).startswith("${"):
                 assert str(chat_id) == "test_chat_id_456"
 
+

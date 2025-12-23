@@ -473,3 +473,4 @@ class TestStateIntegrity:
         assert record["signal"]["type"] == "breakout"
         assert record["signal"]["direction"] == "long"
 
+

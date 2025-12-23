@@ -78,3 +78,4 @@ def test_data_fetcher_wires_data_config(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 
+

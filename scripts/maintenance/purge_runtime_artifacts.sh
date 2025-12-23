@@ -183,3 +183,4 @@ if [[ "$CONFIRMED" == true ]]; then
     echo -e "${GREEN}Purge complete.${NC}"
 fi
 
+

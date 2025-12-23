@@ -218,3 +218,4 @@ class TestDiagnosticsInDashboard:
         # "Session closed" is a simple message, should not show 🔍
         assert "🔍" not in message
 
+

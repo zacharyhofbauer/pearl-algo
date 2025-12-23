@@ -236,3 +236,4 @@ def format_volume_pressure(
     return f"{stale_prefix}{emoji} Pressure: {label}{arrow_part}{details_part}"
 
 
+
