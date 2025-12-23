@@ -42,8 +42,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - System helpers: `disable_auto_sleep.sh`, `setup_ibgateway.sh`, `fix_api_connection.sh`
 - **Docs**:
   - `docs/GATEWAY.md`
-  - `docs/archive/IBKR_DETAILS.md`
-  - `docs/archive/MARKET_DATA_SUBSCRIPTION.md`
+  - `docs/MARKET_DATA_SUBSCRIPTION.md`
 
 ## Strategy / Simulation / Testing
 
@@ -62,6 +61,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `validate_strategy.py`
 - **Docs**:
   - `docs/TESTING_GUIDE.md`
+  - `docs/MOCK_DATA_WARNING.md`
   - Relevant sections of `docs/PROJECT_SUMMARY.md`
 
 ## Configuration

@@ -25,6 +25,9 @@ All other documents must remain consistent with this summary.
   - IBKR Gateway setup and lifecycle
   - 2FA flows and VNC usage
   - Common IBKR connection issues
+- `MARKET_DATA_SUBSCRIPTION.md`
+  - Canonical fix guide for IBKR **Error 354** (market data subscriptions + API acknowledgement)
+  - Reference for entitlements/subscription troubleshooting during market hours
 - `MPLFINANCE_QUICK_START.md`
   - **Canonical charting reference** (mplfinance-based chart generator)
   - Data contract and local verification script
@@ -42,25 +45,18 @@ All other documents must remain consistent with this summary.
   - Explanation of major test suites (integration, IBKR, Telegram, strategy)
   - Includes guidance on when and how to use the mock data provider
   - Test coverage and gaps analysis
+- `MOCK_DATA_WARNING.md`
+  - Standalone warning about synthetic/mock data limitations
+  - Links back to the relevant `TESTING_GUIDE.md` sections
 
-## 4. Supporting / Historical Docs
+## 4. Reference Documents (paths, scripts, configuration)
 
-- `archive/CLEANUP_CONSOLIDATION_PLAN.md`
-  - Historical cleanup and consolidation notes
-- `archive/MIGRATION_TO_MPLFINANCE.md`
-  - Historical mplfinance migration documentation
-- `archive/CHART_VISUALIZATION_BUILD_EXPLANATION.md`
-  - Historical chart generator implementation notes
-- `archive/CHART_DATA_FORMAT.md`
-  - Historical chart data format documentation
-- `archive/ADDITIONAL_FIXES.md`
-  - Historical fix documentation
-- `archive/FIXES_SUMMARY.md`
-  - Historical fix documentation
-- `archive/SIGNAL_PERSISTENCE_FIX.md`
-  - Historical fix documentation
-- `archive/MENU_NAVIGATION_FIX.md`
-  - Historical fix documentation
+- `PATH_TRUTH_TABLE.md`
+  - Canonical mapping between logical components, Python entry points, scripts, and docs
+- `SCRIPTS_TAXONOMY.md`
+  - Canonical script roles and naming conventions under `scripts/`
+- `CONFIGURATION_MAP.md`
+  - Mapping of environment variables, `config/config.yaml`, and code defaults to their consumers
 
 ## 5. Cross‑references
 

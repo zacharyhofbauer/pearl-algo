@@ -56,7 +56,11 @@ Input data should include:
 - columns: `open`, `high`, `low`, `close`, `volume`
 - timestamps: either a `timestamp` column **or** a `DatetimeIndex`
 
-Detailed reference: `docs/CHART_DATA_FORMAT.md`.
+Notes:
+
+- The **input** contract uses **lowercase** OHLCV (`open/high/low/close/volume`).
+- The chart generator normalizes internally for `mplfinance` (which expects an OHLCV index + specific column names).
+- If VWAP is enabled, VWAP calculations expect the same lowercase OHLCV contract.
 
 ---
 
@@ -80,4 +84,5 @@ python3 scripts/testing/test_mplfinance_chart.py
 ### Missing columns / empty charts
 
 - Ensure OHLCV columns exist and timestamps are present (see data contract above).
+
 

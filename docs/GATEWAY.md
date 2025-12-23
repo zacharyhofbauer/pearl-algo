@@ -3,7 +3,7 @@
 ## 🚀 Start Gateway (Headless)
 
 ```bash
-cd ~/pearlalgo-dev-ai-agents
+cd /path/to/pearlalgo-dev-ai-agents
 ./scripts/gateway/start_ibgateway_ibc.sh
 ```
 
@@ -16,13 +16,19 @@ cd ~/pearlalgo-dev-ai-agents
 ## 🛑 Stop Gateway
 
 ```bash
-pkill -f "java.*IBC.jar"
+./scripts/gateway/stop_ibgateway_ibc.sh
+```
+
+If the Gateway is wedged and won’t stop cleanly:
+
+```bash
+pkill -9 -f "java.*IBC.jar"
 ```
 
 ## ✅ Check Gateway Status
 
 ```bash
-cd ~/pearlalgo-dev-ai-agents
+cd /path/to/pearlalgo-dev-ai-agents
 ./scripts/gateway/check_gateway_status.sh
 ```
 
@@ -56,13 +62,13 @@ ss -tuln | grep 5901
 
 ```bash
 # 1. Stop Gateway
-pkill -f "java.*IBC.jar"
+./scripts/gateway/stop_ibgateway_ibc.sh
 
 # 2. Start VNC
 vncserver :1
 
 # 3. Connect via VNC client, then in VNC terminal:
-cd ~/pearlalgo-dev-ai-agents/ibkr/ibc
+cd /path/to/pearlalgo-dev-ai-agents/ibkr/ibc
 export DISPLAY=:1
 ./gatewaystart.sh -inline
 
@@ -74,10 +80,10 @@ export DISPLAY=:1
 
 ```bash
 # Latest IBC log
-tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/ibc-3.23.0_GATEWAY-1041_*.txt
+tail -f ibkr/ibc/logs/ibc-*.txt
 
 # Latest Gateway log
-tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/gateway_*.log
+tail -f ibkr/ibc/logs/gateway_*.log
 ```
 
 ## 🔍 Quick Status Checks
@@ -106,19 +112,25 @@ sleep 3
 
 ### Gateway running but API not ready
 - Wait 30-60 seconds (authentication takes time)
-- Check logs: `tail -f ~/pearlalgo-dev-ai-agents/ibkr/ibc/logs/ibc-3.23.0_GATEWAY-1041_*.txt`
+- Check logs: `tail -f ibkr/ibc/logs/ibc-*.txt`
+
+### Error 354 (market data subscription)
+
+If the API is up but live market data requests return **Error 354** (“not subscribed”), use:
+
+- `docs/MARKET_DATA_SUBSCRIPTION.md` (canonical fix guide)
 
 ### Multiple autorestart files (causes login issues)
 ```bash
 # Remove all, then do manual VNC login to recreate
-find ~/pearlalgo-dev-ai-agents/ibkr/Jts -name "autorestart" -type f -delete
+find ibkr/Jts -name "autorestart" -type f -delete
 ```
 
 ## 🎯 Common Workflows
 
 ### Start Gateway
 ```bash
-cd ~/pearlalgo-dev-ai-agents
+cd /path/to/pearlalgo-dev-ai-agents
 ./scripts/gateway/start_ibgateway_ibc.sh
 ./scripts/gateway/check_gateway_status.sh
 ```
@@ -131,9 +143,9 @@ pkill -f "java.*IBC.jar"
 
 ### Restart Gateway
 ```bash
-pkill -f "java.*IBC.jar"
+./scripts/gateway/stop_ibgateway_ibc.sh
 sleep 5
-cd ~/pearlalgo-dev-ai-agents
+cd /path/to/pearlalgo-dev-ai-agents
 ./scripts/gateway/start_ibgateway_ibc.sh
 ```
 
@@ -144,9 +156,6 @@ cd ~/pearlalgo-dev-ai-agents
 
 ---
 
-## 📚 Additional IBKR References
+## 📚 Additional references
 
-For deeper background and historical notes on IBKR behavior and market data subscriptions, see the archived references:
-
-- [`archive/IBKR_DETAILS.md`](archive/IBKR_DETAILS.md) – additional implementation and behavior notes.
-- [`archive/MARKET_DATA_SUBSCRIPTION.md`](archive/MARKET_DATA_SUBSCRIPTION.md) – detailed market data subscription and Error 354 guidance.
+- `docs/MARKET_DATA_SUBSCRIPTION.md` — Error 354 subscription + API acknowledgement guide

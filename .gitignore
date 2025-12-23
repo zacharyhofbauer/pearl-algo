@@ -2,6 +2,12 @@
 __pycache__/
 *.py[cod]
 .venv/
+
+# Secrets / local environment (never commit)
+.env
+.env.*
+!.env.example
+
 src/pearlalgo_dev_ai_agents.egg-info/
 legacy/
 *.egg-info/
