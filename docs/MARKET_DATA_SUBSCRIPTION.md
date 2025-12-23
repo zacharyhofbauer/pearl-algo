@@ -132,3 +132,4 @@ Treat “historical fallback” as a **degradation mode**, not a fix.
 - `docs/PROJECT_SUMMARY.md` — architecture + configuration source of truth
 
 
+
