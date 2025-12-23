@@ -729,6 +729,55 @@ Startup and shutdown messages include:
 - **Next steps**: Clear guidance on what to do next
 - **Quick access tips**: Commands to monitor status
 
+### 9.9 Labeled Metrics (v2)
+
+Activity metrics in the Home Card use self-explanatory labels:
+
+```
+📊 145 scans (session) / 1,595 total • 2 gen / 0 sent • 25/100 bars • 0 errors
+```
+
+**Label semantics:**
+- **Scans**: `{session} (session) / {total} total` - Cycle counts
+- **Signals**: `{generated} gen / {sent} sent` - Signal delivery
+- **Failures**: `/ {failed} fail` - Only shown when non-zero
+- **Bars**: `{current}/{target} bars` - Rolling buffer fill
+- **Errors**: `{count} errors` - Error count
+
+This removes ambiguity from unlabeled `A/B` ratios.
+
+### 9.10 Staleness Callout (v2)
+
+When market data is stale, the Home Card shows an actionable callout:
+
+```
+⏰ Data stale (11m) • signals paused • /data_quality
+```
+
+**Callout semantics:**
+- **Age**: How old the data is (e.g., `11m` or `1.5h`)
+- **Impact**: What is affected (e.g., "signals paused")
+- **Action**: Command to investigate (e.g., `/data_quality`)
+
+**Stale-safe derived context:**
+When data is stale, the following are suppressed to avoid misleading confidence:
+- Buy/Sell pressure indicators
+- Signal diagnostics
+- MTF trends (in push dashboards)
+
+This ensures operators don't see "green" indicators based on outdated data.
+
+### 9.11 Push Dashboard Buttons (v2)
+
+Push dashboards (scheduled every 15 minutes) now include inline buttons for one-tap navigation when the command handler is running:
+
+```
+[📊 Status] [🛡 Data Quality]
+[📈 Activity] [🏠 Menu]
+```
+
+This allows quick drill-down from push notifications without typing commands.
+
 ---
 
 This file is the authoritative reference for Telegram integration. Other Telegram docs should defer to this guide.

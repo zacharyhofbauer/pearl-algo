@@ -178,6 +178,13 @@ class NQAgentService:
         self.data_quality_checker = DataQualityChecker(
             stale_data_threshold_minutes=self.stale_data_threshold_minutes
         )
+        
+        # New-bar gating: skip heavy analysis when df hasn't advanced (performance optimization).
+        # This is high leverage when using 5m bars with 30s scan interval (5 of 6 cycles are repeats).
+        self._enable_new_bar_gating = bool(service_settings.get("enable_new_bar_gating", True))
+        self._last_analyzed_bar_ts: Optional[datetime] = None
+        self._analysis_skip_count: int = 0
+        self._analysis_run_count: int = 0
 
         # Cadence scheduler for fixed-interval timing (start-to-start)
         # "fixed" = start-to-start timing with skip-ahead for missed cycles
@@ -494,8 +501,47 @@ class NQAgentService:
                     await self._sleep_until_next_cycle()
                     continue
 
-                # Generate signals
-                signals = self.strategy.analyze(market_data)
+                # New-bar gating: skip heavy analysis if df hasn't advanced (performance optimization).
+                # When enabled, we only run strategy.analyze() when a new bar arrives.
+                # This is high leverage for configs like 5m bars + 30s scan interval.
+                skip_analysis = False
+                current_bar_ts = None
+                if self._enable_new_bar_gating and not market_data["df"].empty:
+                    # Extract latest bar timestamp from df
+                    df = market_data["df"]
+                    if "timestamp" in df.columns:
+                        current_bar_ts = df["timestamp"].max()
+                        if isinstance(current_bar_ts, pd.Timestamp):
+                            current_bar_ts = current_bar_ts.to_pydatetime()
+                        if current_bar_ts is not None and current_bar_ts.tzinfo is None:
+                            current_bar_ts = current_bar_ts.replace(tzinfo=timezone.utc)
+                        
+                        # Check if bar has advanced since last analyzed cycle
+                        if self._last_analyzed_bar_ts is not None and current_bar_ts == self._last_analyzed_bar_ts:
+                            skip_analysis = True
+                            self._analysis_skip_count += 1
+                            logger.debug(
+                                "New-bar gating: skipping analysis (bar unchanged)",
+                                extra={
+                                    "bar_ts": current_bar_ts.isoformat() if current_bar_ts else None,
+                                    "skip_count": self._analysis_skip_count,
+                                    "run_count": self._analysis_run_count,
+                                    "cycle": self.cycle_count,
+                                },
+                            )
+
+                # Generate signals (or skip if no new bar)
+                signals = []
+                if skip_analysis:
+                    # Lightweight cycle: skip heavy analysis, but still run health/status/exit grading
+                    pass
+                else:
+                    # Full analysis: new bar arrived
+                    signals = self.strategy.analyze(market_data)
+                    self._analysis_run_count += 1
+                    # Update last analyzed bar timestamp
+                    if current_bar_ts is not None:
+                        self._last_analyzed_bar_ts = current_bar_ts
                 
                 # Log cycle summary for observability
                 data_fresh = True
@@ -704,33 +750,30 @@ class NQAgentService:
         Update virtual trade exits for any `entered` signals when TP/SL is touched.
 
         Rules:
+        - Gated by `config.virtual_pnl_enabled` (default True).
         - Entry is immediate at signal generation time.
-        - Exit occurs on first *touch* of TP/SL using latest bar OHLC.
+        - Exit occurs on first *touch* of TP/SL using **bars from market_data['df']**
+          that are strictly after the entry time (avoids Level1 daily high/low artifacts).
         - If TP and SL are both touched in the same bar, tiebreak is determined by
           config.virtual_pnl_tiebreak ("stop_loss" = conservative, "take_profit" = optimistic).
         """
+        # Gate by config.virtual_pnl_enabled
+        if not getattr(self.config, "virtual_pnl_enabled", True):
+            return
+
+        # Get bars DataFrame - use actual OHLCV bars, NOT Level1 latest_bar
+        # Level1 latest_bar may contain daily high/low which includes pre-entry extremes.
+        df = market_data.get("df") if isinstance(market_data, dict) else None
+        if df is None or df.empty:
+            return
+
+        # Ensure we have required columns
+        required_cols = {"timestamp", "high", "low"}
+        if not required_cols.issubset(set(df.columns)):
+            return
+
         # Get tiebreak preference from config (default to conservative "stop_loss")
         tiebreak = getattr(self.config, "virtual_pnl_tiebreak", "stop_loss")
-        latest_bar = market_data.get("latest_bar") if isinstance(market_data, dict) else None
-        if not isinstance(latest_bar, dict):
-            return
-
-        # Parse bar timestamp (UTC)
-        bar_ts = latest_bar.get("timestamp")
-        if isinstance(bar_ts, str):
-            bar_ts = parse_utc_timestamp(bar_ts)
-        elif isinstance(bar_ts, pd.Timestamp):
-            bar_ts = bar_ts.to_pydatetime()
-        if isinstance(bar_ts, datetime) and bar_ts.tzinfo is None:
-            bar_ts = bar_ts.replace(tzinfo=timezone.utc)
-
-        try:
-            bar_high = float(latest_bar.get("high") or latest_bar.get("close") or 0.0)
-            bar_low = float(latest_bar.get("low") or latest_bar.get("close") or 0.0)
-        except Exception:
-            return
-        if bar_high <= 0 or bar_low <= 0:
-            return
 
         # Consider only recently tracked signals for performance; active trades should be among them.
         try:
@@ -747,15 +790,14 @@ class NQAgentService:
                 if not sig_id or sig_id in exited_this_cycle:
                     continue
 
-                # Optional: only evaluate once bars have progressed beyond entry_time
+                # Parse entry time (UTC)
                 entry_time_str = rec.get("entry_time")
-                if entry_time_str and isinstance(bar_ts, datetime):
+                entry_time: Optional[datetime] = None
+                if entry_time_str:
                     try:
-                        et = parse_utc_timestamp(str(entry_time_str))
-                        if et and et.tzinfo is None:
-                            et = et.replace(tzinfo=timezone.utc)
-                        if et and bar_ts < et:
-                            continue
+                        entry_time = parse_utc_timestamp(str(entry_time_str))
+                        if entry_time and entry_time.tzinfo is None:
+                            entry_time = entry_time.replace(tzinfo=timezone.utc)
                     except Exception:
                         pass
 
@@ -769,50 +811,77 @@ class NQAgentService:
                 if stop <= 0 or target <= 0:
                     continue
 
+                # Iterate over bars AFTER entry time to find exit
                 exit_reason = None
                 exit_price = None
+                exit_bar_ts: Optional[datetime] = None
 
-                if direction == "short":
-                    hit_tp = bar_low <= target
-                    hit_sl = bar_high >= stop
-                    if hit_tp and hit_sl:
-                        # Both touched in same bar - use configured tiebreak
-                        if tiebreak == "take_profit":
-                            exit_reason = "take_profit"
-                            exit_price = target
-                        else:  # Default to conservative "stop_loss"
-                            exit_reason = "stop_loss"
-                            exit_price = stop
-                    elif hit_sl:
-                        exit_reason = "stop_loss"
-                        exit_price = stop
-                    elif hit_tp:
-                        exit_reason = "take_profit"
-                        exit_price = target
-                else:
-                    hit_tp = bar_high >= target
-                    hit_sl = bar_low <= stop
-                    if hit_tp and hit_sl:
-                        # Both touched in same bar - use configured tiebreak
-                        if tiebreak == "take_profit":
-                            exit_reason = "take_profit"
-                            exit_price = target
-                        else:  # Default to conservative "stop_loss"
-                            exit_reason = "stop_loss"
-                            exit_price = stop
-                    elif hit_sl:
-                        exit_reason = "stop_loss"
-                        exit_price = stop
-                    elif hit_tp:
-                        exit_reason = "take_profit"
-                        exit_price = target
+                for _, row in df.iterrows():
+                    try:
+                        bar_ts = row["timestamp"]
+                        if isinstance(bar_ts, pd.Timestamp):
+                            bar_ts = bar_ts.to_pydatetime()
+                        if isinstance(bar_ts, datetime) and bar_ts.tzinfo is None:
+                            bar_ts = bar_ts.replace(tzinfo=timezone.utc)
+
+                        # Skip bars before or at entry time (strict after)
+                        if entry_time and isinstance(bar_ts, datetime) and bar_ts <= entry_time:
+                            continue
+
+                        bar_high = float(row.get("high") or row.get("close") or 0.0)
+                        bar_low = float(row.get("low") or row.get("close") or 0.0)
+                        if bar_high <= 0 or bar_low <= 0:
+                            continue
+
+                        if direction == "short":
+                            hit_tp = bar_low <= target
+                            hit_sl = bar_high >= stop
+                            if hit_tp and hit_sl:
+                                # Both touched in same bar - use configured tiebreak
+                                if tiebreak == "take_profit":
+                                    exit_reason = "take_profit"
+                                    exit_price = target
+                                else:  # Default to conservative "stop_loss"
+                                    exit_reason = "stop_loss"
+                                    exit_price = stop
+                            elif hit_sl:
+                                exit_reason = "stop_loss"
+                                exit_price = stop
+                            elif hit_tp:
+                                exit_reason = "take_profit"
+                                exit_price = target
+                        else:  # long
+                            hit_tp = bar_high >= target
+                            hit_sl = bar_low <= stop
+                            if hit_tp and hit_sl:
+                                # Both touched in same bar - use configured tiebreak
+                                if tiebreak == "take_profit":
+                                    exit_reason = "take_profit"
+                                    exit_price = target
+                                else:  # Default to conservative "stop_loss"
+                                    exit_reason = "stop_loss"
+                                    exit_price = stop
+                            elif hit_sl:
+                                exit_reason = "stop_loss"
+                                exit_price = stop
+                            elif hit_tp:
+                                exit_reason = "take_profit"
+                                exit_price = target
+
+                        # Stop at first exit (earliest bar where TP/SL was touched)
+                        if exit_reason:
+                            exit_bar_ts = bar_ts
+                            break
+
+                    except Exception:
+                        continue
 
                 if exit_reason and exit_price is not None:
                     perf = self.performance_tracker.track_exit(
                         signal_id=sig_id,
                         exit_price=float(exit_price),
                         exit_reason=str(exit_reason),
-                        exit_time=bar_ts if isinstance(bar_ts, datetime) else None,
+                        exit_time=exit_bar_ts if isinstance(exit_bar_ts, datetime) else None,
                     )
                     exited_this_cycle.add(sig_id)
                     if perf:
@@ -1468,6 +1537,21 @@ class NQAgentService:
             "data_source_health": data_source_health,
             # Cache stats for observability
             "cache_stats": self.data_fetcher.get_cache_stats(),
+            # New-bar gating stats (performance optimization observability)
+            "new_bar_gating": {
+                "enabled": self._enable_new_bar_gating,
+                "analysis_skips": self._analysis_skip_count,
+                "analysis_runs": self._analysis_run_count,
+                "skip_rate": round(
+                    self._analysis_skip_count / max(1, self._analysis_skip_count + self._analysis_run_count),
+                    3,
+                ),
+                "last_analyzed_bar_ts": (
+                    self._last_analyzed_bar_ts.isoformat()
+                    if self._last_analyzed_bar_ts
+                    else None
+                ),
+            },
             "last_successful_cycle": (
                 get_utc_timestamp() if self.last_successful_cycle else None
             ),

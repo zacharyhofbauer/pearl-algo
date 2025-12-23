@@ -449,14 +449,31 @@ class TelegramCommandHandler:
             futures_market_open = state.get("futures_market_open")
             strategy_session_open = state.get("strategy_session_open")
             
-            # Get latest price if available
+            # Get latest price and data age if available
             latest_price = None
+            data_age_minutes = None
             latest_bar = state.get("latest_bar")
-            if isinstance(latest_bar, dict) and "close" in latest_bar:
-                try:
-                    latest_price = float(latest_bar["close"])
-                except Exception:
-                    pass
+            if isinstance(latest_bar, dict):
+                if "close" in latest_bar:
+                    try:
+                        latest_price = float(latest_bar["close"])
+                    except Exception:
+                        pass
+                # Compute data age for v2 staleness callout
+                if "timestamp" in latest_bar and latest_bar["timestamp"]:
+                    try:
+                        from pearlalgo.utils.paths import parse_utc_timestamp
+                        bar_time = parse_utc_timestamp(str(latest_bar["timestamp"]))
+                        if bar_time:
+                            if bar_time.tzinfo is None:
+                                bar_time = bar_time.replace(tzinfo=timezone.utc)
+                            age_delta = datetime.now(timezone.utc) - bar_time
+                            data_age_minutes = age_delta.total_seconds() / 60.0
+                    except Exception:
+                        pass
+            
+            # Get stale threshold from state or use default
+            data_stale_threshold_minutes = float(state.get("data_stale_threshold_minutes", 10.0))
             
             # Get 7-day performance
             perf = None
@@ -518,6 +535,9 @@ class TelegramCommandHandler:
                 # Calm-minimal: activity pulse + active trades
                 last_cycle_seconds=last_cycle_seconds,
                 active_trades_count=active_trades_count,
+                # v6 fields for data staleness
+                data_age_minutes=data_age_minutes,
+                data_stale_threshold_minutes=data_stale_threshold_minutes,
             )
             
             # Use consistent main menu buttons

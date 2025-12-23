@@ -1380,6 +1380,24 @@ class NQAgentTelegramNotifier:
             signal_diagnostics = status.get("signal_diagnostics")
             buy_sell_pressure = status.get("buy_sell_pressure")
             
+            # Compute data age in minutes for v2 staleness callout
+            data_age_minutes = None
+            latest_bar = status.get('latest_bar')
+            if latest_bar and 'timestamp' in latest_bar and latest_bar['timestamp']:
+                try:
+                    bar_time = parse_utc_timestamp(latest_bar['timestamp'])
+                    if bar_time:
+                        if bar_time.tzinfo is None:
+                            bar_time = bar_time.replace(tzinfo=timezone.utc)
+                        age_delta = datetime.now(timezone.utc) - bar_time
+                        data_age_minutes = age_delta.total_seconds() / 60.0
+                except Exception:
+                    pass
+            
+            # Get stale threshold from status or use default
+            data_stale_threshold_minutes = float(status.get("data_stale_threshold_minutes", 10.0))
+            is_data_stale = data_age_minutes is not None and data_age_minutes > data_stale_threshold_minutes
+            
             message = format_home_card(
                 symbol=symbol,
                 time_str=time_str,
@@ -1409,11 +1427,15 @@ class NQAgentTelegramNotifier:
                 quiet_reason=quiet_reason,
                 signal_diagnostics=signal_diagnostics,
                 buy_sell_pressure=buy_sell_pressure,
+                # v6 fields for data staleness
+                data_age_minutes=data_age_minutes,
+                data_stale_threshold_minutes=data_stale_threshold_minutes,
             )
             
             # Add MTF snapshot (push-specific enhancement)
+            # V2 spec: Suppress MTF when data is stale to avoid misleading derived context
             mtf_trends = status.get("mtf_trends", {})
-            if mtf_trends:
+            if mtf_trends and not is_data_stale:
                 try:
                     mtf_str = format_mtf_snapshot(mtf_trends, timeframes=["5m", "15m", "1h", "4h", "1D"])
                     if mtf_str and mtf_str != "N/A":
@@ -1421,7 +1443,27 @@ class NQAgentTelegramNotifier:
                 except Exception:
                     pass
             
-            await self.telegram.send_message(message)
+            # Build optional inline buttons when command handler is running
+            reply_markup = None
+            if _is_command_handler_running():
+                try:
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("📊 Status", callback_data="status"),
+                            InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
+                        ],
+                        [
+                            InlineKeyboardButton("📈 Activity", callback_data="activity"),
+                            InlineKeyboardButton("🏠 Menu", callback_data="start"),
+                        ],
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                except Exception as e:
+                    logger.debug(f"Could not build dashboard buttons: {e}")
+                    reply_markup = None
+            
+            await self.telegram.send_message(message, reply_markup=reply_markup)
             return True
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_dashboard")

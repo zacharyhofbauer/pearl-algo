@@ -80,13 +80,20 @@ class TestVirtualPnLTiebreak:
         # Mock state manager to return this signal
         service.state_manager.get_recent_signals = MagicMock(return_value=[signal_record])
         
-        # Create bar that touches both TP and SL
+        # Create bar that touches both TP and SL (bars-only contract: use df, not latest_bar)
         # For a long: SL touched if bar_low <= stop, TP touched if bar_high >= target
+        entry_time = datetime(2025, 12, 23, 10, 0, 0, tzinfo=timezone.utc)
         market_data = {
+            "df": pd.DataFrame({
+                "timestamp": [entry_time + pd.Timedelta(minutes=5)],  # After entry
+                "open": [17500.0],
+                "high": [17535.0],  # Above TP (17530)
+                "low": [17475.0],   # Below SL (17480)
+                "close": [17500.0],
+                "volume": [1000],
+            }),
             "latest_bar": {
                 "timestamp": "2025-12-23T10:05:00+00:00",
-                "high": 17535.0,  # Above TP (17530)
-                "low": 17475.0,   # Below SL (17480)
                 "close": 17500.0,
             },
         }
@@ -122,11 +129,18 @@ class TestVirtualPnLTiebreak:
         
         service.state_manager.get_recent_signals = MagicMock(return_value=[signal_record])
         
+        entry_time = datetime(2025, 12, 23, 10, 0, 0, tzinfo=timezone.utc)
         market_data = {
+            "df": pd.DataFrame({
+                "timestamp": [entry_time + pd.Timedelta(minutes=5)],  # After entry
+                "open": [17500.0],
+                "high": [17535.0],  # Above TP
+                "low": [17475.0],   # Below SL
+                "close": [17500.0],
+                "volume": [1000],
+            }),
             "latest_bar": {
                 "timestamp": "2025-12-23T10:05:00+00:00",
-                "high": 17535.0,  # Above TP
-                "low": 17475.0,   # Below SL
                 "close": 17500.0,
             },
         }
@@ -159,13 +173,20 @@ class TestVirtualPnLTiebreak:
         
         service.state_manager.get_recent_signals = MagicMock(return_value=[signal_record])
         
-        # Create bar that touches both TP and SL for short
+        # Create bar that touches both TP and SL for short (bars-only contract)
         # For a short: SL touched if bar_high >= stop, TP touched if bar_low <= target
+        entry_time = datetime(2025, 12, 23, 10, 0, 0, tzinfo=timezone.utc)
         market_data = {
+            "df": pd.DataFrame({
+                "timestamp": [entry_time + pd.Timedelta(minutes=5)],  # After entry
+                "open": [17500.0],
+                "high": [17525.0],  # Above SL (17520)
+                "low": [17465.0],   # Below TP (17470)
+                "close": [17500.0],
+                "volume": [1000],
+            }),
             "latest_bar": {
                 "timestamp": "2025-12-23T10:05:00+00:00",
-                "high": 17525.0,  # Above SL (17520)
-                "low": 17465.0,   # Below TP (17470)
                 "close": 17500.0,
             },
         }
@@ -198,11 +219,18 @@ class TestVirtualPnLTiebreak:
         
         service.state_manager.get_recent_signals = MagicMock(return_value=[signal_record])
         
+        entry_time = datetime(2025, 12, 23, 10, 0, 0, tzinfo=timezone.utc)
         market_data = {
+            "df": pd.DataFrame({
+                "timestamp": [entry_time + pd.Timedelta(minutes=5)],  # After entry
+                "open": [17500.0],
+                "high": [17525.0],  # Above SL
+                "low": [17465.0],   # Below TP
+                "close": [17500.0],
+                "volume": [1000],
+            }),
             "latest_bar": {
                 "timestamp": "2025-12-23T10:05:00+00:00",
-                "high": 17525.0,  # Above SL
-                "low": 17465.0,   # Below TP
                 "close": 17500.0,
             },
         }
@@ -234,12 +262,19 @@ class TestVirtualPnLTiebreak:
         
         service.state_manager.get_recent_signals = MagicMock(return_value=[signal_record])
         
-        # Bar only touches SL, not TP
+        # Bar only touches SL, not TP (bars-only contract)
+        entry_time = datetime(2025, 12, 23, 10, 0, 0, tzinfo=timezone.utc)
         market_data = {
+            "df": pd.DataFrame({
+                "timestamp": [entry_time + pd.Timedelta(minutes=5)],  # After entry
+                "open": [17500.0],
+                "high": [17510.0],  # Below TP (17530)
+                "low": [17475.0],   # Below SL (17480)
+                "close": [17490.0],
+                "volume": [1000],
+            }),
             "latest_bar": {
                 "timestamp": "2025-12-23T10:05:00+00:00",
-                "high": 17510.0,  # Below TP (17530)
-                "low": 17475.0,   # Below SL (17480)
                 "close": 17490.0,
             },
         }
@@ -270,12 +305,19 @@ class TestVirtualPnLTiebreak:
         
         service.state_manager.get_recent_signals = MagicMock(return_value=[signal_record])
         
-        # Bar only touches TP, not SL
+        # Bar only touches TP, not SL (bars-only contract)
+        entry_time = datetime(2025, 12, 23, 10, 0, 0, tzinfo=timezone.utc)
         market_data = {
+            "df": pd.DataFrame({
+                "timestamp": [entry_time + pd.Timedelta(minutes=5)],  # After entry
+                "open": [17510.0],
+                "high": [17535.0],  # Above TP (17530)
+                "low": [17485.0],   # Above SL (17480)
+                "close": [17520.0],
+                "volume": [1000],
+            }),
             "latest_bar": {
                 "timestamp": "2025-12-23T10:05:00+00:00",
-                "high": 17535.0,  # Above TP (17530)
-                "low": 17485.0,   # Above SL (17480)
                 "close": 17520.0,
             },
         }

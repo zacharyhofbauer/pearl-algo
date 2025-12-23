@@ -40,7 +40,7 @@ class DataQualityChecker:
         
         Args:
             latest_bar: Latest bar dictionary with timestamp
-            df: DataFrame with timestamp column (optional, used as fallback)
+            df: DataFrame with timestamp column or DatetimeIndex (optional, used as fallback)
             
         Returns:
             Dictionary with:
@@ -57,19 +57,36 @@ class DataQualityChecker:
             timestamp = latest_bar["timestamp"]
             if isinstance(timestamp, str):
                 timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            # Handle pd.Timestamp from latest_bar
+            if isinstance(timestamp, pd.Timestamp):
+                timestamp = timestamp.to_pydatetime()
             if isinstance(timestamp, datetime):
                 if timestamp.tzinfo is None:
                     timestamp = timestamp.replace(tzinfo=timezone.utc)
                 age_minutes = (now - timestamp).total_seconds() / 60
 
         # Fallback to DataFrame if no latest_bar timestamp
-        if timestamp is None and df is not None and not df.empty and "timestamp" in df.columns:
-            latest_timestamp = df["timestamp"].max()
-            if isinstance(latest_timestamp, pd.Timestamp):
-                timestamp = latest_timestamp.to_pydatetime()
-                if timestamp.tzinfo is None:
-                    timestamp = timestamp.replace(tzinfo=timezone.utc)
-                age_minutes = (now - timestamp).total_seconds() / 60
+        if timestamp is None and df is not None and not df.empty:
+            latest_timestamp = None
+            
+            # First, try timestamp column (bars-only contract preference)
+            if "timestamp" in df.columns:
+                latest_timestamp = df["timestamp"].max()
+            # Fallback: check for DatetimeIndex (some providers use index-based timestamps)
+            elif isinstance(df.index, pd.DatetimeIndex) and len(df.index) > 0:
+                latest_timestamp = df.index.max()
+            
+            # Convert to datetime and compute age
+            if latest_timestamp is not None:
+                if isinstance(latest_timestamp, pd.Timestamp):
+                    timestamp = latest_timestamp.to_pydatetime()
+                elif isinstance(latest_timestamp, datetime):
+                    timestamp = latest_timestamp
+                    
+                if timestamp is not None:
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=timezone.utc)
+                    age_minutes = (now - timestamp).total_seconds() / 60
 
         is_fresh = age_minutes < self.stale_data_threshold_minutes
 

@@ -438,22 +438,29 @@ def format_activity_line(
     errors: int,
     buffer_size: int,
     buffer_target: int | None = None,
+    signal_send_failures: int = 0,
 ) -> str:
     """
     Format activity summary line for Home Card.
 
-    Returns compact metrics like: 📊 42 cycles • 3/2 signals • 85/100 bars • 0 errors
+    Returns labeled metrics like:
+    📊 145 scans (session) / 1,595 total • 2 gen / 0 sent • 25/100 bars • 0 errors
+
+    V2 spec: All ratios are now self-explanatory with explicit labels.
     """
-    # Cycles
+    # Cycles: labeled as "scans" with (session) / total
     if cycles_session is not None:
-        cycles_part = f"{cycles_session:,}/{cycles_total:,} cycles"
+        cycles_part = f"{cycles_session:,} scans (session) / {cycles_total:,} total"
     else:
-        cycles_part = f"{cycles_total:,} cycles"
+        cycles_part = f"{cycles_total:,} scans"
 
-    # Signals: generated/sent
-    signals_part = f"{signals_generated}/{signals_sent} signals"
+    # Signals: labeled gen/sent (add fail only if non-zero)
+    if signal_send_failures > 0:
+        signals_part = f"{signals_generated} gen / {signals_sent} sent / {signal_send_failures} fail"
+    else:
+        signals_part = f"{signals_generated} gen / {signals_sent} sent"
 
-    # Buffer
+    # Buffer: already clear
     if buffer_target is not None:
         buffer_part = f"{buffer_size}/{buffer_target} bars"
     else:
@@ -463,6 +470,27 @@ def format_activity_line(
     errors_part = f"{errors} errors"
 
     return f"📊 {cycles_part} • {signals_part} • {buffer_part} • {errors_part}"
+
+
+def format_stale_callout(
+    data_age_minutes: float,
+    impact: str = "signals paused",
+) -> str:
+    """
+    Format a staleness callout with age, impact, and next action.
+
+    V2 spec: When data is stale, provide a single actionable line.
+
+    Args:
+        data_age_minutes: Age of data in minutes
+        impact: Impact description (e.g., "signals paused")
+
+    Returns:
+        Formatted staleness callout like:
+        ⏰ Data stale (11m) • signals paused • /data_quality
+    """
+    age_str = f"{data_age_minutes:.0f}m" if data_age_minutes < 60 else f"{data_age_minutes / 60:.1f}h"
+    return f"⏰ Data stale ({age_str}) • {impact} • /data_quality"
 
 
 def format_performance_line(
@@ -517,6 +545,9 @@ def format_home_card(
     buy_sell_pressure: str | None = None,  # e.g. "🟢 Pressure: BUYERS ▲▲ (Δ +18%, Vol 1.3x, 2h)"
     # Active trades (v5 calm-minimal)
     active_trades_count: int = 0,  # Number of currently active positions
+    # Data staleness (v6 - separate from state staleness)
+    data_age_minutes: float | None = None,  # Age of market data in minutes
+    data_stale_threshold_minutes: float = 10.0,  # Minutes; show warning if older
 ) -> str:
     """
     Build unified Home Card message for status/dashboard (balanced verbosity).
@@ -582,9 +613,16 @@ def format_home_card(
         quiet_reason: Why agent is quiet (e.g., "StrategySessionClosed", "NoOpportunity")
         buy_sell_pressure: Buy/Sell pressure proxy string (volume-based)
         active_trades_count: Number of currently active positions (shown when > 0)
+        data_age_minutes: Age of market data in minutes (for v2 staleness callout)
+        data_stale_threshold_minutes: Threshold in minutes for showing stale warning (default: 10)
 
     Returns:
         Formatted Home Card message string
+
+    V2 SPEC CHANGES:
+    - Activity metrics are now labeled (e.g., "145 scans (session) / 1,595 total")
+    - Staleness callout includes age + impact + next action
+    - Derived context (pressure, diagnostics) suppressed when data is stale
     """
     lines = []
 
@@ -627,13 +665,23 @@ def format_home_card(
         pulse_emoji, pulse_text = format_activity_pulse(last_cycle_seconds, is_paused=paused)
         lines.append(f"{pulse_emoji} {pulse_text}")
 
-    # CONDITIONAL: Freshness warning (only when stale)
-    is_stale = (
+    # Compute staleness flags
+    is_state_stale = (
         state_age_seconds is not None
         and state_age_seconds > state_stale_threshold
     )
-    if is_stale:
-        age_mins = state_age_seconds / 60.0
+    is_data_stale = (
+        data_age_minutes is not None
+        and data_age_minutes > data_stale_threshold_minutes
+    )
+
+    # CONDITIONAL: Data staleness callout (v2 spec: age + impact + action)
+    # This takes precedence over state staleness for clarity
+    if is_data_stale and data_age_minutes is not None:
+        lines.append(format_stale_callout(data_age_minutes, impact="signals paused"))
+    elif is_state_stale:
+        # Fallback to state staleness if no data age info
+        age_mins = state_age_seconds / 60.0 if state_age_seconds else 0
         lines.append(f"⚠️ State {age_mins:.1f}m old (may be outdated)")
 
     # Gates line
@@ -666,18 +714,20 @@ def format_home_card(
             lines.append("   💡 Run /data_quality for details")
     
     # CONDITIONAL: Signal diagnostics (when quiet reason is NoOpportunity and we have details)
-    if signal_diagnostics and agent_running and not paused:
+    # V2 spec: Suppress when data is stale to avoid misleading derived context
+    if signal_diagnostics and agent_running and not paused and not is_data_stale:
         # Only show if not a simple "no patterns" or "session closed" message
         if signal_diagnostics not in ("Session closed", "No patterns detected"):
             lines.append(f"   🔍 {signal_diagnostics}")
 
     # CONDITIONAL: Buy/Sell pressure (show only when agent running and not paused)
-    if buy_sell_pressure and agent_running and not paused:
+    # V2 spec: Suppress when data is stale to avoid misleading derived context
+    if buy_sell_pressure and agent_running and not paused and not is_data_stale:
         lines.append(f"   {buy_sell_pressure}")
 
     lines.append("")  # Blank line separator
 
-    # Activity line
+    # Activity line (v2 spec: includes signal_send_failures in the labeled format)
     lines.append(format_activity_line(
         cycles_session=cycles_session,
         cycles_total=cycles_total,
@@ -686,15 +736,12 @@ def format_home_card(
         errors=errors,
         buffer_size=buffer_size,
         buffer_target=buffer_target,
+        signal_send_failures=signal_send_failures,
     ))
 
     # CONDITIONAL: Active trades (only when > 0, calm-minimal)
     if active_trades_count > 0:
         lines.append(f"🎯 *{active_trades_count} active trade{'s' if active_trades_count > 1 else ''}*")
-
-    # CONDITIONAL: Error/failure cue (only when non-zero)
-    if signal_send_failures > 0:
-        lines.append(f"⚠️ {signal_send_failures} signal send failures")
 
     # Last signal age (if available)
     if last_signal_age:

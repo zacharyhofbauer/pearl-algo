@@ -41,6 +41,10 @@ service:
   connection_failure_alert_interval: 600  # 10 minutes in seconds
   data_quality_alert_interval: 300        # 5 minutes in seconds
   dashboard_chart_timeframe: "5m"  # Force 5-minute timeframe to match TradingView-style chart
+  
+  # Performance optimization: skip heavy analysis when bar hasn't advanced.
+  # High leverage for 5m bars + 30s scan interval (5 of 6 cycles are repeats).
+  enable_new_bar_gating: true   # Skip strategy.analyze() if df hasn't advanced (default ON)
 
 # Circuit breaker
 circuit_breaker:
@@ -62,6 +66,15 @@ data:
   use_level2_data: false           # Level 2 disabled by default (most prop-firm feeds are Level 1)
   order_book_depth: 10             # Requested depth if Level 2 is enabled
   order_book_analysis: false       # Order book analysis disabled when Level 2 is off
+  
+  # Caching options (reduce IBKR request volume)
+  # When enabled, historical data is refreshed on a TTL rather than every scan cycle.
+  # Level 1 real-time data (latest_bar) is still fetched every cycle for freshness.
+  enable_base_cache: false         # Cache base timeframe historical data (default OFF)
+  base_refresh_seconds: 60         # TTL for base historical cache (seconds)
+  enable_mtf_cache: false          # Cache 5m/15m MTF historical data (default OFF)
+  mtf_refresh_seconds_5m: 300      # TTL for 5m MTF cache (5 minutes)
+  mtf_refresh_seconds_15m: 900     # TTL for 15m MTF cache (15 minutes)
 
 # Signal generation
 signals:

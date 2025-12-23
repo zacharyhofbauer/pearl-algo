@@ -139,7 +139,7 @@ class NQAgentDataFetcher:
                 age_minutes = freshness_check["age_minutes"]
                 logger.warning(f"Data may be stale: latest historical bar is {age_minutes:.1f} minutes old (market may be closed or data subscription issue)")
 
-            # Update buffer if we have data
+            # Update buffer if we have data (bars-only contract: only real OHLCV bars).
             if not df.empty:
                 # Log data freshness status
                 if not data_freshness_warning:
@@ -147,6 +147,9 @@ class NQAgentDataFetcher:
                     # Preserve timestamps for downstream charting/HUD context (sessions, key levels, etc).
                     # IBKRProvider returns a DatetimeIndex named "timestamp"; reset_index keeps it as a column.
                     self._data_buffer = df.tail(self._buffer_size).reset_index()
+                    # Ensure timestamp column exists (handles both index-based and column-based providers)
+                    if "timestamp" not in self._data_buffer.columns and "index" in self._data_buffer.columns:
+                        self._data_buffer = self._data_buffer.rename(columns={"index": "timestamp"})
                 
                 # Log data freshness at INFO level for observability
                 if "timestamp" in df.columns:
@@ -303,30 +306,18 @@ class NQAgentDataFetcher:
             # Add data source metadata to latest_bar for tracking
             latest_bar["_data_source"] = data_source
 
-            # Update buffer if we have new data
+            # Update buffer from historical data ONLY (bars-only contract).
+            # We do NOT append latest_bar as a synthetic row - that would pollute
+            # the bar-based df with Level1 quote data which may not represent a
+            # true timeframe bar. latest_bar remains separate for dashboards/freshness.
             if self._data_buffer is None or self._data_buffer.empty:
-                # Preserve timestamps for downstream charting/HUD context (sessions, key levels, etc).
-                self._data_buffer = df.tail(self._buffer_size).reset_index()
-            else:
-                # Append latest bar to buffer
-                timestamp = latest_bar.get("timestamp")
-                if timestamp and isinstance(timestamp, str):
-                    timestamp = parse_utc_timestamp(timestamp)
-
-                new_row = pd.DataFrame([{
-                    "timestamp": timestamp or datetime.now(timezone.utc),
-                    "open": latest_bar.get("open"),
-                    "high": latest_bar.get("high"),
-                    "low": latest_bar.get("low"),
-                    "close": latest_bar.get("close"),
-                    "volume": latest_bar.get("volume", 0),
-                }])
-
-                self._data_buffer = pd.concat([self._data_buffer, new_row], ignore_index=True)
-
-                # Trim buffer to max size
-                if len(self._data_buffer) > self._buffer_size:
-                    self._data_buffer = self._data_buffer.tail(self._buffer_size).reset_index(drop=True)
+                if not df.empty:
+                    # Preserve timestamps for downstream charting/HUD context (sessions, key levels, etc).
+                    # IBKRProvider returns a DatetimeIndex named "timestamp"; reset_index keeps it as a column.
+                    self._data_buffer = df.tail(self._buffer_size).reset_index()
+                    # Ensure timestamp column exists (handles both index-based and column-based providers)
+                    if "timestamp" not in self._data_buffer.columns and "index" in self._data_buffer.columns:
+                        self._data_buffer = self._data_buffer.rename(columns={"index": "timestamp"})
 
             # Fetch multi-timeframe data (optionally cached)
             df_5m, df_15m = await self._fetch_multitimeframe_data(end)
@@ -549,13 +540,19 @@ class NQAgentDataFetcher:
             else:
                 df_15m = pd.DataFrame()
 
-            # Update buffers
+            # Update buffers (bars-only contract: only real OHLCV bars).
             if not df_5m.empty:
                 # Preserve timestamp for downstream charting/overlays and better operator debugging.
                 self._data_buffer_5m = df_5m.tail(self._buffer_size_5m).reset_index()
+                # Ensure timestamp column exists (handles both index-based and column-based providers)
+                if "timestamp" not in self._data_buffer_5m.columns and "index" in self._data_buffer_5m.columns:
+                    self._data_buffer_5m = self._data_buffer_5m.rename(columns={"index": "timestamp"})
             if not df_15m.empty:
                 # Preserve timestamp for downstream charting/overlays and better operator debugging.
                 self._data_buffer_15m = df_15m.tail(self._buffer_size_15m).reset_index()
+                # Ensure timestamp column exists (handles both index-based and column-based providers)
+                if "timestamp" not in self._data_buffer_15m.columns and "index" in self._data_buffer_15m.columns:
+                    self._data_buffer_15m = self._data_buffer_15m.rename(columns={"index": "timestamp"})
 
             return (
                 self._data_buffer_5m.copy() if self._data_buffer_5m is not None else pd.DataFrame(),

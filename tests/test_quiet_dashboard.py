@@ -373,3 +373,220 @@ async def test_dashboard_emits_when_data_empty(tmp_path) -> None:
         # The key test is that dashboard was called despite empty data
 
 
+
+
+class TestV2StalenessCallout:
+    """Tests for v2 staleness callout with age + impact + action."""
+
+    def test_data_stale_callout_format(self) -> None:
+        """Data staleness callout includes age, impact, and action."""
+        message = format_home_card(
+            symbol="MNQ",
+            time_str="10:30 AM ET",
+            agent_running=True,
+            gateway_running=True,
+            futures_market_open=True,
+            strategy_session_open=True,
+            data_age_minutes=15.0,  # 15 minutes old
+            data_stale_threshold_minutes=10.0,
+        )
+        # V2 spec: "⏰ Data stale (15m) • signals paused • /data_quality"
+        assert "⏰ Data stale" in message
+        assert "15m" in message
+        assert "signals paused" in message
+        assert "/data_quality" in message
+
+    def test_data_fresh_no_callout(self) -> None:
+        """No staleness callout when data is fresh."""
+        message = format_home_card(
+            symbol="MNQ",
+            time_str="10:30 AM ET",
+            agent_running=True,
+            gateway_running=True,
+            futures_market_open=True,
+            strategy_session_open=True,
+            data_age_minutes=5.0,  # 5 minutes old (fresh)
+            data_stale_threshold_minutes=10.0,
+        )
+        assert "Data stale" not in message
+
+    def test_pressure_suppressed_when_stale(self) -> None:
+        """Buy/sell pressure is suppressed when data is stale."""
+        message = format_home_card(
+            symbol="MNQ",
+            time_str="10:30 AM ET",
+            agent_running=True,
+            gateway_running=True,
+            futures_market_open=True,
+            strategy_session_open=True,
+            buy_sell_pressure="🔴 Pressure: SELLERS ▼▼ (Δ -24%, Vol 1.0x, 2h)",
+            data_age_minutes=15.0,  # Stale
+            data_stale_threshold_minutes=10.0,
+        )
+        # V2 spec: Suppress derived context when stale
+        assert "SELLERS" not in message
+        assert "Pressure:" not in message
+
+    def test_pressure_shown_when_fresh(self) -> None:
+        """Buy/sell pressure is shown when data is fresh."""
+        message = format_home_card(
+            symbol="MNQ",
+            time_str="10:30 AM ET",
+            agent_running=True,
+            gateway_running=True,
+            futures_market_open=True,
+            strategy_session_open=True,
+            buy_sell_pressure="🔴 Pressure: SELLERS ▼▼ (Δ -24%, Vol 1.0x, 2h)",
+            data_age_minutes=5.0,  # Fresh
+            data_stale_threshold_minutes=10.0,
+        )
+        assert "SELLERS" in message
+
+    def test_diagnostics_suppressed_when_stale(self) -> None:
+        """Signal diagnostics are suppressed when data is stale."""
+        message = format_home_card(
+            symbol="MNQ",
+            time_str="10:30 AM ET",
+            agent_running=True,
+            gateway_running=True,
+            futures_market_open=True,
+            strategy_session_open=True,
+            signal_diagnostics="Raw: 3 → Valid: 0 | Filtered: 2 conf, 1 R:R",
+            data_age_minutes=15.0,  # Stale
+            data_stale_threshold_minutes=10.0,
+        )
+        # V2 spec: Suppress derived context when stale
+        assert "Raw: 3" not in message
+
+
+class TestV2LabeledMetrics:
+    """Tests for v2 labeled metrics format."""
+
+    def test_activity_line_labeled_cycles(self) -> None:
+        """Activity line shows labeled cycles (session vs total)."""
+        from pearlalgo.utils.telegram_alerts import format_activity_line
+        
+        line = format_activity_line(
+            cycles_session=145,
+            cycles_total=1595,
+            signals_generated=2,
+            signals_sent=0,
+            errors=0,
+            buffer_size=25,
+            buffer_target=100,
+        )
+        # V2 spec: "145 scans (session) / 1,595 total"
+        assert "145 scans (session)" in line
+        assert "1,595 total" in line
+
+    def test_activity_line_labeled_signals(self) -> None:
+        """Activity line shows labeled signals (gen/sent)."""
+        from pearlalgo.utils.telegram_alerts import format_activity_line
+        
+        line = format_activity_line(
+            cycles_session=145,
+            cycles_total=1595,
+            signals_generated=2,
+            signals_sent=1,
+            errors=0,
+            buffer_size=25,
+            buffer_target=100,
+        )
+        # V2 spec: "2 gen / 1 sent"
+        assert "2 gen" in line
+        assert "1 sent" in line
+
+    def test_activity_line_shows_failures_when_nonzero(self) -> None:
+        """Activity line includes failures when non-zero."""
+        from pearlalgo.utils.telegram_alerts import format_activity_line
+        
+        line = format_activity_line(
+            cycles_session=145,
+            cycles_total=1595,
+            signals_generated=2,
+            signals_sent=1,
+            errors=0,
+            buffer_size=25,
+            buffer_target=100,
+            signal_send_failures=1,
+        )
+        # V2 spec: "2 gen / 1 sent / 1 fail"
+        assert "1 fail" in line
+
+    def test_activity_line_hides_failures_when_zero(self) -> None:
+        """Activity line omits failures when zero."""
+        from pearlalgo.utils.telegram_alerts import format_activity_line
+        
+        line = format_activity_line(
+            cycles_session=145,
+            cycles_total=1595,
+            signals_generated=2,
+            signals_sent=1,
+            errors=0,
+            buffer_size=25,
+            buffer_target=100,
+            signal_send_failures=0,
+        )
+        # V2 spec: No "fail" when zero
+        assert "fail" not in line
+
+
+class TestStaleCalloutHelper:
+    """Tests for format_stale_callout helper."""
+
+    def test_stale_callout_minutes(self) -> None:
+        """Stale callout formats age in minutes correctly."""
+        from pearlalgo.utils.telegram_alerts import format_stale_callout
+        
+        callout = format_stale_callout(11.0, impact="signals paused")
+        assert "11m" in callout
+        assert "signals paused" in callout
+        assert "/data_quality" in callout
+
+    def test_stale_callout_hours(self) -> None:
+        """Stale callout formats age in hours when over 60m."""
+        from pearlalgo.utils.telegram_alerts import format_stale_callout
+        
+        callout = format_stale_callout(90.0, impact="signals paused")
+        assert "1.5h" in callout
+
+
+class TestMessageLengthConstraints:
+    """Tests to ensure messages stay within Telegram limits."""
+
+    def test_home_card_under_limit(self) -> None:
+        """Home card stays under Telegram message limit."""
+        message = format_home_card(
+            symbol="MNQ",
+            time_str="10:30 AM ET",
+            agent_running=True,
+            gateway_running=True,
+            futures_market_open=True,
+            strategy_session_open=True,
+            paused=False,
+            cycles_session=1000,
+            cycles_total=100000,
+            signals_generated=100,
+            signals_sent=95,
+            errors=5,
+            buffer_size=100,
+            buffer_target=100,
+            latest_price=25782.25,
+            buy_sell_pressure="🔴 Pressure: SELLERS ▼▼ (Δ -24%, Vol 1.0x, 2h)",
+            signal_diagnostics="Raw: 10 → Valid: 5 | Filtered: 3 conf, 2 R:R",
+            performance={
+                "exited_signals": 20,
+                "wins": 12,
+                "losses": 8,
+                "win_rate": 0.6,
+                "total_pnl": 500.0,
+            },
+            signal_send_failures=2,
+            active_trades_count=3,
+            data_age_minutes=5.0,
+            data_stale_threshold_minutes=10.0,
+        )
+        # Telegram message limit is 4096 characters
+        assert len(message) < 4096, f"Message too long: {len(message)} chars"
+        # Should be well under for mobile readability
+        assert len(message) < 2000, f"Message should be < 2000 for mobile: {len(message)} chars"
