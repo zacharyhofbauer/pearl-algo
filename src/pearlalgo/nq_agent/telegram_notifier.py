@@ -39,6 +39,12 @@ from pearlalgo.utils.telegram_alerts import (
     format_home_card,
     format_gate_status,
     format_service_status,
+    # New UX improvement helpers
+    format_activity_pulse,
+    format_next_session_time,
+    format_signal_action_cue,
+    format_signal_timing,
+    format_performance_trend,
 )
 
 try:
@@ -344,9 +350,22 @@ class NQAgentTelegramNotifier:
             reason_short = reason[:100] + "…" if len(reason) > 100 else reason
             message += f"\n💡 {reason_short}\n"
 
+        # Signal timing (when generated)
+        timestamp = signal.get("timestamp")
+        timing_str = format_signal_timing(timestamp, include_relative=True)
+        if timing_str:
+            message += f"\n⏰ *Generated:* {timing_str}\n"
+
+        # Action cue (what to do next)
+        status = str(signal.get("status") or "generated")
+        direction = str(signal.get("direction") or "long")
+        action_cue = format_signal_action_cue(status, direction)
+        if action_cue:
+            message += f"\n{action_cue}\n"
+
         # Signal ID for cross-referencing (always include)
         if signal_id:
-            message += f"\n🆔 `{signal_id[:16]}…`"
+            message += f"\n🆔 `{signal_id[:16]}…` (tap Details for more)"
 
         return message
     
@@ -700,7 +719,7 @@ class NQAgentTelegramNotifier:
                 if risk > 0:
                     risk_reward = reward / risk
             
-            # Compact entry notification
+            # Entry notification with position context
             message = f"🎯 *{symbol} {dir_emoji} {dir_label} ENTRY*\n\n"
             message += f"*Type:* {signal_type}\n"
             message += f"*Entry:* ${entry_price:.2f}\n"
@@ -712,6 +731,18 @@ class NQAgentTelegramNotifier:
                 message += f"*TP:* ${take_profit:.2f} ({tp_dist:.2f} pts)\n"
             if risk_reward > 0:
                 message += f"*R:R:* {risk_reward:.2f}:1\n"
+            
+            # Position size and risk (if available)
+            position_size = signal.get("position_size")
+            tick_value = signal.get("tick_value", 2.0)  # Default MNQ tick value
+            if position_size and stop_loss and entry_price:
+                risk_pts = abs(entry_price - stop_loss)
+                risk_amount = risk_pts * float(tick_value) * float(position_size)
+                message += f"\n*Position:* {position_size} contracts\n"
+                message += f"*Risk:* ${risk_amount:.2f}\n"
+            
+            # Action cue
+            message += f"\n✅ *Position ACTIVE* - Monitor stop/TP levels\n"
             message += f"\n🆔 `{signal_id[:16]}…`\n"
             
             # Build optional deep-link buttons
@@ -802,14 +833,27 @@ class NQAgentTelegramNotifier:
             }
             exit_reason_display = exit_reason_map.get(exit_reason.lower(), exit_reason.title())
             
-            # Compact exit notification
+            # Exit notification with trade summary
             message = f"{status_emoji} *{symbol} {dir_emoji} {dir_label} EXIT - {status_label}*\n\n"
             message += f"*Type:* {signal_type}\n"
             message += f"*Entry:* ${entry_price:.2f}\n"
             price_change = exit_price - entry_price if entry_price else 0
-            message += f"*Exit:* ${exit_price:.2f} ({price_change:+.2f})\n"
-            message += f"*Reason:* {exit_reason_display}\n"
-            message += f"{pnl_emoji} *P&L:* {pnl_str}\n"
+            # Calculate percentage change
+            pct_change = (price_change / entry_price * 100) if entry_price > 0 else 0
+            message += f"*Exit:* ${exit_price:.2f} ({price_change:+.2f} / {pct_change:+.1f}%)\n"
+            
+            # Enhanced exit reason explanation
+            exit_explanation = {
+                "stop_loss": "🛑 Stop hit - Risk managed",
+                "take_profit": "🎯 Target reached",
+                "manual": "👤 Manual exit",
+                "expired": "⏰ Signal expired",
+                "trailing_stop": "📉 Trailing stop triggered",
+            }
+            exit_exp = exit_explanation.get(exit_reason.lower(), exit_reason_display)
+            message += f"*Reason:* {exit_exp}\n"
+            
+            message += f"\n{pnl_emoji} *P&L:* {pnl_str}\n"
             
             if hold_duration_minutes is not None:
                 hold_hours = int(hold_duration_minutes // 60)
@@ -818,6 +862,12 @@ class NQAgentTelegramNotifier:
                     message += f"*Hold:* {hold_hours}h {hold_mins}m\n"
                 else:
                     message += f"*Hold:* {hold_mins}m\n"
+            
+            # Next steps guidance
+            if is_win:
+                message += f"\n✅ Trade completed - Review performance for insights\n"
+            else:
+                message += f"\n📊 Trade completed - Check signals for next opportunity\n"
             
             message += f"\n🆔 `{signal_id[:16]}…`\n"
             
@@ -1407,48 +1457,79 @@ class NQAgentTelegramNotifier:
             if is_recovery:
                 msg = "✅ *Recovery*\n\n"
                 msg += f"{message}\n" if message else "Data quality recovered.\n"
+                msg += "\n✅ Signal generation resumed\n"
+                msg += "✅ Position monitoring active\n"
                 msg += "\n*Status:* OK"
             else:
                 # Risk warning format (mobile-friendly)
                 msg = "⚠️ *Risk Warning*\n\n"
 
-                # Add alert type (same as startup's title format)
+                # Add alert type with impact explanation
                 if alert_type == "stale_data":
                     msg += "⏰ *Stale Data*\n"
+                    msg += "\n*Impact:*\n"
+                    msg += "• Signal generation paused\n"
+                    msg += "• Positions still monitored\n"
                 elif alert_type == "data_gap":
                     msg += "📉 *Data Gap*\n"
+                    msg += "\n*Impact:*\n"
+                    msg += "• Indicators may be inaccurate\n"
+                    msg += "• Signal quality reduced\n"
                 elif alert_type == "fetch_failure":
                     msg += "❌ *Fetch Failure*\n"
+                    msg += "\n*Impact:*\n"
+                    msg += "• No new data available\n"
+                    msg += "• Using cached data if available\n"
                 elif alert_type == "buffer_issue":
                     msg += "⚠️ *Buffer Issue*\n"
+                    msg += "\n*Impact:*\n"
+                    msg += "• Insufficient history for indicators\n"
+                    msg += "• Signals may be delayed\n"
                 else:
                     title_text = alert_type.replace('_', ' ').title()
                     msg += f"⚠️ *{title_text}*\n"
 
                 # Add details
+                msg += "\n*Details:*\n"
                 if alert_type == "stale_data" and details and "age_minutes" in details:
                     age_val = details["age_minutes"]
-                    msg += f"🕐 *Age:* {age_val:.1f} minutes\n"
+                    msg += f"🕐 Age: {age_val:.1f} minutes\n"
                 elif message and alert_type != "stale_data":
                     msg += f"{message}\n"
 
                 if details:
-                    detail_lines = []
                     if "consecutive_failures" in details:
-                        detail_lines.append(f"❌ *Failures:* {details['consecutive_failures']}")
+                        msg += f"❌ Failures: {details['consecutive_failures']}\n"
                     if "connection_failures" in details:
-                        detail_lines.append(f"🔌 *Connection Failures:* {details['connection_failures']}")
+                        msg += f"🔌 Connection: {details['connection_failures']} failures\n"
                     if "buffer_size" in details:
-                        detail_lines.append(f"📊 *Buffer:* {details['buffer_size']} bars")
+                        msg += f"📊 Buffer: {details['buffer_size']} bars\n"
                     if "severity" in details:
-                        detail_lines.append(f"🧭 *Severity:* {details['severity']}")
+                        msg += f"🧭 Severity: {details['severity']}\n"
                     if "error_type" in details:
-                        detail_lines.append(f"⚠️ *Error Type:* {details['error_type']}")
-                    if "suggestion" in details:
-                        detail_lines.append(f"💡 *Suggestion:* {details['suggestion']}")
+                        msg += f"⚠️ Type: {details['error_type']}\n"
 
-                    if detail_lines:
-                        msg += "\n" + "\n".join(detail_lines) + "\n"
+                # Action guidance
+                msg += "\n*What to do:*\n"
+                if alert_type in ("stale_data", "fetch_failure", "data_gap"):
+                    msg += "1. Check Gateway status\n"
+                    msg += "2. Verify market is open\n"
+                    msg += "3. Restart if needed\n"
+                elif alert_type == "buffer_issue":
+                    msg += "1. Wait for buffer to fill\n"
+                    msg += "2. Check data connection\n"
+                else:
+                    if details and "suggestion" in details:
+                        msg += f"💡 {details['suggestion']}\n"
+                    else:
+                        msg += "1. Check system status\n"
+                        msg += "2. Review logs if issue persists\n"
+
+                # Expected resolution
+                if alert_type == "stale_data":
+                    msg += "\n⏳ Usually resolves when market reopens\n"
+                elif alert_type == "buffer_issue":
+                    msg += "\n⏳ Buffer fills within 2-5 minutes\n"
 
                 # Escape underscore in DATA_QUALITY to prevent Markdown italic parsing
                 msg += "\n*Status:* DATA\\_QUALITY"
@@ -1581,6 +1662,20 @@ class NQAgentTelegramNotifier:
             message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}\n"
             message += f"{strat_emoji} *StrategySessionOpen:* {strat_text}\n"
 
+            # What to expect
+            message += "\n*What to expect:*\n"
+            if strategy_session_open is True:
+                message += "• Signal generation active\n"
+                message += f"• First signal within ~{scan_interval * 5}s if conditions met\n"
+            elif strategy_session_open is False:
+                message += "• Waiting for session to open\n"
+                message += f"• Use /activity to check status\n"
+            else:
+                message += "• Monitoring market conditions\n"
+            
+            # Quick access tip
+            message += "\n💡 Use /status or /activity to monitor"
+
             await self.telegram.send_message(message)
             return True
         except Exception as e:
@@ -1636,6 +1731,19 @@ class NQAgentTelegramNotifier:
                 if total_pnl is not None:
                     pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
                     message += f"{pnl_emoji} *P&L:* {_format_currency(total_pnl)}\n"
+
+            # Next steps based on shutdown reason
+            message += "\n*Next steps:*\n"
+            if shutdown_reason and ("error" in shutdown_reason.lower() or "circuit" in shutdown_reason.lower()):
+                message += "• Review logs for error details\n"
+                message += "• Check Gateway status\n"
+                message += "• Restart when ready: /start_agent\n"
+            elif shutdown_reason and "interrupt" in shutdown_reason.lower():
+                message += "• Agent stopped by user\n"
+                message += "• Restart when ready: /start_agent\n"
+            else:
+                message += "• Normal shutdown complete\n"
+                message += "• Restart: /start_agent\n"
 
             await self.telegram.send_message(message)
             return True
@@ -1715,21 +1823,35 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
-            # Format message (without Risk Warning prefix - notify_risk_warning adds it)
+            # Format message with clear explanation
             message = f"🛑 *Circuit Breaker Activated*\n\n"
             message += f"*Reason:* {reason}\n"
 
+            # What happened
             if details:
+                message += "\n*What happened:*\n"
                 if "consecutive_errors" in details:
-                    message += f"\n*Errors:* {details['consecutive_errors']} consecutive"
+                    message += f"• {details['consecutive_errors']} consecutive errors\n"
                 if "connection_failures" in details:
-                    message += f"\n*Connection Failures:* {details['connection_failures']}"
+                    message += f"• {details['connection_failures']} connection failures\n"
                 if "error_type" in details:
-                    message += f"\n*Type:* {details['error_type']}"
+                    message += f"• Error type: {details['error_type']}\n"
                 if "action_taken" in details:
-                    message += f"\n*Action:* {details['action_taken']}"
+                    message += f"• Action: {details['action_taken']}\n"
 
-            message += "\n\n⚠️ *Service paused. Manual intervention required.*"
+            # What's safe
+            message += "\n*What's safe:*\n"
+            message += "✅ Existing positions are preserved\n"
+            message += "✅ No new signals will be generated\n"
+            message += "✅ System state is saved\n"
+
+            # What to do
+            message += "\n*What to do:*\n"
+            message += "1. Check Gateway status\n"
+            message += "2. Review error logs\n"
+            message += "3. Restart agent when ready\n"
+
+            message += "\n⚠️ *Manual restart required*"
 
             await self.telegram.notify_risk_warning(message, risk_status="CRITICAL")
             return True

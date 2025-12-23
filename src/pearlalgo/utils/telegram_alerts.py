@@ -199,6 +199,201 @@ def safe_label(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Activity and timing helpers (UX improvement v2)
+# ---------------------------------------------------------------------------
+
+def format_activity_pulse(
+    last_cycle_seconds: float | None,
+    is_paused: bool = False,
+) -> tuple[str, str]:
+    """
+    Format activity pulse indicator showing time since last cycle.
+    
+    Returns (emoji, text) tuple.
+    
+    Args:
+        last_cycle_seconds: Seconds since last cycle completed
+        is_paused: Whether the agent is paused
+        
+    Returns:
+        Tuple of (emoji, description) e.g. ("🟢", "Active (30s ago)")
+    """
+    if is_paused:
+        return "⏸️", "Paused"
+    
+    if last_cycle_seconds is None:
+        return "⚪", "Unknown"
+    
+    if last_cycle_seconds < 0:
+        return "⚪", "Unknown"
+    
+    # Convert to readable format
+    if last_cycle_seconds < 60:
+        time_str = f"{int(last_cycle_seconds)}s ago"
+    elif last_cycle_seconds < 3600:
+        mins = int(last_cycle_seconds // 60)
+        time_str = f"{mins}m ago"
+    else:
+        hours = int(last_cycle_seconds // 3600)
+        mins = int((last_cycle_seconds % 3600) // 60)
+        time_str = f"{hours}h {mins}m ago"
+    
+    # Determine health based on age
+    if last_cycle_seconds <= 120:  # < 2 minutes
+        return "🟢", f"Active ({time_str})"
+    elif last_cycle_seconds <= 300:  # 2-5 minutes
+        return "🟡", f"Slow ({time_str})"
+    else:  # > 5 minutes
+        return "🔴", f"Stale ({time_str})"
+
+
+def format_next_session_time() -> str:
+    """
+    Get the next strategy session opening time (09:30 ET on next trading day).
+    
+    Returns formatted string like "Next session: 9:30 AM ET (Monday)"
+    """
+    try:
+        from datetime import datetime, timezone, timedelta
+        import pytz
+        
+        et_tz = pytz.timezone('US/Eastern')
+        now = datetime.now(et_tz)
+        
+        # Strategy session is 09:30 - 16:00 ET
+        session_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        
+        # If we're before 09:30 today, next session is today
+        if now.hour < 9 or (now.hour == 9 and now.minute < 30):
+            next_open = session_open
+        else:
+            # Next session is tomorrow (or Monday if weekend)
+            next_open = session_open + timedelta(days=1)
+        
+        # Skip weekends
+        while next_open.weekday() >= 5:  # 5=Sat, 6=Sun
+            next_open += timedelta(days=1)
+        
+        day_name = next_open.strftime("%A")
+        time_str = next_open.strftime("%I:%M %p ET")
+        
+        if next_open.date() == now.date():
+            return f"Opens today at {time_str}"
+        elif next_open.date() == (now + timedelta(days=1)).date():
+            return f"Opens tomorrow at {time_str}"
+        else:
+            return f"Opens {day_name} at {time_str}"
+    except Exception:
+        return "Next session: Check market calendar"
+
+
+def format_signal_action_cue(
+    signal_status: str,
+    signal_direction: str,
+) -> str:
+    """
+    Format an action cue for a signal based on its status.
+    
+    Args:
+        signal_status: Current signal status (generated, entered, exited, expired)
+        signal_direction: Signal direction (long, short)
+        
+    Returns:
+        Action cue string like "Monitor for entry" or "Position active"
+    """
+    status_lower = (signal_status or "").lower()
+    dir_lower = (signal_direction or "long").lower()
+    dir_action = "BUY" if dir_lower == "long" else "SELL"
+    
+    if status_lower == "generated":
+        return f"⏳ Monitor for {dir_action} entry at target price"
+    elif status_lower == "entered":
+        return f"🎯 Position ACTIVE - Watch stop/TP levels"
+    elif status_lower == "exited":
+        return "✅ Trade completed - Review performance"
+    elif status_lower == "expired":
+        return "⏰ Signal expired - No action needed"
+    else:
+        return ""
+
+
+def format_signal_timing(
+    timestamp_str: str | None,
+    include_relative: bool = True,
+) -> str:
+    """
+    Format signal timestamp for display.
+    
+    Args:
+        timestamp_str: ISO timestamp string
+        include_relative: Whether to include relative time (e.g., "5m ago")
+        
+    Returns:
+        Formatted string like "10:15 AM ET (5m ago)"
+    """
+    if not timestamp_str:
+        return ""
+    
+    try:
+        from datetime import datetime, timezone
+        import pytz
+        from pearlalgo.utils.paths import parse_utc_timestamp
+        
+        ts = parse_utc_timestamp(str(timestamp_str))
+        if ts is None:
+            return ""
+        
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        
+        # Convert to ET
+        et_tz = pytz.timezone('US/Eastern')
+        et_time = ts.astimezone(et_tz)
+        time_str = et_time.strftime("%I:%M %p ET")
+        
+        if include_relative:
+            age = format_time_ago(timestamp_str)
+            if age:
+                return f"{time_str} ({age})"
+        
+        return time_str
+    except Exception:
+        return ""
+
+
+def format_performance_trend(
+    current_pnl: float,
+    previous_pnl: float | None,
+) -> str:
+    """
+    Format performance trend comparison.
+    
+    Args:
+        current_pnl: Current period P&L
+        previous_pnl: Previous period P&L (e.g., yesterday)
+        
+    Returns:
+        Trend string like "↗️ +$50.00 vs yesterday"
+    """
+    if previous_pnl is None:
+        return ""
+    
+    diff = current_pnl - previous_pnl
+    
+    if diff > 0:
+        emoji = "↗️"
+        sign = "+"
+    elif diff < 0:
+        emoji = "↘️"
+        sign = ""  # negative sign included in value
+    else:
+        emoji = "➡️"
+        sign = ""
+    
+    return f"{emoji} {sign}${diff:,.2f} vs prev"
+
+
+# ---------------------------------------------------------------------------
 # Home Card layout helpers (unified status/dashboard spec)
 # ---------------------------------------------------------------------------
 
@@ -311,6 +506,9 @@ def format_home_card(
     state_stale_threshold: float = 120.0,  # seconds; show warning if older
     signal_send_failures: int = 0,
     gateway_unknown: bool = False,  # True if gateway status couldn't be determined
+    # New fields for UX improvements (v3)
+    last_cycle_seconds: float | None = None,  # For activity pulse
+    previous_pnl: float | None = None,  # For performance trend
 ) -> str:
     """
     Build unified Home Card message for status/dashboard (balanced verbosity).
@@ -371,6 +569,8 @@ def format_home_card(
         state_stale_threshold: Threshold in seconds for showing stale warning
         signal_send_failures: Number of signal send failures (for error cue)
         gateway_unknown: True if gateway status couldn't be determined
+        last_cycle_seconds: Seconds since last cycle (for activity pulse)
+        previous_pnl: Previous period P&L for trend comparison
 
     Returns:
         Formatted Home Card message string
@@ -411,6 +611,11 @@ def format_home_card(
         if "circuit" in pause_reason.lower() or "error" in pause_reason.lower():
             lines.append(f"   💡 Manual intervention required")
 
+    # CONDITIONAL: Activity pulse (when running and we have cycle data)
+    if agent_running and not paused and last_cycle_seconds is not None:
+        pulse_emoji, pulse_text = format_activity_pulse(last_cycle_seconds, is_paused=paused)
+        lines.append(f"{pulse_emoji} {pulse_text}")
+
     # CONDITIONAL: Freshness warning (only when stale)
     is_stale = (
         state_age_seconds is not None
@@ -425,7 +630,8 @@ def format_home_card(
 
     # CONDITIONAL: Gate expectation explanation (only when session closed)
     if strategy_session_open is False:
-        lines.append("   ℹ️ Signals suppressed (session closed)")
+        next_session = format_next_session_time()
+        lines.append(f"   ℹ️ Signals suppressed • {next_session}")
     elif futures_market_open is False and strategy_session_open is not False:
         lines.append("   ℹ️ Data may be delayed (market closed)")
 
@@ -461,6 +667,11 @@ def format_home_card(
             lines.append("")  # Blank line
             lines.append(f"*7d Performance:*")
             lines.append(format_performance_line(wins, losses, win_rate, total_pnl))
+            # Add trend comparison if previous_pnl is available
+            if previous_pnl is not None:
+                trend_str = format_performance_trend(total_pnl, previous_pnl)
+                if trend_str:
+                    lines.append(trend_str)
 
     # CONDITIONAL: Action cue (only for stopped state)
     if not agent_running and not paused:

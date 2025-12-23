@@ -151,6 +151,7 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("config", self._handle_config))
         self.application.add_handler(CommandHandler("health", self._handle_health))
         self.application.add_handler(CommandHandler("data_quality", self._handle_data_quality))
+        self.application.add_handler(CommandHandler("activity", self._handle_activity))
         
         # Service control commands (start/stop gateway and agent)
         self.application.add_handler(CommandHandler("start_gateway", self._handle_start_gateway))
@@ -2646,6 +2647,155 @@ class TelegramCommandHandler:
             reply_markup = self._get_back_to_menu_button()
             await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
 
+    async def _handle_activity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle /activity command - answers "is the bot doing anything?"
+        
+        Shows:
+        - Last cycle time and status
+        - Current buffer status
+        - Active positions (if any)
+        - Next expected action
+        """
+        logger.info(f"Received /activity command from chat {update.effective_chat.id}")
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        try:
+            state_file = get_state_file(self.state_dir)
+            process_running = self._is_agent_process_running()
+            
+            if not state_file.exists():
+                message = "📈 *Activity Status*\n\n"
+                message += "🔴 *Agent:* NOT RUNNING\n\n"
+                message += "ℹ️ No activity data available.\n"
+                message += "💡 Start the agent to begin monitoring.\n"
+                reply_markup = self._get_main_menu_buttons(agent_running=False)
+                await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+                return
+            
+            with open(state_file) as f:
+                state = json.load(f)
+            
+            # Compute state freshness (time since last update)
+            state_age_seconds = None
+            try:
+                mtime = state_file.stat().st_mtime
+                state_age_seconds = (datetime.now(timezone.utc).timestamp() - mtime)
+            except Exception:
+                state_age_seconds = None
+            
+            # Get activity pulse
+            from pearlalgo.utils.telegram_alerts import format_activity_pulse, format_next_session_time
+            
+            running = process_running and state.get("running", False)
+            paused = state.get("paused", False)
+            
+            # Build activity message
+            message = "📈 *Activity Status*\n\n"
+            
+            # Service status
+            if not running:
+                message += "🔴 *Agent:* NOT RUNNING\n"
+            elif paused:
+                message += "⏸️ *Agent:* PAUSED\n"
+                pause_reason = state.get("pause_reason")
+                if pause_reason:
+                    message += f"   Reason: {pause_reason}\n"
+            else:
+                message += "🟢 *Agent:* RUNNING\n"
+            
+            # Activity pulse
+            if state_age_seconds is not None:
+                pulse_emoji, pulse_text = format_activity_pulse(state_age_seconds, is_paused=paused)
+                message += f"\n{pulse_emoji} *Last Update:* {pulse_text}\n"
+            
+            # Cycle information
+            cycles_total = int(state.get("cycle_count", 0) or 0)
+            cycles_session = state.get("cycle_count_session")
+            if cycles_session is not None:
+                message += f"🔄 *Cycles:* {cycles_session:,} (session) / {cycles_total:,} (total)\n"
+            else:
+                message += f"🔄 *Cycles:* {cycles_total:,}\n"
+            
+            # Buffer status
+            buffer_size = int(state.get("buffer_size", 0) or 0)
+            buffer_target = state.get("buffer_size_target")
+            if buffer_target:
+                buffer_pct = (buffer_size / int(buffer_target)) * 100 if int(buffer_target) > 0 else 0
+                message += f"📊 *Buffer:* {buffer_size}/{buffer_target} bars ({buffer_pct:.0f}%)\n"
+            else:
+                message += f"📊 *Buffer:* {buffer_size} bars\n"
+            
+            # Latest bar info
+            latest_bar = state.get("latest_bar")
+            if isinstance(latest_bar, dict) and "close" in latest_bar:
+                try:
+                    close = float(latest_bar["close"])
+                    message += f"💰 *Latest Price:* ${close:,.2f}\n"
+                except Exception:
+                    pass
+            
+            # Active positions count
+            try:
+                signals_file = get_signals_file(self.state_dir)
+                if signals_file.exists():
+                    active_count = 0
+                    with open(signals_file) as f:
+                        for line in f:
+                            try:
+                                sig = json.loads(line.strip())
+                                if sig.get("status") == "entered":
+                                    active_count += 1
+                            except Exception:
+                                continue
+                    if active_count > 0:
+                        message += f"\n🎯 *Active Positions:* {active_count}\n"
+            except Exception:
+                pass
+            
+            # Next expected action
+            message += "\n*What's Next:*\n"
+            futures_open = state.get("futures_market_open")
+            session_open = state.get("strategy_session_open")
+            
+            if not running:
+                message += "💡 Start agent to begin monitoring\n"
+            elif paused:
+                message += "💡 Resume agent or address pause reason\n"
+            elif session_open is False:
+                next_session = format_next_session_time()
+                message += f"⏳ Waiting for session • {next_session}\n"
+            elif futures_open is False:
+                message += "⏳ Waiting for market to open\n"
+            else:
+                scan_interval = state.get("scan_interval", 60)
+                message += f"🔄 Next cycle in ~{scan_interval}s\n"
+            
+            # Buttons
+            keyboard = [
+                [
+                    InlineKeyboardButton("🔄 Refresh", callback_data="activity"),
+                    InlineKeyboardButton("📊 Active Trades", callback_data="active_trades"),
+                ],
+                [
+                    InlineKeyboardButton("🔔 Signals", callback_data="signals"),
+                    InlineKeyboardButton("📈 Performance", callback_data="performance"),
+                ],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+            
+        except Exception as e:
+            logger.error(f"Error handling activity command: {e}", exc_info=True)
+            error_msg = f"❌ *Error:* {str(e)}"
+            reply_markup = self._get_back_to_menu_button()
+            await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
+
     async def _handle_data_quality(
         self,
         update: Update,
@@ -3391,52 +3541,56 @@ class TelegramCommandHandler:
         """
         Generate main menu inline keyboard buttons (unified Home Card layout).
         
-        Layout is streamlined to reduce cognitive load:
-        - Row 1: Agent control (Start/Stop/Restart)
-        - Row 2: Gateway status + Refresh
-        - Row 3: Signals + Data Quality (high-signal views)
-        - Row 4: Performance + Backtest
-        - Row 5: Config + Health
-        - Row 6: Help
+        Layout optimized for quick access and discoverability:
+        - Row 1: Agent control (Start/Stop/Restart) + Gateway status
+        - Row 2: Quick Actions (Last Signal, Active Trades, Activity)
+        - Row 3: Signals + Performance (most-used monitoring)
+        - Row 4: Data Quality + Health (system status)
+        - Row 5: Config + Backtest + Help
         """
         keyboard = []
         
-        # Row 1: Agent control (primary action)
+        # Row 1: Agent control + Gateway (service management)
+        gateway_status_text = "🔌" + (" ✅" if gateway_running else " ❌")
         if agent_running:
             keyboard.append([
-                InlineKeyboardButton("⏹️ Stop Agent", callback_data='stop_agent'),
+                InlineKeyboardButton("⏹️ Stop", callback_data='stop_agent'),
                 InlineKeyboardButton("🔄 Restart", callback_data='restart_agent'),
+                InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
+                InlineKeyboardButton("🔄", callback_data='status'),
             ])
         else:
-            keyboard.append([InlineKeyboardButton("▶️ Start Agent", callback_data='start_agent')])
+            keyboard.append([
+                InlineKeyboardButton("▶️ Start Agent", callback_data='start_agent'),
+                InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
+                InlineKeyboardButton("🔄", callback_data='status'),
+            ])
         
-        # Row 2: Gateway + single Refresh
-        gateway_status_text = "🔌 Gateway" + (" ✅" if gateway_running else " ❌")
+        # Row 2: Quick Actions (most common monitoring needs)
         keyboard.append([
-            InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
-            InlineKeyboardButton("🔄 Refresh", callback_data='status'),
+            InlineKeyboardButton("🆕 Last Signal", callback_data='last_signal'),
+            InlineKeyboardButton("📊 Active", callback_data='active_trades'),
+            InlineKeyboardButton("📈 Activity", callback_data='activity'),
         ])
         
-        # Row 3: Signals + Data Quality (high-signal operator views)
+        # Row 3: Signals + Performance (primary monitoring)
         keyboard.append([
             InlineKeyboardButton("🔔 Signals", callback_data='signals'),
-            InlineKeyboardButton("🛡 Data Quality", callback_data='data_quality'),
-        ])
-        
-        # Row 4: Analysis
-        keyboard.append([
             InlineKeyboardButton("📈 Performance", callback_data='performance'),
-            InlineKeyboardButton("📉 Backtest", callback_data='backtest'),
         ])
         
-        # Row 5: Secondary actions
+        # Row 4: System status
         keyboard.append([
-            InlineKeyboardButton("⚙️ Config", callback_data='config'),
+            InlineKeyboardButton("🛡 Data Quality", callback_data='data_quality'),
             InlineKeyboardButton("💚 Health", callback_data='health'),
         ])
         
-        # Row 6: Help
-        keyboard.append([InlineKeyboardButton("❓ Help", callback_data='help')])
+        # Row 5: Secondary (config, backtest, help)
+        keyboard.append([
+            InlineKeyboardButton("⚙️ Config", callback_data='config'),
+            InlineKeyboardButton("📉 Backtest", callback_data='backtest'),
+            InlineKeyboardButton("❓ Help", callback_data='help'),
+        ])
         
         return InlineKeyboardMarkup(keyboard)
     
@@ -3758,6 +3912,8 @@ class TelegramCommandHandler:
             await self._handle_config(update, context)
         elif callback_data == 'health':
             await self._handle_health(update, context)
+        elif callback_data == 'activity':
+            await self._handle_activity(update, context)
         elif callback_data == 'data_quality':
             await self._handle_data_quality(update, context)
         elif callback_data == 'data_quality:diagnose':

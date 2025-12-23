@@ -27,8 +27,12 @@ It combines quick start steps, command setup, and command behavior.
    stop_agent - Stop NQ Agent Service
    restart_agent - Restart NQ Agent Service
    status - Get current agent status
+   activity - Is the bot doing anything?
    signals - Show recent signals
+   last_signal - Show most recent signal with chart
+   active_trades - Show currently open positions
    performance - Show performance metrics
+   data_quality - Check data freshness and quality
    config - Show key configuration values (read-only)
    health - Show basic agent health (read-only)
    help - Show available commands
@@ -140,23 +144,35 @@ Returns the current agent status, including:
 
 - Running / stopped state
 - Pause reason (if paused)
+- Activity pulse (time since last cycle)
 - Futures/session gates:
   - **FuturesMarketOpen** (CME ETH + maintenance break; affects data freshness)
   - **StrategySessionOpen** (prop-firm window: 18:00–16:10 ET; when signals are allowed)
+  - When session is closed, shows next session opening time
 - Cycles and signals (clarified):
   - **Cycles**: session/total (total persists across restarts)
   - **Signals**: generated vs delivered vs failed
 - Buffer size (rolling): current/target bars
-- Compact 7-day performance summary
-- Inline buttons:
-  - **Start Agent** / **Stop Agent** – Quick service control
-  - **Gateway Status** – Check Gateway health
-  - **Performance** – Detailed performance metrics
-  - **Signals** – Recent signals list
-  - **Config** – Configuration values
-  - **Health** – Health check
+- Compact 7-day performance summary with trend indicator
+- Inline buttons for quick access to all features
 
-### 3.4 `/signals`
+### 3.4 `/activity`
+
+Answers the question "Is the bot doing anything?" with:
+
+- Agent status and activity pulse (time since last cycle)
+- Cycle count (session and total)
+- Buffer status with fill percentage
+- Latest price
+- Active positions count
+- Next expected action (e.g., "Next cycle in ~60s", "Waiting for session")
+
+**Use this when:**
+- You're unsure if the bot is actively monitoring
+- You want a quick check without full status details
+- You want to know what the bot will do next
+
+### 3.5 `/signals`
 
 - Shows the last **10 recent trading signals**.
 - For each signal, includes:
@@ -595,6 +611,53 @@ For detailed chart setup and customization, see [MPLFINANCE_QUICK_START.md](MPLF
 
 **Old Messages Without Buttons:**
 - Send a new command (like `/status`) to get buttons
+
+---
+
+## 9. UX Improvements (v2)
+
+### 9.1 Activity Pulse
+
+The status and activity views now show an "activity pulse" indicator:
+
+- 🟢 **Active** (< 2 min): Agent is actively cycling
+- 🟡 **Slow** (2-5 min): Agent may be waiting or slow
+- 🔴 **Stale** (> 5 min): Agent may need attention
+
+This helps answer "is the bot doing anything?" at a glance.
+
+### 9.2 Enhanced Signal Messages
+
+Signal alerts now include:
+
+- **Action cue**: Clear next steps (e.g., "Monitor for BUY entry at target price")
+- **Timing**: When the signal was generated (with relative time)
+- **Entry/Exit context**: Position size, risk amount, and clear explanations
+
+### 9.3 Improved Error Messages
+
+Data quality and circuit breaker alerts now include:
+
+- **Impact explanation**: What is affected (e.g., "Signal generation paused")
+- **What's safe**: What is still working (e.g., "Positions still monitored")
+- **Action guidance**: Step-by-step what to do
+- **Expected resolution**: When the issue might resolve
+
+### 9.4 Enhanced Navigation
+
+The main menu now features:
+
+- **Quick Actions row**: Last Signal, Active Trades, Activity
+- **Streamlined service control**: Start/Stop/Restart + Gateway in one row
+- **Grouped monitoring buttons**: Signals, Performance, Data Quality, Health
+
+### 9.5 Lifecycle Notifications
+
+Startup and shutdown messages now include:
+
+- **What to expect**: When first signal might appear
+- **Next steps**: Clear guidance on what to do next
+- **Quick access tips**: Commands to monitor status
 
 ---
 
