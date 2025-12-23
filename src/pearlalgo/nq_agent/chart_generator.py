@@ -42,6 +42,45 @@ ENTRY_COLOR = "#2962ff"
 VWAP_COLOR = "#2196f3"
 MA_COLORS = ['#2196f3', '#9c27b0', '#f44336']
 
+# Z-order constants for layering (lower = further back)
+ZORDER_SESSION_SHADING = 0
+ZORDER_ZONES = 1
+ZORDER_LEVEL_LINES = 2
+ZORDER_CANDLES = 3  # mplfinance default
+ZORDER_TEXT_LABELS = 4
+
+
+def _stabilize_matplotlib_rcparams() -> None:
+    """
+    Set minimal matplotlib rcParams for cross-machine rendering consistency.
+    
+    This reduces visual drift from font/rendering differences across environments.
+    Called once at module load to ensure deterministic baseline generation.
+    """
+    import matplotlib as mpl
+    
+    # Use a font family that's broadly available and renders consistently
+    # DejaVu Sans is matplotlib's default fallback and ships with mpl
+    mpl.rcParams['font.family'] = 'sans-serif'
+    mpl.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Helvetica', 'sans-serif']
+    
+    # Disable font hinting variations that cause pixel drift
+    mpl.rcParams['text.hinting'] = 'native'
+    mpl.rcParams['text.hinting_factor'] = 8
+    
+    # Consistent figure rendering
+    mpl.rcParams['figure.dpi'] = 100  # Base DPI (savefig can override)
+    mpl.rcParams['savefig.dpi'] = 150
+    mpl.rcParams['figure.autolayout'] = False  # We control layout explicitly
+    
+    # Consistent antialiasing
+    mpl.rcParams['text.antialiased'] = True
+    mpl.rcParams['lines.antialiased'] = True
+
+
+# Apply rcParams stabilization at module load
+_stabilize_matplotlib_rcparams()
+
 
 @dataclass
 class ChartConfig:
@@ -543,7 +582,12 @@ class ChartGenerator:
         tick_size: float,
         merge_ticks: int,
     ) -> List[Dict[str, Any]]:
-        """Merge nearby levels into a single right-label cluster."""
+        """Merge nearby levels into a single right-label cluster.
+        
+        Visual integrity note: The merged level is drawn at the TOP-PRIORITY level's
+        exact price (not a weighted average) to preserve semantic accuracy. This
+        ensures traders see the actual level, not a synthetic interpolated price.
+        """
         if not levels:
             return []
 
@@ -569,18 +613,21 @@ class ChartGenerator:
 
         merged: List[Dict[str, Any]] = []
         for g in groups:
+            # Sort by priority descending to identify the anchor level
             g_sorted = sorted(g, key=lambda x: int(x.get("priority", 0)), reverse=True)
-            pri_sum = sum(max(1, int(x.get("priority", 1))) for x in g_sorted)
-            price = sum(float(x["price"]) * max(1, int(x.get("priority", 1))) for x in g_sorted) / float(pri_sum)
+            
+            # Use the TOP-PRIORITY level's exact price as the anchor (not averaged)
+            # This preserves semantic accuracy - the line is at an actual level
+            top = g_sorted[0]
+            anchor_price = float(top.get("price", 0.0))
 
             labels = [str(x.get("label") or "") for x in g_sorted if str(x.get("label") or "")]
             labels = labels[:3] + ([f"+{len(labels)-3}"] if len(labels) > 3 else [])
             label = " / ".join(labels)
 
-            top = g_sorted[0]
             merged.append(
                 {
-                    "price": float(price),
+                    "price": anchor_price,  # Exact price of top-priority level
                     "label": label,
                     "color": str(top.get("color") or TEXT_PRIMARY),
                     "priority": int(top.get("priority", 0)),
@@ -600,11 +647,17 @@ class ChartGenerator:
         *,
         current_price: float,
         max_labels: int,
+        min_label_spacing_pts: float = 8.0,
     ) -> None:
         """Draw TradingView-style right-side level labels with minimal clutter.
         
         Only draws levels that fall within the current visible y-range to avoid
         expanding the chart scale or cluttering with out-of-view levels.
+        
+        Visual integrity notes:
+        - Labels are drawn with explicit z-order (ZORDER_TEXT_LABELS)
+        - Level lines use ZORDER_LEVEL_LINES
+        - Collision detection prevents overlapping labels within min_label_spacing_pts
         """
         if not merged_levels:
             return
@@ -634,11 +687,43 @@ class ChartGenerator:
                 dist = 1e9
             return (-pri, dist)
 
-        selected = sorted(visible_levels, key=_score)[: max(1, int(max_labels))]
-
-        # Create extra right margin so labels aren't clipped
+        candidates = sorted(visible_levels, key=_score)
+        
+        # Collision-aware label selection: drop lower-priority labels that would overlap
+        # Convert min_label_spacing_pts to data units using figure transform
         try:
-            fig.subplots_adjust(right=0.84)
+            # Get pixels-per-data-unit for y-axis
+            bbox = ax.get_window_extent()
+            y_pixels = bbox.height
+            y_range = ymax - ymin
+            pts_per_data = y_pixels / y_range if y_range > 0 else 1.0
+            min_spacing_data = min_label_spacing_pts / pts_per_data if pts_per_data > 0 else 0.0
+        except Exception:
+            min_spacing_data = (ymax - ymin) * 0.02  # Fallback: 2% of range
+        
+        selected: List[Dict[str, Any]] = []
+        occupied_prices: List[float] = []
+        
+        for lvl in candidates:
+            if len(selected) >= max(1, int(max_labels)):
+                break
+            
+            p = float(lvl.get("price", 0.0))
+            
+            # Check collision with already-selected labels
+            collision = False
+            for occ_p in occupied_prices:
+                if abs(p - occ_p) < min_spacing_data:
+                    collision = True
+                    break
+            
+            if not collision:
+                selected.append(lvl)
+                occupied_prices.append(p)
+
+        # Create extra right margin so labels aren't clipped (wider for safety)
+        try:
+            fig.subplots_adjust(right=0.82)
         except Exception:
             pass
 
@@ -652,10 +737,17 @@ class ChartGenerator:
             ls = str(lvl.get("linestyle") or "--")
             lw = float(lvl.get("lw") or 1.0)
 
-            # Line
-            ax.axhline(p, color=color, linestyle=ls, linewidth=lw, alpha=min(1.0, max(0.05, alpha)))
+            # Level line with explicit z-order
+            ax.axhline(
+                p,
+                color=color,
+                linestyle=ls,
+                linewidth=lw,
+                alpha=min(1.0, max(0.05, alpha)),
+                zorder=ZORDER_LEVEL_LINES,
+            )
 
-            # Right label
+            # Right label with explicit z-order
             try:
                 rgba = mcolors.to_rgba(color, alpha=0.20)
             except Exception:
@@ -672,6 +764,7 @@ class ChartGenerator:
                 color=TEXT_PRIMARY,
                 bbox=dict(facecolor=rgba, edgecolor="none", boxstyle="round,pad=0.25"),
                 clip_on=False,
+                zorder=ZORDER_TEXT_LABELS,
             )
 
         # Restore original y-limits to prevent autoscale from level lines
@@ -685,6 +778,11 @@ class ChartGenerator:
 
         NOTE: mplfinance candle charts use integer x positions and a datetime formatter.
         Do NOT pass datetimes directly into axvspan/hlines; it can push candles off-screen.
+        
+        Visual integrity notes:
+        - Session shading uses ZORDER_SESSION_SHADING (lowest layer)
+        - Session O/C/Avg lines use ZORDER_ZONES (behind candles)
+        - Session labels placed slightly inside panel (ymin + offset) for consistent visibility
         """
         if not self.config.show_sessions:
             return
@@ -693,6 +791,16 @@ class ChartGenerator:
             return
         if idx is None or not isinstance(idx, pd.DatetimeIndex) or len(idx) == 0:
             return
+
+        # Get y-limits once for consistent label placement
+        try:
+            ymin, ymax = ax.get_ylim()
+            y_range = ymax - ymin
+            # Place labels slightly inside the panel (3% above ymin)
+            label_y_offset = y_range * 0.03 if y_range > 0 else 0.0
+        except Exception:
+            ymin = 0.0
+            label_y_offset = 0.0
 
         for s in sessions:
             try:
@@ -707,20 +815,49 @@ class ChartGenerator:
                     continue
 
                 color = str(s.get("color") or "#444444")
-                ax.axvspan(start_x, end_x, color=color, alpha=0.08, linewidth=0)
+                
+                # Session shading (lowest z-order - behind everything)
+                ax.axvspan(
+                    start_x, end_x,
+                    color=color,
+                    alpha=0.08,
+                    linewidth=0,
+                    zorder=ZORDER_SESSION_SHADING,
+                )
 
                 if self.config.show_session_oc:
                     open_ = float(s.get("open", 0.0) or 0.0)
                     close_ = float(s.get("close", 0.0) or 0.0)
                     if open_ > 0:
-                        ax.hlines(open_, start_x, end_x, colors=color, linestyles="--", linewidth=1.0, alpha=0.55)
+                        ax.hlines(
+                            open_, start_x, end_x,
+                            colors=color,
+                            linestyles="--",
+                            linewidth=1.0,
+                            alpha=0.55,
+                            zorder=ZORDER_ZONES,
+                        )
                     if close_ > 0:
-                        ax.hlines(close_, start_x, end_x, colors=color, linestyles="--", linewidth=1.0, alpha=0.35)
+                        ax.hlines(
+                            close_, start_x, end_x,
+                            colors=color,
+                            linestyles="--",
+                            linewidth=1.0,
+                            alpha=0.35,
+                            zorder=ZORDER_ZONES,
+                        )
 
                 if self.config.show_session_average:
                     avg = float(s.get("avg", 0.0) or 0.0)
                     if avg > 0:
-                        ax.hlines(avg, start_x, end_x, colors=color, linestyles=":", linewidth=1.2, alpha=0.55)
+                        ax.hlines(
+                            avg, start_x, end_x,
+                            colors=color,
+                            linestyles=":",
+                            linewidth=1.2,
+                            alpha=0.55,
+                            zorder=ZORDER_ZONES,
+                        )
 
                 if self.config.show_session_names:
                     parts = []
@@ -735,26 +872,26 @@ class ChartGenerator:
                     parts.append(str(s.get("name") or "Session"))
                     label = "\n".join(parts)
 
-                    # Place label near the session start at chart bottom
-                    try:
-                        y = ax.get_ylim()[0]
-                    except Exception:
-                        y = float(s.get("low") or 0.0)
-                    x_label = min(max(start_x, 0.0), float(max(0, len(idx) - 1)))
+                    # Place label inside the panel (ymin + offset) for consistent visibility
+                    # This prevents labels from overlapping panel boundaries
+                    label_y = ymin + label_y_offset
+                    x_label = min(max(start_x + 0.5, 0.0), float(max(0, len(idx) - 1)))
                     ax.text(
                         x_label,
-                        y,
+                        label_y,
                         label,
                         ha="left",
                         va="bottom",
                         fontsize=8,
                         color=color,
                         alpha=0.9,
+                        zorder=ZORDER_TEXT_LABELS,
                     )
             except Exception:
                 continue
 
     def _draw_supply_demand_overlay(self, ax, hud: Dict) -> None:
+        """Draw LuxAlgo-style supply/demand zones with explicit z-order."""
         if not self.config.show_supply_demand:
             return
         sd = hud.get("supply_demand_vr") if isinstance(hud, dict) else None
@@ -775,18 +912,19 @@ class ChartGenerator:
             d_bot = float(demand.get("bottom", 0.0) or 0.0)
 
             if s_top > 0 and s_bot > 0 and s_top > s_bot:
-                ax.axhspan(s_bot, s_top, facecolor=sup_color, alpha=0.18, edgecolor="none")
-                ax.axhline(float(supply.get("avg", (s_top + s_bot) / 2.0)), color=sup_color, linewidth=1.0, alpha=0.7)
-                ax.axhline(float(supply.get("wavg", (s_top + s_bot) / 2.0)), color=sup_color, linewidth=1.0, alpha=0.7, linestyle="--")
+                ax.axhspan(s_bot, s_top, facecolor=sup_color, alpha=0.18, edgecolor="none", zorder=ZORDER_ZONES)
+                ax.axhline(float(supply.get("avg", (s_top + s_bot) / 2.0)), color=sup_color, linewidth=1.0, alpha=0.7, zorder=ZORDER_ZONES)
+                ax.axhline(float(supply.get("wavg", (s_top + s_bot) / 2.0)), color=sup_color, linewidth=1.0, alpha=0.7, linestyle="--", zorder=ZORDER_ZONES)
 
             if d_top > 0 and d_bot > 0 and d_top > d_bot:
-                ax.axhspan(d_bot, d_top, facecolor=dem_color, alpha=0.18, edgecolor="none")
-                ax.axhline(float(demand.get("avg", (d_top + d_bot) / 2.0)), color=dem_color, linewidth=1.0, alpha=0.7)
-                ax.axhline(float(demand.get("wavg", (d_top + d_bot) / 2.0)), color=dem_color, linewidth=1.0, alpha=0.7, linestyle="--")
+                ax.axhspan(d_bot, d_top, facecolor=dem_color, alpha=0.18, edgecolor="none", zorder=ZORDER_ZONES)
+                ax.axhline(float(demand.get("avg", (d_top + d_bot) / 2.0)), color=dem_color, linewidth=1.0, alpha=0.7, zorder=ZORDER_ZONES)
+                ax.axhline(float(demand.get("wavg", (d_top + d_bot) / 2.0)), color=dem_color, linewidth=1.0, alpha=0.7, linestyle="--", zorder=ZORDER_ZONES)
         except Exception:
             return
 
     def _draw_power_channel_overlay(self, ax, hud: Dict) -> None:
+        """Draw ChartPrime-style power channel with explicit z-order."""
         if not self.config.show_power_channel:
             return
         pc = hud.get("power_channel") if isinstance(hud, dict) else None
@@ -804,20 +942,19 @@ class ChartGenerator:
             mid = float(pc.get("mid", 0.0) or 0.0)
 
             if res_top > 0 and res_bot > 0 and res_top > res_bot:
-                ax.axhspan(res_bot, res_top, facecolor=t_col, alpha=0.10, edgecolor="none")
-                ax.axhline(res_top, color=t_col, linewidth=1.2, alpha=0.7)
+                ax.axhspan(res_bot, res_top, facecolor=t_col, alpha=0.10, edgecolor="none", zorder=ZORDER_ZONES)
+                ax.axhline(res_top, color=t_col, linewidth=1.2, alpha=0.7, zorder=ZORDER_ZONES)
             if sup_top > 0 and sup_bot > 0 and sup_top > sup_bot:
-                ax.axhspan(sup_bot, sup_top, facecolor=b_col, alpha=0.10, edgecolor="none")
-                ax.axhline(sup_bot, color=b_col, linewidth=1.2, alpha=0.7)
+                ax.axhspan(sup_bot, sup_top, facecolor=b_col, alpha=0.10, edgecolor="none", zorder=ZORDER_ZONES)
+                ax.axhline(sup_bot, color=b_col, linewidth=1.2, alpha=0.7, zorder=ZORDER_ZONES)
             if mid > 0:
-                ax.axhline(mid, color=TEXT_SECONDARY, linewidth=1.0, alpha=0.45, linestyle=":")
+                ax.axhline(mid, color=TEXT_SECONDARY, linewidth=1.0, alpha=0.45, linestyle=":", zorder=ZORDER_ZONES)
 
-            # Power readout (compact)
+            # Power readout (compact) - placed with high z-order for visibility
             buy = pc.get("buy_power")
             sell = pc.get("sell_power")
             if buy is not None or sell is not None:
                 txt = f"Power {int(buy or 0)}/{int(sell or 0)}"
-                x = df_x = ax.get_xlim()
                 # Place in upper-left of price panel
                 ax.text(
                     0.01,
@@ -829,11 +966,13 @@ class ChartGenerator:
                     fontsize=10,
                     color=TEXT_PRIMARY,
                     alpha=0.85,
+                    zorder=ZORDER_TEXT_LABELS,
                 )
         except Exception:
             return
 
     def _draw_tbt_overlay(self, ax, hud: Dict) -> None:
+        """Draw trendline breakout target with explicit z-order."""
         if not self.config.show_tbt_targets:
             return
         tbt = hud.get("tbt") if isinstance(hud, dict) else None
@@ -849,7 +988,7 @@ class ChartGenerator:
                 return
 
             col = "#9a6714"  # target brown
-            ax.axhline(tp, color=col, linewidth=1.6, alpha=0.85, linestyle="--")
+            ax.axhline(tp, color=col, linewidth=1.6, alpha=0.85, linestyle="--", zorder=ZORDER_LEVEL_LINES)
             ax.text(
                 0.55,
                 tp,
@@ -861,9 +1000,64 @@ class ChartGenerator:
                 color=TEXT_PRIMARY,
                 bbox=dict(facecolor=mcolors.to_rgba(col, alpha=0.35), edgecolor="none", boxstyle="round,pad=0.25"),
                 clip_on=False,
+                zorder=ZORDER_TEXT_LABELS,
             )
         except Exception:
             return
+
+    def _draw_dashboard_legend(
+        self,
+        ax,
+        *,
+        show_vwap: bool = True,
+        show_ma: bool = True,
+        ma_periods: Optional[List[int]] = None,
+    ) -> None:
+        """Draw a consistent legend for dashboard charts.
+        
+        Fixed order: VWAP, MA20, MA50, MA200 (or configured periods).
+        Placed in upper-left corner with stable styling.
+        """
+        try:
+            from matplotlib.lines import Line2D
+            
+            legend_items: List[Tuple[Any, str]] = []
+            
+            # VWAP first (highest visual priority after candles)
+            if show_vwap:
+                legend_items.append((
+                    Line2D([0], [0], color=VWAP_COLOR, linewidth=1.8, alpha=0.75),
+                    "VWAP"
+                ))
+            
+            # Moving averages in order
+            if show_ma:
+                ma_periods_list = ma_periods or [20, 50, 200]
+                for i, period in enumerate(ma_periods_list):
+                    color = MA_COLORS[i % len(MA_COLORS)]
+                    legend_items.append((
+                        Line2D([0], [0], color=color, linewidth=1.2, alpha=0.7),
+                        f"MA{period}"
+                    ))
+            
+            if not legend_items:
+                return
+            
+            handles, labels = zip(*legend_items)
+            ax.legend(
+                handles,
+                labels,
+                loc="upper left",
+                fontsize=8,
+                framealpha=0.6,
+                facecolor=DARK_BG,
+                edgecolor=GRID_COLOR,
+                labelcolor=TEXT_PRIMARY,
+                handlelength=1.5,
+                handletextpad=0.5,
+            )
+        except Exception:
+            pass
 
     def _draw_rr_box(self, ax, idx: pd.DatetimeIndex, signal: Dict, direction: str) -> Optional[float]:
         """Draw TradingView-like risk/reward box to the right of the last bar."""
@@ -908,11 +1102,11 @@ class ChartGenerator:
         risk_usd = risk_pts * tick_value * size
         reward_usd = reward_pts * tick_value * size
 
-        # Boxes
-        ax.fill_between([x_start, x_end], risk_y0, risk_y1, color=SIGNAL_SHORT, alpha=0.22)
-        ax.fill_between([x_start, x_end], reward_y0, reward_y1, color=SIGNAL_LONG, alpha=0.20)
+        # Boxes (use ZORDER_ZONES to stay behind candles but above session shading)
+        ax.fill_between([x_start, x_end], risk_y0, risk_y1, color=SIGNAL_SHORT, alpha=0.22, zorder=ZORDER_ZONES)
+        ax.fill_between([x_start, x_end], reward_y0, reward_y1, color=SIGNAL_LONG, alpha=0.20, zorder=ZORDER_ZONES)
 
-        # Labels
+        # Labels (use ZORDER_TEXT_LABELS for visibility)
         x_mid = x_start + (x_end - x_start) / 2
         ax.text(
             x_mid,
@@ -923,6 +1117,7 @@ class ChartGenerator:
             fontsize=9,
             color=TEXT_PRIMARY,
             bbox=dict(facecolor=mcolors.to_rgba(SIGNAL_LONG, alpha=0.22), edgecolor="none", boxstyle="round,pad=0.25"),
+            zorder=ZORDER_TEXT_LABELS,
         )
         ax.text(
             x_mid,
@@ -933,6 +1128,7 @@ class ChartGenerator:
             fontsize=9,
             color=TEXT_PRIMARY,
             bbox=dict(facecolor=mcolors.to_rgba(SIGNAL_SHORT, alpha=0.22), edgecolor="none", boxstyle="round,pad=0.25"),
+            zorder=ZORDER_TEXT_LABELS,
         )
 
         return float(x_end)
@@ -1423,6 +1619,7 @@ class ChartGenerator:
         ma_periods: Optional[List[int]] = None,
         show_rsi: bool = True,
         show_pressure: bool = True,
+        title_time: Optional[str] = None,
     ) -> Optional[Path]:
         """
         Generate a TradingView-style dashboard chart.
@@ -1442,6 +1639,8 @@ class ChartGenerator:
             ma_periods: List of MA periods to display (default: [20, 50, 200])
             show_rsi: Show RSI panel
             show_pressure: Show buy/sell pressure proxy panel (signed volume histogram)
+            title_time: Optional fixed time string for title (e.g., "12:00 UTC").
+                        If None, uses current UTC time. Used for deterministic testing.
 
         Returns:
             Path to generated PNG, or None on failure
@@ -1629,11 +1828,14 @@ class ChartGenerator:
             if panel_ratios is None and volume_on and pressure_enabled:
                 panel_ratios = (7, 2, 2)
 
-            # Title
-            try:
-                now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
-            except Exception:
-                now_str = ""
+            # Title (use fixed title_time if provided for deterministic testing)
+            if title_time is not None:
+                now_str = str(title_time)
+            else:
+                try:
+                    now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
+                except Exception:
+                    now_str = ""
             label = range_label or "Dashboard"
             title = f"{symbol} {label} ({timeframe}) • {now_str}"
 
@@ -1667,7 +1869,7 @@ class ChartGenerator:
 
             fig, axlist = mpf.plot(df, **plot_kwargs)
 
-            # HUD overlays (sessions, key levels)
+            # HUD overlays (sessions, key levels, legend)
             try:
                 ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
                 if ax_price is not None:
@@ -1683,17 +1885,26 @@ class ChartGenerator:
                         if candidates:
                             merged = self._merge_levels(candidates, tick_size=0.25, merge_ticks=4)
                             self._draw_right_labels(fig, ax_price, merged, current_price=current_price, max_labels=10)
+                    
+                    # Dashboard legend (consistent order: VWAP, MAs)
+                    self._draw_dashboard_legend(
+                        ax_price,
+                        show_vwap=show_vwap,
+                        show_ma=show_ma,
+                        ma_periods=ma_periods_list if show_ma else None,
+                    )
             except Exception as e:
                 logger.debug(f"Error applying HUD to dashboard chart: {e}")
 
-            # Save
+            # Save with improved margins for Telegram readability
+            # Increased pad_inches to prevent clipping of right labels
             fig.savefig(
                 str(temp_path),
                 dpi=dpi,
                 facecolor=DARK_BG,
                 edgecolor="none",
                 bbox_inches="tight",
-                pad_inches=0.25,
+                pad_inches=0.35,  # Increased from 0.25 to reduce clipping risk
             )
             plt.close(fig)
 

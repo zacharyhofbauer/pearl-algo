@@ -85,7 +85,51 @@ python3 scripts/testing/test_mplfinance_chart.py
 
 - Ensure OHLCV columns exist and timestamps are present (see data contract above).
 
+---
 
+## Visual Regression Testing
 
+The dashboard chart has a required **visual regression test** to prevent unintended visual changes.
+
+### Running the visual regression test
+
+```bash
+pytest tests/test_dashboard_chart_visual_regression.py -v
+```
+
+### Updating the baseline image
+
+If you intentionally change the dashboard chart appearance:
+
+```bash
+python3 scripts/testing/generate_dashboard_baseline.py
+```
+
+The baseline image is stored at: `tests/fixtures/charts/dashboard_baseline.png`
+
+### Determinism hooks
+
+For testing, the dashboard chart supports a `title_time` parameter to fix the timestamp in the title:
+
+```python
+chart_path = generator.generate_dashboard_chart(
+    data=data,
+    symbol="MNQ",
+    timeframe="5m",
+    title_time="12:00 UTC",  # Fixed for deterministic testing
+)
+```
+
+---
+
+## Z-Order (Layering)
+
+Chart elements are rendered with explicit z-order for predictable layering:
+
+1. **Session shading** (lowest) - background
+2. **Zones** (supply/demand, power channel) - behind candles
+3. **Level lines** (key levels, VWAP bands) - above zones
+4. **Candles** - main content
+5. **Text labels** (highest) - always visible
 
 
