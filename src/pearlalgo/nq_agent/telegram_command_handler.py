@@ -100,6 +100,9 @@ class TelegramCommandHandler:
         self._historical_cache_dir = Path(self.state_dir.parent / "historical")
         self._historical_cache_dir.mkdir(parents=True, exist_ok=True)
         
+        # Persistent control panel message tracking (for edit-in-place navigation)
+        self._control_panel_message_id: Optional[int] = None
+        
         # Build application
         self.application = Application.builder().token(bot_token).build()
         
@@ -123,6 +126,7 @@ class TelegramCommandHandler:
         # Command handlers
         # Note: We'll add logging directly in each handler
         self.application.add_handler(CommandHandler("start", self._handle_start))
+        self.application.add_handler(CommandHandler("menu", self._handle_menu))
         self.application.add_handler(CommandHandler("help", self._handle_help))
         self.application.add_handler(CommandHandler("status", self._handle_status))
         self.application.add_handler(CommandHandler("quick_status", self._handle_quick_status))
@@ -198,6 +202,135 @@ class TelegramCommandHandler:
             return False
         
         return False
+
+    def _get_signals_file_stats(self, signals_file: Path) -> Dict:
+        """
+        Get quick diagnostics for signals.jsonl.
+
+        Returns counts of total non-empty lines, valid JSON records, and parse errors.
+        """
+        stats: Dict = {
+            "exists": False,
+            "size_bytes": 0,
+            "lines": 0,
+            "valid": 0,
+            "invalid": 0,
+        }
+
+        try:
+            if not signals_file.exists():
+                return stats
+
+            stats["exists"] = True
+            stats["size_bytes"] = int(signals_file.stat().st_size)
+            if stats["size_bytes"] == 0:
+                return stats
+
+            with open(signals_file, "r") as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line:
+                        continue
+                    stats["lines"] += 1
+                    try:
+                        json.loads(line)
+                        stats["valid"] += 1
+                    except json.JSONDecodeError:
+                        stats["invalid"] += 1
+
+            return stats
+        except Exception as e:
+            logger.debug(f"Could not compute signals file stats: {e}")
+            return stats
+
+    def _telegram_ui_state_file(self) -> Path:
+        """Path for persisted Telegram UI state (control panel message id)."""
+        return self.state_dir / "telegram_ui_state.json"
+
+    def _load_telegram_ui_state(self) -> Dict:
+        """Load persisted Telegram UI state (best-effort)."""
+        path = self._telegram_ui_state_file()
+        try:
+            if not path.exists():
+                return {}
+            return json.loads(path.read_text())
+        except Exception as e:
+            logger.debug(f"Could not load telegram ui state: {e}")
+            return {}
+
+    def _save_telegram_ui_state(self, data: Dict) -> None:
+        """Persist Telegram UI state (best-effort)."""
+        path = self._telegram_ui_state_file()
+        try:
+            path.write_text(json.dumps(data, indent=2))
+        except Exception as e:
+            logger.warning(f"Could not save telegram ui state: {e}")
+
+    async def _upsert_control_panel_message(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        message: str,
+        reply_markup: Optional[InlineKeyboardMarkup] = None,
+        parse_mode: str = "Markdown",
+    ) -> None:
+        """
+        Ensure there is a single persistent Control Panel message (best-effort).
+
+        - If a previous panel message_id is known, edit it in place.
+        - Otherwise send a new message and store its message_id.
+        - Attempt to pin the panel message (ignore failures).
+        """
+        if not update.effective_chat:
+            return
+
+        chat_id = update.effective_chat.id
+        ui_state = self._load_telegram_ui_state()
+        stored_chat = ui_state.get("chat_id")
+        stored_msg_id = ui_state.get("control_panel_message_id")
+
+        # Try edit existing panel (if it belongs to this chat)
+        if stored_msg_id and str(stored_chat) == str(chat_id):
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=int(stored_msg_id),
+                    text=message,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                )
+                return
+            except Exception as e:
+                logger.debug(f"Could not edit control panel message, will send a new one: {e}")
+
+        # Send new panel message
+        sent = await context.bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+
+        # Persist + attempt to pin
+        try:
+            self._save_telegram_ui_state(
+                {
+                    "chat_id": str(chat_id),
+                    "control_panel_message_id": int(sent.message_id),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        except Exception:
+            pass
+
+        try:
+            await context.bot.pin_chat_message(
+                chat_id=chat_id,
+                message_id=sent.message_id,
+                disable_notification=True,
+            )
+        except Exception as e:
+            logger.debug(f"Could not pin control panel message: {e}")
     
     async def _check_authorized(self, update: Update) -> bool:
         """Check if update is from authorized chat."""
@@ -246,6 +379,69 @@ class TelegramCommandHandler:
         reply_markup = self._get_main_menu_buttons(agent_running=agent_running, gateway_running=gateway_running)
         logger.info(f"Sending /start menu with {len(reply_markup.inline_keyboard)} button rows to chat {update.effective_chat.id}")
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+    
+    async def _handle_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /menu command - persistent control panel that edits in place."""
+        logger.info(f"Received /menu command from chat {update.effective_chat.id}")
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        agent_running = self._is_agent_process_running()
+        gateway_status = self.service_controller.get_gateway_status()
+        gateway_running = gateway_status.get("process_running", False)
+        
+        now = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+        message = (
+            "🎛️ *Control Panel*\n\n"
+            f"*Status at {now}:*\n"
+            f"{'🟢' if agent_running else '🔴'} Agent: {'RUNNING' if agent_running else 'STOPPED'}\n"
+            f"{'🟢' if gateway_running else '🔴'} Gateway: {'RUNNING' if gateway_running else 'STOPPED'}\n\n"
+            "💡 _Use buttons below. This message updates in-place._\n"
+            "_Tip: Pin this message so it stays at the top!_"
+        )
+        
+        reply_markup = self._get_control_panel_buttons(agent_running=agent_running, gateway_running=gateway_running)
+        
+        # Try to edit existing control panel message, or send a new one
+        chat_id = update.effective_chat.id
+        if self._control_panel_message_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=self._control_panel_message_id,
+                    text=message,
+                    parse_mode="Markdown",
+                    reply_markup=reply_markup,
+                )
+                logger.info(f"Edited control panel message {self._control_panel_message_id}")
+                # Delete the /menu command message to reduce clutter
+                if update.message:
+                    try:
+                        await update.message.delete()
+                    except Exception:
+                        pass
+                return
+            except Exception as e:
+                logger.warning(f"Could not edit control panel message: {e}")
+                self._control_panel_message_id = None
+        
+        # Send new control panel message
+        sent = await context.bot.send_message(
+            chat_id=chat_id,
+            text=message,
+            parse_mode="Markdown",
+            reply_markup=reply_markup,
+        )
+        self._control_panel_message_id = sent.message_id
+        logger.info(f"Sent new control panel message {self._control_panel_message_id}")
+        
+        # Delete the /menu command message to reduce clutter
+        if update.message:
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
     
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command."""
@@ -318,8 +514,21 @@ class TelegramCommandHandler:
             
             if "cycle_count" in state:
                 message += f"🔄 Cycles: {state.get('cycle_count', 0):,}\n"
-            if "signal_count" in state:
-                message += f"🔔 Signals: {state.get('signal_count', 0)}\n"
+            # Show signal persistence health: stored signals vs state count
+            state_signal_count = int(state.get("signal_count", 0) or 0)
+            try:
+                signals_file = get_signals_file(self.state_dir)
+                sig_stats = self._get_signals_file_stats(signals_file)
+                stored_count = int(sig_stats.get("valid", 0) or 0)
+                message += f"🔔 Signals (saved/state): {stored_count}/{state_signal_count}\n"
+                invalid = int(sig_stats.get("invalid", 0) or 0)
+                if invalid > 0:
+                    message += f"⚠️ Signal log parse errors: {invalid}\n"
+                if state_signal_count > 0 and stored_count == 0 and bool(sig_stats.get("exists")):
+                    message += "⚠️ No saved signal history found yet (signals.jsonl empty or invalid).\n"
+            except Exception as e:
+                logger.debug(f"Could not compute signal persistence health for /status: {e}")
+                message += f"🔔 Signals: {state_signal_count}\n"
             if "buffer_size" in state:
                 message += f"📊 Buffer: {state.get('buffer_size', 0)} bars\n"
 
@@ -494,15 +703,31 @@ class TelegramCommandHandler:
         
         # Send typing indicator
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        # For explicit /signals commands (not button callbacks), default to newest page.
+        if not update.callback_query and hasattr(context, "user_data"):
+            context.user_data["signals_page"] = 0
         
         try:
             signals_file = get_signals_file(self.state_dir)
+            # Pull state signal_count for mismatch diagnostics (state can show signals even if file is empty)
+            state_signal_count = 0
+            try:
+                state_file = get_state_file(self.state_dir)
+                if state_file.exists():
+                    with open(state_file, "r") as sf:
+                        st = json.load(sf)
+                    state_signal_count = int(st.get("signal_count", 0) or 0)
+            except Exception:
+                state_signal_count = 0
+
             if not signals_file.exists():
                 reply_markup = self._get_back_to_menu_button()
                 await self._send_message_or_edit(
                     update, context,
                     "📭 *No signals found*\n\n"
                     "The signals file doesn't exist yet.\n"
+                    f"*State reports:* {state_signal_count} signal(s)\n\n"
                     "Signals will appear here once the agent generates trading opportunities.",
                     reply_markup=reply_markup
                 )
@@ -516,6 +741,7 @@ class TelegramCommandHandler:
                     update, context,
                     "📭 *No signals found*\n\n"
                     "The signals file exists but is empty.\n"
+                    f"*State reports:* {state_signal_count} signal(s)\n\n"
                     "This could mean:\n"
                     "• Signals haven't been generated yet\n"
                     "• Signals were generated but not saved (check logs)\n"
@@ -559,11 +785,16 @@ class TelegramCommandHandler:
             
             if not signals:
                 reply_markup = self._get_back_to_menu_button()
+                sig_stats = self._get_signals_file_stats(signals_file)
+                lines = int(sig_stats.get("lines", 0) or 0)
+                invalid = int(sig_stats.get("invalid", 0) or 0)
                 await self._send_message_or_edit(
                     update, context,
                     f"📭 *No valid signals found*\n\n"
-                    f"File exists ({file_size} bytes) but contains no valid signal records.\n"
-                    f"Check logs for parsing errors.",
+                    f"File exists ({file_size} bytes) but has 0 valid signal records.\n"
+                    f"*State reports:* {state_signal_count} signal(s)\n"
+                    f"*Lines parsed:* {lines} • *Invalid JSON lines:* {invalid}\n\n"
+                    f"💡 Try: `python3 scripts/testing/check_signals.py`",
                     reply_markup=reply_markup
                 )
                 return
@@ -613,16 +844,34 @@ class TelegramCommandHandler:
                     continue
                 filtered.append(sig_data)
 
-            # Show newest first (last 10 of filtered)
-            recent_signals = filtered[-10:]
-            recent_signals.reverse()
-
             total_count = len(signals)
             filtered_count = len(filtered)
 
+            # Paging (newest-first)
+            page_size = 10
+            try:
+                page = int(user_data.get("signals_page", 0) or 0)
+            except Exception:
+                page = 0
+            if page < 0:
+                page = 0
+
+            total_pages = max(1, (filtered_count + page_size - 1) // page_size) if filtered_count > 0 else 1
+            if page > total_pages - 1:
+                page = total_pages - 1
+
+            # Persist clamped page
+            if hasattr(context, "user_data"):
+                context.user_data["signals_page"] = page
+
+            end = filtered_count - (page * page_size)
+            start = max(0, end - page_size)
+            page_signals = filtered[start:end]
+            page_signals.reverse()
+
             message = "🔔 *Signals*\n\n"
             message += f"*Stored:* {total_count}  |  *Matching filters:* {filtered_count}\n"
-            message += f"*Showing:* {len(recent_signals)} newest\n\n"
+            message += f"*Page:* {page + 1}/{total_pages}  |  *Showing:* {len(page_signals)}\n\n"
             message += f"*Filters:* dir={dir_filter}, type={type_filter}, conf≥{int(min_conf*100)}%\n\n"
 
             keyboard: List[List[InlineKeyboardButton]] = []
@@ -649,10 +898,31 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("✅ Other" if type_filter == "other" else "Other", callback_data="signals:settype:other"),
             ])
 
-            if not recent_signals:
+            # Paging + quick actions
+            pager_row: List[InlineKeyboardButton] = []
+            if filtered_count > 0:
+                if page < total_pages - 1:
+                    pager_row.append(InlineKeyboardButton("⬅️ Older", callback_data="signals:page:older"))
+                else:
+                    pager_row.append(InlineKeyboardButton("⬅️ Older", callback_data="signals:page:older"))
+
+                if page > 0:
+                    pager_row.append(InlineKeyboardButton("Newer ➡️", callback_data="signals:page:newer"))
+                else:
+                    pager_row.append(InlineKeyboardButton("Newer ➡️", callback_data="signals:page:newer"))
+
+                pager_row.append(InlineKeyboardButton("🔝 Newest", callback_data="signals:page:newest"))
+                keyboard.append(pager_row)
+
+            keyboard.append([
+                InlineKeyboardButton("🆕 Last Signal", callback_data="last_signal"),
+                InlineKeyboardButton("📊 Active Trades", callback_data="active_trades"),
+            ])
+
+            if not page_signals:
                 message += "📭 No signals match these filters.\n"
             else:
-                for i, sig_data in enumerate(recent_signals, 1):
+                for i, sig_data in enumerate(page_signals, 1):
                     signal = sig_data.get("signal", {}) or {}
                     signal_type = signal.get("type", "unknown")
                     direction = (signal.get("direction", "long") or "long").upper()
@@ -2887,6 +3157,46 @@ class TelegramCommandHandler:
         
         return InlineKeyboardMarkup(keyboard)
     
+    def _get_control_panel_buttons(self, agent_running: bool = False, gateway_running: bool = False) -> InlineKeyboardMarkup:
+        """Generate control panel buttons (compact layout with pin option)."""
+        keyboard = []
+        
+        # Primary actions row
+        if agent_running:
+            keyboard.append([
+                InlineKeyboardButton("⏹️ Stop", callback_data='stop_agent'),
+                InlineKeyboardButton("🔄 Restart", callback_data='restart_agent'),
+                InlineKeyboardButton("📊 Status", callback_data='status'),
+            ])
+        else:
+            keyboard.append([
+                InlineKeyboardButton("▶️ Start Agent", callback_data='start_agent'),
+                InlineKeyboardButton("📊 Status", callback_data='status'),
+            ])
+        
+        # Quick access row
+        keyboard.append([
+            InlineKeyboardButton("🔔 Signals", callback_data='signals'),
+            InlineKeyboardButton("📈 Perf", callback_data='performance'),
+            InlineKeyboardButton("🛡 Data", callback_data='data_quality'),
+        ])
+        
+        # Gateway + secondary
+        gateway_icon = "✅" if gateway_running else "❌"
+        keyboard.append([
+            InlineKeyboardButton(f"🔌 GW {gateway_icon}", callback_data='gateway_status'),
+            InlineKeyboardButton("⚙️ Config", callback_data='config'),
+            InlineKeyboardButton("💚 Health", callback_data='health'),
+        ])
+        
+        # Control panel actions
+        keyboard.append([
+            InlineKeyboardButton("🔄 Refresh", callback_data='refresh_panel'),
+            InlineKeyboardButton("📌 Pin Menu", callback_data='pin_panel'),
+        ])
+        
+        return InlineKeyboardMarkup(keyboard)
+    
     def _get_gateway_buttons(self, gateway_running: bool = False) -> InlineKeyboardMarkup:
         """Generate gateway control buttons."""
         keyboard = []
@@ -3126,9 +3436,25 @@ class TelegramCommandHandler:
             await self._handle_performance_export(update, context, kind)
         elif callback_data == 'signals':
             await self._handle_signals(update, context)
+        elif callback_data.startswith("signals:page:"):
+            action = callback_data.split("signals:page:", 1)[1].strip()
+            if hasattr(context, "user_data"):
+                try:
+                    cur = int(context.user_data.get("signals_page", 0) or 0)
+                except Exception:
+                    cur = 0
+                if action == "older":
+                    cur += 1
+                elif action == "newer":
+                    cur = max(0, cur - 1)
+                elif action == "newest":
+                    cur = 0
+                context.user_data["signals_page"] = cur
+            await self._handle_signals(update, context)
         elif callback_data.startswith("signals:setdir:"):
             if hasattr(context, "user_data"):
                 context.user_data["signals_dir"] = callback_data.split("signals:setdir:", 1)[1]
+                context.user_data["signals_page"] = 0
             await self._handle_signals(update, context)
         elif callback_data.startswith("signals:setconf:"):
             if hasattr(context, "user_data"):
@@ -3137,10 +3463,12 @@ class TelegramCommandHandler:
                     context.user_data["signals_min_conf"] = float(raw)
                 except Exception:
                     context.user_data["signals_min_conf"] = 0.0
+                context.user_data["signals_page"] = 0
             await self._handle_signals(update, context)
         elif callback_data.startswith("signals:settype:"):
             if hasattr(context, "user_data"):
                 context.user_data["signals_type"] = callback_data.split("signals:settype:", 1)[1]
+                context.user_data["signals_page"] = 0
             await self._handle_signals(update, context)
         elif callback_data == 'config':
             await self._handle_config(update, context)
@@ -3168,10 +3496,31 @@ class TelegramCommandHandler:
         elif callback_data == 'start' or callback_data == 'main_menu':
             # Main menu - always return to start
             await self._handle_start(update, context)
+        elif callback_data == 'refresh_panel':
+            # Refresh control panel in place
+            await self._handle_menu(update, context)
+        elif callback_data == 'pin_panel':
+            # Pin the control panel message
+            chat_id = update.effective_chat.id
+            if self._control_panel_message_id:
+                try:
+                    await context.bot.pin_chat_message(
+                        chat_id=chat_id,
+                        message_id=self._control_panel_message_id,
+                        disable_notification=True,
+                    )
+                    await query.answer("📌 Control panel pinned!")
+                except Exception as e:
+                    logger.warning(f"Could not pin control panel: {e}")
+                    await query.answer(f"Could not pin: {e}", show_alert=True)
+            else:
+                await query.answer("No control panel message to pin", show_alert=True)
         elif callback_data == 'help':
             await self._handle_help(update, context)
         elif callback_data == 'last_signal':
             await self._handle_last_signal(update, context)
+        elif callback_data == 'active_trades':
+            await self._handle_active_trades(update, context)
         elif callback_data == 'test_signal':
             await self._handle_test_signal(update, context)
         elif callback_data == 'backtest':

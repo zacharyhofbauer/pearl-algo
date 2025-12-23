@@ -50,7 +50,7 @@ class ChartConfig:
     max_signals_displayed: int = 50
     cluster_signals: bool = True
     show_performance_metrics: bool = True
-    timeframe: str = "1m"
+    timeframe: str = "5m"  # Default to 5m for better visual context (HTF/LTF still used for analysis)
     show_entry_sl_tp_bands: bool = True
     candle_width: float = 0.8  # mplfinance uses 0.8 as default (80% of interval)
 
@@ -307,7 +307,7 @@ class ChartGenerator:
         signal: Dict,
         buffer_data: pd.DataFrame,
         symbol: str = "MNQ",
-        timeframe: str = "1m",
+        timeframe: Optional[str] = None,
     ) -> Optional[Path]:
         """Generate entry chart using mplfinance."""
         if not MPLFINANCE_AVAILABLE:
@@ -345,7 +345,8 @@ class ChartGenerator:
             signal_type = signal.get("type", "unknown").replace("_", " ").title()
             is_test = signal.get("reason", "").lower().startswith("test")
             title_prefix = "🧪 TEST: " if is_test else ""
-            title = f"{title_prefix}{symbol} {direction.upper()} {signal_type} - Entry Chart ({timeframe})"
+            tf_label = timeframe or self.config.timeframe
+            title = f"{title_prefix}{symbol} {direction.upper()} {signal_type} - Entry Chart ({tf_label})"
             
             # Save to temp file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
@@ -390,7 +391,7 @@ class ChartGenerator:
         pnl: float,
         buffer_data: pd.DataFrame,
         symbol: str = "MNQ",
-        timeframe: str = "1m",
+        timeframe: Optional[str] = None,
     ) -> Optional[Path]:
         """Generate exit chart using mplfinance."""
         if not MPLFINANCE_AVAILABLE:
@@ -438,7 +439,8 @@ class ChartGenerator:
             # Create title
             signal_type = signal.get("type", "unknown").replace("_", " ").title()
             result = "WIN" if pnl > 0 else "LOSS"
-            title = f"{symbol} {direction.upper()} {signal_type} - Exit ({result}) ({timeframe})"
+            tf_label = timeframe or self.config.timeframe
+            title = f"{symbol} {direction.upper()} {signal_type} - Exit ({result}) ({tf_label})"
             
             # Save to temp file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')

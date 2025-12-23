@@ -20,6 +20,7 @@ from pearlalgo.utils.paths import (
     get_utc_timestamp,
     parse_utc_timestamp,
 )
+from pearlalgo.nq_agent.state_manager import _to_json_safe
 
 if TYPE_CHECKING:
     from pearlalgo.nq_agent.state_manager import NQAgentStateManager
@@ -94,11 +95,36 @@ class PerformanceTracker:
                 "signal_id": signal_id,
                 "timestamp": get_utc_timestamp(),
                 "status": "generated",
-                "signal": signal,
+                "signal": _to_json_safe(signal),
             }
             try:
                 with open(self.signals_file, "a") as f:
-                    f.write(json.dumps(signal_record) + "\n")
+                    try:
+                        payload = json.dumps(signal_record)
+                    except TypeError as e:
+                        logger.error(
+                            f"Signal serialization failed (fallback write), writing minimal record: {e}",
+                            extra={"signal_id": signal_id},
+                        )
+                        minimal = {
+                            "signal_id": signal_id,
+                            "timestamp": get_utc_timestamp(),
+                            "status": "generated",
+                            "signal": {
+                                "signal_id": signal_id,
+                                "timestamp": str(signal.get("timestamp") or ""),
+                                "symbol": str(signal.get("symbol") or ""),
+                                "type": str(signal.get("type") or "unknown"),
+                                "direction": str(signal.get("direction") or "unknown"),
+                                "entry_price": float(signal.get("entry_price") or 0.0),
+                                "stop_loss": float(signal.get("stop_loss") or 0.0),
+                                "take_profit": float(signal.get("take_profit") or 0.0),
+                                "confidence": float(signal.get("confidence") or 0.0),
+                                "reason": str(signal.get("reason") or ""),
+                            },
+                        }
+                        payload = json.dumps(minimal)
+                    f.write(payload + "\n")
             except Exception as e:
                 logger.error(f"Error tracking signal: {e}")
 

@@ -7,6 +7,7 @@ Manages state persistence for the NQ agent service.
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -19,6 +20,65 @@ from pearlalgo.utils.paths import (
 )
 
 # Import get_utc_timestamp is already in the import above
+
+
+def _to_json_safe(obj):
+    """
+    Recursively convert common non-JSON-serializable types into JSON-safe primitives.
+
+    Signals often contain numpy/pandas scalars (e.g., np.float64, pd.Timestamp) which
+    break json.dumps() and cause signals.jsonl to remain empty.
+    """
+    # JSON primitives
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+
+    # Containers
+    if isinstance(obj, dict):
+        return {str(k): _to_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_to_json_safe(v) for v in obj]
+
+    # Datetime-like
+    if isinstance(obj, (datetime, date)):
+        try:
+            return obj.isoformat()
+        except Exception:
+            return str(obj)
+
+    # Paths
+    if isinstance(obj, Path):
+        return str(obj)
+
+    # numpy scalars/arrays
+    try:
+        import numpy as np  # type: ignore
+
+        if isinstance(obj, np.generic):
+            return obj.item()
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+    except Exception:
+        pass
+
+    # pandas timestamps/containers
+    try:
+        import pandas as pd  # type: ignore
+
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        if isinstance(obj, pd.Timedelta):
+            return float(obj.total_seconds())
+        if isinstance(obj, pd.Series):
+            return {str(k): _to_json_safe(v) for k, v in obj.to_dict().items()}
+        if isinstance(obj, pd.DataFrame):
+            # Signals should not include large dataframes; if they do, keep it bounded.
+            return [_to_json_safe(r) for r in obj.to_dict(orient="records")]
+    except Exception:
+        pass
+
+    # Fallback
+    return str(obj)
 
 
 class NQAgentStateManager:
@@ -70,11 +130,38 @@ class NQAgentStateManager:
                 "signal_id": signal_id,
                 "timestamp": get_utc_timestamp(),
                 "status": "generated",  # Default status for new signals
-                "signal": signal,  # Store full signal dict
+                "signal": _to_json_safe(signal),  # Store JSON-safe signal dict
             }
-            
+
+            try:
+                payload = json.dumps(signal_record)
+            except TypeError as e:
+                # Last resort: write a minimal record so the signals view never goes empty.
+                logger.error(
+                    f"Signal serialization failed, writing minimal record: {e}",
+                    extra={"signal_id": signal_id},
+                )
+                minimal = {
+                    "signal_id": signal_id,
+                    "timestamp": get_utc_timestamp(),
+                    "status": "generated",
+                    "signal": {
+                        "signal_id": signal_id,
+                        "timestamp": str(signal.get("timestamp") or ""),
+                        "symbol": str(signal.get("symbol") or ""),
+                        "type": str(signal.get("type") or "unknown"),
+                        "direction": str(signal.get("direction") or "unknown"),
+                        "entry_price": float(signal.get("entry_price") or 0.0),
+                        "stop_loss": float(signal.get("stop_loss") or 0.0),
+                        "take_profit": float(signal.get("take_profit") or 0.0),
+                        "confidence": float(signal.get("confidence") or 0.0),
+                        "reason": str(signal.get("reason") or ""),
+                    },
+                }
+                payload = json.dumps(minimal)
+
             with open(self.signals_file, "a") as f:
-                f.write(json.dumps(signal_record) + "\n")
+                f.write(payload + "\n")
             
             logger.debug(f"Saved signal {signal_id} to {self.signals_file}")
         except Exception as e:
