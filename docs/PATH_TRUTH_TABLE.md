@@ -72,11 +72,20 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `config/config.yaml` – primary service + strategy configuration
   - `.env` (from `env.example`) – environment variables (Telegram, IBKR, provider selection)
 - **Python modules**:
-  - `pearlalgo.config.config_loader`
-  - `pearlalgo.config.settings`
+  - `pearlalgo.config.config_file` – unified YAML loader with env substitution
+  - `pearlalgo.config.config_loader` – service config with defaults
+  - `pearlalgo.config.settings` – Pydantic settings for infrastructure
 - **Docs**:
   - `docs/PROJECT_SUMMARY.md` (configuration section)
   - `docs/NQ_AGENT_GUIDE.md` (configuration snippets)
+
+## Maintenance
+
+- **Logical component**: Repository hygiene and cleanup
+- **Shell scripts** (`scripts/maintenance/`):
+  - `purge_runtime_artifacts.sh` – safe cleanup of runtime/build artifacts (requires `--yes` flag)
+- **Docs**:
+  - `docs/SCRIPTS_TAXONOMY.md` (maintenance section)
 
 ## Utilities / Cross‑cutting Concerns
 
