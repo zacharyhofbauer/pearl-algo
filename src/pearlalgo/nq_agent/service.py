@@ -28,6 +28,7 @@ from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
+from pearlalgo.utils.market_hours import get_market_hours
 
 
 class NQAgentService:
@@ -419,7 +420,12 @@ class NQAgentService:
                         stale_threshold_seconds = self.stale_data_threshold_minutes * 60
                         data_fresh = age_seconds < stale_threshold_seconds
                 
-                market_open = self.strategy.scanner.is_market_hours()
+                strategy_session_open = self.strategy.scanner.is_market_hours()
+                futures_market_open = False
+                try:
+                    futures_market_open = bool(get_market_hours().is_market_open())
+                except Exception:
+                    futures_market_open = False
                 regime_info = "unknown"
                 if hasattr(self.strategy, 'scanner') and hasattr(self.strategy.scanner, 'regime_detector'):
                     # Try to get last detected regime (would need to store it)
@@ -431,7 +437,11 @@ class NQAgentService:
                         "cycle": self.cycle_count,
                         "signals": len(signals),
                         "data_fresh": data_fresh,
-                        "market_open": market_open,
+                        # Keep legacy field name for backward compatibility, but make semantics explicit.
+                        # Historically this has meant the strategy trading session window (09:30–16:00 ET).
+                        "market_open": strategy_session_open,
+                        "strategy_session_open": strategy_session_open,
+                        "futures_market_open": futures_market_open,
                         "buffer_size": self.data_fetcher.get_buffer_size(),
                         "error_count": self.error_count,
                         "consecutive_errors": self.consecutive_errors,
@@ -639,6 +649,19 @@ class NQAgentService:
         except Exception:
             pass  # Ignore errors when getting latest bar for status
 
+        # Market/session status
+        futures_market_open = None
+        try:
+            futures_market_open = bool(get_market_hours().is_market_open())
+        except Exception:
+            futures_market_open = None
+
+        strategy_session_open = None
+        try:
+            strategy_session_open = bool(self.strategy.scanner.is_market_hours())
+        except Exception:
+            strategy_session_open = None
+
         return {
             "running": self.running,
             "paused": self.paused,
@@ -652,6 +675,8 @@ class NQAgentService:
             "connection_failures": self.connection_failures,
             "connection_status": connection_status,
             "buffer_size": self.data_fetcher.get_buffer_size(),
+            "futures_market_open": futures_market_open,
+            "strategy_session_open": strategy_session_open,
             "performance": performance,
             "data_source_health": data_source_health,
             "last_successful_cycle": (
@@ -697,12 +722,25 @@ class NQAgentService:
             "last_successful_cycle": (
                 self.last_successful_cycle.isoformat() if self.last_successful_cycle else None
             ),
+            # Market/session status used by Telegram UI and operators.
+            # - futures_market_open: CME ETH + maintenance break semantics
+            # - strategy_session_open: 09:30–16:00 ET strategy window
+            "futures_market_open": None,
+            "strategy_session_open": None,
             "config": {
                 "symbol": self.config.symbol,
                 "timeframe": self.config.timeframe,
                 "scan_interval": self.config.scan_interval,
             },
         }
+        try:
+            state["futures_market_open"] = bool(get_market_hours().is_market_open())
+        except Exception:
+            state["futures_market_open"] = None
+        try:
+            state["strategy_session_open"] = bool(self.strategy.scanner.is_market_hours())
+        except Exception:
+            state["strategy_session_open"] = None
         self.state_manager.save_state(state)
 
     async def _check_heartbeat(self) -> None:

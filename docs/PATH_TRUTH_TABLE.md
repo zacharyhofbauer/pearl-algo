@@ -70,7 +70,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Logical component**: Configuration and settings
 - **Config files**:
   - `config/config.yaml` – primary service + strategy configuration
-  - `.env` / `.env.example` – environment variables (Telegram, IBKR, provider selection)
+  - `.env` (from `env.example`) – environment variables (Telegram, IBKR, provider selection)
 - **Python modules**:
   - `pearlalgo.config.config_loader`
   - `pearlalgo.config.settings`

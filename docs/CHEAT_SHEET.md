@@ -17,6 +17,13 @@
 
 - **`.env` essentials**
   ```bash
+  # Copy template, then edit real values
+  cp env.example .env
+  ```
+
+  **Key concepts (don’t confuse these):**
+  - **StrategySessionOpen**: when the strategy is allowed to generate signals (09:30–16:00 ET).\n+  - **FuturesMarketOpen**: when CME futures data is generally available (ETH Sun 18:00 ET → Fri 17:00 ET, with Mon–Thu 17:00–18:00 ET maintenance break).\n+
+  ```bash
   TELEGRAM_BOT_TOKEN=your_bot_token_here
   TELEGRAM_CHAT_ID=your_chat_id_here
 

@@ -59,7 +59,8 @@ The MNQ Trading Agent is designed to:
 
 - **Symbol**: Mini E-mini NASDAQ-100 Futures (MNQ) - 1/10th size of NQ
 - **Timeframe**: 1-minute bars for intraday scalping/swings
-- **Trading Hours**: 09:30 - 16:00 ET (avoids lunch lull 11:30-13:00)
+- **Trading session (StrategySessionOpen)**: 09:30 - 16:00 ET (avoids lunch lull 11:30-13:00)
+- **Futures market window (FuturesMarketOpen)**: CME ETH Sun 18:00 ET → Fri 17:00 ET (Mon–Thu 17:00–18:00 ET maintenance break)
 - **Market**: CME Group futures exchange
 - **Trading Style**: Prop firm - 5-15 contracts per trade, 1% risk, quick scalps
 

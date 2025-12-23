@@ -2364,14 +2364,18 @@ class TelegramCommandHandler:
                 state_last_updated_utc = None
                 state_age_seconds = None
 
-        # Market open/closed is relevant for stale-data interpretation
-        market_open = None
-        try:
-            from pearlalgo.utils.market_hours import get_market_hours
+        # Market/session status is relevant for stale-data interpretation and signal expectations.
+        # Prefer persisted state values when available (so the UI reflects what the agent believed),
+        # but fall back to live evaluation if missing.
+        futures_market_open = state.get("futures_market_open")
+        strategy_session_open = state.get("strategy_session_open")
+        if futures_market_open is None:
+            try:
+                from pearlalgo.utils.market_hours import get_market_hours
 
-            market_open = bool(get_market_hours().is_market_open())
-        except Exception:
-            market_open = None
+                futures_market_open = bool(get_market_hours().is_market_open())
+            except Exception:
+                futures_market_open = None
 
         # Data freshness metadata (populated by service._save_state)
         data_fresh = state.get("data_fresh")
@@ -2416,7 +2420,7 @@ class TelegramCommandHandler:
             likely_causes.append("Gateway down (start/restart gateway)")
         if gateway_running and not gateway_api_ready:
             likely_causes.append("Gateway still authenticating / 2FA / API not ready")
-        if data_fresh is False and (market_open is True or market_open is None):
+        if data_fresh is False and (futures_market_open is True or futures_market_open is None):
             likely_causes.append("IBKR market data entitlement / delayed feed / connectivity issue")
         if buffer_size < 10:
             likely_causes.append("Historical fetch failing (HMDS pacing/outage) or connection issue")
@@ -2439,12 +2443,12 @@ class TelegramCommandHandler:
         else:
             message += "⚪ *Latest Bar Age:* unknown\n"
 
-        if market_open is True:
-            message += "🟢 *Market:* OPEN\n"
-        elif market_open is False:
-            message += "🔴 *Market:* CLOSED\n"
-        else:
-            message += "⚪ *Market:* UNKNOWN\n"
+        futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
+        futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "UNKNOWN"
+        strat_emoji = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪"
+        strat_text = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "UNKNOWN"
+        message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}\n"
+        message += f"{strat_emoji} *StrategySessionOpen:* {strat_text}\n"
 
         if state_last_updated_utc:
             message += f"\n🗂️ *State Updated:* {state_last_updated_utc.isoformat(timespec='seconds')}\n"

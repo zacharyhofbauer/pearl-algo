@@ -68,6 +68,11 @@ def load_service_config(config_path: Optional[Path] = None) -> Dict:
             "historical_hours": 2,
             "multitimeframe_5m_hours": 4,
             "multitimeframe_15m_hours": 12,
+            # Multi-timeframe fetch caching (default OFF).
+            # When enabled, 5m/15m history is refreshed on a TTL rather than every cycle.
+            "enable_mtf_cache": False,
+            "mtf_refresh_seconds_5m": 300,
+            "mtf_refresh_seconds_15m": 900,
             # Default to Level 1 only unless explicitly enabled in config.yaml.
             # Most prop-firm feeds are Level 1; Level 2 requires additional entitlements.
             "use_level2_data": False,

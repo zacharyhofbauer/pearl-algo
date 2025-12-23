@@ -57,6 +57,17 @@ class NQAgentDataFetcher:
         self._historical_hours = data_settings.get("historical_hours", 2)
         self._multitimeframe_5m_hours = data_settings.get("multitimeframe_5m_hours", 4)
         self._multitimeframe_15m_hours = data_settings.get("multitimeframe_15m_hours", 12)
+
+        # MTF caching (default OFF) - reduces repeated 5m/15m historical fetches when scan_interval is fast.
+        self._enable_mtf_cache: bool = bool(data_settings.get("enable_mtf_cache", False))
+        self._mtf_refresh_seconds_5m: int = int(data_settings.get("mtf_refresh_seconds_5m", 300) or 300)
+        self._mtf_refresh_seconds_15m: int = int(data_settings.get("mtf_refresh_seconds_15m", 900) or 900)
+        self._mtf_last_refresh_5m: Optional[datetime] = None
+        self._mtf_last_refresh_15m: Optional[datetime] = None
+        self._mtf_cache_hits_5m: int = 0
+        self._mtf_cache_hits_15m: int = 0
+        self._mtf_cache_misses_5m: int = 0
+        self._mtf_cache_misses_15m: int = 0
         
         # Initialize data quality checker
         stale_threshold_minutes = data_settings.get("stale_data_threshold_minutes", 10)
@@ -72,7 +83,10 @@ class NQAgentDataFetcher:
         # Store last market data for status updates
         self._last_market_data: Optional[Dict] = None
 
-        logger.info(f"NQAgentDataFetcher initialized with provider={type(data_provider).__name__}")
+        logger.info(
+            f"NQAgentDataFetcher initialized with provider={type(data_provider).__name__}, "
+            f"mtf_cache_enabled={self._enable_mtf_cache}"
+        )
 
     @async_retry_with_backoff(
         max_retries=3,
@@ -312,7 +326,7 @@ class NQAgentDataFetcher:
                 if len(self._data_buffer) > self._buffer_size:
                     self._data_buffer = self._data_buffer.tail(self._buffer_size).reset_index(drop=True)
 
-            # Fetch multi-timeframe data
+            # Fetch multi-timeframe data (optionally cached)
             df_5m, df_15m = await self._fetch_multitimeframe_data(end)
 
             # Store market data for status updates
@@ -352,6 +366,82 @@ class NQAgentDataFetcher:
         Returns:
             Tuple of (df_5m, df_15m)
         """
+        if self._enable_mtf_cache:
+            return await self._fetch_multitimeframe_data_cached(end)
+        return await self._fetch_multitimeframe_data_uncached(end)
+
+    async def _fetch_multitimeframe_data_cached(self, end: datetime) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Fetch 5m/15m data using TTL caching (default OFF)."""
+        now = end
+
+        def _expired(last: Optional[datetime], ttl_s: int) -> bool:
+            if last is None:
+                return True
+            try:
+                return (now - last).total_seconds() >= float(ttl_s)
+            except Exception:
+                return True
+
+        need_5m = _expired(self._mtf_last_refresh_5m, self._mtf_refresh_seconds_5m) or self._data_buffer_5m is None
+        need_15m = _expired(self._mtf_last_refresh_15m, self._mtf_refresh_seconds_15m) or self._data_buffer_15m is None
+
+        if not need_5m:
+            self._mtf_cache_hits_5m += 1
+        else:
+            self._mtf_cache_misses_5m += 1
+        if not need_15m:
+            self._mtf_cache_hits_15m += 1
+        else:
+            self._mtf_cache_misses_15m += 1
+
+        # If neither needs refresh, return cached copies.
+        if (not need_5m) and (not need_15m):
+            return (
+                self._data_buffer_5m.copy() if self._data_buffer_5m is not None else pd.DataFrame(),
+                self._data_buffer_15m.copy() if self._data_buffer_15m is not None else pd.DataFrame(),
+            )
+
+        # Otherwise refresh whichever is stale, leaving the other intact.
+        df_5m_new = pd.DataFrame()
+        df_15m_new = pd.DataFrame()
+        if need_5m or need_15m:
+            logger.debug(
+                "Refreshing MTF cache",
+                extra={
+                    "need_5m": need_5m,
+                    "need_15m": need_15m,
+                    "hits_5m": self._mtf_cache_hits_5m,
+                    "hits_15m": self._mtf_cache_hits_15m,
+                    "misses_5m": self._mtf_cache_misses_5m,
+                    "misses_15m": self._mtf_cache_misses_15m,
+                },
+            )
+
+        # Refresh 5m
+        if need_5m:
+            df_5m_new, _ = await self._fetch_multitimeframe_data_uncached(end, fetch_5m=True, fetch_15m=False)
+            if not df_5m_new.empty:
+                self._mtf_last_refresh_5m = now
+
+        # Refresh 15m
+        if need_15m:
+            _, df_15m_new = await self._fetch_multitimeframe_data_uncached(end, fetch_5m=False, fetch_15m=True)
+            if not df_15m_new.empty:
+                self._mtf_last_refresh_15m = now
+
+        # Return current cached buffers (updated where refreshed).
+        return (
+            self._data_buffer_5m.copy() if self._data_buffer_5m is not None else pd.DataFrame(),
+            self._data_buffer_15m.copy() if self._data_buffer_15m is not None else pd.DataFrame(),
+        )
+
+    async def _fetch_multitimeframe_data_uncached(
+        self,
+        end: datetime,
+        fetch_5m: bool = True,
+        fetch_15m: bool = True,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Fetch 5m/15m timeframe data directly from the provider."""
         try:
             # Calculate start time (need more history for higher timeframes)
             start_5m = end - timedelta(hours=self._multitimeframe_5m_hours)
@@ -360,26 +450,32 @@ class NQAgentDataFetcher:
             loop = asyncio.get_event_loop()
 
             # Fetch 5m data
-            df_5m = await loop.run_in_executor(
-                None,
-                lambda: self.data_provider.fetch_historical(
-                    self.config.symbol,
-                    start=start_5m,
-                    end=end,
-                    timeframe="5m",
+            if fetch_5m:
+                df_5m = await loop.run_in_executor(
+                    None,
+                    lambda: self.data_provider.fetch_historical(
+                        self.config.symbol,
+                        start=start_5m,
+                        end=end,
+                        timeframe="5m",
+                    )
                 )
-            )
+            else:
+                df_5m = pd.DataFrame()
 
             # Fetch 15m data
-            df_15m = await loop.run_in_executor(
-                None,
-                lambda: self.data_provider.fetch_historical(
-                    self.config.symbol,
-                    start=start_15m,
-                    end=end,
-                    timeframe="15m",
+            if fetch_15m:
+                df_15m = await loop.run_in_executor(
+                    None,
+                    lambda: self.data_provider.fetch_historical(
+                        self.config.symbol,
+                        start=start_15m,
+                        end=end,
+                        timeframe="15m",
+                    )
                 )
-            )
+            else:
+                df_15m = pd.DataFrame()
 
             # Update buffers
             if not df_5m.empty:

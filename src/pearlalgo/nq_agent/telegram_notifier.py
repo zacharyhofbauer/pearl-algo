@@ -727,17 +727,24 @@ class NQAgentTelegramNotifier:
             if "uptime" in status and status["uptime"]:
                 uptime_str = f" ({_format_uptime(status['uptime'])})"
 
-            try:
-                market_hours = get_market_hours()
-                is_market_open = market_hours.is_market_open()
-                market_emoji = "🟢" if is_market_open else "🔴"
-                market_text = "OPEN" if is_market_open else "CLOSED"
-            except Exception:
-                market_emoji = "⚪"
-                market_text = "UNKNOWN"
+            # FuturesMarketOpen: CME ETH + maintenance break semantics (operator/data-quality relevant)
+            futures_market_open = status.get("futures_market_open")
+            if futures_market_open is None:
+                try:
+                    futures_market_open = bool(get_market_hours().is_market_open())
+                except Exception:
+                    futures_market_open = None
+            futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
+            futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "UNKNOWN"
+
+            # StrategySessionOpen: strategy trading window (09:30–16:00 ET) for signal generation
+            strategy_session_open = status.get("strategy_session_open")
+            strat_emoji = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪"
+            strat_text = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "UNKNOWN"
 
             message += f"{status_emoji} *Service:* RUNNING{pause_status}{uptime_str}\n"
-            message += f"{market_emoji} *Market:* {market_text}\n"
+            message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}\n"
+            message += f"{strat_emoji} *StrategySessionOpen:* {strat_text}\n"
 
             # Connection status (only show if issues)
             connection_status = status.get('connection_status', 'unknown')
@@ -840,8 +847,14 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
-            market_hours = get_market_hours()
-            is_market_open = market_hours.is_market_open()
+            futures_market_open = status.get("futures_market_open")
+            if futures_market_open is None:
+                try:
+                    futures_market_open = bool(get_market_hours().is_market_open())
+                except Exception:
+                    futures_market_open = None
+
+            strategy_session_open = status.get("strategy_session_open")
 
             # Ultra-compact heartbeat: Price, Market status, Activity summary
             latest_price = status.get('latest_price')
@@ -869,13 +882,18 @@ class NQAgentTelegramNotifier:
                         pass
             
             # Build compact message
-            market_emoji = "🟢" if is_market_open else "🔴"
+            futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
+            futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "UNKNOWN"
+            strat_emoji = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪"
+            strat_text = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "UNKNOWN"
             message = f"💓 *Heartbeat* {time_str}\n\n"
             
             if latest_price:
-                message += f"💰 ${latest_price:,.2f} ({symbol}) • {market_emoji} Market {'OPEN' if is_market_open else 'CLOSED'}\n"
+                message += f"💰 ${latest_price:,.2f} ({symbol})\n"
             else:
-                message += f"{market_emoji} *Market:* {'OPEN' if is_market_open else 'CLOSED'}\n"
+                message += f"📊 *Symbol:* {symbol}\n"
+
+            message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}  •  {strat_emoji} *StrategySessionOpen:* {strat_text}\n"
 
             # Activity summary (compact single line)
             cycles = status.get('cycle_count', 0)
@@ -1075,10 +1093,21 @@ class NQAgentTelegramNotifier:
             message += f"⚙️ *Config:* {timeframe} timeframe, {scan_interval}s scan\n"
 
             # Market status
-            market_hours = get_market_hours()
-            is_market_open = market_hours.is_market_open()
-            market_emoji = "🟢" if is_market_open else "🔴"
-            message += f"{market_emoji} *Market:* {'OPEN' if is_market_open else 'CLOSED'}\n"
+            futures_market_open = config.get("futures_market_open")
+            if futures_market_open is None:
+                try:
+                    futures_market_open = bool(get_market_hours().is_market_open())
+                except Exception:
+                    futures_market_open = None
+            strategy_session_open = config.get("strategy_session_open")
+
+            futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
+            futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "UNKNOWN"
+            strat_emoji = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪"
+            strat_text = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "UNKNOWN"
+
+            message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}\n"
+            message += f"{strat_emoji} *StrategySessionOpen:* {strat_text}\n"
 
             await self.telegram.send_message(message)
             return True

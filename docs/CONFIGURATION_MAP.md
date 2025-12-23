@@ -50,6 +50,9 @@ Key sections and their consumers:
     - `pearlalgo.nq_agent.performance_tracker` (performance history limits)
     - `strategies.nq_intraday.*` (signal thresholds, where applicable).
 
+Notes:
+- `data.enable_mtf_cache`, `data.mtf_refresh_seconds_5m`, `data.mtf_refresh_seconds_15m` (default OFF) control how often 5m/15m history is refreshed.\n+  This reduces repeated IBKR historical requests when the service runs with a fast scan interval.
+
 ### 1.3 Settings module (`pearlalgo.config.settings`)
 
 - Provides Pydantic‑validated `Settings` via `get_settings()`.
@@ -85,7 +88,7 @@ Key sections and their consumers:
 ## 3. Guidelines for future changes
 
 1. **New deployment‑specific value?**
-   - Add as an environment variable (documented in `.env.example`) and wire through `Settings` or direct `os.getenv` in `main`/entry code.
+   - Add as an environment variable (documented in `env.example`) and wire through `Settings` or direct `os.getenv` in `main`/entry code.
 2. **New service behavior toggle or threshold?**
    - Add to `config/config.yaml` and load via `load_service_config()` or strategy config; avoid hard‑coding in multiple modules.
 3. **New strategy‑specific parameter?**
