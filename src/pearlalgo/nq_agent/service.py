@@ -492,6 +492,13 @@ class NQAgentService:
                 else:
                     logger.debug(f"No signals generated in cycle {self.cycle_count}")
 
+                # Virtual PnL lifecycle: exit signals when TP/SL is touched (no Telegram spam).
+                # This grades signal quality without auto-trading.
+                try:
+                    self._update_virtual_trade_exits(market_data)
+                except Exception as e:
+                    logger.debug(f"Virtual exit update failed (non-fatal): {e}")
+
                 # Send periodic status updates
                 await self._check_status_update()
 
@@ -570,6 +577,19 @@ class NQAgentService:
             self.last_signal_generated_at = get_utc_timestamp()
             self.last_signal_id_prefix = str(signal_id)[:16]
 
+            # Virtual entry: enter immediately at the signal's entry price.
+            # This enables per-signal PnL tracking without requiring IBKR fills.
+            try:
+                entry_price = float(signal.get("entry_price") or 0.0)
+                if entry_price > 0:
+                    self.performance_tracker.track_entry(
+                        signal_id=signal_id,
+                        entry_price=entry_price,
+                        entry_time=datetime.now(timezone.utc),
+                    )
+            except Exception as e:
+                logger.debug(f"Could not track virtual entry for {signal_id}: {e}")
+
             # Send to Telegram (await async call) with buffer data for chart generation
             signal_type = signal.get('type', 'unknown')
             signal_direction = signal.get('direction', 'unknown')
@@ -605,6 +625,120 @@ class NQAgentService:
         except Exception as e:
             logger.error(f"Error processing signal: {e}", exc_info=True)
             self.error_count += 1
+
+    def _update_virtual_trade_exits(self, market_data: Dict) -> None:
+        """
+        Update virtual trade exits for any `entered` signals when TP/SL is touched.
+
+        Rules (v1 defaults):
+        - Entry is immediate at signal generation time.
+        - Exit occurs on first *touch* of TP/SL using latest bar OHLC.
+        - If TP and SL are both touched in the same bar, exit is **conservative** (SL first).
+        """
+        latest_bar = market_data.get("latest_bar") if isinstance(market_data, dict) else None
+        if not isinstance(latest_bar, dict):
+            return
+
+        # Parse bar timestamp (UTC)
+        bar_ts = latest_bar.get("timestamp")
+        if isinstance(bar_ts, str):
+            bar_ts = parse_utc_timestamp(bar_ts)
+        elif isinstance(bar_ts, pd.Timestamp):
+            bar_ts = bar_ts.to_pydatetime()
+        if isinstance(bar_ts, datetime) and bar_ts.tzinfo is None:
+            bar_ts = bar_ts.replace(tzinfo=timezone.utc)
+
+        try:
+            bar_high = float(latest_bar.get("high") or latest_bar.get("close") or 0.0)
+            bar_low = float(latest_bar.get("low") or latest_bar.get("close") or 0.0)
+        except Exception:
+            return
+        if bar_high <= 0 or bar_low <= 0:
+            return
+
+        # Consider only recently tracked signals for performance; active trades should be among them.
+        try:
+            recent = self.state_manager.get_recent_signals(limit=300)
+        except Exception:
+            return
+
+        exited_this_cycle: set[str] = set()
+        for rec in recent:
+            try:
+                if not isinstance(rec, dict) or rec.get("status") != "entered":
+                    continue
+                sig_id = str(rec.get("signal_id") or "")
+                if not sig_id or sig_id in exited_this_cycle:
+                    continue
+
+                # Optional: only evaluate once bars have progressed beyond entry_time
+                entry_time_str = rec.get("entry_time")
+                if entry_time_str and isinstance(bar_ts, datetime):
+                    try:
+                        et = parse_utc_timestamp(str(entry_time_str))
+                        if et and et.tzinfo is None:
+                            et = et.replace(tzinfo=timezone.utc)
+                        if et and bar_ts < et:
+                            continue
+                    except Exception:
+                        pass
+
+                sig = rec.get("signal", {}) or {}
+                direction = str(sig.get("direction") or "long").lower()
+                try:
+                    stop = float(sig.get("stop_loss") or 0.0)
+                    target = float(sig.get("take_profit") or 0.0)
+                except Exception:
+                    continue
+                if stop <= 0 or target <= 0:
+                    continue
+
+                exit_reason = None
+                exit_price = None
+
+                if direction == "short":
+                    hit_tp = bar_low <= target
+                    hit_sl = bar_high >= stop
+                    if hit_tp and hit_sl:
+                        exit_reason = "stop_loss"
+                        exit_price = stop
+                    elif hit_sl:
+                        exit_reason = "stop_loss"
+                        exit_price = stop
+                    elif hit_tp:
+                        exit_reason = "take_profit"
+                        exit_price = target
+                else:
+                    hit_tp = bar_high >= target
+                    hit_sl = bar_low <= stop
+                    if hit_tp and hit_sl:
+                        exit_reason = "stop_loss"
+                        exit_price = stop
+                    elif hit_sl:
+                        exit_reason = "stop_loss"
+                        exit_price = stop
+                    elif hit_tp:
+                        exit_reason = "take_profit"
+                        exit_price = target
+
+                if exit_reason and exit_price is not None:
+                    perf = self.performance_tracker.track_exit(
+                        signal_id=sig_id,
+                        exit_price=float(exit_price),
+                        exit_reason=str(exit_reason),
+                        exit_time=bar_ts if isinstance(bar_ts, datetime) else None,
+                    )
+                    exited_this_cycle.add(sig_id)
+                    if perf:
+                        logger.info(
+                            "Virtual exit: %s | %s | exit=%s | pnl=%s",
+                            sig_id[:16],
+                            exit_reason,
+                            f"{float(exit_price):.2f}",
+                            f"{float(perf.get('pnl', 0.0)):.2f}",
+                        )
+            except Exception:
+                continue
 
     async def _check_status_update(self) -> None:
         """Send periodic status updates to Telegram."""

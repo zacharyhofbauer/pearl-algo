@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+import matplotlib.pyplot as plt
+from matplotlib import colors as mcolors
 
 from pearlalgo.utils.logger import logger
 
@@ -53,6 +56,30 @@ class ChartConfig:
     timeframe: str = "5m"  # Default to 5m for better visual context (HTF/LTF still used for analysis)
     show_entry_sl_tp_bands: bool = True
     candle_width: float = 0.8  # mplfinance uses 0.8 as default (80% of interval)
+
+    # TradingView-style HUD layers
+    show_hud: bool = True
+    show_rr_box: bool = True
+    rr_box_forward_bars: int = 30
+    right_pad_bars: int = 30
+
+    show_sessions: bool = True
+    show_session_names: bool = True
+    show_session_oc: bool = True
+    show_session_tick_range: bool = True
+    show_session_average: bool = True
+
+    show_supply_demand: bool = True
+    show_power_channel: bool = True
+    show_tbt_targets: bool = True
+    show_key_levels: bool = True
+
+    show_right_labels: bool = True
+    max_right_labels: int = 12
+    right_label_merge_ticks: int = 4  # merge labels when within N ticks
+
+    show_rsi: bool = True
+    rsi_period: int = 14
 
 
 class ChartGenerator:
@@ -301,6 +328,549 @@ class ChartGenerator:
             logger.debug(f"Error adding context levels: {e}")
 
         return lines
+
+    def _infer_bar_delta(self, idx: pd.DatetimeIndex) -> timedelta:
+        """Infer bar spacing from index; fallback to 1 minute."""
+        try:
+            if idx is not None and len(idx) >= 2:
+                dt = idx[-1] - idx[-2]
+                if isinstance(dt, pd.Timedelta):
+                    dt = dt.to_pytimedelta()
+                if isinstance(dt, timedelta) and dt.total_seconds() > 0:
+                    return dt
+        except Exception:
+            pass
+        return timedelta(minutes=1)
+
+    def _safe_parse_dt(self, value: Any) -> Optional[pd.Timestamp]:
+        try:
+            ts = pd.to_datetime(value, errors="coerce")
+            if pd.isna(ts):
+                return None
+            if isinstance(ts, pd.Timestamp):
+                # Normalize tz handling to UTC
+                if ts.tzinfo is None:
+                    ts = ts.tz_localize(timezone.utc)
+                else:
+                    ts = ts.tz_convert(timezone.utc)
+                return ts
+        except Exception:
+            return None
+        return None
+
+    def _collect_level_candidates(
+        self,
+        df: pd.DataFrame,
+        signal: Dict,
+        hud: Dict,
+        *,
+        extra_levels: Optional[List[Dict[str, Any]]] = None,
+    ) -> Tuple[List[Dict[str, Any]], float]:
+        """Collect level candidates for right-side merged labeling."""
+        levels: List[Dict[str, Any]] = []
+
+        # Current price (anchor for level relevance ranking)
+        try:
+            current_price = float(df["Close"].iloc[-1])
+        except Exception:
+            current_price = float(signal.get("entry_price") or 0.0) or 0.0
+
+        def _add(price: Any, label: str, color: str, *, priority: int, linestyle: str = "--", lw: float = 1.0, alpha: float = 0.6):
+            try:
+                p = float(price)
+            except Exception:
+                return
+            if not np.isfinite(p) or p <= 0:
+                return
+            levels.append(
+                {
+                    "price": float(p),
+                    "label": str(label),
+                    "color": str(color),
+                    "priority": int(priority),
+                    "linestyle": linestyle,
+                    "lw": float(lw),
+                    "alpha": float(alpha),
+                }
+            )
+
+        # Trade lines (always highest priority)
+        _add(signal.get("entry_price"), "Entry", ENTRY_COLOR, priority=100, linestyle="-", lw=1.8, alpha=0.95)
+        _add(signal.get("stop_loss"), "Stop", SIGNAL_SHORT, priority=95, linestyle="--", lw=1.4, alpha=0.9)
+        _add(signal.get("take_profit"), "Target", SIGNAL_LONG, priority=95, linestyle="--", lw=1.4, alpha=0.9)
+
+        # Extra levels (e.g., Exit)
+        if extra_levels:
+            for e in extra_levels:
+                _add(
+                    e.get("price"),
+                    str(e.get("label") or "Level"),
+                    str(e.get("color") or TEXT_PRIMARY),
+                    priority=int(e.get("priority") or 80),
+                    linestyle=str(e.get("linestyle") or "-"),
+                    lw=float(e.get("lw") or 1.4),
+                    alpha=float(e.get("alpha") or 0.9),
+                )
+
+        if not self.config.show_key_levels:
+            return levels, current_price
+
+        # VWAP + bands (from scanner)
+        vwap = (hud.get("vwap") or signal.get("vwap_data") or {}) if isinstance(hud, dict) else (signal.get("vwap_data") or {})
+        if isinstance(vwap, dict):
+            _add(vwap.get("vwap"), "VWAP", VWAP_COLOR, priority=60, linestyle="-", lw=1.2, alpha=0.65)
+            _add(vwap.get("vwap_upper_1"), "VWAP+1", VWAP_COLOR, priority=40, linestyle="--", lw=1.0, alpha=0.35)
+            _add(vwap.get("vwap_lower_1"), "VWAP-1", VWAP_COLOR, priority=40, linestyle="--", lw=1.0, alpha=0.35)
+            _add(vwap.get("vwap_upper_2"), "VWAP+2", VWAP_COLOR, priority=30, linestyle="--", lw=0.9, alpha=0.25)
+            _add(vwap.get("vwap_lower_2"), "VWAP-2", VWAP_COLOR, priority=30, linestyle="--", lw=0.9, alpha=0.25)
+
+        # Volume profile levels (POC/VAH/VAL)
+        vp = hud.get("volume_profile") or signal.get("volume_profile") or {}
+        if isinstance(vp, dict):
+            _add(vp.get("poc"), "POC", TEXT_SECONDARY, priority=35, linestyle=":", lw=1.1, alpha=0.55)
+            _add(vp.get("value_area_high"), "VAH", TEXT_SECONDARY, priority=30, linestyle=":", lw=1.0, alpha=0.45)
+            _add(vp.get("value_area_low"), "VAL", TEXT_SECONDARY, priority=30, linestyle=":", lw=1.0, alpha=0.45)
+
+        # Strongest S/R
+        sr = hud.get("sr_levels") or signal.get("sr_levels") or {}
+        if isinstance(sr, dict):
+            _add(sr.get("strongest_support"), "Support", TEXT_SECONDARY, priority=25, linestyle=":", lw=1.0, alpha=0.55)
+            _add(sr.get("strongest_resistance"), "Resist", TEXT_SECONDARY, priority=25, linestyle=":", lw=1.0, alpha=0.55)
+
+        # RTH + ETH key levels
+        kl = hud.get("key_levels") if isinstance(hud, dict) else None
+        if isinstance(kl, dict):
+            rth = (kl.get("rth") or {})
+            eth = (kl.get("eth") or {})
+
+            rth_cur = rth.get("current") or {}
+            rth_prev = rth.get("previous") or {}
+            eth_cur = eth.get("current") or {}
+            eth_prev = eth.get("previous") or {}
+
+            _add(rth_cur.get("open"), "RTH Open", ENTRY_COLOR, priority=55, linestyle="--", lw=1.0, alpha=0.35)
+            _add(eth_cur.get("open"), "ETH Open", ENTRY_COLOR, priority=55, linestyle="--", lw=1.0, alpha=0.35)
+
+            _add(rth_prev.get("high"), "RTH PDH", TEXT_SECONDARY, priority=50, linestyle="--", lw=1.0, alpha=0.35)
+            _add(rth_prev.get("mid"), "RTH PDM", TEXT_SECONDARY, priority=45, linestyle=":", lw=1.0, alpha=0.30)
+            _add(rth_prev.get("low"), "RTH PDL", TEXT_SECONDARY, priority=50, linestyle="--", lw=1.0, alpha=0.35)
+
+            _add(eth_prev.get("high"), "ETH PDH", TEXT_SECONDARY, priority=45, linestyle="--", lw=1.0, alpha=0.30)
+            _add(eth_prev.get("mid"), "ETH PDM", TEXT_SECONDARY, priority=40, linestyle=":", lw=1.0, alpha=0.25)
+            _add(eth_prev.get("low"), "ETH PDL", TEXT_SECONDARY, priority=45, linestyle="--", lw=1.0, alpha=0.30)
+
+        return levels, current_price
+
+    def _merge_levels(
+        self,
+        levels: List[Dict[str, Any]],
+        *,
+        tick_size: float,
+        merge_ticks: int,
+    ) -> List[Dict[str, Any]]:
+        """Merge nearby levels into a single right-label cluster."""
+        if not levels:
+            return []
+
+        thr = max(0.0, float(tick_size) * float(max(0, int(merge_ticks))))
+        if thr <= 0:
+            return levels
+
+        levels_sorted = sorted(levels, key=lambda x: float(x.get("price", 0.0)))
+        groups: List[List[Dict[str, Any]]] = []
+        cur: List[Dict[str, Any]] = []
+
+        for lvl in levels_sorted:
+            if not cur:
+                cur = [lvl]
+                continue
+            if abs(float(lvl["price"]) - float(cur[-1]["price"])) <= thr:
+                cur.append(lvl)
+            else:
+                groups.append(cur)
+                cur = [lvl]
+        if cur:
+            groups.append(cur)
+
+        merged: List[Dict[str, Any]] = []
+        for g in groups:
+            g_sorted = sorted(g, key=lambda x: int(x.get("priority", 0)), reverse=True)
+            pri_sum = sum(max(1, int(x.get("priority", 1))) for x in g_sorted)
+            price = sum(float(x["price"]) * max(1, int(x.get("priority", 1))) for x in g_sorted) / float(pri_sum)
+
+            labels = [str(x.get("label") or "") for x in g_sorted if str(x.get("label") or "")]
+            labels = labels[:3] + ([f"+{len(labels)-3}"] if len(labels) > 3 else [])
+            label = " / ".join(labels)
+
+            top = g_sorted[0]
+            merged.append(
+                {
+                    "price": float(price),
+                    "label": label,
+                    "color": str(top.get("color") or TEXT_PRIMARY),
+                    "priority": int(top.get("priority", 0)),
+                    "linestyle": str(top.get("linestyle") or "--"),
+                    "lw": float(top.get("lw") or 1.0),
+                    "alpha": float(top.get("alpha") or 0.6),
+                }
+            )
+
+        return merged
+
+    def _draw_right_labels(
+        self,
+        fig,
+        ax,
+        merged_levels: List[Dict[str, Any]],
+        *,
+        current_price: float,
+        max_labels: int,
+    ) -> None:
+        """Draw TradingView-style right-side level labels with minimal clutter."""
+        if not merged_levels:
+            return
+
+        # Pick most relevant levels (priority first, then proximity to current price)
+        def _score(lvl: Dict[str, Any]) -> Tuple[int, float]:
+            pri = int(lvl.get("priority", 0))
+            try:
+                dist = abs(float(lvl.get("price", 0.0)) - float(current_price))
+            except Exception:
+                dist = 1e9
+            return (-pri, dist)
+
+        selected = sorted(merged_levels, key=_score)[: max(1, int(max_labels))]
+
+        # Create extra right margin so labels aren't clipped
+        try:
+            fig.subplots_adjust(right=0.84)
+        except Exception:
+            pass
+
+        trans = ax.get_yaxis_transform()
+
+        for lvl in selected:
+            p = float(lvl["price"])
+            label = str(lvl.get("label") or "")
+            color = str(lvl.get("color") or TEXT_PRIMARY)
+            alpha = float(lvl.get("alpha") or 0.6)
+            ls = str(lvl.get("linestyle") or "--")
+            lw = float(lvl.get("lw") or 1.0)
+
+            # Line
+            ax.axhline(p, color=color, linestyle=ls, linewidth=lw, alpha=min(1.0, max(0.05, alpha)))
+
+            # Right label
+            try:
+                rgba = mcolors.to_rgba(color, alpha=0.20)
+            except Exception:
+                rgba = (0, 0, 0, 0.2)
+            txt = f"{label}  {p:,.2f}" if label else f"{p:,.2f}"
+            ax.text(
+                1.005,
+                p,
+                txt,
+                transform=trans,
+                ha="left",
+                va="center",
+                fontsize=9,
+                color=TEXT_PRIMARY,
+                bbox=dict(facecolor=rgba, edgecolor="none", boxstyle="round,pad=0.25"),
+                clip_on=False,
+            )
+
+    def _draw_sessions_overlay(self, ax, hud: Dict) -> None:
+        if not self.config.show_sessions:
+            return
+        sessions = hud.get("sessions") if isinstance(hud, dict) else None
+        if not isinstance(sessions, list) or not sessions:
+            return
+
+        for s in sessions:
+            try:
+                start = self._safe_parse_dt(s.get("start"))
+                end = self._safe_parse_dt(s.get("end"))
+                if not start or not end:
+                    continue
+
+                color = str(s.get("color") or "#444444")
+                ax.axvspan(start, end, color=color, alpha=0.08, linewidth=0)
+
+                if self.config.show_session_oc:
+                    open_ = float(s.get("open", 0.0) or 0.0)
+                    close_ = float(s.get("close", 0.0) or 0.0)
+                    if open_ > 0:
+                        ax.hlines(open_, start, end, colors=color, linestyles="--", linewidth=1.0, alpha=0.55)
+                    if close_ > 0:
+                        ax.hlines(close_, start, end, colors=color, linestyles="--", linewidth=1.0, alpha=0.35)
+
+                if self.config.show_session_average:
+                    avg = float(s.get("avg", 0.0) or 0.0)
+                    if avg > 0:
+                        ax.hlines(avg, start, end, colors=color, linestyles=":", linewidth=1.2, alpha=0.55)
+
+                if self.config.show_session_names:
+                    parts = []
+                    if self.config.show_session_tick_range:
+                        rt = s.get("range_ticks")
+                        if rt is not None:
+                            parts.append(f"Range: {rt}")
+                    if self.config.show_session_average:
+                        avg = s.get("avg")
+                        if avg is not None:
+                            parts.append(f"Avg: {float(avg):.2f}")
+                    parts.append(str(s.get("name") or "Session"))
+                    label = "\n".join(parts)
+
+                    # Place label near the session start at chart bottom
+                    try:
+                        y = ax.get_ylim()[0]
+                    except Exception:
+                        y = float(s.get("low") or 0.0)
+                    ax.text(
+                        start,
+                        y,
+                        label,
+                        ha="left",
+                        va="bottom",
+                        fontsize=8,
+                        color=color,
+                        alpha=0.9,
+                    )
+            except Exception:
+                continue
+
+    def _draw_supply_demand_overlay(self, ax, hud: Dict) -> None:
+        if not self.config.show_supply_demand:
+            return
+        sd = hud.get("supply_demand_vr") if isinstance(hud, dict) else None
+        if not isinstance(sd, dict):
+            return
+
+        supply = sd.get("supply") or {}
+        demand = sd.get("demand") or {}
+
+        try:
+            # Colors from Pine reference (LuxAlgo): supply blue, demand orange.
+            sup_color = "#2157f3"
+            dem_color = "#ff5d00"
+
+            s_top = float(supply.get("top", 0.0) or 0.0)
+            s_bot = float(supply.get("bottom", 0.0) or 0.0)
+            d_top = float(demand.get("top", 0.0) or 0.0)
+            d_bot = float(demand.get("bottom", 0.0) or 0.0)
+
+            if s_top > 0 and s_bot > 0 and s_top > s_bot:
+                ax.axhspan(s_bot, s_top, facecolor=sup_color, alpha=0.18, edgecolor="none")
+                ax.axhline(float(supply.get("avg", (s_top + s_bot) / 2.0)), color=sup_color, linewidth=1.0, alpha=0.7)
+                ax.axhline(float(supply.get("wavg", (s_top + s_bot) / 2.0)), color=sup_color, linewidth=1.0, alpha=0.7, linestyle="--")
+
+            if d_top > 0 and d_bot > 0 and d_top > d_bot:
+                ax.axhspan(d_bot, d_top, facecolor=dem_color, alpha=0.18, edgecolor="none")
+                ax.axhline(float(demand.get("avg", (d_top + d_bot) / 2.0)), color=dem_color, linewidth=1.0, alpha=0.7)
+                ax.axhline(float(demand.get("wavg", (d_top + d_bot) / 2.0)), color=dem_color, linewidth=1.0, alpha=0.7, linestyle="--")
+        except Exception:
+            return
+
+    def _draw_power_channel_overlay(self, ax, hud: Dict) -> None:
+        if not self.config.show_power_channel:
+            return
+        pc = hud.get("power_channel") if isinstance(hud, dict) else None
+        if not isinstance(pc, dict):
+            return
+
+        try:
+            t_col = "#ff00ff"  # fuchsia (Pine default)
+            b_col = "#00ff00"  # lime (Pine default)
+
+            res_top = float(pc.get("res_area_top", 0.0) or 0.0)
+            res_bot = float(pc.get("res_area_bottom", 0.0) or 0.0)
+            sup_top = float(pc.get("sup_area_top", 0.0) or 0.0)
+            sup_bot = float(pc.get("sup_area_bottom", 0.0) or 0.0)
+            mid = float(pc.get("mid", 0.0) or 0.0)
+
+            if res_top > 0 and res_bot > 0 and res_top > res_bot:
+                ax.axhspan(res_bot, res_top, facecolor=t_col, alpha=0.10, edgecolor="none")
+                ax.axhline(res_top, color=t_col, linewidth=1.2, alpha=0.7)
+            if sup_top > 0 and sup_bot > 0 and sup_top > sup_bot:
+                ax.axhspan(sup_bot, sup_top, facecolor=b_col, alpha=0.10, edgecolor="none")
+                ax.axhline(sup_bot, color=b_col, linewidth=1.2, alpha=0.7)
+            if mid > 0:
+                ax.axhline(mid, color=TEXT_SECONDARY, linewidth=1.0, alpha=0.45, linestyle=":")
+
+            # Power readout (compact)
+            buy = pc.get("buy_power")
+            sell = pc.get("sell_power")
+            if buy is not None or sell is not None:
+                txt = f"Power {int(buy or 0)}/{int(sell or 0)}"
+                x = df_x = ax.get_xlim()
+                # Place in upper-left of price panel
+                ax.text(
+                    0.01,
+                    0.90,
+                    txt,
+                    transform=ax.transAxes,
+                    ha="left",
+                    va="top",
+                    fontsize=10,
+                    color=TEXT_PRIMARY,
+                    alpha=0.85,
+                )
+        except Exception:
+            return
+
+    def _draw_tbt_overlay(self, ax, hud: Dict) -> None:
+        if not self.config.show_tbt_targets:
+            return
+        tbt = hud.get("tbt") if isinstance(hud, dict) else None
+        if not isinstance(tbt, dict):
+            return
+
+        try:
+            tp = tbt.get("tp")
+            if tp is None:
+                return
+            tp = float(tp)
+            if not np.isfinite(tp) or tp <= 0:
+                return
+
+            col = "#9a6714"  # target brown
+            ax.axhline(tp, color=col, linewidth=1.6, alpha=0.85, linestyle="--")
+            ax.text(
+                0.55,
+                tp,
+                "Target",
+                transform=ax.get_yaxis_transform(),
+                ha="left",
+                va="center",
+                fontsize=9,
+                color=TEXT_PRIMARY,
+                bbox=dict(facecolor=mcolors.to_rgba(col, alpha=0.35), edgecolor="none", boxstyle="round,pad=0.25"),
+                clip_on=False,
+            )
+        except Exception:
+            return
+
+    def _draw_rr_box(self, ax, idx: pd.DatetimeIndex, signal: Dict, direction: str) -> Optional[pd.Timestamp]:
+        """Draw TradingView-like risk/reward box to the right of the last bar."""
+        if not self.config.show_rr_box:
+            return None
+
+        try:
+            entry = float(signal.get("entry_price") or 0.0)
+            stop = float(signal.get("stop_loss") or 0.0)
+            target = float(signal.get("take_profit") or 0.0)
+            if entry <= 0 or stop <= 0 or target <= 0:
+                return None
+            if idx is None or len(idx) < 2:
+                return None
+        except Exception:
+            return None
+
+        bar_dt = self._infer_bar_delta(idx)
+        x_start = pd.Timestamp(idx[-1])
+        x_end = x_start + pd.Timedelta(bar_dt * max(1, int(self.config.rr_box_forward_bars)))
+
+        # Dollars (optional – if present in signal)
+        try:
+            tick_value = float(signal.get("tick_value") or 2.0)
+            size = float(signal.get("position_size") or 1.0)
+        except Exception:
+            tick_value = 2.0
+            size = 1.0
+
+        if direction == "short":
+            risk_pts = abs(stop - entry)
+            reward_pts = abs(entry - target)
+            risk_y0, risk_y1 = entry, stop
+            reward_y0, reward_y1 = target, entry
+        else:
+            risk_pts = abs(entry - stop)
+            reward_pts = abs(target - entry)
+            risk_y0, risk_y1 = stop, entry
+            reward_y0, reward_y1 = entry, target
+
+        rr = (reward_pts / risk_pts) if risk_pts > 0 else 0.0
+        risk_usd = risk_pts * tick_value * size
+        reward_usd = reward_pts * tick_value * size
+
+        # Boxes
+        ax.fill_between([x_start, x_end], risk_y0, risk_y1, color=SIGNAL_SHORT, alpha=0.22)
+        ax.fill_between([x_start, x_end], reward_y0, reward_y1, color=SIGNAL_LONG, alpha=0.20)
+
+        # Labels
+        x_mid = x_start + (x_end - x_start) / 2
+        ax.text(
+            x_mid,
+            (reward_y0 + reward_y1) / 2,
+            f"+{reward_usd:.0f} USD\nR:R {rr:.2f}",
+            ha="center",
+            va="center",
+            fontsize=9,
+            color=TEXT_PRIMARY,
+            bbox=dict(facecolor=mcolors.to_rgba(SIGNAL_LONG, alpha=0.22), edgecolor="none", boxstyle="round,pad=0.25"),
+        )
+        ax.text(
+            x_mid,
+            (risk_y0 + risk_y1) / 2,
+            f"-{risk_usd:.0f} USD",
+            ha="center",
+            va="center",
+            fontsize=9,
+            color=TEXT_PRIMARY,
+            bbox=dict(facecolor=mcolors.to_rgba(SIGNAL_SHORT, alpha=0.22), edgecolor="none", boxstyle="round,pad=0.25"),
+        )
+
+        return x_end
+
+    def _apply_hud(self, fig, ax_price, df: pd.DataFrame, signal: Dict, direction: str, *, extra_levels: Optional[List[Dict[str, Any]]] = None) -> None:
+        """Apply TradingView-style HUD overlays to an mplfinance-rendered figure."""
+        if not self.config.show_hud:
+            return
+
+        hud = signal.get("hud_context") or {}
+        if not isinstance(hud, dict):
+            hud = {}
+
+        # Right padding (for RR boxes + right labels)
+        idx = df.index if isinstance(df.index, pd.DatetimeIndex) else None
+        if idx is not None and len(idx) >= 2:
+            bar_dt = self._infer_bar_delta(idx)
+            x_end_pad = pd.Timestamp(idx[-1]) + pd.Timedelta(bar_dt * max(1, int(self.config.right_pad_bars)))
+            try:
+                ax_price.set_xlim(pd.Timestamp(idx[0]), x_end_pad)
+            except Exception:
+                pass
+
+        # Overlays
+        self._draw_sessions_overlay(ax_price, hud)
+        self._draw_supply_demand_overlay(ax_price, hud)
+        self._draw_power_channel_overlay(ax_price, hud)
+        self._draw_tbt_overlay(ax_price, hud)
+
+        # RR box (extends xlim if needed)
+        if idx is not None and len(idx) >= 2:
+            rr_end = self._draw_rr_box(ax_price, idx, signal, direction)
+            if rr_end is not None:
+                try:
+                    left = pd.Timestamp(idx[0])
+                    right = max(rr_end, pd.Timestamp(idx[-1]))
+                    ax_price.set_xlim(left, right)
+                except Exception:
+                    pass
+
+        # Levels + right labels
+        if self.config.show_right_labels:
+            tick_size = float(hud.get("tick_size") or 0.25)
+            candidates, current_price = self._collect_level_candidates(df, signal, hud, extra_levels=extra_levels)
+            merged = self._merge_levels(candidates, tick_size=tick_size, merge_ticks=int(self.config.right_label_merge_ticks))
+            self._draw_right_labels(
+                fig,
+                ax_price,
+                merged,
+                current_price=current_price,
+                max_labels=int(self.config.max_right_labels),
+            )
     
     def generate_entry_chart(
         self,
@@ -338,8 +908,7 @@ class ChartGenerator:
             entry_lines = self._add_entry_sl_tp_lines(df, entry_price, stop_loss, take_profit, direction)
             addplot.extend(entry_lines)
 
-            # Add context levels (S/R + VWAP bands if present)
-            addplot.extend(self._add_context_levels(df, signal))
+            # NOTE: Context levels are rendered via HUD (right labels + merged lines) instead of legend lines.
             
             # Create title
             signal_type = signal.get("type", "unknown").replace("_", " ").title()
@@ -353,28 +922,72 @@ class ChartGenerator:
             temp_path = Path(temp_file.name)
             temp_file.close()
             
-            # Plot with mplfinance
-            mpf.plot(
+            # Plot with mplfinance (return fig so we can draw HUD overlays)
+            volume_on = True if 'Volume' in df.columns else False
+            if self.config.show_rsi:
+                # RSI is plotted in a separate panel below volume.
+                close = df["Close"]
+                delta = close.diff()
+                gain = delta.clip(lower=0).rolling(self.config.rsi_period).mean()
+                loss = (-delta.clip(upper=0)).rolling(self.config.rsi_period).mean()
+                rs = gain / loss.replace(0, np.nan)
+                rsi = 100 - (100 / (1 + rs))
+
+                rsi_panel = 2 if volume_on else 1
+                addplot.append(
+                    mpf.make_addplot(rsi, panel=rsi_panel, color="#b388ff", width=1.2, ylabel="RSI", alpha=0.9)
+                )
+                for lvl, a in ((30, 0.25), (50, 0.18), (70, 0.25)):
+                    addplot.append(
+                        mpf.make_addplot(
+                            pd.Series([lvl] * len(df), index=df.index),
+                            panel=rsi_panel,
+                            color=TEXT_SECONDARY,
+                            width=1.0,
+                            linestyle="--",
+                            alpha=a,
+                        )
+                    )
+
+                panel_ratios = (6, 2, 2) if volume_on else (7, 3)
+            else:
+                panel_ratios = None
+
+            fig, axlist = mpf.plot(
                 df,
                 type='candle',
                 style=self.style,
                 addplot=addplot if addplot else None,
-                volume=True if 'Volume' in df.columns else False,
+                volume=volume_on,
+                volume_panel=1 if volume_on else None,
+                panel_ratios=panel_ratios,
                 title=title,
                 ylabel='Price ($)',
                 ylabel_lower='Volume',
                 figsize=(12, 8),
-                savefig=dict(
-                    fname=str(temp_path),
-                    dpi=self.dpi,
-                    facecolor=DARK_BG,
-                    edgecolor='none',
-                    bbox_inches='tight'
-                ),
                 show_nontrading=False,
                 tight_layout=True,
-                returnfig=False
+                returnfig=True
             )
+
+            # Apply HUD overlays on the price axis.
+            try:
+                ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
+                if ax_price is not None:
+                    self._apply_hud(fig, ax_price, df, signal, direction)
+            except Exception:
+                pass
+
+            # Save + cleanup
+            fig.savefig(
+                str(temp_path),
+                dpi=self.dpi,
+                facecolor=DARK_BG,
+                edgecolor="none",
+                bbox_inches="tight",
+                pad_inches=0.25,
+            )
+            plt.close(fig)
             
             logger.debug(f"Generated entry chart with mplfinance: {temp_path}")
             return temp_path
@@ -422,8 +1035,7 @@ class ChartGenerator:
             entry_lines = self._add_entry_sl_tp_lines(df, entry_price, stop_loss, take_profit, direction)
             addplot.extend(entry_lines)
 
-            # Add context levels (S/R + VWAP bands if present)
-            addplot.extend(self._add_context_levels(df, signal))
+            # NOTE: Context levels are rendered via HUD (right labels + merged lines) instead of legend lines.
             
             # Add exit line
             exit_series = pd.Series([exit_price] * len(df), index=df.index)
@@ -447,28 +1059,85 @@ class ChartGenerator:
             temp_path = Path(temp_file.name)
             temp_file.close()
             
-            # Plot with mplfinance
-            mpf.plot(
+            volume_on = True if 'Volume' in df.columns else False
+            if self.config.show_rsi:
+                close = df["Close"]
+                delta = close.diff()
+                gain = delta.clip(lower=0).rolling(self.config.rsi_period).mean()
+                loss = (-delta.clip(upper=0)).rolling(self.config.rsi_period).mean()
+                rs = gain / loss.replace(0, np.nan)
+                rsi = 100 - (100 / (1 + rs))
+
+                rsi_panel = 2 if volume_on else 1
+                addplot.append(
+                    mpf.make_addplot(rsi, panel=rsi_panel, color="#b388ff", width=1.2, ylabel="RSI", alpha=0.9)
+                )
+                for lvl, a in ((30, 0.25), (50, 0.18), (70, 0.25)):
+                    addplot.append(
+                        mpf.make_addplot(
+                            pd.Series([lvl] * len(df), index=df.index),
+                            panel=rsi_panel,
+                            color=TEXT_SECONDARY,
+                            width=1.0,
+                            linestyle="--",
+                            alpha=a,
+                        )
+                    )
+                panel_ratios = (6, 2, 2) if volume_on else (7, 3)
+            else:
+                panel_ratios = None
+
+            fig, axlist = mpf.plot(
                 df,
                 type='candle',
                 style=self.style,
                 addplot=addplot if addplot else None,
-                volume=True if 'Volume' in df.columns else False,
+                volume=volume_on,
+                volume_panel=1 if volume_on else None,
+                panel_ratios=panel_ratios,
                 title=title,
                 ylabel='Price ($)',
                 ylabel_lower='Volume',
                 figsize=(12, 8),
-                savefig=dict(
-                    fname=str(temp_path),
-                    dpi=self.dpi,
-                    facecolor=DARK_BG,
-                    edgecolor='none',
-                    bbox_inches='tight'
-                ),
                 show_nontrading=False,
                 tight_layout=True,
-                returnfig=False
+                returnfig=True
             )
+
+            # Apply HUD overlays, including an Exit right-label.
+            try:
+                ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
+                if ax_price is not None:
+                    self._apply_hud(
+                        fig,
+                        ax_price,
+                        df,
+                        signal,
+                        direction,
+                        extra_levels=[
+                            {
+                                "price": float(exit_price),
+                                "label": f"Exit ({exit_reason})",
+                                "color": MA_COLORS[0],
+                                "priority": 90,
+                                "linestyle": "-",
+                                "lw": 1.6,
+                                "alpha": 0.9,
+                            }
+                        ],
+                    )
+            except Exception:
+                pass
+
+            fig.savefig(
+                str(temp_path),
+                dpi=self.dpi,
+                facecolor=DARK_BG,
+                edgecolor="none",
+                bbox_inches="tight",
+                pad_inches=0.25,
+            )
+            plt.close(fig)
             
             logger.debug(f"Generated exit chart with mplfinance: {temp_path}")
             return temp_path

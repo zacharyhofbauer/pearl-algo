@@ -189,15 +189,27 @@ class PerformanceTracker:
             logger.warning(f"Signal {signal_id} not found for exit tracking")
             return None
 
-        signal = signal_record.get("signal", {})
-        entry_price = signal.get("entry_price", 0)
-        direction = signal.get("direction", "long").lower()
+        signal = signal_record.get("signal", {}) or {}
+        entry_price = float(signal.get("entry_price", 0) or 0.0)
+        direction = str(signal.get("direction", "long") or "long").lower()
 
-        # Calculate P&L (simplified - assumes 1 contract)
+        # MNQ-native P&L:
+        # pnl = points * $/point * contracts
+        try:
+            tick_value = float(signal.get("tick_value") or 2.0)  # $ per point (MNQ default)
+        except Exception:
+            tick_value = 2.0
+        try:
+            position_size = float(signal.get("position_size") or 1.0)
+        except Exception:
+            position_size = 1.0
+
         if direction == "long":
-            pnl = (exit_price - entry_price) * 20  # NQ tick value
+            pnl_points = float(exit_price) - float(entry_price)
         else:
-            pnl = (entry_price - exit_price) * 20
+            pnl_points = float(entry_price) - float(exit_price)
+
+        pnl = pnl_points * tick_value * position_size
 
         is_win = pnl > 0
 

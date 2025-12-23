@@ -32,6 +32,7 @@ from pearlalgo.strategies.nq_intraday.mtf_analyzer import MTFAnalyzer
 from pearlalgo.strategies.nq_intraday.volume_profile import VolumeProfile
 from pearlalgo.strategies.nq_intraday.order_flow import OrderFlowApproximator
 from pearlalgo.utils.vwap import VWAPCalculator
+from pearlalgo.strategies.nq_intraday.hud_context import build_hud_context
 
 
 class NQScanner:
@@ -1056,6 +1057,29 @@ class NQScanner:
             calculate_stop_take, calculate_signal_score
         )
         signals.extend(engulfing_signals)
+
+        # Attach a compact HUD context to every signal for TradingView-style chart rendering.
+        # Keep this computed once per scan cycle (not per signal) for performance.
+        if signals:
+            try:
+                hud_context = build_hud_context(
+                    df,
+                    symbol=self.config.symbol,
+                    tick_size=0.25,  # MNQ/NQ tick size (configurable later)
+                    vwap_data=vwap_data,
+                    volume_profile=volume_profile_data,
+                    sr_levels=sr_levels,
+                    threshold_pct=10.0,
+                    bins=50,
+                    power_length=130,
+                    tbt_period=10,
+                )
+                for s in signals:
+                    # Avoid mutating shared dict references across cycles.
+                    s["hud_context"] = hud_context
+            except Exception:
+                # Never fail signal generation due to HUD context.
+                pass
 
         return signals
 

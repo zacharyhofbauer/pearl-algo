@@ -145,7 +145,9 @@ class NQAgentDataFetcher:
                 # Log data freshness status
                 if not data_freshness_warning:
                     logger.debug(f"Data is fresh: {len(df)} bars retrieved for {self.config.symbol}")
-                    self._data_buffer = df.tail(self._buffer_size).reset_index(drop=True)
+                    # Preserve timestamps for downstream charting/HUD context (sessions, key levels, etc).
+                    # IBKRProvider returns a DatetimeIndex named "timestamp"; reset_index keeps it as a column.
+                    self._data_buffer = df.tail(self._buffer_size).reset_index()
                 
                 # Log data freshness at INFO level for observability
                 if "timestamp" in df.columns:
@@ -304,7 +306,8 @@ class NQAgentDataFetcher:
 
             # Update buffer if we have new data
             if self._data_buffer is None or self._data_buffer.empty:
-                self._data_buffer = df.tail(self._buffer_size).reset_index(drop=True)
+                # Preserve timestamps for downstream charting/HUD context (sessions, key levels, etc).
+                self._data_buffer = df.tail(self._buffer_size).reset_index()
             else:
                 # Append latest bar to buffer
                 timestamp = latest_bar.get("timestamp")
