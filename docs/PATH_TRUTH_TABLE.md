@@ -73,7 +73,6 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Python modules**:
   - `pearlalgo.config.config_loader`
   - `pearlalgo.config.settings`
-  - `pearlalgo.config.symbols`
 - **Docs**:
   - `docs/PROJECT_SUMMARY.md` (configuration section)
   - `docs/NQ_AGENT_GUIDE.md` (configuration snippets)

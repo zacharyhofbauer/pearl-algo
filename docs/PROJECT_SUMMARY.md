@@ -265,8 +265,7 @@ The MNQ Trading Agent is designed to:
 - Loads from environment variables
 - Type validation
 
-**Symbols** (`symbols.py`):
-- Symbol definitions and mappings
+**Symbols**: Symbol definitions are embedded in strategy configuration (`strategies/nq_intraday/config.py`). The system currently uses MNQ (Mini NQ) futures.
 
 ---
 
@@ -404,9 +403,9 @@ pearlalgo-dev-ai-agents/
 │   │   ├── market_hours.py     # Market hours logic
 │   │   ├── retry.py            # Retry logic
 │   │   └── logging.py          # Logging config
-│   └── config/                 # Configuration (3 files)
+│   └── config/                 # Configuration (2 files)
 │       ├── settings.py          # Settings management
-│       └── symbols.py           # Symbol definitions
+│       └── config_loader.py     # Service config loader
 │
 ├── config/                     # Configuration files
 │   └── config.yaml             # Main configuration
