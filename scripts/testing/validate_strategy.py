@@ -372,9 +372,9 @@ async def main():
     print()
     print("Next Steps:")
     print("  1. Fix any failed tests")
-    print("  2. Run with live data: python3 scripts/test_nq_agent_with_mock.py")
-    print("  3. Start service: ./scripts/start_nq_agent_service.sh")
-    print("  4. Monitor: tail -f logs/nq_agent.log")
+    print("  2. Run a short-run service test (mock): python3 scripts/testing/test_all.py service")
+    print("  3. Start the real service: ./scripts/lifecycle/start_nq_agent_service.sh")
+    print("  4. Monitor: foreground terminal output and Telegram (or systemd journal if deployed)")
     print()
     
     return passed_count == total_count

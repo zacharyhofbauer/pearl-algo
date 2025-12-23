@@ -31,9 +31,16 @@ fi
 if ! pgrep -f "java.*IBC.jar" > /dev/null; then
     echo "⚠️  Warning: IBKR Gateway doesn't appear to be running"
     echo "   Start it with: ./scripts/gateway/start_ibgateway_ibc.sh"
-    read -p "Continue anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    # In non-interactive contexts (e.g. Telegram command handler), do not block on input.
+    # Preserve the prompt's default answer ("N") by failing fast.
+    if [ -t 0 ]; then
+        read -p "Continue anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    else
+        echo "❌ Non-interactive session detected; refusing to continue without Gateway (default: N)"
         exit 1
     fi
 fi

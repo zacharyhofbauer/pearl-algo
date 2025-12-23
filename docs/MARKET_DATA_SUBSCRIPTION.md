@@ -49,7 +49,7 @@ Canonical defaults (see `docs/PROJECT_SUMMARY.md`):
 - `IBKR_CLIENT_ID=10`
 - `IBKR_DATA_CLIENT_ID=11`
 
-If you change these, update `.env` and/or `config/config.yaml` consistently.
+If you change these, update `.env` consistently.
 
 ---
 

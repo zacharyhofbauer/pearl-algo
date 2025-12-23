@@ -2,12 +2,12 @@
 Service-level configuration loader.
 
 Loads configuration from config.yaml for service intervals, circuit breaker,
-alerts, data settings, signals, and performance tracking.
+data settings, signals, and performance tracking.
 
 **Purpose**: This module handles service behavior configuration (how the service operates).
 
 **When to use `load_service_config()`:**
-- For service-level settings (intervals, circuit breaker, alerts)
+- For service-level settings (intervals, circuit breaker thresholds)
 - For data fetching configuration (buffer sizes, thresholds)
 - For signal generation settings (duplicate windows, thresholds)
 - For performance tracking configuration
@@ -27,7 +27,7 @@ alerts, data settings, signals, and performance tracking.
     
     config = load_service_config()
     service_settings = config.get("service", {})
-    scan_interval = service_settings.get("status_update_interval", 1800)
+    status_update_interval = service_settings.get("status_update_interval", 1800)
     ```
 """
 
@@ -63,18 +63,16 @@ def load_service_config(config_path: Optional[Path] = None) -> Dict:
             "max_connection_failures": 10,
             "max_data_fetch_errors": 5,
         },
-        "alerts": {
-            "connection_failure_interval": 600,
-            "data_quality_interval": 300,
-        },
         "data": {
             "buffer_size": 100,
             "historical_hours": 2,
             "multitimeframe_5m_hours": 4,
             "multitimeframe_15m_hours": 12,
-            "use_level2_data": True,
+            # Default to Level 1 only unless explicitly enabled in config.yaml.
+            # Most prop-firm feeds are Level 1; Level 2 requires additional entitlements.
+            "use_level2_data": False,
             "order_book_depth": 10,
-            "order_book_analysis": True,
+            "order_book_analysis": False,
         },
         "signals": {
             "duplicate_window_seconds": 300,

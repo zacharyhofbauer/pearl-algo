@@ -2,8 +2,7 @@
 Infrastructure and environment-based configuration.
 
 This module provides Pydantic-validated settings loaded from environment variables
-for infrastructure and deployment wiring (IBKR connectivity, local paths, provider
-selection flags).
+for infrastructure and deployment wiring (IBKR connectivity).
 
 **Purpose**: This module handles infrastructure configuration (how the system connects to external services).
 
@@ -14,7 +13,7 @@ selection flags).
 - For settings that vary by environment (development, staging, production)
 
 **When to use `config_loader.py` instead:**
-- For service behavior configuration (intervals, circuit breaker, alerts)
+- For service behavior configuration (intervals, circuit breaker thresholds)
 - For data fetching configuration (buffer sizes, thresholds)
 - For signal generation settings (duplicate windows, thresholds)
 - For performance tracking configuration
@@ -36,7 +35,7 @@ from __future__ import annotations
 
 import os
 
-from pydantic import Field, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Load `.env` manually so non-prefixed vars (e.g. `IBKR_HOST`) are available in `os.environ`.
@@ -64,11 +63,6 @@ class Settings(BaseSettings):
         env_file=".env", env_prefix="PEARLALGO_", extra="ignore"
     )
 
-    # General / local
-    data_dir: str = Field(default="data", description="Base data directory (relative to repo root)")
-    log_level: str = Field(default="INFO", description="Logging level")
-    data_provider: str = Field(default="ibkr", description="Data provider name (default: ibkr)")
-
     # IBKR
     ib_host: str = "127.0.0.1"
     # Default to IB Gateway paper port; TWS default is 7497.
@@ -76,10 +70,6 @@ class Settings(BaseSettings):
     ib_client_id: int = 1
     # Optional separate client id for market data to avoid clashes with brokers/orders.
     ib_data_client_id: int | None = None
-    # Explicit dummy mode flag - when True, allows dummy data fallback
-    # When False and IBKR connection fails, raises error instead of silent fallback
-    dummy_mode: bool = Field(default=False, description="Enable dummy data mode (for testing/development)")
-
     @field_validator("ib_port")
     @classmethod
     def validate_port(cls, v: int) -> int:
@@ -135,15 +125,6 @@ class Settings(BaseSettings):
             )
             if data_client_id_str:
                 kwargs["ib_data_client_id"] = int(data_client_id_str)
-
-        # Handle dummy_mode flag
-        if "dummy_mode" not in kwargs:
-            dummy_str = os.getenv("PEARLALGO_DUMMY_MODE", "").lower()
-            kwargs["dummy_mode"] = dummy_str in ("true", "1", "yes", "on")
-
-        # Provider name (used by tooling like the Telegram command handler)
-        if "data_provider" not in kwargs:
-            kwargs["data_provider"] = os.getenv("PEARLALGO_DATA_PROVIDER") or kwargs.get("data_provider", "ibkr")
 
         super().__init__(**kwargs)
 

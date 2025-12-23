@@ -567,7 +567,7 @@ Charts are fully integrated with the menu system:
 3. **Chart Viewing:** Tap "📊 Chart" to view any signal's chart
 4. **Test Signals:** Use `/test_signal` to verify chart generation
 
-For detailed chart customization, see [CHART_VISUALIZATION.md](CHART_VISUALIZATION.md).
+For detailed chart setup and customization, see [MPLFINANCE_QUICK_START.md](MPLFINANCE_QUICK_START.md).
 
 ### 8.6 Troubleshooting Charts and Buttons
 

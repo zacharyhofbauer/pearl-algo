@@ -295,9 +295,9 @@ python3 scripts/testing/test_all.py service
 
 #### 2. Data Quality
 Monitor logs for:
-```bash
-tail -f logs/nq_agent.log
-```
+- Foreground mode: logs are printed in your terminal.
+- systemd: `journalctl -u pearlalgo-mnq.service -f`
+- Docker: `docker logs -f <container>`
 
 **What to Check:**
 - ✅ No connection errors
@@ -529,7 +529,7 @@ Always validate strategy performance with **real market data** (IB Gateway + NQ 
 **Solutions:**
 1. Check IB Gateway: `./scripts/gateway/check_gateway_status.sh`
 2. Install dependencies: `pip install -e .`
-3. Check logs: `tail -50 logs/nq_agent.log`
+3. Check logs: foreground terminal output or `journalctl -u pearlalgo-mnq.service --since -10m`
 
 ### ModuleNotFoundError
 
@@ -635,7 +635,7 @@ pytest tests/ -m integration -v
 - `tests/test_edge_cases.py` - Edge-case coverage (market hours/data quality/service)
 - `tests/test_error_recovery.py` - Circuit breaker and recovery behaviors
 - `tests/mock_data_provider.py` - Mock data provider
-- `logs/nq_agent.log` - Service logs
+- Service logs are emitted to stdout/stderr (terminal output, systemd journal, or Docker logs)
 - `data/nq_agent_state/state.json` - Service state
 
 ### Key Metrics
@@ -668,11 +668,12 @@ This section summarizes the current test coverage and highlights areas for futur
 
 #### Tests under `scripts/testing/`
 
-- `test_nq_agent_with_mock.py` – integration tests using mock provider
-- `test_signal_generation.py`, `test_signal_starvation_fixes.py` – strategy tests
+- `test_signal_starvation_fixes.py` – strategy regression validations (anti-starvation fixes)
 - `test_data_quality.py` – data quality checks
 - `test_e2e_simulation.py` – end‑to‑end simulation
-- `test_telegram_notifications.py` – Telegram notifications
+- `test_mplfinance_chart.py` – chart generation smoke test
+- `backtest_nq_strategy.py` – offline backtest helper
+- `check_signals.py` – signals file diagnostics (format/count/validity)
 - `smoke_test_ibkr.py` – IBKR connectivity smoke test
 - `validate_strategy.py` – strategy validation helper
 

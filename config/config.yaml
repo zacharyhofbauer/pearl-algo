@@ -11,23 +11,11 @@ timeframe: "1m"  # 1-minute bars for intraday scalping/swings
 # Scan Interval (seconds)
 scan_interval: 30  # Check for signals every 30 seconds (faster for scalping)
 
-# IBKR Connection
-ibkr:
-  host: "${IBKR_HOST:-127.0.0.1}"
-  port: "${IBKR_PORT:-4002}"
-  client_id: "${IBKR_CLIENT_ID:-10}"
-  data_client_id: "${IBKR_DATA_CLIENT_ID:-11}"
-
 # Telegram Notifications
 telegram:
   enabled: true
   bot_token: "${TELEGRAM_BOT_TOKEN}"
   chat_id: "${TELEGRAM_CHAT_ID}"
-  notify_on:
-    - "signal"
-    - "entry"
-    - "exit"
-    - "error"
 
 # Risk Management (Prop Firm Style)
 risk:
@@ -37,15 +25,6 @@ risk:
   take_profit_risk_reward: 1.5   # 1.5:1 R/R for quick scalps
   min_position_size: 5      # Minimum MNQ contracts per trade
   max_position_size: 15     # Maximum MNQ contracts per trade
-
-# Logging
-logging:
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  file: "logs/nq_agent.log"
-  console: true
-
-# Data Provider
-data_provider: "ibkr"  # Use IBKR for market data
 
 # Service intervals
 service:
@@ -60,11 +39,6 @@ circuit_breaker:
   max_consecutive_errors: 10
   max_connection_failures: 10
   max_data_fetch_errors: 5
-
-# Alert intervals
-alerts:
-  connection_failure_interval: 600  # 10 minutes
-  data_quality_interval: 300        # 5 minutes
 
 # Data fetching
 data:

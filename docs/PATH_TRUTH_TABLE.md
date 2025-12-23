@@ -53,12 +53,13 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Testing scripts** (`scripts/testing/`):
   - `test_all.py` – master test runner
   - `run_tests.sh` – convenience wrapper
-  - `test_nq_agent_with_mock.py`
-  - `test_signal_generation.py`, `test_signal_starvation_fixes.py`
-  - `test_data_quality.py`, `test_e2e_simulation.py`
-  - `test_telegram_notifications.py`
-  - `smoke_test_ibkr.py`
   - `validate_strategy.py`
+  - `smoke_test_ibkr.py`
+  - `test_signal_starvation_fixes.py`
+  - `test_data_quality.py`, `test_e2e_simulation.py`
+  - `test_mplfinance_chart.py`
+  - `backtest_nq_strategy.py`
+  - `check_signals.py`
 - **Docs**:
   - `docs/TESTING_GUIDE.md`
   - `docs/MOCK_DATA_WARNING.md`
@@ -69,7 +70,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Logical component**: Configuration and settings
 - **Config files**:
   - `config/config.yaml` – primary service + strategy configuration
-  - `.env` / `.env.example` – environment variables (Telegram, IBKR, provider, log level)
+  - `.env` / `.env.example` – environment variables (Telegram, IBKR, provider selection)
 - **Python modules**:
   - `pearlalgo.config.config_loader`
   - `pearlalgo.config.settings`

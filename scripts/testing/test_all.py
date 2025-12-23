@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # ============================================================================
 # Category: Testing
-# Purpose: Unified test runner for NQ Agent (combines multiple test scripts)
+# Purpose: Unified test runner for NQ Agent (canonical entry point)
 # Usage: python3 scripts/testing/test_all.py [mode]
 # Modes: all (default), telegram, signals, service
 # ============================================================================
 """
 Unified Test Runner for NQ Agent
 
-Combines functionality from:
-- test_telegram_notifications.py
-- test_signal_generation.py
-- test_nq_agent_with_mock.py
+Runs the canonical test/validation modes for this repo:
+- Telegram notification formatting + send
+- Strategy signal generation with the mock provider
+- Short-run service lifecycle with the mock provider
 
 Usage:
     python3 scripts/testing/test_all.py [mode]

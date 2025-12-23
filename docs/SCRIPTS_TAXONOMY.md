@@ -42,17 +42,17 @@ Key scripts (to keep as canonical):
 ## Testing (`scripts/testing/`)
 
 - `test_all.py`
-  - **Role**: Unified test runner supporting different modes (e.g. `telegram`, `ibkr`, `strategy`).
+  - **Role**: Unified test runner supporting modes: `telegram`, `signals`, `service`.
 - `run_tests.sh`
   - **Role**: Developer convenience script; activates `.venv` if present, ensures package is installed, then calls `test_all.py`.
-- `test_nq_agent_with_mock.py`
-  - **Role**: Integration tests using mock data provider.
-- `test_signal_generation.py`, `test_signal_starvation_fixes.py`
-  - **Role**: Strategy‑level unit tests.
+- `test_signal_starvation_fixes.py`
+  - **Role**: Strategy regression validations (anti-starvation fixes).
 - `test_data_quality.py`, `test_e2e_simulation.py`
   - **Role**: Data‑quality and end‑to‑end tests.
-- `test_telegram_notifications.py`
-  - **Role**: Validate Telegram notification formatting and sending behavior (using mocks/fixtures).
+- `test_mplfinance_chart.py`
+  - **Role**: Chart generation smoke test (mplfinance).
+- `backtest_nq_strategy.py`
+  - **Role**: Offline backtest helper over cached parquet data.
 - `smoke_test_ibkr.py`
   - **Role**: Quick connectivity and entitlement smoke test for IBKR.
 - `validate_strategy.py`

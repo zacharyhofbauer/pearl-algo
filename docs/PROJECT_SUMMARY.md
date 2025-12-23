@@ -254,9 +254,9 @@ The MNQ Trading Agent is designed to:
 - Async retry with exponential backoff
 - Configurable retry attempts
 
-**Logging** (`logging.py`):
-- Loguru-based logging configuration
-- File and console logging
+**Logging** (`logger.py`, `logging_config.py`):
+- `logger.py`: shared logger instance (loguru-backed when available)
+- `logging_config.py`: logging setup helpers (structured logging, correlation IDs, timing)
 
 ### 5. Configuration (`src/pearlalgo/config/`)
 
@@ -377,13 +377,15 @@ Signal Count Incremented
 ```
 pearlalgo-dev-ai-agents/
 ├── src/pearlalgo/              # Main source code
-│   ├── nq_agent/               # MNQ Agent Service (6 files)
+│   ├── nq_agent/               # MNQ Agent Service
 │   │   ├── main.py             # Entry point
 │   │   ├── service.py          # Main service loop
 │   │   ├── data_fetcher.py     # Data fetching logic
 │   │   ├── state_manager.py    # State persistence
 │   │   ├── performance_tracker.py  # Performance metrics
 │   │   ├── telegram_notifier.py    # Telegram notifications
+│   │   ├── telegram_command_handler.py  # Interactive Telegram bot commands (separate service)
+│   │   ├── chart_generator.py    # mplfinance chart generation (optional, Telegram)
 │   │   └── health_monitor.py       # Health monitoring
 │   ├── strategies/nq_intraday/ # MNQ Strategy (prop firm optimized)
 │   │   ├── strategy.py         # Main strategy class
@@ -398,11 +400,16 @@ pearlalgo-dev-ai-agents/
 │   │   │   ├── connection_manager.py
 │   │   │   └── entitlements.py
 │   │   └── ibkr_executor.py    # Thread-safe executor
-│   ├── utils/                  # Utilities (4 files)
+│   ├── utils/                  # Utilities (cross-cutting)
 │   │   ├── telegram_alerts.py  # Telegram core
 │   │   ├── market_hours.py     # Market hours logic
 │   │   ├── retry.py            # Retry logic
-│   │   └── logging.py          # Logging config
+│   │   ├── logger.py           # Shared logger instance
+│   │   ├── logging_config.py   # Logging setup helpers
+│   │   ├── error_handler.py    # Error classification + handling helpers
+│   │   ├── data_quality.py     # Data freshness + validation helpers
+│   │   ├── paths.py            # Timestamp/path helpers
+│   │   └── vwap.py             # VWAP computation
 │   └── config/                 # Configuration (2 files)
 │       ├── settings.py          # Settings management
 │       └── config_loader.py     # Service config loader
@@ -427,14 +434,10 @@ pearlalgo-dev-ai-agents/
 │       ├── run_tests.sh                 # Run all tests
 │       └── smoke_test_ibkr.py           # IBKR smoke test
 │
-├── tests/                       # Unit tests (12 files)
-│   ├── conftest.py             # Pytest configuration
-│   ├── mock_data_provider.py   # Mock data for testing
-│   ├── test_nq_agent_service.py
-│   ├── test_nq_agent_integration.py
-│   ├── test_ibkr_provider.py
-│   ├── test_ibkr_executor.py   # Integration tests (marked)
-│   └── ... (other test files)
+├── tests/                       # Pytest suite (fast, assertion-driven)
+│   ├── mock_data_provider.py   # Synthetic OHLCV for tests (no external deps)
+│   ├── test_edge_cases.py      # Data fetcher + short-run service lifecycle
+│   └── test_error_recovery.py  # Circuit breaker / pause behavior
 │
 ├── docs/                        # Documentation
 │   ├── PROJECT_SUMMARY.md      # This file (single source of truth)
@@ -451,8 +454,7 @@ pearlalgo-dev-ai-agents/
 │   ├── buffers/                 # Data buffers (pickle files)
 │   └── historical/              # Historical data (parquet)
 │
-├── logs/                        # Log files
-│   ├── nq_agent.log            # Service logs
+├── logs/                        # PID + handler logs (runtime artifacts; gitignored)
 │   └── nq_agent.pid            # Process ID
 │
 ├── ibkr/                        # IBKR Gateway files
@@ -485,9 +487,6 @@ TELEGRAM_CHAT_ID=your_chat_id_here
 
 # Data Provider
 PEARLALGO_DATA_PROVIDER=ibkr
-
-# Optional: Logging
-PEARLALGO_LOG_LEVEL=INFO
 ```
 
 ### Configuration File (`config/config.yaml`)
@@ -501,13 +500,6 @@ timeframe: "1m"  # 1-minute bars for scalping/swings
 
 # Scan Interval (seconds)
 scan_interval: 30  # Faster for scalping (was 60)
-
-# IBKR Connection
-ibkr:
-  host: "${IBKR_HOST:-127.0.0.1}"
-  port: "${IBKR_PORT:-4002}"
-  client_id: "${IBKR_CLIENT_ID:-10}"
-  data_client_id: "${IBKR_DATA_CLIENT_ID:-11}"
 
 # Telegram Notifications
 telegram:
@@ -523,15 +515,6 @@ risk:
   take_profit_risk_reward: 1.5   # 1.5:1 R/R for quick profits (was 2.0)
   min_position_size: 5           # Minimum contracts per trade
   max_position_size: 15          # Maximum contracts per trade
-
-# Logging
-logging:
-  level: "INFO"
-  file: "logs/nq_agent.log"
-  console: true
-
-# Data Provider
-data_provider: "ibkr"
 ```
 
 ### Configuration Precedence
@@ -541,7 +524,7 @@ Configuration is resolved using the following precedence rules:
 1. **Environment variables** (from `.env` or process env) are the primary source for:
    - IBKR connection (`IBKR_HOST`, `IBKR_PORT`, `IBKR_CLIENT_ID`, `IBKR_DATA_CLIENT_ID`)
    - Telegram bot token and chat ID (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)
-   - Provider/profile flags (for example `PEARLALGO_DATA_PROVIDER`, `PEARLALGO_DUMMY_MODE`)
+   - Provider selection (`PEARLALGO_DATA_PROVIDER`)
 2. **`config/config.yaml`** provides the **default behavior** for the MNQ agent:
    - Trading symbol, timeframe, scan interval
    - Risk/position sizing and prop‑firm assumptions
@@ -557,8 +540,10 @@ Configuration is resolved using the following precedence rules:
 In practice:
 - **Change behavior** (symbol, risk, scan intervals, thresholds) by editing `config/config.yaml`.
 - **Change infrastructure or secrets** (IBKR, Telegram, provider selection) by editing `.env`.
-- The entrypoints (`pearlalgo.nq_agent.main`, `telegram_command_handler.main`) will first read
-  from the environment and then fall back to `config/config.yaml` for any missing values.
+- The agent entrypoint (`pearlalgo.nq_agent.main`) reads from the environment and uses `config/config.yaml`
+  for service/strategy defaults (and Telegram enablement when env vars are missing).
+- The Telegram command handler (`pearlalgo.nq_agent.telegram_command_handler`) requires Telegram credentials
+  in `.env` / environment variables.
 
 ---
 
@@ -638,10 +623,11 @@ In practice:
    - Signal generation testing
    - Telegram notification testing
 
-3. **Manual Testing Scripts** (`scripts/`):
-   - `test_telegram_notifications.py`: Test all notification types
-   - `test_signal_generation.py`: Test signal logic with mock data
-   - `test_nq_agent_with_mock.py`: Test full service (2 minutes)
+3. **Testing & Validation Scripts** (`scripts/testing/`):
+   - `test_all.py`: Unified runner (telegram / signals / short-run service)
+   - `validate_strategy.py`: Strategy validation helper
+   - `smoke_test_ibkr.py`: IBKR connectivity + entitlement smoke test
+   - `test_data_quality.py`, `test_e2e_simulation.py`, `test_signal_starvation_fixes.py`: Targeted validations
 
 ### Running Tests
 
@@ -733,9 +719,9 @@ pip install -e .
 ```
 
 **View Logs**:
-```bash
-tail -f logs/nq_agent.log
-```
+- Foreground mode: logs are printed in your terminal.
+- systemd: `journalctl -u pearlalgo-mnq.service -f`
+- Docker: `docker logs -f <container>`
 
 ### Example `systemd` Unit (VPS / server)
 
@@ -785,7 +771,7 @@ docker run --rm -it \\
 ### Service Management
 
 - **PID File**: `logs/nq_agent.pid` (for process management)
-- **Log File**: `logs/nq_agent.log` (service logs)
+- **Logs**: stdout/stderr (systemd journal, Docker logs) and Telegram notifications
 - **State Directory**: `data/nq_agent_state/` (persistent state)
 
 ### Daily Operations
@@ -793,7 +779,7 @@ docker run --rm -it \\
 **Morning Checklist**:
 1. Verify IBKR Gateway is running: `./scripts/gateway/check_gateway_status.sh`
 2. Check service status: `./scripts/lifecycle/check_nq_agent_status.sh`
-3. Review overnight logs: `tail -100 logs/nq_agent.log`
+3. Review overnight errors/status (Telegram and/or `journalctl -u pearlalgo-mnq.service --since yesterday`)
 
 **During Trading**:
 - Monitor Telegram for signals
@@ -981,8 +967,8 @@ python3 scripts/testing/test_all.py
 # Validate Strategy
 python3 scripts/testing/validate_strategy.py
 
-# View Logs
-tail -f logs/nq_agent.log
+# View Logs (foreground: printed in terminal; systemd: journal)
+journalctl -u pearlalgo-mnq.service -f
 
 # Run All Unit Tests
 ./scripts/testing/run_tests.sh
@@ -990,7 +976,7 @@ tail -f logs/nq_agent.log
 
 ### File Locations
 
-- **Logs**: `logs/nq_agent.log`
+- **Logs**: stdout/stderr (systemd journal, Docker logs) + `logs/telegram_handler.log` (handler background mode)
 - **State**: `data/nq_agent_state/state.json`
 - **Signals**: `data/nq_agent_state/signals.jsonl`
 - **Performance**: `data/nq_agent_state/performance.json`

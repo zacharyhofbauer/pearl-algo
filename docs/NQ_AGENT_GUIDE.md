@@ -68,9 +68,6 @@ IBKR_DATA_CLIENT_ID=11
 
 # Data Provider
 PEARLALGO_DATA_PROVIDER=ibkr
-
-# Optional: Logging
-PEARLALGO_LOG_LEVEL=INFO
 ```
 
 ### 3. Setup IBKR Gateway
