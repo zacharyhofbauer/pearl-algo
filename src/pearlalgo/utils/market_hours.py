@@ -82,6 +82,12 @@ class MarketHours:
             logger.debug(f"Market closed: Holiday ({et_date.month}/{et_date.day})")
             return False
 
+        # CME futures daily maintenance break (Mon–Thu 17:00–18:00 ET).
+        # This primarily affects data freshness expectations and Error 354 interpretation.
+        if 0 <= weekday <= 3 and time(17, 0) <= et_time < time(18, 0):
+            logger.debug("Market closed: CME maintenance break (17:00-18:00 ET)")
+            return False
+
         # Friday after 5 PM ET - market closed
         if weekday == 4 and et_time >= time(17, 0):  # Friday 5:00 PM
             logger.debug("Market closed: Friday after 5 PM ET")

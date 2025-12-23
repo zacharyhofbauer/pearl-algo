@@ -9,7 +9,9 @@
 pip install -e .
 
 # 2. Configure environment
-# Create .env with: IBKR_HOST, IBKR_PORT, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# Copy the example env file, then edit values:
+cp env.example .env
+# Required keys: IBKR_HOST, IBKR_PORT, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 # 3. Setup IBKR Gateway (first time)
 ./scripts/gateway/setup_ibgateway.sh
