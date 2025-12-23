@@ -28,6 +28,7 @@ except ImportError:
 except Exception as e:
     logger.warning(f"Could not load .env file: {e}")
 
+from pearlalgo.config.config_file import load_config_yaml
 from pearlalgo.data_providers.factory import create_data_provider
 from pearlalgo.nq_agent.service import NQAgentService
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
@@ -44,33 +45,17 @@ async def main():
     import os
 
     # Load Telegram configuration from environment or config.yaml
+    # Precedence: env vars > config.yaml (unified loader handles ${ENV} substitution)
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-    # Precedence for Telegram configuration:
-    # 1) Environment variables (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
-    # 2) config/config.yaml -> telegram.bot_token / telegram.chat_id (with ${ENV} substitution)
     if not telegram_bot_token or not telegram_chat_id:
-        try:
-            from pathlib import Path
-            config_path = Path(__file__).parent.parent.parent.parent / "config" / "config.yaml"
-            if config_path.exists():
-                import yaml
-                with open(config_path) as f:
-                    config_data = yaml.safe_load(f) or {}
-                    telegram_config = config_data.get("telegram", {})
-                    if telegram_config.get("enabled", True):
-                        telegram_bot_token = telegram_bot_token or telegram_config.get("bot_token")
-                        telegram_chat_id = telegram_chat_id or telegram_config.get("chat_id")
-                        # Support environment variable substitution in config
-                        if telegram_bot_token and telegram_bot_token.startswith("${"):
-                            env_var = telegram_bot_token[2:-1].split(":")[0]
-                            telegram_bot_token = os.getenv(env_var) or telegram_config.get("bot_token", "")
-                        if telegram_chat_id and telegram_chat_id.startswith("${"):
-                            env_var = telegram_chat_id[2:-1].split(":")[0]
-                            telegram_chat_id = os.getenv(env_var) or telegram_config.get("chat_id", "")
-        except Exception as e:
-            logger.warning(f"Could not load Telegram config from config.yaml: {e}")
+        config_data = load_config_yaml()
+        telegram_config = config_data.get("telegram", {})
+        if telegram_config.get("enabled", True):
+            # Unified loader already substitutes ${ENV} patterns
+            telegram_bot_token = telegram_bot_token or telegram_config.get("bot_token")
+            telegram_chat_id = telegram_chat_id or telegram_config.get("chat_id")
 
     # Create configuration (load from config.yaml if available)
     try:

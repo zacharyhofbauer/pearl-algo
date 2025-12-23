@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from ib_insync import IB, Future, Option, Stock, util
+from ib_insync import IB, Future, Stock, util
 
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.utils.logger import logger
@@ -938,116 +938,6 @@ class GetHistoricalDataTask(Task):
             )
 
         return bars
-
-
-@dataclass
-class GetOptionsChainTask(Task):
-    """Task to fetch options chain."""
-
-    underlying_symbol: str
-    expiration_date: Optional[str] = None
-    min_dte: Optional[int] = None
-    max_dte: Optional[int] = None
-    strike_proximity_pct: Optional[float] = None
-    min_volume: Optional[int] = None
-    min_open_interest: Optional[int] = None
-    underlying_price: Optional[float] = None
-
-    def execute(self, ib: IB) -> List[Dict]:
-        """Fetch options chain with filtering."""
-        # Create stock contract for underlying
-        stock = Stock(self.underlying_symbol, "SMART", "USD")
-
-        # Request option chains
-        chains = ib.reqSecDefOptParams(stock.symbol, "", stock.secType, stock.conId)
-
-        if not chains:
-            return []
-
-        # Get today's date for DTE calculation
-        today = date.today()
-        all_options = []
-
-        # Process each chain (each chain represents an expiration)
-        for chain in chains:
-            expiration_str = chain.expirations[0] if chain.expirations else None
-            if not expiration_str:
-                continue
-
-            # Parse expiration date
-            try:
-                # IB returns expiration as YYYYMMDD string
-                exp_date = datetime.strptime(expiration_str, "%Y%m%d").date()
-                dte = (exp_date - today).days
-
-                # Filter by DTE
-                if self.min_dte is not None and dte < self.min_dte:
-                    continue
-                if self.max_dte is not None and dte > self.max_dte:
-                    continue
-                if self.expiration_date and expiration_str != self.expiration_date:
-                    continue
-
-                # Process strikes for this expiration
-                for strike in chain.strikes:
-                    # Filter by strike proximity
-                    if self.strike_proximity_pct and self.underlying_price and self.underlying_price > 0:
-                        strike_pct = abs(strike - self.underlying_price) / self.underlying_price
-                        if strike_pct > self.strike_proximity_pct:
-                            continue
-
-                    # Get option contracts for call and put
-                    for option_type in ["C", "P"]:
-                        option = Option(
-                            self.underlying_symbol,
-                            expiration_str,
-                            strike,
-                            option_type,
-                            "SMART"
-                        )
-
-                        try:
-                            # Request market data for this option
-                            ticker = ib.reqMktData(option, "", False, False)
-                            time.sleep(0.1)  # Brief wait for data
-
-                            # Get option data
-                            volume = ticker.volume if ticker.volume else 0
-                            open_interest = ticker.openInterest if hasattr(ticker, 'openInterest') else 0
-
-                            # Filter by volume and OI
-                            if self.min_volume is not None and volume < self.min_volume:
-                                continue
-                            if self.min_open_interest is not None and open_interest < self.min_open_interest:
-                                continue
-
-                            # Build option dict
-                            option_dict = {
-                                "symbol": f"{self.underlying_symbol} {expiration_str} {strike} {option_type}",
-                                "underlying_symbol": self.underlying_symbol,
-                                "strike": strike,
-                                "expiration": expiration_str,
-                                "expiration_date": exp_date.isoformat(),
-                                "dte": dte,
-                                "option_type": "call" if option_type == "C" else "put",
-                                "bid": ticker.bid if ticker.bid else None,
-                                "ask": ticker.ask if ticker.ask else None,
-                                "last_price": ticker.last if ticker.last else (ticker.bid + ticker.ask) / 2 if ticker.bid and ticker.ask else None,
-                                "volume": volume,
-                                "open_interest": open_interest,
-                                "iv": ticker.impliedVolatility if hasattr(ticker, 'impliedVolatility') else None,
-                            }
-
-                            all_options.append(option_dict)
-
-                        except Exception as e:
-                            logger.debug(f"Error fetching data for option {option}: {e}")
-                            continue
-            except Exception as e:
-                logger.debug(f"Error parsing expiration {expiration_str}: {e}")
-                continue
-
-        return all_options
 
 
 @dataclass

@@ -328,22 +328,16 @@ Monitor logs for:
   - Valid entry/stop/target prices
   - Risk/reward >= 1.5:1
 
-#### 4. Status Updates
-Check Telegram for periodic status updates (every 30 minutes):
+#### 4. Dashboard Updates
+Check Telegram for periodic dashboard updates (every 15 minutes):
 
 **What to Verify:**
-- ✅ Status shows "RUNNING"
+- ✅ Dashboard shows "RUNNING" status
 - ✅ Market status (OPEN/CLOSED)
 - ✅ Cycle count increases
 - ✅ Buffer size is reasonable
 - ✅ Error count is low (ideally 0)
 - ✅ Connection status is "connected"
-
-#### 5. Heartbeat Messages
-Check Telegram for heartbeat messages (every hour):
-
-**What to Verify:**
-- ✅ Heartbeats arrive on schedule
 - ✅ Uptime increases correctly
 - ✅ Activity metrics are reasonable
 

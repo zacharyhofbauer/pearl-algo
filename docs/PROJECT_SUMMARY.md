@@ -58,7 +58,7 @@ The MNQ Trading Agent is designed to:
 ### Target Market
 
 - **Symbol**: Mini E-mini NASDAQ-100 Futures (MNQ) - 1/10th size of NQ
-- **Timeframe**: 1-minute bars for intraday scalping/swings
+- **Timeframe**: 5-minute bars primary for intraday swings, with 1-2m for execution pinpointing
 - **Trading session (StrategySessionOpen)**: Prop-firm window 18:00 - 16:10 ET (NY time). Positions must be flat by 16:10.
 - **Futures market window (FuturesMarketOpen)**: CME ETH Sun 18:00 ET → Fri 17:00 ET (Mon–Thu 17:00–18:00 ET maintenance break)
 - **Market**: CME Group futures exchange
@@ -151,8 +151,7 @@ The MNQ Trading Agent is designed to:
 **Telegram Notifier** (`telegram_notifier.py`):
 - Sends all notification types:
   - Signal notifications (entry, stop, target, R:R)
-  - Heartbeat messages (hourly)
-  - Status updates (every 30 minutes)
+  - Dashboard updates (every 15 minutes)
   - Data quality alerts
   - Performance summaries
   - Startup/shutdown notifications
@@ -303,8 +302,7 @@ For each signal:
   └─→ Telegram Notifier.send_signal()
   ↓
 Periodic Updates:
-  ├─→ Status Update (every 30 min)
-  ├─→ Heartbeat (every 1 hour)
+  ├─→ Dashboard Update (every 15 min)
   └─→ State Save (every 10 cycles)
 ```
 
@@ -509,10 +507,10 @@ PEARLALGO_DATA_PROVIDER=ibkr
 symbol: "MNQ"  # Mini NQ (1/10th size of NQ, better for prop firms)
 
 # Timeframe
-timeframe: "1m"  # 1-minute bars for scalping/swings
+timeframe: "5m"  # 5-minute bars primary for intraday swings
 
 # Scan Interval (seconds)
-scan_interval: 30  # Faster for scalping (was 60)
+scan_interval: 30  # Check for signals every 30 seconds
 
 # Telegram Notifications
 telegram:
@@ -523,11 +521,11 @@ telegram:
 # Risk Management (Prop Firm Style)
 risk:
   max_risk_per_trade: 0.01      # 1% max risk per trade (prop firm conservative)
-  max_drawdown: 0.10             # 10% account drawdown limit (prop firm typical)
-  stop_loss_atr_multiplier: 1.5  # Tighter stops for scalping (was 2.0)
-  take_profit_risk_reward: 1.5   # 1.5:1 R/R for quick profits (was 2.0)
-  min_position_size: 5           # Minimum contracts per trade
-  max_position_size: 15          # Maximum contracts per trade
+  max_drawdown: 0.10            # 10% account drawdown limit (prop firm typical)
+  stop_loss_atr_multiplier: 1.5 # Tighter stops for scalping
+  take_profit_risk_reward: 1.5  # 1.5:1 R/R for quick profits
+  min_position_size: 5          # Minimum contracts per trade
+  max_position_size: 15         # Maximum contracts per trade
 ```
 
 ### Configuration Precedence
@@ -575,8 +573,7 @@ In practice:
 ### 2. Mobile-Optimized Telegram Notifications
 
 - **Signal Notifications**: Entry, stop-loss, take-profit, R:R ratio
-- **Heartbeat Messages**: Hourly service status
-- **Status Updates**: Every 30 minutes with performance metrics
+- **Dashboard Updates**: Every 15 minutes with performance metrics
 - **Data Quality Alerts**: Stale data, buffer issues, fetch failures
 - **Performance Summaries**: Daily/weekly statistics
 - **Service Notifications**: Startup, shutdown, recovery, circuit breaker
@@ -810,8 +807,7 @@ docker run --rm -it \\
 
 ### Automatic Monitoring
 
-- **Heartbeat Messages**: Every 1 hour
-- **Status Updates**: Every 30 minutes
+- **Dashboard Updates**: Every 15 minutes
 - **Data Quality Alerts**: When issues detected
 - **Error Alerts**: Circuit breaker, consecutive errors
 - **Recovery Notifications**: When service recovers

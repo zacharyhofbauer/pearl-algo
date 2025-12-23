@@ -60,9 +60,17 @@ Key scripts (to keep as canonical):
 - `check_signals.py`
   - **Role**: Diagnostic tool to check signals file format, count, and validity. Useful for troubleshooting signal persistence issues.
 
-## Maintenance / Misc
+## Maintenance (`scripts/maintenance/`)
 
-At present, all scripts fall into the four categories above. If new scripts are added, they should be placed under one of these directories and follow the patterns described here:
+Scripts for repository hygiene and cleanup operations.
+
+- `purge_runtime_artifacts.sh`
+  - **Role**: Safe cleanup of runtime/build artifacts (data, logs, telemetry, tmp images, `__pycache__`, egg-info).
+  - **Behavior**: Requires explicit `--yes` flag to execute deletions. Supports `--dry-run` to preview what would be removed.
+
+## General Guidelines
+
+When adding new scripts, place them under one of the categories above and follow these patterns:
 
 - Always `cd` to project root at startup.
 - Prefer the project virtual environment (`.venv/bin/python3`) when running Python modules.

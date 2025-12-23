@@ -6,10 +6,11 @@ Configuration settings for MNQ intraday trading strategy.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from pearlalgo.config.config_file import load_config_yaml
 
 
 @dataclass
@@ -86,127 +87,109 @@ class NQIntradayConfig:
     def from_config_file(cls, config_path: Optional[Path] = None) -> "NQIntradayConfig":
         """Load configuration from config.yaml file.
 
+        Uses the unified config loader with environment variable substitution.
+
         Args:
             config_path: Path to config.yaml (defaults to config/config.yaml)
 
         Returns:
             NQIntradayConfig instance
         """
-        if config_path is None:
-            # Try to find config.yaml relative to project root
-            project_root = Path(__file__).parent.parent.parent.parent.parent
-            config_path = project_root / "config" / "config.yaml"
-
         # Start with defaults (MNQ-native)
         config = cls()
 
-        # Load from file if exists
-        if config_path and config_path.exists():
-            try:
-                import yaml
+        # Load config using unified loader (handles env substitution)
+        config_data = load_config_yaml(config_path)
+        if not config_data:
+            return config
 
-                with open(config_path) as f:
-                    config_data = yaml.safe_load(f) or {}
+        try:
+            # Load symbol and timeframe
+            if "symbol" in config_data:
+                config.symbol = str(config_data["symbol"])
+            if "timeframe" in config_data:
+                config.timeframe = str(config_data["timeframe"])
+            if "scan_interval" in config_data:
+                config.scan_interval = int(config_data["scan_interval"])
 
-                    # Load symbol and timeframe
-                    if "symbol" in config_data:
-                        config.symbol = config_data["symbol"]
-                    if "timeframe" in config_data:
-                        config.timeframe = config_data["timeframe"]
-                    if "scan_interval" in config_data:
-                        config.scan_interval = config_data["scan_interval"]
+            # Load strategy session window (NY time / ET).
+            # Supports either:
+            # - session.start_time / session.end_time (preferred)
+            # - top-level start_time / end_time (backward-compatible)
+            session_cfg = config_data.get("session", {}) or {}
+            if "start_time" in session_cfg:
+                config.start_time = str(session_cfg["start_time"])
+            elif "start_time" in config_data:
+                config.start_time = str(config_data["start_time"])
 
-                    # Load strategy session window (NY time / ET).
-                    # Supports either:
-                    # - session.start_time / session.end_time (preferred)
-                    # - top-level start_time / end_time (backward-compatible)
-                    session_cfg = config_data.get("session", {}) or {}
-                    if "start_time" in session_cfg:
-                        config.start_time = session_cfg["start_time"]
-                    elif "start_time" in config_data:
-                        config.start_time = config_data["start_time"]
+            if "end_time" in session_cfg:
+                config.end_time = str(session_cfg["end_time"])
+            elif "end_time" in config_data:
+                config.end_time = str(config_data["end_time"])
 
-                    if "end_time" in session_cfg:
-                        config.end_time = session_cfg["end_time"]
-                    elif "end_time" in config_data:
-                        config.end_time = config_data["end_time"]
+            # Load risk parameters
+            risk_config = config_data.get("risk", {}) or {}
+            if "stop_loss_atr_multiplier" in risk_config:
+                config.stop_loss_atr_multiplier = float(risk_config["stop_loss_atr_multiplier"])
+            if "take_profit_risk_reward" in risk_config:
+                config.take_profit_risk_reward = float(risk_config["take_profit_risk_reward"])
+            if "max_risk_per_trade" in risk_config:
+                config.max_risk_per_trade = float(risk_config["max_risk_per_trade"])
+            if "max_position_size" in risk_config:
+                config.max_position_size = int(risk_config["max_position_size"])
+            if "min_position_size" in risk_config:
+                config.min_position_size = int(risk_config["min_position_size"])
 
-                    # Load risk parameters
-                    risk_config = config_data.get("risk", {})
-                    if "stop_loss_atr_multiplier" in risk_config:
-                        config.stop_loss_atr_multiplier = risk_config["stop_loss_atr_multiplier"]
-                    if "take_profit_risk_reward" in risk_config:
-                        config.take_profit_risk_reward = risk_config["take_profit_risk_reward"]
-                    if "max_risk_per_trade" in risk_config:
-                        config.max_risk_per_trade = risk_config["max_risk_per_trade"]
-                    if "max_position_size" in risk_config:
-                        config.max_position_size = risk_config["max_position_size"]
-                    if "min_position_size" in risk_config:
-                        config.min_position_size = risk_config["min_position_size"]
+            # Load virtual PnL settings
+            vpnl_cfg = config_data.get("virtual_pnl", {}) or {}
+            if "enabled" in vpnl_cfg:
+                config.virtual_pnl_enabled = bool(vpnl_cfg["enabled"])
+            if "intrabar_tiebreak" in vpnl_cfg:
+                config.virtual_pnl_tiebreak = str(vpnl_cfg["intrabar_tiebreak"])
 
-                    # Support environment variable substitution for basic fields
-                    def substitute_env(value):
-                        if isinstance(value, str) and value.startswith("${"):
-                            env_var = value[2:-1].split(":")[0]
-                            default = value.split(":")[1][:-1] if ":" in value else None
-                            return os.getenv(env_var, default)
-                        return value
+            # Load HUD settings
+            hud_cfg = config_data.get("hud", {}) or {}
+            if "enabled" in hud_cfg:
+                config.hud_enabled = bool(hud_cfg["enabled"])
+            if "show_rr_box" in hud_cfg:
+                config.hud_show_rr_box = bool(hud_cfg["show_rr_box"])
+            if "rr_box_forward_bars" in hud_cfg:
+                config.hud_rr_box_forward_bars = int(hud_cfg["rr_box_forward_bars"])
+            if "right_pad_bars" in hud_cfg:
+                config.hud_right_pad_bars = int(hud_cfg["right_pad_bars"])
+            if "show_sessions" in hud_cfg:
+                config.hud_show_sessions = bool(hud_cfg["show_sessions"])
+            if "show_session_names" in hud_cfg:
+                config.hud_show_session_names = bool(hud_cfg["show_session_names"])
+            if "show_session_oc" in hud_cfg:
+                config.hud_show_session_oc = bool(hud_cfg["show_session_oc"])
+            if "show_session_tick_range" in hud_cfg:
+                config.hud_show_session_tick_range = bool(hud_cfg["show_session_tick_range"])
+            if "show_session_average" in hud_cfg:
+                config.hud_show_session_average = bool(hud_cfg["show_session_average"])
+            if "show_supply_demand" in hud_cfg:
+                config.hud_show_supply_demand = bool(hud_cfg["show_supply_demand"])
+            if "show_power_channel" in hud_cfg:
+                config.hud_show_power_channel = bool(hud_cfg["show_power_channel"])
+            if "show_tbt_targets" in hud_cfg:
+                config.hud_show_tbt_targets = bool(hud_cfg["show_tbt_targets"])
+            if "show_key_levels" in hud_cfg:
+                config.hud_show_key_levels = bool(hud_cfg["show_key_levels"])
+            if "show_right_labels" in hud_cfg:
+                config.hud_show_right_labels = bool(hud_cfg["show_right_labels"])
+            if "max_right_labels" in hud_cfg:
+                config.hud_max_right_labels = int(hud_cfg["max_right_labels"])
+            if "right_label_merge_ticks" in hud_cfg:
+                config.hud_right_label_merge_ticks = int(hud_cfg["right_label_merge_ticks"])
+            if "show_rsi" in hud_cfg:
+                config.hud_show_rsi = bool(hud_cfg["show_rsi"])
+            if "rsi_period" in hud_cfg:
+                config.hud_rsi_period = int(hud_cfg["rsi_period"])
 
-                    config.symbol = substitute_env(config.symbol) or config.symbol
-                    config.timeframe = substitute_env(config.timeframe) or config.timeframe
-                    config.start_time = substitute_env(config.start_time) or config.start_time
-                    config.end_time = substitute_env(config.end_time) or config.end_time
+        except Exception as e:  # pragma: no cover - defensive logging
+            import logging
 
-                    # Load virtual PnL settings
-                    vpnl_cfg = config_data.get("virtual_pnl", {}) or {}
-                    if "enabled" in vpnl_cfg:
-                        config.virtual_pnl_enabled = bool(vpnl_cfg["enabled"])
-                    if "intrabar_tiebreak" in vpnl_cfg:
-                        config.virtual_pnl_tiebreak = str(vpnl_cfg["intrabar_tiebreak"])
-
-                    # Load HUD settings
-                    hud_cfg = config_data.get("hud", {}) or {}
-                    if "enabled" in hud_cfg:
-                        config.hud_enabled = bool(hud_cfg["enabled"])
-                    if "show_rr_box" in hud_cfg:
-                        config.hud_show_rr_box = bool(hud_cfg["show_rr_box"])
-                    if "rr_box_forward_bars" in hud_cfg:
-                        config.hud_rr_box_forward_bars = int(hud_cfg["rr_box_forward_bars"])
-                    if "right_pad_bars" in hud_cfg:
-                        config.hud_right_pad_bars = int(hud_cfg["right_pad_bars"])
-                    if "show_sessions" in hud_cfg:
-                        config.hud_show_sessions = bool(hud_cfg["show_sessions"])
-                    if "show_session_names" in hud_cfg:
-                        config.hud_show_session_names = bool(hud_cfg["show_session_names"])
-                    if "show_session_oc" in hud_cfg:
-                        config.hud_show_session_oc = bool(hud_cfg["show_session_oc"])
-                    if "show_session_tick_range" in hud_cfg:
-                        config.hud_show_session_tick_range = bool(hud_cfg["show_session_tick_range"])
-                    if "show_session_average" in hud_cfg:
-                        config.hud_show_session_average = bool(hud_cfg["show_session_average"])
-                    if "show_supply_demand" in hud_cfg:
-                        config.hud_show_supply_demand = bool(hud_cfg["show_supply_demand"])
-                    if "show_power_channel" in hud_cfg:
-                        config.hud_show_power_channel = bool(hud_cfg["show_power_channel"])
-                    if "show_tbt_targets" in hud_cfg:
-                        config.hud_show_tbt_targets = bool(hud_cfg["show_tbt_targets"])
-                    if "show_key_levels" in hud_cfg:
-                        config.hud_show_key_levels = bool(hud_cfg["show_key_levels"])
-                    if "show_right_labels" in hud_cfg:
-                        config.hud_show_right_labels = bool(hud_cfg["show_right_labels"])
-                    if "max_right_labels" in hud_cfg:
-                        config.hud_max_right_labels = int(hud_cfg["max_right_labels"])
-                    if "right_label_merge_ticks" in hud_cfg:
-                        config.hud_right_label_merge_ticks = int(hud_cfg["right_label_merge_ticks"])
-                    if "show_rsi" in hud_cfg:
-                        config.hud_show_rsi = bool(hud_cfg["show_rsi"])
-                    if "rsi_period" in hud_cfg:
-                        config.hud_rsi_period = int(hud_cfg["rsi_period"])
-
-            except Exception as e:  # pragma: no cover - defensive logging
-                import logging
-
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Could not load config from {config_path}: {e}")
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Could not parse config data: {e}")
 
         return config

@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
 import pandas as pd
+import math
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
@@ -861,7 +862,11 @@ class NQAgentService:
                 return
 
             # Fetch lookback window for chart (prefer direct historical fetch; fallback to buffers)
+            # Ensure we always show at least a useful minimum window (operator request: >= 6h)
+            min_lookback_hours = 6.0
             lookback_hours = float(self.dashboard_chart_lookback_hours or 48)
+            if lookback_hours < min_lookback_hours:
+                lookback_hours = min_lookback_hours
             chart_tf = (self.dashboard_chart_timeframe or "auto").strip().lower()
 
             def _choose_timeframe(hours: float, max_bars: int) -> str:
@@ -881,8 +886,11 @@ class NQAgentService:
 
             chosen_tf = _choose_timeframe(lookback_hours, int(self.dashboard_chart_max_bars or 420))
             max_bars = int(self.dashboard_chart_max_bars or 420)
-            bars_target = int((lookback_hours * 60.0) / float(timeframe_to_minutes(chosen_tf) or 5))
-            bars_target = max(50, min(max_bars, bars_target))
+            tf_mins = float(timeframe_to_minutes(chosen_tf) or 5)
+            bars_target = int((lookback_hours * 60.0) / tf_mins)
+            # Guarantee at least 6h of history regardless of timeframe selection.
+            min_bars_for_min_hours = int(math.ceil((min_lookback_hours * 60.0) / tf_mins))
+            bars_target = max(50, min_bars_for_min_hours, min(max_bars, bars_target))
 
             logger.debug(
                 f"Fetching dashboard chart data: lookback_hours={lookback_hours}, timeframe={chosen_tf}, bars={bars_target}"
@@ -903,32 +911,115 @@ class NQAgentService:
                     ),
                 )
                 if isinstance(df_hist, pd.DataFrame) and not df_hist.empty:
-                    chart_data = df_hist.tail(bars_target).copy()
+                    chart_data = df_hist.tail(min(int(bars_target), len(df_hist))).copy()
             except Exception as e:
                 logger.debug(f"Direct historical fetch for dashboard chart failed: {e}")
-            
-            # Try to get from the 5m buffer first (already resampled by data_fetcher)
+
+            # If the full lookback request failed, retry with the minimum window (less load, more likely to succeed).
             if chart_data is None or chart_data.empty:
-                if hasattr(self.data_fetcher, '_data_buffer_5m') and self.data_fetcher._data_buffer_5m is not None:
-                    df_5m = self.data_fetcher._data_buffer_5m
-                    if not df_5m.empty and len(df_5m) >= 50:
-                        chart_data = df_5m.tail(bars_target).copy()
-                        logger.debug(f"Using 5m buffer: {len(chart_data)} bars")
+                try:
+                    end = datetime.now(timezone.utc)
+                    start = end - timedelta(hours=min_lookback_hours)
+                    loop = asyncio.get_event_loop()
+                    df_hist = await loop.run_in_executor(
+                        None,
+                        lambda: self.data_fetcher.data_provider.fetch_historical(
+                            self.config.symbol,
+                            start=start,
+                            end=end,
+                            timeframe=chosen_tf,
+                        ),
+                    )
+                    if isinstance(df_hist, pd.DataFrame) and not df_hist.empty:
+                        chart_data = df_hist.tail(min(int(bars_target), len(df_hist))).copy()
+                except Exception as e:
+                    logger.debug(f"Min-window historical fetch for dashboard chart failed: {e}")
             
-            # Fallback: resample from the primary buffer (which is now 5m)
+            def _resample_ohlcv(df_in: pd.DataFrame, target_tf: str) -> pd.DataFrame:
+                """Best-effort resample of OHLCV data to target timeframe."""
+                try:
+                    mins = timeframe_to_minutes(target_tf)
+                    if not mins or mins <= 0:
+                        return df_in
+                    rule = f"{int(mins)}T"
+                    df = df_in.copy()
+                    if "timestamp" in df.columns:
+                        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+                        df = df.dropna(subset=["timestamp"]).set_index("timestamp")
+                    elif isinstance(df.index, pd.DatetimeIndex):
+                        pass
+                    else:
+                        return df_in
+
+                    need_cols = {"open", "high", "low", "close"}
+                    if not need_cols.issubset(set(df.columns)):
+                        return df_in
+
+                    ohlc = df[["open", "high", "low", "close"]].resample(rule).agg(
+                        {"open": "first", "high": "max", "low": "min", "close": "last"}
+                    )
+                    if "volume" in df.columns:
+                        vol = df["volume"].resample(rule).sum()
+                        ohlc["volume"] = vol
+                    ohlc = ohlc.dropna(subset=["open", "high", "low", "close"]).reset_index()
+                    return ohlc
+                except Exception:
+                    return df_in
+
+            # Buffer fallback (timeframe-aware). This should be rare; used only if historical fetch fails.
             if chart_data is None or chart_data.empty:
-                if self.data_fetcher._data_buffer is not None and not self.data_fetcher._data_buffer.empty:
-                    df = self.data_fetcher._data_buffer
-                    # The primary buffer is already 5m, so just use it directly
-                    chart_data = df.tail(bars_target).copy()
-                    logger.debug(f"Using primary buffer: {len(chart_data)} bars")
+                buf = None
+                try:
+                    if chosen_tf == "15m":
+                        buf = getattr(self.data_fetcher, "_data_buffer_15m", None)
+                    elif chosen_tf == "5m":
+                        buf = getattr(self.data_fetcher, "_data_buffer_5m", None)
+                    # If we don't have a matching buffer, resample from whatever we do have.
+                    if buf is None or not isinstance(buf, pd.DataFrame) or buf.empty:
+                        base = (
+                            getattr(self.data_fetcher, "_data_buffer", None)
+                            or getattr(self.data_fetcher, "_data_buffer_5m", None)
+                            or getattr(self.data_fetcher, "_data_buffer_15m", None)
+                        )
+                        if isinstance(base, pd.DataFrame) and not base.empty:
+                            buf = _resample_ohlcv(base, chosen_tf)
+                except Exception:
+                    buf = None
+
+                if isinstance(buf, pd.DataFrame) and not buf.empty:
+                    chart_data = buf.tail(min(int(bars_target), len(buf))).copy()
+                    logger.debug(f"Using buffer fallback for dashboard chart: {len(chart_data)} bars (tf={chosen_tf})")
             
             if chart_data is None or chart_data.empty or len(chart_data) < 20:
                 logger.debug("Not enough data for dashboard chart (need at least 20 bars)")
                 return
             
             # Generate the chart
-            range_label = f"{int(lookback_hours)}h" if lookback_hours < 72 else f"{int(round(lookback_hours/24))}d"
+            # Prefer an accurate label based on the actual data window (avoids "48h" when fallback data is shorter).
+            range_label = None
+            try:
+                tmin = None
+                tmax = None
+                if isinstance(chart_data, pd.DataFrame):
+                    if "timestamp" in chart_data.columns:
+                        ts = pd.to_datetime(chart_data["timestamp"], errors="coerce")
+                        if not ts.isna().all():
+                            tmin = ts.min()
+                            tmax = ts.max()
+                    elif isinstance(chart_data.index, pd.DatetimeIndex) and len(chart_data.index) > 0:
+                        tmin = chart_data.index.min()
+                        tmax = chart_data.index.max()
+                if tmin is not None and tmax is not None and pd.notna(tmin) and pd.notna(tmax):
+                    hrs = float((tmax - tmin).total_seconds()) / 3600.0
+                    if hrs >= 72:
+                        range_label = f"{max(1, int(round(hrs / 24.0)))}d"
+                    else:
+                        range_label = f"{max(1, int(round(hrs)))}h"
+            except Exception:
+                range_label = None
+            if not range_label:
+                range_label = f"{int(lookback_hours)}h" if lookback_hours < 72 else f"{int(round(lookback_hours/24))}d"
+
             chart_path = self.telegram_notifier.chart_generator.generate_dashboard_chart(
                 data=chart_data,
                 symbol=self.config.symbol,

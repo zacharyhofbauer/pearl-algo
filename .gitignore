@@ -27,7 +27,20 @@ telemetry/
 reports/
 state_cache/
 
-# IB/IBC artifacts (not for VCS)
+# Temporary debug/test images
+tmp_debug_*.png
+tmp_test_*.png
+
+# IBKR vendor bundle is now a versioned asset, but ignore runtime logs/backups
+ibkr/ibc/logs/
+ibkr/ibc/config-auto.ini.backup*
+ibkr/ibc/config-auto.ini.save
+ibkr/Jts/launcher*.log
+ibkr/Jts/launcher.log
+ibkr/Jts/jts.ini.backup
+ibkr/Jts/~/
+
+# Legacy IB artifacts (if present outside ibkr/)
 Jts/
 ibc/
 ibgateway-latest-standalone-linux-x64.sh

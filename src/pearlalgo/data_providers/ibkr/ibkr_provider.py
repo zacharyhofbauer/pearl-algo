@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from typing import AsyncIterator, Dict, List, Optional
+from typing import Dict, Optional
 
 import pandas as pd
 from ib_insync import util
@@ -22,7 +22,6 @@ from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.data_providers.ibkr_executor import (
     GetHistoricalDataTask,
     GetLatestBarTask,
-    GetOptionsChainTask,
     IBKRExecutor,
 )
 from pearlalgo.utils.retry import async_retry_with_backoff
@@ -131,101 +130,6 @@ class IBKRProvider(DataProvider):
             raise ValueError(f"Invalid price for {symbol}: {price}")
 
         return float(price)
-
-    async def get_option_chain(
-        self,
-        symbol: str,
-        filters: Optional[Dict] = None,
-    ) -> List[Dict]:
-        """
-        Get options chain for an underlying symbol with optional filtering.
-        
-        Args:
-            symbol: Underlying symbol (e.g., 'SPY', 'QQQ')
-            filters: Optional filter dictionary (see MarketDataProvider interface)
-            
-        Returns:
-            List of option contracts
-        """
-        if not await self.validate_connection():
-            raise ConnectionError("Not connected to IB Gateway")
-
-        # Get underlying price first
-        underlying_price = None
-        try:
-            underlying_price = await self.get_underlier_price(symbol)
-        except Exception as e:
-            logger.warning(f"Could not get underlying price for {symbol}: {e}")
-
-        # Extract filters
-        filters = filters or {}
-        min_dte = filters.get("min_dte")
-        max_dte = filters.get("max_dte")
-        strike_proximity_pct = filters.get("strike_proximity_pct")
-        min_volume = filters.get("min_volume")
-        min_open_interest = filters.get("min_open_interest")
-        expiration_date = filters.get("expiration_date")
-
-        # Get options chain using executor
-        task_id = str(uuid.uuid4())
-        task = GetOptionsChainTask(
-            task_id=task_id,
-            underlying_symbol=symbol,
-            expiration_date=expiration_date,
-            min_dte=min_dte,
-            max_dte=max_dte,
-            strike_proximity_pct=strike_proximity_pct,
-            min_volume=min_volume,
-            min_open_interest=min_open_interest,
-            underlying_price=underlying_price,
-        )
-
-        future = self._executor.submit_task(task)
-        options = await asyncio.wrap_future(future)
-
-        logger.info(f"Retrieved {len(options)} options for {symbol}")
-        return options
-
-    async def get_option_quotes(self, contracts: List[str]) -> List[Dict]:
-        """
-        Get real-time quotes for specific option contracts.
-        
-        Args:
-            contracts: List of option contract identifiers (IBKR format)
-            
-        Returns:
-            List of quote dictionaries
-        """
-        if not await self.validate_connection():
-            raise ConnectionError("Not connected to IB Gateway")
-
-        # This would need to be implemented in the executor
-        # For now, return empty list
-        logger.warning("get_option_quotes not yet fully implemented")
-        return []
-
-    async def subscribe_realtime(
-        self,
-        symbols: List[str],
-    ) -> AsyncIterator[Dict]:
-        """
-        Subscribe to real-time market data updates.
-        
-        Args:
-            symbols: List of symbols to subscribe to
-            
-        Yields:
-            Dictionary with market data updates
-        """
-        if not await self.validate_connection():
-            raise ConnectionError("Not connected to IB Gateway")
-
-        # This would need to be implemented with async streaming
-        # For now, yield empty
-        logger.warning("subscribe_realtime not yet fully implemented")
-        while True:
-            await asyncio.sleep(1)
-            yield {}
 
     async def validate_connection(self) -> bool:
         """

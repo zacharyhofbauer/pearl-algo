@@ -37,7 +37,7 @@ chart_path = generator.generate_entry_chart(
     signal=signal_dict,
     buffer_data=dataframe,
     symbol="MNQ",
-    timeframe="1m",
+    timeframe="5m",
 )
 ```
 

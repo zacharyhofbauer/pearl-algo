@@ -482,9 +482,11 @@ class NQAgentDataFetcher:
 
             # Update buffers
             if not df_5m.empty:
-                self._data_buffer_5m = df_5m.tail(self._buffer_size_5m).reset_index(drop=True)
+                # Preserve timestamp for downstream charting/overlays and better operator debugging.
+                self._data_buffer_5m = df_5m.tail(self._buffer_size_5m).reset_index()
             if not df_15m.empty:
-                self._data_buffer_15m = df_15m.tail(self._buffer_size_15m).reset_index(drop=True)
+                # Preserve timestamp for downstream charting/overlays and better operator debugging.
+                self._data_buffer_15m = df_15m.tail(self._buffer_size_15m).reset_index()
 
             return (
                 self._data_buffer_5m.copy() if self._data_buffer_5m is not None else pd.DataFrame(),

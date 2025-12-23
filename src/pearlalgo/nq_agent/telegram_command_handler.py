@@ -3431,8 +3431,9 @@ class TelegramCommandHandler:
                     from pearlalgo.utils.paths import parse_utc_timestamp
                     signal_time = parse_utc_timestamp(str(signal_ts))
                     
-                    # Fetch 2 hours before and 1 hour after signal (or until now)
-                    start_time = signal_time - timedelta(hours=2)
+                    # Fetch enough history for meaningful context (>= 6h requested).
+                    # We include a small forward window so the chart also shows immediate post-signal behavior.
+                    start_time = signal_time - timedelta(hours=6)
                     end_time = min(signal_time + timedelta(hours=1), datetime.now(timezone.utc))
                     
                     data_provider = self._get_data_provider()

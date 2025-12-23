@@ -1,30 +1,15 @@
-"""Strategy interfaces and examples."""
+"""
+Strategy implementations for the PearlAlgo trading agent.
 
-from pearlalgo.strategies.base import (
-    BaseStrategy,
-    register_strategy,
-    get_strategy,
-    list_strategies,
-    get_strategy_info,
-    create_strategy_signal,
-)
+Currently contains:
+- nq_intraday: MNQ futures intraday strategy optimized for prop firm trading
+"""
 
-# Import strategies to register them (optional - only if they exist)
-try:
-    from pearlalgo.strategies import scalping  # noqa: F401
-except ImportError:
-    pass  # scalping module not available
-
-try:
-    from pearlalgo.strategies import intraday_swing  # noqa: F401
-except ImportError:
-    pass  # intraday_swing module not available
+# Import the main strategy for convenience
+from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
+from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 
 __all__ = [
-    "BaseStrategy",
-    "register_strategy",
-    "get_strategy",
-    "list_strategies",
-    "get_strategy_info",
-    "create_strategy_signal",
+    "NQIntradayStrategy",
+    "NQIntradayConfig",
 ]
