@@ -658,6 +658,9 @@ def format_home_card(
         }.get(quiet_reason, f"ℹ️ {quiet_reason}")
         if reason_display:
             lines.append(f"   {reason_display}")
+        # Actionable cue for StaleData
+        if quiet_reason == "StaleData":
+            lines.append("   💡 Run /data_quality for details")
     
     # CONDITIONAL: Signal diagnostics (when quiet reason is NoOpportunity and we have details)
     if signal_diagnostics and agent_running and not paused:

@@ -58,6 +58,16 @@ class NQAgentDataFetcher:
         self._multitimeframe_5m_hours = data_settings.get("multitimeframe_5m_hours", 4)
         self._multitimeframe_15m_hours = data_settings.get("multitimeframe_15m_hours", 12)
 
+        # Base historical fetch caching (default OFF).
+        # When enabled, 1m history is refreshed on a TTL rather than every 30s cycle.
+        # This reduces IBKR request volume while keeping Level 1 real-time data fresh.
+        self._enable_base_cache: bool = bool(data_settings.get("enable_base_cache", False))
+        self._base_refresh_seconds: int = int(data_settings.get("base_refresh_seconds", 60) or 60)
+        self._base_last_refresh: Optional[datetime] = None
+        self._base_cache_hits: int = 0
+        self._base_cache_misses: int = 0
+        self._base_request_count: int = 0  # Total historical fetch requests
+
         # MTF caching (default OFF) - reduces repeated 5m/15m historical fetches when scan_interval is fast.
         self._enable_mtf_cache: bool = bool(data_settings.get("enable_mtf_cache", False))
         self._mtf_refresh_seconds_5m: int = int(data_settings.get("mtf_refresh_seconds_5m", 300) or 300)
@@ -85,7 +95,7 @@ class NQAgentDataFetcher:
 
         logger.info(
             f"NQAgentDataFetcher initialized with provider={type(data_provider).__name__}, "
-            f"mtf_cache_enabled={self._enable_mtf_cache}"
+            f"base_cache_enabled={self._enable_base_cache}, mtf_cache_enabled={self._enable_mtf_cache}"
         )
 
     @async_retry_with_backoff(
@@ -106,19 +116,8 @@ class NQAgentDataFetcher:
             end = datetime.now(timezone.utc)
             start = end - timedelta(hours=self._historical_hours)
 
-            # Use sync method (data providers use sync interface)
-            # Run in executor to avoid blocking the event loop
-            import asyncio
-            loop = asyncio.get_event_loop()
-            df = await loop.run_in_executor(
-                None,
-                lambda: self.data_provider.fetch_historical(
-                    self.config.symbol,
-                    start=start,
-                    end=end,
-                    timeframe=self.config.timeframe,
-                )
-            )
+            # Check if we can use cached base historical data
+            df = await self._fetch_base_historical_data(start, end)
 
             if df.empty:
                 logger.warning(f"No historical data available for {self.config.symbol} (Error 162 may be blocking historical data)")
@@ -359,6 +358,76 @@ class NQAgentDataFetcher:
             self._last_market_data = market_data
             return market_data
 
+    async def _fetch_base_historical_data(
+        self, start: datetime, end: datetime
+    ) -> pd.DataFrame:
+        """
+        Fetch base historical data with optional TTL caching.
+        
+        When caching is enabled, historical data is only refreshed when the TTL
+        expires, reducing IBKR request volume. The latest bar (Level 1 real-time)
+        is still fetched every cycle for freshness.
+        
+        Args:
+            start: Start datetime for data fetch
+            end: End datetime for data fetch
+            
+        Returns:
+            DataFrame with historical OHLCV data
+        """
+        now = end
+        
+        # Check if cache is enabled and valid
+        if self._enable_base_cache and self._data_buffer is not None and not self._data_buffer.empty:
+            if self._base_last_refresh is not None:
+                elapsed = (now - self._base_last_refresh).total_seconds()
+                if elapsed < self._base_refresh_seconds:
+                    # Cache hit - return existing buffer
+                    self._base_cache_hits += 1
+                    logger.debug(
+                        "Base historical cache hit",
+                        extra={
+                            "cache_age_seconds": round(elapsed, 1),
+                            "ttl_seconds": self._base_refresh_seconds,
+                            "hits": self._base_cache_hits,
+                            "misses": self._base_cache_misses,
+                        },
+                    )
+                    return self._data_buffer.copy()
+        
+        # Cache miss (or caching disabled) - fetch fresh data
+        self._base_cache_misses += 1
+        self._base_request_count += 1
+        
+        if self._enable_base_cache:
+            logger.debug(
+                "Base historical cache miss - fetching fresh data",
+                extra={
+                    "hits": self._base_cache_hits,
+                    "misses": self._base_cache_misses,
+                    "total_requests": self._base_request_count,
+                },
+            )
+        
+        # Use sync method (data providers use sync interface)
+        # Run in executor to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        df = await loop.run_in_executor(
+            None,
+            lambda: self.data_provider.fetch_historical(
+                self.config.symbol,
+                start=start,
+                end=end,
+                timeframe=self.config.timeframe,
+            )
+        )
+        
+        # Update cache timestamp on successful fetch
+        if not df.empty and self._enable_base_cache:
+            self._base_last_refresh = now
+        
+        return df
+
     async def _fetch_multitimeframe_data(self, end: datetime) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Fetch 5m and 15m timeframe data for multi-timeframe analysis.
@@ -502,3 +571,46 @@ class NQAgentDataFetcher:
         if self._data_buffer is None:
             return 0
         return len(self._data_buffer)
+
+    def get_cache_stats(self) -> Dict:
+        """
+        Get cache statistics for observability/dashboard.
+        
+        Returns:
+            Dictionary with cache hit/miss counts and hit rates.
+        """
+        # Base historical cache stats
+        base_total = self._base_cache_hits + self._base_cache_misses
+        base_hit_rate = (
+            self._base_cache_hits / base_total if base_total > 0 else 0.0
+        )
+        
+        # MTF cache stats (5m)
+        mtf_5m_total = self._mtf_cache_hits_5m + self._mtf_cache_misses_5m
+        mtf_5m_hit_rate = (
+            self._mtf_cache_hits_5m / mtf_5m_total if mtf_5m_total > 0 else 0.0
+        )
+        
+        # MTF cache stats (15m)
+        mtf_15m_total = self._mtf_cache_hits_15m + self._mtf_cache_misses_15m
+        mtf_15m_hit_rate = (
+            self._mtf_cache_hits_15m / mtf_15m_total if mtf_15m_total > 0 else 0.0
+        )
+        
+        return {
+            "base_cache_enabled": self._enable_base_cache,
+            "base_ttl_seconds": self._base_refresh_seconds,
+            "base_hits": self._base_cache_hits,
+            "base_misses": self._base_cache_misses,
+            "base_hit_rate": round(base_hit_rate, 3),
+            "base_request_count": self._base_request_count,
+            "mtf_cache_enabled": self._enable_mtf_cache,
+            "mtf_5m_ttl_seconds": self._mtf_refresh_seconds_5m,
+            "mtf_5m_hits": self._mtf_cache_hits_5m,
+            "mtf_5m_misses": self._mtf_cache_misses_5m,
+            "mtf_5m_hit_rate": round(mtf_5m_hit_rate, 3),
+            "mtf_15m_ttl_seconds": self._mtf_refresh_seconds_15m,
+            "mtf_15m_hits": self._mtf_cache_hits_15m,
+            "mtf_15m_misses": self._mtf_cache_misses_15m,
+            "mtf_15m_hit_rate": round(mtf_15m_hit_rate, 3),
+        }

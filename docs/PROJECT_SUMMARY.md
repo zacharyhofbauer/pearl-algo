@@ -345,13 +345,16 @@ Signal Count Incremented
 - **pandas**: 2.2+ (DataFrame operations)
 - **numpy**: 2.0+ (Numerical computations)
 - **pydantic**: 2.8+ (Configuration validation)
-- **pandas-ta**: 0.4.70+ (Technical indicators)
+- **pydantic-settings**: 2.6+ (Environment-based settings)
+- **python-dotenv**: 1.0+ (Environment file loading)
 - **ib-insync**: 0.9.86+ (IBKR API client)
 - **python-telegram-bot**: 20.0+ (Telegram notifications)
 - **loguru**: 0.7.0+ (Logging)
 - **PyYAML**: 6.0+ (Configuration files)
-- **aiohttp**: 3.9.0+ (Async HTTP)
 - **pytz**: 2024.1+ (Timezone handling)
+- **matplotlib**: 3.8+ (Charting backend)
+- **mplfinance**: 0.12+ (Financial charts)
+- **pyarrow**: 16.0+ (Parquet state persistence)
 
 ### Development Dependencies
 

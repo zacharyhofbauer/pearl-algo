@@ -25,6 +25,24 @@ from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.utils.logger import logger
 
 
+# Load IBKR verbose logging setting once at module load time
+_data_settings = load_service_config(validate=False).get("data", {})
+_IBKR_VERBOSE_LOGGING = bool(_data_settings.get("ibkr_verbose_logging", False))
+
+
+def _log_trace(message: str, *args, **kwargs) -> None:
+    """
+    Log at INFO if verbose logging is enabled, otherwise DEBUG.
+    
+    This is used for step-by-step tracing in the IBKR executor.
+    Actionable warnings/errors should still use logger.warning/error directly.
+    """
+    if _IBKR_VERBOSE_LOGGING:
+        logger.info(message, *args, **kwargs)
+    else:
+        logger.debug(message, *args, **kwargs)
+
+
 def _is_valid_price(value: Any) -> bool:
     """Check if a price value is valid (not None, not NaN, and > 0)."""
     if value is None:
@@ -141,23 +159,23 @@ class GetLatestBarTask(Task):
 
     def execute(self, ib: IB, executor=None) -> Optional[Dict]:
         """Fetch latest bar data using Level 1 market data only."""
-        logger.info(f"🔵 GetLatestBarTask.execute() STARTED for {self.symbol}")
+        _log_trace(f"🔵 GetLatestBarTask.execute() STARTED for {self.symbol}")
         
         # Store executor reference for error checking
         if executor:
             ib._executor = executor
         
         # Create contract with detailed logging
-        logger.info(f"📋 Step 1: Creating contract for {self.symbol}")
+        _log_trace(f"📋 Step 1: Creating contract for {self.symbol}")
         if self.is_futures:
             # For futures, use reqContractDetails to get all contracts, then select front month
             contract = Future(self.symbol, exchange="CME", currency="USD")
-            logger.info(f"   Created Future contract: symbol={self.symbol}, exchange=CME, currency=USD")
+            _log_trace(f"   Created Future contract: symbol={self.symbol}, exchange=CME, currency=USD")
             try:
-                logger.info(f"   Requesting contract details from IBKR...")
+                _log_trace(f"   Requesting contract details from IBKR...")
                 # Request contract details which returns all available contracts
                 contracts = ib.reqContractDetails(contract)
-                logger.info(f"   Received {len(contracts) if contracts else 0} contract(s) from IBKR")
+                _log_trace(f"   Received {len(contracts) if contracts else 0} contract(s) from IBKR")
                 if contracts:
                     # Sort contracts by expiration date
                     sorted_contracts = sorted(contracts, key=lambda cd: cd.contract.lastTradeDateOrContractMonth)
@@ -179,19 +197,19 @@ class GetLatestBarTask(Task):
                             # Use next month contract if available
                             if len(sorted_contracts) > 1:
                                 contract_details = sorted_contracts[1]
-                                logger.info(f"✅ Using next month contract instead (expires {contract_details.contract.lastTradeDateOrContractMonth})")
+                                _log_trace(f"✅ Using next month contract instead (expires {contract_details.contract.lastTradeDateOrContractMonth})")
                             else:
                                 contract_details = front_month
                                 logger.warning(f"⚠️  Only one contract available, using front month despite expiration")
                         else:
                             contract_details = front_month
-                            logger.info(f"✅ Front month contract expires in {days_until_expiration} days - OK")
+                            _log_trace(f"✅ Front month contract expires in {days_until_expiration} days - OK")
                     except Exception as date_e:
                         logger.warning(f"⚠️  Could not parse expiration date '{expiration_str}': {date_e}, using front month")
                         contract_details = front_month
                     
                     contract = contract_details.contract
-                    logger.info(
+                    _log_trace(
                         f"✅ Selected contract:\n"
                         f"   - Local Symbol: {contract.localSymbol}\n"
                         f"   - ConId: {contract.conId}\n"
@@ -207,7 +225,7 @@ class GetLatestBarTask(Task):
                 return None
         else:
             contract = Stock(self.symbol, exchange="SMART", currency="USD")
-            logger.info(f"   Created Stock contract: symbol={self.symbol}, exchange=SMART")
+            _log_trace(f"   Created Stock contract: symbol={self.symbol}, exchange=SMART")
 
         # REMOVED: All Level 2 code - user has Level 1 subscription only
         # Directly request Level 1 market data
@@ -255,8 +273,8 @@ class GetLatestBarTask(Task):
             market_status = "Market closed (opens Sunday 6:00 PM ET)"
         
         # Request Level 1 market data (ONLY - no Level 2)
-        logger.info(f"📡 Step 2: Requesting Level 1 market data for {self.symbol}")
-        logger.info(
+        _log_trace(f"📡 Step 2: Requesting Level 1 market data for {self.symbol}")
+        _log_trace(
             f"   Contract Details:\n"
             f"   - Symbol: {contract.symbol}\n"
             f"   - Local Symbol: {contract.localSymbol if hasattr(contract, 'localSymbol') else 'N/A'}\n"
@@ -265,39 +283,39 @@ class GetLatestBarTask(Task):
             f"   - Currency: {contract.currency}\n"
             f"   - SecType: {contract.secType if hasattr(contract, 'secType') else 'N/A'}"
         )
-        logger.info(
+        _log_trace(
             f"   Market Status:\n"
             f"   - Current time: {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
             f"   - Market status: {market_status}\n"
             f"   - Market open: {is_market_open}"
         )
-        logger.info(f"   Subscription: CME Real-Time (NP,L1) - Level 1 only")
+        _log_trace(f"   Subscription: CME Real-Time (NP,L1) - Level 1 only")
         
         ticker = None
         try:
             # Ensure market data type is LIVE (1) before requesting
-            logger.info(f"   Setting market data type to LIVE (1)...")
+            _log_trace(f"   Setting market data type to LIVE (1)...")
             try:
                 ib.reqMarketDataType(1)  # 1 = Live, 2 = Frozen, 3 = Delayed, 4 = Delayed-Frozen
-                logger.info(f"   ✅ Market data type set to LIVE (1)")
+                _log_trace(f"   ✅ Market data type set to LIVE (1)")
             except Exception as md_type_e:
                 logger.warning(f"   ⚠️  Could not set market data type (may already be set): {md_type_e}")
             
             # Request Level 1 market data
             # Try snapshot first to get initial price, then switch to streaming if needed
             # Parameters: contract, genericTickList="", snapshot=True/False, regulatorySnapshot=False
-            logger.info(f"   Attempting snapshot request first to get initial price...")
-            logger.info(f"   Calling ib.reqMktData(contract, '', True, False) [snapshot=True]...")
-            logger.info(f"   - genericTickList: '' (empty = default ticks)")
-            logger.info(f"   - snapshot: True (one-time snapshot to get initial price)")
-            logger.info(f"   - regulatorySnapshot: False")
+            _log_trace(f"   Attempting snapshot request first to get initial price...")
+            _log_trace(f"   Calling ib.reqMktData(contract, '', True, False) [snapshot=True]...")
+            _log_trace(f"   - genericTickList: '' (empty = default ticks)")
+            _log_trace(f"   - snapshot: True (one-time snapshot to get initial price)")
+            _log_trace(f"   - regulatorySnapshot: False")
             
             # Try snapshot first (one-time request, might work better for initial price)
             ticker = ib.reqMktData(contract, "", True, False)
             ticker_req_id = ticker.reqId if hasattr(ticker, 'reqId') else None
-            logger.info(f"   ✅ reqMktData() call completed, ticker object created")
-            logger.info(f"   Ticker object type: {type(ticker)}")
-            logger.info(f"   Ticker ID: {ticker_req_id}")
+            _log_trace(f"   ✅ reqMktData() call completed, ticker object created")
+            _log_trace(f"   Ticker object type: {type(ticker)}")
+            _log_trace(f"   Ticker ID: {ticker_req_id}")
             
             # Clear any previous errors for this reqId
             if ticker_req_id is not None:
@@ -307,7 +325,7 @@ class GetLatestBarTask(Task):
                         executor._market_data_errors.pop(ticker_req_id, None)
             
             # Wait for data/errors using event-based approach
-            logger.info(f"   Waiting for market data to arrive (snapshot request, should be faster)...")
+            _log_trace(f"   Waiting for market data to arrive (snapshot request, should be faster)...")
             max_wait = 15.0  # Increased wait time for snapshot requests
             check_interval = 0.5  # Check every 0.5 seconds
             waited = 0.0
@@ -320,13 +338,13 @@ class GetLatestBarTask(Task):
                     # Wait for update with timeout (raises exception on timeout, which is expected)
                     ib.waitForUpdate(timeout=check_interval)
                     waited += check_interval
-                    logger.info(f"   [{waited:.1f}s] Event received, checking ticker state...")
+                    _log_trace(f"   [{waited:.1f}s] Event received, checking ticker state...")
                 except Exception:
                     # Timeout exception is expected when no update arrives - continue checking
                     waited += check_interval
                     # Only log every 2 seconds to reduce spam
                     if int(waited * 2) % 4 == 0:
-                        logger.info(f"   [{waited:.1f}s] Waiting for snapshot data...")
+                        _log_trace(f"   [{waited:.1f}s] Waiting for snapshot data...")
                 
                 # Check ticker attributes
                 if ticker:
@@ -362,7 +380,7 @@ class GetLatestBarTask(Task):
                     if has_nan:
                         logger.warning(f"   ⚠️  Ticker contains NaN values - this indicates no market data available")
                         if not is_market_open:
-                            logger.info(f"   Market is CLOSED ({market_status}) - NaN values are expected during market closure")
+                            _log_trace(f"   Market is CLOSED ({market_status}) - NaN values are expected during market closure")
                         else:
                             # Only log this warning every 2 seconds to reduce spam
                             if int(waited * 2) % 4 == 0:  # Every 2 seconds
@@ -391,7 +409,7 @@ class GetLatestBarTask(Task):
                 # Check modelOption for errors (backup method)
                 if not error_354_detected and hasattr(ticker, 'modelOption') and ticker.modelOption:
                     error_msg = str(ticker.modelOption)
-                    logger.info(f"   Ticker modelOption: {error_msg}")
+                    _log_trace(f"   Ticker modelOption: {error_msg}")
                     if "354" in error_msg or "subscription" in error_msg.lower() or "not subscribed" in error_msg.lower():
                         error_354_detected = True
                 
@@ -405,7 +423,7 @@ class GetLatestBarTask(Task):
                 # Check marketDataType - if it's not LIVE (1), that's a problem
                 if hasattr(ticker, 'marketDataType'):
                     mkt_data_type = ticker.marketDataType
-                    logger.info(f"   Market data type: {mkt_data_type} (1=LIVE, 2=FROZEN, 3=DELAYED, 4=DELAYED_FROZEN)")
+                    _log_trace(f"   Market data type: {mkt_data_type} (1=LIVE, 2=FROZEN, 3=DELAYED, 4=DELAYED_FROZEN)")
                     if mkt_data_type != 1:
                         logger.warning(f"   ⚠️  Market data type is {mkt_data_type}, not LIVE (1). This may indicate delayed data or subscription issue.")
                 
@@ -441,7 +459,7 @@ class GetLatestBarTask(Task):
                             )
                         try:
                             ib.cancelMktData(contract)
-                            logger.info(f"   ✅ Cancelled market data request")
+                            _log_trace(f"   ✅ Cancelled market data request")
                         except Exception as cancel_e:
                             logger.warning(f"   ⚠️  Error cancelling market data: {cancel_e}")
                         ticker = None
@@ -453,7 +471,7 @@ class GetLatestBarTask(Task):
                     last_val = ticker.last if hasattr(ticker, 'last') else None
                     close_val = ticker.close if hasattr(ticker, 'close') else None
                     if _is_valid_price(last_val) or _is_valid_price(close_val):
-                        logger.info(f"   ✅ VALID DATA RECEIVED! Exiting wait loop early.")
+                        _log_trace(f"   ✅ VALID DATA RECEIVED! Exiting wait loop early.")
                         break
             
             # Final check for valid data (must be valid price, not NaN)
@@ -469,7 +487,7 @@ class GetLatestBarTask(Task):
                     last_price = float(close_val)
                 
                 if last_price:
-                    logger.info(f"   ✅ Processing Level 1 data...")
+                    _log_trace(f"   ✅ Processing Level 1 data...")
                     
                     # Extract all values, handling NaN properly
                     open_val = float(ticker.open) if _is_valid_price(ticker.open) else last_price
@@ -583,10 +601,10 @@ class GetLatestBarTask(Task):
             ticker = None
 
         # Fallback: Use latest historical bar if real-time data not available
-        logger.info(f"📉 Step 3: Using historical data fallback for {self.symbol}")
-        logger.info(f"   Reason: Level 1 real-time data not available")
-        logger.info(f"   Market status: {market_status}")
-        logger.info(f"   Note: Error 354 can occur when market is closed, even with active subscription")
+        _log_trace(f"📉 Step 3: Using historical data fallback for {self.symbol}")
+        _log_trace(f"   Reason: Level 1 real-time data not available")
+        _log_trace(f"   Market status: {market_status}")
+        _log_trace(f"   Note: Error 354 can occur when market is closed, even with active subscription")
         
         try:
             # IBKR requires duration format: integer{SPACE}unit where unit is S|D|W|M|Y (NOT H for hours!)
@@ -615,8 +633,8 @@ class GetLatestBarTask(Task):
             
             for duration_str, use_rth in duration_strategies:
                 try:
-                    logger.info(f"   Trying historical data: duration={duration_str}, useRTH={use_rth}")
-                    logger.info(f"   Calling ib.reqHistoricalData(contract, endDateTime='', durationStr='{duration_str}', barSizeSetting='1 min', whatToShow='TRADES', useRTH={use_rth})")
+                    _log_trace(f"   Trying historical data: duration={duration_str}, useRTH={use_rth}")
+                    _log_trace(f"   Calling ib.reqHistoricalData(contract, endDateTime='', durationStr='{duration_str}', barSizeSetting='1 min', whatToShow='TRADES', useRTH={use_rth})")
                     bars = ib.reqHistoricalData(
                         contract,
                         endDateTime="",
@@ -626,10 +644,10 @@ class GetLatestBarTask(Task):
                         useRTH=use_rth,
                         formatDate=1,
                     )
-                    logger.info(f"   ✅ Historical data request completed: received {len(bars) if bars else 0} bars")
+                    _log_trace(f"   ✅ Historical data request completed: received {len(bars) if bars else 0} bars")
                     if bars and len(bars) > 0:
                         used_eth = not use_rth  # Track whether ETH (False) or RTH (True) was used
-                        logger.info(f"   ✅ SUCCESS: Retrieved {len(bars)} historical bars with {duration_str} (ETH={'Yes' if used_eth else 'No'})")
+                        _log_trace(f"   ✅ SUCCESS: Retrieved {len(bars)} historical bars with {duration_str} (ETH={'Yes' if used_eth else 'No'})")
                         break  # Success, exit the loop
                     else:
                         logger.warning(f"   ⚠️  No bars returned for {duration_str}, trying next strategy...")

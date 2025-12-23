@@ -504,7 +504,12 @@ class NQAgentService:
                     if latest_bar_time:
                         if isinstance(latest_bar_time, str):
                             latest_bar_time = parse_utc_timestamp(latest_bar_time)
-                        age_seconds = (datetime.now(timezone.utc) - latest_bar_time.replace(tzinfo=timezone.utc)).total_seconds()
+                        # Timezone-safe age computation: convert to UTC if aware, assume UTC if naive
+                        if latest_bar_time.tzinfo is None:
+                            latest_bar_time = latest_bar_time.replace(tzinfo=timezone.utc)
+                        else:
+                            latest_bar_time = latest_bar_time.astimezone(timezone.utc)
+                        age_seconds = (datetime.now(timezone.utc) - latest_bar_time).total_seconds()
                         stale_threshold_seconds = self.stale_data_threshold_minutes * 60
                         data_fresh = age_seconds < stale_threshold_seconds
                 
@@ -565,8 +570,12 @@ class NQAgentService:
                 if not signals:
                     quiet_reason = self._get_quiet_reason(market_data, has_data=True, no_signals=True)
                     # Get signal diagnostics for no-signal observability
-                    if hasattr(self.strategy, 'generator') and hasattr(self.strategy.generator, 'last_diagnostics'):
-                        signal_diagnostics = self.strategy.generator.last_diagnostics
+                    # Note: NQIntradayStrategy uses `signal_generator` (not `generator`)
+                    if hasattr(self.strategy, 'signal_generator') and hasattr(self.strategy.signal_generator, 'last_diagnostics'):
+                        diag = self.strategy.signal_generator.last_diagnostics
+                        if diag is not None:
+                            # Render as compact string for Telegram (e.g., "Raw: 3 → Valid: 0 | Filtered: 2 conf")
+                            signal_diagnostics = diag.format_compact() if hasattr(diag, 'format_compact') else str(diag)
                 await self._check_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
 
                 # Save state periodically
@@ -1086,8 +1095,14 @@ class NQAgentService:
             
             # Add signal diagnostics when no signals (for observability)
             if signal_diagnostics is not None:
-                status["signal_diagnostics"] = signal_diagnostics.format_compact()
-                status["signal_diagnostics_raw"] = signal_diagnostics.to_dict()
+                # Handle both SignalDiagnostics object and pre-formatted string
+                if hasattr(signal_diagnostics, 'format_compact'):
+                    status["signal_diagnostics"] = signal_diagnostics.format_compact()
+                    status["signal_diagnostics_raw"] = signal_diagnostics.to_dict() if hasattr(signal_diagnostics, 'to_dict') else {}
+                else:
+                    # Already a formatted string
+                    status["signal_diagnostics"] = str(signal_diagnostics)
+                    status["signal_diagnostics_raw"] = {}
             
             # Try to get latest price
             try:
@@ -1267,7 +1282,12 @@ class NQAgentService:
                     if bar_time:
                         if isinstance(bar_time, str):
                             bar_time = parse_utc_timestamp(bar_time)
-                        age_seconds = (datetime.now(timezone.utc) - bar_time.replace(tzinfo=timezone.utc)).total_seconds()
+                        # Timezone-safe age computation: convert to UTC if aware, assume UTC if naive
+                        if bar_time.tzinfo is None:
+                            bar_time = bar_time.replace(tzinfo=timezone.utc)
+                        else:
+                            bar_time = bar_time.astimezone(timezone.utc)
+                        age_seconds = (datetime.now(timezone.utc) - bar_time).total_seconds()
                         if age_seconds > self.stale_data_threshold_minutes * 60:
                             return "StaleData"
                 
@@ -1446,6 +1466,8 @@ class NQAgentService:
             "strategy_session_open": strategy_session_open,
             "performance": performance,
             "data_source_health": data_source_health,
+            # Cache stats for observability
+            "cache_stats": self.data_fetcher.get_cache_stats(),
             "last_successful_cycle": (
                 get_utc_timestamp() if self.last_successful_cycle else None
             ),

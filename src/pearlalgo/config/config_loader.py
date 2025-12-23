@@ -36,7 +36,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from pearlalgo.config.config_file import load_config_yaml
+from pearlalgo.config.config_file import load_config_yaml, log_config_warnings
 
 
 # Default values for service configuration sections
@@ -66,6 +66,11 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "historical_hours": 2,
         "multitimeframe_5m_hours": 4,
         "multitimeframe_15m_hours": 12,
+        # Base historical fetch caching (default OFF).
+        # When enabled, 1m history is refreshed on a TTL rather than every cycle.
+        # Level 1 real-time data is still fetched every cycle for latest bar freshness.
+        "enable_base_cache": False,
+        "base_refresh_seconds": 60,  # 1 minute TTL when enabled
         # Multi-timeframe fetch caching (default OFF).
         # When enabled, 5m/15m history is refreshed on a TTL rather than every cycle.
         "enable_mtf_cache": False,
@@ -76,6 +81,10 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "use_level2_data": False,
         "order_book_depth": 10,
         "order_book_analysis": False,
+        # IBKR executor logging verbosity (default OFF).
+        # When enabled, logs step-by-step tracing at INFO level.
+        # When disabled, step-by-step tracing is at DEBUG level (actionable events stay at INFO/WARN).
+        "ibkr_verbose_logging": False,
     },
     "signals": {
         "duplicate_window_seconds": 300,
@@ -98,7 +107,11 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def load_service_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
+def load_service_config(
+    config_path: Optional[Path] = None,
+    *,
+    validate: bool = True,
+) -> Dict[str, Any]:
     """
     Load service configuration from config.yaml.
     
@@ -106,12 +119,18 @@ def load_service_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
     
     Args:
         config_path: Path to config.yaml (defaults to config/config.yaml)
+        validate: Whether to validate config and log warnings. Default True.
+                  Set to False in tests or when loading config multiple times.
         
     Returns:
         Dictionary with service configuration sections merged with defaults
     """
     # Load raw config using unified loader
     config_data = load_config_yaml(config_path)
+    
+    # Validate config (logs warnings, does not fail)
+    if validate and config_data:
+        log_config_warnings(config_data)
     
     # Merge config sections with defaults
     result = {}
