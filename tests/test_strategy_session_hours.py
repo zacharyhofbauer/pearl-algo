@@ -43,3 +43,4 @@ def test_prop_firm_session_cross_midnight_rules() -> None:
     assert scanner.is_market_hours(_to_utc(2025, 12, 27, 10, 0)) is False
 
 
+

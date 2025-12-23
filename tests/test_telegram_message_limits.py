@@ -8,6 +8,13 @@ from pearlalgo.utils.telegram_alerts import (
     format_signal_confidence_tier,
     format_pnl,
     format_time_ago,
+    escape_markdown,
+    safe_label,
+    format_gate_status,
+    format_service_status,
+    format_activity_line,
+    format_performance_line,
+    format_home_card,
 )
 
 
@@ -229,4 +236,309 @@ def test_professional_signal_template_under_limit() -> None:
     
     # Should stay under limit
     assert len(message) < TELEGRAM_TEXT_LIMIT, f"Professional message too long: {len(message)} chars"
+
+
+# ---------------------------------------------------------------------------
+# Markdown safety helper tests
+# ---------------------------------------------------------------------------
+
+def test_escape_markdown_underscores() -> None:
+    """Test that underscores are escaped for Telegram Markdown."""
+    result = escape_markdown("hello_world_test")
+    assert result == "hello\\_world\\_test"
+
+
+def test_escape_markdown_asterisks() -> None:
+    """Test that asterisks are escaped for Telegram Markdown."""
+    result = escape_markdown("hello*world*test")
+    assert result == "hello\\*world\\*test"
+
+
+def test_escape_markdown_mixed() -> None:
+    """Test that mixed special chars are escaped."""
+    result = escape_markdown("test_value*bold*`code`[link]")
+    assert "\\_" in result
+    assert "\\*" in result
+    assert "\\`" in result
+    assert "\\[" in result
+
+
+def test_escape_markdown_empty() -> None:
+    """Test that empty string returns empty."""
+    assert escape_markdown("") == ""
+    assert escape_markdown(None) == ""
+
+
+def test_safe_label_underscores_to_spaces() -> None:
+    """Test that safe_label replaces underscores with spaces."""
+    result = safe_label("trending_bullish")
+    assert result == "trending bullish"
+
+
+def test_safe_label_preserves_other_chars() -> None:
+    """Test that safe_label preserves non-underscore characters."""
+    result = safe_label("Hello World 123!")
+    assert result == "Hello World 123!"
+
+
+def test_safe_label_empty() -> None:
+    """Test that empty string returns empty."""
+    assert safe_label("") == ""
+    assert safe_label(None) == ""
+
+
+# ---------------------------------------------------------------------------
+# Home Card layout helper tests
+# ---------------------------------------------------------------------------
+
+def test_format_gate_status_open() -> None:
+    """Test gate status formatting when both gates are open."""
+    result = format_gate_status(
+        futures_market_open=True,
+        strategy_session_open=True,
+    )
+    assert "🟢 Futures: OPEN" in result
+    assert "🟢 Session: OPEN" in result
+
+
+def test_format_gate_status_closed() -> None:
+    """Test gate status formatting when both gates are closed."""
+    result = format_gate_status(
+        futures_market_open=False,
+        strategy_session_open=False,
+    )
+    assert "🔴 Futures: CLOSED" in result
+    assert "🔴 Session: CLOSED" in result
+
+
+def test_format_gate_status_unknown() -> None:
+    """Test gate status formatting when status is unknown."""
+    result = format_gate_status(
+        futures_market_open=None,
+        strategy_session_open=None,
+    )
+    assert "⚪ Futures: ?" in result
+    assert "⚪ Session: ?" in result
+
+
+def test_format_service_status_running() -> None:
+    """Test service status when both services are running."""
+    result = format_service_status(
+        agent_running=True,
+        gateway_running=True,
+    )
+    assert "🟢 Agent: RUNNING" in result
+    assert "🟢 Gateway: RUNNING" in result
+
+
+def test_format_service_status_stopped() -> None:
+    """Test service status when both services are stopped."""
+    result = format_service_status(
+        agent_running=False,
+        gateway_running=False,
+    )
+    assert "🔴 Agent: STOPPED" in result
+    assert "🔴 Gateway: STOPPED" in result
+
+
+def test_format_service_status_paused() -> None:
+    """Test service status when agent is paused."""
+    result = format_service_status(
+        agent_running=True,
+        gateway_running=True,
+        paused=True,
+    )
+    assert "⏸️ Agent: PAUSED" in result
+
+
+def test_format_activity_line() -> None:
+    """Test activity line formatting."""
+    result = format_activity_line(
+        cycles_session=100,
+        cycles_total=500,
+        signals_generated=10,
+        signals_sent=8,
+        errors=2,
+        buffer_size=85,
+        buffer_target=100,
+    )
+    assert "100/500 cycles" in result
+    assert "10/8 signals" in result
+    assert "85/100 bars" in result
+    assert "2 errors" in result
+
+
+def test_format_activity_line_no_session() -> None:
+    """Test activity line when session cycles not available."""
+    result = format_activity_line(
+        cycles_session=None,
+        cycles_total=500,
+        signals_generated=10,
+        signals_sent=8,
+        errors=0,
+        buffer_size=85,
+        buffer_target=None,
+    )
+    assert "500 cycles" in result
+    assert "85 bars" in result
+
+
+def test_format_performance_line() -> None:
+    """Test performance line formatting."""
+    result = format_performance_line(
+        wins=5,
+        losses=2,
+        win_rate=71.4,
+        total_pnl=350.50,
+    )
+    assert "5W/2L" in result
+    assert "71% WR" in result
+    assert "🟢" in result
+    assert "$350.50" in result
+
+
+def test_format_performance_line_negative() -> None:
+    """Test performance line with negative P&L."""
+    result = format_performance_line(
+        wins=2,
+        losses=5,
+        win_rate=28.6,
+        total_pnl=-150.25,
+    )
+    assert "2W/5L" in result
+    assert "🔴" in result
+    assert "$-150.25" in result
+
+
+# ---------------------------------------------------------------------------
+# Home Card template tests
+# ---------------------------------------------------------------------------
+
+def test_home_card_minimal() -> None:
+    """Test Home Card with minimal required fields."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+    )
+    
+    # Check key elements are present
+    assert "📊 *MNQ*" in result
+    assert "10:30 AM ET" in result
+    assert "Agent: RUNNING" in result
+    assert "Gateway: RUNNING" in result
+    assert "Futures: OPEN" in result
+    assert "Session: OPEN" in result
+
+
+def test_home_card_with_price() -> None:
+    """Test Home Card with price information."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        latest_price=21234.50,
+        price_change_str="+0.25%",
+    )
+    
+    assert "💰 *$21,234.50*" in result
+    assert "+0.25%" in result
+
+
+def test_home_card_with_performance() -> None:
+    """Test Home Card with performance data."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        performance={
+            "exited_signals": 10,
+            "wins": 7,
+            "losses": 3,
+            "win_rate": 0.70,
+            "total_pnl": 500.00,
+        },
+    )
+    
+    assert "*7d Performance:*" in result
+    assert "7W/3L" in result
+    assert "70% WR" in result
+
+
+def test_home_card_paused() -> None:
+    """Test Home Card when agent is paused."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        paused=True,
+        pause_reason="circuit_breaker",
+    )
+    
+    assert "PAUSED" in result
+    assert "circuit breaker" in result  # safe_label converts underscore to space
+
+
+def test_home_card_under_telegram_limit() -> None:
+    """Test that Home Card with all fields stays under Telegram limit."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        paused=False,
+        pause_reason=None,
+        cycles_session=1234,
+        cycles_total=5678,
+        signals_generated=50,
+        signals_sent=48,
+        errors=5,
+        buffer_size=95,
+        buffer_target=100,
+        latest_price=21234.50,
+        performance={
+            "exited_signals": 25,
+            "wins": 18,
+            "losses": 7,
+            "win_rate": 0.72,
+            "total_pnl": 1250.75,
+        },
+        sparkline="▁▂▃▄▅▆▇█▇▆▅▄▃▂▁",
+        price_change_str="+0.35%",
+        last_signal_age="5m ago",
+    )
+    
+    # Should stay well under Telegram limit (4096 chars)
+    assert len(result) < TELEGRAM_TEXT_LIMIT, f"Home Card too long: {len(result)} chars"
+    # Should be compact (under 1500 chars for mobile-friendliness)
+    assert len(result) < 1500, f"Home Card should be compact: {len(result)} chars"
+
+
+def test_home_card_stopped_agent() -> None:
+    """Test Home Card when agent is stopped."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=False,
+        gateway_running=False,
+        futures_market_open=None,
+        strategy_session_open=None,
+    )
+    
+    assert "Agent: STOPPED" in result
+    assert "Gateway: STOPPED" in result
 

@@ -206,3 +206,4 @@ def format_session_summary(
         f"{buf_bar} {buffer_bars}/{buffer_target} bars • {errors} err"
     )
 
+

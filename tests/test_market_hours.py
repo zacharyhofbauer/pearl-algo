@@ -45,3 +45,4 @@ def test_market_hours_friday_close() -> None:
     assert mh.is_market_open(_to_utc(2025, 6, 6, 17, 0)) is False
 
 
+

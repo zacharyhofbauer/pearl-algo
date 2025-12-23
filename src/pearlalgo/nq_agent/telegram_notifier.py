@@ -36,6 +36,9 @@ from pearlalgo.utils.telegram_alerts import (
     format_signal_direction,
     format_signal_confidence_tier,
     format_pnl,
+    format_home_card,
+    format_gate_status,
+    format_service_status,
 )
 
 try:
@@ -1230,13 +1233,8 @@ class NQAgentTelegramNotifier:
         """
         Send consolidated dashboard message (replaces Status + Heartbeat).
         
-        Combines all recurring status info into one clean message:
-        - Header: symbol + price + ET time
-        - Gates: FuturesMarketOpen + StrategySessionOpen
-        - Session activity: cycles, signals, errors, buffer
-        - MTF snapshot: trend arrows for multiple timeframes
-        - Mini-chart: sparkline + % change
-        - Performance (7d): wins/losses/WR/PnL
+        Uses the unified Home Card layout for consistency with interactive /status.
+        Adds push-specific enhancements: sparkline, MTF snapshot.
         
         Args:
             status: Status dictionary with service information
@@ -1250,21 +1248,18 @@ class NQAgentTelegramNotifier:
         try:
             from pearlalgo.utils.sparkline import (
                 generate_sparkline,
-                generate_progress_bar,
                 format_price_change,
                 format_mtf_snapshot,
             )
         except ImportError:
             # Fallback if sparkline module not available
             generate_sparkline = lambda x, w=20: "─" * w
-            generate_progress_bar = lambda c, t, w=10: "█" * w
             format_price_change = lambda c, p: f"{((c-p)/p*100) if p else 0:.2f}%"
-            format_mtf_snapshot = lambda t: "N/A"
+            format_mtf_snapshot = lambda t, **kw: "N/A"
 
         try:
-            # === Header: Symbol + Price + Time ===
+            # Extract values from status dict
             symbol = status.get('symbol', 'MNQ')
-            latest_price = status.get('latest_price')
             current_time = status.get('current_time') or datetime.now(timezone.utc)
             
             # Format ET time
@@ -1281,99 +1276,89 @@ class NQAgentTelegramNotifier:
             except Exception:
                 time_str = current_time.strftime("%H:%M UTC") if hasattr(current_time, 'strftime') else ""
             
-            # Price change from buffer (if available)
-            price_change_str = ""
-            recent_closes = status.get("recent_closes", [])
-            if recent_closes and len(recent_closes) >= 2 and latest_price:
-                first_close = recent_closes[0]
-                price_change_str = f" {format_price_change(latest_price, first_close)}"
+            # Extract all metrics
+            latest_price = status.get('latest_price')
+            paused = status.get("paused", False)
+            pause_reason = status.get("pause_reason")
             
-            message = f"📊 *{symbol} Dashboard* • {time_str}\n"
-            message += "━━━━━━━━━━━━━━━━━━━━━\n\n"
-            
-            # Price with sparkline
-            if latest_price:
-                message += f"💰 *${latest_price:,.2f}*{price_change_str}\n"
-                
-                # Mini sparkline from recent closes
-                if recent_closes and len(recent_closes) >= 5:
-                    spark = generate_sparkline(recent_closes, width=20)
-                    message += f"`{spark}`\n"
-            else:
-                message += f"💰 Price: N/A\n"
-            
-            message += "\n"
-            
-            # === Gates: Market + Session Status ===
+            # Gates
             futures_market_open = status.get("futures_market_open")
             if futures_market_open is None:
                 try:
                     futures_market_open = bool(get_market_hours().is_market_open())
                 except Exception:
                     futures_market_open = None
-            
             strategy_session_open = status.get("strategy_session_open")
-            paused = status.get("paused", False)
             
-            futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
-            futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "?"
-            strat_emoji = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪"
-            strat_text = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "?"
-            
-            message += f"{futures_emoji} Futures: {futures_text}  •  {strat_emoji} Session: {strat_text}"
-            if paused:
-                message += "  •  ⏸️ PAUSED"
-            message += "\n\n"
-            
-            # === Session Activity ===
+            # Activity metrics
+            cycles_total = int(status.get("cycle_count", 0) or 0)
             cycles_session = status.get("cycle_count_session")
             try:
-                cycles_session = int(cycles_session) if cycles_session is not None else 0
+                cycles_session = int(cycles_session) if cycles_session is not None else None
             except Exception:
-                cycles_session = 0
+                cycles_session = None
             
-            signals_gen_session = status.get("signal_count_session")
+            signals_generated = int(status.get("signal_count", 0) or 0)
             try:
-                signals_gen_session = int(signals_gen_session) if signals_gen_session is not None else 0
+                signals_sent = int(status.get("signals_sent", 0) or 0)
             except Exception:
-                signals_gen_session = 0
-            
-            signals_sent_session = status.get("signals_sent_session")
-            try:
-                signals_sent_session = int(signals_sent_session) if signals_sent_session is not None else 0
-            except Exception:
-                signals_sent_session = 0
+                signals_sent = 0
             
             errors = int(status.get("error_count", 0) or 0)
-            buffer = int(status.get("buffer_size", 0) or 0)
-            buffer_target = int(status.get("buffer_size_target", 100) or 100)
+            buffer_size = int(status.get("buffer_size", 0) or 0)
+            buffer_target = status.get("buffer_size_target")
+            try:
+                buffer_target = int(buffer_target) if buffer_target is not None else None
+            except Exception:
+                buffer_target = None
             
-            # Buffer progress bar
-            buf_bar = generate_progress_bar(buffer, buffer_target, width=5)
+            # Performance
+            performance = status.get("performance", {})
             
-            message += f"*Session:* {cycles_session:,} cycles • {signals_gen_session}/{signals_sent_session} signals\n"
-            message += f"*Buffer:* {buf_bar} {buffer}/{buffer_target} bars • {errors} errors\n\n"
+            # Price change and sparkline
+            price_change_str = None
+            sparkline = None
+            recent_closes = status.get("recent_closes", [])
+            if recent_closes and len(recent_closes) >= 2 and latest_price:
+                first_close = recent_closes[0]
+                price_change_str = format_price_change(latest_price, first_close)
+            if recent_closes and len(recent_closes) >= 5:
+                sparkline = generate_sparkline(recent_closes, width=20)
             
-            # === MTF Snapshot (trend arrows) ===
+            # Build Home Card using unified format
+            # Note: agent/gateway running status not available in push dashboard context
+            # (the service is running if it's sending dashboards)
+            message = format_home_card(
+                symbol=symbol,
+                time_str=time_str,
+                agent_running=True,  # If sending dashboard, agent is running
+                gateway_running=True,  # Assumed running if data is flowing
+                futures_market_open=futures_market_open,
+                strategy_session_open=strategy_session_open,
+                paused=paused,
+                pause_reason=pause_reason,
+                cycles_session=cycles_session,
+                cycles_total=cycles_total,
+                signals_generated=signals_generated,
+                signals_sent=signals_sent,
+                errors=errors,
+                buffer_size=buffer_size,
+                buffer_target=buffer_target,
+                latest_price=latest_price,
+                performance=performance,
+                sparkline=sparkline,
+                price_change_str=price_change_str,
+            )
+            
+            # Add MTF snapshot (push-specific enhancement)
             mtf_trends = status.get("mtf_trends", {})
             if mtf_trends:
-                mtf_str = format_mtf_snapshot(mtf_trends, timeframes=["5m", "15m", "1h", "4h", "1D"])
-                message += f"*MTF:* {mtf_str}\n\n"
-            
-            # === Performance (7d) ===
-            performance = status.get("performance", {})
-            if performance:
-                exited = performance.get("exited_signals", 0)
-                if exited > 0:
-                    wins = performance.get('wins', 0)
-                    losses = performance.get('losses', 0)
-                    win_rate = performance.get('win_rate', 0) * 100
-                    total_pnl = performance.get('total_pnl', 0)
-                    
-                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                    message += f"*7d:* {wins}W/{losses}L • {win_rate:.0f}% WR • {pnl_emoji} {_format_currency(total_pnl)}\n"
-                else:
-                    message += f"*7d:* No completed trades yet\n"
+                try:
+                    mtf_str = format_mtf_snapshot(mtf_trends, timeframes=["5m", "15m", "1h", "4h", "1D"])
+                    if mtf_str and mtf_str != "N/A":
+                        message += f"\n*MTF:* {mtf_str}"
+                except Exception:
+                    pass
             
             await self.telegram.send_message(message)
             return True

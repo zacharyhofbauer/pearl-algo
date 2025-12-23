@@ -165,6 +165,239 @@ def format_time_ago(timestamp_str: str | None) -> str:
         return ""
 
 
+# ---------------------------------------------------------------------------
+# Markdown-safe rendering helpers
+# ---------------------------------------------------------------------------
+
+def escape_markdown(text: str) -> str:
+    """
+    Escape characters that have special meaning in Telegram Markdown.
+
+    Escapes: _ * [ ] ( ) ~ ` > # + - = | { } . !
+    For Markdown mode (not MarkdownV2), primarily _ and * matter.
+    """
+    if not text:
+        return ""
+    # For Telegram Markdown (not V2), escape underscores and asterisks
+    result = str(text)
+    result = result.replace("_", "\\_")
+    result = result.replace("*", "\\*")
+    result = result.replace("`", "\\`")
+    result = result.replace("[", "\\[")
+    return result
+
+
+def safe_label(text: str) -> str:
+    """
+    Make a dynamic string safe for Telegram Markdown labels.
+
+    Replaces underscores with spaces (more readable than escaping).
+    """
+    if not text:
+        return ""
+    return str(text).replace("_", " ")
+
+
+# ---------------------------------------------------------------------------
+# Home Card layout helpers (unified status/dashboard spec)
+# ---------------------------------------------------------------------------
+
+def format_gate_status(
+    futures_market_open: bool | None,
+    strategy_session_open: bool | None,
+) -> str:
+    """
+    Format market gates line for Home Card.
+
+    Returns a compact line like: 🟢 Futures: OPEN  •  🟢 Session: OPEN
+    """
+    futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
+    futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "?"
+    strat_emoji = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪"
+    strat_text = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "?"
+    return f"{futures_emoji} Futures: {futures_text}  •  {strat_emoji} Session: {strat_text}"
+
+
+def format_service_status(
+    agent_running: bool,
+    gateway_running: bool,
+    paused: bool = False,
+) -> str:
+    """
+    Format service status line for Home Card.
+
+    Returns a compact line like: 🟢 Agent: RUNNING  •  🟢 Gateway: RUNNING
+    """
+    agent_emoji = "🟢" if agent_running and not paused else "⏸️" if paused else "🔴"
+    agent_text = "PAUSED" if paused else ("RUNNING" if agent_running else "STOPPED")
+    gateway_emoji = "🟢" if gateway_running else "🔴"
+    gateway_text = "RUNNING" if gateway_running else "STOPPED"
+    return f"{agent_emoji} Agent: {agent_text}  •  {gateway_emoji} Gateway: {gateway_text}"
+
+
+def format_activity_line(
+    cycles_session: int | None,
+    cycles_total: int,
+    signals_generated: int,
+    signals_sent: int,
+    errors: int,
+    buffer_size: int,
+    buffer_target: int | None = None,
+) -> str:
+    """
+    Format activity summary line for Home Card.
+
+    Returns compact metrics like: 📊 42 cycles • 3/2 signals • 85/100 bars • 0 errors
+    """
+    # Cycles
+    if cycles_session is not None:
+        cycles_part = f"{cycles_session:,}/{cycles_total:,} cycles"
+    else:
+        cycles_part = f"{cycles_total:,} cycles"
+
+    # Signals: generated/sent
+    signals_part = f"{signals_generated}/{signals_sent} signals"
+
+    # Buffer
+    if buffer_target is not None:
+        buffer_part = f"{buffer_size}/{buffer_target} bars"
+    else:
+        buffer_part = f"{buffer_size} bars"
+
+    # Errors
+    errors_part = f"{errors} errors"
+
+    return f"📊 {cycles_part} • {signals_part} • {buffer_part} • {errors_part}"
+
+
+def format_performance_line(
+    wins: int,
+    losses: int,
+    win_rate: float,
+    total_pnl: float,
+) -> str:
+    """
+    Format 7-day performance summary for Home Card.
+
+    Returns compact line like: 📈 5W/2L • 71% WR • 🟢 +$350.00
+    """
+    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+    return f"📈 {wins}W/{losses}L • {win_rate:.0f}% WR • {pnl_emoji} {_format_currency(total_pnl)}"
+
+
+def format_home_card(
+    symbol: str,
+    time_str: str,
+    agent_running: bool,
+    gateway_running: bool,
+    futures_market_open: bool | None,
+    strategy_session_open: bool | None,
+    paused: bool = False,
+    pause_reason: str | None = None,
+    cycles_session: int | None = None,
+    cycles_total: int = 0,
+    signals_generated: int = 0,
+    signals_sent: int = 0,
+    errors: int = 0,
+    buffer_size: int = 0,
+    buffer_target: int | None = None,
+    latest_price: float | None = None,
+    performance: dict | None = None,
+    sparkline: str | None = None,
+    price_change_str: str | None = None,
+    last_signal_age: str | None = None,
+) -> str:
+    """
+    Build unified Home Card message for status/dashboard (balanced verbosity).
+
+    This is the canonical layout used by both interactive /status and push dashboard.
+
+    Args:
+        symbol: Trading symbol (e.g., "MNQ")
+        time_str: Current time string (e.g., "10:30 AM ET")
+        agent_running: Whether agent service is running
+        gateway_running: Whether gateway is running
+        futures_market_open: Futures market gate status
+        strategy_session_open: Strategy session gate status
+        paused: Whether agent is paused
+        pause_reason: Reason for pause (if paused)
+        cycles_session: Cycles this session
+        cycles_total: Total cycles
+        signals_generated: Signals generated count
+        signals_sent: Signals successfully sent count
+        errors: Error count
+        buffer_size: Current buffer size
+        buffer_target: Target buffer size
+        latest_price: Latest price (optional)
+        performance: Performance dict with wins, losses, win_rate, total_pnl (optional)
+        sparkline: Price sparkline string (optional)
+        price_change_str: Price change string like "+0.25%" (optional)
+        last_signal_age: Age of last signal like "5m ago" (optional)
+
+    Returns:
+        Formatted Home Card message string
+    """
+    lines = []
+
+    # Header: Symbol + Time + Price
+    header = f"📊 *{symbol}*"
+    if time_str:
+        header += f" • {time_str}"
+    lines.append(header)
+
+    # Price line (if available)
+    if latest_price is not None:
+        price_line = f"💰 *${latest_price:,.2f}*"
+        if price_change_str:
+            price_line += f" {price_change_str}"
+        lines.append(price_line)
+        if sparkline:
+            lines.append(f"`{sparkline}`")
+
+    lines.append("")  # Blank line separator
+
+    # Service status line
+    lines.append(format_service_status(agent_running, gateway_running, paused))
+
+    # Pause reason (if paused)
+    if paused and pause_reason:
+        lines.append(f"   ⚠️ Reason: {safe_label(pause_reason)}")
+
+    # Gates line
+    lines.append(format_gate_status(futures_market_open, strategy_session_open))
+
+    lines.append("")  # Blank line separator
+
+    # Activity line
+    lines.append(format_activity_line(
+        cycles_session=cycles_session,
+        cycles_total=cycles_total,
+        signals_generated=signals_generated,
+        signals_sent=signals_sent,
+        errors=errors,
+        buffer_size=buffer_size,
+        buffer_target=buffer_target,
+    ))
+
+    # Last signal age (if available)
+    if last_signal_age:
+        lines.append(f"🔔 Last signal: {last_signal_age}")
+
+    # Performance (if available and has trades)
+    if performance:
+        exited = performance.get("exited_signals", 0)
+        if exited > 0:
+            wins = performance.get("wins", 0)
+            losses = performance.get("losses", 0)
+            win_rate = performance.get("win_rate", 0.0) * 100
+            total_pnl = performance.get("total_pnl", 0.0)
+            lines.append("")  # Blank line
+            lines.append(f"*7d Performance:*")
+            lines.append(format_performance_line(wins, losses, win_rate, total_pnl))
+
+    return "\n".join(lines)
+
+
 class TelegramAlerts:
     """Telegram alert sender for trading notifications."""
 

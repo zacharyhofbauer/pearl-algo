@@ -77,3 +77,4 @@ def test_data_fetcher_wires_data_config(monkeypatch: pytest.MonkeyPatch) -> None
     assert fetcher.stale_data_threshold_minutes == 1
 
 
+
