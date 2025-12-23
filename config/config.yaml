@@ -40,6 +40,7 @@ service:
   state_save_interval: 10       # Save state every N cycles
   connection_failure_alert_interval: 600  # 10 minutes in seconds
   data_quality_alert_interval: 300        # 5 minutes in seconds
+  dashboard_chart_timeframe: "5m"  # Force 5-minute timeframe to match TradingView-style chart
 
 # Circuit breaker
 circuit_breaker:

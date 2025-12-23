@@ -1028,6 +1028,8 @@ class NQAgentService:
                 range_label=range_label,
                 figsize=(16, 7),
                 dpi=150,
+                show_ma=True,  # Show moving averages to match TradingView-style chart
+                ma_periods=[20, 50, 200],  # Common MA periods
                 show_pressure=self.dashboard_chart_show_pressure,
             )
             

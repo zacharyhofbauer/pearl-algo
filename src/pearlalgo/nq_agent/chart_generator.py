@@ -1419,6 +1419,8 @@ class ChartGenerator:
         show_sessions: bool = True,
         show_key_levels: bool = True,
         show_vwap: bool = True,
+        show_ma: bool = True,
+        ma_periods: Optional[List[int]] = None,
         show_rsi: bool = True,
         show_pressure: bool = True,
     ) -> Optional[Path]:
@@ -1436,6 +1438,8 @@ class ChartGenerator:
             show_sessions: Shade Tokyo/London/NY sessions
             show_key_levels: Show RTH/ETH PDH/PDL/Open levels
             show_vwap: Show VWAP line + bands
+            show_ma: Show moving averages (default: True)
+            ma_periods: List of MA periods to display (default: [20, 50, 200])
             show_rsi: Show RSI panel
             show_pressure: Show buy/sell pressure proxy panel (signed volume histogram)
 
@@ -1484,6 +1488,24 @@ class ChartGenerator:
 
             # Addplots
             addplot: List = []
+
+            # Moving Averages (to match TradingView-style chart)
+            if show_ma:
+                ma_periods_list = ma_periods or [20, 50, 200]  # Common MA periods
+                for period in ma_periods_list:
+                    if period <= len(df):
+                        color_idx = ma_periods_list.index(period) % len(MA_COLORS)
+                        color = MA_COLORS[color_idx]
+                        ma_series = df["Close"].rolling(period).mean()
+                        addplot.append(
+                            mpf.make_addplot(
+                                ma_series,
+                                color=color,
+                                width=1.2,
+                                alpha=0.7,
+                                label=f"MA{period}",
+                            )
+                        )
 
             # VWAP
             if show_vwap:
