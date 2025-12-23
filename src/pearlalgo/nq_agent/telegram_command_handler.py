@@ -359,7 +359,16 @@ class TelegramCommandHandler:
                 message += f"⏸️ *Paused* (reason: `{pause_reason}`)\n"
             
             if "cycle_count" in state:
-                message += f"🔄 Cycles: {state.get('cycle_count', 0):,}\n"
+                cycles_total = int(state.get("cycle_count", 0) or 0)
+                cycles_session = state.get("cycle_count_session")
+                try:
+                    cycles_session = int(cycles_session) if cycles_session is not None else None
+                except Exception:
+                    cycles_session = None
+                if cycles_session is not None:
+                    message += f"🔄 Cycles (session/total): {cycles_session:,}/{cycles_total:,}\n"
+                else:
+                    message += f"🔄 Cycles: {cycles_total:,}\n"
             # Show signal persistence health: stored signals vs state count
             state_signal_count = int(state.get("signal_count", 0) or 0)
             try:
@@ -375,8 +384,38 @@ class TelegramCommandHandler:
             except Exception as e:
                 logger.debug(f"Could not compute signal persistence health for /status: {e}")
                 message += f"🔔 Signals: {state_signal_count}\n"
+
+            # Signal delivery counters (generated != delivered)
+            try:
+                sent = int(state.get("signals_sent", 0) or 0)
+            except Exception:
+                sent = 0
+            try:
+                failed = int(state.get("signals_send_failures", 0) or 0)
+            except Exception:
+                failed = 0
+            message += f"📨 Delivered: {sent} sent • {failed} failed\n"
+            last_err = state.get("last_signal_send_error")
+            if last_err:
+                s = str(last_err)
+                if len(s) > 140:
+                    s = s[:140] + "…"
+                message += f"⚠️ Last send error: {s}\n"
+            last_id = state.get("last_signal_id_prefix")
+            if last_id:
+                message += f"🆔 Last signal id: {str(last_id)}…\n"
+
             if "buffer_size" in state:
-                message += f"📊 Buffer: {state.get('buffer_size', 0)} bars\n"
+                buf = int(state.get("buffer_size", 0) or 0)
+                buf_target = state.get("buffer_size_target")
+                try:
+                    buf_target = int(buf_target) if buf_target is not None else None
+                except Exception:
+                    buf_target = None
+                if buf_target is not None:
+                    message += f"📊 Buffer: {buf}/{buf_target} bars (rolling)\n"
+                else:
+                    message += f"📊 Buffer: {buf} bars (rolling)\n"
 
             # Add a compact 7d performance summary
             try:

@@ -16,6 +16,18 @@ except ImportError:
     TelegramError = Exception
 
 
+TELEGRAM_TEXT_LIMIT = 4096
+_TRUNC_SUFFIX = "\n\n…(truncated)"
+
+
+def _truncate_telegram_text(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> str:
+    """Ensure text is within Telegram message size limits."""
+    if len(text) <= limit:
+        return text
+    keep = max(0, limit - len(_TRUNC_SUFFIX))
+    return text[:keep] + _TRUNC_SUFFIX
+
+
 def _format_separator(length: int = 25) -> str:
     """Create a visual separator line (mobile-friendly)."""
     # Use blank line instead of long separator for mobile compatibility
@@ -66,6 +78,7 @@ class TelegramAlerts:
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.enabled = enabled
+        self.last_error: Optional[str] = None
 
         self.bot = None
         if enabled and Bot:
@@ -74,19 +87,22 @@ class TelegramAlerts:
                 logger.info("Telegram alerts initialized")
             except Exception as e:
                 logger.warning(f"Failed to initialize Telegram bot: {e}")
+                self.last_error = str(e)
                 self.enabled = False
         elif enabled and not Bot:
             logger.warning(
                 "python-telegram-bot not installed, Telegram alerts disabled"
             )
+            self.last_error = "python-telegram-bot not installed"
             self.enabled = False
 
     async def send_message(
         self,
         message: str,
-        parse_mode: str = "Markdown",
+        parse_mode: str | None = "Markdown",
         max_retries: int = 3,
         reply_markup=None,
+        dedupe: bool = True,
     ) -> bool:
         """
         Send a message to Telegram with retry logic and deduplication.
@@ -101,11 +117,20 @@ class TelegramAlerts:
             True if sent successfully, False otherwise
         """
         if not self.enabled or not self.bot:
+            self.last_error = "Telegram disabled or bot not initialized"
             return False
 
         import asyncio
         import hashlib
         import time
+
+        # Enforce Telegram size limit early. This prevents silent non-delivery for oversized messages.
+        original_len = len(message)
+        message = _truncate_telegram_text(message)
+        if len(message) != original_len:
+            logger.warning(
+                f"Telegram message truncated (len={original_len} -> {len(message)})"
+            )
 
         # Enhanced deduplication: track last message hash and timestamp
         # Prevent sending same or very similar messages within 120 seconds (2 minutes)
@@ -131,10 +156,12 @@ class TelegramAlerts:
             self._last_message_time = 0
         
         # Skip if same/similar message sent within last 120 seconds (2 minutes)
-        if (self._last_message_hash == message_hash and 
-            current_time - self._last_message_time < 120.0):
-            logger.debug(f"Skipping duplicate message (sent {current_time - self._last_message_time:.1f}s ago)")
-            return True  # Return True since message was already sent
+        if dedupe:
+            if (self._last_message_hash == message_hash and 
+                current_time - self._last_message_time < 120.0):
+                logger.debug(f"Skipping duplicate message (sent {current_time - self._last_message_time:.1f}s ago)")
+                self.last_error = None
+                return True  # Return True since message was already sent
 
         for attempt in range(max_retries):
             try:
@@ -147,9 +174,11 @@ class TelegramAlerts:
                 # Mark as sent successfully
                 self._last_message_hash = message_hash
                 self._last_message_time = current_time
+                self.last_error = None
                 return True
             except TelegramError as e:
                 error_msg = str(e)
+                self.last_error = error_msg
                 # "Not Found" usually means invalid chat_id or bot not started
                 if "Not Found" in error_msg or "404" in error_msg:
                     logger.error(
@@ -174,9 +203,11 @@ class TelegramAlerts:
                                 parse_mode=None,  # Plain text
                                 reply_markup=reply_markup,
                             )
+                            self.last_error = None
                             return True
                         except Exception as e2:
                             logger.debug(f"Plain text send also failed: {e2}")
+                            self.last_error = str(e2)
                             # Continue to retry loop
                     elif attempt == max_retries - 1:
                         # Last attempt - try without Markdown
@@ -187,9 +218,11 @@ class TelegramAlerts:
                                 parse_mode=None,
                                 reply_markup=reply_markup,
                             )
+                            self.last_error = None
                             return True
                         except Exception as plain_error:
                             logger.error(f"Failed to send as plain text: {plain_error}")
+                            self.last_error = str(plain_error)
                             return False
 
                 if attempt < max_retries - 1:
@@ -205,6 +238,7 @@ class TelegramAlerts:
                     return False
             except Exception as e:
                 logger.error(f"Unexpected error sending Telegram message: {e}")
+                self.last_error = str(e)
                 return False
 
         return False

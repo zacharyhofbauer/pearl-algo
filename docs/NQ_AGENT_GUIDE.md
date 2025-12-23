@@ -314,14 +314,19 @@ tail -f data/nq_agent_state/signals.jsonl | jq
 
 ### No Signals Generated
 
-1. **Check strategy session hours (StrategySessionOpen)**\n+   Signals are only generated during **09:30–16:00 ET** (by design).\n+   \n+   Note: this is different from **FuturesMarketOpen** (CME ETH Sun 18:00 ET → Fri 17:00 ET, with Mon–Thu 17:00–18:00 ET maintenance break), which affects data freshness and Error 354 interpretation.
-2. **Check buffer size:**
+1. **Check strategy session hours (StrategySessionOpen)**
+   - Signals are only generated during **09:30–16:00 ET** (by design).
+   - Note: this is different from **FuturesMarketOpen** (CME ETH Sun 18:00 ET → Fri 17:00 ET, with Mon–Thu 17:00–18:00 ET maintenance break), which affects data freshness and Error 354 interpretation.
+2. **If `/signals` shows signals but you didn’t receive signal alerts**
+   - Check Telegram `/status` for **Delivered: X sent • Y failed** and **Last send error**.
+   - Run: `python3 scripts/testing/test_all.py telegram` to confirm Telegram delivery is healthy.
+3. **Check buffer size:**
    ```bash
    cat data/nq_agent_state/state.json | jq .buffer_size
    ```
    Should be > 10 bars. If low, check data provider connection.
-3. **Check signal confidence threshold** (minimum 50% required, configurable in `config.yaml`)
-4. **Verify market is open:**
+4. **Check signal confidence threshold** (minimum 50% required, configurable in `config.yaml`)
+5. **Verify market is open:**
    ```bash
    # Strategy session hours: 09:30-16:00 ET
    ```

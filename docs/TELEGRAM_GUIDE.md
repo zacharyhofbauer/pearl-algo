@@ -140,7 +140,13 @@ Returns the current agent status, including:
 
 - Running / stopped state
 - Pause reason (if paused)
-- Cycle count, signal count, buffer size
+- Futures/session gates:
+  - **FuturesMarketOpen** (CME ETH + maintenance break; affects data freshness)
+  - **StrategySessionOpen** (09:30–16:00 ET; when signals are allowed)
+- Cycles and signals (clarified):
+  - **Cycles**: session/total (total persists across restarts)
+  - **Signals**: generated vs delivered vs failed
+- Buffer size (rolling): current/target bars
 - Compact 7-day performance summary
 - Inline buttons:
   - **Start Agent** / **Stop Agent** – Quick service control

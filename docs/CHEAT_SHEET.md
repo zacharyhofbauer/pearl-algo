@@ -22,7 +22,8 @@
   ```
 
   **Key concepts (don’t confuse these):**
-  - **StrategySessionOpen**: when the strategy is allowed to generate signals (09:30–16:00 ET).\n+  - **FuturesMarketOpen**: when CME futures data is generally available (ETH Sun 18:00 ET → Fri 17:00 ET, with Mon–Thu 17:00–18:00 ET maintenance break).\n+
+  - **StrategySessionOpen**: when the strategy is allowed to generate signals (09:30–16:00 ET).
+  - **FuturesMarketOpen**: when CME futures data is generally available (ETH Sun 18:00 ET → Fri 17:00 ET, with Mon–Thu 17:00–18:00 ET maintenance break).
   ```bash
   TELEGRAM_BOT_TOKEN=your_bot_token_here
   TELEGRAM_CHAT_ID=your_chat_id_here
@@ -196,6 +197,10 @@
   cat data/nq_agent_state/state.json | jq .buffer_size
   ```
 
+- **Status looks “weird” (e.g., cycles >> bars, signals generated but no alerts):**
+  - `buffer_size` is a **rolling window** capped by config (often 100 bars). It will not grow with time.
+  - `cycle_count` can be **total since first run** (persisted), while uptime is per-process.
+  - Use Telegram `/status` to see **session/total cycles** and **signals generated vs delivered vs failed**.
 - **Service looks stuck / weird:**
   ```bash
   ./scripts/lifecycle/check_nq_agent_status.sh

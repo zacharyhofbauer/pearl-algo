@@ -51,7 +51,8 @@ Key sections and their consumers:
     - `strategies.nq_intraday.*` (signal thresholds, where applicable).
 
 Notes:
-- `data.enable_mtf_cache`, `data.mtf_refresh_seconds_5m`, `data.mtf_refresh_seconds_15m` (default OFF) control how often 5m/15m history is refreshed.\n+  This reduces repeated IBKR historical requests when the service runs with a fast scan interval.
+- `data.enable_mtf_cache`, `data.mtf_refresh_seconds_5m`, `data.mtf_refresh_seconds_15m` (default OFF) control how often 5m/15m history is refreshed.
+  This reduces repeated IBKR historical requests when the service runs with a fast scan interval.
 
 ### 1.3 Settings module (`pearlalgo.config.settings`)
 

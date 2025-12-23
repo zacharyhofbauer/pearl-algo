@@ -143,8 +143,8 @@ class NQAgentTelegramNotifier:
                 except Exception as e:
                     logger.warning(f"Could not generate chart for signal: {e}")
             
-            # Send message
-            success = await self.telegram.send_message(message)
+            # Send message (disable dedupe for signals: prices/confidence differences matter).
+            success = await self.telegram.send_message(message, dedupe=False)
             
             # Send chart if generated
             if chart_path and chart_path.exists():
@@ -158,10 +158,55 @@ class NQAgentTelegramNotifier:
                 except Exception as e:
                     logger.warning(f"Could not send chart: {e}")
             
-            return success
+            if success:
+                return True
+
+            # Fallback: send a minimal, guaranteed-short signal summary.
+            # This ensures operators get *some* alert even if rich formatting fails.
+            fallback = self._format_minimal_signal(signal)
+            fallback_ok = await self.telegram.send_message(
+                fallback,
+                parse_mode=None,
+                dedupe=False,
+            )
+            return bool(fallback_ok)
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_signal")
             return False
+
+    def _format_minimal_signal(self, signal: Dict) -> str:
+        """Format a minimal signal message (plain text, bounded)."""
+        symbol = str(signal.get("symbol") or "MNQ")
+        sig_type = str(signal.get("type") or "unknown").replace("_", " ").title()
+        direction = str(signal.get("direction") or "long").upper()
+        try:
+            entry = float(signal.get("entry_price") or 0.0)
+        except Exception:
+            entry = 0.0
+        try:
+            stop = float(signal.get("stop_loss") or 0.0)
+        except Exception:
+            stop = 0.0
+        try:
+            target = float(signal.get("take_profit") or 0.0)
+        except Exception:
+            target = 0.0
+        try:
+            conf = float(signal.get("confidence") or 0.0)
+        except Exception:
+            conf = 0.0
+
+        sid = str(signal.get("signal_id") or "")
+        sid_short = (sid[:16] + "…") if sid else ""
+
+        # Keep this compact and robust to Markdown parsing issues.
+        lines = [
+            f"SIGNAL {symbol} {direction} | {sig_type}",
+            f"entry={entry:.2f} stop={stop:.2f} target={target:.2f} conf={conf:.0%}",
+        ]
+        if sid_short:
+            lines.append(f"id={sid_short}")
+        return "\n".join(lines)
     
     async def _send_photo(self, photo_path: Path) -> bool:
         """Send photo to Telegram."""
@@ -757,11 +802,39 @@ class NQAgentTelegramNotifier:
                 message += "\n"
 
             # Activity section (compact single line)
-            cycles = status.get('cycle_count', 0)
-            signals = status.get('signal_count', 0)
-            errors = status.get('error_count', 0)
-            buffer = status.get('buffer_size', 0)
-            message += f"📊 *Activity:* {cycles:,} cycles • {signals} signals • {buffer} bars • {errors} errors\n"
+            cycles_total = int(status.get("cycle_count", 0) or 0)
+            cycles_session = status.get("cycle_count_session")
+            try:
+                cycles_session = int(cycles_session) if cycles_session is not None else None
+            except Exception:
+                cycles_session = None
+
+            errors = int(status.get("error_count", 0) or 0)
+
+            buffer = int(status.get("buffer_size", 0) or 0)
+            buffer_target = status.get("buffer_size_target")
+            try:
+                buffer_target = int(buffer_target) if buffer_target is not None else None
+            except Exception:
+                buffer_target = None
+
+            cycles_label = f"{cycles_session:,} (session) / {cycles_total:,} (total)" if cycles_session is not None else f"{cycles_total:,}"
+            buffer_label = f"{buffer}/{buffer_target} bars (rolling)" if buffer_target is not None else f"{buffer} bars (rolling)"
+            message += f"📊 *Activity:* {cycles_label} • {buffer_label} • {errors} errors\n"
+
+            # Signal delivery clarity: generated vs sent vs failed
+            signals_generated = int(status.get("signal_count", 0) or 0)
+            signals_sent = int(status.get("signals_sent", 0) or 0)
+            signals_failed = int(status.get("signals_send_failures", 0) or 0)
+            message += f"🔔 *Signals:* {signals_generated} generated • {signals_sent} sent • {signals_failed} failed\n"
+
+            last_err = status.get("last_signal_send_error")
+            if last_err:
+                # Keep it short for mobile.
+                msg_err = str(last_err)
+                if len(msg_err) > 140:
+                    msg_err = msg_err[:140] + "…"
+                message += f"⚠️ *Last send error:* {msg_err}\n"
             
             # Data quality section (compact)
             latest_bar = status.get('latest_bar')
@@ -896,11 +969,29 @@ class NQAgentTelegramNotifier:
             message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}  •  {strat_emoji} *StrategySessionOpen:* {strat_text}\n"
 
             # Activity summary (compact single line)
-            cycles = status.get('cycle_count', 0)
-            signals = status.get('signal_count', 0)
-            errors = status.get('error_count', 0)
-            buffer = status.get('buffer_size', 0)
-            message += f"📊 {cycles:,} cycles • {signals} signals • {buffer} bars • {errors} errors\n"
+            cycles_total = int(status.get("cycle_count", 0) or 0)
+            cycles_session = status.get("cycle_count_session")
+            try:
+                cycles_session = int(cycles_session) if cycles_session is not None else None
+            except Exception:
+                cycles_session = None
+
+            signals_generated = int(status.get("signal_count", 0) or 0)
+            signals_sent = int(status.get("signals_sent", 0) or 0)
+            signals_failed = int(status.get("signals_send_failures", 0) or 0)
+
+            errors = int(status.get("error_count", 0) or 0)
+
+            buffer = int(status.get("buffer_size", 0) or 0)
+            buffer_target = status.get("buffer_size_target")
+            try:
+                buffer_target = int(buffer_target) if buffer_target is not None else None
+            except Exception:
+                buffer_target = None
+
+            cycle_part = f"{cycles_session:,}/{cycles_total:,} cycles" if cycles_session is not None else f"{cycles_total:,} cycles"
+            buf_part = f"{buffer}/{buffer_target} bars" if buffer_target is not None else f"{buffer} bars"
+            message += f"📊 {cycle_part} • {signals_generated} gen / {signals_sent} sent / {signals_failed} fail • {buf_part} • {errors} errors\n"
 
             await self.telegram.send_message(message)
             return True

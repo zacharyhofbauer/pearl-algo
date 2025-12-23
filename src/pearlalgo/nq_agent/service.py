@@ -117,6 +117,19 @@ class NQAgentService:
             self.signal_count = saved_signal_count
         
         self.error_count = saved_state.get("error_count", 0)
+        # Telegram delivery observability (backward-compatible defaults)
+        self.signals_sent = int(saved_state.get("signals_sent", 0) or 0)
+        self.signals_send_failures = int(saved_state.get("signals_send_failures", 0) or 0)
+        self.last_signal_send_error: Optional[str] = saved_state.get("last_signal_send_error")
+        self.last_signal_generated_at: Optional[str] = saved_state.get("last_signal_generated_at")
+        self.last_signal_sent_at: Optional[str] = saved_state.get("last_signal_sent_at")
+        self.last_signal_id_prefix: Optional[str] = saved_state.get("last_signal_id_prefix")
+
+        # Session baselines (initialized on start)
+        self._cycle_count_at_start: Optional[int] = None
+        self._signal_count_at_start: Optional[int] = None
+        self._signals_sent_at_start: Optional[int] = None
+        self._signals_fail_at_start: Optional[int] = None
         self.last_status_update: Optional[datetime] = None
         self.status_update_interval = service_settings.get("status_update_interval", 1800)
         self.last_heartbeat: Optional[datetime] = None
@@ -142,6 +155,7 @@ class NQAgentService:
         self._was_buffer_inadequate: bool = False
         self.stale_data_threshold_minutes = data_settings.get("stale_data_threshold_minutes", 10)
         self.connection_timeout_minutes = data_settings.get("connection_timeout_minutes", 30)
+        self.buffer_size_target = int(data_settings.get("buffer_size", 100) or 100)
         
         # Initialize data quality checker
         self.data_quality_checker = DataQualityChecker(
@@ -159,6 +173,11 @@ class NQAgentService:
         self.running = True
         self.shutdown_requested = False
         self.start_time = datetime.now(timezone.utc)
+        # Establish session baselines for derived counters (cycles/signals since start)
+        self._cycle_count_at_start = int(self.cycle_count or 0)
+        self._signal_count_at_start = int(self.signal_count or 0)
+        self._signals_sent_at_start = int(self.signals_sent or 0)
+        self._signals_fail_at_start = int(self.signals_send_failures or 0)
 
         # Setup signal handlers
         # Note: These set shutdown_requested flag, stop() is called in finally block
@@ -538,6 +557,8 @@ class NQAgentService:
         try:
             # Track signal generation (delegates to state_manager for persistence)
             signal_id = self.performance_tracker.track_signal_generated(signal)
+            self.last_signal_generated_at = get_utc_timestamp()
+            self.last_signal_id_prefix = str(signal_id)[:16]
 
             # Send to Telegram (await async call) with buffer data for chart generation
             signal_type = signal.get('type', 'unknown')
@@ -548,12 +569,26 @@ class NQAgentService:
 
             if success:
                 logger.info(f"✅ Signal sent to Telegram: {signal_type} {signal_direction}")
+                self.signals_sent += 1
+                self.last_signal_sent_at = get_utc_timestamp()
+                # Clear last error on success to avoid stale operator confusion.
+                self.last_signal_send_error = None
             else:
                 logger.error(
                     f"❌ Failed to send signal to Telegram: {signal_type} {signal_direction}. "
                     f"Telegram enabled: {self.telegram_notifier.enabled}, "
                     f"Telegram instance: {self.telegram_notifier.telegram is not None}"
                 )
+                self.signals_send_failures += 1
+                try:
+                    err = None
+                    if self.telegram_notifier.telegram is not None:
+                        err = getattr(self.telegram_notifier.telegram, "last_error", None)
+                    if err:
+                        self.last_signal_send_error = str(err)[:200]
+                except Exception:
+                    # Keep prior error if we can’t read the latest reason.
+                    pass
 
             self.signal_count += 1
 
@@ -670,11 +705,38 @@ class NQAgentService:
             "uptime": uptime,
             "cycle_count": self.cycle_count,
             "signal_count": self.signal_count,
+            "signals_sent": self.signals_sent,
+            "signals_send_failures": self.signals_send_failures,
+            "last_signal_send_error": self.last_signal_send_error,
+            "last_signal_generated_at": self.last_signal_generated_at,
+            "last_signal_sent_at": self.last_signal_sent_at,
+            "last_signal_id_prefix": self.last_signal_id_prefix,
+            "cycle_count_session": (
+                (self.cycle_count - self._cycle_count_at_start)
+                if self._cycle_count_at_start is not None
+                else None
+            ),
+            "signal_count_session": (
+                (self.signal_count - self._signal_count_at_start)
+                if self._signal_count_at_start is not None
+                else None
+            ),
+            "signals_sent_session": (
+                (self.signals_sent - self._signals_sent_at_start)
+                if self._signals_sent_at_start is not None
+                else None
+            ),
+            "signals_send_failures_session": (
+                (self.signals_send_failures - self._signals_fail_at_start)
+                if self._signals_fail_at_start is not None
+                else None
+            ),
             "latest_bar": latest_bar,  # Include for order book transparency
             "error_count": self.error_count,
             "connection_failures": self.connection_failures,
             "connection_status": connection_status,
             "buffer_size": self.data_fetcher.get_buffer_size(),
+            "buffer_size_target": self.buffer_size_target,
             "futures_market_open": futures_market_open,
             "strategy_session_open": strategy_session_open,
             "performance": performance,
@@ -715,7 +777,34 @@ class NQAgentService:
             "start_time": self.start_time.isoformat() if self.start_time else None,
             "cycle_count": self.cycle_count,
             "signal_count": self.signal_count,
+            "signals_sent": self.signals_sent,
+            "signals_send_failures": self.signals_send_failures,
+            "last_signal_send_error": self.last_signal_send_error,
+            "last_signal_generated_at": self.last_signal_generated_at,
+            "last_signal_sent_at": self.last_signal_sent_at,
+            "last_signal_id_prefix": self.last_signal_id_prefix,
+            "cycle_count_session": (
+                (self.cycle_count - self._cycle_count_at_start)
+                if self._cycle_count_at_start is not None
+                else None
+            ),
+            "signal_count_session": (
+                (self.signal_count - self._signal_count_at_start)
+                if self._signal_count_at_start is not None
+                else None
+            ),
+            "signals_sent_session": (
+                (self.signals_sent - self._signals_sent_at_start)
+                if self._signals_sent_at_start is not None
+                else None
+            ),
+            "signals_send_failures_session": (
+                (self.signals_send_failures - self._signals_fail_at_start)
+                if self._signals_fail_at_start is not None
+                else None
+            ),
             "buffer_size": self.data_fetcher.get_buffer_size(),
+            "buffer_size_target": self.buffer_size_target,
             "data_fresh": data_fresh,
             "latest_bar_timestamp": latest_bar_timestamp,
             "latest_bar_age_minutes": latest_bar_age_minutes,
