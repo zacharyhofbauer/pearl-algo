@@ -415,6 +415,36 @@ class TelegramCommandHandler:
             except Exception:
                 state_age_seconds = None
             
+            # Compute activity pulse from last_successful_cycle (more accurate than state file mtime)
+            last_cycle_seconds = None
+            try:
+                last_cycle_ts = state.get("last_successful_cycle")
+                if last_cycle_ts:
+                    from pearlalgo.utils.paths import parse_utc_timestamp
+                    last_cycle_dt = parse_utc_timestamp(str(last_cycle_ts))
+                    if last_cycle_dt:
+                        if last_cycle_dt.tzinfo is None:
+                            last_cycle_dt = last_cycle_dt.replace(tzinfo=timezone.utc)
+                        last_cycle_seconds = (datetime.now(timezone.utc) - last_cycle_dt).total_seconds()
+            except Exception:
+                last_cycle_seconds = None
+            
+            # Count active trades (signals with status="entered")
+            active_trades_count = 0
+            try:
+                signals_file = get_signals_file(self.state_dir)
+                if signals_file.exists():
+                    with open(signals_file) as f:
+                        for line in f:
+                            try:
+                                sig = json.loads(line.strip())
+                                if sig.get("status") == "entered":
+                                    active_trades_count += 1
+                            except Exception:
+                                continue
+            except Exception:
+                active_trades_count = 0
+            
             # Gate status
             futures_market_open = state.get("futures_market_open")
             strategy_session_open = state.get("strategy_session_open")
@@ -460,7 +490,7 @@ class TelegramCommandHandler:
             except Exception as e:
                 logger.debug(f"Could not get last signal age: {e}")
             
-            # Build Home Card message with enhanced confidence/clarity cues
+            # Build Home Card message with enhanced confidence/clarity cues (calm-minimal)
             message = format_home_card(
                 symbol=state.get("symbol", "MNQ"),
                 time_str=self._get_current_time_str(),
@@ -480,11 +510,14 @@ class TelegramCommandHandler:
                 latest_price=latest_price,
                 performance=perf,
                 last_signal_age=last_signal_age,
-                # New v2 fields for confidence/clarity
+                # Confidence/clarity cues
                 state_age_seconds=state_age_seconds,
                 state_stale_threshold=120.0,  # 2 minutes; warn if state file is older
                 signal_send_failures=signal_send_failures,
                 buy_sell_pressure=state.get("buy_sell_pressure"),
+                # Calm-minimal: activity pulse + active trades
+                last_cycle_seconds=last_cycle_seconds,
+                active_trades_count=active_trades_count,
             )
             
             # Use consistent main menu buttons

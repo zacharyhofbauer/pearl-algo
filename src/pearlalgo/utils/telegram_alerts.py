@@ -515,6 +515,8 @@ def format_home_card(
     signal_diagnostics: str | None = None,  # Compact summary like "Raw: 3 → Valid: 0 | Filtered: 2 conf, 1 R:R"
     # Buy/Sell pressure (volume-based proxy)
     buy_sell_pressure: str | None = None,  # e.g. "🟢 Pressure: BUYERS ▲▲ (Δ +18%, Vol 1.3x, 2h)"
+    # Active trades (v5 calm-minimal)
+    active_trades_count: int = 0,  # Number of currently active positions
 ) -> str:
     """
     Build unified Home Card message for status/dashboard (balanced verbosity).
@@ -579,6 +581,7 @@ def format_home_card(
         previous_pnl: Previous period P&L for trend comparison
         quiet_reason: Why agent is quiet (e.g., "StrategySessionClosed", "NoOpportunity")
         buy_sell_pressure: Buy/Sell pressure proxy string (volume-based)
+        active_trades_count: Number of currently active positions (shown when > 0)
 
     Returns:
         Formatted Home Card message string
@@ -684,6 +687,10 @@ def format_home_card(
         buffer_size=buffer_size,
         buffer_target=buffer_target,
     ))
+
+    # CONDITIONAL: Active trades (only when > 0, calm-minimal)
+    if active_trades_count > 0:
+        lines.append(f"🎯 *{active_trades_count} active trade{'s' if active_trades_count > 1 else ''}*")
 
     # CONDITIONAL: Error/failure cue (only when non-zero)
     if signal_send_failures > 0:

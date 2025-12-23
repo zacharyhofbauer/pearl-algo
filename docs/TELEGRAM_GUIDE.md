@@ -614,46 +614,116 @@ For detailed chart setup and customization, see [MPLFINANCE_QUICK_START.md](MPLF
 
 ---
 
-## 9. UX Improvements (v2)
+## 9. UX Philosophy: Calm-Minimal
+
+The Telegram UI follows a **calm-minimal** design philosophy:
+
+> *Healthy state stays CALM. Degraded state gets EXPLANATIONS.*
+
+**Core principles:**
+
+1. **Decision-first layout**: Trade plan and action cue appear before context
+2. **Progressive disclosure**: Details live in drill-down views, not push alerts
+3. **Silence is a feature**: Only show warnings when something needs attention
+4. **Consistent labeling**: Same emoji/label semantics across all views
 
 ### 9.1 Activity Pulse
 
-The status and activity views now show an "activity pulse" indicator:
+The `/status` Home Card shows an "activity pulse" indicator computed from `last_successful_cycle`:
 
 - 🟢 **Active** (< 2 min): Agent is actively cycling
 - 🟡 **Slow** (2-5 min): Agent may be waiting or slow
 - 🔴 **Stale** (> 5 min): Agent may need attention
 
-This helps answer "is the bot doing anything?" at a glance.
+This answers "is the bot doing anything?" at a glance.
 
-### 9.2 Enhanced Signal Messages
+### 9.2 Active Trades Count
 
-Signal alerts now include:
+When positions are open, the Home Card shows:
 
-- **Action cue**: Clear next steps (e.g., "Monitor for BUY entry at target price")
-- **Timing**: When the signal was generated (with relative time)
-- **Entry/Exit context**: Position size, risk amount, and clear explanations
+```
+🎯 *1 active trade*
+```
 
-### 9.3 Improved Error Messages
+This only appears when count > 0 (calm-minimal: no noise when nothing is active).
 
-Data quality and circuit breaker alerts now include:
+### 9.3 Signal Push Alerts (Calm-Minimal)
+
+Signal alerts use a decision-first, compact layout:
+
+```
+🎯 *MNQ 🟢 LONG* | Momentum Breakout
+
+*Entry:* $21,234.50  •  R:R 2.1:1
+*Stop:* $21,200.00 (34.5 pts)
+*TP:* $21,300.00 (65.5 pts)
+
+⏳ Monitor for BUY entry at target price
+
+🟢 75% confidence (High)
+🧭 Trending Bullish • ✅ MTF
+
+`momentum_brea` • tap Details
+```
+
+**Layout order:**
+1. Header (symbol, direction, type)
+2. Trade Plan (entry, R:R, stop, TP)
+3. Action cue (what to do next)
+4. Confidence (single line)
+5. Context (condensed regime + MTF)
+6. Signal ID footer (for Details drill-down)
+
+Full reasoning and timestamps live in the Details view.
+
+### 9.4 Entry Notification (Calm-Minimal)
+
+```
+🎯 *MNQ 🟢 LONG ENTRY*
+
+*Entry:* $21,234.50  •  R:R 2.1:1
+*Stop:* $21,200.00 (34.5 pts)
+*TP:* $21,300.00 (65.5 pts)
+
+✅ *Position ACTIVE* - Monitor stop/TP
+
+`momentum_brea` • tap Details
+```
+
+### 9.5 Exit Notification (Calm-Minimal)
+
+P&L appears first (most important information):
+
+```
+✅ *MNQ 🟢 LONG EXIT*
+
+🟢 *+$125.00*  •  45m
+$21,234.50 → $21,300.00 (+65.5 / +0.3%)
+🎯 Take Profit
+
+`momentum_brea` • tap Details
+```
+
+### 9.6 Improved Error Messages
+
+Data quality and circuit breaker alerts include:
 
 - **Impact explanation**: What is affected (e.g., "Signal generation paused")
 - **What's safe**: What is still working (e.g., "Positions still monitored")
 - **Action guidance**: Step-by-step what to do
 - **Expected resolution**: When the issue might resolve
 
-### 9.4 Enhanced Navigation
+### 9.7 Navigation
 
-The main menu now features:
+The main menu features:
 
 - **Quick Actions row**: Last Signal, Active Trades, Activity
 - **Streamlined service control**: Start/Stop/Restart + Gateway in one row
 - **Grouped monitoring buttons**: Signals, Performance, Data Quality, Health
 
-### 9.5 Lifecycle Notifications
+### 9.8 Lifecycle Notifications
 
-Startup and shutdown messages now include:
+Startup and shutdown messages include:
 
 - **What to expect**: When first signal might appear
 - **Next steps**: Clear guidance on what to do next

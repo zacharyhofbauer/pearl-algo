@@ -797,3 +797,155 @@ def test_home_card_markdown_safety_underscores() -> None:
     # The original underscore version should NOT appear (would break Markdown)
     assert "consecutive_errors_exceeded_limit" not in result
 
+
+# ---------------------------------------------------------------------------
+# Calm-minimal UX tests (v5)
+# ---------------------------------------------------------------------------
+
+def test_home_card_active_trades_shown_when_positive() -> None:
+    """Test that active trades count appears when > 0."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        active_trades_count=2,
+    )
+    
+    assert "2 active trades" in result
+    assert "🎯" in result
+
+
+def test_home_card_active_trades_hidden_when_zero() -> None:
+    """Test that active trades count does NOT appear when 0 (calm-minimal)."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        active_trades_count=0,
+    )
+    
+    assert "active trade" not in result
+
+
+def test_home_card_active_trades_singular() -> None:
+    """Test that active trades uses singular form for 1."""
+    result = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        active_trades_count=1,
+    )
+    
+    assert "1 active trade" in result
+    assert "1 active trades" not in result
+
+
+def test_home_card_last_cycle_seconds_pulse() -> None:
+    """Test that last_cycle_seconds shows activity pulse when provided."""
+    # Active (< 2 min)
+    result_active = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        last_cycle_seconds=30.0,
+    )
+    assert "Active" in result_active
+    assert "🟢" in result_active
+    
+    # Slow (2-5 min)
+    result_slow = format_home_card(
+        symbol="MNQ",
+        time_str="10:30 AM ET",
+        agent_running=True,
+        gateway_running=True,
+        futures_market_open=True,
+        strategy_session_open=True,
+        last_cycle_seconds=180.0,
+    )
+    assert "Slow" in result_slow
+    assert "🟡" in result_slow
+
+
+def test_compact_signal_calm_minimal_layout() -> None:
+    """Test that compact signal uses decision-first calm-minimal layout."""
+    from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
+    
+    signal = {
+        "symbol": "MNQ",
+        "type": "momentum_breakout",
+        "direction": "long",
+        "entry_price": 21234.50,
+        "stop_loss": 21200.00,
+        "take_profit": 21300.00,
+        "confidence": 0.75,
+        "signal_id": "momentum_breakout_1703347200.123456",
+        "regime": {"regime": "trending_bullish", "volatility": "normal"},
+        "mtf_analysis": {"alignment": "aligned"},
+    }
+    
+    notifier = NQAgentTelegramNotifier.__new__(NQAgentTelegramNotifier)
+    message = notifier._format_compact_signal(signal)
+    
+    # Should have decision-first layout
+    assert "*Entry:*" in message
+    assert "*Stop:*" in message
+    assert "*TP:*" in message
+    assert "R:R" in message
+    
+    # Should have action cue
+    assert "Monitor" in message or "BUY" in message
+    
+    # Should have confidence
+    assert "75%" in message or "confidence" in message.lower()
+    
+    # Should have compact footer
+    assert "tap Details" in message
+    
+    # Should NOT have verbose elements (kept in Details)
+    assert "Generated:" not in message  # Timestamp moved to Details
+    
+    # Should be compact (under 1000 chars for mobile)
+    assert len(message) < 1000, f"Calm-minimal signal too long: {len(message)} chars"
+
+
+def test_compact_signal_under_telegram_limit() -> None:
+    """Test that calm-minimal signal stays well under Telegram limit."""
+    from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
+    
+    # Maximum content signal
+    signal = {
+        "symbol": "MNQ",
+        "type": "momentum_breakout_continuation",
+        "direction": "long",
+        "entry_price": 21234.50,
+        "stop_loss": 21200.00,
+        "take_profit": 21300.00,
+        "confidence": 0.72,
+        "signal_id": "momentum_breakout_continuation_1703347200.123456",
+        "regime": {
+            "regime": "trending_bullish",
+            "volatility": "high",
+        },
+        "mtf_analysis": {
+            "alignment": "aligned",
+        },
+    }
+    
+    notifier = NQAgentTelegramNotifier.__new__(NQAgentTelegramNotifier)
+    message = notifier._format_compact_signal(signal)
+    
+    assert len(message) < TELEGRAM_TEXT_LIMIT, f"Signal too long: {len(message)} chars"
+    assert len(message) < 1000, f"Calm-minimal signal should be compact: {len(message)} chars"
+

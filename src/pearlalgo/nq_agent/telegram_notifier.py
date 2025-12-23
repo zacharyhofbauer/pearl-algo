@@ -262,16 +262,23 @@ class NQAgentTelegramNotifier:
 
     def _format_compact_signal(self, signal: Dict) -> str:
         """
-        Format signal as a compact, decision-first push alert.
+        Format signal as a calm-minimal, decision-first push alert.
         
-        Trade plan appears first for fast action; context is condensed.
-        Includes signal ID prefix for cross-referencing with /signals.
+        Layout (calm-minimal spec):
+        1. Header: Symbol, direction, type
+        2. Trade Plan: Entry, Stop, TP, R:R
+        3. Action cue: What to do next (immediately after plan)
+        4. Confidence: Single line with tier
+        5. Context: Single condensed line (regime + MTF) only if informative
+        6. Signal ID: Short reference for Details drill-down
+        
+        Full context (reason, timestamps, detailed regime) lives in Details view.
         
         Args:
             signal: Signal dictionary with full context
             
         Returns:
-            Formatted message string (under ~1500 chars for mobile)
+            Formatted message string (under ~1000 chars for mobile, fast scan)
         """
         symbol = str(signal.get("symbol") or "MNQ")
         signal_type = str(signal.get("type") or "unknown").replace("_", " ").title()
@@ -291,7 +298,6 @@ class NQAgentTelegramNotifier:
             confidence = float(signal.get("confidence") or 0.0)
         except Exception:
             confidence = 0.0
-        reason = str(signal.get("reason") or "")
         signal_id = str(signal.get("signal_id") or "")
 
         # Use shared helpers for consistent formatting
@@ -310,62 +316,52 @@ class NQAgentTelegramNotifier:
             if risk > 0:
                 rr = reward / risk
 
-        # Build compact message with trade plan first
-        message = f"🎯 *{symbol} {dir_emoji} {dir_label} | {signal_type}*\n"
-        message += "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        # Build calm-minimal message: decision-first, action-cue-early
+        message = f"🎯 *{symbol} {dir_emoji} {dir_label}* | {signal_type}\n\n"
 
-        # Trade Plan (always first)
-        message += "📋 *Trade Plan*\n"
+        # Trade Plan (always first, compact)
         if entry_price:
-            message += f"   Entry: ${entry_price:.2f}\n"
+            message += f"*Entry:* ${entry_price:.2f}"
+            if rr > 0:
+                message += f"  •  R:R {rr:.1f}:1"
+            message += "\n"
         if stop_loss:
             stop_dist = abs(entry_price - stop_loss) if entry_price else 0
-            message += f"   Stop:  ${stop_loss:.2f} ({stop_dist:.2f} pts)\n"
+            message += f"*Stop:* ${stop_loss:.2f} ({stop_dist:.1f} pts)\n"
         if take_profit:
             tp_dist = abs(take_profit - entry_price) if entry_price else 0
-            message += f"   TP:    ${take_profit:.2f} ({tp_dist:.2f} pts)\n"
-        if rr > 0:
-            message += f"   R:R:   {rr:.2f}:1\n"
-        message += "\n"
+            message += f"*TP:* ${take_profit:.2f} ({tp_dist:.1f} pts)\n"
 
-        # Confidence
-        message += f"{conf_emoji} *Confidence:* {confidence:.0%} ({conf_tier})\n"
-
-        # Condensed context (one line each, only if available)
-        regime = signal.get("regime", {}) or {}
-        mtf = signal.get("mtf_analysis", {}) or {}
-
-        if regime.get("regime"):
-            r_regime = str(regime.get("regime", "")).replace("_", " ").title()
-            r_vol = str(regime.get("volatility", "")).title()
-            message += f"🧭 *Regime:* {r_regime} | {r_vol} Vol\n"
-
-        alignment = mtf.get("alignment")
-        if alignment:
-            mtf_emoji = "✅" if alignment == "aligned" else "⚠️" if alignment == "partial" else "❌"
-            message += f"🧩 *MTF:* {mtf_emoji} {alignment.title()}\n"
-
-        # Reason (truncated for mobile)
-        if reason:
-            reason_short = reason[:100] + "…" if len(reason) > 100 else reason
-            message += f"\n💡 {reason_short}\n"
-
-        # Signal timing (when generated)
-        timestamp = signal.get("timestamp")
-        timing_str = format_signal_timing(timestamp, include_relative=True)
-        if timing_str:
-            message += f"\n⏰ *Generated:* {timing_str}\n"
-
-        # Action cue (what to do next)
+        # Action cue (immediately after plan - what to do next)
         status = str(signal.get("status") or "generated")
         direction = str(signal.get("direction") or "long")
         action_cue = format_signal_action_cue(status, direction)
         if action_cue:
             message += f"\n{action_cue}\n"
 
-        # Signal ID for cross-referencing (always include)
+        # Confidence (single line)
+        message += f"\n{conf_emoji} {confidence:.0%} confidence ({conf_tier})\n"
+
+        # Context: condensed single line (regime + MTF) only if both informative
+        regime = signal.get("regime", {}) or {}
+        mtf = signal.get("mtf_analysis", {}) or {}
+        context_parts = []
+        
+        if regime.get("regime"):
+            r_regime = str(regime.get("regime", "")).replace("_", " ").title()
+            context_parts.append(r_regime)
+        
+        alignment = mtf.get("alignment")
+        if alignment:
+            mtf_emoji = "✅" if alignment == "aligned" else "⚠️" if alignment == "partial" else "❌"
+            context_parts.append(f"{mtf_emoji} MTF")
+        
+        if context_parts:
+            message += f"🧭 {' • '.join(context_parts)}\n"
+
+        # Signal ID for cross-referencing (compact footer)
         if signal_id:
-            message += f"\n🆔 `{signal_id[:16]}…` (tap Details for more)"
+            message += f"\n`{signal_id[:12]}` • tap Details"
 
         return message
     
@@ -723,31 +719,24 @@ class NQAgentTelegramNotifier:
                 if risk > 0:
                     risk_reward = reward / risk
             
-            # Entry notification with position context
+            # Entry notification (calm-minimal: action-first, compact)
             message = f"🎯 *{symbol} {dir_emoji} {dir_label} ENTRY*\n\n"
-            message += f"*Type:* {signal_type}\n"
-            message += f"*Entry:* ${entry_price:.2f}\n"
+            message += f"*Entry:* ${entry_price:.2f}"
+            if risk_reward > 0:
+                message += f"  •  R:R {risk_reward:.1f}:1"
+            message += "\n"
             if stop_loss:
                 stop_dist = abs(entry_price - stop_loss)
-                message += f"*Stop:* ${stop_loss:.2f} ({stop_dist:.2f} pts)\n"
+                message += f"*Stop:* ${stop_loss:.2f} ({stop_dist:.1f} pts)\n"
             if take_profit:
                 tp_dist = abs(take_profit - entry_price)
-                message += f"*TP:* ${take_profit:.2f} ({tp_dist:.2f} pts)\n"
-            if risk_reward > 0:
-                message += f"*R:R:* {risk_reward:.2f}:1\n"
+                message += f"*TP:* ${take_profit:.2f} ({tp_dist:.1f} pts)\n"
             
-            # Position size and risk (if available)
-            position_size = signal.get("position_size")
-            tick_value = signal.get("tick_value", 2.0)  # Default MNQ tick value
-            if position_size and stop_loss and entry_price:
-                risk_pts = abs(entry_price - stop_loss)
-                risk_amount = risk_pts * float(tick_value) * float(position_size)
-                message += f"\n*Position:* {position_size} contracts\n"
-                message += f"*Risk:* ${risk_amount:.2f}\n"
+            # Action cue (immediate)
+            message += f"\n✅ *Position ACTIVE* - Monitor stop/TP\n"
             
-            # Action cue
-            message += f"\n✅ *Position ACTIVE* - Monitor stop/TP levels\n"
-            message += f"\n🆔 `{signal_id[:16]}…`\n"
+            # Compact footer
+            message += f"\n`{signal_id[:12]}` • tap Details"
             
             # Build optional deep-link buttons
             reply_markup = None
@@ -837,43 +826,38 @@ class NQAgentTelegramNotifier:
             }
             exit_reason_display = exit_reason_map.get(exit_reason.lower(), exit_reason.title())
             
-            # Exit notification with trade summary
-            message = f"{status_emoji} *{symbol} {dir_emoji} {dir_label} EXIT - {status_label}*\n\n"
-            message += f"*Type:* {signal_type}\n"
-            message += f"*Entry:* ${entry_price:.2f}\n"
-            price_change = exit_price - entry_price if entry_price else 0
-            # Calculate percentage change
-            pct_change = (price_change / entry_price * 100) if entry_price > 0 else 0
-            message += f"*Exit:* ${exit_price:.2f} ({price_change:+.2f} / {pct_change:+.1f}%)\n"
+            # Exit notification (calm-minimal: P&L first, compact)
+            message = f"{status_emoji} *{symbol} {dir_emoji} {dir_label} EXIT*\n\n"
             
-            # Enhanced exit reason explanation
-            exit_explanation = {
-                "stop_loss": "🛑 Stop hit - Risk managed",
-                "take_profit": "🎯 Target reached",
-                "manual": "👤 Manual exit",
-                "expired": "⏰ Signal expired",
-                "trailing_stop": "📉 Trailing stop triggered",
-            }
-            exit_exp = exit_explanation.get(exit_reason.lower(), exit_reason_display)
-            message += f"*Reason:* {exit_exp}\n"
-            
-            message += f"\n{pnl_emoji} *P&L:* {pnl_str}\n"
-            
+            # P&L first (most important)
+            message += f"{pnl_emoji} *{pnl_str}*"
             if hold_duration_minutes is not None:
                 hold_hours = int(hold_duration_minutes // 60)
                 hold_mins = int(hold_duration_minutes % 60)
                 if hold_hours > 0:
-                    message += f"*Hold:* {hold_hours}h {hold_mins}m\n"
+                    message += f"  •  {hold_hours}h {hold_mins}m"
                 else:
-                    message += f"*Hold:* {hold_mins}m\n"
+                    message += f"  •  {hold_mins}m"
+            message += "\n"
             
-            # Next steps guidance
-            if is_win:
-                message += f"\n✅ Trade completed - Review performance for insights\n"
-            else:
-                message += f"\n📊 Trade completed - Check signals for next opportunity\n"
+            # Price summary (compact)
+            price_change = exit_price - entry_price if entry_price else 0
+            pct_change = (price_change / entry_price * 100) if entry_price > 0 else 0
+            message += f"${entry_price:.2f} → ${exit_price:.2f} ({price_change:+.1f} / {pct_change:+.1f}%)\n"
             
-            message += f"\n🆔 `{signal_id[:16]}…`\n"
+            # Exit reason (single line, compact)
+            exit_icons = {
+                "stop_loss": "🛑",
+                "take_profit": "🎯",
+                "manual": "👤",
+                "expired": "⏰",
+                "trailing_stop": "📉",
+            }
+            reason_icon = exit_icons.get(exit_reason.lower(), "ℹ️")
+            message += f"{reason_icon} {exit_reason_display}\n"
+            
+            # Compact footer
+            message += f"\n`{signal_id[:12]}` • tap Details"
             
             # Build optional deep-link buttons
             reply_markup = None
