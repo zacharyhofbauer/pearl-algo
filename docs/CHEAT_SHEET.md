@@ -217,11 +217,45 @@
 
 ---
 
-## 6. Where things live
+## 6. Logs (systemd / journalctl)
+
+When running via systemd, logs go to journald. Use these commands:
+
+```bash
+# Follow live logs
+journalctl -u pearlalgo-mnq.service -f
+
+# Last 10 minutes
+journalctl -u pearlalgo-mnq.service --since -10m
+
+# Since yesterday (for overnight review)
+journalctl -u pearlalgo-mnq.service --since yesterday
+
+# Filter by priority (errors only)
+journalctl -u pearlalgo-mnq.service -p err
+```
+
+**Observability environment variables** (optional, in `.env`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PEARLALGO_LOG_LEVEL` | `INFO` | Override log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `PEARLALGO_LOG_JSON` | `false` | Set to `true` for JSON logs (useful for log aggregation) |
+| `PEARLALGO_LOG_EXTRA` | `false` | Set to `true` to include `extra={...}` context in text logs |
+
+**Notes:**
+- When stdout is not a TTY (e.g., under systemd), ANSI colors are automatically disabled.
+- Each process start gets a unique `run_id` (first 8 chars of UUID) for log correlation.
+- Cycle-by-cycle context (cycle number, freshness, signals) appears in `extra` fields.
+
+---
+
+## 7. Where things live
 
 - **Config**: `config/config.yaml`, `.env`
 - **State**: `data/nq_agent_state/` (`state.json`, `signals.jsonl`, `performance.json`)
 - **Services & scripts**: `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/`
+- **Logs**: stdout/stderr (foreground), journald (systemd), or Docker logs
 - **Deep-dive docs**: `NQ_AGENT_GUIDE.md`, `GATEWAY.md`, `TELEGRAM_GUIDE.md`, `PROJECT_SUMMARY.md`
 
 This cheat sheet is the **primary quick-reference** for PEARLalgo operations. Keep it updated as workflows evolve.

@@ -252,6 +252,12 @@ The MNQ Trading Agent is designed to:
 **Logging** (`logger.py`, `logging_config.py`):
 - `logger.py`: shared logger instance (loguru-backed when available)
 - `logging_config.py`: logging setup helpers (structured logging, correlation IDs, timing)
+- **Systemd-friendly**: ANSI colors auto-disabled when stdout is not a TTY
+- **Per-run correlation**: Each process start gets a unique `run_id` for log grouping
+- **Environment variables** (optional):
+  - `PEARLALGO_LOG_LEVEL`: Override log level (DEBUG, INFO, WARNING, ERROR)
+  - `PEARLALGO_LOG_JSON`: Set to `true` for JSON logs (useful for log aggregation)
+  - `PEARLALGO_LOG_EXTRA`: Set to `true` to include `extra={...}` context in text logs
 
 ### 5. Configuration (`src/pearlalgo/config/`)
 

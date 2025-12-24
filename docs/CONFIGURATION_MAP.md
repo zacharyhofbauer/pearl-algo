@@ -31,6 +31,18 @@ Primary environment variables:
   - **Used by**: `pearlalgo.config.settings.Settings` (fallbacks when `IBKR_*` are not set).
   - **Purpose**: Alternative namespaced IBKR settings.
 
+Optional logging environment variables (for systemd/journald):
+
+- `PEARLALGO_LOG_LEVEL`
+  - **Used by**: `pearlalgo.utils.logging_config.setup_logging()`
+  - **Purpose**: Override log level (DEBUG, INFO, WARNING, ERROR). Default: `INFO`.
+- `PEARLALGO_LOG_JSON`
+  - **Used by**: `pearlalgo.utils.logging_config.setup_logging()`
+  - **Purpose**: Set to `true` or `1` to emit JSON logs to stdout (useful for log aggregation). Default: `false`.
+- `PEARLALGO_LOG_EXTRA`
+  - **Used by**: `pearlalgo.utils.logging_config.setup_logging()`
+  - **Purpose**: Set to `true` or `1` to include `extra={...}` context in text log lines. Default: `false`.
+
 No other environment variables are required by the running agent; keep any additions explicit and documented here.
 
 ### 1.2 Service configuration (`config/config.yaml`)
@@ -72,6 +84,7 @@ Notes:
   - Secrets (Telegram bot token, chat IDs)
   - IBKR host/port/client IDs
   - Provider selection (`PEARLALGO_DATA_PROVIDER`)
+  - Logging overrides (`PEARLALGO_LOG_LEVEL`, `PEARLALGO_LOG_JSON`, `PEARLALGO_LOG_EXTRA`)
 - **Service config (`config/config.yaml`)** – behavior of the running service:
   - Trading symbol, timeframe, scan interval
   - Risk and position sizing defaults

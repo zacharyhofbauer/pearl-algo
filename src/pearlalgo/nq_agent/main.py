@@ -32,7 +32,7 @@ from pearlalgo.config.config_file import load_config_yaml
 from pearlalgo.data_providers.factory import create_data_provider
 from pearlalgo.nq_agent.service import NQAgentService
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
-from pearlalgo.utils.logging_config import setup_logging
+from pearlalgo.utils.logging_config import set_run_id, setup_logging
 
 
 async def main():
@@ -40,7 +40,18 @@ async def main():
     # Setup logging for console output (matches testing behavior)
     setup_logging(level="INFO")
     
-    logger.info("Starting NQ Agent Service (MNQ-native config)...")
+    # Generate a stable run_id for this process lifetime
+    # This helps correlate all logs from a single service run in journald
+    run_id = set_run_id()
+    
+    # Bind run_id to loguru context if available (appears in all subsequent logs)
+    try:
+        from loguru import logger as loguru_logger
+        loguru_logger.configure(extra={"run_id": run_id})
+    except ImportError:
+        pass  # loguru not available, run_id still in context var
+    
+    logger.info(f"Starting NQ Agent Service (MNQ-native config) | run_id={run_id}")
 
     import os
 
