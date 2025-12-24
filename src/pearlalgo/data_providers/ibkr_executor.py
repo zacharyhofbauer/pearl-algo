@@ -827,17 +827,34 @@ class GetHistoricalDataTask(Task):
         bar_size = bar_size_map.get(self.timeframe.lower() if self.timeframe else "1d", "1 day")
 
         # Calculate duration string for IB
-        duration_days = (end - start).days
-        if duration_days <= 1:
+        #
+        # IMPORTANT (futures nuance):
+        # - For CME futures, IBKR's "1 D" duration often returns data since the *current trading-day*
+        #   open (≈17:00 CT), not a true rolling 24h window.
+        # - To support "last N hours" charts (e.g., 24h of 5m candles) we prefer seconds for
+        #   sub-day requests, which behaves as a true wall-clock window.
+        #
+        # Reference: IB durationStr supports: "<n> S|D|W|M|Y"
+        # We choose the smallest unit that fully covers the requested [start, end] window.
+        try:
+            delta_seconds = float((end - start).total_seconds())
+        except Exception:
+            delta_seconds = 0.0
+
+        if not math.isfinite(delta_seconds) or delta_seconds <= 0:
             duration_str = "1 D"
-        elif duration_days <= 7:
-            duration_str = "1 W"
-        elif duration_days <= 30:
-            duration_str = "1 M"
-        elif duration_days <= 365:
-            duration_str = "1 Y"
         else:
-            duration_str = f"{duration_days} D"
+            # Use seconds for <= 24h to get a true rolling window (fixes "2h" issue early in session).
+            secs = int(math.ceil(delta_seconds))
+            if secs <= 86400:
+                duration_str = f"{max(1, secs)} S"
+            else:
+                days = int(math.ceil(float(secs) / 86400.0))
+                if days <= 365:
+                    duration_str = f"{max(1, days)} D"
+                else:
+                    years = int(math.ceil(float(days) / 365.0))
+                    duration_str = f"{max(1, years)} Y"
 
         # Create contract
         if self.is_futures:
