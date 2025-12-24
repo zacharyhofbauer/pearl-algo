@@ -940,11 +940,15 @@ class NQAgentService:
                 return
 
             # Fetch lookback window for chart (prefer direct historical fetch; fallback to buffers)
-            # Ensure we always show at least a useful minimum window (operator request: >= 6h)
+            # Ensure we always show at least a useful minimum window (operator request: >= 6h),
+            # and cap the window for Telegram readability (operator request: <= 24h).
             min_lookback_hours = 6.0
-            lookback_hours = float(self.dashboard_chart_lookback_hours or 48)
+            max_lookback_hours = 24.0
+            lookback_hours = float(self.dashboard_chart_lookback_hours or max_lookback_hours)
             if lookback_hours < min_lookback_hours:
                 lookback_hours = min_lookback_hours
+            if lookback_hours > max_lookback_hours:
+                lookback_hours = max_lookback_hours
             chart_tf = (self.dashboard_chart_timeframe or "auto").strip().lower()
 
             def _choose_timeframe(hours: float, max_bars: int) -> str:
@@ -1044,6 +1048,36 @@ class NQAgentService:
                 except Exception:
                     return df_in
 
+            def _clip_to_lookback_hours(
+                df_in: Optional[pd.DataFrame], hours: float
+            ) -> Optional[pd.DataFrame]:
+                """Best-effort clip to a wall-clock window ending at the most recent bar."""
+                try:
+                    if df_in is None:
+                        return None
+                    if df_in.empty:
+                        return df_in
+
+                    if hours <= 0:
+                        return df_in
+
+                    if "timestamp" in df_in.columns:
+                        ts = pd.to_datetime(df_in["timestamp"], errors="coerce")
+                        if ts.isna().all():
+                            return df_in
+                        tmax = ts.max()
+                        cutoff = tmax - timedelta(hours=float(hours))
+                        return df_in.loc[ts >= cutoff].copy()
+
+                    if isinstance(df_in.index, pd.DatetimeIndex) and len(df_in.index) > 0:
+                        tmax = df_in.index.max()
+                        cutoff = tmax - timedelta(hours=float(hours))
+                        return df_in.loc[df_in.index >= cutoff].copy()
+
+                    return df_in
+                except Exception:
+                    return df_in
+
             # Buffer fallback (timeframe-aware). This should be rare; used only if historical fetch fails.
             if chart_data is None or chart_data.empty:
                 buf = None
@@ -1068,6 +1102,9 @@ class NQAgentService:
                     chart_data = buf.tail(min(int(bars_target), len(buf))).copy()
                     logger.debug(f"Using buffer fallback for dashboard chart: {len(chart_data)} bars (tf={chosen_tf})")
             
+            # Enforce wall-clock cap (prevents market gaps from inflating the displayed range).
+            chart_data = _clip_to_lookback_hours(chart_data, lookback_hours)
+
             if chart_data is None or chart_data.empty or len(chart_data) < 20:
                 logger.debug("Not enough data for dashboard chart (need at least 20 bars)")
                 return
@@ -1089,6 +1126,7 @@ class NQAgentService:
                         tmax = chart_data.index.max()
                 if tmin is not None and tmax is not None and pd.notna(tmin) and pd.notna(tmax):
                     hrs = float((tmax - tmin).total_seconds()) / 3600.0
+                    hrs = min(float(hrs), float(lookback_hours))
                     if hrs >= 72:
                         range_label = f"{max(1, int(round(hrs / 24.0)))}d"
                     else:
