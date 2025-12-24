@@ -49,6 +49,17 @@ from pearlalgo.utils.telegram_alerts import (
     format_service_status,
     safe_label,
     _format_currency,
+    # Standardized terminology constants
+    LABEL_AGENT,
+    LABEL_GATEWAY,
+    LABEL_ACTIVE_TRADES,
+    LABEL_SCANS,
+    LABEL_BUFFER,
+    STATE_RUNNING,
+    STATE_STOPPED,
+    STATE_PAUSED,
+    GATE_OPEN,
+    GATE_CLOSED,
 )
 
 try:
@@ -152,6 +163,9 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("health", self._handle_health))
         self.application.add_handler(CommandHandler("data_quality", self._handle_data_quality))
         self.application.add_handler(CommandHandler("activity", self._handle_activity))
+        self.application.add_handler(CommandHandler("glossary", self._handle_glossary))
+        self.application.add_handler(CommandHandler("explain", self._handle_glossary))  # Alias
+        self.application.add_handler(CommandHandler("chart", self._handle_chart))
         
         # Service control commands (start/stop gateway and agent)
         self.application.add_handler(CommandHandler("start_gateway", self._handle_start_gateway))
@@ -291,12 +305,12 @@ class TelegramCommandHandler:
             "• Use '▶️ Start Agent' button below to start the agent\n"
             "• Or use `/start_agent` command\n\n"
             "📋 *Quick Start:*\n"
-            "1. Check Gateway Status first\n"
-            "2. Start Agent when ready\n"
+            f"1. Check {LABEL_GATEWAY} status first\n"
+            f"2. Start {LABEL_AGENT} when ready\n"
             "3. Monitor via Status & Signals\n\n"
             f"*Current State:*\n"
-            f"{'🟢' if agent_running else '🔴'} Agent: {'RUNNING' if agent_running else 'STOPPED'}\n"
-            f"{'🟢' if gateway_running else '🔴'} Gateway: {'RUNNING' if gateway_running else 'STOPPED'}"
+            f"{'🟢' if agent_running else '🔴'} {LABEL_AGENT}: {STATE_RUNNING if agent_running else STATE_STOPPED}\n"
+            f"{'🟢' if gateway_running else '🔴'} {LABEL_GATEWAY}: {STATE_RUNNING if gateway_running else STATE_STOPPED}"
         )
         
         reply_markup = self._get_main_menu_buttons(agent_running=agent_running, gateway_running=gateway_running)
@@ -327,6 +341,262 @@ class TelegramCommandHandler:
             gateway_running=gateway_running
         )
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+    
+    async def _handle_glossary(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle /glossary or /explain command - show definitions for key terms.
+        
+        Provides concise explanations for:
+        - Scans vs Signals
+        - Pressure (buy/sell)
+        - MTF (multi-timeframe)
+        - Gates (Futures/Session)
+        - Active Trades
+        """
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        # Check if a specific term was requested
+        args = context.args if context.args else []
+        
+        # Define glossary entries
+        glossary = {
+            "scans": (
+                "🔄 *Scans*\n"
+                "Each scan is one iteration of the strategy loop. "
+                "The agent scans market data at regular intervals "
+                "(e.g., every 60s) looking for trading setups. "
+                "High scan count = agent is actively working."
+            ),
+            "signals": (
+                "🔔 *Signals*\n"
+                "A signal is a trading opportunity detected by the strategy. "
+                "Signals go through stages: generated → sent → entered → exited. "
+                "'Generated' means a pattern matched; 'Sent' means it was delivered to Telegram."
+            ),
+            "pressure": (
+                "📊 *Buy/Sell Pressure*\n"
+                "Shows order flow imbalance from Level 2 data. "
+                "Positive = more buy pressure; Negative = more sell pressure. "
+                "Helps gauge short-term market sentiment. "
+                "Only available with Level 2 market data subscription."
+            ),
+            "mtf": (
+                "📈 *MTF (Multi-Timeframe)*\n"
+                "Shows trend direction across multiple timeframes (5m, 15m, 1h, 4h, 1D). "
+                "⬆️ = bullish, ⬇️ = bearish, ➡️ = neutral. "
+                "Helps assess if trends align across timeframes for higher-probability trades."
+            ),
+            "gates": (
+                "🚦 *Gates (Futures/Session)*\n"
+                f"• *{LABEL_FUTURES}:* CME futures market hours (includes ETH). "
+                "When closed, no live data flows.\n"
+                f"• *{LABEL_SESSION}:* Strategy's trading window (9:30 AM - 4:00 PM ET). "
+                "Signals are suppressed outside this window."
+            ),
+            "active_trades": (
+                f"🎯 *{LABEL_ACTIVE_TRADES}*\n"
+                "Currently open positions (signals with status='entered'). "
+                "These are being monitored for stop-loss and take-profit levels. "
+                "Use /active_trades to see details and unrealized P&L."
+            ),
+            "buffer": (
+                f"📊 *Buffer ({LABEL_BUFFER})*\n"
+                "Rolling window of recent price bars held in memory. "
+                "Required for technical analysis calculations. "
+                "Low buffer count means insufficient data for reliable signals."
+            ),
+        }
+        
+        if args:
+            term = args[0].lower()
+            if term in glossary:
+                message = glossary[term]
+            else:
+                message = (
+                    f"❓ Unknown term: `{term}`\n\n"
+                    "Available terms: " + ", ".join(f"`{k}`" for k in glossary.keys())
+                )
+        else:
+            # Show all terms in compact format
+            message = "📚 *Glossary*\n\n"
+            message += "Tap a button below for detailed explanation, or use `/glossary <term>`.\n\n"
+            message += "*Quick Reference:*\n"
+            message += f"• *Scans* – Strategy loop iterations\n"
+            message += f"• *Signals* – Detected trading opportunities\n"
+            message += f"• *Pressure* – Order flow imbalance\n"
+            message += f"• *MTF* – Multi-timeframe trend alignment\n"
+            message += f"• *Gates* – Market hours & session windows\n"
+            message += f"• *{LABEL_ACTIVE_TRADES}* – Open positions\n"
+            message += f"• *Buffer* – Rolling price data\n"
+        
+        # Build drill-down buttons
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 Scans", callback_data="glossary_scans"),
+                InlineKeyboardButton("🔔 Signals", callback_data="glossary_signals"),
+            ],
+            [
+                InlineKeyboardButton("📊 Pressure", callback_data="glossary_pressure"),
+                InlineKeyboardButton("📈 MTF", callback_data="glossary_mtf"),
+            ],
+            [
+                InlineKeyboardButton("🚦 Gates", callback_data="glossary_gates"),
+                InlineKeyboardButton("🎯 Trades", callback_data="glossary_active_trades"),
+            ],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+    
+    async def _handle_chart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle /chart command - generate and send on-demand dashboard chart.
+        
+        Usage: /chart [hours]
+        - hours: lookback window (default: 6, max: 24)
+        """
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+        
+        try:
+            if not self.chart_generator:
+                await self._send_message_or_edit(
+                    update, context,
+                    "❌ Chart generator not available.\n\n"
+                    "💡 Ensure matplotlib and mplfinance are installed.",
+                    reply_markup=self._get_back_to_menu_button()
+                )
+                return
+            
+            # Parse optional hours argument
+            args = context.args if context.args else []
+            lookback_hours = 6.0  # default
+            if args:
+                try:
+                    lookback_hours = float(args[0])
+                    lookback_hours = max(1.0, min(24.0, lookback_hours))  # clamp 1-24h
+                except ValueError:
+                    pass
+            
+            # Get data provider
+            data_provider = self._get_data_provider()
+            if data_provider is None:
+                await self._send_message_or_edit(
+                    update, context,
+                    "❌ Data provider not available.\n\n"
+                    "💡 Check Gateway status and try again.",
+                    reply_markup=self._get_back_to_menu_button()
+                )
+                return
+            
+            # Fetch historical data
+            import asyncio
+            from datetime import datetime, timezone
+            import pandas as pd
+            
+            symbol = "MNQ"
+            timeframe = "5m"
+            end_time = datetime.now(timezone.utc)
+            
+            loop = asyncio.get_running_loop()
+            bars = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    data_provider.get_historical_bars,
+                    symbol,
+                    timeframe,
+                    lookback_hours,
+                ),
+                timeout=30.0,
+            )
+            
+            if bars is None or (isinstance(bars, pd.DataFrame) and bars.empty) or (isinstance(bars, list) and len(bars) == 0):
+                await self._send_message_or_edit(
+                    update, context,
+                    "❌ No data available for chart.\n\n"
+                    "💡 Check Gateway connection or try again later.",
+                    reply_markup=self._get_back_to_menu_button()
+                )
+                return
+            
+            # Convert to DataFrame if needed
+            if isinstance(bars, list):
+                df = pd.DataFrame(bars)
+            else:
+                df = bars
+            
+            if df.empty:
+                await self._send_message_or_edit(
+                    update, context,
+                    "❌ Insufficient data for chart.",
+                    reply_markup=self._get_back_to_menu_button()
+                )
+                return
+            
+            # Generate chart
+            chart_path = self.chart_generator.generate_dashboard_chart(
+                df,
+                symbol=symbol,
+                timeframe=timeframe,
+                lookback_hours=lookback_hours,
+                show_pressure=True,
+            )
+            
+            if chart_path and chart_path.exists():
+                from pathlib import Path
+                caption = f"📊 *{symbol}* {timeframe} Chart ({lookback_hours:.0f}h)\n"
+                caption += f"🕐 Generated: {end_time.strftime('%H:%M UTC')}"
+                
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🔄 Refresh", callback_data="chart"),
+                        InlineKeyboardButton("📈 6h", callback_data="chart_6h"),
+                        InlineKeyboardButton("📈 12h", callback_data="chart_12h"),
+                    ],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await context.bot.send_photo(
+                    chat_id=update.effective_chat.id,
+                    photo=open(chart_path, "rb"),
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=reply_markup,
+                )
+                
+                # Clean up temp file
+                try:
+                    chart_path.unlink()
+                except Exception:
+                    pass
+            else:
+                await self._send_message_or_edit(
+                    update, context,
+                    "❌ Failed to generate chart.\n\n"
+                    "💡 Check logs for details.",
+                    reply_markup=self._get_back_to_menu_button()
+                )
+                
+        except asyncio.TimeoutError:
+            await self._send_message_or_edit(
+                update, context,
+                "⏱️ Chart generation timed out.\n\n"
+                "💡 Try again or check data connection.",
+                reply_markup=self._get_back_to_menu_button()
+            )
+        except Exception as e:
+            logger.error(f"Error handling chart command: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ Error generating chart: {str(e)[:100]}",
+                reply_markup=self._get_back_to_menu_button()
+            )
     
     async def _handle_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /status command - unified Home Card view."""
@@ -590,8 +860,8 @@ class TelegramCommandHandler:
                 reply_markup = self._get_main_menu_buttons(agent_running=False)
                 await self._send_message_or_edit(
                     update, context,
-                    "🔴 *Agent:* NOT RUNNING\n\n"
-                    "💡 Tap 'Start Agent' below to begin",
+                    f"🔴 *{LABEL_AGENT}:* {STATE_STOPPED}\n\n"
+                    f"💡 Tap 'Start {LABEL_AGENT}' below to begin",
                     reply_markup=reply_markup
                 )
                 return
@@ -603,12 +873,12 @@ class TelegramCommandHandler:
             running = process_running and state.get("running", False)
             status_emoji = "🟢" if running else "🔴"
             
-            cycles = state.get('cycle_count', 0)
+            scans = state.get('cycle_count', 0)
             signals = state.get('signal_count', 0)
             buffer = state.get('buffer_size', 0)
             
             message = f"{status_emoji} *Quick Status*\n\n"
-            message += f"🔄 {cycles:,} cycles\n"
+            message += f"🔄 {scans:,} scans\n"
             message += f"🔔 {signals} signals\n"
             message += f"📊 {buffer} bars\n"
             
@@ -2681,8 +2951,8 @@ class TelegramCommandHandler:
                 last_updated = dt.isoformat(timespec="seconds")
 
             health_emoji = "🟢" if process_running and state_exists else "🟡" if state_exists else "🔴"
-            message = f"{health_emoji} *Agent Health*\n\n"
-            message += f"- Service process: {'RUNNING' if process_running else 'NOT RUNNING'}\n"
+            message = f"{health_emoji} *{LABEL_AGENT} Health*\n\n"
+            message += f"- {LABEL_AGENT}: {STATE_RUNNING if process_running else STATE_STOPPED}\n"
             message += f"- State file: {'present' if state_exists else 'missing'}\n"
             message += f"- State last updated (UTC): {last_updated}\n"
 
@@ -2724,9 +2994,9 @@ class TelegramCommandHandler:
             
             if not state_file.exists():
                 message = "📈 *Activity Status*\n\n"
-                message += "🔴 *Agent:* NOT RUNNING\n\n"
+                message += f"🔴 *{LABEL_AGENT}:* {STATE_STOPPED}\n\n"
                 message += "ℹ️ No activity data available.\n"
-                message += "💡 Start the agent to begin monitoring.\n"
+                message += f"💡 Start the {LABEL_AGENT.lower()} to begin monitoring.\n"
                 reply_markup = self._get_main_menu_buttons(agent_running=False)
                 await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
                 return
@@ -2734,16 +3004,21 @@ class TelegramCommandHandler:
             with open(state_file) as f:
                 state = json.load(f)
             
-            # Compute state freshness (time since last update)
-            state_age_seconds = None
-            try:
-                mtime = state_file.stat().st_mtime
-                state_age_seconds = (datetime.now(timezone.utc).timestamp() - mtime)
-            except Exception:
-                state_age_seconds = None
-            
-            # Get activity pulse
+            # Get activity pulse from last_successful_cycle (more accurate than state file mtime)
             from pearlalgo.utils.telegram_alerts import format_activity_pulse, format_next_session_time
+            from pearlalgo.utils.paths import parse_utc_timestamp
+            
+            last_cycle_seconds = None
+            try:
+                last_cycle_ts = state.get("last_successful_cycle")
+                if last_cycle_ts:
+                    last_cycle_dt = parse_utc_timestamp(str(last_cycle_ts))
+                    if last_cycle_dt:
+                        if last_cycle_dt.tzinfo is None:
+                            last_cycle_dt = last_cycle_dt.replace(tzinfo=timezone.utc)
+                        last_cycle_seconds = (datetime.now(timezone.utc) - last_cycle_dt).total_seconds()
+            except Exception:
+                last_cycle_seconds = None
             
             running = process_running and state.get("running", False)
             paused = state.get("paused", False)
@@ -2751,38 +3026,38 @@ class TelegramCommandHandler:
             # Build activity message
             message = "📈 *Activity Status*\n\n"
             
-            # Service status
+            # Service status (using standardized terminology)
             if not running:
-                message += "🔴 *Agent:* NOT RUNNING\n"
+                message += f"🔴 *{LABEL_AGENT}:* {STATE_STOPPED}\n"
             elif paused:
-                message += "⏸️ *Agent:* PAUSED\n"
+                message += f"⏸️ *{LABEL_AGENT}:* {STATE_PAUSED}\n"
                 pause_reason = state.get("pause_reason")
                 if pause_reason:
                     message += f"   Reason: {pause_reason}\n"
             else:
-                message += "🟢 *Agent:* RUNNING\n"
+                message += f"🟢 *{LABEL_AGENT}:* {STATE_RUNNING}\n"
             
-            # Activity pulse
-            if state_age_seconds is not None:
-                pulse_emoji, pulse_text = format_activity_pulse(state_age_seconds, is_paused=paused)
-                message += f"\n{pulse_emoji} *Last Update:* {pulse_text}\n"
+            # Activity pulse (using last_successful_cycle for accuracy)
+            if last_cycle_seconds is not None:
+                pulse_emoji, pulse_text = format_activity_pulse(last_cycle_seconds, is_paused=paused)
+                message += f"\n{pulse_emoji} *Last Scan:* {pulse_text}\n"
             
-            # Cycle information
-            cycles_total = int(state.get("cycle_count", 0) or 0)
-            cycles_session = state.get("cycle_count_session")
-            if cycles_session is not None:
-                message += f"🔄 *Cycles:* {cycles_session:,} (session) / {cycles_total:,} (total)\n"
+            # Scan information (standardized: "scans" not "cycles")
+            scans_total = int(state.get("cycle_count", 0) or 0)
+            scans_session = state.get("cycle_count_session")
+            if scans_session is not None:
+                message += f"🔄 *Scans:* {scans_session:,} (session) / {scans_total:,} (total)\n"
             else:
-                message += f"🔄 *Cycles:* {cycles_total:,}\n"
+                message += f"🔄 *Scans:* {scans_total:,}\n"
             
             # Buffer status
             buffer_size = int(state.get("buffer_size", 0) or 0)
             buffer_target = state.get("buffer_size_target")
             if buffer_target:
                 buffer_pct = (buffer_size / int(buffer_target)) * 100 if int(buffer_target) > 0 else 0
-                message += f"📊 *Buffer:* {buffer_size}/{buffer_target} bars ({buffer_pct:.0f}%)\n"
+                message += f"📊 *Buffer:* {buffer_size}/{buffer_target} {LABEL_BUFFER} ({buffer_pct:.0f}%)\n"
             else:
-                message += f"📊 *Buffer:* {buffer_size} bars\n"
+                message += f"📊 *Buffer:* {buffer_size} {LABEL_BUFFER}\n"
             
             # Latest bar info
             latest_bar = state.get("latest_bar")
@@ -2793,7 +3068,7 @@ class TelegramCommandHandler:
                 except Exception:
                     pass
             
-            # Active positions count
+            # Active trades count (standardized terminology)
             try:
                 signals_file = get_signals_file(self.state_dir)
                 if signals_file.exists():
@@ -2807,19 +3082,22 @@ class TelegramCommandHandler:
                             except Exception:
                                 continue
                     if active_count > 0:
-                        message += f"\n🎯 *Active Positions:* {active_count}\n"
+                        message += f"\n🎯 *{LABEL_ACTIVE_TRADES}:* {active_count}\n"
             except Exception:
                 pass
             
-            # Next expected action
+            # Next expected action (consistent with pulse status)
             message += "\n*What's Next:*\n"
             futures_open = state.get("futures_market_open")
             session_open = state.get("strategy_session_open")
             
             if not running:
-                message += "💡 Start agent to begin monitoring\n"
+                message += f"💡 Start {LABEL_AGENT.lower()} to begin monitoring\n"
             elif paused:
-                message += "💡 Resume agent or address pause reason\n"
+                message += f"💡 Resume {LABEL_AGENT.lower()} or address pause reason\n"
+            elif last_cycle_seconds is not None and last_cycle_seconds > 300:
+                # Stale pulse - highlight potential issue
+                message += "⚠️ Scans appear stalled—check /health or logs\n"
             elif session_open is False:
                 next_session = format_next_session_time()
                 message += f"⏳ Waiting for session • {next_session}\n"
@@ -2827,7 +3105,7 @@ class TelegramCommandHandler:
                 message += "⏳ Waiting for market to open\n"
             else:
                 scan_interval = state.get("scan_interval", 60)
-                message += f"🔄 Next cycle in ~{scan_interval}s\n"
+                message += f"🔄 Next scan in ~{scan_interval}s\n"
             
             # Buttons
             keyboard = [
@@ -2919,15 +3197,20 @@ class TelegramCommandHandler:
                 latest_bar_age_minutes = None
 
         buffer_size = int(state.get("buffer_size", 0) or 0)
+        buffer_target = state.get("buffer_size_target")
+        try:
+            buffer_target = int(buffer_target) if buffer_target is not None else None
+        except Exception:
+            buffer_target = None
 
         # Identify issues (keep short; top 3 shown)
         issues: list[str] = []
         if not agent_running:
-            issues.append("Agent process not running")
+            issues.append(f"{LABEL_AGENT} process not running")
         if not gateway_running:
-            issues.append("IBKR Gateway not running")
+            issues.append(f"IBKR {LABEL_GATEWAY} not running")
         elif not gateway_api_ready:
-            issues.append("Gateway running but API not ready (port 4002 not listening)")
+            issues.append(f"{LABEL_GATEWAY} running but API not ready (port 4002 not listening)")
 
         # State file should update frequently when agent is healthy
         if state_age_seconds is not None and state_age_seconds > 60:
@@ -2951,17 +3234,23 @@ class TelegramCommandHandler:
         if buffer_size < 10:
             likely_causes.append("Historical fetch failing (HMDS pacing/outage) or connection issue")
 
-        # Render message
+        # Render message using standardized terminology
         title = "🛡 *Data Quality*" + (" (diagnose)" if diagnose else "")
         message = f"{title}\n\n"
 
-        message += f"🤖 *Agent:* {'🟢 RUNNING' if agent_running else '🔴 STOPPED'}\n"
+        message += f"🤖 *{LABEL_AGENT}:* {'🟢 ' + STATE_RUNNING if agent_running else '🔴 ' + STATE_STOPPED}\n"
         message += (
-            f"🔌 *Gateway:* {'🟢 RUNNING' if gateway_running else '🔴 STOPPED'}"
+            f"🔌 *{LABEL_GATEWAY}:* {'🟢 ' + STATE_RUNNING if gateway_running else '🔴 ' + STATE_STOPPED}"
             + (f" • API {'🟢 READY' if gateway_api_ready else '🔴 NOT READY'}" if gateway_running else "")
             + "\n"
         )
-        message += f"📊 *Buffer:* {buffer_size} bars\n"
+        
+        # Buffer with target/percent
+        if buffer_target is not None and buffer_target > 0:
+            buffer_pct = (buffer_size / buffer_target) * 100
+            message += f"📊 *Buffer:* {buffer_size}/{buffer_target} {LABEL_BUFFER} ({buffer_pct:.0f}%)\n"
+        else:
+            message += f"📊 *Buffer:* {buffer_size} {LABEL_BUFFER}\n"
 
         if latest_bar_age_minutes is not None:
             freshness_emoji = "🟢" if data_fresh is True else "🔴" if data_fresh is False else "⚪"
@@ -2969,25 +3258,33 @@ class TelegramCommandHandler:
         else:
             message += "⚪ *Latest Bar Age:* unknown\n"
 
-        futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
-        futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "UNKNOWN"
-        strat_emoji = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪"
-        strat_text = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "UNKNOWN"
-        message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}\n"
-        message += f"{strat_emoji} *StrategySessionOpen:* {strat_text}\n"
+        # Use standardized gate terminology
+        message += format_gate_status(futures_market_open, strategy_session_open) + "\n"
 
         if state_last_updated_utc:
             message += f"\n🗂️ *State Updated:* {state_last_updated_utc.isoformat(timespec='seconds')}\n"
 
+        # Impact section: explain what issues mean for trading
         if issues:
             message += "\n⚠️ *Issues:*\n"
             for i, issue in enumerate(issues[:3], start=1):
                 message += f"{i}. {issue}\n"
+            
+            # Add short impact summary
+            message += "\n📉 *Impact:*\n"
+            if not agent_running or not gateway_running:
+                message += "• Signal generation halted\n"
+            elif data_fresh is False:
+                message += "• Signals paused until data refreshes\n"
+            elif buffer_size < 10:
+                message += "• Insufficient data for reliable signals\n"
+            else:
+                message += "• May affect signal accuracy\n"
 
         if likely_causes:
             message += "\n💡 *Likely causes:*\n"
-            for i, cause in enumerate(likely_causes[:3], start=1):
-                message += f"{i}. {cause}\n"
+            for i, cause in enumerate(likely_causes[:2], start=1):
+                message += f"• {cause}\n"
 
         if diagnose:
             try:
@@ -3993,6 +4290,29 @@ class TelegramCommandHandler:
             await self._handle_start(update, context)
         elif callback_data == 'help':
             await self._handle_help(update, context)
+        elif callback_data == 'glossary':
+            await self._handle_glossary(update, context)
+        elif callback_data.startswith('glossary_'):
+            # Handle glossary drill-down buttons
+            term = callback_data.replace('glossary_', '')
+            # Simulate args for the glossary handler
+            context.args = [term]
+            await self._handle_glossary(update, context)
+            context.args = []  # Reset
+        elif callback_data == 'chart':
+            await self._handle_chart(update, context)
+        elif callback_data == 'chart_6h':
+            context.args = ['6']
+            await self._handle_chart(update, context)
+            context.args = []
+        elif callback_data == 'chart_12h':
+            context.args = ['12']
+            await self._handle_chart(update, context)
+            context.args = []
+        elif callback_data == 'chart_24h':
+            context.args = ['24']
+            await self._handle_chart(update, context)
+            context.args = []
         elif callback_data == 'last_signal':
             await self._handle_last_signal(update, context)
         elif callback_data == 'active_trades':

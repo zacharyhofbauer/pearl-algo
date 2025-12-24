@@ -35,6 +35,8 @@ It combines quick start steps, command setup, and command behavior.
    data_quality - Check data freshness and quality
    config - Show key configuration values (read-only)
    health - Show basic agent health (read-only)
+   glossary - Explain key terms (Scans, Signals, Gates, etc.)
+   chart - Generate on-demand price chart
    help - Show available commands
    ```
 5. BotFather will confirm the commands are set.
@@ -144,13 +146,13 @@ Returns the current agent status, including:
 
 - Running / stopped state
 - Pause reason (if paused)
-- Activity pulse (time since last cycle)
-- Futures/session gates:
-  - **FuturesMarketOpen** (CME ETH + maintenance break; affects data freshness)
-  - **StrategySessionOpen** (prop-firm window: 18:00–16:10 ET; when signals are allowed)
+- Activity pulse (time since last scan)
+- Gates (standardized terminology):
+  - **Futures** (CME ETH + maintenance break; affects data freshness)
+  - **Session** (strategy window: 09:30–16:00 ET; when signals are allowed)
   - When session is closed, shows next session opening time
-- Cycles and signals (clarified):
-  - **Cycles**: session/total (total persists across restarts)
+- Scans and signals (clarified):
+  - **Scans**: session/total (total persists across restarts)
   - **Signals**: generated vs delivered vs failed
 - Buffer size (rolling): current/target bars
 - Compact 7-day performance summary with trend indicator
@@ -160,12 +162,13 @@ Returns the current agent status, including:
 
 Answers the question "Is the bot doing anything?" with:
 
-- Agent status and activity pulse (time since last cycle)
-- Cycle count (session and total)
+- Agent status and activity pulse (time since last scan, using `last_successful_cycle`)
+- Scan count (session and total)
 - Buffer status with fill percentage
 - Latest price
-- Active positions count
-- Next expected action (e.g., "Next cycle in ~60s", "Waiting for session")
+- Active Trades count
+- Next expected action (e.g., "Next scan in ~60s", "Waiting for session")
+- Stale scan warning if scans appear stalled
 
 **Use this when:**
 - You're unsure if the bot is actively monitoring
@@ -198,10 +201,41 @@ Answers the question "Is the bot doing anything?" with:
   - Risk parameters and position sizing
   
 - `/health`: Shows basic agent health status
-  - Service process status
+  - Agent process status
   - State file presence and last update time
 
-### 3.7 `/pause` and `/resume` (Legacy)
+### 3.7 `/glossary` (or `/explain`)
+
+Explains key terms used in the UI:
+
+- **Scans** – Strategy loop iterations (each scan looks for trading setups)
+- **Signals** – Detected trading opportunities (generated → sent → entered → exited)
+- **Pressure** – Order flow imbalance from Level 2 data
+- **MTF** – Multi-timeframe trend alignment
+- **Gates** – Market hours (Futures) and strategy session windows (Session)
+- **Active Trades** – Currently open positions
+- **Buffer** – Rolling price data held in memory
+
+**Usage:**
+- `/glossary` – Show all terms with drill-down buttons
+- `/glossary scans` – Show detailed explanation for "Scans"
+
+### 3.8 `/chart`
+
+Generates an on-demand price chart.
+
+**Usage:**
+- `/chart` – Generate 6-hour chart (default)
+- `/chart 12` – Generate 12-hour chart
+- `/chart 24` – Generate 24-hour chart (maximum)
+
+**Features:**
+- Candlestick price action
+- Volume bars
+- Pressure panel (if enabled)
+- Refresh and time-range buttons
+
+### 3.9 `/pause` and `/resume` (Legacy)
 
 - Currently **informational only** (use `/stop_agent` and `/start_agent` instead)
 - These commands acknowledge receipt but don't perform actions
@@ -631,13 +665,28 @@ The Telegram UI follows a **calm-minimal** design philosophy:
 
 The `/status` Home Card shows an "activity pulse" indicator computed from `last_successful_cycle`:
 
-- 🟢 **Active** (< 2 min): Agent is actively cycling
+- 🟢 **Active** (< 2 min): Agent is actively scanning
 - 🟡 **Slow** (2-5 min): Agent may be waiting or slow
 - 🔴 **Stale** (> 5 min): Agent may need attention
 
 This answers "is the bot doing anything?" at a glance.
 
-### 9.2 Active Trades Count
+### 9.2 Standardized Terminology
+
+The UI uses consistent labels across all views:
+
+| Term | Meaning |
+|------|---------|
+| **Agent** | NQ Agent service (the trading bot process) |
+| **Gateway** | IBKR Gateway (the broker connection) |
+| **Scans** | Per-cycle processing iterations |
+| **Signals** | Trading opportunities generated |
+| **Futures** | CME futures market open/closed |
+| **Session** | Strategy session window (9:30 AM - 4:00 PM ET) |
+| **Active Trades** | Currently open positions |
+| **Buffer** | Rolling bar data held in memory |
+
+### 9.3 Active Trades Count
 
 When positions are open, the Home Card shows:
 
@@ -647,7 +696,7 @@ When positions are open, the Home Card shows:
 
 This only appears when count > 0 (calm-minimal: no noise when nothing is active).
 
-### 9.3 Signal Push Alerts (Calm-Minimal)
+### 9.4 Signal Push Alerts (Calm-Minimal)
 
 Signal alerts use a decision-first, compact layout:
 
@@ -746,7 +795,24 @@ Activity metrics in the Home Card use self-explanatory labels:
 
 This removes ambiguity from unlabeled `A/B` ratios.
 
-### 9.10 Staleness Callout (v2)
+### 9.10 Dashboard Chart Controls
+
+Dashboard charts can be configured via `config/config.yaml`:
+
+```yaml
+service:
+  dashboard_chart_enabled: true   # Set false to disable automatic chart pushes
+  dashboard_chart_interval: 3600  # Seconds between chart pushes (default: 1 hour)
+```
+
+**Options:**
+- **`dashboard_chart_enabled`**: Set to `false` to disable automatic hourly charts (default: `true`)
+- **`dashboard_chart_interval`**: Adjust the interval in seconds (default: 3600 = 1 hour)
+
+**On-demand access:**
+Even with automatic charts disabled, you can always use `/chart` to generate a chart on demand.
+
+### 9.11 Staleness Callout (v2)
 
 When market data is stale, the Home Card shows an actionable callout:
 

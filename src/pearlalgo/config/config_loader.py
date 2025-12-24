@@ -53,6 +53,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "pressure_lookback_bars": 24,   # ~2h on 5m bars
         "pressure_baseline_bars": 120,  # ~10h on 5m bars
         # Dashboard chart (hourly image)
+        "dashboard_chart_enabled": True,       # set False to disable automatic chart pushes
         "dashboard_chart_interval": 3600,      # 1 hour between dashboard chart pushes
         "dashboard_chart_lookback_hours": 24,  # cap notification chart window (24h max)
         "dashboard_chart_timeframe": "auto",   # "auto" | "5m" | "15m" | "30m" | "1h"

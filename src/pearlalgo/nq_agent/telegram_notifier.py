@@ -45,6 +45,12 @@ from pearlalgo.utils.telegram_alerts import (
     format_signal_action_cue,
     format_signal_timing,
     format_performance_trend,
+    # Standardized terminology constants
+    LABEL_AGENT,
+    LABEL_GATEWAY,
+    LABEL_SCANS,
+    STATE_RUNNING,
+    STATE_STOPPED,
 )
 
 try:
@@ -1066,13 +1072,13 @@ class NQAgentTelegramNotifier:
                     message += f" ({connection_failures} failures)"
                 message += "\n"
 
-            # Activity section (compact single line)
-            cycles_total = int(status.get("cycle_count", 0) or 0)
-            cycles_session = status.get("cycle_count_session")
+            # Activity section (compact single line, using standardized "scans" terminology)
+            scans_total = int(status.get("cycle_count", 0) or 0)
+            scans_session = status.get("cycle_count_session")
             try:
-                cycles_session = int(cycles_session) if cycles_session is not None else None
+                scans_session = int(scans_session) if scans_session is not None else None
             except Exception:
-                cycles_session = None
+                scans_session = None
 
             errors = int(status.get("error_count", 0) or 0)
 
@@ -1083,9 +1089,9 @@ class NQAgentTelegramNotifier:
             except Exception:
                 buffer_target = None
 
-            cycles_label = f"{cycles_session:,} (session) / {cycles_total:,} (total)" if cycles_session is not None else f"{cycles_total:,}"
+            scans_label = f"{scans_session:,} {LABEL_SCANS} (session) / {scans_total:,} (total)" if scans_session is not None else f"{scans_total:,} {LABEL_SCANS}"
             buffer_label = f"{buffer}/{buffer_target} bars (rolling)" if buffer_target is not None else f"{buffer} bars (rolling)"
-            message += f"📊 *Activity:* {cycles_label} • {buffer_label} • {errors} errors\n"
+            message += f"📊 *Activity:* {scans_label} • {buffer_label} • {errors} errors\n"
 
             # Signal delivery clarity: generated vs sent vs failed
             signals_generated = int(status.get("signal_count", 0) or 0)
@@ -1237,12 +1243,12 @@ class NQAgentTelegramNotifier:
             message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}  •  {strat_emoji} *StrategySessionOpen:* {strat_text}\n"
 
             # Activity summary (compact single line)
-            cycles_total = int(status.get("cycle_count", 0) or 0)
-            cycles_session = status.get("cycle_count_session")
+            scans_total = int(status.get("cycle_count", 0) or 0)
+            scans_session = status.get("cycle_count_session")
             try:
-                cycles_session = int(cycles_session) if cycles_session is not None else None
+                scans_session = int(scans_session) if scans_session is not None else None
             except Exception:
-                cycles_session = None
+                scans_session = None
 
             signals_generated = int(status.get("signal_count", 0) or 0)
             signals_sent = int(status.get("signals_sent", 0) or 0)
@@ -1257,9 +1263,9 @@ class NQAgentTelegramNotifier:
             except Exception:
                 buffer_target = None
 
-            cycle_part = f"{cycles_session:,}/{cycles_total:,} cycles" if cycles_session is not None else f"{cycles_total:,} cycles"
+            scans_part = f"{scans_session:,}/{scans_total:,} {LABEL_SCANS}" if scans_session is not None else f"{scans_total:,} {LABEL_SCANS}"
             buf_part = f"{buffer}/{buffer_target} bars" if buffer_target is not None else f"{buffer} bars"
-            message += f"📊 {cycle_part} • {signals_generated} gen / {signals_sent} sent / {signals_failed} fail • {buf_part} • {errors} errors\n"
+            message += f"📊 {scans_part} • {signals_generated} gen / {signals_sent} sent / {signals_failed} fail • {buf_part} • {errors} errors\n"
 
             await self.telegram.send_message(message)
             return True
@@ -1398,11 +1404,15 @@ class NQAgentTelegramNotifier:
             data_stale_threshold_minutes = float(status.get("data_stale_threshold_minutes", 10.0))
             is_data_stale = data_age_minutes is not None and data_age_minutes > data_stale_threshold_minutes
             
+            # Determine if we can infer gateway status from data flow.
+            # If data is stale or buffer is empty, we can't be confident gateway is working.
+            gateway_uncertain = is_data_stale or buffer_size < 1
+            
             message = format_home_card(
                 symbol=symbol,
                 time_str=time_str,
                 agent_running=True,  # If sending dashboard, agent is running
-                gateway_running=True,  # Best guess based on data flow
+                gateway_running=not gateway_uncertain,  # Infer from data flow health
                 futures_market_open=futures_market_open,
                 strategy_session_open=strategy_session_open,
                 paused=paused,
@@ -1420,9 +1430,8 @@ class NQAgentTelegramNotifier:
                 price_change_str=price_change_str,
                 # v2 fields for enhanced confidence/clarity
                 signal_send_failures=signal_send_failures,
-                # Note: gateway_unknown=False here because if we're getting data, 
-                # gateway is likely working. Use gateway_unknown=True only when status
-                # cannot be inferred at all.
+                # Mark gateway as unknown when we can't infer status from data flow
+                gateway_unknown=gateway_uncertain,
                 # v4 fields for quiet reason and signal diagnostics
                 quiet_reason=quiet_reason,
                 signal_diagnostics=signal_diagnostics,
@@ -1625,6 +1634,9 @@ class NQAgentTelegramNotifier:
         """
         Send service startup notification with configuration, current price, and time.
         
+        Uses standardized terminology and aligns with Home Card layout.
+        Avoids false confidence in timing claims.
+        
         Args:
             config: Configuration dictionary (may include latest_price and current_time)
             
@@ -1636,8 +1648,11 @@ class NQAgentTelegramNotifier:
 
         try:
             from datetime import datetime, timezone
+            from pearlalgo.utils.telegram_alerts import (
+                LABEL_FUTURES, LABEL_SESSION, GATE_OPEN, GATE_CLOSED, GATE_UNKNOWN
+            )
             
-            message = f"🚀 *NQ Agent Started*\n\n"
+            message = f"🚀 *NQ {LABEL_AGENT} Started*\n\n"
 
             # Show current price and time
             current_time = config.get('current_time')
@@ -1684,7 +1699,7 @@ class NQAgentTelegramNotifier:
             scan_interval = config.get('scan_interval', 60)
             message += f"⚙️ *Config:* {timeframe} timeframe, {scan_interval}s scan\n"
 
-            # Market status
+            # Market gates (using standardized terminology matching Home Card)
             futures_market_open = config.get("futures_market_open")
             if futures_market_open is None:
                 try:
@@ -1693,29 +1708,37 @@ class NQAgentTelegramNotifier:
                     futures_market_open = None
             strategy_session_open = config.get("strategy_session_open")
 
-            futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
-            futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "UNKNOWN"
-            strat_emoji = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪"
-            strat_text = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "UNKNOWN"
+            # Use standardized gate status format (matches Home Card)
+            message += format_gate_status(futures_market_open, strategy_session_open) + "\n"
 
-            message += f"{futures_emoji} *FuturesMarketOpen:* {futures_text}\n"
-            message += f"{strat_emoji} *StrategySessionOpen:* {strat_text}\n"
-
-            # What to expect
-            message += "\n*What to expect:*\n"
+            # What to expect (reduced false confidence in timing)
+            message += "\n*What's next:*\n"
             if strategy_session_open is True:
-                message += "• Signal generation active\n"
-                message += f"• First signal within ~{scan_interval * 5}s if conditions met\n"
+                message += "• Scanning for signals when conditions align\n"
+                message += "• No guaranteed timing—watch /activity for updates\n"
             elif strategy_session_open is False:
-                message += "• Waiting for session to open\n"
-                message += f"• Use /activity to check status\n"
+                next_session = format_next_session_time()
+                message += f"• Waiting for session • {next_session}\n"
+                message += "• Use /activity to check status\n"
             else:
-                message += "• Monitoring market conditions\n"
+                message += "• Checking market conditions...\n"
             
-            # Quick access tip
-            message += "\n💡 Use /status or /activity to monitor"
+            # Build optional navigation buttons when command handler is running
+            reply_markup = None
+            if _is_command_handler_running():
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                keyboard = [
+                    [
+                        InlineKeyboardButton("📈 Activity", callback_data="activity"),
+                        InlineKeyboardButton("🏠 Status", callback_data="status"),
+                    ],
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                message += "\n💡 Tap below for quick access"
+            else:
+                message += "\n💡 Use /status or /activity to monitor"
 
-            await self.telegram.send_message(message)
+            await self.telegram.send_message(message, reply_markup=reply_markup)
             return True
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_startup_notification")
@@ -1736,7 +1759,7 @@ class NQAgentTelegramNotifier:
 
         try:
             shutdown_reason = summary.get('shutdown_reason', 'Normal shutdown')
-            message = f"🛑 *NQ Agent Stopped*\n"
+            message = f"🛑 *NQ {LABEL_AGENT} Stopped*\n"
             
             # Show shutdown reason
             if shutdown_reason and shutdown_reason != "Normal shutdown":
@@ -1744,16 +1767,16 @@ class NQAgentTelegramNotifier:
                 message += f"{reason_emoji} *Reason:* {shutdown_reason}\n"
             message += "\n"
 
-            # Session summary (mobile-friendly)
+            # Session summary (mobile-friendly, using standardized terminology)
             uptime_h = summary.get('uptime_hours', 0)
             uptime_m = summary.get('uptime_minutes', 0)
-            cycles = summary.get('cycle_count', 0)
+            scans = summary.get('cycle_count', 0)
             signals = summary.get('signal_count', 0)
             errors = summary.get('error_count', 0)
 
             message += f"*Session Summary:*\n"
             message += f"⏱️ Uptime: {uptime_h:.0f}h {uptime_m:.0f}m\n"
-            message += f"🔄 {cycles:,} cycles\n"
+            message += f"🔄 {scans:,} {LABEL_SCANS}\n"
             message += f"🔔 {signals} signals\n"
             message += f"⚠️ {errors} errors\n"
 
@@ -1775,11 +1798,11 @@ class NQAgentTelegramNotifier:
             message += "\n*Next steps:*\n"
             if shutdown_reason and ("error" in shutdown_reason.lower() or "circuit" in shutdown_reason.lower()):
                 message += "• Review logs for error details\n"
-                message += "• Check Gateway status\n"
-                message += "• Restart when ready: /start_agent\n"
+                message += f"• Check {LABEL_GATEWAY} status\n"
+                message += f"• Restart when ready: /start_agent\n"
             elif shutdown_reason and "interrupt" in shutdown_reason.lower():
-                message += "• Agent stopped by user\n"
-                message += "• Restart when ready: /start_agent\n"
+                message += f"• {LABEL_AGENT} stopped by user\n"
+                message += f"• Restart when ready: /start_agent\n"
             else:
                 message += "• Normal shutdown complete\n"
                 message += "• Restart: /start_agent\n"

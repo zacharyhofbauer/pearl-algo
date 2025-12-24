@@ -143,6 +143,7 @@ class NQAgentService:
         self.heartbeat_interval = service_settings.get("heartbeat_interval", 3600)
         # Dashboard chart (hourly mplfinance screenshot)
         self.last_dashboard_chart_sent: Optional[datetime] = None
+        self.dashboard_chart_enabled = bool(service_settings.get("dashboard_chart_enabled", True))  # can disable auto charts
         self.dashboard_chart_interval = service_settings.get("dashboard_chart_interval", 3600)  # 1 hour default
         self.dashboard_chart_lookback_hours = float(service_settings.get("dashboard_chart_lookback_hours", 48) or 48)
         self.dashboard_chart_timeframe = str(service_settings.get("dashboard_chart_timeframe", "auto") or "auto")
@@ -920,7 +921,8 @@ class NQAgentService:
             self.last_status_update = now
 
         # Check if it's time for a dashboard chart (every 60m by default)
-        if (
+        # Respect dashboard_chart_enabled config (can be disabled to reduce noise)
+        if self.dashboard_chart_enabled and (
             self.last_dashboard_chart_sent is None
             or (now - self.last_dashboard_chart_sent).total_seconds() >= self.dashboard_chart_interval
         ):
