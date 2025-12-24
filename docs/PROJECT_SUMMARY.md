@@ -480,8 +480,8 @@ pearlalgo-dev-ai-agents/
 │   └── MOCK_DATA_WARNING.md    # Mock data testing notes
 │
 ├── data/                        # Data storage
-│   ├── nq_agent_state/         # Service state
-│   │   ├── state.json          # Current state
+│   ├── nq_agent_state/         # Service state (see State Schema below)
+│   │   ├── state.json          # Current state (authoritative for /status + watchdog)
 │   │   ├── signals.jsonl       # Signal history
 │   │   └── performance.json    # Performance metrics
 │   ├── buffers/                 # Data buffers (pickle files)
@@ -534,6 +534,56 @@ python3 scripts/testing/test_all.py arch
 # Strict enforcement (exit 1 on violations)
 PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 ```
+
+### State Schema (`data/nq_agent_state/state.json`)
+
+The `state.json` file is the authoritative source of truth for the agent's operational state.
+It is read by the Telegram command handler (`/status`), the external watchdog, and the optional status server.
+
+**Stable fields** (safe for external tools to depend on):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `running` | bool | Agent process is actively running |
+| `paused` | bool | Agent paused by circuit breaker |
+| `pause_reason` | string\|null | Reason for pause (e.g., "consecutive_errors", "connection_failures") |
+| `start_time` | ISO string | When the agent started |
+| `last_updated` | ISO string | When state.json was last written |
+| `last_successful_cycle` | ISO string\|null | When the last successful scan cycle completed |
+| `cycle_count` | int | Total scan cycles since first start |
+| `signal_count` | int | Total signals generated |
+| `signals_sent` | int | Total signals successfully sent to Telegram |
+| `signals_send_failures` | int | Total Telegram send failures |
+| `error_count` | int | Total errors encountered |
+| `consecutive_errors` | int | Current consecutive error count (resets on success) |
+| `connection_failures` | int | Current IB Gateway connection failure count |
+| `data_fetch_errors` | int | Current data fetch error count |
+| `buffer_size` | int | Current number of bars in data buffer |
+| `buffer_size_target` | int | Target buffer size from config |
+| `data_fresh` | bool\|null | Whether market data is fresh (within threshold) |
+| `latest_bar_timestamp` | ISO string\|null | Timestamp of latest bar |
+| `latest_bar_age_minutes` | float\|null | Age of latest bar in minutes |
+| `futures_market_open` | bool\|null | CME futures market is open |
+| `strategy_session_open` | bool\|null | Strategy trading session is open |
+| `data_stale_threshold_minutes` | float | Threshold for stale data alerts (from config) |
+| `connection_timeout_minutes` | float | Connection timeout threshold (from config) |
+| `run_id` | string\|null | Unique ID for this process run (for log correlation) |
+| `version` | string\|null | Agent version |
+
+**Session-scoped fields** (reset each agent start):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `cycle_count_session` | int\|null | Cycles since this agent start |
+| `signal_count_session` | int\|null | Signals since this agent start |
+| `signals_sent_session` | int\|null | Signals sent since this agent start |
+| `signals_send_failures_session` | int\|null | Send failures since this agent start |
+
+**Nested fields**:
+- `config.symbol`, `config.timeframe`, `config.scan_interval` - Trading config
+- `cadence_metrics.*` - Cycle timing metrics (duration, percentiles, missed cycles)
+- `latest_bar.*` - Latest bar OHLCV data (for order book transparency)
+- `buy_sell_pressure`, `buy_sell_pressure_raw` - Volume pressure indicators
 
 ---
 
@@ -892,6 +942,62 @@ tail -20 data/nq_agent_state/signals.jsonl | jq
 ```bash
 cat data/nq_agent_state/performance.json | jq
 ```
+
+### External Watchdog
+
+The watchdog script validates state freshness from outside the agent process:
+
+```bash
+# Check health (exit codes: 0=OK, 1=Warning, 2=Critical, 3=Error)
+python3 scripts/monitoring/watchdog_nq_agent.py --verbose
+
+# Send alerts to Telegram on issues
+python3 scripts/monitoring/watchdog_nq_agent.py --telegram
+```
+
+Add to cron for continuous monitoring (every 5 minutes):
+```cron
+*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/watchdog_nq_agent.py --telegram
+```
+
+### Status Server (Optional)
+
+A lightweight localhost HTTP server for standard tooling integration:
+
+```bash
+# Start the status server (default port 9100)
+python3 scripts/monitoring/serve_nq_agent_status.py
+
+# Custom port
+python3 scripts/monitoring/serve_nq_agent_status.py --port 9200
+```
+
+**Endpoints:**
+- `GET /` - Simple status page (HTML)
+- `GET /healthz` - Health check (JSON, 200 OK or 503 Unhealthy)
+- `GET /metrics` - Prometheus text exposition format
+
+**Example usage:**
+```bash
+# Health check
+curl http://localhost:9100/healthz
+
+# Prometheus scrape
+curl http://localhost:9100/metrics
+
+# systemd health check
+ExecStartPost=/bin/sh -c 'until curl -sf http://localhost:9100/healthz; do sleep 1; done'
+```
+
+**Metrics exposed:**
+- `pearlalgo_agent_running` - Agent process running (1/0)
+- `pearlalgo_agent_paused` - Agent paused by circuit breaker (1/0)
+- `pearlalgo_state_age_seconds` - Seconds since state.json update
+- `pearlalgo_cycle_age_seconds` - Seconds since last successful cycle
+- `pearlalgo_data_fresh` - Market data is fresh (1/0)
+- `pearlalgo_signals_sent_total` - Total signals sent to Telegram
+- `pearlalgo_errors_total` - Total errors encountered
+- `pearlalgo_consecutive_errors` - Current consecutive error count
 
 ### Alert Types
 

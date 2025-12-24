@@ -1624,6 +1624,7 @@ class NQAgentService:
         latest_bar_timestamp = None
         latest_bar_age_minutes = None
         data_fresh = None
+        latest_bar = None
         try:
             last_market_data = getattr(self.data_fetcher, "_last_market_data", None) or {}
             freshness = self.data_quality_checker.check_data_freshness(
@@ -1635,13 +1636,45 @@ class NQAgentService:
                 latest_bar_timestamp = ts.isoformat()
                 latest_bar_age_minutes = float(freshness.get("age_minutes", 0.0))
                 data_fresh = bool(freshness.get("is_fresh", False))
+            # Persist latest_bar for Telegram command UI (order book transparency)
+            raw_bar = last_market_data.get("latest_bar")
+            if raw_bar and isinstance(raw_bar, dict):
+                # Ensure JSON-serializable (timestamps as ISO strings)
+                latest_bar = {}
+                for k, v in raw_bar.items():
+                    if hasattr(v, "isoformat"):
+                        latest_bar[k] = v.isoformat()
+                    elif hasattr(v, "item"):  # numpy scalar
+                        latest_bar[k] = v.item()
+                    else:
+                        latest_bar[k] = v
         except Exception:
             # Never let status persistence fail due to optional metadata.
             pass
 
+        # Get run_id for log correlation (if set by logging_config)
+        run_id = None
+        try:
+            from pearlalgo.utils.logging_config import get_run_id
+            run_id = get_run_id()
+        except Exception:
+            pass
+
+        # Get version for operational visibility
+        version = None
+        try:
+            from importlib.metadata import version as get_version
+            version = get_version("pearlalgo-dev-ai-agents")
+        except Exception:
+            version = "0.2.1"  # Fallback to known version
+
         state = {
+            # Core service state
             "running": self.running,
+            "paused": self.paused,
+            "pause_reason": self.pause_reason,
             "start_time": self.start_time.isoformat() if self.start_time else None,
+            # Counters (lifetime)
             "cycle_count": self.cycle_count,
             "signal_count": self.signal_count,
             "signals_sent": self.signals_sent,
@@ -1650,6 +1683,7 @@ class NQAgentService:
             "last_signal_generated_at": self.last_signal_generated_at,
             "last_signal_sent_at": self.last_signal_sent_at,
             "last_signal_id_prefix": self.last_signal_id_prefix,
+            # Counters (session - since start)
             "cycle_count_session": (
                 (self.cycle_count - self._cycle_count_at_start)
                 if self._cycle_count_at_start is not None
@@ -1670,19 +1704,29 @@ class NQAgentService:
                 if self._signals_fail_at_start is not None
                 else None
             ),
+            # Error/health counters (for watchdog + Telegram UI)
+            "error_count": self.error_count,
+            "consecutive_errors": self.consecutive_errors,
+            "connection_failures": self.connection_failures,
+            "data_fetch_errors": self.data_fetch_errors,
+            # Data quality
             "buffer_size": self.data_fetcher.get_buffer_size(),
             "buffer_size_target": self.buffer_size_target,
             "data_fresh": data_fresh,
             "latest_bar_timestamp": latest_bar_timestamp,
             "latest_bar_age_minutes": latest_bar_age_minutes,
+            "latest_bar": latest_bar,
             "last_successful_cycle": (
                 self.last_successful_cycle.isoformat() if self.last_successful_cycle else None
             ),
             # Market/session status used by Telegram UI and operators.
             # - futures_market_open: CME ETH + maintenance break semantics
-            # - strategy_session_open: 09:30–16:00 ET strategy window
+            # - strategy_session_open: configurable strategy window (default 18:00–16:10 ET)
             "futures_market_open": None,
             "strategy_session_open": None,
+            # Config thresholds (for external tools to compare against)
+            "data_stale_threshold_minutes": self.stale_data_threshold_minutes,
+            "connection_timeout_minutes": self.connection_timeout_minutes,
             "config": {
                 "symbol": self.config.symbol,
                 "timeframe": self.config.timeframe,
@@ -1698,6 +1742,9 @@ class NQAgentService:
             # Buy/Sell pressure (volume-based proxy) for /status parity with push dashboard
             "buy_sell_pressure": None,
             "buy_sell_pressure_raw": None,
+            # Operational metadata
+            "run_id": run_id,
+            "version": version,
         }
         try:
             state["futures_market_open"] = bool(get_market_hours().is_market_open())

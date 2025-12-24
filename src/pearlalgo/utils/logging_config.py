@@ -115,12 +115,72 @@ def clear_run_id() -> None:
     run_id_var.set(None)
 
 
+def _safe_json_default(obj: Any) -> Any:
+    """
+    Safe default serializer for json.dumps().
+    
+    Converts non-serializable objects to strings to prevent log loss.
+    """
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    if hasattr(obj, "item"):  # numpy scalar
+        return obj.item()
+    if hasattr(obj, "tolist"):  # numpy array
+        return obj.tolist()
+    if hasattr(obj, "__dict__"):
+        return str(obj)
+    return str(obj)
+
+
+# Known extra fields that should be extracted from LogRecord for JSON logs.
+# These match the fields commonly passed via extra={...} in logger calls.
+KNOWN_EXTRA_FIELDS = frozenset([
+    # Service cycle fields
+    "cycle", "signals", "data_fresh", "market_open", "buffer_size",
+    "error_count", "connection_failures", "consecutive_errors", "data_fetch_errors",
+    "quiet_reason", "pause_reason",
+    # Strategy fields
+    "strategy_session_open", "futures_market_open",
+    # Timing/performance
+    "duration_ms", "cadence_lag_ms", "sleep_scheduled_ms",
+    # Signal fields
+    "signal_id", "signal_type", "direction", "confidence",
+    # Data provider fields
+    "backoff_seconds", "retry_count",
+    # Telegram fields
+    "telegram_send_result", "chat_id",
+    # Generic event classification
+    "event", "event_category",
+    # Correlation
+    "correlation_id", "function",
+    # Custom extras
+    "skip_count", "run_count", "bar_ts", "scan_interval",
+])
+
+# Standard LogRecord attributes that should NOT be included as extras
+LOGRECORD_ATTRS = frozenset([
+    "name", "msg", "args", "created", "filename", "funcName", "levelname",
+    "levelno", "lineno", "module", "msecs", "pathname", "process",
+    "processName", "relativeCreated", "stack_info", "exc_info", "exc_text",
+    "thread", "threadName", "message", "asctime",
+])
+
+
 class StructuredFormatter(logging.Formatter):
-    """JSON formatter for structured logging (systemd/journald friendly)."""
+    """
+    JSON formatter for structured logging (systemd/journald friendly).
+    
+    Features:
+    - Safe serialization with fallback to str() for non-JSON types
+    - Extracts known extra fields from LogRecord
+    - Includes event codes for queryable logs
+    - Always includes run_id and correlation_id for tracing
+    """
     
     def format(self, record: logging.LogRecord) -> str:
-        """Format log record as JSON."""
-        log_data = {
+        """Format log record as JSON with robust extra field handling."""
+        # Core fields
+        log_data: dict[str, Any] = {
             "timestamp": self.formatTime(record, self.datefmt),
             "level": record.levelname,
             "logger": record.name,
@@ -129,19 +189,53 @@ class StructuredFormatter(logging.Formatter):
             "correlation_id": get_correlation_id(),
         }
         
-        # Add extra fields if present
-        if hasattr(record, "extra_fields"):
-            log_data.update(record.extra_fields)
+        # Add source location for debugging
+        log_data["source"] = {
+            "file": record.filename,
+            "line": record.lineno,
+            "function": record.funcName,
+        }
         
-        # Add timing if present
-        if hasattr(record, "duration_ms"):
-            log_data["duration_ms"] = record.duration_ms
+        # Extract known extra fields from record
+        # These are set via logger.info("msg", extra={...})
+        extras: dict[str, Any] = {}
+        for key in KNOWN_EXTRA_FIELDS:
+            if hasattr(record, key):
+                val = getattr(record, key)
+                if val is not None:
+                    extras[key] = val
+        
+        # Also check for any custom attributes not in LogRecord defaults
+        # This catches extra={...} fields we didn't explicitly list
+        for key, val in record.__dict__.items():
+            if key not in LOGRECORD_ATTRS and key not in KNOWN_EXTRA_FIELDS:
+                if not key.startswith("_") and val is not None:
+                    extras[key] = val
+        
+        if extras:
+            log_data["extra"] = extras
+        
+        # Legacy: also check for explicit extra_fields attribute
+        if hasattr(record, "extra_fields") and isinstance(record.extra_fields, dict):
+            log_data.setdefault("extra", {}).update(record.extra_fields)
         
         # Add exception info if present
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
         
-        return json.dumps(log_data)
+        # Safe JSON serialization - never lose a log due to serialization error
+        try:
+            return json.dumps(log_data, default=_safe_json_default)
+        except Exception:
+            # Ultimate fallback: return a minimal valid JSON log
+            return json.dumps({
+                "timestamp": self.formatTime(record, self.datefmt),
+                "level": record.levelname,
+                "logger": record.name,
+                "message": str(record.getMessage()),
+                "run_id": get_run_id(),
+                "serialization_error": True,
+            })
 
 
 class SystemdFriendlyFormatter(logging.Formatter):
@@ -176,14 +270,15 @@ class SystemdFriendlyFormatter(logging.Formatter):
         
         # Include extra fields if enabled
         if self.include_extra:
-            # Common extra fields to surface
-            extra_keys = ["cycle", "signals", "data_fresh", "market_open", "buffer_size",
-                          "error_count", "connection_failures", "quiet_reason", "duration_ms"]
+            # Use the same known extra fields as StructuredFormatter for consistency
             extras = {}
-            for key in extra_keys:
+            for key in KNOWN_EXTRA_FIELDS:
                 if hasattr(record, key):
-                    extras[key] = getattr(record, key)
+                    val = getattr(record, key)
+                    if val is not None:
+                        extras[key] = val
             if extras:
+                # Format as compact key=value pairs for readability
                 context_parts.append(f"extra={extras}")
         
         if context_parts:

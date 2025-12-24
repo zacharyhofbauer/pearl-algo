@@ -296,6 +296,39 @@ python3 scripts/monitoring/watchdog_nq_agent.py --telegram
 
 The watchdog is designed for cron/systemd timers (e.g., every 5 minutes). It reads `data/nq_agent_state/state.json` and returns non‑zero exit codes for warning/critical conditions.
 
+**Cron example (every 5 minutes):**
+```cron
+*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/watchdog_nq_agent.py --telegram
+```
+
+### Status Server (optional)
+
+A lightweight localhost HTTP server for standard tooling (curl, Prometheus, systemd health checks):
+
+```bash
+# Start on default port (9100)
+python3 scripts/monitoring/serve_nq_agent_status.py
+
+# Custom port
+python3 scripts/monitoring/serve_nq_agent_status.py --port 9200
+```
+
+**Endpoints:**
+- `GET /` - Status page (HTML)
+- `GET /healthz` - Health check (JSON, 200 or 503)
+- `GET /metrics` - Prometheus text format
+
+**Usage examples:**
+```bash
+# Health check
+curl http://localhost:9100/healthz
+
+# Prometheus scrape
+curl http://localhost:9100/metrics
+```
+
+The status server reads from `state.json` and does not affect the trading agent.
+
 ---
 
 ## 🔍 Troubleshooting
