@@ -72,8 +72,18 @@ if [ "$1" == "--background" ] || [ "$1" == "-b" ]; then
         PYTHON_CMD=".venv/bin/python3"
     fi
     
-    # Run in background - output goes to /dev/null (no log files)
-    nohup "$PYTHON_CMD" -m pearlalgo.nq_agent.main > /dev/null 2>&1 &
+    # Log file for background mode (with basic rotation)
+    LOG_FILE="$PROJECT_DIR/logs/nq_agent.log"
+    
+    # Rotate existing log if it exists and is non-empty
+    if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
+        # Keep one backup (overwrite if exists)
+        mv "$LOG_FILE" "${LOG_FILE}.1"
+        echo "📁 Rotated previous log to ${LOG_FILE}.1"
+    fi
+    
+    # Run in background - output captured to log file
+    nohup "$PYTHON_CMD" -m pearlalgo.nq_agent.main >> "$LOG_FILE" 2>&1 &
     SERVICE_PID=$!
     
     # Save PID
@@ -82,8 +92,9 @@ if [ "$1" == "--background" ] || [ "$1" == "-b" ]; then
     echo "✅ NQ Agent Service started in background"
     echo "   PID: $SERVICE_PID"
     echo "   PID File: $PID_FILE"
+    echo "   Log File: $LOG_FILE"
     echo ""
-    echo "⚠️  Note: Logs are not saved to file. Run in foreground to see output."
+    echo "📋 To view logs: tail -f $LOG_FILE"
     echo "To run in foreground: ./scripts/lifecycle/start_nq_agent_service.sh"
     echo "To stop: ./scripts/lifecycle/stop_nq_agent_service.sh"
     exit 0

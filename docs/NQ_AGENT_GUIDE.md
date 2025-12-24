@@ -98,7 +98,7 @@ For detailed gateway setup, see `GATEWAY.md`.
 ```bash
 ./scripts/lifecycle/start_nq_agent_service.sh --background
 ```
-**Background mode:** Service runs in background with no terminal output. Use this if you want to run the service detached from your terminal session.
+**Background mode:** Service runs in background with output captured to `logs/nq_agent.log`. Use this if you want to run the service detached from your terminal session.
 
 ### Stop Service
 ```bash
@@ -122,7 +122,7 @@ ps aux | grep "pearlalgo.nq_agent.main"
 ### View Logs
 **Foreground mode (default):** Logs appear directly in your terminal - no file needed.
 
-**Background mode:** No log files are created. To see output, run in foreground mode or check Telegram notifications for status updates.
+**Background mode:** Logs are written to `logs/nq_agent.log` (with basic rotation - previous log saved as `nq_agent.log.1`). View with: `tail -f logs/nq_agent.log`
 
 ---
 

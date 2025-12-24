@@ -371,8 +371,13 @@ class NQAgentTelegramNotifier:
 
         return message
     
-    async def _send_photo(self, photo_path: Path, caption: Optional[str] = None) -> bool:
-        """Send photo to Telegram."""
+    async def _send_photo(
+        self,
+        photo_path: Path,
+        caption: Optional[str] = None,
+        reply_markup=None,
+    ) -> bool:
+        """Send photo to Telegram with optional inline buttons."""
         if not self.enabled or not self.telegram or not self.telegram.bot:
             return False
         
@@ -383,6 +388,7 @@ class NQAgentTelegramNotifier:
                     photo=photo,
                     caption=caption,
                     parse_mode="Markdown" if caption else None,
+                    reply_markup=reply_markup,
                 )
             return True
         except Exception as e:
@@ -395,14 +401,17 @@ class NQAgentTelegramNotifier:
         symbol: str = "MNQ",
         timeframe: str = "5m",
         range_label: str | None = None,
+        current_hours: float | None = None,
     ) -> bool:
         """
-        Send dashboard chart to Telegram with minimal caption.
+        Send dashboard chart to Telegram with minimal caption and timeframe toggle buttons.
         
         Args:
             chart_path: Path to the generated chart image
             symbol: Symbol for caption
             timeframe: Timeframe for caption
+            range_label: Optional range label (e.g., "24h")
+            current_hours: Current lookback hours (for highlighting active toggle)
             
         Returns:
             True if sent successfully
@@ -421,7 +430,35 @@ class NQAgentTelegramNotifier:
             else:
                 caption = f"📊 *{symbol}* ({timeframe})"
             
-            success = await self._send_photo(chart_path, caption=caption)
+            # Build chart timeframe toggle buttons when command handler is running
+            reply_markup = None
+            if _is_command_handler_running():
+                try:
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    
+                    # Determine which button to highlight based on current_hours
+                    # Default to 16h if not specified
+                    active_hours = current_hours or 16
+                    
+                    def btn_label(hours: int) -> str:
+                        """Add indicator if this is the active timeframe."""
+                        if abs(active_hours - hours) < 1:
+                            return f"✓ {hours}h"
+                        return f"{hours}h"
+                    
+                    keyboard = [
+                        [
+                            InlineKeyboardButton(btn_label(12), callback_data="chart_12h"),
+                            InlineKeyboardButton(btn_label(16), callback_data="chart_16h"),
+                            InlineKeyboardButton(btn_label(24), callback_data="chart_24h"),
+                        ],
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                except Exception as e:
+                    logger.debug(f"Could not build chart toggle buttons: {e}")
+                    reply_markup = None
+            
+            success = await self._send_photo(chart_path, caption=caption, reply_markup=reply_markup)
             
             if success:
                 logger.debug(f"Dashboard chart sent to Telegram: {chart_path}")

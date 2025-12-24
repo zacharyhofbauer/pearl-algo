@@ -225,7 +225,7 @@ Explains key terms used in the UI:
 Generates an on-demand price chart.
 
 **Usage:**
-- `/chart` – Generate 6-hour chart (default)
+- `/chart` – Generate 16-hour chart (default)
 - `/chart 12` – Generate 12-hour chart
 - `/chart 24` – Generate 24-hour chart (maximum)
 
@@ -233,7 +233,7 @@ Generates an on-demand price chart.
 - Candlestick price action
 - Volume bars
 - Pressure panel (if enabled)
-- Refresh and time-range buttons
+- Timeframe toggle buttons: 12h, 16h, 24h (with checkmark on active)
 
 ### 3.9 `/pause` and `/resume` (Legacy)
 
@@ -801,16 +801,26 @@ Dashboard charts can be configured via `config/config.yaml`:
 
 ```yaml
 service:
-  dashboard_chart_enabled: true   # Set false to disable automatic chart pushes
-  dashboard_chart_interval: 3600  # Seconds between chart pushes (default: 1 hour)
+  dashboard_chart_enabled: true        # Set false to disable automatic chart pushes
+  dashboard_chart_interval: 3600       # Seconds between chart pushes (default: 1 hour)
+  dashboard_chart_lookback_hours: 16   # Chart window (12, 16, or 24 hours)
 ```
 
 **Options:**
 - **`dashboard_chart_enabled`**: Set to `false` to disable automatic hourly charts (default: `true`)
 - **`dashboard_chart_interval`**: Adjust the interval in seconds (default: 3600 = 1 hour)
+- **`dashboard_chart_lookback_hours`**: Chart window in hours (default: 16)
+
+**Timeframe Toggles:**
+Push dashboard charts include inline toggle buttons:
+- **12h** – Compact view for recent action
+- **16h** – Default view (recommended)
+- **24h** – Extended view for full session context
+
+The active timeframe shows a checkmark (✓). Tapping a button generates a new chart at that timeframe.
 
 **On-demand access:**
-Even with automatic charts disabled, you can always use `/chart` to generate a chart on demand.
+Use `/chart` to generate a chart on demand with the same toggle options.
 
 ### 9.11 Staleness Callout (v2)
 

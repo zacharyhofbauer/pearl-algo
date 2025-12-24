@@ -263,6 +263,37 @@ def safe_label(text: str) -> str:
     return str(text).replace("_", " ")
 
 
+def escape_subprocess_output(text: str) -> str:
+    """
+    Escape subprocess/shell output for safe inclusion in Telegram Markdown messages.
+    
+    This is more aggressive than escape_markdown() since subprocess output can contain
+    arbitrary characters including file paths (nq_agent.pid), shell escape sequences, etc.
+    
+    For reliability, we strip ANSI escape sequences and escape Markdown-sensitive chars.
+    """
+    if not text:
+        return ""
+    
+    import re
+    
+    result = str(text)
+    
+    # Strip ANSI escape sequences (colors, cursor movements, etc.)
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    result = ansi_escape.sub('', result)
+    
+    # Escape Markdown-sensitive characters
+    result = result.replace("\\", "\\\\")  # Escape backslashes first
+    result = result.replace("_", "\\_")
+    result = result.replace("*", "\\*")
+    result = result.replace("`", "\\`")
+    result = result.replace("[", "\\[")
+    result = result.replace("]", "\\]")
+    
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Activity and timing helpers (UX improvement v2)
 # ---------------------------------------------------------------------------

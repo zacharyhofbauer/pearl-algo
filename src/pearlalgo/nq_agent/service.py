@@ -1152,12 +1152,13 @@ class NQAgentService:
             )
             
             if chart_path and chart_path.exists():
-                # Send the chart
+                # Send the chart with current lookback for toggle button highlighting
                 success = await self.telegram_notifier.send_dashboard_chart(
                     chart_path=chart_path,
                     symbol=self.config.symbol,
                     timeframe=chosen_tf,
                     range_label=range_label,
+                    current_hours=lookback_hours,
                 )
                 
                 # Clean up temp file

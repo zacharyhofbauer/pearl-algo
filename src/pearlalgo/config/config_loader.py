@@ -55,7 +55,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         # Dashboard chart (hourly image)
         "dashboard_chart_enabled": True,       # set False to disable automatic chart pushes
         "dashboard_chart_interval": 3600,      # 1 hour between dashboard chart pushes
-        "dashboard_chart_lookback_hours": 24,  # cap notification chart window (24h max)
+        "dashboard_chart_lookback_hours": 16,  # default notification chart window (16h)
         "dashboard_chart_timeframe": "auto",   # "auto" | "5m" | "15m" | "30m" | "1h"
         "dashboard_chart_max_bars": 420,       # cap candles for readability/Telegram
         "dashboard_chart_show_pressure": True, # show signed-volume pressure panel
@@ -115,6 +115,18 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "default_contracts": 10,
         "max_risk_per_trade_pct": 1.0,
         "max_drawdown_pct": 10.0,
+    },
+    # Market hours configuration (for holiday/early-close overrides)
+    # Disabled by default to preserve current behavior.
+    # Enable by setting enable_config_overrides: true and providing dates.
+    "market_hours": {
+        "enable_config_overrides": False,  # Set to true to load overrides from config
+        # holiday_overrides: list of (year, month, day) tuples for full-day closures
+        # Example: [[2025, 11, 27], [2025, 3, 28]]  # Thanksgiving, Good Friday
+        "holiday_overrides": [],
+        # early_closes: dict mapping (year, month, day) to close_hour (24h format)
+        # Example: {"2025-11-26": 13, "2025-12-24": 13}  # Day before Thanksgiving, Christmas Eve
+        "early_closes": {},
     },
 }
 

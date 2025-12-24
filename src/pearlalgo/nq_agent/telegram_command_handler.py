@@ -48,6 +48,7 @@ from pearlalgo.utils.telegram_alerts import (
     format_gate_status,
     format_service_status,
     safe_label,
+    escape_subprocess_output,
     _format_currency,
     # Standardized terminology constants
     LABEL_AGENT,
@@ -475,7 +476,7 @@ class TelegramCommandHandler:
             
             # Parse optional hours argument
             args = context.args if context.args else []
-            lookback_hours = 6.0  # default
+            lookback_hours = 16.0  # default (matches dashboard chart default)
             if args:
                 try:
                     lookback_hours = float(args[0])
@@ -552,11 +553,17 @@ class TelegramCommandHandler:
                 caption = f"📊 *{symbol}* {timeframe} Chart ({lookback_hours:.0f}h)\n"
                 caption += f"🕐 Generated: {end_time.strftime('%H:%M UTC')}"
                 
+                # Build toggle buttons with active indicator
+                def btn_label(hours: int) -> str:
+                    if abs(lookback_hours - hours) < 1:
+                        return f"✓ {hours}h"
+                    return f"{hours}h"
+                
                 keyboard = [
                     [
-                        InlineKeyboardButton("🔄 Refresh", callback_data="chart"),
-                        InlineKeyboardButton("📈 6h", callback_data="chart_6h"),
-                        InlineKeyboardButton("📈 12h", callback_data="chart_12h"),
+                        InlineKeyboardButton(btn_label(12), callback_data="chart_12h"),
+                        InlineKeyboardButton(btn_label(16), callback_data="chart_16h"),
+                        InlineKeyboardButton(btn_label(24), callback_data="chart_24h"),
                     ],
                     [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
                 ]
@@ -3340,7 +3347,9 @@ class TelegramCommandHandler:
 
         message = f"{result['message']}\n"
         if result.get("details"):
-            message += f"\n{result['details']}"
+            # Escape subprocess output to prevent Markdown parse errors
+            escaped_details = escape_subprocess_output(result['details'])
+            message += f"\n{escaped_details}"
 
         gateway_status = self.service_controller.get_gateway_status()
         reply_markup = self._get_gateway_buttons(gateway_running=gateway_status.get("process_running", False))
@@ -3360,7 +3369,9 @@ class TelegramCommandHandler:
 
         message = f"{result['message']}\n"
         if result.get("details"):
-            message += f"\n{result['details']}"
+            # Escape subprocess output to prevent Markdown parse errors
+            escaped_details = escape_subprocess_output(result['details'])
+            message += f"\n{escaped_details}"
         
         # Get updated gateway status
         gateway_status = self.service_controller.get_gateway_status()
@@ -3405,7 +3416,9 @@ class TelegramCommandHandler:
 
         message = f"{result['message']}\n"
         if result.get("details"):
-            message += f"\n{result['details']}"
+            # Escape subprocess output to prevent Markdown parse errors
+            escaped_details = escape_subprocess_output(result['details'])
+            message += f"\n{escaped_details}"
 
         # Add gateway status warning if needed
         gateway_status = self.service_controller.get_gateway_status()
@@ -3432,7 +3445,9 @@ class TelegramCommandHandler:
 
         message = f"{result['message']}\n"
         if result.get("details"):
-            message += f"\n{result['details']}"
+            # Escape subprocess output to prevent Markdown parse errors
+            escaped_details = escape_subprocess_output(result['details'])
+            message += f"\n{escaped_details}"
 
         gateway_status = self.service_controller.get_gateway_status()
         gateway_running = gateway_status.get("process_running", False)
@@ -3455,7 +3470,7 @@ class TelegramCommandHandler:
             reply_markup = self._get_main_menu_buttons(agent_running=True)
             await self._send_message_or_edit(
                 update, context,
-                f"⚠️ Stop failed: {stop_result['message']}\nAborting restart.",
+                f"⚠️ Stop failed: {escape_subprocess_output(stop_result['message'])}\nAborting restart.",
                 reply_markup=reply_markup
             )
             return
@@ -3467,11 +3482,13 @@ class TelegramCommandHandler:
         start_result = await self.service_controller.start_agent(background=True)
 
         message = "🔄 *Restart Complete*\n\n"
-        message += f"*Stop:* {stop_result['message']}\n"
-        message += f"*Start:* {start_result['message']}"
+        message += f"*Stop:* {escape_subprocess_output(stop_result['message'])}\n"
+        message += f"*Start:* {escape_subprocess_output(start_result['message'])}"
 
         if start_result.get("details"):
-            message += f"\n\n{start_result['details']}"
+            # Escape subprocess output to prevent Markdown parse errors
+            escaped_details = escape_subprocess_output(start_result['details'])
+            message += f"\n\n{escaped_details}"
 
         gateway_status = self.service_controller.get_gateway_status()
         gateway_running = gateway_status.get("process_running", False)
@@ -4301,12 +4318,12 @@ class TelegramCommandHandler:
             context.args = []  # Reset
         elif callback_data == 'chart':
             await self._handle_chart(update, context)
-        elif callback_data == 'chart_6h':
-            context.args = ['6']
-            await self._handle_chart(update, context)
-            context.args = []
         elif callback_data == 'chart_12h':
             context.args = ['12']
+            await self._handle_chart(update, context)
+            context.args = []
+        elif callback_data == 'chart_16h':
+            context.args = ['16']
             await self._handle_chart(update, context)
             context.args = []
         elif callback_data == 'chart_24h':
