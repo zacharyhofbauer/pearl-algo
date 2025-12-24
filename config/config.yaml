@@ -56,11 +56,11 @@ circuit_breaker:
 # Data fetching
 data:
   buffer_size: 100                 # Main buffer (1m bars)
-  buffer_size_5m: 50               # 5m timeframe buffer
-  buffer_size_15m: 50              # 15m timeframe buffer
+  buffer_size_5m: 300              # 5m timeframe buffer (300 bars = 25h for 24h chart display)
+  buffer_size_15m: 100             # 15m timeframe buffer (100 bars = 25h)
   historical_hours: 2              # Historical data fetch window
-  multitimeframe_5m_hours: 4       # 5m MTF window
-  multitimeframe_15m_hours: 12     # 15m MTF window
+  multitimeframe_5m_hours: 25      # 5m MTF window (25h to support 24h dashboard chart)
+  multitimeframe_15m_hours: 25     # 15m MTF window (25h)
   performance_history_limit: 1000  # Max performance records
   stale_data_threshold_minutes: 10 # Alert if data is older than this
   connection_timeout_minutes: 30   # Consider connection lost after this time without data
