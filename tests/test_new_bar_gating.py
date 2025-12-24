@@ -382,3 +382,4 @@ class TestGatingTimestampEdgeCases:
         has_timestamp = "timestamp" in df.columns
         assert has_timestamp is False
 
+

@@ -182,3 +182,4 @@ class TestMarkdownSafetyRegression:
         # The full message should be safe
         assert "\\nq\\_agent" in full_message or "nq\\_agent" in full_message
 
+
