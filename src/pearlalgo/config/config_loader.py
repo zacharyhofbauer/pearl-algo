@@ -47,14 +47,20 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "state_save_interval": 10,
         # Cadence mode: "fixed" (start-to-start timing) or "sleep_after" (legacy)
         "cadence_mode": "fixed",
+        # New-bar gating (skip redundant analysis when bar hasn't advanced)
+        "enable_new_bar_gating": True,
         # Dashboard observability (15m push)
         "pressure_lookback_bars": 24,   # ~2h on 5m bars
         "pressure_baseline_bars": 120,  # ~10h on 5m bars
         # Dashboard chart (hourly image)
+        "dashboard_chart_interval": 3600,      # 1 hour between dashboard chart pushes
         "dashboard_chart_lookback_hours": 48,  # show more context for key levels
         "dashboard_chart_timeframe": "auto",   # "auto" | "5m" | "15m" | "30m" | "1h"
         "dashboard_chart_max_bars": 420,       # cap candles for readability/Telegram
         "dashboard_chart_show_pressure": True, # show signed-volume pressure panel
+        # Alert throttling
+        "connection_failure_alert_interval": 600,  # 10 minutes
+        "data_quality_alert_interval": 300,        # 5 minutes
     },
     "circuit_breaker": {
         "max_consecutive_errors": 10,
@@ -63,9 +69,14 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
     },
     "data": {
         "buffer_size": 100,
+        "buffer_size_5m": 50,
+        "buffer_size_15m": 50,
         "historical_hours": 2,
         "multitimeframe_5m_hours": 4,
         "multitimeframe_15m_hours": 12,
+        "performance_history_limit": 1000,
+        "stale_data_threshold_minutes": 10,
+        "connection_timeout_minutes": 30,
         # Base historical fetch caching (default OFF).
         # When enabled, 1m history is refreshed on a TTL rather than every cycle.
         # Level 1 real-time data is still fetched every cycle for latest bar freshness.

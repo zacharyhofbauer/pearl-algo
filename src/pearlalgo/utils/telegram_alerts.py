@@ -19,6 +19,10 @@ except ImportError:
 TELEGRAM_TEXT_LIMIT = 4096
 _TRUNC_SUFFIX = "\n\n…(truncated)"
 
+# Visual formatting constants (Telegram clients can render multiple leading spaces inconsistently)
+_BULLET_SEP = " • "
+_SUBLINE_PREFIX = "↳ "
+
 
 def _truncate_telegram_text(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> str:
     """Ensure text is within Telegram message size limits."""
@@ -404,13 +408,13 @@ def format_gate_status(
     """
     Format market gates line for Home Card.
 
-    Returns a compact line like: 🟢 Futures: OPEN  •  🟢 Session: OPEN
+    Returns a compact line like: 🟢 Futures: OPEN • 🟢 Session: OPEN
     """
     futures_emoji = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪"
     futures_text = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "?"
     strat_emoji = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪"
     strat_text = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "?"
-    return f"{futures_emoji} Futures: {futures_text}  •  {strat_emoji} Session: {strat_text}"
+    return f"{futures_emoji} Futures: {futures_text}{_BULLET_SEP}{strat_emoji} Session: {strat_text}"
 
 
 def format_service_status(
@@ -421,13 +425,13 @@ def format_service_status(
     """
     Format service status line for Home Card.
 
-    Returns a compact line like: 🟢 Agent: RUNNING  •  🟢 Gateway: RUNNING
+    Returns a compact line like: 🟢 Agent: RUNNING • 🟢 Gateway: RUNNING
     """
     agent_emoji = "🟢" if agent_running and not paused else "⏸️" if paused else "🔴"
     agent_text = "PAUSED" if paused else ("RUNNING" if agent_running else "STOPPED")
     gateway_emoji = "🟢" if gateway_running else "🔴"
     gateway_text = "RUNNING" if gateway_running else "STOPPED"
-    return f"{agent_emoji} Agent: {agent_text}  •  {gateway_emoji} Gateway: {gateway_text}"
+    return f"{agent_emoji} Agent: {agent_text}{_BULLET_SEP}{gateway_emoji} Gateway: {gateway_text}"
 
 
 def format_activity_line(
@@ -648,17 +652,17 @@ def format_home_card(
         # Show gateway as unknown rather than asserting running/stopped
         agent_emoji = "🟢" if agent_running and not paused else "⏸️" if paused else "🔴"
         agent_text = "PAUSED" if paused else ("RUNNING" if agent_running else "STOPPED")
-        lines.append(f"{agent_emoji} Agent: {agent_text}  •  ⚪ Gateway: ?")
+        lines.append(f"{agent_emoji} Agent: {agent_text}{_BULLET_SEP}⚪ Gateway: ?")
     else:
         lines.append(format_service_status(agent_running, gateway_running, paused))
 
     # CONDITIONAL: Pause reason (if paused)
     if paused and pause_reason:
         reason_safe = safe_label(pause_reason)
-        lines.append(f"   ⚠️ Reason: {reason_safe}")
+        lines.append(f"{_SUBLINE_PREFIX}⚠️ Reason: {reason_safe}")
         # Add action cue for circuit-breaker style pauses
         if "circuit" in pause_reason.lower() or "error" in pause_reason.lower():
-            lines.append(f"   💡 Manual intervention required")
+            lines.append(f"{_SUBLINE_PREFIX}💡 Manual intervention required")
 
     # CONDITIONAL: Activity pulse (when running and we have cycle data)
     if agent_running and not paused and last_cycle_seconds is not None:
@@ -690,9 +694,9 @@ def format_home_card(
     # CONDITIONAL: Gate expectation explanation (only when session closed)
     if strategy_session_open is False:
         next_session = format_next_session_time()
-        lines.append(f"   ℹ️ Signals suppressed • {next_session}")
+        lines.append(f"{_SUBLINE_PREFIX}ℹ️ Signals suppressed{_BULLET_SEP}{next_session}")
     elif futures_market_open is False and strategy_session_open is not False:
-        lines.append("   ℹ️ Data may be delayed (market closed)")
+        lines.append(f"{_SUBLINE_PREFIX}ℹ️ Data may be delayed (market closed)")
     
     # CONDITIONAL: Quiet reason (when agent is quiet but running)
     if quiet_reason and agent_running and not paused:
@@ -708,22 +712,22 @@ def format_home_card(
             "Unknown": "❓ Status unknown",
         }.get(quiet_reason, f"ℹ️ {quiet_reason}")
         if reason_display:
-            lines.append(f"   {reason_display}")
+            lines.append(f"{_SUBLINE_PREFIX}{reason_display}")
         # Actionable cue for StaleData
         if quiet_reason == "StaleData":
-            lines.append("   💡 Run /data_quality for details")
+            lines.append(f"{_SUBLINE_PREFIX}💡 Run /data_quality for details")
     
     # CONDITIONAL: Signal diagnostics (when quiet reason is NoOpportunity and we have details)
     # V2 spec: Suppress when data is stale to avoid misleading derived context
     if signal_diagnostics and agent_running and not paused and not is_data_stale:
         # Only show if not a simple "no patterns" or "session closed" message
         if signal_diagnostics not in ("Session closed", "No patterns detected"):
-            lines.append(f"   🔍 {signal_diagnostics}")
+            lines.append(f"{_SUBLINE_PREFIX}🔍 {signal_diagnostics}")
 
     # CONDITIONAL: Buy/Sell pressure (show only when agent running and not paused)
     # V2 spec: Suppress when data is stale to avoid misleading derived context
     if buy_sell_pressure and agent_running and not paused and not is_data_stale:
-        lines.append(f"   {buy_sell_pressure}")
+        lines.append(f"{_SUBLINE_PREFIX}{buy_sell_pressure}")
 
     lines.append("")  # Blank line separator
 

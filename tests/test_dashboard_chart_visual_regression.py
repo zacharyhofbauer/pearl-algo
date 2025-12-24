@@ -14,27 +14,25 @@ To update the baseline image after intentional changes:
 
 from __future__ import annotations
 
-import os
 import sys
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import pandas as pd
 import pytest
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-# === Constants ===
+# Import shared deterministic data generator
+from tests.fixtures.deterministic_data import (
+    generate_deterministic_ohlcv,
+    SEED,
+    FIXED_TITLE_TIME,
+)
 
-# Fixed seed and timestamps for reproducibility (must match generate_dashboard_baseline.py)
-SEED = 42
-BASE_TIMESTAMP = datetime(2024, 12, 20, 0, 0, 0, tzinfo=timezone.utc)
-NUM_BARS = 432  # 36h of 5m bars
-FIXED_TITLE_TIME = "12:00 UTC"
+# === Constants ===
 
 # Paths
 FIXTURES_DIR = project_root / "tests" / "fixtures" / "charts"
@@ -45,50 +43,6 @@ DIFF_OUTPUT_DIR = project_root / "tests" / "artifacts"
 # Measured as mean absolute difference per pixel (0-255 scale)
 PIXEL_TOLERANCE = 2.0  # Allow ~0.8% variance per channel
 MAX_DIFF_PIXELS_PCT = 1.0  # Allow up to 1% of pixels to differ
-
-
-def generate_deterministic_ohlcv(
-    num_bars: int = NUM_BARS,
-    base_timestamp: datetime = BASE_TIMESTAMP,
-    seed: int = SEED,
-    base_price: float = 25000.0,
-) -> pd.DataFrame:
-    """
-    Generate deterministic synthetic OHLCV data for MNQ-style futures.
-    
-    Must match the implementation in generate_dashboard_baseline.py.
-    """
-    np.random.seed(seed)
-
-    timestamps = [base_timestamp + timedelta(minutes=5 * i) for i in range(num_bars)]
-    price_changes = np.random.randn(num_bars) * 8
-    prices = base_price + np.cumsum(price_changes)
-
-    data = []
-    for i, (ts, price) in enumerate(zip(timestamps, prices)):
-        candle_range = abs(np.random.randn() * 8) + 5
-
-        if np.random.random() > 0.5:
-            open_price = price - candle_range * 0.3
-            close_price = price + candle_range * 0.3
-        else:
-            open_price = price + candle_range * 0.3
-            close_price = price - candle_range * 0.3
-
-        high = max(open_price, close_price) + abs(np.random.randn() * 3) + 2
-        low = min(open_price, close_price) - abs(np.random.randn() * 3) - 2
-        volume = int(np.random.uniform(1000, 5000))
-
-        data.append({
-            "timestamp": ts,
-            "open": round(open_price, 2),
-            "high": round(high, 2),
-            "low": round(low, 2),
-            "close": round(close_price, 2),
-            "volume": volume,
-        })
-
-    return pd.DataFrame(data)
 
 
 def load_image_as_array(path: Path) -> Optional[np.ndarray]:

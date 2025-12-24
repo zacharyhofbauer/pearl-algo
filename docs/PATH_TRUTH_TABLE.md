@@ -60,6 +60,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `test_mplfinance_chart.py`
   - `backtest_nq_strategy.py`
   - `check_signals.py`
+  - `generate_dashboard_baseline.py` – generate deterministic baseline image for visual regression tests
 - **Docs**:
   - `docs/TESTING_GUIDE.md`
   - `docs/MOCK_DATA_WARNING.md`

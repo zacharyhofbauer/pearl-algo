@@ -59,6 +59,11 @@ Key scripts (to keep as canonical):
   - **Role**: Validate strategy outputs/assumptions for given historical data.
 - `check_signals.py`
   - **Role**: Diagnostic tool to check signals file format, count, and validity. Useful for troubleshooting signal persistence issues.
+- `generate_dashboard_baseline.py`
+  - **Role**: Generate deterministic dashboard baseline image for visual regression testing.
+  - **Behavior**: Creates fixed synthetic OHLCV data and renders a chart with deterministic parameters; outputs to `tests/fixtures/charts/dashboard_baseline.png`.
+- `check_no_secrets.py`
+  - **Role**: Secret detection guardrail; scans codebase for accidentally committed secrets/tokens.
 
 ## Maintenance (`scripts/maintenance/`)
 

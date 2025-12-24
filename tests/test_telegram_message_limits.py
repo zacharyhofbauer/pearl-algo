@@ -362,8 +362,11 @@ def test_format_activity_line() -> None:
         buffer_size=85,
         buffer_target=100,
     )
-    assert "100/500 cycles" in result
-    assert "10/8 signals" in result
+    # v2 labeled format: "100 scans (session) / 500 total • 10 gen / 8 sent ..."
+    assert "100 scans (session)" in result
+    assert "500 total" in result
+    assert "10 gen" in result
+    assert "8 sent" in result
     assert "85/100 bars" in result
     assert "2 errors" in result
 
@@ -379,7 +382,8 @@ def test_format_activity_line_no_session() -> None:
         buffer_size=85,
         buffer_target=None,
     )
-    assert "500 cycles" in result
+    # v2 labeled format: "500 scans • 10 gen / 8 sent • 85 bars • 0 errors"
+    assert "500 scans" in result
     assert "85 bars" in result
 
 
@@ -583,7 +587,7 @@ def test_home_card_degraded_state() -> None:
     # Should show action cue
     assert "Start agent to begin" in result
     # Should show signal send failures
-    assert "2 signal send failures" in result
+    assert "2 fail" in result
     # Should stay under limits
     assert len(result) < TELEGRAM_TEXT_LIMIT, f"Degraded Home Card too long: {len(result)} chars"
     assert len(result) < 2000, f"Degraded Home Card should be compact: {len(result)} chars"
@@ -722,7 +726,7 @@ def test_home_card_signal_send_failures() -> None:
         strategy_session_open=True,
         signal_send_failures=3,
     )
-    assert "3 signal send failures" in result_with_failures
+    assert "3 fail" in result_with_failures
 
 
 def test_home_card_gateway_unknown() -> None:
