@@ -218,3 +218,4 @@ class TestValidateMarketData:
         assert result["is_valid"] is False
         assert any("stale" in issue.lower() for issue in result["issues"])
 
+

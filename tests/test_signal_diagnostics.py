@@ -219,3 +219,4 @@ class TestDiagnosticsInDashboard:
         assert "🔍" not in message
 
 
+
