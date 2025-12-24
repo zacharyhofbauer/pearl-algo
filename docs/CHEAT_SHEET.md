@@ -215,6 +215,12 @@
   python3 scripts/testing/test_all.py telegram
   ```
 
+- **Check architecture boundaries (for development):**
+  ```bash
+  python3 scripts/testing/test_all.py arch                          # warn-only
+  PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch # strict
+  ```
+
 ---
 
 ## 6. Logs (systemd / journalctl)

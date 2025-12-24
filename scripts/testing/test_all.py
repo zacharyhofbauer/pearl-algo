@@ -3,7 +3,7 @@
 # Category: Testing
 # Purpose: Unified test runner for NQ Agent (canonical entry point)
 # Usage: python3 scripts/testing/test_all.py [mode]
-# Modes: all (default), telegram, signals, service
+# Modes: all (default), telegram, signals, service, arch
 # ============================================================================
 """
 Unified Test Runner for NQ Agent
@@ -12,6 +12,7 @@ Runs the canonical test/validation modes for this repo:
 - Telegram notification formatting + send
 - Strategy signal generation with the mock provider
 - Short-run service lifecycle with the mock provider
+- Architecture boundary enforcement
 
 Usage:
     python3 scripts/testing/test_all.py [mode]
@@ -21,11 +22,17 @@ Modes:
     telegram     - Test Telegram notifications only
     signals      - Test signal generation only
     service      - Test full service with mock data
+    arch         - Test module boundary rules
+
+Environment:
+    PEARLALGO_ARCH_ENFORCE=1  - Make architecture check fail on violations
+                               (default: warn-only)
 """
 
 import argparse
 import asyncio
 import os
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -291,6 +298,72 @@ async def test_service_with_mock():
     return True
 
 
+def test_architecture_boundaries() -> bool:
+    """
+    Test module boundary rules using the AST-based boundary checker.
+    
+    By default, runs in warn-only mode (violations are reported but don't fail).
+    Set PEARLALGO_ARCH_ENFORCE=1 to make violations fail the test.
+    
+    Returns:
+        True if no violations (or warn-only mode), False if violations in enforce mode.
+    """
+    print("=" * 60)
+    print("Architecture Boundary Check")
+    print("=" * 60)
+    print()
+    
+    # Determine enforcement mode from environment
+    enforce = os.getenv("PEARLALGO_ARCH_ENFORCE", "").lower() in ("1", "true", "yes")
+    
+    if enforce:
+        print("Mode: ENFORCE (violations will fail the test)")
+    else:
+        print("Mode: WARN-ONLY (violations are reported but don't fail)")
+        print("      Set PEARLALGO_ARCH_ENFORCE=1 to enable strict mode")
+    print()
+    
+    # Build command
+    checker_script = project_root / "scripts" / "testing" / "check_architecture_boundaries.py"
+    
+    if not checker_script.exists():
+        print(f"❌ ERROR: Boundary checker not found at {checker_script}")
+        return False
+    
+    cmd = [sys.executable, str(checker_script)]
+    if enforce:
+        cmd.append("--enforce")
+    
+    # Run the checker
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=project_root,
+            capture_output=False,  # Let output flow to stdout/stderr
+        )
+        
+        if result.returncode == 0:
+            print()
+            print("=" * 60)
+            print("✅ Architecture boundary check passed")
+            print("=" * 60)
+            return True
+        else:
+            print()
+            print("=" * 60)
+            if enforce:
+                print("❌ Architecture boundary check FAILED")
+            else:
+                print("⚠️  Architecture boundary check found issues (warn-only)")
+            print("=" * 60)
+            # In warn-only mode, we still return True (don't fail the test suite)
+            return not enforce
+            
+    except Exception as e:
+        print(f"❌ ERROR running boundary checker: {e}")
+        return False
+
+
 async def main():
     """Main entry point."""
     # Setup logging for consistent console output (matches production)
@@ -301,7 +374,7 @@ async def main():
         "mode",
         nargs="?",
         default="all",
-        choices=["all", "telegram", "signals", "service"],
+        choices=["all", "telegram", "signals", "service", "arch"],
         help="Test mode to run (default: all)",
     )
     args = parser.parse_args()
@@ -327,6 +400,11 @@ async def main():
     if args.mode in ["all", "service"]:
         print("\n" + "=" * 60)
         results["service"] = await test_service_with_mock()
+        print()
+    
+    if args.mode in ["all", "arch"]:
+        print("\n" + "=" * 60)
+        results["arch"] = test_architecture_boundaries()
         print()
     
     print()

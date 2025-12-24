@@ -486,6 +486,42 @@ pearlalgo-dev-ai-agents/
 └── README.md                    # Quick start guide
 ```
 
+### Module Boundaries
+
+The `src/pearlalgo/` package follows a layered architecture with explicit dependency rules.
+These boundaries prevent accidental coupling, keep strategies portable, and make the codebase easier to reason about.
+
+#### Dependency Matrix
+
+| Source Layer     | May Import                                      | Must NOT Import              |
+|------------------|-------------------------------------------------|------------------------------|
+| `utils`          | `pearlalgo.utils.*`, stdlib, third-party        | `config`, `data_providers`, `strategies`, `nq_agent` |
+| `config`         | `pearlalgo.config.*`, `pearlalgo.utils.*`       | `data_providers`, `strategies`, `nq_agent` |
+| `data_providers` | `pearlalgo.data_providers.*`, `config`, `utils` | `strategies`, `nq_agent`     |
+| `strategies`     | `pearlalgo.strategies.*`, `config`, `utils`     | `data_providers`, `nq_agent` |
+| `nq_agent`       | Any internal layer (orchestration layer)        | —                            |
+
+#### Rationale
+
+- **`utils`** is the lowest layer: pure helpers with no domain awareness.
+- **`config`** provides settings and loaders; it may use utils for logging but must stay agnostic to higher layers.
+- **`data_providers`** abstract market data sources; they must not know about strategies or the agent orchestration.
+- **`strategies`** contain trading logic; they must remain independent of specific data providers and the orchestrating agent so they can be tested in isolation or reused elsewhere.
+- **`nq_agent`** is the top-level orchestration layer that wires everything together.
+
+#### Enforcement
+
+Boundary violations are detected by `scripts/testing/check_architecture_boundaries.py` (AST-based, no external deps).
+Run it via the unified test runner:
+
+```bash
+# Warn-only (default in test_all.py)
+python3 scripts/testing/test_all.py arch
+
+# Strict enforcement (exit 1 on violations)
+PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
+```
+
 ---
 
 ## Configuration

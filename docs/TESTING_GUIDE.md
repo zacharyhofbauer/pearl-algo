@@ -32,6 +32,10 @@ python3 scripts/testing/test_all.py
 python3 scripts/testing/test_all.py telegram
 python3 scripts/testing/test_all.py signals
 python3 scripts/testing/test_all.py service
+python3 scripts/testing/test_all.py arch
+
+# Architecture check with strict enforcement (fails on violations)
+PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 ```
 
 ### Option 2: Comprehensive Validation
@@ -473,6 +477,71 @@ Always validate strategy performance with **real market data** (IB Gateway + NQ 
 
 ---
 
+## 🏗️ Architecture Boundary Testing
+
+The codebase enforces module boundary rules to maintain clean layering and prevent accidental coupling.
+See `docs/PROJECT_SUMMARY.md` (Module Boundaries section) for the full dependency matrix.
+
+### Quick Check (Warn-Only)
+
+```bash
+# Runs in warn-only mode (reports violations but doesn't fail)
+python3 scripts/testing/test_all.py arch
+```
+
+### Strict Enforcement
+
+```bash
+# Fails (exit 1) if any boundary violations are found
+PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
+```
+
+### Direct Script Usage
+
+```bash
+# Warn-only (default)
+python3 scripts/testing/check_architecture_boundaries.py
+
+# Enforce mode
+python3 scripts/testing/check_architecture_boundaries.py --enforce
+
+# Verbose output (show all scanned files)
+python3 scripts/testing/check_architecture_boundaries.py --verbose
+```
+
+### What It Checks
+
+The boundary checker scans all Python files under `src/pearlalgo/` and verifies that:
+
+- `utils/` does not import from `config`, `data_providers`, `strategies`, or `nq_agent`
+- `config/` does not import from `data_providers`, `strategies`, or `nq_agent`
+- `data_providers/` does not import from `strategies` or `nq_agent`
+- `strategies/` does not import from `data_providers` or `nq_agent`
+- `nq_agent/` may import from any internal layer (it's the orchestration layer)
+
+### When to Run
+
+- **Before committing**: Run `python3 scripts/testing/test_all.py arch` to catch accidental cross-layer imports
+- **In CI**: Set `PEARLALGO_ARCH_ENFORCE=1` to fail builds on violations
+- **During code review**: Reviewers can run the check to verify architectural compliance
+
+### Alternative: import-linter (Optional)
+
+For teams preferring an industry-standard tool, `import-linter` is available as an optional dependency:
+
+```bash
+# Install with lint extras
+pip install -e .[lint]
+
+# Run import-linter
+lint-imports
+```
+
+The import-linter configuration in `pyproject.toml` mirrors the same boundary rules as the stdlib checker.
+Both tools can be run side-by-side; choose whichever fits your workflow.
+
+---
+
 ## 🐛 Troubleshooting
 
 ### No Signals Generated
@@ -619,12 +688,19 @@ pytest tests/ -v
 # Integration tests
 pytest tests/ -m integration -v
 
+# Architecture boundary check (warn-only)
+python3 scripts/testing/test_all.py arch
+
+# Architecture boundary check (strict enforcement)
+PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
+
 # Check status
 ./scripts/lifecycle/check_nq_agent_status.sh
 ```
 
 ### Key Files
 - `scripts/testing/test_all.py` - Unified test runner
+- `scripts/testing/check_architecture_boundaries.py` - Module boundary enforcement
 - `scripts/testing/validate_strategy.py` - Comprehensive validation
 - `tests/test_edge_cases.py` - Edge-case coverage (market hours/data quality/service)
 - `tests/test_error_recovery.py` - Circuit breaker and recovery behaviors

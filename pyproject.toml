@@ -24,6 +24,7 @@ dependencies = [
 [project.optional-dependencies]
 backtrader = ["backtrader>=1.9.78.123"]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.21.0", "ruff>=0.6"]
+lint = ["import-linter>=2.0"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -31,3 +32,53 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# ---------------------------------------------------------------------------
+# import-linter: Module boundary enforcement (optional, requires `pip install -e .[lint]`)
+# ---------------------------------------------------------------------------
+# Mirrors the dependency matrix in docs/PROJECT_SUMMARY.md.
+# Run: lint-imports
+# ---------------------------------------------------------------------------
+
+[tool.importlinter]
+root_package = "pearlalgo"
+include_external_packages = false
+
+[[tool.importlinter.contracts]]
+name = "utils is self-contained"
+type = "forbidden"
+source_modules = ["pearlalgo.utils"]
+forbidden_modules = [
+    "pearlalgo.config",
+    "pearlalgo.data_providers",
+    "pearlalgo.strategies",
+    "pearlalgo.nq_agent",
+]
+
+[[tool.importlinter.contracts]]
+name = "config does not depend on higher layers"
+type = "forbidden"
+source_modules = ["pearlalgo.config"]
+forbidden_modules = [
+    "pearlalgo.data_providers",
+    "pearlalgo.strategies",
+    "pearlalgo.nq_agent",
+]
+
+[[tool.importlinter.contracts]]
+name = "data_providers does not depend on strategies or nq_agent"
+type = "forbidden"
+source_modules = ["pearlalgo.data_providers"]
+forbidden_modules = [
+    "pearlalgo.strategies",
+    "pearlalgo.nq_agent",
+]
+
+[[tool.importlinter.contracts]]
+name = "strategies does not depend on data_providers or nq_agent"
+type = "forbidden"
+source_modules = ["pearlalgo.strategies"]
+forbidden_modules = [
+    "pearlalgo.data_providers",
+    "pearlalgo.nq_agent",
+]
