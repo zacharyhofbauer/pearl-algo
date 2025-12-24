@@ -73,7 +73,7 @@ Notes:
 - Intended for **infrastructure** and **deployment** configuration:
   - IBKR host/port/client IDs
 
-### 1.4 Strategy config (`strategies/nq_intraday/config.py`)
+### 1.4 Strategy config (`pearlalgo.strategies.nq_intraday.config`)
 
 - Strategy‑specific parameters such as symbol, timeframe, risk parameters, ATR multipliers, R:R ratios.
 - May read environment overrides (via `os.getenv` helper) but is primarily driven by `config/config.yaml`.
@@ -92,10 +92,10 @@ Notes:
   - Data buffer sizes and history windows
   - Signal thresholds and duplicate windows
   - Performance history limits and prop‑firm assumptions
-- **Settings (`settings.py`)** – infrastructure and environment glue:
+- **Settings (`pearlalgo.config.settings`)** – infrastructure and environment glue (`src/pearlalgo/config/settings.py`):
   - Normalization of env vars
   - Validation of IBKR settings
-- **Strategy config (`strategies/nq_intraday/config.py`)** – trading logic parameters:
+- **Strategy config (`pearlalgo.strategies.nq_intraday.config`)** – trading logic parameters (`src/pearlalgo/strategies/nq_intraday/config.py`):
   - ATR multipliers, risk/reward thresholds
   - Session definitions and regime parameters
 
@@ -106,7 +106,7 @@ Notes:
 2. **New service behavior toggle or threshold?**
    - Add to `config/config.yaml` and load via `load_service_config()` or strategy config; avoid hard‑coding in multiple modules.
 3. **New strategy‑specific parameter?**
-   - Add to `strategies/nq_intraday/config.py` and reference from strategy components.
+   - Add to `src/pearlalgo/strategies/nq_intraday/config.py` and reference from strategy components.
 4. **Avoid magic numbers** when they influence trading or service behavior; prefer a named config key with a documented default.
 
 This document is descriptive and does not alter runtime behavior, but it should be kept up to date when configuration wiring changes.

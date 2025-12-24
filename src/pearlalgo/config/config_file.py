@@ -184,8 +184,6 @@ _TYPE_EXPECTATIONS: List[Tuple[str, str, str]] = [
     ("hud", "show_key_levels", "bool"),
     ("hud", "show_right_labels", "bool"),
     ("hud", "show_rsi", "bool"),
-    ("data", "use_level2_data", "bool"),
-    ("data", "order_book_analysis", "bool"),
     ("service", "status_update_interval", "int"),
     ("service", "heartbeat_interval", "int"),
     ("service", "state_save_interval", "int"),

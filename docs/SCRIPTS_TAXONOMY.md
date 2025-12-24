@@ -27,7 +27,6 @@ Key scripts (to keep as canonical):
 - `monitor_until_ready.sh` – wait for Gateway readiness.
 - `disable_auto_sleep.sh` – prevent OS sleep (environmental helper).
 - `setup_ibgateway.sh` – initial setup/orchestration.
-- `vnc_terminal_helper.md` – helper doc for VNC usage.
 
 ## Telegram (`scripts/telegram/`)
 
@@ -72,6 +71,16 @@ Scripts for repository hygiene and cleanup operations.
 - `purge_runtime_artifacts.sh`
   - **Role**: Safe cleanup of runtime/build artifacts (data, logs, telemetry, tmp images, `__pycache__`, egg-info).
   - **Behavior**: Requires explicit `--yes` flag to execute deletions. Supports `--dry-run` to preview what would be removed.
+
+## Monitoring (`scripts/monitoring/`)
+
+External safety nets intended for cron/systemd timers. These scripts validate runtime health/state;
+they do **not** contain trading or strategy logic.
+
+- `watchdog_nq_agent.py`
+  - **Role**: External watchdog for state freshness + silent failure detection.
+  - **Behavior**: Reads `data/nq_agent_state/state.json`, checks staleness against scan interval and dashboard cadence, and can optionally send Telegram alerts.
+  - **Usage**: `python3 scripts/monitoring/watchdog_nq_agent.py [--telegram] [--verbose]`
 
 ## General Guidelines
 

@@ -88,6 +88,15 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Docs**:
   - `docs/SCRIPTS_TAXONOMY.md` (maintenance section)
 
+## Monitoring
+
+- **Logical component**: External watchdog / state freshness validator
+- **Script**:
+  - `scripts/monitoring/watchdog_nq_agent.py` – cron/systemd-timer friendly watchdog for stalled state / silent failures (optional)
+- **Docs**:
+  - `docs/NQ_AGENT_GUIDE.md` (monitoring section)
+  - `docs/SCRIPTS_TAXONOMY.md` (monitoring section)
+
 ## Utilities / Cross‑cutting Concerns
 
 - **Logical component**: Logging, error handling, retry, paths, data quality

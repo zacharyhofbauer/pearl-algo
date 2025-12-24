@@ -64,9 +64,6 @@ data:
   performance_history_limit: 1000  # Max performance records
   stale_data_threshold_minutes: 10 # Alert if data is older than this
   connection_timeout_minutes: 30   # Consider connection lost after this time without data
-  use_level2_data: false           # Level 2 disabled by default (most prop-firm feeds are Level 1)
-  order_book_depth: 10             # Requested depth if Level 2 is enabled
-  order_book_analysis: false       # Order book analysis disabled when Level 2 is off
   
   # Caching options (reduce IBKR request volume)
   # When enabled, historical data is refreshed on a TTL rather than every scan cycle.

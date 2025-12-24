@@ -89,11 +89,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "enable_mtf_cache": False,
         "mtf_refresh_seconds_5m": 300,
         "mtf_refresh_seconds_15m": 900,
-        # Default to Level 1 only unless explicitly enabled in config.yaml.
-        # Most prop-firm feeds are Level 1; Level 2 requires additional entitlements.
-        "use_level2_data": False,
-        "order_book_depth": 10,
-        "order_book_analysis": False,
         # IBKR executor logging verbosity (default OFF).
         # When enabled, logs step-by-step tracing at INFO level.
         # When disabled, step-by-step tracing is at DEBUG level (actionable events stay at INFO/WARN).

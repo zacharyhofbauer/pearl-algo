@@ -63,6 +63,54 @@ ss -tuln | grep 5901
 - **VNC Client:** RealVNC Viewer or TightVNC Viewer
 - **Address:** `your-server-ip:5901` or via SSH tunnel: `ssh -L 5901:localhost:5901 your-server`
 
+### If the terminal won’t open inside VNC (helper)
+
+If clicking terminal icons doesn't work, try these methods:
+
+#### Method 1: Keyboard shortcut
+
+- Press `Ctrl+Alt+T` (common Linux shortcut)
+- Or `Alt+F2` then type `xterm` or `gnome-terminal`
+
+#### Method 2: Right‑click desktop
+
+- Right‑click on desktop → "Open Terminal Here"
+- If this doesn't work, use the SSH-based workflows below.
+
+#### Method 3: Run commands via SSH (recommended)
+
+Instead of using a VNC terminal, run commands from your main terminal:
+
+```bash
+# Check Gateway status
+ssh <user>@<server> "./scripts/gateway/check_tws_conflict.sh"
+
+# Check if 2FA is needed
+ssh <user>@<server> "tail -20 ibkr/ibc/logs/ibc-*.txt | grep -i '2fa\\|authentication'"
+
+# Check if API port is ready
+ssh <user>@<server> "ss -tuln | grep 4002"
+```
+
+#### Method 4: Direct command execution (via SSH; targets VNC display)
+
+If you can see the VNC desktop but terminal won't open, you can run commands directly:
+
+```bash
+# Set DISPLAY to VNC session
+export DISPLAY=:1
+
+# Run Gateway start command
+cd /path/to/pearlalgo-dev-ai-agents
+./scripts/gateway/start_ibgateway_ibc.sh
+```
+
+Then verify Gateway readiness from your main terminal:
+
+```bash
+ss -tuln | grep 4002
+```
+
 ## 🔧 Manual Gateway Login (VNC - Only if Headless Fails)
 
 ```bash

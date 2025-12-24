@@ -282,6 +282,20 @@ cat data/nq_agent_state/performance.json | jq
 tail -f data/nq_agent_state/signals.jsonl | jq
 ```
 
+### External Watchdog (cron/systemd timer) (optional)
+
+If you want an **independent safety net** outside the running agent process (detect stalled state updates / silent failures), use:
+
+```bash
+# Local check (prints summary + exit code)
+python3 scripts/monitoring/watchdog_nq_agent.py --verbose
+
+# Alert to Telegram (requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+python3 scripts/monitoring/watchdog_nq_agent.py --telegram
+```
+
+The watchdog is designed for cron/systemd timers (e.g., every 5 minutes). It reads `data/nq_agent_state/state.json` and returns non‑zero exit codes for warning/critical conditions.
+
 ---
 
 ## 🔍 Troubleshooting

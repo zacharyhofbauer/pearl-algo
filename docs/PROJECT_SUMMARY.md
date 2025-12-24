@@ -210,7 +210,7 @@ The MNQ Trading Agent is designed to:
 - Abstract interface for data providers
 - Methods: `fetch_historical()`, `get_latest_bar()`
 
-**IBKR Provider** (`ibkr/ibkr_provider.py`):
+**IBKR Provider** (`src/pearlalgo/data_providers/ibkr/ibkr_provider.py`):
 - Production-ready IBKR data provider
 - Uses `ib_insync` library for IB Gateway connection
 - Thread-safe executor for IBKR API calls
@@ -225,7 +225,7 @@ The MNQ Trading Agent is designed to:
 - Handles reconnection logic
 - Task queue for async operations
 
-**Entitlements** (`ibkr/entitlements.py`):
+**Entitlements** (`src/pearlalgo/data_providers/ibkr/entitlements.py`):
 - Validates market data subscriptions
 - Checks data permissions
 
@@ -266,7 +266,7 @@ The MNQ Trading Agent is designed to:
 - Loads from environment variables
 - Type validation
 
-**Symbols**: Symbol definitions are embedded in strategy configuration (`strategies/nq_intraday/config.py`). The system currently uses MNQ (Mini NQ) futures.
+**Symbols**: Symbol definitions are embedded in strategy configuration (`src/pearlalgo/strategies/nq_intraday/config.py`). The system currently uses MNQ (Mini NQ) futures.
 
 ---
 
@@ -411,17 +411,22 @@ pearlalgo-dev-ai-agents/
 │   │   └── ibkr_executor.py    # Thread-safe executor
 │   ├── utils/                  # Utilities (cross-cutting)
 │   │   ├── telegram_alerts.py  # Telegram core
+│   │   ├── cadence.py          # Cadence scheduler + metrics
 │   │   ├── market_hours.py     # Market hours logic
 │   │   ├── retry.py            # Retry logic
 │   │   ├── logger.py           # Shared logger instance
 │   │   ├── logging_config.py   # Logging setup helpers
 │   │   ├── error_handler.py    # Error classification + handling helpers
 │   │   ├── data_quality.py     # Data freshness + validation helpers
+│   │   ├── service_controller.py # Shell/script orchestration (Telegram remote control)
+│   │   ├── sparkline.py        # Compact sparkline rendering helpers
+│   │   ├── volume_pressure.py  # Signed-volume pressure computations
 │   │   ├── paths.py            # Timestamp/path helpers
 │   │   └── vwap.py             # VWAP computation
-│   └── config/                 # Configuration (2 files)
+│   └── config/                 # Configuration (3 files)
 │       ├── settings.py          # Settings management
-│       └── config_loader.py     # Service config loader
+│       ├── config_loader.py     # Service config loader
+│       └── config_file.py       # YAML loader + env substitution + validation warnings
 │
 ├── config/                     # Configuration files
 │   └── config.yaml             # Main configuration
@@ -437,6 +442,14 @@ pearlalgo-dev-ai-agents/
 │   │   ├── setup_ibgateway.sh           # Complete gateway setup
 │   │   ├── setup_vnc_for_login.sh       # VNC setup
 │   │   └── disable_auto_sleep.sh        # System settings
+│   ├── telegram/                   # Telegram command-handler scripts
+│   │   ├── start_command_handler.sh     # Start handler (foreground/background)
+│   │   ├── check_command_handler.sh     # Check handler status
+│   │   └── set_bot_commands.py          # Push BotFather commands via API
+│   ├── monitoring/                 # Monitoring scripts (external safety nets)
+│   │   └── watchdog_nq_agent.py         # State freshness watchdog (cron/systemd timer)
+│   ├── maintenance/                # Maintenance/hygiene scripts
+│   │   └── purge_runtime_artifacts.sh   # Safe cleanup (requires --yes)
 │   └── testing/                    # Testing and validation scripts
 │       ├── test_all.py                  # Unified test runner
 │       ├── validate_strategy.py         # Comprehensive validation
@@ -586,7 +599,7 @@ Configuration is resolved using the following precedence rules:
    - Risk/position sizing and prop‑firm assumptions
    - Service intervals, data buffers, and signal thresholds
 3. **Code defaults** in:
-   - `strategies/nq_intraday/config.py` (`NQIntradayConfig`)
+   - `src/pearlalgo/strategies/nq_intraday/config.py` (`NQIntradayConfig`)
    - `pearlalgo.config.config_loader.load_service_config`
    - `pearlalgo.config.settings.Settings`
 
