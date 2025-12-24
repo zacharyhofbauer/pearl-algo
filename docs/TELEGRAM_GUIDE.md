@@ -225,8 +225,8 @@ Explains key terms used in the UI:
 Generates an on-demand price chart.
 
 **Usage:**
-- `/chart` – Generate 16-hour chart (default)
-- `/chart 12` – Generate 12-hour chart
+- `/chart` – Generate 12-hour chart (default)
+- `/chart 16` – Generate 16-hour chart
 - `/chart 24` – Generate 24-hour chart (maximum)
 
 **Features:**
@@ -803,18 +803,18 @@ Dashboard charts can be configured via `config/config.yaml`:
 service:
   dashboard_chart_enabled: true        # Set false to disable automatic chart pushes
   dashboard_chart_interval: 3600       # Seconds between chart pushes (default: 1 hour)
-  dashboard_chart_lookback_hours: 16   # Chart window (12, 16, or 24 hours)
+  dashboard_chart_lookback_hours: 12   # Chart window (12, 16, or 24 hours)
 ```
 
 **Options:**
 - **`dashboard_chart_enabled`**: Set to `false` to disable automatic hourly charts (default: `true`)
 - **`dashboard_chart_interval`**: Adjust the interval in seconds (default: 3600 = 1 hour)
-- **`dashboard_chart_lookback_hours`**: Chart window in hours (default: 16)
+- **`dashboard_chart_lookback_hours`**: Chart window in hours (default: 12)
 
 **Timeframe Toggles:**
 Push dashboard charts include inline toggle buttons:
 - **12h** – Compact view for recent action
-- **16h** – Default view (recommended)
+- **16h** – Medium view for more context
 - **24h** – Extended view for full session context
 
 The active timeframe shows a checkmark (✓). Tapping a button generates a new chart at that timeframe.
@@ -843,16 +843,14 @@ When data is stale, the following are suppressed to avoid misleading confidence:
 
 This ensures operators don't see "green" indicators based on outdated data.
 
-### 9.11 Push Dashboard Buttons (v2)
+### 9.12 Push Dashboard Buttons
 
-Push dashboards (scheduled every 15 minutes) now include inline buttons for one-tap navigation when the command handler is running:
+Push dashboards no longer include inline “menu” buttons by default (to save space and reduce clutter).
 
-```
-[📊 Status] [🛡 Data Quality]
-[📈 Activity] [🏠 Menu]
-```
-
-This allows quick drill-down from push notifications without typing commands.
+Use:
+- `/status` for the full interactive Home Card (with buttons)
+- `/activity` for liveness (“is it doing anything?”)
+- `/data_quality` for triage when something looks off
 
 ---
 

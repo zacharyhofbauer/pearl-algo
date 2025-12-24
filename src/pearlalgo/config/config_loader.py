@@ -55,7 +55,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         # Dashboard chart (hourly image)
         "dashboard_chart_enabled": True,       # set False to disable automatic chart pushes
         "dashboard_chart_interval": 3600,      # 1 hour between dashboard chart pushes
-        "dashboard_chart_lookback_hours": 16,  # default notification chart window (16h)
+        "dashboard_chart_lookback_hours": 12,  # default notification chart window (12h)
         "dashboard_chart_timeframe": "auto",   # "auto" | "5m" | "15m" | "30m" | "1h"
         "dashboard_chart_max_bars": 420,       # cap candles for readability/Telegram
         "dashboard_chart_show_pressure": True, # show signed-volume pressure panel

@@ -437,8 +437,8 @@ class NQAgentTelegramNotifier:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     
                     # Determine which button to highlight based on current_hours
-                    # Default to 16h if not specified
-                    active_hours = current_hours or 16
+                    # Default to 12h if not specified
+                    active_hours = current_hours or 12
                     
                     def btn_label(hours: int) -> str:
                         """Add indicator if this is the active timeframe."""
@@ -1490,26 +1490,9 @@ class NQAgentTelegramNotifier:
                     pass
             
             # Build optional inline buttons when command handler is running
-            reply_markup = None
-            if _is_command_handler_running():
-                try:
-                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                    keyboard = [
-                        [
-                            InlineKeyboardButton("📊 Status", callback_data="status"),
-                            InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
-                        ],
-                        [
-                            InlineKeyboardButton("📈 Activity", callback_data="activity"),
-                            InlineKeyboardButton("🏠 Menu", callback_data="start"),
-                        ],
-                    ]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                except Exception as e:
-                    logger.debug(f"Could not build dashboard buttons: {e}")
-                    reply_markup = None
-            
-            await self.telegram.send_message(message, reply_markup=reply_markup)
+            # Push dashboards: keep calm-minimal by default (no inline menu buttons).
+            # Operators can use /status, /activity, or open the command handler UI when needed.
+            await self.telegram.send_message(message)
             return True
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_dashboard")

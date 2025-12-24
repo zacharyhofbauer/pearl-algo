@@ -476,7 +476,7 @@ class TelegramCommandHandler:
             
             # Parse optional hours argument
             args = context.args if context.args else []
-            lookback_hours = 16.0  # default (matches dashboard chart default)
+            lookback_hours = 12.0  # default (matches dashboard chart default)
             if args:
                 try:
                     lookback_hours = float(args[0])
