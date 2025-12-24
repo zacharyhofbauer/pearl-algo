@@ -18,7 +18,7 @@ import math
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
 
-from pearlalgo.config.config_loader import load_service_config
+from pearlalgo.config.config_loader import load_service_config, parse_market_hours_overrides
 from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
 from pearlalgo.nq_agent.health_monitor import HealthMonitor
@@ -30,7 +30,7 @@ from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
 from pearlalgo.utils.cadence import CadenceMetrics, CadenceScheduler
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
-from pearlalgo.utils.market_hours import get_market_hours
+from pearlalgo.utils.market_hours import configure_market_hours, get_market_hours
 from pearlalgo.utils.volume_pressure import (
     compute_volume_pressure_summary,
     format_volume_pressure,
@@ -97,6 +97,14 @@ class NQAgentService:
         service_settings = service_config.get("service", {})
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
         data_settings = service_config.get("data", {})
+
+        # Configure optional market-hours overrides (disabled by default).
+        # Keeps the declared boundary intact: config drives utils, never the reverse.
+        try:
+            holidays, early_closes = parse_market_hours_overrides(service_config)
+            configure_market_hours(holiday_overrides=holidays, early_closes=early_closes)
+        except Exception as e:
+            logger.warning(f"Could not configure market hours overrides: {e}")
 
         self.running = False
         self.shutdown_requested = False

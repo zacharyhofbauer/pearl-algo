@@ -8,7 +8,7 @@ Futures markets are generally 24/5 (Sunday 6pm ET - Friday 5pm ET).
 from __future__ import annotations
 
 from datetime import datetime, time, timezone
-from typing import Optional
+from typing import Iterable, Mapping, Optional
 
 import pytz
 
@@ -227,81 +227,47 @@ class MarketHours:
 _market_hours = None
 
 
-def _load_market_hours_config() -> tuple[set, dict]:
+_market_hours_holiday_overrides: set[tuple[int, int, int]] = set()
+_market_hours_early_closes: dict[tuple[int, int, int], int] = {}
+
+
+def configure_market_hours(
+    *,
+    holiday_overrides: Optional[Iterable[tuple[int, int, int]]] = None,
+    early_closes: Optional[Mapping[tuple[int, int, int], int]] = None,
+) -> None:
     """
-    Load holiday overrides and early closes from config.yaml if enabled.
-    
-    Returns:
-        (holiday_overrides, early_closes) tuple
-        - holiday_overrides: set of (year, month, day) tuples
-        - early_closes: dict mapping (year, month, day) to close_hour
+    Configure the global MarketHours instance with optional overrides.
+
+    This function exists to keep `utils` boundary-clean: config-driven behavior is wired
+    by higher layers (e.g., `nq_agent`), then injected here.
     """
-    holiday_overrides = set()
-    early_closes = {}
-    
-    try:
-        from pearlalgo.config.config_loader import load_service_config
-        
-        config = load_service_config(validate=False)
-        mh_config = config.get("market_hours", {})
-        
-        # Only load if explicitly enabled
-        if not mh_config.get("enable_config_overrides", False):
-            return holiday_overrides, early_closes
-        
-        # Parse holiday_overrides (list of [year, month, day] lists)
-        raw_holidays = mh_config.get("holiday_overrides", [])
-        if isinstance(raw_holidays, list):
-            for item in raw_holidays:
-                if isinstance(item, (list, tuple)) and len(item) == 3:
-                    try:
-                        holiday_overrides.add((int(item[0]), int(item[1]), int(item[2])))
-                    except (ValueError, TypeError):
-                        pass
-        
-        # Parse early_closes (dict with "YYYY-MM-DD": hour format)
-        raw_early = mh_config.get("early_closes", {})
-        if isinstance(raw_early, dict):
-            for date_str, hour in raw_early.items():
-                try:
-                    # Parse "YYYY-MM-DD" format
-                    parts = str(date_str).split("-")
-                    if len(parts) == 3:
-                        key = (int(parts[0]), int(parts[1]), int(parts[2]))
-                        early_closes[key] = int(hour)
-                except (ValueError, TypeError):
-                    pass
-        
-        if holiday_overrides or early_closes:
-            logger.info(
-                f"Loaded market hours overrides from config: "
-                f"{len(holiday_overrides)} holidays, {len(early_closes)} early closes"
-            )
-        
-    except ImportError:
-        # Config loader not available (e.g., in unit tests)
-        pass
-    except Exception as e:
-        logger.warning(f"Could not load market hours config: {e}")
-    
-    return holiday_overrides, early_closes
+    global _market_hours, _market_hours_holiday_overrides, _market_hours_early_closes
+    _market_hours_holiday_overrides = set(holiday_overrides or [])
+    _market_hours_early_closes = dict(early_closes or {})
+    _market_hours = None
+    if _market_hours_holiday_overrides or _market_hours_early_closes:
+        logger.info(
+            "Configured market hours overrides: "
+            f"{len(_market_hours_holiday_overrides)} holidays, {len(_market_hours_early_closes)} early closes"
+        )
 
 
 def get_market_hours() -> MarketHours:
     """
     Get global market hours instance.
     
-    Loads holiday_overrides and early_closes from config.yaml if
-    market_hours.enable_config_overrides is set to true.
+    Market-hours overrides (holidays/early closes) must be configured by a higher layer
+    (e.g., `pearlalgo.nq_agent.service`) via `configure_market_hours()`.
     """
     global _market_hours
     if _market_hours is None:
-        # Load config overrides if enabled
-        holiday_overrides, early_closes = _load_market_hours_config()
-        
+        holiday_overrides = _market_hours_holiday_overrides
+        early_closes = _market_hours_early_closes
+
         _market_hours = MarketHours(
             holiday_overrides=list(holiday_overrides) if holiday_overrides else None,
-            early_closes=early_closes if early_closes else None,
+            early_closes=dict(early_closes) if early_closes else None,
         )
     return _market_hours
 

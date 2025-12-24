@@ -4460,6 +4460,17 @@ def main():
         load_dotenv(project_root / ".env")
     except ImportError:
         pass
+
+    # Optional: configure market-hours overrides from config/config.yaml (disabled by default).
+    # This preserves the module boundary: utils never imports config.
+    try:
+        from pearlalgo.config.config_loader import load_market_hours_overrides
+        from pearlalgo.utils.market_hours import configure_market_hours
+
+        holidays, early_closes = load_market_hours_overrides(validate=False)
+        configure_market_hours(holiday_overrides=holidays, early_closes=early_closes)
+    except Exception as e:
+        logger.warning(f"Could not configure market hours overrides: {e}")
     
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")

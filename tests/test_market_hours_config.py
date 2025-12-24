@@ -13,9 +13,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from pearlalgo.config.config_loader import load_market_hours_overrides
 from pearlalgo.utils.market_hours import (
     MarketHours,
-    _load_market_hours_config,
+    configure_market_hours,
     get_market_hours,
     reset_market_hours,
 )
@@ -41,7 +42,7 @@ class TestMarketHoursConfigLoading:
                 }
             }
             
-            holidays, early = _load_market_hours_config()
+            holidays, early = load_market_hours_overrides()
             
             assert len(holidays) == 0
             assert len(early) == 0
@@ -60,7 +61,7 @@ class TestMarketHoursConfigLoading:
                 }
             }
             
-            holidays, early = _load_market_hours_config()
+            holidays, early = load_market_hours_overrides()
             
             assert (2025, 11, 27) in holidays
             assert (2025, 3, 28) in holidays
@@ -80,7 +81,7 @@ class TestMarketHoursConfigLoading:
                 }
             }
             
-            holidays, early = _load_market_hours_config()
+            holidays, early = load_market_hours_overrides()
             
             assert (2025, 11, 26) in early
             assert early[(2025, 11, 26)] == 13
@@ -103,7 +104,7 @@ class TestMarketHoursConfigLoading:
                 }
             }
             
-            holidays, early = _load_market_hours_config()
+            holidays, early = load_market_hours_overrides()
             
             # Should only include the valid entry
             assert len(holidays) == 1
@@ -124,7 +125,7 @@ class TestMarketHoursConfigLoading:
                 }
             }
             
-            holidays, early = _load_market_hours_config()
+            holidays, early = load_market_hours_overrides()
             
             # Should only include the valid entry
             assert len(early) == 1
@@ -133,7 +134,7 @@ class TestMarketHoursConfigLoading:
     def test_handles_missing_config_loader(self):
         """Should return empty when config loader import fails."""
         with patch('pearlalgo.config.config_loader.load_service_config', side_effect=ImportError):
-            holidays, early = _load_market_hours_config()
+            holidays, early = load_market_hours_overrides()
             
             assert len(holidays) == 0
             assert len(early) == 0
@@ -161,6 +162,8 @@ class TestGetMarketHoursWithConfig:
                 }
             }
             
+            holidays, early_closes = load_market_hours_overrides()
+            configure_market_hours(holiday_overrides=holidays, early_closes=early_closes)
             mh = get_market_hours()
             
             # June 15, 2025 is a Sunday - normally market opens at 6 PM
@@ -184,6 +187,8 @@ class TestGetMarketHoursWithConfig:
                 }
             }
             
+            holidays, early_closes = load_market_hours_overrides()
+            configure_market_hours(holiday_overrides=holidays, early_closes=early_closes)
             mh = get_market_hours()
             
             # June 16, 2025 is Monday
@@ -204,6 +209,8 @@ class TestGetMarketHoursWithConfig:
                 }
             }
             
+            holidays, early_closes = load_market_hours_overrides()
+            configure_market_hours(holiday_overrides=holidays, early_closes=early_closes)
             mh1 = get_market_hours()
             mh2 = get_market_hours()
             
@@ -220,6 +227,8 @@ class TestGetMarketHoursWithConfig:
                 }
             }
             
+            holidays, early_closes = load_market_hours_overrides()
+            configure_market_hours(holiday_overrides=holidays, early_closes=early_closes)
             mh1 = get_market_hours()
             reset_market_hours()
             mh2 = get_market_hours()

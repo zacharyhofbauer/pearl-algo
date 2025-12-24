@@ -34,9 +34,10 @@ data settings, signals, and performance tracking.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from pearlalgo.config.config_file import load_config_yaml, log_config_warnings
+from pearlalgo.utils.logger import logger
 
 
 # Default values for service configuration sections
@@ -162,6 +163,87 @@ def load_service_config(
         result[section] = {**defaults, **config_data.get(section, {})}
     
     return result
+
+
+def parse_market_hours_overrides(
+    config: Mapping[str, Any],
+) -> tuple[set[tuple[int, int, int]], dict[tuple[int, int, int], int]]:
+    """
+    Parse optional market-hours overrides from a loaded service config dict.
+
+    This lives in the `config` layer by design: configuration may depend on `utils`,
+    but `utils` must never depend on configuration (see docs/PROJECT_SUMMARY.md).
+
+    Expected schema under `market_hours`:
+    - enable_config_overrides: bool (default False)
+    - holiday_overrides: list of [year, month, day]
+    - early_closes: dict {"YYYY-MM-DD": hour_int}
+    """
+    holiday_overrides: set[tuple[int, int, int]] = set()
+    early_closes: dict[tuple[int, int, int], int] = {}
+
+    mh_config = config.get("market_hours", {}) or {}
+    if not isinstance(mh_config, dict):
+        return holiday_overrides, early_closes
+
+    # Only load if explicitly enabled (preserves default behavior).
+    if not mh_config.get("enable_config_overrides", False):
+        return holiday_overrides, early_closes
+
+    # Parse holiday_overrides (list of [year, month, day] lists)
+    raw_holidays = mh_config.get("holiday_overrides", [])
+    if isinstance(raw_holidays, list):
+        for item in raw_holidays:
+            if isinstance(item, (list, tuple)) and len(item) == 3:
+                try:
+                    holiday_overrides.add((int(item[0]), int(item[1]), int(item[2])))
+                except (ValueError, TypeError):
+                    # Malformed entries are ignored (best-effort feature).
+                    pass
+
+    # Parse early_closes (dict with "YYYY-MM-DD": hour format)
+    raw_early = mh_config.get("early_closes", {})
+    if isinstance(raw_early, dict):
+        for date_str, hour in raw_early.items():
+            try:
+                parts = str(date_str).split("-")
+                if len(parts) != 3:
+                    continue
+                key = (int(parts[0]), int(parts[1]), int(parts[2]))
+                early_closes[key] = int(hour)
+            except (ValueError, TypeError):
+                # Malformed entries are ignored (best-effort feature).
+                pass
+
+    return holiday_overrides, early_closes
+
+
+def load_market_hours_overrides(
+    config_path: Optional[Path] = None,
+    *,
+    validate: bool = False,
+) -> tuple[set[tuple[int, int, int]], dict[tuple[int, int, int], int]]:
+    """
+    Load optional market-hours overrides from config/config.yaml.
+
+    - Disabled by default (enable via `market_hours.enable_config_overrides: true`)
+    - Never raises on parse errors; returns empty overrides instead
+    """
+    try:
+        config = load_service_config(config_path=config_path, validate=validate)
+        holiday_overrides, early_closes = parse_market_hours_overrides(config)
+        if holiday_overrides or early_closes:
+            logger.info(
+                "Loaded market hours overrides from config: "
+                f"{len(holiday_overrides)} holidays, {len(early_closes)} early closes"
+            )
+        return holiday_overrides, early_closes
+    except ImportError:
+        # Defensive: treat as optional feature.
+        return set(), {}
+    except Exception as e:
+        logger.warning(f"Could not load market hours overrides: {e}")
+        return set(), {}
 
 
 
