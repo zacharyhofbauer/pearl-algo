@@ -70,9 +70,26 @@ class VolumeProfile:
         if df_session.empty:
             return self._default_profile()
 
+        # Sanitize: drop rows with non-finite values in high/low/volume
+        # This prevents crashes from inf/-inf/NaN values propagating to bucket calculations
+        required_cols = ["high", "low", "volume"]
+        cols_present = [c for c in required_cols if c in df_session.columns]
+        if cols_present:
+            mask = pd.Series(True, index=df_session.index)
+            for col in cols_present:
+                mask &= np.isfinite(df_session[col].astype(float))
+            df_session = df_session[mask]
+
+        if df_session.empty or len(df_session) < 5:
+            return self._default_profile()
+
         # Get price range
         price_min = df_session["low"].min()
         price_max = df_session["high"].max()
+
+        # Guard against non-finite price bounds (defensive)
+        if not np.isfinite(price_min) or not np.isfinite(price_max):
+            return self._default_profile()
 
         if price_max <= price_min:
             return self._default_profile()
@@ -80,6 +97,10 @@ class VolumeProfile:
         # Create price buckets
         price_range = price_max - price_min
         bucket_size = price_range / self.price_buckets
+
+        # Guard against non-finite or non-positive bucket_size
+        if not np.isfinite(bucket_size) or bucket_size <= 0:
+            return self._default_profile()
 
         # Initialize volume buckets
         volume_buckets = np.zeros(self.price_buckets)

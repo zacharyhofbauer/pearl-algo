@@ -750,8 +750,11 @@ This section summarizes the current test coverage and highlights areas for futur
 #### Tests under `tests/`
 
 - `mock_data_provider.py` – common mock provider for unit/integration tests
+- `test_base_cache.py` – base historical caching behavior (cache hits, buffer shape, timestamp extraction)
+- `test_config_wiring.py` – config propagation from `config.yaml` to `NQAgentService` and `NQAgentDataFetcher`
 - `test_edge_cases.py` – focused edge-case tests (no-data fetch + short-run service lifecycle)
 - `test_error_recovery.py` – circuit-breaker behavior (connection-failure pause) using a stub provider
+- `test_signal_generation_edge_cases.py` – edge cases for signal generation (NaN, inf, extreme prices, malformed data)
 
 ### Observed Gaps
 
@@ -763,42 +766,44 @@ These gaps are **observational only** and do not change behavior.
 2. **Circuit breaker thresholds** (`test_error_recovery.py`)
    - Connection-failure pause behavior is tested, but other breaker paths are not yet directly covered (e.g., consecutive errors pause, data-fetch backoff).
 
-3. **Configuration wiring**
-   - There are no explicit tests verifying that values from `config/config.yaml` and `Settings` correctly propagate into `NQAgentService` (intervals, thresholds) and data providers.
-
-4. **IBKR entitlements and fallback behavior**
+3. **IBKR entitlements and fallback behavior**
    - `smoke_test_ibkr.py` and docs describe entitlements, but there are no isolated unit tests for `ibkr.entitlements` logic.
 
-5. **Command handler behavior**
+4. **Command handler behavior**
    - The Telegram command handler (`telegram_command_handler.py`) is exercised indirectly via manual testing but does not yet have automated tests for `/status`, `/signals`, `/performance` command flows.
 
-6. **Volume profile edge cases** (`test_signal_generation_edge_cases.py`)
-   - One edge case is intentionally marked **xfail**: `inf` values can crash `VolumeProfile.calculate_profile()` (needs sanitization/guardrails).
+### Recently Resolved Gaps
+
+The following gaps have been addressed with explicit test coverage:
+
+1. **Configuration wiring** (`test_config_wiring.py`)
+   - Tests verify that values from `config/config.yaml` and `Settings` correctly propagate into `NQAgentService` (intervals, thresholds, flags) and `NQAgentDataFetcher` (buffer sizes, cache settings).
+
+2. **Volume profile edge cases** (`test_signal_generation_edge_cases.py`)
+   - The previously-xfail test for `inf` values is now passing. `VolumeProfile.calculate_profile()` sanitizes non-finite values before computing buckets.
+
+3. **Base historical cache** (`test_base_cache.py`)
+   - Tests validate cache hit behavior, dataframe shape consistency (no column accumulation), and historical fallback timestamp extraction from both index-based and column-based dataframes.
 
 ### Suggested Future Tests
 
-1. **Config propagation tests**
-   - New tests that:
-     - Load `config/config.yaml` via `load_service_config()`
-     - Instantiate `NQAgentService` and assert that service intervals, circuit breaker thresholds, and buffer sizes match config values.
-
-2. **Settings/IBKR normalization tests**
+1. **Settings/IBKR normalization tests**
    - Unit tests for `get_settings()` and env normalization paths, ensuring `IBKR_*` and `PEARLALGO_IB_*` precedence behaves as documented.
 
-3. **Circuit breaker integration tests**
+2. **Circuit breaker integration tests**
    - Controlled tests that simulate repeated errors through a stub data provider and assert:
      - `connection_failures` threshold triggers pause
      - consecutive error pause triggers when strategy/processing raises repeatedly
      - data-fetch error backoff behavior activates at `max_data_fetch_errors`
      - Telegram circuit‑breaker alerts are sent (using a mock notifier).
 
-4. **Command handler tests**
+3. **Command handler tests**
    - Async tests for `TelegramCommandHandler` that mock Telegram `Update` objects and verify:
      - `/status` returns correctly formatted status and buttons
      - `/signals` and `/performance` read from state/performance files and render expected output
      - Unauthorized chat IDs are rejected.
 
-5. **Market hours / data quality edge cases**
+4. **Market hours / data quality edge cases**
    - Add DST/holiday tests using mocked `market_hours` and timestamped data frames (no placeholders).
 
 ### Tests Potentially Safe to Refine

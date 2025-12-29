@@ -155,24 +155,18 @@ class TestNaNHandling:
         signals = generator.generate(market_data)
         assert isinstance(signals, list)
 
-    @pytest.mark.xfail(
-        reason="KNOWN BUG: volume_profile.py crashes on inf values. "
-               "VolumeProfile.calculate_profile() uses int() on NaN derived from inf, "
-               "causing ValueError. Should be fixed by adding inf check or try/except.",
-        raises=ValueError,
-    )
     def test_dataframe_with_inf_values(self) -> None:
         """
         Assumption: Infinite values in prices should not crash.
         Failure signal: Exception raised
         Test type: Deterministic
         
-        DISCOVERED BUG: volume_profile.py line 99 does:
-            low_bucket = int((low - price_min) / bucket_size)
-        When high=inf or low=-inf, price_min/price_max become inf,
-        bucket_size becomes NaN, and int(NaN) raises ValueError.
+        Previously tracked as KNOWN BUG (now fixed):
+        VolumeProfile.calculate_profile() crashed when high=inf or low=-inf
+        because price_min/price_max became inf, bucket_size became NaN,
+        and int(NaN) raised ValueError.
         
-        Fix suggestion: Add data validation or wrap in try/except.
+        Fix: VolumeProfile now sanitizes non-finite values before computing buckets.
         """
         config = NQIntradayConfig()
         generator = NQSignalGenerator(config=config)
@@ -183,7 +177,7 @@ class TestNaNHandling:
         
         market_data = {"df": df}
         
-        # Should not raise (but currently does - this test documents the bug)
+        # Should not raise - non-finite values are filtered out
         signals = generator.generate(market_data)
         assert isinstance(signals, list)
 

@@ -67,6 +67,9 @@ class NQAgentDataFetcher:
         self._base_cache_hits: int = 0
         self._base_cache_misses: int = 0
         self._base_request_count: int = 0  # Total historical fetch requests
+        # Dedicated cache for provider-shaped historical data (timestamp-indexed).
+        # Separate from _data_buffer which is strategy-shaped (timestamp as column).
+        self._base_historical_cache: Optional[pd.DataFrame] = None
 
         # MTF caching (default OFF) - reduces repeated 5m/15m historical fetches when scan_interval is fast.
         self._enable_mtf_cache: bool = bool(data_settings.get("enable_mtf_cache", False))
@@ -144,12 +147,8 @@ class NQAgentDataFetcher:
                 # Log data freshness status
                 if not data_freshness_warning:
                     logger.debug(f"Data is fresh: {len(df)} bars retrieved for {self.config.symbol}")
-                    # Preserve timestamps for downstream charting/HUD context (sessions, key levels, etc).
-                    # IBKRProvider returns a DatetimeIndex named "timestamp"; reset_index keeps it as a column.
-                    self._data_buffer = df.tail(self._buffer_size).reset_index()
-                    # Ensure timestamp column exists (handles both index-based and column-based providers)
-                    if "timestamp" not in self._data_buffer.columns and "index" in self._data_buffer.columns:
-                        self._data_buffer = self._data_buffer.rename(columns={"index": "timestamp"})
+                    # Use centralized normalization to avoid double-reset_index issues
+                    self._data_buffer = self._normalize_to_strategy_buffer(df, self._buffer_size)
                 
                 # Log data freshness at INFO level for observability
                 if "timestamp" in df.columns:
@@ -230,12 +229,30 @@ class NQAgentDataFetcher:
                     data_source = "historical_fallback"
                     logger.info(f"Using historical data fallback for latest bar (real-time subscription may not be available)")
                     latest_row = df.iloc[-1]
-                    timestamp = latest_row.name if hasattr(latest_row, 'name') else datetime.now(timezone.utc)
+                    
+                    # Extract timestamp - handle both index-based and column-based dataframes
+                    timestamp = None
+                    # First try: timestamp column (strategy-buffer shape)
+                    if "timestamp" in df.columns:
+                        ts_val = df["timestamp"].iloc[-1]
+                        if ts_val is not None and pd.notna(ts_val):
+                            timestamp = ts_val
+                    # Second try: DatetimeIndex (provider shape)
+                    if timestamp is None and isinstance(df.index, pd.DatetimeIndex):
+                        timestamp = latest_row.name
+                    # Third try: named index
+                    if timestamp is None and hasattr(latest_row, 'name') and latest_row.name is not None:
+                        timestamp = latest_row.name
+                    # Fallback to now
+                    if timestamp is None:
+                        timestamp = datetime.now(timezone.utc)
+                    
+                    # Normalize timestamp to datetime
                     if hasattr(timestamp, 'to_pydatetime'):
                         timestamp = timestamp.to_pydatetime()
                     elif isinstance(timestamp, pd.Timestamp):
                         timestamp = timestamp.to_pydatetime()
-                    if timestamp.tzinfo is None:
+                    if isinstance(timestamp, datetime) and timestamp.tzinfo is None:
                         timestamp = timestamp.replace(tzinfo=timezone.utc)
 
                     # Extract values from Series/DataFrame row
@@ -312,12 +329,8 @@ class NQAgentDataFetcher:
             # true timeframe bar. latest_bar remains separate for dashboards/freshness.
             if self._data_buffer is None or self._data_buffer.empty:
                 if not df.empty:
-                    # Preserve timestamps for downstream charting/HUD context (sessions, key levels, etc).
-                    # IBKRProvider returns a DatetimeIndex named "timestamp"; reset_index keeps it as a column.
-                    self._data_buffer = df.tail(self._buffer_size).reset_index()
-                    # Ensure timestamp column exists (handles both index-based and column-based providers)
-                    if "timestamp" not in self._data_buffer.columns and "index" in self._data_buffer.columns:
-                        self._data_buffer = self._data_buffer.rename(columns={"index": "timestamp"})
+                    # Use centralized normalization to avoid double-reset_index issues
+                    self._data_buffer = self._normalize_to_strategy_buffer(df, self._buffer_size)
 
             # Fetch multi-timeframe data (optionally cached)
             df_5m, df_15m = await self._fetch_multitimeframe_data(end)
@@ -349,6 +362,43 @@ class NQAgentDataFetcher:
             self._last_market_data = market_data
             return market_data
 
+    def _normalize_to_strategy_buffer(self, df: pd.DataFrame, buffer_size: int) -> pd.DataFrame:
+        """
+        Normalize provider-shaped DataFrame to strategy buffer format.
+        
+        Strategy buffer format has 'timestamp' as a column (not index).
+        This method handles both:
+        - Provider data with DatetimeIndex named 'timestamp'
+        - Data that already has a 'timestamp' column
+        
+        Args:
+            df: DataFrame from provider or cache
+            buffer_size: Maximum rows to keep
+            
+        Returns:
+            DataFrame with 'timestamp' column, no 'index' column accumulation
+        """
+        if df.empty:
+            return df
+        
+        result = df.tail(buffer_size).copy()
+        
+        # If 'timestamp' is already a column, don't reset_index again
+        if "timestamp" in result.columns:
+            # Drop any stray 'index' column from previous resets
+            if "index" in result.columns:
+                result = result.drop(columns=["index"])
+            return result
+        
+        # If index is DatetimeIndex or named 'timestamp', move to column
+        if isinstance(result.index, pd.DatetimeIndex) or result.index.name == "timestamp":
+            result = result.reset_index()
+            # Ensure the column is named 'timestamp'
+            if "index" in result.columns and "timestamp" not in result.columns:
+                result = result.rename(columns={"index": "timestamp"})
+        
+        return result
+
     async def _fetch_base_historical_data(
         self, start: datetime, end: datetime
     ) -> pd.DataFrame:
@@ -364,16 +414,17 @@ class NQAgentDataFetcher:
             end: End datetime for data fetch
             
         Returns:
-            DataFrame with historical OHLCV data
+            DataFrame with historical OHLCV data (provider-shaped: timestamp-indexed)
         """
         now = end
         
         # Check if cache is enabled and valid
-        if self._enable_base_cache and self._data_buffer is not None and not self._data_buffer.empty:
+        # Use dedicated _base_historical_cache, not strategy buffer
+        if self._enable_base_cache and self._base_historical_cache is not None and not self._base_historical_cache.empty:
             if self._base_last_refresh is not None:
                 elapsed = (now - self._base_last_refresh).total_seconds()
                 if elapsed < self._base_refresh_seconds:
-                    # Cache hit - return existing buffer
+                    # Cache hit - return provider-shaped cache (not strategy buffer)
                     self._base_cache_hits += 1
                     logger.debug(
                         "Base historical cache hit",
@@ -384,7 +435,7 @@ class NQAgentDataFetcher:
                             "misses": self._base_cache_misses,
                         },
                     )
-                    return self._data_buffer.copy()
+                    return self._base_historical_cache.copy()
         
         # Cache miss (or caching disabled) - fetch fresh data
         self._base_cache_misses += 1
@@ -413,9 +464,10 @@ class NQAgentDataFetcher:
             )
         )
         
-        # Update cache timestamp on successful fetch
+        # Update cache on successful fetch (store provider-shaped data)
         if not df.empty and self._enable_base_cache:
             self._base_last_refresh = now
+            self._base_historical_cache = df.copy()
         
         return df
 
@@ -542,17 +594,11 @@ class NQAgentDataFetcher:
 
             # Update buffers (bars-only contract: only real OHLCV bars).
             if not df_5m.empty:
-                # Preserve timestamp for downstream charting/overlays and better operator debugging.
-                self._data_buffer_5m = df_5m.tail(self._buffer_size_5m).reset_index()
-                # Ensure timestamp column exists (handles both index-based and column-based providers)
-                if "timestamp" not in self._data_buffer_5m.columns and "index" in self._data_buffer_5m.columns:
-                    self._data_buffer_5m = self._data_buffer_5m.rename(columns={"index": "timestamp"})
+                # Use centralized normalization to avoid double-reset_index issues
+                self._data_buffer_5m = self._normalize_to_strategy_buffer(df_5m, self._buffer_size_5m)
             if not df_15m.empty:
-                # Preserve timestamp for downstream charting/overlays and better operator debugging.
-                self._data_buffer_15m = df_15m.tail(self._buffer_size_15m).reset_index()
-                # Ensure timestamp column exists (handles both index-based and column-based providers)
-                if "timestamp" not in self._data_buffer_15m.columns and "index" in self._data_buffer_15m.columns:
-                    self._data_buffer_15m = self._data_buffer_15m.rename(columns={"index": "timestamp"})
+                # Use centralized normalization to avoid double-reset_index issues
+                self._data_buffer_15m = self._normalize_to_strategy_buffer(df_15m, self._buffer_size_15m)
 
             return (
                 self._data_buffer_5m.copy() if self._data_buffer_5m is not None else pd.DataFrame(),
