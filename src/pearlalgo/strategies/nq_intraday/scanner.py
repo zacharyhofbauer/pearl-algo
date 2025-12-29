@@ -288,8 +288,37 @@ class NQScanner:
         if df.empty or len(df) < self.config.lookback_periods:
             return signals
 
-        # Detect market regime
-        regime = self.regime_detector.detect_regime(df)
+        # Extract bar timestamp for deterministic session detection in backtests.
+        # Use latest_bar.timestamp if available (backtest passes is_backtest=True),
+        # otherwise fall back to df index or None (uses wall-clock).
+        bar_dt = None
+        latest_bar = market_data.get("latest_bar") if market_data else None
+        if latest_bar and latest_bar.get("timestamp"):
+            ts = latest_bar["timestamp"]
+            if isinstance(ts, str):
+                try:
+                    bar_dt = pd.to_datetime(ts)
+                    if bar_dt.tzinfo is None:
+                        bar_dt = bar_dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    bar_dt = None
+            elif isinstance(ts, pd.Timestamp):
+                bar_dt = ts.to_pydatetime()
+                if bar_dt.tzinfo is None:
+                    bar_dt = bar_dt.replace(tzinfo=timezone.utc)
+            elif isinstance(ts, datetime):
+                bar_dt = ts
+                if bar_dt.tzinfo is None:
+                    bar_dt = bar_dt.replace(tzinfo=timezone.utc)
+        # Fallback: extract from df index if backtest and bar_dt not set
+        if bar_dt is None and market_data and market_data.get("is_backtest"):
+            if isinstance(df.index, pd.DatetimeIndex) and len(df) > 0:
+                bar_dt = df.index[-1].to_pydatetime()
+                if bar_dt.tzinfo is None:
+                    bar_dt = bar_dt.replace(tzinfo=timezone.utc)
+
+        # Detect market regime (pass bar_dt for deterministic session detection)
+        regime = self.regime_detector.detect_regime(df, dt=bar_dt)
         regime_type = regime.get("regime", "unknown")
         volatility = regime.get("volatility", "unknown")
         regime_confidence = regime.get("confidence", 0)
@@ -311,12 +340,12 @@ class NQScanner:
         
         logger.info(f"Regime: {regime_type}, Volatility: {volatility}, Confidence: {regime_confidence:.2f}, ATR Expansion: {atr_expansion}")
         
-        # Log market hours status
-        is_market_hours = self.is_market_hours()
+        # Log market hours status (use bar_dt for deterministic backtest logging)
+        is_market_hours = self.is_market_hours(bar_dt)
         if ET_TIMEZONE is not None:
-            now_utc = datetime.now(timezone.utc)
-            et_time = now_utc.astimezone(ET_TIMEZONE)
-            logger.info(f"Market hours: {is_market_hours}, Current ET time: {et_time.strftime('%H:%M:%S')}")
+            check_time = bar_dt if bar_dt else datetime.now(timezone.utc)
+            et_time = check_time.astimezone(ET_TIMEZONE)
+            logger.info(f"Market hours: {is_market_hours}, ET time: {et_time.strftime('%H:%M:%S')}")
         else:
             logger.info(f"Market hours: {is_market_hours}")
 

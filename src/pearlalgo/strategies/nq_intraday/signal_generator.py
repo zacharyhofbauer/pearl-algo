@@ -622,7 +622,21 @@ class NQSignalGenerator:
 
         # Add metadata
         formatted["symbol"] = self.config.symbol
-        formatted["timestamp"] = datetime.now(timezone.utc).isoformat()
+        
+        # Use bar timestamp in backtest mode for determinism; wall-clock otherwise.
+        is_backtest = market_data.get("is_backtest", False)
+        bar_ts = None
+        if is_backtest:
+            latest_bar = market_data.get("latest_bar")
+            if latest_bar and latest_bar.get("timestamp"):
+                bar_ts = latest_bar["timestamp"]
+                # Normalize to ISO string if it's a datetime
+                if hasattr(bar_ts, "isoformat"):
+                    bar_ts = bar_ts.isoformat()
+                elif isinstance(bar_ts, pd.Timestamp):
+                    bar_ts = bar_ts.isoformat()
+        formatted["timestamp"] = bar_ts if bar_ts else datetime.now(timezone.utc).isoformat()
+        
         formatted["strategy"] = "nq_intraday"
         formatted["timeframe"] = self.config.timeframe
 

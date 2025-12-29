@@ -41,12 +41,14 @@ class RegimeDetector:
         """Initialize regime detector."""
         logger.info("RegimeDetector initialized")
 
-    def detect_regime(self, df: pd.DataFrame) -> Dict:
+    def detect_regime(self, df: pd.DataFrame, dt: Optional[datetime] = None) -> Dict:
         """
         Detect current market regime.
         
         Args:
             df: DataFrame with OHLCV data and indicators (must have ATR, EMA calculated)
+            dt: Optional datetime (UTC) for session detection. If None, uses wall-clock time.
+                Pass the bar timestamp in backtest mode for deterministic results.
             
         Returns:
             Dictionary with regime classification:
@@ -58,7 +60,7 @@ class RegimeDetector:
             }
         """
         if df.empty or len(df) < 20:
-            return self._default_regime()
+            return self._default_regime(dt=dt)
 
         latest = df.iloc[-1]
 
@@ -68,8 +70,8 @@ class RegimeDetector:
         # Detect volatility regime
         volatility_regime, vol_confidence = self._detect_volatility(df, latest)
 
-        # Detect session context
-        session = self._detect_session()
+        # Detect session context (use provided dt for deterministic backtests)
+        session = self._detect_session(dt=dt)
 
         # Overall confidence (weighted average)
         overall_confidence = (trend_confidence * 0.5 + vol_confidence * 0.3 + 0.2)
@@ -182,14 +184,23 @@ class RegimeDetector:
             # Normal volatility
             return ("normal", 0.7)
 
-    def _detect_session(self) -> str:
+    def _detect_session(self, dt: Optional[datetime] = None) -> str:
         """
         Detect current session phase.
+        
+        Args:
+            dt: Optional datetime (UTC) to use for session detection.
+                If None, uses wall-clock time. Pass the bar timestamp
+                in backtest mode for deterministic results.
         
         Returns:
             Session phase: "opening", "morning_trend", "lunch_lull", "afternoon", "closing"
         """
-        now = datetime.now(timezone.utc)
+        now = dt if dt is not None else datetime.now(timezone.utc)
+
+        # Ensure timezone awareness (assume UTC if naive)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
 
         # Convert to ET
         if ET_TIMEZONE is not None:
@@ -283,12 +294,16 @@ class RegimeDetector:
 
         return df
 
-    def _default_regime(self) -> Dict:
-        """Return default regime when data is insufficient."""
+    def _default_regime(self, dt: Optional[datetime] = None) -> Dict:
+        """Return default regime when data is insufficient.
+        
+        Args:
+            dt: Optional datetime (UTC) for session detection.
+        """
         return {
             "regime": "ranging",
             "volatility": "normal",
-            "session": self._detect_session(),
+            "session": self._detect_session(dt=dt),
             "confidence": 0.5,
         }
 

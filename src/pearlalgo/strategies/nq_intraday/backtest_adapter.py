@@ -70,6 +70,81 @@ class Trade:
 
 
 @dataclass
+class VerificationSummary:
+    """Backtest verification diagnostics for strategy health assessment.
+    
+    Answers the key questions:
+    - Does the strategy generate signals at all?
+    - Under what conditions do signals appear?
+    - What are the bottlenecks preventing signals?
+    """
+    
+    # Signal presence & density
+    signals_per_day: float = 0.0
+    signals_per_hour: float = 0.0
+    trading_days: int = 0
+    trading_hours: int = 0
+    
+    # Signal distribution by type
+    signal_type_distribution: Dict[str, int] = field(default_factory=dict)
+    
+    # Regime activation (where signals occur)
+    regime_distribution: Dict[str, int] = field(default_factory=dict)  # trending_bullish, etc.
+    volatility_distribution: Dict[str, int] = field(default_factory=dict)  # low, normal, high
+    session_distribution: Dict[str, int] = field(default_factory=dict)  # opening, morning_trend, etc.
+    
+    # Condition bottlenecks (why signals were rejected or not generated)
+    bottleneck_summary: Dict[str, int] = field(default_factory=dict)  # e.g., {"low_volume": 42, ...}
+    top_gate_reasons: List[str] = field(default_factory=list)  # Most common scanner gate reasons
+    
+    # Data coverage
+    date_range_start: Optional[str] = None
+    date_range_end: Optional[str] = None
+    
+    def to_dict(self) -> Dict:
+        """Convert to dictionary for JSON export."""
+        return {
+            "signals_per_day": self.signals_per_day,
+            "signals_per_hour": self.signals_per_hour,
+            "trading_days": self.trading_days,
+            "trading_hours": self.trading_hours,
+            "signal_type_distribution": self.signal_type_distribution,
+            "regime_distribution": self.regime_distribution,
+            "volatility_distribution": self.volatility_distribution,
+            "session_distribution": self.session_distribution,
+            "bottleneck_summary": self.bottleneck_summary,
+            "top_gate_reasons": self.top_gate_reasons,
+            "date_range_start": self.date_range_start,
+            "date_range_end": self.date_range_end,
+        }
+    
+    def format_compact(self) -> str:
+        """Format as compact string for Telegram display."""
+        lines = []
+        
+        # Signal density
+        if self.signals_per_day > 0:
+            lines.append(f"📊 {self.signals_per_day:.1f} signals/day ({self.trading_days} days)")
+        else:
+            lines.append("⚠️ No signals generated")
+        
+        # Top regimes
+        if self.regime_distribution:
+            top_regime = max(self.regime_distribution.items(), key=lambda x: x[1], default=(None, 0))
+            if top_regime[0]:
+                lines.append(f"📈 Top regime: {top_regime[0]} ({top_regime[1]} signals)")
+        
+        # Top bottlenecks
+        if self.bottleneck_summary:
+            sorted_bottlenecks = sorted(self.bottleneck_summary.items(), key=lambda x: x[1], reverse=True)[:3]
+            if sorted_bottlenecks:
+                bottleneck_str = ", ".join([f"{k}: {v}" for k, v in sorted_bottlenecks])
+                lines.append(f"🚧 Bottlenecks: {bottleneck_str}")
+        
+        return "\n".join(lines) if lines else "No verification data"
+
+
+@dataclass
 class BacktestResult:
     """Summary of a backtest run with optional trade simulation."""
 
@@ -94,6 +169,8 @@ class BacktestResult:
     avg_loss: Optional[float] = None
     avg_hold_time_minutes: Optional[float] = None
     trades: Optional[List[Dict]] = field(default=None)  # Optional: trade journal
+    # Verification diagnostics
+    verification: Optional[VerificationSummary] = None
 
 
 def _build_mtf(df_1m: pd.DataFrame, config: NQIntradayConfig) -> Dict[str, pd.DataFrame]:
@@ -118,6 +195,86 @@ def _build_mtf(df_1m: pd.DataFrame, config: NQIntradayConfig) -> Dict[str, pd.Da
         .dropna()
     )
     return {"df_5m": df_5m, "df_15m": df_15m}
+
+
+def _compute_verification_summary(
+    signals: List[Dict],
+    df: pd.DataFrame,
+    bottleneck_counts: Optional[Dict[str, int]] = None,
+    gate_reasons: Optional[List[str]] = None,
+) -> VerificationSummary:
+    """Compute verification diagnostics from backtest signals and data.
+    
+    Args:
+        signals: List of signal dictionaries from backtest
+        df: DataFrame with the backtest data (for date range)
+        bottleneck_counts: Optional aggregated bottleneck counts
+        gate_reasons: Optional list of scanner gate reasons encountered
+    
+    Returns:
+        VerificationSummary with computed diagnostics
+    """
+    summary = VerificationSummary()
+    
+    # Date range
+    if not df.empty and isinstance(df.index, pd.DatetimeIndex):
+        summary.date_range_start = df.index[0].isoformat()
+        summary.date_range_end = df.index[-1].isoformat()
+        
+        # Compute trading days and hours
+        unique_dates = df.index.normalize().unique()
+        summary.trading_days = len(unique_dates)
+        summary.trading_hours = len(df.index.floor("h").unique())
+    
+    # Signal density
+    if signals:
+        summary.signals_per_day = len(signals) / max(summary.trading_days, 1)
+        summary.signals_per_hour = len(signals) / max(summary.trading_hours, 1)
+        
+        # Signal type distribution
+        type_dist: Dict[str, int] = {}
+        regime_dist: Dict[str, int] = {}
+        vol_dist: Dict[str, int] = {}
+        session_dist: Dict[str, int] = {}
+        
+        for sig in signals:
+            # Type distribution
+            sig_type = sig.get("type", "unknown")
+            type_dist[sig_type] = type_dist.get(sig_type, 0) + 1
+            
+            # Regime distribution (from signal context)
+            regime = sig.get("regime", {})
+            if isinstance(regime, dict):
+                regime_type = regime.get("regime", "unknown")
+                volatility = regime.get("volatility", "unknown")
+                session = regime.get("session", "unknown")
+                
+                regime_dist[regime_type] = regime_dist.get(regime_type, 0) + 1
+                vol_dist[volatility] = vol_dist.get(volatility, 0) + 1
+                session_dist[session] = session_dist.get(session, 0) + 1
+        
+        summary.signal_type_distribution = type_dist
+        summary.regime_distribution = regime_dist
+        summary.volatility_distribution = vol_dist
+        summary.session_distribution = session_dist
+    
+    # Bottleneck summary
+    if bottleneck_counts:
+        summary.bottleneck_summary = bottleneck_counts
+    
+    # Top gate reasons
+    if gate_reasons:
+        # Count and sort gate reasons
+        reason_counts: Dict[str, int] = {}
+        for reason in gate_reasons:
+            # Simplify reason (extract key part)
+            key = reason.split(":")[0].strip() if ":" in reason else reason[:50]
+            reason_counts[key] = reason_counts.get(key, 0) + 1
+        
+        sorted_reasons = sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)
+        summary.top_gate_reasons = [f"{k} ({v}x)" for k, v in sorted_reasons[:5]]
+    
+    return summary
 
 
 def _resample_ohlcv(df: pd.DataFrame, rule: str) -> pd.DataFrame:
@@ -182,6 +339,18 @@ def run_signal_backtest_5m_decision(
     signals: List[Dict] = []
     confidences: List[float] = []
     risk_rewards: List[float] = []
+    
+    # Verification diagnostics collectors
+    all_gate_reasons: List[str] = []
+    bottleneck_counts: Dict[str, int] = {
+        "rejected_confidence": 0,
+        "rejected_risk_reward": 0,
+        "rejected_quality_scorer": 0,
+        "rejected_order_book": 0,
+        "rejected_invalid_prices": 0,
+        "duplicates_filtered": 0,
+        "rejected_market_hours": 0,
+    }
 
     # Fixed rolling window to avoid O(n^2) slicing.
     window_size = max(200, int(config.lookback_periods * 10))
@@ -213,6 +382,21 @@ def run_signal_backtest_5m_decision(
             }
 
             new_signals = strategy.analyze(market_data)
+            
+            # Collect verification diagnostics from signal generator
+            if hasattr(strategy, 'signal_generator') and hasattr(strategy.signal_generator, 'last_diagnostics'):
+                diag = strategy.signal_generator.last_diagnostics
+                if diag:
+                    bottleneck_counts["rejected_confidence"] += diag.rejected_confidence
+                    bottleneck_counts["rejected_risk_reward"] += diag.rejected_risk_reward
+                    bottleneck_counts["rejected_quality_scorer"] += diag.rejected_quality_scorer
+                    bottleneck_counts["rejected_order_book"] += diag.rejected_order_book
+                    bottleneck_counts["rejected_invalid_prices"] += diag.rejected_invalid_prices
+                    bottleneck_counts["duplicates_filtered"] += diag.duplicates_filtered
+                    if diag.rejected_market_hours:
+                        bottleneck_counts["rejected_market_hours"] += 1
+                    all_gate_reasons.extend(diag.scanner_gate_reasons)
+            
             for s in new_signals:
                 s.setdefault("timestamp", latest_ts.isoformat())
                 signals.append(s)
@@ -241,6 +425,16 @@ def run_signal_backtest_5m_decision(
             signal_type = signal.get("type", "unknown")
             signal_distribution[signal_type] = signal_distribution.get(signal_type, 0) + 1
 
+    # Compute verification summary
+    # Filter out zero-count bottlenecks for cleaner output
+    filtered_bottlenecks = {k: v for k, v in bottleneck_counts.items() if v > 0}
+    verification = _compute_verification_summary(
+        signals=signals,
+        df=df_decision,
+        bottleneck_counts=filtered_bottlenecks,
+        gate_reasons=all_gate_reasons,
+    )
+
     return BacktestResult(
         total_bars=len(df_decision),
         total_signals=len(signals),
@@ -248,6 +442,7 @@ def run_signal_backtest_5m_decision(
         avg_risk_reward=avg_rr,
         signals=signals if return_signals else None,
         signal_distribution=signal_distribution if signal_distribution else None,
+        verification=verification,
     )
 
 
@@ -285,6 +480,18 @@ def run_signal_backtest(
     signals: List[Dict] = []
     confidences: List[float] = []
     risk_rewards: List[float] = []
+    
+    # Verification diagnostics collectors
+    all_gate_reasons: List[str] = []
+    bottleneck_counts: Dict[str, int] = {
+        "rejected_confidence": 0,
+        "rejected_risk_reward": 0,
+        "rejected_quality_scorer": 0,
+        "rejected_order_book": 0,
+        "rejected_invalid_prices": 0,
+        "duplicates_filtered": 0,
+        "rejected_market_hours": 0,
+    }
 
     if df_1m.empty:
         return BacktestResult(
@@ -331,6 +538,21 @@ def run_signal_backtest(
             }
 
             new_signals = strategy.analyze(market_data)
+            
+            # Collect verification diagnostics from signal generator
+            if hasattr(strategy, 'signal_generator') and hasattr(strategy.signal_generator, 'last_diagnostics'):
+                diag = strategy.signal_generator.last_diagnostics
+                if diag:
+                    bottleneck_counts["rejected_confidence"] += diag.rejected_confidence
+                    bottleneck_counts["rejected_risk_reward"] += diag.rejected_risk_reward
+                    bottleneck_counts["rejected_quality_scorer"] += diag.rejected_quality_scorer
+                    bottleneck_counts["rejected_order_book"] += diag.rejected_order_book
+                    bottleneck_counts["rejected_invalid_prices"] += diag.rejected_invalid_prices
+                    bottleneck_counts["duplicates_filtered"] += diag.duplicates_filtered
+                    if diag.rejected_market_hours:
+                        bottleneck_counts["rejected_market_hours"] += 1
+                    all_gate_reasons.extend(diag.scanner_gate_reasons)
+            
             for s in new_signals:
                 # Ensure timestamp is always present for downstream charting/backtest reporting
                 s.setdefault("timestamp", latest_ts.isoformat())
@@ -362,8 +584,14 @@ def run_signal_backtest(
             signal_type = signal.get("type", "unknown")
             signal_distribution[signal_type] = signal_distribution.get(signal_type, 0) + 1
     
-    # Note: win_rate and total_pnl would require trade simulation
-    # For signal-only backtest, these remain None
+    # Compute verification summary
+    filtered_bottlenecks = {k: v for k, v in bottleneck_counts.items() if v > 0}
+    verification = _compute_verification_summary(
+        signals=signals,
+        df=df_1m,
+        bottleneck_counts=filtered_bottlenecks,
+        gate_reasons=all_gate_reasons,
+    )
     
     return BacktestResult(
         total_bars=len(df_1m),
@@ -372,6 +600,7 @@ def run_signal_backtest(
         avg_risk_reward=avg_rr,
         signals=signals if return_signals else None,
         signal_distribution=signal_distribution if signal_distribution else None,
+        verification=verification,
     )
 
 
@@ -738,6 +967,7 @@ def run_full_backtest(
             profit_factor=0.0,
             max_drawdown=0.0,
             sharpe_ratio=0.0,
+            verification=signal_result.verification,
         )
     
     # Run trade simulation
@@ -775,6 +1005,7 @@ def run_full_backtest(
         avg_loss=metrics["avg_loss"],
         avg_hold_time_minutes=metrics["avg_hold_time_minutes"],
         trades=trades_list,
+        verification=signal_result.verification,
     )
 
 
@@ -821,6 +1052,7 @@ def run_full_backtest_5m_decision(
             profit_factor=0.0,
             max_drawdown=0.0,
             sharpe_ratio=0.0,
+            verification=signal_result.verification,
         )
 
     simulator = TradeSimulator(
@@ -856,6 +1088,7 @@ def run_full_backtest_5m_decision(
         avg_loss=metrics["avg_loss"],
         avg_hold_time_minutes=metrics["avg_hold_time_minutes"],
         trades=trades_list,
+        verification=signal_result.verification,
     )
 
 

@@ -1622,15 +1622,24 @@ class TelegramCommandHandler:
                 # Try to get provider from config, default to 'ibkr'
                 provider_name = getattr(settings, 'data_provider', 'ibkr') if hasattr(settings, 'data_provider') else 'ibkr'
                 # Use a dedicated client_id for the command handler to avoid colliding with the main service.
-                # Prefer IBKR_DATA_CLIENT_ID if set; otherwise offset the default client id by +1.
+                # IMPORTANT: Do NOT reuse IBKR_DATA_CLIENT_ID here; the main agent typically uses it.
+                # Allow an explicit override, otherwise pick a safe unused id derived from configured ids.
                 client_id = None
                 try:
-                    base = getattr(settings, "ib_client_id", 1)
-                    data_cid = getattr(settings, "ib_data_client_id", None)
-                    if data_cid is not None:
-                        client_id = int(data_cid)
+                    override = (
+                        os.getenv("IBKR_TELEGRAM_CLIENT_ID")
+                        or os.getenv("PEARLALGO_IBKR_TELEGRAM_CLIENT_ID")
+                    )
+                    if override:
+                        client_id = int(override)
                     else:
-                        client_id = min(100, max(0, int(base) + 1))
+                        base = int(getattr(settings, "ib_client_id", 1) or 1)
+                        data_cid_raw = getattr(settings, "ib_data_client_id", None)
+                        reserved = {base}
+                        if data_cid_raw is not None:
+                            reserved.add(int(data_cid_raw))
+                        # Common defaults: base=10, data=11, so we select 12.
+                        client_id = max(reserved) + 1
                 except Exception:
                     client_id = None
 
@@ -1987,11 +1996,19 @@ class TelegramCommandHandler:
                 slippage_ticks = float(user_data.get("backtest_slippage_ticks", 0.5) or 0.5)
             except Exception:
                 slippage_ticks = 0.5
+            
+            # Symbol selection (MNQ or NQ, default MNQ)
+            symbol = user_data.get("backtest_symbol", "MNQ") if hasattr(context, "user_data") else "MNQ"
+            if symbol not in ("MNQ", "NQ"):
+                symbol = "MNQ"
+            tick_value = 2.0 if symbol == "MNQ" else 20.0
+            symbol_label = f"{symbol} (${tick_value:.0f}/pt)"
 
             message = (
                 "📊 *Backtest Strategy*\n\n"
-                f"*Mode:* {mode_label}\n\n"
-                f"*Contracts:* {pos_size} MNQ  |  *Slippage:* {slippage_ticks} ticks\n\n"
+                f"*Mode:* {mode_label}\n"
+                f"*Symbol:* {symbol_label}\n\n"
+                f"*Contracts:* {pos_size} {symbol}  |  *Slippage:* {slippage_ticks} ticks\n\n"
                 "Select backtest duration:\n\n"
                 "Tip: 2 weeks is a good starting point. 4-6 weeks for deeper validation."
             )
@@ -2016,6 +2033,16 @@ class TelegramCommandHandler:
                     InlineKeyboardButton(
                         "✅ 1m legacy" if mode == "1m" else "1m legacy",
                         callback_data="backtest_setmode_1m",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        "✅ MNQ" if symbol == "MNQ" else "MNQ",
+                        callback_data="backtest_setsymbol_MNQ",
+                    ),
+                    InlineKeyboardButton(
+                        "✅ NQ" if symbol == "NQ" else "NQ",
+                        callback_data="backtest_setsymbol_NQ",
                     ),
                 ],
                 [
@@ -2145,9 +2172,14 @@ class TelegramCommandHandler:
                     slippage_ticks = 0.5
                 if slippage_ticks not in (0.5, 1.0):
                     slippage_ticks = 0.5
+                
+                # Symbol selection (MNQ or NQ, default MNQ)
+                symbol = user_data.get("backtest_symbol", "MNQ") if hasattr(context, "user_data") else "MNQ"
+                if symbol not in ("MNQ", "NQ"):
+                    symbol = "MNQ"
+                tick_value = 2.0 if symbol == "MNQ" else 20.0
 
-                config = NQIntradayConfig()
-                tick_value = float(getattr(config, "tick_value", 2.0) or 2.0)
+                config = NQIntradayConfig.from_config_file()
 
                 if mode == "5m":
                     result = run_full_backtest_5m_decision(
@@ -2243,6 +2275,11 @@ class TelegramCommandHandler:
                     max_dd_display = f"${result.max_drawdown:.2f}" if result.max_drawdown is not None else "N/A"
                     sharpe_display = f"{result.sharpe_ratio:.2f}" if result.sharpe_ratio is not None else "N/A"
                     trades_display = f"{result.total_trades}" if result.total_trades is not None else "0"
+                    
+                    # Format verification summary if available
+                    verification_block = ""
+                    if result.verification:
+                        verification_block = f"\n🔍 *Verification*\n{result.verification.format_compact()}\n"
 
                     message = (
                         f"📊 *Backtest Results ({weeks} Week{'s' if weeks > 1 else ''})*\n\n"
@@ -2250,32 +2287,29 @@ class TelegramCommandHandler:
                         f"*Bars Analyzed:* {result.total_bars:,}\n"
                         f"*Signals Generated:* {result.total_signals}\n"
                         f"*Signals on Chart:* {signals_shown}\n\n"
-                        f"*Contracts:* {pos_size} MNQ  |  *Slippage:* {slippage_ticks} ticks\n"
+                        f"*Symbol:* {symbol} (${tick_value:.0f}/pt)  |  *Contracts:* {pos_size}\n"
+                        f"*Slippage:* {slippage_ticks} ticks\n"
                         f"*Trades:* {trades_display}  |  *Win Rate:* {win_rate_display}  |  *PF:* {profit_factor_display}\n"
                         f"*Avg Confidence:* {result.avg_confidence:.2f}\n"
                         f"*Avg R:R:* {result.avg_risk_reward:.2f}:1\n"
-                        f"*Total P&L:* {total_pnl_display}  |  *Max DD:* {max_dd_display}  |  *Sharpe:* {sharpe_display}\n\n"
-                        "📈 *Chart Components:*\n"
-                        "• Green/Red candlesticks = Price action\n"
-                        "• 🔼 Green triangles = Long entry signals\n"
-                        "• 🔽 Orange triangles = Short entry signals\n"
-                        "• Volume bars (bottom panel)\n"
-                        "• VWAP line (orange)\n"
-                        "• Moving averages (blue/purple)"
+                        f"*Total P&L:* {total_pnl_display}  |  *Max DD:* {max_dd_display}  |  *Sharpe:* {sharpe_display}\n"
+                        f"{verification_block}"
                     )
                             
-                    # Export artifacts (trade journal + metrics)
+                    # Export artifacts (trade journal + metrics + verification)
                     export_paths: Dict[str, str] = {}
                     try:
                         exports_dir = self.state_dir / "exports"
                         exports_dir.mkdir(parents=True, exist_ok=True)
                         ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                        base_name = f"backtest_{mode}_{weeks}w_{ts_tag}"
+                        base_name = f"backtest_{mode}_{symbol}_{weeks}w_{ts_tag}"
 
-                        # Metrics JSON (always)
+                        # Metrics JSON (always) - now includes compact verification summary
                         metrics_path = exports_dir / f"{base_name}_metrics.json"
                         metrics_obj = {
                             "mode": mode,
+                            "symbol": symbol,
+                            "tick_value": tick_value,
                             "weeks": weeks,
                             "contracts": pos_size,
                             "slippage_ticks": slippage_ticks,
@@ -2294,9 +2328,23 @@ class TelegramCommandHandler:
                             "avg_loss": result.avg_loss,
                             "avg_hold_time_minutes": result.avg_hold_time_minutes,
                         }
+                        # Embed compact verification in metrics
+                        if result.verification:
+                            metrics_obj["verification_summary"] = {
+                                "signals_per_day": result.verification.signals_per_day,
+                                "trading_days": result.verification.trading_days,
+                                "top_bottlenecks": list(result.verification.bottleneck_summary.keys())[:3] if result.verification.bottleneck_summary else [],
+                            }
                         with open(metrics_path, "w") as f:
                             json.dump(metrics_obj, f, indent=2)
                         export_paths["metrics"] = str(metrics_path)
+
+                        # Verification JSON (full diagnostics)
+                        if result.verification:
+                            verification_path = exports_dir / f"{base_name}_verification.json"
+                            with open(verification_path, "w") as f:
+                                json.dump(result.verification.to_dict(), f, indent=2)
+                            export_paths["verification"] = str(verification_path)
 
                         # Trades (if available)
                         if getattr(result, "trades", None):
@@ -2321,11 +2369,14 @@ class TelegramCommandHandler:
                         export_row.append(InlineKeyboardButton("🧾 Trades JSON", callback_data="backtest_export:json"))
                     if export_row:
                         keyboard.append(export_row)
+                    export_row2 = [InlineKeyboardButton("📊 Metrics", callback_data="backtest_export:metrics")]
+                    if export_paths.get("verification"):
+                        export_row2.append(InlineKeyboardButton("🔍 Verification", callback_data="backtest_export:verification"))
+                    keyboard.append(export_row2)
                     keyboard.append([
-                        InlineKeyboardButton("📊 Metrics JSON", callback_data="backtest_export:metrics"),
                         InlineKeyboardButton("🔄 Run Again", callback_data="backtest"),
+                        InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
                     ])
-                    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
                     reply_markup = InlineKeyboardMarkup(keyboard)
                     
                     await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -2428,7 +2479,7 @@ class TelegramCommandHandler:
             paths = context.user_data.get("backtest_export_paths", {}) or {}
 
         key = kind.lower().strip()
-        if key not in ("csv", "json", "metrics"):
+        if key not in ("csv", "json", "metrics", "verification"):
             key = "metrics"
 
         target = paths.get(key)
@@ -4585,6 +4636,14 @@ class TelegramCommandHandler:
                 slip = 0.5
             if hasattr(context, "user_data"):
                 context.user_data["backtest_slippage_ticks"] = slip
+            await self._handle_backtest(update, context, weeks=None)
+        elif callback_data.startswith("backtest_setsymbol_"):
+            # Set symbol (MNQ or NQ) for backtest simulation
+            symbol = callback_data.replace("backtest_setsymbol_", "")
+            if symbol not in ("MNQ", "NQ"):
+                symbol = "MNQ"
+            if hasattr(context, "user_data"):
+                context.user_data["backtest_symbol"] = symbol
             await self._handle_backtest(update, context, weeks=None)
         elif callback_data.startswith('backtest_'):
             # Handle backtest duration selection (backtest_1w, backtest_2w, etc.)
