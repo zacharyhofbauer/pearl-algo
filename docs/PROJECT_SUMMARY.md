@@ -1016,8 +1016,7 @@ ExecStartPost=/bin/sh -c 'until curl -sf http://localhost:9100/healthz; do sleep
 ### High Priority
 
 1. **Market Hours Improvements**:
-   - Better timezone handling (ET with DST)
-   - Market holiday calendar
+   - Market holiday calendar + early closes/observance rules (DST is already handled; calendar coverage is the gap)
    - Pre-market/post-market scanning option
 
 2. **Signal Quality Enhancements**:
@@ -1104,10 +1103,11 @@ ExecStartPost=/bin/sh -c 'until curl -sf http://localhost:9100/healthz; do sleep
 
 ### Technical Debt
 
-1. **Timezone Handling**: Simplified ET timezone (needs DST support)
+1. **Market Calendar Coverage**: Holiday/early-close coverage is intentionally incomplete by default; optional overrides exist (disabled by default).
 2. **Error Recovery**: Basic recovery (could be more sophisticated)
-3. **Data Validation**: Basic validation (could be more comprehensive)
-4. **Testing Coverage**: Good coverage, but could be expanded
+3. **Data Validation**: Good baseline validation, but edge-case hardening is ongoing (see testing notes / xfailed cases)
+4. **Volume Profile Robustness**: Known bug on `inf` values in volume profile calculations (tracked via xfailed test)
+5. **Testing Coverage**: Good coverage, but could be expanded
 
 ---
 
@@ -1159,7 +1159,6 @@ journalctl -u pearlalgo-mnq.service -f
 ### Documentation
 
 - **Complete Guide**: `docs/NQ_AGENT_GUIDE.md` (includes prop firm configuration)
-- **Strategy Testing**: `docs/TESTING_GUIDE.md` (includes strategy testing)
 - **Testing Guide**: `docs/TESTING_GUIDE.md`
 - **Gateway Setup**: `docs/GATEWAY.md`
 - **Project Summary**: `docs/PROJECT_SUMMARY.md` (this file)

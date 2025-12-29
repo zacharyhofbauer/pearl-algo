@@ -758,7 +758,7 @@ This section summarizes the current test coverage and highlights areas for futur
 These gaps are **observational only** and do not change behavior.
 
 1. **Market hours edge cases** (`test_edge_cases.py`)
-   - DST transitions and holiday calendar behavior are not explicitly tested yet.
+   - DST transitions are covered (see `test_dst_transitions.py`), but full CME holiday/early-close calendar behavior is not yet comprehensively tested.
 
 2. **Circuit breaker thresholds** (`test_error_recovery.py`)
    - Connection-failure pause behavior is tested, but other breaker paths are not yet directly covered (e.g., consecutive errors pause, data-fetch backoff).
@@ -771,6 +771,9 @@ These gaps are **observational only** and do not change behavior.
 
 5. **Command handler behavior**
    - The Telegram command handler (`telegram_command_handler.py`) is exercised indirectly via manual testing but does not yet have automated tests for `/status`, `/signals`, `/performance` command flows.
+
+6. **Volume profile edge cases** (`test_signal_generation_edge_cases.py`)
+   - One edge case is intentionally marked **xfail**: `inf` values can crash `VolumeProfile.calculate_profile()` (needs sanitization/guardrails).
 
 ### Suggested Future Tests
 

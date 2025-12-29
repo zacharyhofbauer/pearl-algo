@@ -90,11 +90,13 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 ## Monitoring
 
-- **Logical component**: External watchdog / state freshness validator
-- **Script**:
+- **Logical component**: External watchdog / state freshness validator + optional localhost status server
+- **Scripts**:
   - `scripts/monitoring/watchdog_nq_agent.py` – cron/systemd-timer friendly watchdog for stalled state / silent failures (optional)
+  - `scripts/monitoring/serve_nq_agent_status.py` – localhost HTTP server exposing `/healthz` and `/metrics` (optional sidecar)
 - **Docs**:
   - `docs/NQ_AGENT_GUIDE.md` (monitoring section)
+  - `docs/PROJECT_SUMMARY.md` (status server section)
   - `docs/SCRIPTS_TAXONOMY.md` (monitoring section)
 
 ## Utilities / Cross‑cutting Concerns

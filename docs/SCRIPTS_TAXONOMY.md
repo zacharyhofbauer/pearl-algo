@@ -82,6 +82,11 @@ they do **not** contain trading or strategy logic.
   - **Behavior**: Reads `data/nq_agent_state/state.json`, checks staleness against scan interval and dashboard cadence, and can optionally send Telegram alerts.
   - **Usage**: `python3 scripts/monitoring/watchdog_nq_agent.py [--telegram] [--verbose]`
 
+- `serve_nq_agent_status.py`
+  - **Role**: Localhost status server for standard tooling integration (curl, Prometheus, systemd health checks).
+  - **Behavior**: Reads `data/nq_agent_state/state.json`; exposes `GET /healthz` (200/503), `GET /metrics` (Prometheus), and `GET /` (simple HTML status page).
+  - **Usage**: `python3 scripts/monitoring/serve_nq_agent_status.py [--port 9100]`
+
 ## General Guidelines
 
 When adding new scripts, place them under one of the categories above and follow these patterns:
