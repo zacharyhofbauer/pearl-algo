@@ -1620,7 +1620,7 @@ class NQAgentService:
                 ),
             },
             "last_successful_cycle": (
-                get_utc_timestamp() if self.last_successful_cycle else None
+                self.last_successful_cycle.isoformat() if self.last_successful_cycle else None
             ),
             "config": {
                 "symbol": self.config.symbol,

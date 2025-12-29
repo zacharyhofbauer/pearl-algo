@@ -1445,6 +1445,19 @@ class NQAgentTelegramNotifier:
             # If data is stale or buffer is empty, we can't be confident gateway is working.
             gateway_uncertain = is_data_stale or buffer_size < 1
             
+            # Compute activity pulse from last_successful_cycle (same semantics as /activity)
+            last_cycle_seconds = None
+            last_successful_cycle = status.get("last_successful_cycle")
+            if last_successful_cycle:
+                try:
+                    last_cycle_dt = parse_utc_timestamp(str(last_successful_cycle))
+                    if last_cycle_dt:
+                        if last_cycle_dt.tzinfo is None:
+                            last_cycle_dt = last_cycle_dt.replace(tzinfo=timezone.utc)
+                        last_cycle_seconds = (datetime.now(timezone.utc) - last_cycle_dt).total_seconds()
+                except Exception:
+                    pass
+            
             message = format_home_card(
                 symbol=symbol,
                 time_str=time_str,
@@ -1476,6 +1489,8 @@ class NQAgentTelegramNotifier:
                 # v6 fields for data staleness
                 data_age_minutes=data_age_minutes,
                 data_stale_threshold_minutes=data_stale_threshold_minutes,
+                # v7 field: activity pulse for push dashboards
+                last_cycle_seconds=last_cycle_seconds,
             )
             
             # Add MTF snapshot (push-specific enhancement)

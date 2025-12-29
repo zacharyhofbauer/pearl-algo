@@ -619,22 +619,21 @@ class TelegramCommandHandler:
                 return
             
             # Fetch historical data
-            import asyncio
-            from datetime import datetime, timezone
-            import pandas as pd
-            
             symbol = "MNQ"
             timeframe = "5m"
             end_time = datetime.now(timezone.utc)
+            start_time = end_time - timedelta(hours=lookback_hours)
             
             loop = asyncio.get_running_loop()
             bars = await asyncio.wait_for(
                 loop.run_in_executor(
                     None,
-                    data_provider.get_historical_bars,
-                    symbol,
-                    timeframe,
-                    lookback_hours,
+                    lambda: data_provider.fetch_historical(
+                        symbol=symbol,
+                        start=start_time,
+                        end=end_time,
+                        timeframe=timeframe,
+                    ),
                 ),
                 timeout=30.0,
             )
@@ -1326,13 +1325,13 @@ class TelegramCommandHandler:
                     age_part = f" • {age_str}" if age_str else ""
 
                     # Compact one-liner: status, type, direction, confidence, age
-                    message += f"{i}. {status_emoji} {signal_type} {dir_label} • {conf_val:.0%}{age_part}\n"
+                    message += f"{i}. {status_emoji} {safe_label(signal_type)} {dir_label} • {conf_val:.0%}{age_part}\n"
                     
                     # Second line: entry price + PnL for exited, or short status for others
                     if status == "exited":
                         pnl = float(sig_data.get("pnl", 0.0) or 0.0)
                         pnl_emoji, pnl_str = format_pnl(pnl)
-                        exit_reason = str(sig_data.get("exit_reason", "") or "")[:8]
+                        exit_reason = safe_label(str(sig_data.get("exit_reason", "") or "")[:16])
                         message += f"   {pnl_emoji} {pnl_str} ({exit_reason}) @ ${entry_price:.2f}\n\n"
                     else:
                         message += f"   Entry: ${entry_price:.2f} | `{signal_id[:8]}…`\n\n"
@@ -1440,7 +1439,7 @@ class TelegramCommandHandler:
             age_str = format_time_ago(sig_ts)
             
             message = f"{status_emoji} *Last Signal*\n\n"
-            message += f"*Type:* {signal_type} {dir_emoji} {dir_label}\n"
+            message += f"*Type:* {safe_label(signal_type)} {dir_emoji} {dir_label}\n"
             message += f"*Entry:* ${entry_price:.2f}\n"
             if stop_loss:
                 message += f"*Stop:* ${stop_loss:.2f}\n"
@@ -1456,7 +1455,7 @@ class TelegramCommandHandler:
             if status == "exited":
                 pnl = float(last_signal_data.get("pnl", 0.0) or 0.0)
                 pnl_emoji, pnl_str = format_pnl(pnl)
-                exit_reason = str(last_signal_data.get("exit_reason", "") or "")
+                exit_reason = safe_label(str(last_signal_data.get("exit_reason", "") or ""))
                 message += f"\n{pnl_emoji} *P&L:* {pnl_str}"
                 if exit_reason:
                     message += f" ({exit_reason})"
@@ -1531,19 +1530,28 @@ class TelegramCommandHandler:
             
             # Try to get current price for unrealized PnL
             current_price = None
+            price_source = None
             try:
                 data_provider = self._get_data_provider()
                 if data_provider is not None:
-                    loop = asyncio.get_running_loop()
+                    # get_latest_bar is async - await it directly with timeout
                     latest = await asyncio.wait_for(
-                        loop.run_in_executor(None, data_provider.get_latest_bar, "MNQ"),
+                        data_provider.get_latest_bar("MNQ"),
                         timeout=5.0,
                     )
                     if isinstance(latest, dict) and "close" in latest:
                         current_price = float(latest["close"])
-                        message += f"*Current Price:* ${current_price:.2f}\n\n"
+                        price_source = latest.get("_data_level", "live")
+            except asyncio.TimeoutError:
+                logger.debug("Timeout fetching current price for active trades")
             except Exception as e:
                 logger.debug(f"Could not fetch current price for active trades: {e}")
+            
+            # Show price with confidence cue
+            if current_price is not None:
+                message += f"*Current Price:* ${current_price:.2f}\n\n"
+            else:
+                message += "⚠️ *Price unavailable* — P&L not shown\n\n"
             
             for i, trade_data in enumerate(active_trades, 1):
                 signal = trade_data.get("signal", {})
@@ -1556,7 +1564,7 @@ class TelegramCommandHandler:
                 tick_value = float(signal.get("tick_value", 2.0) or 2.0)
                 position_size = float(signal.get("position_size", 1.0) or 1.0)
                 
-                message += f"{i}. 🎯 {signal_type} {direction}\n"
+                message += f"{i}. 🎯 {safe_label(signal_type)} {direction}\n"
                 message += f"   Entry: ${entry_price:.2f}"
                 
                 # Show unrealized PnL if we have current price
@@ -2777,9 +2785,10 @@ class TelegramCommandHandler:
                         await asyncio.sleep(10)
                         try:
                             result = "WIN" if exit_reason == "take_profit" else "LOSS"
+                            exit_label = safe_label(exit_reason).title()
                             msg = (
                                 f"🧪 *Test Exit ({result})*\n\n"
-                                f"*Exit:* ${exit_price:,.2f} ({exit_reason.replace('_', ' ').title()})\n"
+                                f"*Exit:* ${exit_price:,.2f} ({exit_label})\n"
                                 f"*P&L:* ${pnl_usd:,.2f}\n\n"
                                 "📉 Exit chart below!"
                             )
@@ -3987,7 +3996,7 @@ class TelegramCommandHandler:
                                         symbol=symbol,
                                         start=start_time,
                                         end=end_time,
-                                        bar_size="1 min",
+                                        timeframe="5m",
                                     ),
                                 ),
                                 timeout=30.0,
@@ -4008,9 +4017,12 @@ class TelegramCommandHandler:
             if status == "exited":
                 # Exited signal: show exit chart with PnL
                 exit_price = float(signal_data.get("exit_price", 0.0) or 0.0)
-                exit_reason = str(signal_data.get("exit_reason", "unknown") or "unknown")
+                exit_reason = safe_label(str(signal_data.get("exit_reason", "unknown") or "unknown"))
                 pnl = float(signal_data.get("pnl", 0.0) or 0.0)
                 is_win = signal_data.get("is_win", pnl > 0)
+                
+                sig_type = safe_label(str(signal.get('type', 'signal')))
+                sig_dir = str(signal.get('direction', '')).upper()
                 
                 if exit_price > 0:
                     chart_path = self.chart_generator.generate_exit_chart(
@@ -4023,7 +4035,7 @@ class TelegramCommandHandler:
                     )
                     result_emoji = "✅" if is_win else "❌"
                     caption = (
-                        f"{result_emoji} {signal.get('type', 'signal')} {signal.get('direction', '').upper()} | "
+                        f"{result_emoji} {sig_type} {sig_dir} | "
                         f"Exit: {exit_reason} | PnL: ${pnl:+.2f}"
                     )
                 else:
@@ -4031,14 +4043,16 @@ class TelegramCommandHandler:
                     chart_path = self.chart_generator.generate_entry_chart(
                         signal, buffer_data if buffer_data is not None else pd.DataFrame(), symbol
                     )
-                    caption = f"📊 {signal.get('type', 'signal')} {signal.get('direction', '').upper()} (exited)"
+                    caption = f"📊 {sig_type} {sig_dir} (exited)"
             else:
                 # Entry or active signal: show entry chart
                 chart_path = self.chart_generator.generate_entry_chart(
                     signal, buffer_data if buffer_data is not None else pd.DataFrame(), symbol
                 )
+                sig_type = safe_label(str(signal.get('type', 'signal')))
+                sig_dir = str(signal.get('direction', '')).upper()
                 status_emoji = "🎯" if status == "entered" else "📊"
-                caption = f"{status_emoji} {signal.get('type', 'signal')} {signal.get('direction', '').upper()}"
+                caption = f"{status_emoji} {sig_type} {sig_dir}"
             
             if chart_path and chart_path.exists():
                 try:
