@@ -384,7 +384,10 @@ The `/status` command includes inline buttons for quick actions:
 
 - **▶️ Start Agent** / **⏹️ Stop Agent** – Quick service control
 - **🔄 Restart** – Restart agent
-- **🔌 Gateway Status** – Check Gateway health (shows ✅ when running, ❌ when stopped)
+- **🔌 Gateway Status** – Check Gateway health (tri-state indicator):
+  - `✅` – Gateway running **and** API ready (data flowing)
+  - `🟡` – Gateway running but API not ready (authenticating or awaiting 2FA)
+  - `❌` – Gateway stopped
 - **📊 Performance** – Detailed metrics
 - **🔔 Signals** – Recent signals
 - **⚙️ Config** – Configuration values
@@ -394,7 +397,7 @@ The `/status` command includes inline buttons for quick actions:
 **Navigation Features:**
 - **100% Button-Based**: No need to type commands
 - **Contextual Buttons**: Adapt based on current state
-- **Status Indicators**: Visual feedback (✅/❌) on buttons
+- **Status Indicators**: Visual feedback (✅/🟡/❌) on buttons
 - **Quick Actions**: Refresh, shortcuts, and navigation
 
 ### 7.4 Security & Safety
@@ -587,7 +590,7 @@ The bot features a **fully UI-driven interface** with inline keyboard buttons. N
 - Button layout:
   - **Stop Agent** / **Restart** (if agent running)
   - **Start Agent** (if agent stopped)
-  - **Gateway ✅/❌** / **Refresh**
+  - **Gateway ✅/🟡/❌** / **Refresh** (tri-state: ready / authenticating / stopped)
   - **Status** / **Signals** / **Performance**
   - **Config** / **Health** / **Help**
 
@@ -604,7 +607,7 @@ The bot features a **fully UI-driven interface** with inline keyboard buttons. N
 - Navigation buttons
 
 **Button Features:**
-- **Status Indicators:** Gateway button shows ✅ when running, ❌ when stopped
+- **Status Indicators:** Gateway button shows ✅ (ready), 🟡 (authenticating), or ❌ (stopped)
 - **Contextual Actions:** Buttons adapt based on current state
 - **Quick Actions:** Refresh, shortcuts, and navigation
 - **Always Available:** Main Menu button returns to status from anywhere
@@ -632,6 +635,14 @@ For detailed chart setup and customization, see [MPLFINANCE_QUICK_START.md](MPLF
 - Check matplotlib is installed: `pip install matplotlib`
 - Verify chart generator: `/test_signal` should work
 - Check logs: `tail -f logs/telegram_handler.log`
+
+**Chart Error Messages (User-Friendly):**
+When chart generation fails, the bot shows calm, actionable messages instead of raw errors:
+- "📊 *Chart Unavailable*" – Something prevented chart generation; try `/data_quality` to diagnose
+- "⏱️ *Chart Timed Out*" – Generation took too long; try a shorter timeframe
+- "📊 *Chart Delivery Failed*" – Chart was generated but couldn't be sent; try again
+
+All error messages include a "What to try" section pointing to `/data_quality` or next actions.
 
 **Buttons Not Appearing:**
 - Restart handler: `./scripts/telegram/start_command_handler.sh --background`

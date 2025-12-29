@@ -268,6 +268,122 @@ class TelegramCommandHandler:
             logger.debug(f"Could not compute signals file stats: {e}")
             return stats
 
+    # -------------------------------------------------------------------------
+    # State parsing helpers (robust fallback chain for data age / price)
+    # -------------------------------------------------------------------------
+
+    def _extract_data_age_minutes(self, state: Dict) -> Optional[float]:
+        """
+        Extract data age in minutes from state with robust fallback chain.
+
+        Priority:
+          1. state["latest_bar_age_minutes"] (pre-computed by service)
+          2. Parse state["latest_bar_timestamp"] (ISO string)
+          3. Parse state["latest_bar"]["timestamp"] (nested dict)
+
+        Returns None if unavailable.
+        """
+        # 1. Pre-computed age (most reliable when present)
+        try:
+            age = state.get("latest_bar_age_minutes")
+            if age is not None:
+                return float(age)
+        except Exception:
+            pass
+
+        # 2. Parse top-level latest_bar_timestamp
+        ts_str = state.get("latest_bar_timestamp")
+        if ts_str:
+            age = self._timestamp_to_age_minutes(ts_str)
+            if age is not None:
+                return age
+
+        # 3. Parse nested latest_bar.timestamp
+        latest_bar = state.get("latest_bar")
+        if isinstance(latest_bar, dict):
+            ts_str = latest_bar.get("timestamp")
+            if ts_str:
+                age = self._timestamp_to_age_minutes(ts_str)
+                if age is not None:
+                    return age
+
+        return None
+
+    def _timestamp_to_age_minutes(self, ts_str: str) -> Optional[float]:
+        """Convert ISO timestamp string to age in minutes (now - ts)."""
+        try:
+            from pearlalgo.utils.paths import parse_utc_timestamp
+
+            ts = parse_utc_timestamp(str(ts_str))
+            if ts is None:
+                return None
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            age_delta = datetime.now(timezone.utc) - ts
+            return age_delta.total_seconds() / 60.0
+        except Exception:
+            return None
+
+    def _extract_latest_price(self, state: Dict) -> Optional[float]:
+        """
+        Extract latest price from state with fallback chain.
+
+        Priority:
+          1. state["latest_bar"]["close"]
+          2. state["latest_price"] (legacy / push dashboard field)
+        """
+        # 1. Nested latest_bar.close
+        latest_bar = state.get("latest_bar")
+        if isinstance(latest_bar, dict):
+            close = latest_bar.get("close")
+            if close is not None:
+                try:
+                    return float(close)
+                except Exception:
+                    pass
+
+        # 2. Top-level latest_price (fallback)
+        lp = state.get("latest_price")
+        if lp is not None:
+            try:
+                return float(lp)
+            except Exception:
+                pass
+
+        return None
+
+    def _compute_state_stale_threshold(self, state: Dict) -> float:
+        """
+        Compute a sensible state staleness threshold based on configured cadence.
+
+        Default: 2 * state_save_interval * scan_interval (in seconds).
+        Floor: 120s to avoid over-sensitive warnings.
+
+        The service saves state every state_save_interval cycles, and each cycle
+        takes scan_interval seconds. Allow 2x headroom before flagging.
+        """
+        try:
+            from pearlalgo.config.config_loader import load_service_config
+
+            cfg = load_service_config()
+            service_cfg = cfg.get("service", {})
+            state_save_interval = int(service_cfg.get("state_save_interval", 10))
+        except Exception:
+            state_save_interval = 10
+
+        # Scan interval from state (persisted by service)
+        scan_interval = 60  # default
+        try:
+            config_block = state.get("config", {})
+            if isinstance(config_block, dict):
+                scan_interval = int(config_block.get("scan_interval", 60))
+        except Exception:
+            pass
+
+        threshold = float(2 * state_save_interval * scan_interval)
+        # Floor at 120s to avoid false warnings during normal operation
+        return max(threshold, 120.0)
+
     # Control panel persistence removed (per user request to simplify)
     
     async def _check_authorized(self, update: Update) -> bool:
@@ -297,6 +413,7 @@ class TelegramCommandHandler:
         agent_running = self._is_agent_process_running()
         gateway_status = self.service_controller.get_gateway_status()
         gateway_running = gateway_status.get("process_running", False)
+        gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
         
         message = (
             "🤖 *NQ Agent Bot*\n\n"
@@ -314,7 +431,11 @@ class TelegramCommandHandler:
             f"{'🟢' if gateway_running else '🔴'} {LABEL_GATEWAY}: {STATE_RUNNING if gateway_running else STATE_STOPPED}"
         )
         
-        reply_markup = self._get_main_menu_buttons(agent_running=agent_running, gateway_running=gateway_running)
+        reply_markup = self._get_main_menu_buttons(
+            agent_running=agent_running,
+            gateway_running=gateway_running,
+            gateway_api_ready=gateway_api_ready,
+        )
         logger.info(f"Sending /start menu with {len(reply_markup.inline_keyboard)} button rows to chat {update.effective_chat.id}")
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
     
@@ -337,9 +458,11 @@ class TelegramCommandHandler:
         
         gateway_status = self.service_controller.get_gateway_status()
         gateway_running = gateway_status.get("process_running", False)
+        gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
         reply_markup = self._get_main_menu_buttons(
             agent_running=self._is_agent_process_running(),
-            gateway_running=gateway_running
+            gateway_running=gateway_running,
+            gateway_api_ready=gateway_api_ready,
         )
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
     
@@ -585,23 +708,36 @@ class TelegramCommandHandler:
             else:
                 await self._send_message_or_edit(
                     update, context,
-                    "❌ Failed to generate chart.\n\n"
-                    "💡 Check logs for details.",
+                    "📊 *Chart Unavailable*\n\n"
+                    "Chart generation did not produce an image.\n\n"
+                    "*What to try:*\n"
+                    "• Wait a few minutes for data to accumulate\n"
+                    "• Check /data_quality for data issues\n"
+                    "• Try a shorter timeframe (12h)",
                     reply_markup=self._get_back_to_menu_button()
                 )
                 
         except asyncio.TimeoutError:
             await self._send_message_or_edit(
                 update, context,
-                "⏱️ Chart generation timed out.\n\n"
-                "💡 Try again or check data connection.",
+                "⏱️ *Chart Timed Out*\n\n"
+                "Chart generation took too long.\n\n"
+                "*What to try:*\n"
+                "• Try again in a moment\n"
+                "• Check /data_quality for connection issues\n"
+                "• Use a shorter timeframe",
                 reply_markup=self._get_back_to_menu_button()
             )
         except Exception as e:
             logger.error(f"Error handling chart command: {e}", exc_info=True)
             await self._send_message_or_edit(
                 update, context,
-                f"❌ Error generating chart: {str(e)[:100]}",
+                "📊 *Chart Unavailable*\n\n"
+                "Something went wrong generating the chart.\n\n"
+                "*What to try:*\n"
+                "• Try again in a moment\n"
+                "• Check /data_quality for data issues\n"
+                "• If problem persists, check logs",
                 reply_markup=self._get_back_to_menu_button()
             )
     
@@ -619,6 +755,7 @@ class TelegramCommandHandler:
             # Get gateway status first (needed for both message and buttons)
             gateway_status = self.service_controller.get_gateway_status()
             gateway_running = gateway_status.get("process_running", False)
+            gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
             
             # Load state
             state_file = get_state_file(self.state_dir)
@@ -639,6 +776,7 @@ class TelegramCommandHandler:
                 reply_markup = self._get_main_menu_buttons(
                     agent_running=process_running,
                     gateway_running=gateway_running,
+                    gateway_api_ready=gateway_api_ready,
                 )
                 await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
                 return
@@ -726,31 +864,15 @@ class TelegramCommandHandler:
             futures_market_open = state.get("futures_market_open")
             strategy_session_open = state.get("strategy_session_open")
             
-            # Get latest price and data age if available
-            latest_price = None
-            data_age_minutes = None
-            latest_bar = state.get("latest_bar")
-            if isinstance(latest_bar, dict):
-                if "close" in latest_bar:
-                    try:
-                        latest_price = float(latest_bar["close"])
-                    except Exception:
-                        pass
-                # Compute data age for v2 staleness callout
-                if "timestamp" in latest_bar and latest_bar["timestamp"]:
-                    try:
-                        from pearlalgo.utils.paths import parse_utc_timestamp
-                        bar_time = parse_utc_timestamp(str(latest_bar["timestamp"]))
-                        if bar_time:
-                            if bar_time.tzinfo is None:
-                                bar_time = bar_time.replace(tzinfo=timezone.utc)
-                            age_delta = datetime.now(timezone.utc) - bar_time
-                            data_age_minutes = age_delta.total_seconds() / 60.0
-                    except Exception:
-                        pass
+            # Get latest price and data age using robust fallback helpers
+            latest_price = self._extract_latest_price(state)
+            data_age_minutes = self._extract_data_age_minutes(state)
             
             # Get stale threshold from state or use default
             data_stale_threshold_minutes = float(state.get("data_stale_threshold_minutes", 10.0))
+            
+            # Compute adaptive state staleness threshold based on configured save cadence
+            state_stale_threshold = self._compute_state_stale_threshold(state)
             
             # Get 7-day performance
             perf = None
@@ -804,9 +926,9 @@ class TelegramCommandHandler:
                 latest_price=latest_price,
                 performance=perf,
                 last_signal_age=last_signal_age,
-                # Confidence/clarity cues
+                # Confidence/clarity cues (adaptive threshold based on save cadence)
                 state_age_seconds=state_age_seconds,
-                state_stale_threshold=120.0,  # 2 minutes; warn if state file is older
+                state_stale_threshold=state_stale_threshold,
                 signal_send_failures=signal_send_failures,
                 buy_sell_pressure=state.get("buy_sell_pressure"),
                 # Calm-minimal: activity pulse + active trades
@@ -821,6 +943,7 @@ class TelegramCommandHandler:
             reply_markup = self._get_main_menu_buttons(
                 agent_running=running,
                 gateway_running=gateway_running,
+                gateway_api_ready=gateway_api_ready,
             )
             
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -837,9 +960,11 @@ class TelegramCommandHandler:
             )
             gateway_status = self.service_controller.get_gateway_status()
             gateway_running = gateway_status.get("process_running", False)
+            gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
             reply_markup = self._get_main_menu_buttons(
                 agent_running=self._is_agent_process_running(),
-                gateway_running=gateway_running
+                gateway_running=gateway_running,
+                gateway_api_ready=gateway_api_ready,
             )
             await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
     
@@ -920,9 +1045,11 @@ class TelegramCommandHandler:
         # For now, just acknowledge the command
         gateway_status = self.service_controller.get_gateway_status()
         gateway_running = gateway_status.get("process_running", False)
+        gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
         reply_markup = self._get_main_menu_buttons(
             agent_running=self._is_agent_process_running(),
-            gateway_running=gateway_running
+            gateway_running=gateway_running,
+            gateway_api_ready=gateway_api_ready,
         )
         await self._send_message_or_edit(
             update, context,
@@ -940,9 +1067,11 @@ class TelegramCommandHandler:
         
         gateway_status = self.service_controller.get_gateway_status()
         gateway_running = gateway_status.get("process_running", False)
+        gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
         reply_markup = self._get_main_menu_buttons(
             agent_running=self._is_agent_process_running(),
-            gateway_running=gateway_running
+            gateway_running=gateway_running,
+            gateway_api_ready=gateway_api_ready,
         )
         await self._send_message_or_edit(
             update, context,
@@ -2685,13 +2814,17 @@ class TelegramCommandHandler:
                     logger.error(f"Error sending test chart: {e}", exc_info=True)
                     await self._send_message_or_edit(
                         update, context,
-                        f"⚠️ Chart generated but failed to send: {str(e)}"
+                        "📊 *Test Chart Delivery Failed*\n\n"
+                        "Chart was generated but couldn't be sent.\n\n"
+                        "💡 Try again"
                     )
             else:
                 reply_markup = self._get_back_to_menu_button()
                 await self._send_message_or_edit(
                     update, context,
-                    "❌ Failed to generate test chart",
+                    "📊 *Test Chart Unavailable*\n\n"
+                    "Could not generate test chart.\n\n"
+                    "💡 Check /data_quality for data issues",
                     reply_markup=reply_markup
                 )
                 
@@ -2700,7 +2833,9 @@ class TelegramCommandHandler:
             reply_markup = self._get_back_to_menu_button()
             await self._send_message_or_edit(
                 update, context,
-                f"❌ *Error:* {str(e)}",
+                "📊 *Test Signal Failed*\n\n"
+                "Something went wrong generating the test signal.\n\n"
+                "💡 Try again or check /data_quality",
                 reply_markup=reply_markup
             )
     
@@ -3027,8 +3162,24 @@ class TelegramCommandHandler:
             except Exception:
                 last_cycle_seconds = None
             
+            # Fallback: if no last_successful_cycle, use nq_agent.log mtime as liveness proxy
+            if last_cycle_seconds is None and process_running:
+                try:
+                    project_root = Path(__file__).parent.parent.parent.parent
+                    log_file = project_root / "logs" / "nq_agent.log"
+                    if log_file.exists():
+                        log_mtime = log_file.stat().st_mtime
+                        last_cycle_seconds = datetime.now(timezone.utc).timestamp() - log_mtime
+                except Exception:
+                    pass
+            
             running = process_running and state.get("running", False)
             paused = state.get("paused", False)
+            
+            # Compute data freshness using robust helper
+            data_age_minutes = self._extract_data_age_minutes(state)
+            data_stale_threshold = float(state.get("data_stale_threshold_minutes", 10.0))
+            is_data_stale = data_age_minutes is not None and data_age_minutes > data_stale_threshold
             
             # Build activity message
             message = "📈 *Activity Status*\n\n"
@@ -3066,14 +3217,18 @@ class TelegramCommandHandler:
             else:
                 message += f"📊 *Buffer:* {buffer_size} {LABEL_BUFFER}\n"
             
-            # Latest bar info
-            latest_bar = state.get("latest_bar")
-            if isinstance(latest_bar, dict) and "close" in latest_bar:
-                try:
-                    close = float(latest_bar["close"])
-                    message += f"💰 *Latest Price:* ${close:,.2f}\n"
-                except Exception:
-                    pass
+            # Latest bar info + data freshness
+            latest_price = self._extract_latest_price(state)
+            if latest_price is not None:
+                message += f"💰 *Latest Price:* ${latest_price:,.2f}\n"
+            
+            # Data freshness cue (concise + actionable when stale)
+            if data_age_minutes is not None:
+                if is_data_stale:
+                    age_str = f"{data_age_minutes:.0f}m" if data_age_minutes < 60 else f"{data_age_minutes / 60:.1f}h"
+                    message += f"⏰ *Data:* stale ({age_str}) • /data_quality\n"
+                else:
+                    message += f"🟢 *Data:* fresh ({data_age_minutes:.0f}m old)\n"
             
             # Active trades count (standardized terminology)
             try:
@@ -3102,6 +3257,9 @@ class TelegramCommandHandler:
                 message += f"💡 Start {LABEL_AGENT.lower()} to begin monitoring\n"
             elif paused:
                 message += f"💡 Resume {LABEL_AGENT.lower()} or address pause reason\n"
+            elif is_data_stale:
+                # Data stale - prioritize this issue
+                message += "⏰ Data stale—signals paused • /data_quality\n"
             elif last_cycle_seconds is not None and last_cycle_seconds > 300:
                 # Stale pulse - highlight potential issue
                 message += "⚠️ Scans appear stalled—check /health or logs\n"
@@ -3111,7 +3269,9 @@ class TelegramCommandHandler:
             elif futures_open is False:
                 message += "⏳ Waiting for market to open\n"
             else:
-                scan_interval = state.get("scan_interval", 60)
+                # Get scan_interval from nested config block
+                config_block = state.get("config", {})
+                scan_interval = config_block.get("scan_interval", 60) if isinstance(config_block, dict) else 60
                 message += f"🔄 Next scan in ~{scan_interval}s\n"
             
             # Buttons
@@ -3422,12 +3582,15 @@ class TelegramCommandHandler:
 
         # Add gateway status warning if needed
         gateway_status = self.service_controller.get_gateway_status()
-        if not gateway_status["process_running"]:
+        gateway_running = gateway_status.get("process_running", False)
+        gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
+        if not gateway_running:
             message += "\n\n⚠️ *Warning:* IBKR Gateway is not running. Agent may not receive data."
 
         reply_markup = self._get_main_menu_buttons(
             agent_running=self._is_agent_process_running(),
-            gateway_running=gateway_status.get("process_running", False),
+            gateway_running=gateway_running,
+            gateway_api_ready=gateway_api_ready,
         )
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
 
@@ -3451,7 +3614,12 @@ class TelegramCommandHandler:
 
         gateway_status = self.service_controller.get_gateway_status()
         gateway_running = gateway_status.get("process_running", False)
-        reply_markup = self._get_main_menu_buttons(agent_running=False, gateway_running=gateway_running)
+        gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
+        reply_markup = self._get_main_menu_buttons(
+            agent_running=False,
+            gateway_running=gateway_running,
+            gateway_api_ready=gateway_api_ready,
+        )
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
 
     async def _handle_restart_agent(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3492,7 +3660,12 @@ class TelegramCommandHandler:
 
         gateway_status = self.service_controller.get_gateway_status()
         gateway_running = gateway_status.get("process_running", False)
-        reply_markup = self._get_main_menu_buttons(agent_running=True, gateway_running=gateway_running)
+        gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
+        reply_markup = self._get_main_menu_buttons(
+            agent_running=True,
+            gateway_running=gateway_running,
+            gateway_api_ready=gateway_api_ready,
+        )
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
 
     async def _handle_signal_detail(
@@ -3891,22 +4064,36 @@ class TelegramCommandHandler:
                     logger.error(f"Error sending chart: {e}", exc_info=True)
                     await self._send_message_or_edit(
                         update, context,
-                        f"❌ Error sending chart: {str(e)}"
+                        "📊 *Chart Delivery Failed*\n\n"
+                        "Chart was generated but couldn't be sent.\n\n"
+                        "💡 Try again or check /data_quality"
                     )
             else:
                 await self._send_message_or_edit(
                     update, context,
-                    "❌ Could not generate chart. Historical data may not be available."
+                    "📊 *Chart Unavailable*\n\n"
+                    "Could not generate chart for this signal.\n\n"
+                    "*Possible reasons:*\n"
+                    "• Historical data not available\n"
+                    "• Data still loading\n\n"
+                    "💡 Try /data_quality to check data status"
                 )
                 
         except Exception as e:
             logger.error(f"Error handling signal chart: {e}", exc_info=True)
             await self._send_message_or_edit(
                 update, context,
-                f"❌ Error: {str(e)}"
+                "📊 *Chart Unavailable*\n\n"
+                "Something went wrong loading the chart.\n\n"
+                "💡 Try again or check /data_quality"
             )
     
-    def _get_main_menu_buttons(self, agent_running: bool = False, gateway_running: bool = False) -> InlineKeyboardMarkup:
+    def _get_main_menu_buttons(
+        self,
+        agent_running: bool = False,
+        gateway_running: bool = False,
+        gateway_api_ready: Optional[bool] = None,
+    ) -> InlineKeyboardMarkup:
         """
         Generate main menu inline keyboard buttons (unified Home Card layout).
         
@@ -3916,11 +4103,24 @@ class TelegramCommandHandler:
         - Row 3: Signals + Performance (most-used monitoring)
         - Row 4: Data Quality + Health (system status)
         - Row 5: Config + Backtest + Help
+        
+        Gateway indicator tri-state:
+        - ✅ when running and API ready
+        - 🟡 when running but API not ready (authenticating/2FA)
+        - ❌ when stopped
         """
         keyboard = []
         
-        # Row 1: Agent control + Gateway (service management)
-        gateway_status_text = "🔌" + (" ✅" if gateway_running else " ❌")
+        # Row 1: Agent control + Gateway (service management with tri-state indicator)
+        if gateway_running:
+            if gateway_api_ready is True:
+                gateway_status_text = "🔌 ✅"  # Running + API ready
+            elif gateway_api_ready is False:
+                gateway_status_text = "🔌 🟡"  # Running but API not ready
+            else:
+                gateway_status_text = "🔌 ✅"  # Assume ready if not specified (backward compat)
+        else:
+            gateway_status_text = "🔌 ❌"  # Stopped
         if agent_running:
             keyboard.append([
                 InlineKeyboardButton("⏹️ Stop", callback_data='stop_agent'),
