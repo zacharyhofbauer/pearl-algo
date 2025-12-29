@@ -44,6 +44,46 @@ DIFF_OUTPUT_DIR = project_root / "tests" / "artifacts"
 PIXEL_TOLERANCE = 2.0  # Allow ~0.8% variance per channel
 MAX_DIFF_PIXELS_PCT = 1.0  # Allow up to 1% of pixels to differ
 
+# PNG magic bytes (first 8 bytes of any valid PNG file)
+PNG_MAGIC = b'\x89PNG\r\n\x1a\n'
+
+
+def validate_png_file(path: Path) -> tuple[bool, str]:
+    """
+    Validate that a file is a valid PNG image.
+    
+    Returns:
+        (is_valid, error_message)
+    """
+    if not path.exists():
+        return False, f"File does not exist: {path}"
+    
+    if path.stat().st_size == 0:
+        return False, f"File is empty: {path}"
+    
+    # Check PNG magic bytes
+    try:
+        with open(path, "rb") as f:
+            header = f.read(8)
+        if header != PNG_MAGIC:
+            return False, f"Invalid PNG header: got {header!r}, expected {PNG_MAGIC!r}"
+    except Exception as e:
+        return False, f"Could not read file: {e}"
+    
+    # Try to actually load the image to verify it's not truncated/corrupt
+    try:
+        try:
+            from PIL import Image
+            img = Image.open(path)
+            img.verify()  # Verify without loading full data
+        except ImportError:
+            import matplotlib.pyplot as plt
+            plt.imread(str(path))  # Will raise if corrupt
+    except Exception as e:
+        return False, f"Image file is corrupt or unreadable: {e}"
+    
+    return True, ""
+
 
 def load_image_as_array(path: Path) -> Optional[np.ndarray]:
     """Load an image file as a numpy array."""
@@ -136,6 +176,60 @@ def save_diff_artifact(
             plt.imsave(str(DIFF_OUTPUT_DIR / f"{name}_diff.png"), diff)
     
     return DIFF_OUTPUT_DIR
+
+
+class TestBaselineValidity:
+    """
+    Baseline artifact health checks.
+    
+    These tests validate that the committed baseline image is a valid PNG file.
+    They run before visual regression to catch silent corruption early.
+    """
+
+    def test_baseline_exists(self):
+        """Baseline file must exist for visual regression to work."""
+        assert BASELINE_PATH.exists(), (
+            f"Baseline image not found: {BASELINE_PATH}\n"
+            f"Run: python3 scripts/testing/generate_dashboard_baseline.py"
+        )
+
+    def test_baseline_is_valid_png(self):
+        """
+        Baseline must be a valid PNG file.
+        
+        This catches:
+        - Corrupted files (truncated, damaged)
+        - Wrong file type (e.g., Git LFS pointer instead of actual image)
+        - Empty files
+        """
+        if not BASELINE_PATH.exists():
+            pytest.skip("Baseline file does not exist")
+        
+        is_valid, error = validate_png_file(BASELINE_PATH)
+        assert is_valid, (
+            f"Baseline image is invalid: {error}\n"
+            f"Regenerate with: python3 scripts/testing/generate_dashboard_baseline.py"
+        )
+
+    def test_baseline_has_reasonable_size(self):
+        """Baseline should be a reasonable size for a chart image."""
+        if not BASELINE_PATH.exists():
+            pytest.skip("Baseline file does not exist")
+        
+        size_bytes = BASELINE_PATH.stat().st_size
+        
+        # Dashboard charts are typically 200KB-500KB at 150dpi
+        min_size = 50 * 1024  # 50KB minimum
+        max_size = 2 * 1024 * 1024  # 2MB maximum
+        
+        assert size_bytes >= min_size, (
+            f"Baseline image too small ({size_bytes} bytes). "
+            f"May be corrupted or a placeholder."
+        )
+        assert size_bytes <= max_size, (
+            f"Baseline image unexpectedly large ({size_bytes} bytes). "
+            f"Check for accidental inclusion of debug data."
+        )
 
 
 class TestDashboardChartVisualRegression:

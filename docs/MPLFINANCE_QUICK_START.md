@@ -89,23 +89,57 @@ python3 scripts/testing/test_mplfinance_chart.py
 
 ## Visual Regression Testing
 
-The dashboard chart has a required **visual regression test** to prevent unintended visual changes.
+All chart types have **visual regression tests** to prevent unintended visual changes.
 
-### Running the visual regression test
+### Running all chart visual regression tests
 
 ```bash
+# Dashboard chart tests (11 tests)
 pytest tests/test_dashboard_chart_visual_regression.py -v
+
+# Entry/Exit chart tests (13 tests)
+pytest tests/test_entry_exit_chart_visual_regression.py -v
+
+# Run all chart visual regression tests
+pytest tests/test_dashboard_chart_visual_regression.py tests/test_entry_exit_chart_visual_regression.py -v
 ```
 
-### Updating the baseline image
+Test coverage includes:
+- **Baseline validity tests** – verify baseline PNGs are not corrupted
+- **Visual regression tests** – compare rendered output against baselines
+- **Determinism tests** – verify same inputs produce identical outputs
+- **Edge case tests** – verify charts handle stress scenarios
 
-If you intentionally change the dashboard chart appearance:
+### Updating baseline images
+
+If you intentionally change chart appearance:
 
 ```bash
+# Dashboard chart baseline
 python3 scripts/testing/generate_dashboard_baseline.py
+
+# Entry/Exit chart baselines
+python3 scripts/testing/generate_entry_exit_baselines.py
+
+# Entry only
+python3 scripts/testing/generate_entry_exit_baselines.py --entry-only
+
+# Exit only
+python3 scripts/testing/generate_entry_exit_baselines.py --exit-only
 ```
 
-The baseline image is stored at: `tests/fixtures/charts/dashboard_baseline.png`
+Baseline images are stored in: `tests/fixtures/charts/`
+- `dashboard_baseline.png`
+- `entry_baseline.png`
+- `exit_baseline.png`
+
+### Visual Schema Reference
+
+See `docs/CHART_VISUAL_SCHEMA.md` for the authoritative reference on:
+- Color semantics (candles, signals, indicators)
+- Z-order layering rules
+- Right-label priority hierarchy
+- Implicit trader contracts (do not violate)
 
 ### Determinism hooks
 

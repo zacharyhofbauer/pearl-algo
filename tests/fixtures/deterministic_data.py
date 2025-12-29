@@ -91,6 +91,73 @@ def generate_deterministic_ohlcv(
     return pd.DataFrame(data)
 
 
+def generate_deterministic_entry_signal(
+    data: pd.DataFrame,
+    direction: str = "long",
+) -> dict:
+    """
+    Generate a deterministic signal for entry chart testing.
+    
+    Args:
+        data: OHLCV DataFrame from generate_deterministic_ohlcv()
+        direction: "long" or "short"
+    
+    Returns:
+        Signal dict compatible with ChartGenerator.generate_entry_chart()
+    """
+    # Use close price at bar 80 as entry (gives context before and after)
+    entry_bar_idx = 80
+    entry_price = float(data["close"].iloc[entry_bar_idx])
+    entry_timestamp = data["timestamp"].iloc[entry_bar_idx]
+    
+    if direction == "long":
+        stop_loss = entry_price - 20.0  # 20 point stop
+        take_profit = entry_price + 30.0  # 30 point target (1.5:1 R:R)
+    else:
+        stop_loss = entry_price + 20.0
+        take_profit = entry_price - 30.0
+    
+    return {
+        "type": "momentum_breakout",
+        "direction": direction,
+        "entry_price": round(entry_price, 2),
+        "stop_loss": round(stop_loss, 2),
+        "take_profit": round(take_profit, 2),
+        "timestamp": entry_timestamp.isoformat() if hasattr(entry_timestamp, "isoformat") else str(entry_timestamp),
+        "reason": "test_deterministic_signal",
+    }
+
+
+def generate_deterministic_exit_data(
+    data: pd.DataFrame,
+    signal: dict,
+) -> tuple[float, str, float]:
+    """
+    Generate deterministic exit data for exit chart testing.
+    
+    Args:
+        data: OHLCV DataFrame
+        signal: Entry signal dict
+    
+    Returns:
+        (exit_price, exit_reason, pnl)
+    """
+    direction = signal.get("direction", "long")
+    entry_price = float(signal.get("entry_price", 0))
+    take_profit = float(signal.get("take_profit", 0))
+    
+    # Simulate hitting take profit
+    exit_price = take_profit
+    exit_reason = "take_profit"
+    
+    if direction == "long":
+        pnl = (exit_price - entry_price) * 2.0  # $2 per point for MNQ
+    else:
+        pnl = (entry_price - exit_price) * 2.0
+    
+    return exit_price, exit_reason, round(pnl, 2)
+
+
 
 
 
