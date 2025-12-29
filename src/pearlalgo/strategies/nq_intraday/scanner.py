@@ -6,6 +6,7 @@ Scans NQ futures for intraday trading opportunities using real-time data.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, time, timezone
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -45,6 +46,11 @@ class NQScanner:
     - Breakout signals
     """
 
+    # Timeframe to minutes mapping for threshold scaling
+    TIMEFRAME_MINUTES = {
+        "1m": 1, "2m": 2, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30, "1h": 60,
+    }
+
     def __init__(self, config: Optional[NQIntradayConfig] = None):
         """
         Initialize scanner.
@@ -58,7 +64,65 @@ class NQScanner:
         self.vwap_calculator = VWAPCalculator()
         self.volume_profile = VolumeProfile()
         self.order_flow = OrderFlowApproximator(lookback_periods=self.config.lookback_periods)
+        
+        # Track gate reasons from most recent scan (for diagnostics)
+        self.last_gate_reasons: List[str] = []
+        
         logger.info(f"NQScanner initialized with symbol={self.config.symbol}, timeframe={self.config.timeframe}")
+
+    def _get_timeframe_minutes(self, timeframe: str) -> int:
+        """Get minutes for a timeframe string (e.g. '1m' -> 1, '5m' -> 5)."""
+        return self.TIMEFRAME_MINUTES.get(timeframe.lower(), 5)
+
+    def get_gate_reasons(self) -> List[str]:
+        """
+        Get the gate reasons from the most recent scan cycle.
+        
+        Use this for diagnostics to understand why no signals were generated.
+        
+        Returns:
+            List of gate reason strings (empty if signals were generated or no gates hit).
+        """
+        return list(self.last_gate_reasons)
+
+    def _get_scaled_thresholds(self) -> Tuple[int, float]:
+        """
+        Get volume and volatility thresholds scaled for the current timeframe.
+        
+        Rationale:
+        - Volume aggregates over the bar period: 1m bar has ~1/5 the volume of a 5m bar.
+        - ATR is the average range which also scales (though less linearly).
+        
+        We scale relative to 5m as the reference timeframe (the original defaults).
+        
+        Returns:
+            Tuple of (min_volume, volatility_threshold) scaled for this timeframe.
+        """
+        ref_minutes = 5  # Reference timeframe (5m)
+        tf_minutes = self._get_timeframe_minutes(self.config.timeframe)
+        
+        # Scale factor: 1m = 0.2, 5m = 1.0, 15m = 3.0
+        scale = tf_minutes / ref_minutes
+        
+        # Volume scales roughly linearly with bar duration
+        base_min_volume = self.config.min_volume
+        if self.config.symbol == "NQ":
+            base_min_volume = max(base_min_volume, 100)
+        elif self.config.symbol == "MNQ":
+            base_min_volume = max(base_min_volume, 500)
+        
+        scaled_min_volume = max(10, int(base_min_volume * scale))
+        
+        # Volatility (ATR/price) scales with sqrt of bar duration (rough heuristic)
+        # Using linear scaling is too aggressive; sqrt is a compromise
+        import math
+        volatility_scale = math.sqrt(scale)
+        base_volatility = self.config.volatility_threshold
+        if self.config.symbol in ["NQ", "MNQ"]:
+            base_volatility = base_volatility * 0.8  # Existing scalp-friendly reduction
+        scaled_volatility = base_volatility * volatility_scale
+        
+        return scaled_min_volume, scaled_volatility
 
     def is_market_hours(self, dt: Optional[datetime] = None) -> bool:
         """
@@ -210,8 +274,11 @@ class NQScanner:
             List of signal dictionaries
         """
         signals = []
+        # Reset gate reasons for this scan cycle
+        self.last_gate_reasons = []
 
         if df.empty or len(df) < self.config.lookback_periods:
+            self.last_gate_reasons.append(f"Insufficient data: {len(df)} bars < {self.config.lookback_periods} required")
             return signals
 
         # Ensure indicators are calculated
@@ -281,25 +348,27 @@ class NQScanner:
             order_flow_data = self.order_flow.analyze_order_flow(df)
             logger.debug(f"Order Flow (approximated): {order_flow_data.get('recent_trend')} (net: {order_flow_data.get('net_pressure', 0):.2f})")
 
+        # Get timeframe-scaled thresholds (1m bars have lower volume/ATR than 5m)
+        min_volume, volatility_threshold = self._get_scaled_thresholds()
+        
         # Check volume threshold
-        min_volume = self.config.min_volume
-        if self.config.symbol == "NQ":
-            # NQ has good liquidity, standard threshold
-            min_volume = max(min_volume, 100)
-        elif self.config.symbol == "MNQ":
-            # MNQ typically has higher volume, but we want to ensure liquidity
-            min_volume = max(min_volume, 500)  # Ensure minimum liquidity
-
-        if latest.get("volume", 0) < min_volume:
+        current_volume = latest.get("volume", 0)
+        if current_volume < min_volume:
+            self.last_gate_reasons.append(
+                f"Low volume: {current_volume:.0f} < {min_volume} (scaled for {self.config.timeframe})"
+            )
+            logger.debug(f"Volume gate: {current_volume:.0f} < {min_volume} ({self.config.timeframe})")
             return signals
 
-        # Check volatility threshold (slightly lower for scalping opportunities)
-        volatility_threshold = self.config.volatility_threshold
-        if self.config.symbol in ["NQ", "MNQ"]:
-            # Allow slightly lower volatility for scalping setups (works for both NQ and MNQ)
-            volatility_threshold = volatility_threshold * 0.8
-
-        if latest.get("atr", 0) / latest["close"] < volatility_threshold:
+        # Check volatility threshold
+        current_atr = latest.get("atr", 0)
+        current_close = latest["close"]
+        atr_pct = current_atr / current_close if current_close > 0 else 0
+        if atr_pct < volatility_threshold:
+            self.last_gate_reasons.append(
+                f"Low volatility: ATR/price={atr_pct:.5f} < {volatility_threshold:.5f} (scaled for {self.config.timeframe})"
+            )
+            logger.debug(f"Volatility gate: ATR/price={atr_pct:.5f} < {volatility_threshold:.5f} ({self.config.timeframe})")
             return signals
 
         # Calculate ATR-based stop loss and take profit
@@ -442,6 +511,7 @@ class NQScanner:
         # Prop firm style: Avoid lunch lull for scalping (low volume, choppy)
         avoid_lunch = getattr(self.config, 'avoid_lunch_lull', True)
         if avoid_lunch and session == "lunch_lull":
+            self.last_gate_reasons.append("Lunch lull session (11:30-13:00 ET) - skipping signals")
             logger.debug("Skipping signals during lunch lull (prop firm style)")
             return signals
 

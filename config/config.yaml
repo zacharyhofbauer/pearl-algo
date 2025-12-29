@@ -6,7 +6,7 @@
 symbol: "MNQ"  # Mini NQ (1/10th size of NQ, prop-firm friendly)
 
 # Timeframe
-timeframe: "5m"  # 5-minute bars for intraday swings (primary), with 1-2m for execution pinpointing
+timeframe: "1m"  # 1-minute bars for decision stream (more opportunities), 5m/15m for MTF context
 
 # Scan Interval (seconds)
 scan_interval: 30  # Check for signals every 30 seconds (faster for scalping)
@@ -68,9 +68,9 @@ data:
   # Caching options (reduce IBKR request volume)
   # When enabled, historical data is refreshed on a TTL rather than every scan cycle.
   # Level 1 real-time data (latest_bar) is still fetched every cycle for freshness.
-  enable_base_cache: false         # Cache base timeframe historical data (default OFF)
+  enable_base_cache: true          # Cache base timeframe historical data (reduces IBKR load)
   base_refresh_seconds: 60         # TTL for base historical cache (seconds)
-  enable_mtf_cache: false          # Cache 5m/15m MTF historical data (default OFF)
+  enable_mtf_cache: true           # Cache 5m/15m MTF historical data (reduces IBKR load)
   mtf_refresh_seconds_5m: 300      # TTL for 5m MTF cache (5 minutes)
   mtf_refresh_seconds_15m: 900     # TTL for 15m MTF cache (15 minutes)
 

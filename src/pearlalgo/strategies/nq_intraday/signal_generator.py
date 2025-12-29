@@ -40,6 +40,9 @@ class SignalDiagnostics:
     rejected_order_book: int = 0  # Filtered by order book imbalance
     rejected_invalid_prices: int = 0  # Invalid entry/stop/target prices
     
+    # Scanner gate reasons (from NQScanner.get_gate_reasons())
+    scanner_gate_reasons: List[str] = field(default_factory=list)
+    
     # Context
     market_hours_checked: bool = False
     order_book_available: bool = False
@@ -57,6 +60,7 @@ class SignalDiagnostics:
             "rejected_quality_scorer": self.rejected_quality_scorer,
             "rejected_order_book": self.rejected_order_book,
             "rejected_invalid_prices": self.rejected_invalid_prices,
+            "scanner_gate_reasons": self.scanner_gate_reasons,
             "market_hours_checked": self.market_hours_checked,
             "order_book_available": self.order_book_available,
             "timestamp": self.timestamp,
@@ -68,11 +72,22 @@ class SignalDiagnostics:
         
         Returns a one-line summary like:
         "Raw: 3 → Valid: 1 | Filtered: 1 dup, 1 conf"
+        
+        Or for gated scans:
+        "Gated: Low volume (42 < 100)"
         """
         if self.rejected_market_hours:
             return "Session closed"
         
         if self.raw_signals == 0:
+            # Show scanner gate reasons if available (more informative than "No patterns")
+            if self.scanner_gate_reasons:
+                # Show first gate reason (most relevant, typically volume or volatility)
+                reason = self.scanner_gate_reasons[0]
+                # Truncate long reasons for compact display
+                if len(reason) > 50:
+                    reason = reason[:47] + "..."
+                return f"Gated: {reason}"
             return "No patterns detected"
         
         parts = []
@@ -101,6 +116,52 @@ class SignalDiagnostics:
             parts.append(f"| Filtered: {', '.join(rejections)}")
         
         return " ".join(parts)
+    
+    def format_detailed(self) -> str:
+        """
+        Format as detailed multi-line string for dashboard diagnostics section.
+        
+        Returns a multi-line summary with all gate reasons and rejection counts.
+        """
+        lines = []
+        
+        if self.rejected_market_hours:
+            lines.append("Session closed (outside market hours)")
+            return "\n".join(lines)
+        
+        # Signal flow
+        lines.append(f"Scanner: {self.raw_signals} raw signals")
+        if self.validated_signals > 0:
+            lines.append(f"Validated: {self.validated_signals} signals")
+        
+        # Scanner gate reasons (if no raw signals)
+        if self.raw_signals == 0 and self.scanner_gate_reasons:
+            lines.append("Gate reasons:")
+            for reason in self.scanner_gate_reasons[:3]:  # Limit to 3 for brevity
+                lines.append(f"  • {reason}")
+        
+        # Rejection breakdown (if any raw signals)
+        if self.raw_signals > 0:
+            rejections = []
+            if self.rejected_confidence > 0:
+                rejections.append(f"Confidence: {self.rejected_confidence}")
+            if self.rejected_risk_reward > 0:
+                rejections.append(f"R:R ratio: {self.rejected_risk_reward}")
+            if self.rejected_quality_scorer > 0:
+                rejections.append(f"Quality score: {self.rejected_quality_scorer}")
+            if self.rejected_order_book > 0:
+                rejections.append(f"Order book: {self.rejected_order_book}")
+            if self.rejected_invalid_prices > 0:
+                rejections.append(f"Invalid prices: {self.rejected_invalid_prices}")
+            if self.duplicates_filtered > 0:
+                rejections.append(f"Duplicates: {self.duplicates_filtered}")
+            
+            if rejections:
+                lines.append("Filtered out:")
+                for rej in rejections:
+                    lines.append(f"  • {rej}")
+        
+        return "\n".join(lines) if lines else "No diagnostic data"
 
 
 class NQSignalGenerator:
@@ -196,6 +257,9 @@ class NQSignalGenerator:
 
         # Track raw signal count for diagnostics
         diagnostics.raw_signals = len(raw_signals)
+        
+        # Capture scanner gate reasons for "why no signals" diagnostics
+        diagnostics.scanner_gate_reasons = self.scanner.get_gate_reasons()
 
         # Log raw signal count at INFO level for observability
         logger.info(f"Raw signals from scanner: {len(raw_signals)}")

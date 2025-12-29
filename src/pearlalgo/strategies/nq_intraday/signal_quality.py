@@ -43,13 +43,17 @@ class SignalQualityScorer:
     Scores signal quality based on historical performance and multi-factor analysis.
     
     Uses:
-    - Historical win rate by signal type + regime
+    - Historical win rate by signal type + regime (derived from signals.jsonl)
     - Information ratio (signal strength vs noise)
     - Confluence scoring (indicator alignment)
     - Time-of-day weighting
     - ATR-normalized adjustments
     - Minimum edge threshold enforcement
+    - Cold-start mode: allows signals through until enough historical data exists
     """
+
+    # Minimum exited signals required before enforcing win-rate gates
+    COLD_START_MIN_EXITS = 10
 
     def __init__(
         self,
@@ -69,9 +73,13 @@ class SignalQualityScorer:
 
         self.min_edge_threshold = min_edge_threshold
 
-        # Cache for performance lookup
+        # Cache for performance lookup (derived from signals.jsonl)
         self._performance_cache: Optional[Dict] = None
         self._cache_timestamp: Optional[datetime] = None
+        
+        # Cold-start mode: track whether we have enough data
+        self._cold_start_mode: bool = True
+        self._total_exits: int = 0
 
         logger.info(f"SignalQualityScorer initialized: min_edge={min_edge_threshold:.0%}")
 
@@ -149,6 +157,15 @@ class SignalQualityScorer:
         effective_threshold = self.min_edge_threshold - (confluence_score * 0.05)
         meets_threshold = historical_wr >= effective_threshold
 
+        # Cold-start bypass: allow all signals until we have enough exit data
+        # This prevents the quality filter from suppressing everything when starting fresh
+        cold_start_bypass = self._cold_start_mode and signal_confidence >= 0.50
+        if cold_start_bypass:
+            logger.debug(
+                f"Cold-start mode active ({self._total_exits} exits < {self.COLD_START_MIN_EXITS}): "
+                f"allowing signal through (confidence={signal_confidence:.2f})"
+            )
+
         # Enhanced bypass: handle first-time expansion days with no historical data
         # If ATR expanded and confidence is high, allow even if historical WR = 0.5 (no data)
         volatility_bypass = (
@@ -172,6 +189,7 @@ class SignalQualityScorer:
             (meets_threshold and information_ratio > 0)
             or volatility_bypass
             or confluence_bypass
+            or cold_start_bypass  # Always allow during cold-start
         )
 
         # Diagnostic logging: log quality scorer decisions when signal is rejected
@@ -186,7 +204,9 @@ class SignalQualityScorer:
                 f"information_ratio={information_ratio:.3f}, "
                 f"volatility={volatility}, "
                 f"volatility_bypass={volatility_bypass}, "
-                f"confluence_bypass={confluence_bypass}"
+                f"confluence_bypass={confluence_bypass}, "
+                f"cold_start_bypass={cold_start_bypass}, "
+                f"total_exits={self._total_exits}"
             )
 
         return {
@@ -437,25 +457,117 @@ class SignalQualityScorer:
             return "afternoon"  # Default
 
     def _load_performance_data(self) -> Dict:
-        """Load performance data from file."""
+        """
+        Load performance data derived from signals.jsonl (exited signals).
+        
+        This is more reliable than performance.json because:
+        1. signals.jsonl contains actual signal outcomes with regime context
+        2. Handles cold-start gracefully (we can count exits)
+        3. Avoids format mismatch issues (list vs dict in performance.json)
+        """
         # Use cache if recent (within 5 minutes)
         if self._performance_cache is not None and self._cache_timestamp:
             age = (datetime.now(timezone.utc) - self._cache_timestamp).total_seconds()
             if age < 300:  # 5 minutes
                 return self._performance_cache
 
-        try:
-            if self.performance_file.exists():
-                with open(self.performance_file) as f:
-                    data = json.load(f)
-                    self._performance_cache = data
-                    self._cache_timestamp = datetime.now(timezone.utc)
-                    return data
-        except Exception as e:
-            logger.warning(f"Error loading performance data: {e}")
+        # Initialize stats structure
+        performance_data: Dict = {
+            "signal_stats": {},
+            "regime_stats": {},
+            "total_exits": 0,
+        }
 
-        # Return default if no data
-        return {}
+        # Derive stats from signals.jsonl (primary source)
+        try:
+            if self.signals_file.exists():
+                with open(self.signals_file, "r") as f:
+                    for line in f:
+                        try:
+                            record = json.loads(line.strip())
+                            # Only count exited signals (they have outcome data)
+                            if record.get("status") != "exited":
+                                continue
+                            
+                            performance_data["total_exits"] += 1
+                            
+                            # Extract signal and outcome data
+                            signal = record.get("signal", {})
+                            signal_type = signal.get("type", "unknown")
+                            regime = signal.get("regime", {})
+                            regime_type = regime.get("regime", "ranging")
+                            volatility = regime.get("volatility", "normal")
+                            
+                            # Determine win/loss from exit_reason
+                            exit_reason = record.get("exit_reason", "")
+                            is_win = exit_reason == "take_profit"
+                            pnl = float(record.get("pnl", 0.0) or 0.0)
+                            
+                            # Update signal type + regime stats
+                            key = f"{signal_type}_{regime_type}_{volatility}"
+                            if key not in performance_data["signal_stats"]:
+                                performance_data["signal_stats"][key] = {
+                                    "wins": 0, "losses": 0, "total": 0, "total_pnl": 0.0
+                                }
+                            stats = performance_data["signal_stats"][key]
+                            stats["total"] += 1
+                            if is_win:
+                                stats["wins"] += 1
+                            else:
+                                stats["losses"] += 1
+                            stats["total_pnl"] += pnl
+                            
+                            # Update signal type stats (aggregate)
+                            if signal_type not in performance_data["signal_stats"]:
+                                performance_data["signal_stats"][signal_type] = {
+                                    "wins": 0, "losses": 0, "total": 0, "total_pnl": 0.0
+                                }
+                            stats_type = performance_data["signal_stats"][signal_type]
+                            stats_type["total"] += 1
+                            if is_win:
+                                stats_type["wins"] += 1
+                            else:
+                                stats_type["losses"] += 1
+                            stats_type["total_pnl"] += pnl
+                            
+                            # Update regime stats
+                            if regime_type not in performance_data["regime_stats"]:
+                                performance_data["regime_stats"][regime_type] = {
+                                    "wins": 0, "losses": 0, "total": 0, "total_pnl": 0.0
+                                }
+                            stats_regime = performance_data["regime_stats"][regime_type]
+                            stats_regime["total"] += 1
+                            if is_win:
+                                stats_regime["wins"] += 1
+                            else:
+                                stats_regime["losses"] += 1
+                            stats_regime["total_pnl"] += pnl
+                            
+                        except (json.JSONDecodeError, KeyError, TypeError):
+                            continue
+                
+                logger.debug(
+                    f"Loaded performance data from signals.jsonl: "
+                    f"{performance_data['total_exits']} exits, "
+                    f"{len(performance_data['signal_stats'])} signal types"
+                )
+        except Exception as e:
+            logger.warning(f"Error deriving performance data from signals.jsonl: {e}")
+        
+        # Update cold-start mode based on exit count
+        self._total_exits = performance_data.get("total_exits", 0)
+        self._cold_start_mode = self._total_exits < self.COLD_START_MIN_EXITS
+        
+        if self._cold_start_mode:
+            logger.debug(
+                f"Cold-start mode: {self._total_exits} exits < {self.COLD_START_MIN_EXITS} threshold"
+            )
+
+        # Cache the results
+        self._performance_cache = performance_data
+        self._cache_timestamp = datetime.now(timezone.utc)
+        
+        return performance_data
 
     def _lookup_historical_wr(
         self,

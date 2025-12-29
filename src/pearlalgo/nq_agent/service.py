@@ -1297,34 +1297,36 @@ class NQAgentService:
         """
         Compute compact trend arrows for multiple timeframes.
         
+        Uses df_5m and df_15m from market_data for accurate MTF trends,
+        regardless of the base decision timeframe (1m/5m).
+        
         Returns dict mapping timeframe -> slope value for trend_arrow() conversion.
         """
         trends = {}
         
         try:
-            # 5m trend from primary buffer (which is now 5m)
-            if self.data_fetcher._data_buffer is not None and len(self.data_fetcher._data_buffer) >= 10:
-                df = self.data_fetcher._data_buffer
-                if "close" in df.columns:
-                    closes = df["close"].tail(10)
+            # 5m trend from df_5m (explicit MTF data, not base buffer)
+            if market_data and "df_5m" in market_data:
+                df_5m = market_data["df_5m"]
+                if df_5m is not None and not df_5m.empty and "close" in df_5m.columns and len(df_5m) >= 10:
+                    closes = df_5m["close"].tail(10)
                     if len(closes) >= 2:
                         slope = (closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0] * 100
                         trends["5m"] = float(slope)
             
-            # 15m trend from 15m buffer
-            if market_data and "df_15m" in market_data and not market_data["df_15m"].empty:
+            # 15m trend from df_15m
+            if market_data and "df_15m" in market_data:
                 df_15m = market_data["df_15m"]
-                if "close" in df_15m.columns and len(df_15m) >= 5:
+                if df_15m is not None and not df_15m.empty and "close" in df_15m.columns and len(df_15m) >= 5:
                     closes = df_15m["close"].tail(5)
                     if len(closes) >= 2:
                         slope = (closes.iloc[-1] - closes.iloc[0]) / closes.iloc[0] * 100
                         trends["15m"] = float(slope)
             
-            # Resample from available data to get longer timeframes
-            # (these will be computed from 15m data if available)
-            if market_data and "df_15m" in market_data and not market_data["df_15m"].empty:
+            # Compute longer timeframes from 15m data (higher TF = fewer bars needed)
+            if market_data and "df_15m" in market_data:
                 df_15m = market_data["df_15m"]
-                if "close" in df_15m.columns:
+                if df_15m is not None and not df_15m.empty and "close" in df_15m.columns:
                     # 1h: look at 4 bars of 15m data
                     if len(df_15m) >= 4:
                         closes_1h = df_15m["close"].tail(4)
