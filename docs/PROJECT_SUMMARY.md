@@ -58,7 +58,7 @@ The MNQ Trading Agent is designed to:
 ### Target Market
 
 - **Symbol**: Mini E-mini NASDAQ-100 Futures (MNQ) - 1/10th size of NQ
-- **Timeframe**: 5-minute bars primary for intraday swings, with 1-2m for execution pinpointing
+- **Timeframe**: 1-minute decision stream (configurable), with 5m/15m for MTF context
 - **Trading session (StrategySessionOpen)**: Prop-firm window 18:00 - 16:10 ET (NY time). Positions must be flat by 16:10.
 - **Futures market window (FuturesMarketOpen)**: CME ETH Sun 18:00 ET → Fri 17:00 ET (Mon–Thu 17:00–18:00 ET maintenance break)
 - **Market**: CME Group futures exchange
@@ -482,8 +482,8 @@ pearlalgo-dev-ai-agents/
 ├── data/                        # Data storage
 │   ├── nq_agent_state/         # Service state (see State Schema below)
 │   │   ├── state.json          # Current state (authoritative for /status + watchdog)
-│   │   ├── signals.jsonl       # Signal history
-│   │   └── performance.json    # Performance metrics
+│   │   ├── signals.jsonl       # Signal history (JSONL, all signals)
+│   │   └── exports/            # Performance exports (7d metrics, signals snapshots)
 │   ├── buffers/                 # Data buffers (pickle files)
 │   └── historical/              # Historical data (parquet)
 │
@@ -615,7 +615,7 @@ PEARLALGO_DATA_PROVIDER=ibkr
 symbol: "MNQ"  # Mini NQ (1/10th size of NQ, better for prop firms)
 
 # Timeframe
-timeframe: "5m"  # 5-minute bars primary for intraday swings
+timeframe: "1m"  # 1-minute decision stream (5m/15m for MTF context)
 
 # Scan Interval (seconds)
 scan_interval: 30  # Check for signals every 30 seconds
@@ -940,7 +940,9 @@ tail -20 data/nq_agent_state/signals.jsonl | jq
 
 **View Performance**:
 ```bash
-cat data/nq_agent_state/performance.json | jq
+# Performance metrics are computed on-demand and exported to data/nq_agent_state/exports/
+# Use /performance command in Telegram, or:
+ls -la data/nq_agent_state/exports/
 ```
 
 ### External Watchdog
@@ -1152,7 +1154,7 @@ journalctl -u pearlalgo-mnq.service -f
 - **Logs**: stdout/stderr (systemd journal, Docker logs) + `logs/telegram_handler.log` (handler background mode)
 - **State**: `data/nq_agent_state/state.json`
 - **Signals**: `data/nq_agent_state/signals.jsonl`
-- **Performance**: `data/nq_agent_state/performance.json`
+- **Performance exports**: `data/nq_agent_state/exports/` (7d metrics, signals snapshots)
 - **Config**: `config/config.yaml`
 - **PID**: `logs/nq_agent.pid`
 

@@ -152,8 +152,8 @@
 
 - **Command**:
   - `/backtest` → pick duration (1–6 months)
-- **Primary timeframe**: **5m** (default for strategy analysis; 1–2m available for execution pinpointing)
-- **MTF context**: 15m/1h/4h trend arrows shown in dashboard
+- **Primary timeframe**: **1m** (default decision stream; configurable in `config.yaml`)
+- **MTF context**: 5m/15m used for trend alignment and dashboard charts
 - **Caching (important)**:
   - Historical data is cached to: `data/historical/`
   - Files look like: `MNQ_1m_2m.parquet`, `MNQ_1m_6m.parquet`
@@ -259,7 +259,7 @@ journalctl -u pearlalgo-mnq.service -p err
 ## 7. Where things live
 
 - **Config**: `config/config.yaml`, `.env`
-- **State**: `data/nq_agent_state/` (`state.json`, `signals.jsonl`, `performance.json`)
+- **State**: `data/nq_agent_state/` (`state.json`, `signals.jsonl`, `exports/`)
 - **Services & scripts**: `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/`
 - **Logs**: stdout/stderr (foreground), journald (systemd), or Docker logs
 - **Deep-dive docs**: `NQ_AGENT_GUIDE.md`, `GATEWAY.md`, `TELEGRAM_GUIDE.md`, `PROJECT_SUMMARY.md`

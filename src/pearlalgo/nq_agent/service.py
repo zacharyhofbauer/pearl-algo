@@ -765,6 +765,9 @@ class NQAgentService:
           that are strictly after the entry time (avoids Level1 daily high/low artifacts).
         - If TP and SL are both touched in the same bar, tiebreak is determined by
           config.virtual_pnl_tiebreak ("stop_loss" = conservative, "take_profit" = optimistic).
+
+        Performance: Uses vectorized pandas operations instead of iterrows() for O(signals)
+        instead of O(signals × bars) complexity.
         """
         # Gate by config.virtual_pnl_enabled
         if not getattr(self.config, "virtual_pnl_enabled", True):
@@ -787,6 +790,22 @@ class NQAgentService:
         # Consider only recently tracked signals for performance; active trades should be among them.
         try:
             recent = self.state_manager.get_recent_signals(limit=300)
+        except Exception:
+            return
+
+        # Precompute bar arrays once (vectorized) for all signals
+        try:
+            # Convert timestamps to tz-aware datetimes for comparison
+            bar_times = pd.to_datetime(df["timestamp"])
+            # Ensure timezone-aware (UTC) for comparison
+            if bar_times.dt.tz is None:
+                bar_times = bar_times.dt.tz_localize("UTC")
+            else:
+                bar_times = bar_times.dt.tz_convert("UTC")
+            bar_times_arr = bar_times.values  # numpy array of datetime64[ns, UTC]
+            
+            bar_highs = df["high"].fillna(df.get("close", 0)).astype(float).values
+            bar_lows = df["low"].fillna(df.get("close", 0)).astype(float).values
         except Exception:
             return
 
@@ -820,77 +839,74 @@ class NQAgentService:
                 if stop <= 0 or target <= 0:
                     continue
 
-                # Iterate over bars AFTER entry time to find exit
-                exit_reason = None
-                exit_price = None
-                exit_bar_ts: Optional[datetime] = None
+                # Vectorized: compute hit masks for all bars at once
+                if direction == "short":
+                    tp_mask = bar_lows <= target
+                    sl_mask = bar_highs >= stop
+                else:  # long
+                    tp_mask = bar_highs >= target
+                    sl_mask = bar_lows <= stop
 
-                for _, row in df.iterrows():
-                    try:
-                        bar_ts = row["timestamp"]
-                        if isinstance(bar_ts, pd.Timestamp):
-                            bar_ts = bar_ts.to_pydatetime()
-                        if isinstance(bar_ts, datetime) and bar_ts.tzinfo is None:
-                            bar_ts = bar_ts.replace(tzinfo=timezone.utc)
+                # Mask for bars strictly after entry time
+                if entry_time:
+                    import numpy as _np  # local import to avoid polluting namespace
+                    entry_ts_np = _np.datetime64(pd.Timestamp(entry_time).tz_convert("UTC"))
+                    after_entry_mask = bar_times_arr > entry_ts_np
+                else:
+                    import numpy as _np
+                    after_entry_mask = _np.array([True] * len(df))
 
-                        # Skip bars before or at entry time (strict after)
-                        if entry_time and isinstance(bar_ts, datetime) and bar_ts <= entry_time:
-                            continue
+                # Mask for valid bars (positive high/low)
+                valid_mask = (bar_highs > 0) & (bar_lows > 0)
 
-                        bar_high = float(row.get("high") or row.get("close") or 0.0)
-                        bar_low = float(row.get("low") or row.get("close") or 0.0)
-                        if bar_high <= 0 or bar_low <= 0:
-                            continue
+                # Combined exit mask: (TP or SL hit) AND after entry AND valid
+                exit_mask = (tp_mask | sl_mask) & after_entry_mask & valid_mask
 
-                        if direction == "short":
-                            hit_tp = bar_low <= target
-                            hit_sl = bar_high >= stop
-                            if hit_tp and hit_sl:
-                                # Both touched in same bar - use configured tiebreak
-                                if tiebreak == "take_profit":
-                                    exit_reason = "take_profit"
-                                    exit_price = target
-                                else:  # Default to conservative "stop_loss"
-                                    exit_reason = "stop_loss"
-                                    exit_price = stop
-                            elif hit_sl:
-                                exit_reason = "stop_loss"
-                                exit_price = stop
-                            elif hit_tp:
-                                exit_reason = "take_profit"
-                                exit_price = target
-                        else:  # long
-                            hit_tp = bar_high >= target
-                            hit_sl = bar_low <= stop
-                            if hit_tp and hit_sl:
-                                # Both touched in same bar - use configured tiebreak
-                                if tiebreak == "take_profit":
-                                    exit_reason = "take_profit"
-                                    exit_price = target
-                                else:  # Default to conservative "stop_loss"
-                                    exit_reason = "stop_loss"
-                                    exit_price = stop
-                            elif hit_sl:
-                                exit_reason = "stop_loss"
-                                exit_price = stop
-                            elif hit_tp:
-                                exit_reason = "take_profit"
-                                exit_price = target
+                if not exit_mask.any():
+                    continue
 
-                        # Stop at first exit (earliest bar where TP/SL was touched)
-                        if exit_reason:
-                            exit_bar_ts = bar_ts
-                            break
+                # Find first bar index where exit condition is met
+                first_exit_idx = exit_mask.argmax()  # argmax returns first True index
 
-                    except Exception:
-                        continue
+                # Get values at exit bar
+                exit_bar_ts_raw = bar_times_arr[first_exit_idx]
+                hit_tp = tp_mask[first_exit_idx]
+                hit_sl = sl_mask[first_exit_idx]
+
+                # Determine exit reason and price based on tiebreak
+                exit_reason: Optional[str] = None
+                exit_price: Optional[float] = None
+
+                if hit_tp and hit_sl:
+                    # Both touched in same bar - use configured tiebreak
+                    if tiebreak == "take_profit":
+                        exit_reason = "take_profit"
+                        exit_price = target
+                    else:  # Default to conservative "stop_loss"
+                        exit_reason = "stop_loss"
+                        exit_price = stop
+                elif hit_sl:
+                    exit_reason = "stop_loss"
+                    exit_price = stop
+                elif hit_tp:
+                    exit_reason = "take_profit"
+                    exit_price = target
 
                 if exit_reason and exit_price is not None:
+                    # Convert numpy datetime64 to python datetime
+                    exit_bar_ts: Optional[datetime] = None
+                    try:
+                        exit_bar_ts = pd.Timestamp(exit_bar_ts_raw).to_pydatetime()
+                        if exit_bar_ts and exit_bar_ts.tzinfo is None:
+                            exit_bar_ts = exit_bar_ts.replace(tzinfo=timezone.utc)
+                    except Exception:
+                        pass
+
                     perf = self.performance_tracker.track_exit(
                         signal_id=sig_id,
                         exit_price=float(exit_price),
                         exit_reason=str(exit_reason),
-                        exit_time=exit_bar_ts if isinstance(exit_bar_ts, datetime) else None,
+                        exit_time=exit_bar_ts,
                     )
                     exited_this_cycle.add(sig_id)
                     if perf:

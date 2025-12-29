@@ -7,6 +7,9 @@
 # This script is designed to run via cron or systemd timer to detect:
 # - Stale state (agent not updating state.json)
 # - Silent failures (running=true but no recent successful cycles)
+# - Paused state (circuit breaker triggered)
+# - Data freshness issues (data_fresh=false while market is open)
+# - Cadence drift (missed_cycles > 0 or excessive lag)
 # - Telegram delivery failures accumulating
 #
 # Exit codes:
@@ -111,6 +114,8 @@ def check_state(state: dict, verbose: bool = False) -> tuple[int, str, list[str]
     
     # Extract key values
     running = state.get("running", False)
+    paused = state.get("paused", False)
+    pause_reason = state.get("pause_reason")
     last_updated = parse_timestamp(state.get("last_updated"))
     last_successful_cycle = parse_timestamp(state.get("last_successful_cycle"))
     scan_interval = state.get("config", {}).get("scan_interval", 30)
@@ -118,14 +123,23 @@ def check_state(state: dict, verbose: bool = False) -> tuple[int, str, list[str]
     signals_send_failures_session = int(state.get("signals_send_failures_session", 0) or 0)
     futures_market_open = state.get("futures_market_open")
     strategy_session_open = state.get("strategy_session_open")
+    data_fresh = state.get("data_fresh")
+    
+    # Cadence metrics for drift detection
+    cadence_metrics = state.get("cadence_metrics", {}) or {}
+    missed_cycles = int(cadence_metrics.get("missed_cycles", 0) or 0)
+    cadence_lag_ms = float(cadence_metrics.get("cadence_lag_ms", 0) or 0)
     
     if verbose:
         details.append(f"Running: {running}")
+        details.append(f"Paused: {paused} (reason: {pause_reason})")
         details.append(f"Last updated: {last_updated}")
         details.append(f"Last successful cycle: {last_successful_cycle}")
         details.append(f"Scan interval: {scan_interval}s")
         details.append(f"Futures market open: {futures_market_open}")
         details.append(f"Strategy session open: {strategy_session_open}")
+        details.append(f"Data fresh: {data_fresh}")
+        details.append(f"Cadence: missed_cycles={missed_cycles}, lag={cadence_lag_ms:.1f}ms")
     
     # Calculate stale thresholds
     # Dashboard updates every 15 minutes (900s), so we use 2x that for stale threshold
@@ -158,7 +172,25 @@ def check_state(state: dict, verbose: bool = False) -> tuple[int, str, list[str]
             # Only warn if running but no successful cycle
             issues.append("Running but no successful cycle recorded")
     
-    # Check 3: Telegram send failures accumulating
+    # Check 3: Paused state (circuit breaker)
+    if running and paused:
+        reason_str = f" ({pause_reason})" if pause_reason else ""
+        issues.append(f"Agent is PAUSED{reason_str} - circuit breaker triggered")
+    
+    # Check 4: Data freshness while market is open
+    # Only alert if market is open but data is stale (avoids false positives during maintenance break)
+    if running and futures_market_open is True and data_fresh is False:
+        issues.append("Data is STALE while futures market is open - check IBKR connection")
+    
+    # Check 5: Cadence drift (missed cycles or excessive lag)
+    # Cadence lag threshold: 2x scan interval in ms (e.g., 60000ms for 30s interval)
+    cadence_lag_threshold_ms = scan_interval * 2 * 1000
+    if running and missed_cycles > 0:
+        issues.append(f"Cadence drift: {missed_cycles} missed cycle(s) - possible runtime issue")
+    if running and cadence_lag_ms > cadence_lag_threshold_ms:
+        issues.append(f"Cadence lag excessive: {cadence_lag_ms:.0f}ms (threshold: {cadence_lag_threshold_ms:.0f}ms)")
+    
+    # Check 6: Telegram send failures accumulating
     failure_threshold = 5  # Warn if more than 5 failures in session
     if signals_send_failures_session > failure_threshold:
         issues.append(f"Telegram send failures in session: {signals_send_failures_session}")
@@ -173,8 +205,8 @@ def check_state(state: dict, verbose: bool = False) -> tuple[int, str, list[str]
     if futures_market_open is False:
         if verbose:
             details.append("Futures market closed (expected quiet)")
-        # Clear stale issues if market is closed - expected to be quiet
-        issues = [i for i in issues if "stale" not in i.lower()]
+        # Clear stale issues and data freshness issues if market is closed - expected to be quiet
+        issues = [i for i in issues if "stale" not in i.lower() and "data is stale" not in i.lower()]
     
     if strategy_session_open is False:
         if verbose:
@@ -187,7 +219,8 @@ def check_state(state: dict, verbose: bool = False) -> tuple[int, str, list[str]
         return (0, "All checks passed", details)
     
     # Classify severity
-    critical_keywords = ["stale", "no successful cycle"]
+    # Critical: paused, data stale during market, cadence drift, state stale
+    critical_keywords = ["stale", "no successful cycle", "paused", "data is stale", "cadence drift"]
     is_critical = any(any(kw in issue.lower() for kw in critical_keywords) for issue in issues)
     
     if is_critical:
@@ -230,6 +263,18 @@ Exit codes:
   1 = Warning (operator should review)
   2 = Critical (action required)
   3 = Error reading state
+
+Checks performed:
+  - State freshness (last_updated)
+  - Cycle freshness (last_successful_cycle)
+  - Paused state (circuit breaker triggered)
+  - Data freshness while market is open
+  - Cadence drift (missed_cycles, excessive lag)
+  - Telegram send failures
+
+Market-aware suppression:
+  - Stale issues are suppressed when futures market is closed
+  - Cycle stale issues are suppressed when strategy session is closed
 
 Example cron (every 5 minutes):
   */5 * * * * cd /path/to/project && python3 scripts/monitoring/watchdog_nq_agent.py --telegram
@@ -284,8 +329,3 @@ Example cron (every 5 minutes):
 
 if __name__ == "__main__":
     main()
-
-
-
-
-

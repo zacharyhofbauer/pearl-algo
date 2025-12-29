@@ -642,6 +642,64 @@ Both tools can be run side-by-side; choose whichever fits your workflow.
 
 ---
 
+## 🔧 Parameter Tuning Protocol
+
+When adjusting strategy or service parameters in live operation, follow this bounded tuning protocol to avoid compounding changes and ensure accountability.
+
+### Single-Change Rule
+
+1. **One change at a time**: Only modify one parameter per tuning cycle.
+2. **Document before changing**:
+   - Parameter name and current value
+   - Proposed new value
+   - Rationale (why this change?)
+   - Success metric (what will improvement look like?)
+   - Rollback trigger (under what conditions will you revert?)
+3. **Observation period**: Run for at least 1-2 full trading sessions before evaluating.
+4. **Measure, don't assume**: Use `/performance`, `signals.jsonl`, or watchdog output to verify impact.
+
+### Example Tuning Cycle
+
+```
+# Before
+Parameter: signals.min_confidence
+Current: 0.50
+Proposed: 0.55
+Rationale: Too many low-quality signals; want to filter more aggressively
+Success metric: Fewer signals per day (target: 20% reduction) with same or better win rate
+Rollback trigger: Win rate drops below 45% OR signal count drops to zero for 2 consecutive sessions
+
+# After observation
+Result: Signal count reduced by 25%, win rate improved from 52% to 58%
+Decision: Keep change
+```
+
+### Parameters Safe for Bounded Tuning
+
+| Parameter | Location | Safe Range | Notes |
+|-----------|----------|------------|-------|
+| `signals.min_confidence` | config.yaml | 0.40 – 0.70 | Higher = fewer signals |
+| `signals.min_risk_reward` | config.yaml | 1.2 – 2.5 | Higher = stricter R:R filter |
+| `service.status_update_interval` | config.yaml | 300 – 3600 | Dashboard frequency (seconds) |
+| `data.stale_data_threshold_minutes` | config.yaml | 5 – 30 | Staleness alert threshold |
+| `circuit_breaker.max_consecutive_errors` | config.yaml | 5 – 20 | Circuit breaker sensitivity |
+
+### Parameters Requiring Extra Caution
+
+- `timeframe`: Changes affect buffer sizes, MTF alignment, and indicator calculations.
+- `session.start_time` / `session.end_time`: Affects when signals are generated.
+- `risk.*` parameters: Directly impact position sizing and stop/target placement.
+- `virtual_pnl.intrabar_tiebreak`: Affects signal grading (conservative vs optimistic).
+
+### Anti-Patterns to Avoid
+
+- **Stacking changes**: Don't tune multiple parameters simultaneously.
+- **Premature optimization**: Wait for statistically significant sample (minimum 20-30 trades).
+- **Overfitting to recent data**: A good week doesn't justify aggressive changes.
+- **Ignoring rollback triggers**: If the trigger condition is met, revert immediately.
+
+---
+
 ## 📝 Testing Best Practices
 
 1. **Test Before Deploying**
