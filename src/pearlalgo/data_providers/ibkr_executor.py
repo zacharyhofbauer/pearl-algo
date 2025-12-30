@@ -273,7 +273,15 @@ class GetLatestBarTask(Task):
         # Use unified market hours detection from utils.market_hours
         # This ensures consistent behavior with the rest of the codebase
         from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
         from pearlalgo.utils.market_hours import get_market_hours
+        
+        # Get current time in ET for logging
+        try:
+            ET = ZoneInfo("America/New_York")
+            now_et = datetime.now(ET)
+        except Exception:
+            now_et = datetime.now(timezone.utc)
         
         try:
             market_hours = get_market_hours()

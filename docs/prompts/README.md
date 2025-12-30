@@ -48,6 +48,26 @@ Telegram UI/UX analysis and improvement prompt for the trading bot interface. Us
 
 **When to use:** When you need to improve the Telegram bot interface, message clarity, or user experience. Focuses on UI/UX only - backend logic changes should use project_building.md.
 
+### `charting_suite.md`
+Chart generation and visualization integrity prompt for trading charts. Use this when:
+- Analyzing chart visual clarity and trader trust
+- Improving chart readability and consistency
+- Refining visual schema and color semantics
+- Enhancing chart layout and information hierarchy
+- Validating visual regressions
+
+**When to use:** When you need to improve chart visualization, preserve visual integrity, or validate chart changes. Focuses on chart rendering only - signal logic changes should use project_building.md.
+
+### `nq_agent.md`
+NQ Agent verification and performance stewardship prompt. Use this when:
+- Continuously verifying agent behavior and reliability
+- Monitoring agent performance and health
+- Testing agent lifecycle and state consistency
+- Validating signal generation integrity
+- Fine-tuning agent parameters and behavior
+
+**When to use:** When you need to verify, monitor, or fine-tune the trading agent. Focuses on agent verification and performance - strategy changes should use project_building.md.
+
 ## Usage
 
 1. Open the relevant prompt file
