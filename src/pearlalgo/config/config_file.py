@@ -164,6 +164,9 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "hud",
     "sessions",
     "prop_firm",
+    "strategy",
+    "strategy_variants",
+    "market_hours",
 })
 
 # Config keys expected to be specific types after env substitution

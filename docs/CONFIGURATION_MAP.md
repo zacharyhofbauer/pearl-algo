@@ -61,6 +61,12 @@ Key sections and their consumers:
     - `pearlalgo.nq_agent.data_fetcher` (data buffer sizes)
     - `pearlalgo.nq_agent.performance_tracker` (performance history limits)
     - `strategies.nq_intraday.*` (signal thresholds, where applicable).
+- `strategy`, `strategy_variants`
+  - **Used by**: `strategies.nq_intraday.config.NQIntradayConfig` for advanced strategy configuration.
+  - **Purpose**: Allow runtime strategy parameter overrides and define strategy variants for backtesting/experimentation.
+- `market_hours`
+  - **Used by**: `pearlalgo.utils.market_hours` and strategy session logic.
+  - **Purpose**: Define market hours and session windows for trading logic.
 
 Notes:
 - `data.enable_mtf_cache`, `data.mtf_refresh_seconds_5m`, `data.mtf_refresh_seconds_15m` (default OFF) control how often 5m/15m history is refreshed.

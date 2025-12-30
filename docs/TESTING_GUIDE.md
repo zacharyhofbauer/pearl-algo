@@ -179,7 +179,7 @@ mock_provider = MockDataProvider(
 )
 ```
 
-**Expected:** Fewer or no long signals (strategy is long-only)
+**Expected:** Short signals may be generated, or signal count may vary based on confidence thresholds
 
 #### Test High Volatility
 ```python
@@ -827,8 +827,8 @@ These gaps are **observational only** and do not change behavior.
 2. **Circuit breaker thresholds** (`test_error_recovery.py`)
    - Connection-failure pause behavior is tested, but other breaker paths are not yet directly covered (e.g., consecutive errors pause, data-fetch backoff).
 
-3. **IBKR entitlements and fallback behavior**
-   - `smoke_test_ibkr.py` and docs describe entitlements, but there are no isolated unit tests for `ibkr.entitlements` logic.
+3. **IBKR connectivity and fallback behavior**
+   - `smoke_test_ibkr.py` tests basic connectivity, but detailed fallback paths (reconnection, data staleness recovery) could use expanded coverage.
 
 4. **Command handler behavior**
    - The Telegram command handler (`telegram_command_handler.py`) is exercised indirectly via manual testing but does not yet have automated tests for `/status`, `/signals`, `/performance` command flows.

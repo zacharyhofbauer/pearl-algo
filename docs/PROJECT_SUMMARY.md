@@ -1,7 +1,7 @@
 # Project Summary - PearlAlgo MNQ Trading Agent
 
 **Version:** 0.2.1  
-**Last Updated:** 2025-12-23 (Hygiene Pass)  
+**Last Updated:** 2025-12-30 (Hygiene Pass)  
 **Status:** Production-Ready  
 **Trading Style:** Prop Firm - Intraday Swings & Quick Scalps
 
@@ -215,7 +215,7 @@ The MNQ Trading Agent is designed to:
 - Uses `ib_insync` library for IB Gateway connection
 - Thread-safe executor for IBKR API calls
 - Connection lifecycle management
-- Market data entitlement validation
+- Market data validation
 - Stale data detection
 - Automatic contract resolution (front month futures)
 
@@ -224,10 +224,6 @@ The MNQ Trading Agent is designed to:
 - Manages connection lifecycle
 - Handles reconnection logic
 - Task queue for async operations
-
-**Entitlements** (`src/pearlalgo/data_providers/ibkr/entitlements.py`):
-- Validates market data subscriptions
-- Checks data permissions
 
 **Factory** (`factory.py`):
 - Creates data provider instances
@@ -406,8 +402,7 @@ pearlalgo-dev-ai-agents/
 │   │   ├── base.py             # Abstract interface
 │   │   ├── factory.py          # Provider factory
 │   │   ├── ibkr/               # IBKR provider
-│   │   │   ├── ibkr_provider.py
-│   │   │   └── entitlements.py
+│   │   │   └── ibkr_provider.py
 │   │   └── ibkr_executor.py    # Thread-safe executor
 │   ├── utils/                  # Utilities (cross-cutting)
 │   │   ├── telegram_alerts.py  # Telegram core
@@ -1224,7 +1219,7 @@ The system is ready for production use and optimized for prop firm trading with 
 - `docs/GATEWAY.md` - IBKR Gateway setup
 - `docs/MARKET_DATA_SUBSCRIPTION.md` - How to get live market data (fix Error 354)
 
-**Last Updated:** 2025-12-23  
+**Last Updated:** 2025-12-30  
 **Current Configuration:** MNQ (Mini NQ) - Prop Firm Style Trading
 
 

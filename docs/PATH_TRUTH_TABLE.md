@@ -32,7 +32,6 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Logical component**: IBKR Gateway + API connectivity
 - **Python modules**:
   - `pearlalgo.data_providers.ibkr.ibkr_provider`
-  - `pearlalgo.data_providers.ibkr.entitlements`
   - `pearlalgo.data_providers.ibkr_executor`
 - **Shell scripts** (`scripts/gateway/`):
   - Startup / shutdown: `start_ibgateway_ibc.sh`, `stop_ibgateway_ibc.sh`, `start_ibgateway_ibc_vnc.sh`
