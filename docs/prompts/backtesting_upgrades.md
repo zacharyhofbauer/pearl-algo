@@ -549,7 +549,6 @@ Key Files:
 - src/pearlalgo/strategies/nq_intraday/backtest_adapter.py
 - scripts/backtesting/backtest_cli.py
 - scripts/backtesting/run_variants.py
-- scripts/testing/backtest_nq_strategy.py
 
 Data Sources:
 - data/historical/: Directory for cached historical OHLCV parquet files

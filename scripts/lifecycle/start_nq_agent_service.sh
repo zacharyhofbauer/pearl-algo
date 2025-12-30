@@ -11,6 +11,31 @@ PID_FILE="$PROJECT_DIR/logs/nq_agent.pid"
 
 cd "$PROJECT_DIR"
 
+# ----------------------------------------------------------------------------
+# Arg parsing
+# ----------------------------------------------------------------------------
+BACKGROUND_MODE=false
+EXECUTION_DRY_RUN=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --background|-b)
+            BACKGROUND_MODE=true
+            ;;
+        --execution-dry-run)
+            EXECUTION_DRY_RUN=true
+            ;;
+    esac
+done
+
+# Enable execution dry-run via typed env overrides (no orders; still requires /arm to attempt execution)
+if [ "$EXECUTION_DRY_RUN" = true ]; then
+    export PEARLALGO_EXECUTION_ENABLED=true
+    export PEARLALGO_EXECUTION_MODE=dry_run
+    export PEARLALGO_EXECUTION_ARMED=false
+    echo "🛡️  ATS dry_run enabled via env overrides (execution.enabled=true, armed=false, mode=dry_run)"
+fi
+
 # Create logs directory if it doesn't exist (for PID file only)
 mkdir -p "$PROJECT_DIR/logs"
 
@@ -62,7 +87,7 @@ if ! python3 -c "import pearlalgo" 2>/dev/null; then
 fi
 
 # Check if user wants background mode
-if [ "$1" == "--background" ] || [ "$1" == "-b" ]; then
+if [ "$BACKGROUND_MODE" = true ]; then
     echo "=== Starting NQ Agent Service (Background Mode) ==="
     echo ""
     

@@ -805,7 +805,6 @@ This section summarizes the current test coverage and highlights areas for futur
 - `test_data_quality.py` – data quality checks
 - `test_e2e_simulation.py` – end‑to‑end simulation
 - `test_mplfinance_chart.py` – chart generation smoke test
-- `backtest_nq_strategy.py` – **deprecated**, use `scripts/backtesting/backtest_cli.py signal`
 - `check_signals.py` – signals file diagnostics (format/count/validity)
 - `smoke_test_ibkr.py` – IBKR connectivity smoke test
 - `validate_strategy.py` – strategy validation helper

@@ -19,6 +19,7 @@ Gateway scripts orchestrate IBKR Gateway lifecycle and 2FA flows. They do **not*
 
 Key scripts (to keep as canonical):
 
+- `gateway.sh` – consolidated entry point (subcommands) that delegates to the scripts below.
 - `start_ibgateway_ibc.sh`, `stop_ibgateway_ibc.sh` – start/stop Gateway via IBC.
 - `check_gateway_status.sh` – check if Gateway is running.
 - `check_api_ready.sh`, `check_gateway_2fa_status.sh`, `test_api_connection.sh` – verify authentication and API connectivity.
@@ -62,9 +63,6 @@ Backtesting scripts for strategy validation on historical data.
   - **Role**: Data‑quality and end‑to‑end tests.
 - `test_mplfinance_chart.py`
   - **Role**: Chart generation smoke test (mplfinance).
-- `backtest_nq_strategy.py`
-  - **Role**: **Deprecated** wrapper. Use `scripts/backtesting/backtest_cli.py signal` instead.
-  - **Behavior**: Delegates to `backtest_cli.py` with deprecation warning.
 - `smoke_test_ibkr.py`
   - **Role**: Quick connectivity and entitlement smoke test for IBKR.
 - `validate_strategy.py`
@@ -77,6 +75,9 @@ Backtesting scripts for strategy validation on historical data.
 - `generate_entry_exit_baselines.py`
   - **Role**: Generate deterministic entry/exit baseline images for visual regression testing.
   - **Behavior**: Renders entry and exit charts; outputs to `tests/fixtures/charts/entry_baseline.png` and `tests/fixtures/charts/exit_baseline.png`.
+- `generate_on_demand_chart_baseline.py`
+  - **Role**: Generate deterministic baseline image for the Telegram `/chart` (on-demand) dashboard chart.
+  - **Behavior**: Renders the 12h lookback variant; outputs to `tests/fixtures/charts/on_demand_chart_12h_baseline.png`.
 - `check_no_secrets.py`
   - **Role**: Secret detection guardrail; scans codebase for accidentally committed secrets/tokens.
 - `live_probe_mnq.py`

@@ -89,6 +89,13 @@ Automated Trading System (ATS) execution and learning prompt. Use this when:
 
 **When to use:** When you need to analyze, improve, or extend the automated execution system or adaptive learning layer. Focuses on execution safety and learning - signal generation changes should use project_building.md, Telegram UI changes should use telegram_suite.md.
 
+### `master_task_prompt.md`
+All-in-one “offline session” prompt that orchestrates the full workflow end-to-end (cleanup → verification → backtesting → ATS safety → Telegram UX → charting integrity → agent verification → testing). Use this when:
+- You want **one big prompt** to drive a multi-hour autonomous session
+- The operator will be away/unavailable and you want the agent to both **execute safe work** and **leave a clear plan/report**
+
+**When to use:** When you want a single orchestrator prompt that references and sequences the other prompts, rather than choosing one workflow prompt at a time.
+
 ## Usage
 
 1. Open the relevant prompt file

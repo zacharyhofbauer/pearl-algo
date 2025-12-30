@@ -126,6 +126,7 @@
   ```bash
   ./scripts/lifecycle/start_nq_agent_service.sh          # start (fg)
   ./scripts/lifecycle/start_nq_agent_service.sh --background
+  ./scripts/lifecycle/start_nq_agent_service.sh --execution-dry-run  # ATS (dry_run, disarmed; logs only)
   ./scripts/lifecycle/stop_nq_agent_service.sh           # stop
   ./scripts/lifecycle/check_nq_agent_status.sh           # status
   ```

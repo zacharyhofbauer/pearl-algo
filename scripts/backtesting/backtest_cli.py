@@ -27,7 +27,22 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+
+def _numpy_safe_json(obj: Any) -> str:
+    """JSON serialize with numpy type support."""
+    def default_handler(o: Any) -> Any:
+        if isinstance(o, (np.bool_, np.integer)):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+    return json.dumps(obj, default=default_handler)
 
 import pandas as pd
 import numpy as np
@@ -329,11 +344,11 @@ def write_report(
     # 2. Signals CSV
     if result.signals:
         signals_df = pd.DataFrame(result.signals)
-        # Flatten nested dicts for CSV compatibility
+        # Flatten nested dicts for CSV compatibility (handle numpy types)
         for col in signals_df.columns:
             if signals_df[col].apply(lambda x: isinstance(x, dict)).any():
                 signals_df[col] = signals_df[col].apply(
-                    lambda x: json.dumps(x) if isinstance(x, dict) else x
+                    lambda x: _numpy_safe_json(x) if isinstance(x, dict) else x
                 )
         signals_df.to_csv(report_dir / "signals.csv", index=False)
 

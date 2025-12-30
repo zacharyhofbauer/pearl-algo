@@ -461,7 +461,6 @@ pearlalgo-dev-ai-agents/
 │       ├── run_tests.sh                 # Run pytest unit tests
 │       ├── smoke_test_ibkr.py           # IBKR smoke test
 │       ├── check_no_secrets.py          # Secret detection guardrail
-│       ├── backtest_nq_strategy.py      # Strategy backtesting (deprecated wrapper)
 │       ├── test_data_quality.py         # Data quality validation
 │       └── test_e2e_simulation.py       # End-to-end simulation
 │

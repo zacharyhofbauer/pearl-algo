@@ -810,11 +810,23 @@ class TelegramCommandHandler:
                 return
             
             # Generate chart
+            # ChartGenerator uses lookback_bars (not hours). Convert hours → bars for the chosen timeframe.
+            # /chart currently uses 5m bars (12 bars/hour).
+            tf_minutes = 5
+            try:
+                if isinstance(timeframe, str) and timeframe.endswith("m"):
+                    tf_minutes = max(1, int(timeframe[:-1]))
+            except Exception:
+                tf_minutes = 5
+
+            lookback_bars = int(round((lookback_hours * 60.0) / float(tf_minutes)))
+            lookback_bars = max(20, lookback_bars)  # ensure enough context for indicators/overlays
+
             chart_path = self.chart_generator.generate_dashboard_chart(
                 df,
                 symbol=symbol,
                 timeframe=timeframe,
-                lookback_hours=lookback_hours,
+                lookback_bars=min(int(lookback_bars), len(df)),
                 show_pressure=True,
             )
             

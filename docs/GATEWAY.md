@@ -12,6 +12,13 @@ cd /path/to/pearlalgo-dev-ai-agents
 ./scripts/gateway/start_ibgateway_ibc.sh
 ```
 
+Or (consolidated entry point):
+
+```bash
+cd /path/to/pearlalgo-dev-ai-agents
+./scripts/gateway/gateway.sh start
+```
+
 **What happens:**
 - Starts Gateway headlessly (no GUI needed)
 - Authenticates automatically
@@ -22,6 +29,12 @@ cd /path/to/pearlalgo-dev-ai-agents
 
 ```bash
 ./scripts/gateway/stop_ibgateway_ibc.sh
+```
+
+Or:
+
+```bash
+./scripts/gateway/gateway.sh stop
 ```
 
 If the Gateway is wedged and won’t stop cleanly:
@@ -35,6 +48,13 @@ pkill -9 -f "java.*IBC.jar"
 ```bash
 cd /path/to/pearlalgo-dev-ai-agents
 ./scripts/gateway/check_gateway_status.sh
+```
+
+Or:
+
+```bash
+cd /path/to/pearlalgo-dev-ai-agents
+./scripts/gateway/gateway.sh status
 ```
 
 **Shows:**

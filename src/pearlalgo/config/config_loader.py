@@ -33,12 +33,68 @@ data settings, signals, performance tracking, execution (ATS), and learning.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 from pearlalgo.config.config_file import load_config_yaml, log_config_warnings
 from pearlalgo.utils.logger import logger
 
+
+# Environment override helpers (typed)
+_ENV_TRUE = {"1", "true", "yes", "y", "on"}
+_ENV_FALSE = {"0", "false", "no", "n", "off"}
+
+
+def _get_env_bool(name: str) -> Optional[bool]:
+    """
+    Read a boolean from the environment using tolerant parsing.
+
+    Returns None if the env var is not set (so config.yaml/defaults remain in control).
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    v = raw.strip().lower()
+    if v in _ENV_TRUE:
+        return True
+    if v in _ENV_FALSE:
+        return False
+    logger.warning(f"Invalid boolean for {name}={raw!r} (expected one of: {sorted(_ENV_TRUE | _ENV_FALSE)})")
+    return None
+
+
+def _get_env_str(name: str) -> Optional[str]:
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    v = raw.strip()
+    return v if v else None
+
+
+def _apply_execution_env_overrides(execution_cfg: Dict[str, Any]) -> None:
+    """
+    Apply safe, typed environment overrides for execution rollout.
+
+    This avoids YAML `${ENV_VAR}` substitution for booleans, which would produce strings.
+    """
+    enabled = _get_env_bool("PEARLALGO_EXECUTION_ENABLED")
+    if enabled is not None:
+        execution_cfg["enabled"] = enabled
+
+    armed = _get_env_bool("PEARLALGO_EXECUTION_ARMED")
+    if armed is not None:
+        execution_cfg["armed"] = armed
+
+    mode = _get_env_str("PEARLALGO_EXECUTION_MODE")
+    if mode:
+        mode_norm = mode.lower()
+        if mode_norm in ("dry_run", "paper", "live"):
+            execution_cfg["mode"] = mode_norm
+        else:
+            logger.warning(
+                f"Invalid PEARLALGO_EXECUTION_MODE={mode!r} (expected: dry_run|paper|live); ignoring"
+            )
 
 # Default values for service configuration sections
 _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
@@ -200,6 +256,12 @@ def load_service_config(
     result = {}
     for section, defaults in _SERVICE_DEFAULTS.items():
         result[section] = {**defaults, **config_data.get(section, {})}
+
+    # Safe environment overrides for controlled rollouts (do not rely on YAML substitution)
+    try:
+        _apply_execution_env_overrides(result.get("execution", {}))
+    except Exception as e:
+        logger.warning(f"Could not apply execution env overrides: {e}")
     
     return result
 

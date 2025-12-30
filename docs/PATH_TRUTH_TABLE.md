@@ -34,6 +34,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.data_providers.ibkr.ibkr_provider`
   - `pearlalgo.data_providers.ibkr_executor`
 - **Shell scripts** (`scripts/gateway/`):
+  - Consolidated entry: `gateway.sh` (subcommands delegating to scripts below)
   - Startup / shutdown: `start_ibgateway_ibc.sh`, `stop_ibgateway_ibc.sh`, `start_ibgateway_ibc_vnc.sh`
   - Status / checks: `check_gateway_status.sh`, `check_api_ready.sh`, `check_gateway_2fa_status.sh`, `test_api_connection.sh`, `check_tws_conflict.sh`
   - 2FA + VNC helpers: `auto_2fa.sh`, `wait_for_2fa_approval.sh`, `complete_2fa_vnc.sh`, `setup_vnc_for_login.sh`, `configure_gateway_api_vnc.sh`, `monitor_until_ready.sh`
@@ -60,10 +61,10 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `test_signal_starvation_fixes.py`
   - `test_data_quality.py`, `test_e2e_simulation.py`
   - `test_mplfinance_chart.py`
-  - `backtest_nq_strategy.py` – **deprecated**, use `scripts/backtesting/backtest_cli.py signal`
   - `check_signals.py`
   - `generate_dashboard_baseline.py` – generate deterministic baseline image for visual regression tests
   - `generate_entry_exit_baselines.py` – generate deterministic entry/exit baseline images for visual regression tests
+  - `generate_on_demand_chart_baseline.py` – generate deterministic `/chart` (on-demand) baseline image (12h lookback)
   - `live_probe_mnq.py` – read-only IBKR MNQ data verification probe (connection, contract, freshness)
   - `soak_test_mock_service.py` – bounded soak test harness (memory drift, cadence, error rate monitoring)
 - **Docs**:

@@ -167,6 +167,9 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "strategy",
     "strategy_variants",
     "market_hours",
+    # ATS execution + learning layers (kept separate from strategy logic)
+    "execution",
+    "learning",
 })
 
 # Config keys expected to be specific types after env substitution

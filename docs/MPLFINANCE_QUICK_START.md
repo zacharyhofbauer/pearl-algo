@@ -132,6 +132,9 @@ python3 scripts/testing/generate_entry_exit_baselines.py --exit-only
 
 # Backtest chart baseline
 python3 scripts/testing/generate_backtest_baseline.py
+
+# On-demand (/chart) baseline (12h lookback)
+python3 scripts/testing/generate_on_demand_chart_baseline.py
 ```
 
 Baseline images are stored in: `tests/fixtures/charts/`
@@ -139,6 +142,7 @@ Baseline images are stored in: `tests/fixtures/charts/`
 - `entry_baseline.png`
 - `exit_baseline.png`
 - `backtest_baseline.png`
+- `on_demand_chart_12h_baseline.png`
 
 ### Visual Schema Reference
 

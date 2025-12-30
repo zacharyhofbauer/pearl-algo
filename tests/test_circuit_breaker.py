@@ -191,6 +191,8 @@ async def test_connection_failure_triggers_pause(tmp_path) -> None:
     )
     # Set low threshold to trigger quickly
     service.max_connection_failures = 2
+    # Disable adaptive cadence to ensure fast scan interval is respected
+    service._adaptive_cadence_enabled = False
 
     task = asyncio.create_task(service.start())
 
@@ -239,6 +241,8 @@ async def test_consecutive_errors_triggers_pause(tmp_path, monkeypatch) -> None:
         state_dir=tmp_path,
     )
     service.max_consecutive_errors = 2
+    # Disable adaptive cadence to ensure fast scan interval is respected
+    service._adaptive_cadence_enabled = False
 
     # Patch the strategy's analyze method to raise an exception
     # This simulates an unhandled error in the processing logic
@@ -454,6 +458,8 @@ class TestCircuitBreakerThresholdEdgeCases:
         )
         # Set threshold to exactly 3
         service.max_connection_failures = 3
+        # Disable adaptive cadence to ensure fast scan interval is respected
+        service._adaptive_cadence_enabled = False
 
         task = asyncio.create_task(service.start())
 
