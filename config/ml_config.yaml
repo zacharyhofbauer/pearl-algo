@@ -1,0 +1,171 @@
+# PearlAlgo ML Configuration
+# All new ML components run in SHADOW MODE by default (observe only, no execution impact)
+
+learning:
+  # Master toggle for entire ML system
+  enabled: true
+  
+  # Mode: "shadow" (observe only) or "live" (affects execution)
+  # SAFETY: Start with shadow, only switch to live after validation
+  mode: "shadow"
+
+  # =========================================================================
+  # Layer 1: Feature Engineering
+  # =========================================================================
+  features:
+    enabled: true
+    
+    # Lookback windows for feature computation
+    short_window: 5
+    medium_window: 20
+    long_window: 50
+    
+    # Feature categories to compute
+    compute_price_action: true
+    compute_volume_profile: true
+    compute_microstructure: true
+    compute_time_features: true
+    compute_sequential: true
+    compute_cross_timeframe: true
+    
+    # Normalization settings
+    normalize_features: true
+    clip_outliers: true
+    outlier_std: 3.0
+
+  # =========================================================================
+  # Layer 2: Contextual Bandits
+  # =========================================================================
+  contextual_bandit:
+    enabled: true
+    mode: "shadow"
+    
+    # Exploration settings
+    explore_rate: 0.1
+    min_samples_per_context: 5
+    
+    # Decision thresholds
+    decision_threshold: 0.3
+    confidence_boost_threshold: 0.7
+    
+    # Prior distribution (optimistic start)
+    prior_alpha: 2.0
+    prior_beta: 2.0
+    
+    # Context handling
+    use_context_clustering: true
+    max_context_buckets: 100
+    fallback_to_global: true
+
+  # =========================================================================
+  # Layer 3: Ensemble Scoring
+  # =========================================================================
+  ensemble:
+    enabled: true
+    mode: "shadow"
+    
+    # Model weights (should sum to 1.0)
+    logistic_weight: 0.3
+    gbm_weight: 0.4
+    bandit_weight: 0.3
+    
+    # Decision threshold
+    ensemble_threshold: 0.5
+    confidence_boost_threshold: 0.7
+    
+    # Training settings
+    min_samples_to_train: 50
+    retrain_frequency_trades: 100
+    
+    # LightGBM hyperparameters
+    lgb_num_leaves: 31
+    lgb_learning_rate: 0.05
+    lgb_n_estimators: 100
+    lgb_max_depth: 6
+    
+    # Logistic regression
+    lr_c: 1.0
+    lr_max_iter: 1000
+
+  # =========================================================================
+  # Layer 4: Regime Detection
+  # =========================================================================
+  regime:
+    enabled: true
+    
+    # Detection method
+    use_hmm: true  # Use HMM if hmmlearn available, else heuristics
+    hmm_n_states: 4
+    hmm_covariance_type: "diag"
+    
+    # Heuristic thresholds
+    trend_threshold: 0.002
+    volatility_high_percentile: 0.75
+    volatility_low_percentile: 0.25
+    
+    # Lookback windows
+    short_window: 5
+    medium_window: 20
+    long_window: 50
+    
+    # Update frequency
+    update_bars: 5
+
+  # =========================================================================
+  # Layer 5: Meta-Learning
+  # =========================================================================
+  meta:
+    enabled: true
+    
+    # Experience replay
+    replay_buffer_size: 1000
+    replay_batch_size: 32
+    replay_priority_alpha: 0.6
+    
+    # Learning curve tracking
+    learning_curve_window: 50
+    convergence_threshold: 0.05
+    
+    # Exploration adaptation
+    min_explore_rate: 0.05
+    max_explore_rate: 0.3
+    explore_decay_rate: 0.99
+    
+    # Feature importance
+    feature_importance_window: 100
+    importance_decay_threshold: 0.3
+    
+    # Meta learning rate
+    meta_learning_rate: 0.01
+
+  # =========================================================================
+  # Risk Metrics
+  # =========================================================================
+  risk:
+    # Risk-free rate for Sharpe/Sortino (annualized)
+    risk_free_rate: 0.05
+    trading_days_per_year: 252
+    
+    # Slippage model
+    base_slippage_ticks: 0.5
+    volatility_slippage_mult: 0.5
+    
+    # Kelly criterion
+    kelly_fraction: 0.25  # Use 1/4 Kelly for safety
+    max_kelly_size: 2.0
+    min_kelly_size: 0.25
+    
+    # MNQ contract specs
+    tick_value: 0.5
+    point_value: 2.0
+
+  # =========================================================================
+  # Trade Database
+  # =========================================================================
+  database:
+    # SQLite database location
+    db_path: "data/nq_agent_state/trades.db"
+    
+    # Retention (optional)
+    max_trades: null  # null = no limit
+
