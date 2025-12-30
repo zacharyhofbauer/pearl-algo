@@ -237,6 +237,58 @@ sessions:
     timezone: "UTC"
     color: "#089981"
 
+# =============================================================================
+# EXECUTION (ATS - Automated Trading System)
+# =============================================================================
+# Controls automated order placement via IBKR.
+# SAFETY: Default is disabled + disarmed. Must explicitly enable and /arm to trade.
+execution:
+  enabled: false                    # Master toggle - must be true for any execution
+  armed: false                      # Runtime toggle - must be true to place orders (use /arm command)
+  mode: "dry_run"                   # "dry_run" (log only), "paper", or "live"
+  
+  # Risk limits (hard caps)
+  max_positions: 1                  # Maximum concurrent positions
+  max_orders_per_day: 20            # Maximum orders per trading day
+  max_daily_loss: 500.0             # Kill switch: max daily loss in dollars
+  cooldown_seconds: 60              # Minimum seconds between orders for same signal type
+  
+  # Symbol whitelist (empty = all symbols allowed)
+  symbol_whitelist:
+    - MNQ
+  
+  # IBKR connection (separate client_id from data to avoid conflicts)
+  ibkr_trading_client_id: 20        # Different from IBKR_CLIENT_ID (data)
+  ibkr_host: "${IBKR_HOST}"
+  ibkr_port: "${IBKR_PORT}"
+
+# =============================================================================
+# LEARNING (Adaptive Bandit Policy)
+# =============================================================================
+# Adjusts execution decisions based on observed signal type performance.
+# Uses Thompson sampling (Beta-Bernoulli) per signal type.
+# SAFETY: Default is shadow mode - learns but does NOT affect execution.
+learning:
+  enabled: true                     # Master toggle for adaptive policy
+  mode: "shadow"                    # "shadow" (observe only) or "live" (affects execution)
+  
+  # Bandit configuration
+  min_samples_per_type: 10          # Minimum samples before policy has opinion
+  explore_rate: 0.1                 # Random explore rate (epsilon-greedy component)
+  decision_threshold: 0.3           # Skip signal if P(win) < threshold
+  
+  # Position sizing adjustment (when mode=live)
+  max_size_multiplier: 1.5          # Maximum size boost for high-confidence types
+  min_size_multiplier: 0.5          # Minimum size reduction for low-confidence types
+  
+  # Prior distribution (Beta distribution parameters)
+  # Start optimistic: alpha=2, beta=2 gives mean=0.5 with some uncertainty
+  prior_alpha: 2.0
+  prior_beta: 2.0
+  
+  # Decay factor for older observations (0 = no decay, 1 = full weight to recent)
+  decay_factor: 0.0                 # Disabled for now - all observations equal weight
+
 # Prop Firm Trading Assumptions (MNQ-native)
 prop_firm:
   # MNQ (Micro E-mini NASDAQ-100)

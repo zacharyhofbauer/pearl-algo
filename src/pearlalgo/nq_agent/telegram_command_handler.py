@@ -211,6 +211,13 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("ai_off", self._handle_ai_off))
         self.application.add_handler(CommandHandler("ai_reset", self._handle_ai_reset))
         
+        # Execution control commands (ATS - Automated Trading System)
+        self.application.add_handler(CommandHandler("arm", self._handle_arm))
+        self.application.add_handler(CommandHandler("disarm", self._handle_disarm))
+        self.application.add_handler(CommandHandler("kill", self._handle_kill))
+        self.application.add_handler(CommandHandler("positions", self._handle_positions))
+        self.application.add_handler(CommandHandler("policy", self._handle_policy))
+        
         # Claude message handler (for chat mode and wizard text input)
         # Must be added AFTER command handlers, lower priority group
         self.application.add_handler(
@@ -6608,6 +6615,283 @@ class TelegramCommandHandler:
             await self._handle_claude_refine_search(update, context)
         else:
             await query.edit_message_text(f"❌ Unknown action: {callback_data}")
+    
+    # ==========================================================================
+    # EXECUTION CONTROL COMMANDS (ATS - Automated Trading System)
+    # ==========================================================================
+    
+    async def _handle_arm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Handle /arm command - Arm execution adapter for order placement.
+        
+        SAFETY: Requires authorized chat ID. Changes are persistent.
+        """
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /arm command from {update.effective_user.id}")
+        
+        try:
+            # Get execution status from state
+            state = self.state_manager.load_state()
+            execution_status = state.get("execution", {})
+            
+            if not execution_status.get("enabled", False):
+                await update.message.reply_text(
+                    "⚠️ *Execution Disabled*\n\n"
+                    "Execution adapter is not enabled in config.\n"
+                    "Set `execution.enabled: true` in `config/config.yaml` and restart.",
+                    parse_mode="Markdown",
+                )
+                return
+            
+            if execution_status.get("armed", False):
+                await update.message.reply_text(
+                    "🔫 *Already Armed*\n\n"
+                    "Execution adapter is already armed.\n"
+                    "Use `/disarm` to disarm.",
+                    parse_mode="Markdown",
+                )
+                return
+            
+            # Write arm command to a file that the service will pick up
+            arm_file = self.state_dir / "arm_request.flag"
+            arm_file.write_text(f"arm_requested_at={datetime.now(timezone.utc).isoformat()}")
+            
+            await update.message.reply_text(
+                "🔫 *ARM REQUESTED*\n\n"
+                "⚠️ The execution adapter will be armed on the next service cycle.\n\n"
+                "This means:\n"
+                "• Signals will trigger REAL orders\n"
+                "• Bracket orders (entry + SL + TP) will be placed\n"
+                "• Use `/disarm` to stop order placement\n"
+                "• Use `/kill` to cancel all orders AND disarm\n\n"
+                f"Mode: `{execution_status.get('mode', 'unknown')}`\n"
+                f"Max positions: `{execution_status.get('max_positions', 'unknown')}`",
+                parse_mode="Markdown",
+            )
+            
+        except Exception as e:
+            logger.error(f"Error handling /arm: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_disarm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Handle /disarm command - Disarm execution adapter.
+        
+        SAFETY: Immediately prevents new orders. Does NOT cancel existing orders.
+        """
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /disarm command from {update.effective_user.id}")
+        
+        try:
+            # Write disarm command to a file that the service will pick up
+            disarm_file = self.state_dir / "disarm_request.flag"
+            disarm_file.write_text(f"disarm_requested_at={datetime.now(timezone.utc).isoformat()}")
+            
+            # Remove arm file if present
+            arm_file = self.state_dir / "arm_request.flag"
+            if arm_file.exists():
+                arm_file.unlink()
+            
+            await update.message.reply_text(
+                "🔒 *DISARM REQUESTED*\n\n"
+                "The execution adapter will be disarmed on the next service cycle.\n\n"
+                "• No NEW orders will be placed\n"
+                "• Existing orders will NOT be cancelled\n"
+                "• Use `/kill` to cancel all orders",
+                parse_mode="Markdown",
+            )
+            
+        except Exception as e:
+            logger.error(f"Error handling /disarm: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_kill(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Handle /kill command - Cancel all orders AND disarm execution.
+        
+        SAFETY: Emergency kill switch. Immediately disarms and cancels all orders.
+        """
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"🚨 Received /kill command from {update.effective_user.id}")
+        
+        try:
+            # Write kill command to a file that the service will pick up
+            kill_file = self.state_dir / "kill_request.flag"
+            kill_file.write_text(f"kill_requested_at={datetime.now(timezone.utc).isoformat()}")
+            
+            # Also write disarm
+            disarm_file = self.state_dir / "disarm_request.flag"
+            disarm_file.write_text(f"disarm_requested_at={datetime.now(timezone.utc).isoformat()}")
+            
+            # Remove arm file if present
+            arm_file = self.state_dir / "arm_request.flag"
+            if arm_file.exists():
+                arm_file.unlink()
+            
+            await update.message.reply_text(
+                "🚨 *KILL SWITCH ACTIVATED*\n\n"
+                "Emergency shutdown requested:\n"
+                "• Execution adapter will be disarmed\n"
+                "• All open orders will be cancelled\n\n"
+                "This will take effect on the next service cycle.",
+                parse_mode="Markdown",
+            )
+            
+        except Exception as e:
+            logger.error(f"Error handling /kill: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_positions(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Handle /positions command - Show current positions.
+        
+        Read-only command.
+        """
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /positions command from {update.effective_user.id}")
+        
+        try:
+            state = self.state_manager.load_state()
+            execution_status = state.get("execution", {})
+            
+            if not execution_status.get("enabled", False):
+                await update.message.reply_text(
+                    "📊 *Positions*\n\n"
+                    "Execution adapter is not enabled.\n"
+                    "No positions tracked.",
+                    parse_mode="Markdown",
+                )
+                return
+            
+            positions_count = execution_status.get("positions", 0)
+            max_positions = execution_status.get("max_positions", 1)
+            orders_today = execution_status.get("orders_today", 0)
+            daily_pnl = execution_status.get("daily_pnl", 0.0)
+            armed = execution_status.get("armed", False)
+            mode = execution_status.get("mode", "unknown")
+            connected = execution_status.get("connected", False)
+            
+            status_emoji = "🟢" if armed else "🔴"
+            conn_emoji = "✅" if connected else "❌"
+            
+            message = (
+                f"📊 *Positions & Execution Status*\n\n"
+                f"{status_emoji} Armed: `{armed}`\n"
+                f"{conn_emoji} Connected: `{connected}`\n"
+                f"Mode: `{mode}`\n\n"
+                f"*Positions:* `{positions_count}/{max_positions}`\n"
+                f"*Orders Today:* `{orders_today}`\n"
+                f"*Daily P&L:* `${daily_pnl:.2f}`\n"
+            )
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error handling /positions: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_policy(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Handle /policy command - Show bandit policy status.
+        
+        Read-only command showing learning/policy state.
+        """
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /policy command from {update.effective_user.id}")
+        
+        try:
+            state = self.state_manager.load_state()
+            learning_status = state.get("learning", {})
+            
+            if not learning_status.get("enabled", False):
+                await update.message.reply_text(
+                    "📊 *AI Policy*\n\n"
+                    "Adaptive policy is not enabled.\n"
+                    "Set `learning.enabled: true` in `config/config.yaml`.",
+                    parse_mode="Markdown",
+                )
+                return
+            
+            mode = learning_status.get("mode", "shadow")
+            threshold = learning_status.get("decision_threshold", 0.3)
+            explore_rate = learning_status.get("explore_rate", 0.1)
+            total_decisions = learning_status.get("total_decisions", 0)
+            total_executes = learning_status.get("total_executes", 0)
+            total_skips = learning_status.get("total_skips", 0)
+            execute_rate = learning_status.get("execute_rate", 0.0)
+            signal_types_tracked = learning_status.get("signal_types_tracked", 0)
+            
+            last_decision = learning_status.get("last_decision", {})
+            
+            mode_emoji = "👁️" if mode == "shadow" else "🔥"
+            
+            message = (
+                f"📊 *AI Policy Status*\n\n"
+                f"{mode_emoji} Mode: `{mode}`\n"
+                f"Threshold: `{threshold}`\n"
+                f"Explore Rate: `{explore_rate*100:.0f}%`\n\n"
+                f"*Decisions:* `{total_decisions}`\n"
+                f"• Execute: `{total_executes}` ({execute_rate*100:.0f}%)\n"
+                f"• Skip: `{total_skips}`\n\n"
+                f"*Signal Types Tracked:* `{signal_types_tracked}`\n"
+            )
+            
+            if last_decision and last_decision.get("signal_type"):
+                exec_emoji = "✅" if last_decision.get("execute") else "⏭️"
+                message += (
+                    f"\n*Last Decision:*\n"
+                    f"Type: `{last_decision.get('signal_type')}`\n"
+                    f"{exec_emoji} Execute: `{last_decision.get('execute')}`\n"
+                    f"Score: `{last_decision.get('score', 0):.2f}`\n"
+                    f"Reason: `{last_decision.get('reason', 'unknown')[:30]}`"
+                )
+            
+            # Try to load policy state file for detailed signal type stats
+            try:
+                policy_state_file = self.state_dir / "policy_state.json"
+                if policy_state_file.exists():
+                    import json
+                    with open(policy_state_file, 'r') as f:
+                        policy_state = json.load(f)
+                    
+                    signal_types = policy_state.get("signal_types", {})
+                    if signal_types:
+                        message += "\n\n*Signal Type Performance:*\n"
+                        
+                        # Sort by sample count
+                        sorted_types = sorted(
+                            signal_types.items(),
+                            key=lambda x: x[1].get("sample_count", 0),
+                            reverse=True,
+                        )
+                        
+                        for signal_type, stats in sorted_types[:5]:
+                            wins = stats.get("wins", 0)
+                            losses = stats.get("losses", 0)
+                            win_rate = stats.get("win_rate", 0.5)
+                            samples = stats.get("sample_count", 0)
+                            
+                            if samples > 0:
+                                emoji = "🟢" if win_rate >= 0.5 else "🔴"
+                                message += f"{emoji} `{signal_type}`: {wins}W/{losses}L ({win_rate:.0%})\n"
+            except Exception as pe:
+                logger.debug(f"Could not load policy state details: {pe}")
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error handling /policy: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
     
     async def start(self):
         """Start the command handler (polling for updates)."""

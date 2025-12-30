@@ -37,6 +37,27 @@ from pearlalgo.utils.volume_pressure import (
     timeframe_to_minutes,
 )
 
+# Execution layer imports (optional - only used if execution.enabled)
+try:
+    from pearlalgo.execution.base import ExecutionAdapter, ExecutionConfig
+    from pearlalgo.execution.ibkr.adapter import IBKRExecutionAdapter
+    EXECUTION_AVAILABLE = True
+except ImportError:
+    EXECUTION_AVAILABLE = False
+    ExecutionAdapter = None  # type: ignore
+    ExecutionConfig = None  # type: ignore
+    IBKRExecutionAdapter = None  # type: ignore
+
+# Learning layer imports (optional - only used if learning.enabled)
+try:
+    from pearlalgo.learning.bandit_policy import BanditPolicy, BanditConfig, BanditDecision
+    LEARNING_AVAILABLE = True
+except ImportError:
+    LEARNING_AVAILABLE = False
+    BanditPolicy = None  # type: ignore
+    BanditConfig = None  # type: ignore
+    BanditDecision = None  # type: ignore
+
 
 class NQAgentService:
     """
@@ -227,6 +248,63 @@ class NQAgentService:
                 f"Cadence scheduler disabled: mode={self.cadence_mode} (legacy sleep-after-work)"
             )
 
+        # ==========================================================================
+        # EXECUTION ADAPTER (ATS - Automated Trading System)
+        # ==========================================================================
+        # Initialize execution adapter for automated order placement.
+        # SAFETY: Default is disabled + disarmed. Must explicitly enable and /arm.
+        self.execution_adapter: Optional["ExecutionAdapter"] = None
+        self._execution_config: Optional["ExecutionConfig"] = None
+        execution_settings = service_config.get("execution", {})
+        
+        if EXECUTION_AVAILABLE and execution_settings.get("enabled", False):
+            try:
+                self._execution_config = ExecutionConfig.from_dict(execution_settings)
+                self.execution_adapter = IBKRExecutionAdapter(self._execution_config)
+                logger.info(
+                    f"Execution adapter initialized: mode={self._execution_config.mode.value}, "
+                    f"armed={self._execution_config.armed}, "
+                    f"max_positions={self._execution_config.max_positions}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize execution adapter: {e}", exc_info=True)
+                self.execution_adapter = None
+        else:
+            if not EXECUTION_AVAILABLE:
+                logger.debug("Execution layer not available (import failed)")
+            else:
+                logger.info("Execution adapter disabled (execution.enabled=false)")
+
+        # ==========================================================================
+        # LEARNING (Adaptive Bandit Policy)
+        # ==========================================================================
+        # Initialize adaptive policy for signal type selection.
+        # SAFETY: Default is shadow mode - learns but does NOT affect execution.
+        self.bandit_policy: Optional["BanditPolicy"] = None
+        self._bandit_config: Optional["BanditConfig"] = None
+        learning_settings = service_config.get("learning", {})
+        
+        if LEARNING_AVAILABLE and learning_settings.get("enabled", True):
+            try:
+                self._bandit_config = BanditConfig.from_dict(learning_settings)
+                self.bandit_policy = BanditPolicy(
+                    config=self._bandit_config,
+                    state_dir=state_dir,
+                )
+                logger.info(
+                    f"Bandit policy initialized: mode={self._bandit_config.mode}, "
+                    f"threshold={self._bandit_config.decision_threshold}, "
+                    f"explore_rate={self._bandit_config.explore_rate}"
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize bandit policy: {e}", exc_info=True)
+                self.bandit_policy = None
+        else:
+            if not LEARNING_AVAILABLE:
+                logger.debug("Learning layer not available (import failed)")
+            else:
+                logger.info("Bandit policy disabled (learning.enabled=false)")
+
         logger.info("NQAgentService initialized")
 
     async def start(self) -> None:
@@ -292,6 +370,20 @@ class NQAgentService:
             logger.info("Startup notification sent to Telegram")
         except Exception as e:
             logger.error(f"Could not send startup notification: {e}", exc_info=True)
+
+        # Connect execution adapter if enabled
+        if self.execution_adapter is not None:
+            try:
+                connected = await self.execution_adapter.connect()
+                if connected:
+                    logger.info(
+                        f"✅ Execution adapter connected (mode={self._execution_config.mode.value}, "
+                        f"armed={self.execution_adapter.armed})"
+                    )
+                else:
+                    logger.warning("⚠️ Execution adapter failed to connect - orders will not be placed")
+            except Exception as e:
+                logger.error(f"Error connecting execution adapter: {e}", exc_info=True)
 
         try:
             await self._run_loop()
@@ -361,6 +453,16 @@ class NQAgentService:
         except Exception as e:
             logger.error(f"❌ Error sending shutdown notification: {e}", exc_info=True)
 
+        # Disconnect execution adapter
+        if self.execution_adapter is not None:
+            try:
+                # Disarm first as safety measure
+                self.execution_adapter.disarm()
+                await self.execution_adapter.disconnect()
+                logger.info("Execution adapter disconnected")
+            except Exception as e:
+                logger.warning(f"Error disconnecting execution adapter: {e}")
+
         self.running = False
         logger.info("NQ Agent Service stopped")
 
@@ -377,6 +479,9 @@ class NQAgentService:
         )
 
         while not self.shutdown_requested:
+            # Check for execution control flag files (from Telegram commands)
+            await self._check_execution_control_flags()
+            
             # Adaptive cadence: compute effective interval for this cycle
             if self._adaptive_cadence_enabled:
                 self._effective_interval = self._compute_effective_interval()
@@ -768,6 +873,101 @@ class NQAgentService:
             except Exception as e:
                 logger.debug(f"Could not track virtual entry for {signal_id}: {e}")
 
+            # ==========================================================================
+            # BANDIT POLICY: Evaluate signal type and decide whether to execute
+            # ==========================================================================
+            policy_decision = None
+            policy_status = "not_evaluated"
+            
+            if self.bandit_policy is not None:
+                try:
+                    policy_decision = self.bandit_policy.decide(signal)
+                    policy_status = f"{policy_decision.mode}:{policy_decision.reason}"
+                    
+                    logger.info(
+                        f"Policy decision: {signal.get('type')} -> "
+                        f"execute={policy_decision.execute} | "
+                        f"score={policy_decision.sampled_score:.2f} | "
+                        f"mode={policy_decision.mode}"
+                    )
+                except Exception as policy_e:
+                    policy_status = f"error:{str(policy_e)[:50]}"
+                    logger.error(f"Policy evaluation error: {policy_e}", exc_info=True)
+            
+            # Store policy status in signal
+            signal["_policy_status"] = policy_status
+            if policy_decision:
+                signal["_policy_execute"] = policy_decision.execute
+                signal["_policy_score"] = policy_decision.sampled_score
+                signal["_policy_size_multiplier"] = policy_decision.size_multiplier
+            
+            # ==========================================================================
+            # EXECUTION: Place bracket order if execution adapter is enabled + armed
+            # ==========================================================================
+            execution_result = None
+            execution_status = "not_attempted"
+            
+            # Gate execution by policy decision (only in live mode)
+            should_execute = True
+            if (policy_decision is not None 
+                and self._bandit_config is not None 
+                and self._bandit_config.mode == "live"):
+                should_execute = policy_decision.execute
+                if not should_execute:
+                    execution_status = f"policy_skip:{policy_decision.reason}"
+                    logger.info(
+                        f"Execution blocked by policy (live mode): {policy_decision.reason}"
+                    )
+            
+            if should_execute and self.execution_adapter is not None:
+                try:
+                    # Check preconditions (enabled, armed, limits, cooldowns)
+                    decision = self.execution_adapter.check_preconditions(signal)
+                    
+                    if decision.execute:
+                        # Apply size multiplier from policy (if in live mode)
+                        if (policy_decision is not None 
+                            and self._bandit_config is not None 
+                            and self._bandit_config.mode == "live"):
+                            original_size = signal.get("position_size", 1)
+                            adjusted_size = int(original_size * policy_decision.size_multiplier)
+                            adjusted_size = max(1, adjusted_size)  # At least 1 contract
+                            signal["position_size"] = adjusted_size
+                            logger.info(
+                                f"Position size adjusted by policy: {original_size} -> {adjusted_size} "
+                                f"(multiplier={policy_decision.size_multiplier})"
+                            )
+                        
+                        # Place bracket order
+                        execution_result = await self.execution_adapter.place_bracket(signal)
+                        
+                        if execution_result.success:
+                            execution_status = "placed"
+                            logger.info(
+                                f"✅ Order placed: {signal.get('type')} {signal.get('direction')} | "
+                                f"order_id={execution_result.parent_order_id}"
+                            )
+                        else:
+                            execution_status = f"place_failed:{execution_result.error_message}"
+                            logger.warning(
+                                f"⚠️ Order placement failed: {execution_result.error_message}"
+                            )
+                    else:
+                        # Preconditions not met - log why
+                        execution_status = f"skipped:{decision.reason}"
+                        logger.info(
+                            f"Order skipped: {decision.reason} | signal_id={signal_id[:16]}"
+                        )
+                        
+                except Exception as exec_e:
+                    execution_status = f"error:{str(exec_e)[:50]}"
+                    logger.error(f"Execution error: {exec_e}", exc_info=True)
+            
+            # Store execution status in signal for state persistence
+            signal["_execution_status"] = execution_status
+            if execution_result:
+                signal["_execution_order_id"] = execution_result.parent_order_id
+
             # Send to Telegram (await async call) with buffer data for chart generation
             signal_type = signal.get('type', 'unknown')
             signal_direction = signal.get('direction', 'unknown')
@@ -795,7 +995,7 @@ class NQAgentService:
                     if err:
                         self.last_signal_send_error = str(err)[:200]
                 except Exception:
-                    # Keep prior error if we can’t read the latest reason.
+                    # Keep prior error if we can't read the latest reason.
                     pass
 
             self.signal_count += 1
@@ -967,13 +1167,28 @@ class NQAgentService:
                     )
                     exited_this_cycle.add(sig_id)
                     if perf:
+                        pnl_value = float(perf.get('pnl', 0.0))
                         logger.info(
                             "Virtual exit: %s | %s | exit=%s | pnl=%s",
                             sig_id[:16],
                             exit_reason,
                             f"{float(exit_price):.2f}",
-                            f"{float(perf.get('pnl', 0.0)):.2f}",
+                            f"{pnl_value:.2f}",
                         )
+                        
+                        # Record outcome with bandit policy for learning
+                        if self.bandit_policy is not None:
+                            try:
+                                signal_type = str(sig.get("type") or "unknown")
+                                is_win = (exit_reason == "take_profit")
+                                self.bandit_policy.record_outcome(
+                                    signal_id=sig_id,
+                                    signal_type=signal_type,
+                                    is_win=is_win,
+                                    pnl=pnl_value,
+                                )
+                            except Exception as policy_err:
+                                logger.debug(f"Could not record policy outcome: {policy_err}")
             except Exception:
                 continue
 
@@ -1640,6 +1855,100 @@ class NQAgentService:
         except Exception as e:
             logger.error(f"Error sending error notification: {e}")
 
+    async def _check_execution_control_flags(self) -> None:
+        """
+        Check for execution control flag files (from Telegram commands).
+        
+        Flag files:
+        - arm_request.flag: Arm the execution adapter
+        - disarm_request.flag: Disarm the execution adapter
+        - kill_request.flag: Cancel all orders and disarm
+        """
+        if self.execution_adapter is None:
+            return
+        
+        try:
+            state_dir = self.state_manager.state_dir
+            
+            # Check for kill flag (highest priority)
+            kill_file = state_dir / "kill_request.flag"
+            if kill_file.exists():
+                logger.warning("🚨 KILL flag detected - cancelling all orders and disarming")
+                try:
+                    # Cancel all orders
+                    results = await self.execution_adapter.cancel_all()
+                    cancelled_count = sum(1 for r in results if r.success)
+                    logger.warning(f"Kill switch: cancelled {cancelled_count} orders")
+                    
+                    # Notify via Telegram
+                    try:
+                        await self.telegram_notifier.telegram.send_message(
+                            f"🚨 *KILL SWITCH EXECUTED*\n\n"
+                            f"Cancelled: `{cancelled_count}` orders\n"
+                            f"Execution: `DISARMED`",
+                            parse_mode="Markdown",
+                        )
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.error(f"Error executing kill switch: {e}")
+                finally:
+                    kill_file.unlink(missing_ok=True)
+                return  # Skip arm/disarm after kill
+            
+            # Check for disarm flag
+            disarm_file = state_dir / "disarm_request.flag"
+            if disarm_file.exists():
+                logger.info("🔒 DISARM flag detected - disarming execution adapter")
+                self.execution_adapter.disarm()
+                disarm_file.unlink(missing_ok=True)
+                
+                # Notify via Telegram
+                try:
+                    await self.telegram_notifier.telegram.send_message(
+                        "🔒 *Execution DISARMED*\n\n"
+                        "No new orders will be placed.",
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    pass
+                return  # Skip arm after disarm
+            
+            # Check for arm flag
+            arm_file = state_dir / "arm_request.flag"
+            if arm_file.exists():
+                logger.info("🔫 ARM flag detected - arming execution adapter")
+                success = self.execution_adapter.arm()
+                arm_file.unlink(missing_ok=True)
+                
+                if success:
+                    # Notify via Telegram
+                    try:
+                        mode = self._execution_config.mode.value if self._execution_config else "unknown"
+                        await self.telegram_notifier.telegram.send_message(
+                            f"🔫 *Execution ARMED*\n\n"
+                            f"Mode: `{mode}`\n"
+                            f"Orders will be placed for signals.\n\n"
+                            f"⚠️ Use `/disarm` to stop or `/kill` to cancel all.",
+                            parse_mode="Markdown",
+                        )
+                    except Exception:
+                        pass
+                else:
+                    logger.warning("Could not arm execution adapter - preconditions not met")
+                    try:
+                        await self.telegram_notifier.telegram.send_message(
+                            "⚠️ *ARM FAILED*\n\n"
+                            "Could not arm execution adapter.\n"
+                            "Check that execution is enabled in config.",
+                            parse_mode="Markdown",
+                        )
+                    except Exception:
+                        pass
+                        
+        except Exception as e:
+            logger.error(f"Error checking execution control flags: {e}", exc_info=True)
+
     def get_status(self) -> Dict:
         """Get current service status."""
         uptime = None
@@ -1778,6 +2087,18 @@ class NQAgentService:
                 self.cadence_scheduler.get_metrics().to_dict()
                 if self.cadence_scheduler
                 else None
+            ),
+            # Execution status (ATS)
+            "execution": (
+                self.execution_adapter.get_status()
+                if self.execution_adapter is not None
+                else {"enabled": False, "armed": False, "mode": "disabled"}
+            ),
+            # Learning/policy status
+            "learning": (
+                self.bandit_policy.get_status()
+                if self.bandit_policy is not None
+                else {"enabled": False, "mode": "disabled"}
             ),
         }
 
