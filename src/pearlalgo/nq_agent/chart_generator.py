@@ -7,6 +7,7 @@ This is the production chart generator using mplfinance library.
 
 from __future__ import annotations
 
+import math
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -1982,8 +1983,24 @@ class ChartGenerator:
                     max_n = self.config.max_signals_displayed
                     sigs = signals[-max_n:] if max_n and len(signals) > max_n else signals
 
-                    long_y = pd.Series(np.nan, index=df.index)
-                    short_y = pd.Series(np.nan, index=df.index)
+                    # Dynamic marker size (prevent "marker soup" when many signals exist)
+                    # We intentionally cap the effective marker size for readability on Telegram/mobile.
+                    n_sigs = max(1, int(len(sigs)))
+                    base = float(getattr(self.config, "signal_marker_size", 140) or 140)
+                    base = min(base, 140.0)
+                    scale = math.sqrt(50.0 / float(n_sigs))
+                    marker_size = int(max(40.0, min(base, base * scale)))
+
+                    # Marker series:
+                    # - If a signal includes 'pnl', we color by outcome: green=win, red=loss
+                    #   and keep marker SHAPE = direction (^ long, v short).
+                    # - Otherwise, we fall back to direction-colored markers.
+                    long_y = pd.Series(np.nan, index=df.index)   # unknown outcome
+                    short_y = pd.Series(np.nan, index=df.index)  # unknown outcome
+                    win_long_y = pd.Series(np.nan, index=df.index)
+                    loss_long_y = pd.Series(np.nan, index=df.index)
+                    win_short_y = pd.Series(np.nan, index=df.index)
+                    loss_short_y = pd.Series(np.nan, index=df.index)
 
                     for s in sigs:
                         ts = s.get("timestamp")
@@ -2011,22 +2028,90 @@ class ChartGenerator:
                             continue
 
                         direction = (s.get("direction") or "long").lower()
+                        # Optional: outcome (trade dicts will include pnl; raw signals won't)
+                        pnl_val = s.get("pnl", None)
+                        is_win: Optional[bool] = None
+                        if pnl_val is not None:
+                            try:
+                                is_win = float(pnl_val) > 0
+                            except Exception:
+                                is_win = None
                         if direction == "long":
                             # Plot just below candle low
                             low_val = float(df["Low"].iloc[pos])
-                            long_y.iloc[pos] = low_val * 0.999
+                            y = low_val * 0.999
+                            if is_win is True:
+                                win_long_y.iloc[pos] = y
+                            elif is_win is False:
+                                loss_long_y.iloc[pos] = y
+                            else:
+                                long_y.iloc[pos] = y
                         else:
                             high_val = float(df["High"].iloc[pos])
-                            short_y.iloc[pos] = high_val * 1.001
+                            y = high_val * 1.001
+                            if is_win is True:
+                                win_short_y.iloc[pos] = y
+                            elif is_win is False:
+                                loss_short_y.iloc[pos] = y
+                            else:
+                                short_y.iloc[pos] = y
 
+                    # Outcome-colored markers (preferred when pnl is available)
+                    if not win_long_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                win_long_y,
+                                type="scatter",
+                                marker="^",
+                                markersize=marker_size,
+                                color=SIGNAL_LONG,  # win
+                                alpha=0.85,
+                            )
+                        )
+                    if not loss_long_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                loss_long_y,
+                                type="scatter",
+                                marker="^",
+                                markersize=marker_size,
+                                color=SIGNAL_SHORT,  # loss
+                                alpha=0.85,
+                            )
+                        )
+                    if not win_short_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                win_short_y,
+                                type="scatter",
+                                marker="v",
+                                markersize=marker_size,
+                                color=SIGNAL_LONG,  # win
+                                alpha=0.85,
+                            )
+                        )
+                    if not loss_short_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                loss_short_y,
+                                type="scatter",
+                                marker="v",
+                                markersize=marker_size,
+                                color=SIGNAL_SHORT,  # loss
+                                alpha=0.85,
+                            )
+                        )
+
+                    # Fallback direction-colored markers (when pnl not available)
                     if not long_y.isna().all():
                         addplot.append(
                             mpf.make_addplot(
                                 long_y,
                                 type="scatter",
                                 marker="^",
-                                markersize=self.config.signal_marker_size,
+                                markersize=max(35, int(marker_size * 0.9)),
                                 color=SIGNAL_LONG,
+                                alpha=0.65,
                             )
                         )
                     if not short_y.isna().all():
@@ -2035,8 +2120,9 @@ class ChartGenerator:
                                 short_y,
                                 type="scatter",
                                 marker="v",
-                                markersize=self.config.signal_marker_size,
+                                markersize=max(35, int(marker_size * 0.9)),
                                 color=SIGNAL_SHORT,
+                                alpha=0.65,
                             )
                         )
             except Exception as e:
@@ -2044,7 +2130,8 @@ class ChartGenerator:
             
             # Create title
             tf_label = timeframe or self.config.timeframe
-            chart_title = f"{title} - Candlestick Chart with Signal Markers ({tf_label})"
+            # Keep titles short for mobile readability (avoid redundant suffixes)
+            chart_title = f"{title} ({tf_label})" if tf_label and tf_label not in str(title) else str(title)
             
             # Save to temp file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')

@@ -64,11 +64,12 @@ from pearlalgo.utils.telegram_alerts import (
 )
 
 try:
-    from pearlalgo.nq_agent.chart_generator import ChartGenerator
+    from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
     CHART_GENERATOR_AVAILABLE = True
 except ImportError:
     CHART_GENERATOR_AVAILABLE = False
     ChartGenerator = None
+    ChartConfig = None
 
 
 class TelegramCommandHandler:
@@ -2242,16 +2243,35 @@ class TelegramCommandHandler:
                 
                 # Generate backtest chart
                 if self.chart_generator and not backtest_data.empty:
-                    signals_shown = len(signals_from_backtest)
+                    # Prefer plotting EXECUTED trade entries (less misleading + clearer than plotting all raw signals).
+                    # We include trade pnl so charts can color markers by outcome (win=green, loss=red).
+                    plot_signals: List[Dict] = []
+                    if getattr(result, "trades", None):
+                        for t in (result.trades or []):
+                            ts = t.get("entry_time") or t.get("timestamp")
+                            if not ts:
+                                continue
+                            plot_signals.append(
+                                {
+                                    "timestamp": ts,
+                                    "direction": (t.get("direction") or "long"),
+                                    "pnl": t.get("pnl"),
+                                    "signal_type": t.get("signal_type"),
+                                }
+                            )
+                    plot_label = "trade entries" if plot_signals else "signals"
+                    if not plot_signals:
+                        plot_signals = signals_from_backtest
+
+                    # Limit for Telegram readability (avoid thousands of markers)
+                    MAX_MARKERS = 250
+                    signals_shown = min(len(plot_signals), MAX_MARKERS)
+                    plot_signals = plot_signals[-signals_shown:] if signals_shown > 0 else []
                     
-                    # Create clearer title
+                    # Compact title (chart generator will add timeframe label)
                     data_start = backtest_data.index[0].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
                     data_end = backtest_data.index[-1].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
-                    chart_title = (
-                        f"Backtest Results ({data_start} to {data_end}) - "
-                        f"{result.total_signals} Signals - "
-                        f"{'5m decision' if mode == '5m' else '1m legacy'}"
-                    )
+                    chart_title = f"{symbol} Backtest {data_start} to {data_end} | sig {result.total_signals} | tr {result.total_trades or 0}"
                     
                     # Prepare performance data
                     performance_data = {
@@ -2294,12 +2314,7 @@ class TelegramCommandHandler:
                     if 'timestamp' not in chart_data.columns and chart_data.index.name == 'timestamp':
                         chart_data = chart_data.reset_index()
                     
-                    # Update title to show chart timeframe
-                    chart_title = (
-                        f"Backtest Results ({data_start} to {data_end}) - "
-                        f"{result.total_signals} Signals - "
-                        f"{chart_tf_label} chart"
-                    )
+                    # Keep chart title compact; `generate_backtest_chart()` appends timeframe label.
                     
                     # Use larger figure for longer backtests
                     if weeks >= 4:
@@ -2314,24 +2329,24 @@ class TelegramCommandHandler:
                     chart_path = None
                     equity_chart_path = None
                     
-                    if weeks >= 4 and result.trades:
-                        # Generate equity curve (most informative for long backtests)
+                    if result.trades:
+                        # Generate equity curve (best backtest overview, even for 2 weeks)
                         equity_chart_path = self.chart_generator.generate_equity_curve_chart(
                             result.trades,
                             symbol,
-                            f"{symbol} Backtest Equity Curve ({data_start} to {data_end})",
+                            f"{symbol} Equity Curve ({data_start} to {data_end})",
                             performance_data=performance_data,
                             figsize=figsize,
                             dpi=dpi,
                         )
-                        # Set as primary chart
+                        # Prefer equity curve as the primary chart when available
                         chart_path = equity_chart_path
                     
                     # Generate price chart (line chart for 6+ weeks, candles for shorter)
                     use_line = weeks >= 6
                     price_chart_path = self.chart_generator.generate_backtest_chart(
                         chart_data,
-                        signals_from_backtest,
+                        plot_signals,
                         symbol,
                         chart_title,
                         performance_data=performance_data,
@@ -2361,18 +2376,62 @@ class TelegramCommandHandler:
                     if result.verification:
                         verification_block = f"\n🔍 *Verification*\n{result.verification.format_compact()}\n"
 
+                    # Trade breakdown by signal type (helps refine strategy quickly)
+                    trade_type_block = ""
+                    try:
+                        if getattr(result, "trades", None):
+                            by_type: Dict[str, Dict[str, float]] = {}
+                            for t in (result.trades or []):
+                                st = str(t.get("signal_type") or "unknown")
+                                try:
+                                    pnl = float(t.get("pnl") or 0.0)
+                                except Exception:
+                                    pnl = 0.0
+                                wins = 1.0 if pnl > 0 else 0.0
+                                losses = 1.0 if pnl < 0 else 0.0
+
+                                if st not in by_type:
+                                    by_type[st] = {"n": 0.0, "wins": 0.0, "losses": 0.0, "pnl_total": 0.0}
+                                by_type[st]["n"] += 1.0
+                                by_type[st]["wins"] += wins
+                                by_type[st]["losses"] += losses
+                                by_type[st]["pnl_total"] += pnl
+
+                            if by_type:
+                                ranked = sorted(by_type.items(), key=lambda kv: float(kv[1].get("pnl_total", 0.0)), reverse=True)
+                                best_k, best_v = ranked[0]
+                                worst_k, worst_v = ranked[-1]
+
+                                def _fmt_type(k: str) -> str:
+                                    # Avoid underscores triggering Telegram markdown
+                                    return safe_label(k.replace("_", " "))
+
+                                def _fmt_wr(v: Dict[str, float]) -> str:
+                                    n = float(v.get("n", 0.0) or 0.0)
+                                    w = float(v.get("wins", 0.0) or 0.0)
+                                    return f"{(w / n * 100.0):.1f}%" if n > 0 else "N/A"
+
+                                trade_type_block = (
+                                    "\n📌 *Trade Types (this run)*\n"
+                                    f"✅ Best: {_fmt_type(best_k)}  |  n={int(best_v.get('n', 0))}  |  WR {_fmt_wr(best_v)}  |  P&L {_format_currency(float(best_v.get('pnl_total', 0.0)))}\n"
+                                    f"❌ Worst: {_fmt_type(worst_k)}  |  n={int(worst_v.get('n', 0))}  |  WR {_fmt_wr(worst_v)}  |  P&L {_format_currency(float(worst_v.get('pnl_total', 0.0)))}\n"
+                                )
+                    except Exception:
+                        trade_type_block = ""
+
                     message = (
                         f"📊 *Backtest Results ({weeks} Week{'s' if weeks > 1 else ''})*\n\n"
                         f"*Period:* {data_start} to {data_end}\n"
                         f"*Bars Analyzed:* {result.total_bars:,}\n"
                         f"*Signals Generated:* {result.total_signals}\n"
-                        f"*Signals on Chart:* {signals_shown}\n\n"
+                        f"*Chart markers:* {signals_shown} {plot_label} (green=win, red=loss)\n\n"
                         f"*Symbol:* {symbol} (${tick_value:.0f}/pt)  |  *Contracts:* {pos_size}\n"
                         f"*Slippage:* {slippage_ticks} ticks  |  *Max pos:* {max_pos}\n"
                         f"*Trades:* {trades_display}  |  *Win Rate:* {win_rate_display}  |  *PF:* {profit_factor_display}\n"
                         f"*Avg Confidence:* {result.avg_confidence:.2f}\n"
                         f"*Avg R:R:* {result.avg_risk_reward:.2f}:1\n"
                         f"*Total P&L:* {total_pnl_display}  |  *Max DD:* {max_dd_display}  |  *Sharpe:* {sharpe_display}\n"
+                        f"{trade_type_block}"
                         f"{verification_block}"
                     )
                             
@@ -2409,6 +2468,36 @@ class TelegramCommandHandler:
                             "avg_loss": result.avg_loss,
                             "avg_hold_time_minutes": result.avg_hold_time_minutes,
                         }
+                        # Trade type stats (executed trades only) — helps post-run refinement.
+                        try:
+                            if getattr(result, "trades", None):
+                                tstats: Dict[str, Dict[str, float]] = {}
+                                for t in (result.trades or []):
+                                    st = str(t.get("signal_type") or "unknown")
+                                    try:
+                                        pnl = float(t.get("pnl") or 0.0)
+                                    except Exception:
+                                        pnl = 0.0
+                                    win = 1.0 if pnl > 0 else 0.0
+                                    if st not in tstats:
+                                        tstats[st] = {"n": 0.0, "wins": 0.0, "pnl_total": 0.0}
+                                    tstats[st]["n"] += 1.0
+                                    tstats[st]["wins"] += win
+                                    tstats[st]["pnl_total"] += pnl
+                                # Add win_rate per type
+                                out: Dict[str, Dict[str, float]] = {}
+                                for st, v in tstats.items():
+                                    n = float(v.get("n", 0.0) or 0.0)
+                                    w = float(v.get("wins", 0.0) or 0.0)
+                                    out[st] = {
+                                        "n": n,
+                                        "wins": w,
+                                        "win_rate": (w / n) if n > 0 else 0.0,
+                                        "pnl_total": float(v.get("pnl_total", 0.0) or 0.0),
+                                    }
+                                metrics_obj["trade_type_stats"] = out
+                        except Exception:
+                            pass
                         # Embed compact verification in metrics
                         if result.verification:
                             metrics_obj["verification_summary"] = {
@@ -2467,8 +2556,8 @@ class TelegramCommandHandler:
                     # For short backtests, send price chart only
                     if chart_path and chart_path.exists():
                         try:
-                            # Send primary chart (equity curve for 4+ weeks, price chart otherwise)
-                            chart_type = "Equity Curve" if weeks >= 4 and equity_chart_path else "Price Chart"
+                            # Send primary chart (equity curve when available, otherwise price chart)
+                            chart_type = "Equity Curve" if equity_chart_path and chart_path == equity_chart_path else "Price Chart"
                             with open(chart_path, 'rb') as photo:
                                 if update.callback_query:
                                     await context.bot.send_photo(
@@ -2483,15 +2572,15 @@ class TelegramCommandHandler:
                                     )
                             chart_path.unlink()
                             
-                            # For long backtests, also send the price chart
-                            if weeks >= 4 and price_chart_path and price_chart_path.exists() and price_chart_path != chart_path:
+                            # Also send the price chart if we have a separate file (common when equity curve is primary)
+                            if price_chart_path and price_chart_path.exists() and (chart_path is None or price_chart_path != chart_path):
                                 await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
                                 chart_type_label = "Line" if use_line else "Candlestick"
                                 with open(price_chart_path, 'rb') as photo:
                                     await context.bot.send_photo(
                                         chat_id=update.effective_chat.id,
                                         photo=photo,
-                                        caption=f"📊 {chart_type_label} Chart ({weeks} Week{'s' if weeks > 1 else ''}, {chart_tf_label} bars)"
+                                        caption=f"📊 {chart_type_label} Chart ({weeks} Week{'s' if weeks > 1 else ''}, {chart_tf_label} bars) • entries: green=win red=loss"
                                     )
                                 price_chart_path.unlink()
                         except Exception as e:

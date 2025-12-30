@@ -28,6 +28,16 @@ Forward-looking prompt for architectural evolution and continuous improvement. U
 
 **When to use:** When the codebase is clean and stable, and you're ready to evolve and improve the system. Complements project_cleanup.md - use cleanup first, then building.
 
+### `full_testing.md`
+Comprehensive testing and verification strategy for validating system reliability. Use this when:
+- Designing comprehensive test strategies
+- Discovering edge cases and failure modes
+- Stress-testing critical paths
+- Validating correctness and reliability
+- Proving system behavior under various conditions
+
+**When to use:** When you need to validate reliability, discover edge cases, or design comprehensive test coverage. Works alongside cleanup and building prompts - test what you build and clean.
+
 ## Usage
 
 1. Open the relevant prompt file
