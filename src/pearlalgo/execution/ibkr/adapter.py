@@ -501,3 +501,4 @@ class IBKRExecutionAdapter(ExecutionAdapter):
             logger.error(f"Error getting open orders: {e}", exc_info=True)
             return []
 
+

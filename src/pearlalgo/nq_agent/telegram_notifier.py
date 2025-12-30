@@ -833,7 +833,8 @@ class NQAgentTelegramNotifier:
                     reply_markup = None
             
             # Send message
-            success = await self.telegram.send_message(message, reply_markup=reply_markup)
+            # Entry notifications are high-signal; never dedupe.
+            success = await self.telegram.send_message(message, reply_markup=reply_markup, dedupe=False)
             
             # Generate and send chart if available
             chart_path = None
@@ -959,7 +960,8 @@ class NQAgentTelegramNotifier:
                     reply_markup = None
             
             # Send message
-            success = await self.telegram.send_message(message, reply_markup=reply_markup)
+            # Exit notifications are high-signal; never dedupe.
+            success = await self.telegram.send_message(message, reply_markup=reply_markup, dedupe=False)
             
             # Generate and send chart if available
             chart_path = None
@@ -1531,6 +1533,10 @@ class NQAgentTelegramNotifier:
                 quiet_reason=quiet_reason,
                 signal_diagnostics=signal_diagnostics,
                 buy_sell_pressure=buy_sell_pressure,
+                # v5 fields: active trades + unrealized PnL (push dashboards)
+                active_trades_count=int(status.get("active_trades_count", 0) or 0),
+                active_trades_unrealized_pnl=status.get("active_trades_unrealized_pnl"),
+                active_trades_price_source=status.get("latest_price_source"),
                 # v6 fields for data staleness
                 data_age_minutes=data_age_minutes,
                 data_stale_threshold_minutes=data_stale_threshold_minutes,
@@ -1540,6 +1546,28 @@ class NQAgentTelegramNotifier:
                 session_start=session_start,
                 session_end=session_end,
             )
+
+            # Optional: recent exits (compact transparency for push dashboards).
+            try:
+                recent_exits = status.get("recent_exits")
+                if isinstance(recent_exits, list) and recent_exits:
+                    message += "\n\n*Recent exits:*"
+                    for t in recent_exits[:3]:
+                        try:
+                            pnl_val = float(t.get("pnl") or 0.0)
+                        except Exception:
+                            pnl_val = 0.0
+                        pnl_emoji, pnl_str = format_pnl(pnl_val)
+                        dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
+                        sig_type = safe_label(str(t.get("type") or "unknown"))
+                        reason = safe_label(str(t.get("exit_reason") or "")).strip()
+                        # Keep each line compact for mobile.
+                        line = f"\n{pnl_emoji} *{pnl_str}* • {dir_emoji} {dir_label} • {sig_type}"
+                        if reason:
+                            line += f" • {reason}"
+                        message += line
+            except Exception:
+                pass
             
             # Add MTF snapshot (push-specific enhancement)
             # V2 spec: Suppress MTF when data is stale to avoid misleading derived context

@@ -862,6 +862,8 @@ class NQAgentService:
 
             # Virtual entry: enter immediately at the signal's entry price.
             # This enables per-signal PnL tracking without requiring IBKR fills.
+            entry_tracked = False
+            entry_price = 0.0
             try:
                 entry_price = float(signal.get("entry_price") or 0.0)
                 if entry_price > 0:
@@ -870,6 +872,7 @@ class NQAgentService:
                         entry_price=entry_price,
                         entry_time=datetime.now(timezone.utc),
                     )
+                    entry_tracked = True
             except Exception as e:
                 logger.debug(f"Could not track virtual entry for {signal_id}: {e}")
 
@@ -999,6 +1002,26 @@ class NQAgentService:
                     pass
 
             self.signal_count += 1
+
+            # Optional: send a dedicated ENTRY notification for virtual trades (with chart).
+            # This is config-gated to preserve the default "no entry spam" behavior.
+            try:
+                if (
+                    entry_tracked
+                    and bool(getattr(self.config, "virtual_pnl_enabled", True))
+                    and bool(getattr(self.config, "virtual_pnl_notify_entry", False))
+                ):
+                    # Fire-and-forget to avoid delaying the scan loop on chart generation.
+                    asyncio.create_task(
+                        self.telegram_notifier.send_entry_notification(
+                            signal_id=str(signal_id),
+                            entry_price=float(entry_price),
+                            signal=signal,
+                            buffer_data=buffer_data,
+                        )
+                    )
+            except Exception as e:
+                logger.debug(f"Could not schedule entry notification for {str(signal_id)[:16]}: {e}")
 
         except Exception as e:
             logger.error(f"Error processing signal: {e}", exc_info=True)
@@ -1189,6 +1212,34 @@ class NQAgentService:
                                 )
                             except Exception as policy_err:
                                 logger.debug(f"Could not record policy outcome: {policy_err}")
+
+                        # Optional: send Telegram EXIT notification (with chart) for virtual trades.
+                        # This is config-gated to preserve default "no Telegram spam" behavior.
+                        try:
+                            if (
+                                bool(getattr(self.config, "virtual_pnl_enabled", True))
+                                and bool(getattr(self.config, "virtual_pnl_notify_exit", False))
+                            ):
+                                hold_mins = perf.get("hold_duration_minutes")
+                                try:
+                                    hold_mins = float(hold_mins) if hold_mins is not None else None
+                                except Exception:
+                                    hold_mins = None
+
+                                # Fire-and-forget: chart generation + Telegram send can take time.
+                                asyncio.create_task(
+                                    self.telegram_notifier.send_exit_notification(
+                                        signal_id=str(sig_id),
+                                        exit_price=float(exit_price),
+                                        exit_reason=str(exit_reason),
+                                        pnl=float(pnl_value),
+                                        signal=sig,
+                                        hold_duration_minutes=hold_mins,
+                                        buffer_data=df,
+                                    )
+                                )
+                        except Exception as e:
+                            logger.debug(f"Could not schedule exit notification for {sig_id[:16]}: {e}")
             except Exception:
                 continue
 
@@ -1445,6 +1496,8 @@ class NQAgentService:
                 show_ma=True,  # Show moving averages to match TradingView-style chart
                 ma_periods=[20, 50, 200],  # Common MA periods
                 show_pressure=self.dashboard_chart_show_pressure,
+                # Overlay recent trades (entries/exits) for transparency.
+                trades=self._get_trades_for_chart(chart_data),
             )
             
             if chart_path and chart_path.exists():
@@ -1518,6 +1571,88 @@ class NQAgentService:
                         status["latest_price"] = latest_bar["close"]
             except Exception:
                 pass
+
+            # Track price source for UI confidence cues (e.g., Level 1 vs historical fallback).
+            try:
+                if market_data and isinstance(market_data.get("latest_bar"), dict):
+                    status["latest_price_source"] = market_data["latest_bar"].get("_data_level")
+            except Exception:
+                pass
+
+            # Active trades + unrealized PnL (virtual lifecycle: status="entered").
+            try:
+                active = []
+                try:
+                    recent_signals = self.state_manager.get_recent_signals(limit=300)
+                except Exception:
+                    recent_signals = []
+                for rec in recent_signals:
+                    if isinstance(rec, dict) and rec.get("status") == "entered":
+                        active.append(rec)
+
+                status["active_trades_count"] = len(active)
+
+                # Total unrealized PnL across active trades (USD), computed using the freshest available price.
+                latest_price = status.get("latest_price")
+                if latest_price is not None and len(active) > 0:
+                    try:
+                        current_price = float(latest_price)
+                    except Exception:
+                        current_price = None
+                    if current_price and current_price > 0:
+                        total_upnl = 0.0
+                        for rec in active:
+                            sig = rec.get("signal", {}) or {}
+                            direction = str(sig.get("direction") or "long").lower()
+                            try:
+                                entry_price = float(sig.get("entry_price") or 0.0)
+                            except Exception:
+                                entry_price = 0.0
+                            if entry_price <= 0:
+                                continue
+                            try:
+                                tick_value = float(sig.get("tick_value") or 2.0)
+                            except Exception:
+                                tick_value = 2.0
+                            try:
+                                position_size = float(sig.get("position_size") or 1.0)
+                            except Exception:
+                                position_size = 1.0
+
+                            pnl_pts = (current_price - entry_price) if direction == "long" else (entry_price - current_price)
+                            total_upnl += float(pnl_pts) * float(tick_value) * float(position_size)
+
+                        status["active_trades_unrealized_pnl"] = float(total_upnl)
+
+                # Recent exits (compact transparency list for dashboards).
+                try:
+                    exited = []
+                    for rec in recent_signals:
+                        if not isinstance(rec, dict) or rec.get("status") != "exited":
+                            continue
+                        pnl = rec.get("pnl")
+                        if pnl is None:
+                            continue
+                        sig = rec.get("signal", {}) or {}
+                        exited.append(
+                            {
+                                "signal_id": str(rec.get("signal_id") or ""),
+                                "type": str(sig.get("type") or "unknown"),
+                                "direction": str(sig.get("direction") or "long"),
+                                "pnl": pnl,
+                                "exit_reason": str(rec.get("exit_reason") or ""),
+                                "exit_time": rec.get("exit_time") or rec.get("timestamp") or sig.get("timestamp"),
+                            }
+                        )
+                    # Keep only the most recent few (signals.jsonl is append-only, so reverse is safe)
+                    exited = list(reversed(exited))[:3]
+                    if exited:
+                        status["recent_exits"] = exited
+                except Exception:
+                    pass
+            except Exception:
+                # Never let optional PnL UI break dashboard delivery.
+                pass
             
             # Get recent closes for sparkline
             recent_closes = self._get_recent_closes(market_data)
@@ -1580,6 +1715,114 @@ class NQAgentService:
             logger.debug(f"Could not get recent closes for sparkline: {e}")
         
         return []
+
+    def _get_trades_for_chart(self, chart_data: Optional[pd.DataFrame]) -> list[dict]:
+        """
+        Build a compact list of recent trades (entries/exits) that fall within the chart window.
+
+        Used to overlay trade markers on the periodic dashboard chart for transparency.
+        """
+        try:
+            if chart_data is None or not isinstance(chart_data, pd.DataFrame) or chart_data.empty:
+                return []
+
+            # Determine chart time window (normalize to naive UTC for stable comparisons)
+            tmin = None
+            tmax = None
+            if "timestamp" in chart_data.columns:
+                ts = pd.to_datetime(chart_data["timestamp"], errors="coerce")
+                ts = ts.dropna()
+                if ts.empty:
+                    return []
+                tmin = pd.Timestamp(ts.min())
+                tmax = pd.Timestamp(ts.max())
+            elif isinstance(chart_data.index, pd.DatetimeIndex) and len(chart_data.index) > 0:
+                tmin = pd.Timestamp(chart_data.index.min())
+                tmax = pd.Timestamp(chart_data.index.max())
+            if tmin is None or tmax is None:
+                return []
+
+            def _to_utc_naive(x):
+                if not x:
+                    return None
+                try:
+                    tsx = pd.Timestamp(x)
+                except Exception:
+                    return None
+                try:
+                    if tsx.tzinfo is not None:
+                        tsx = tsx.tz_convert("UTC").tz_localize(None)
+                except Exception:
+                    # If tz_convert fails, fall back to stripping tz
+                    try:
+                        tsx = tsx.tz_localize(None)
+                    except Exception:
+                        pass
+                return tsx
+
+            tmin_u = _to_utc_naive(tmin)
+            tmax_u = _to_utc_naive(tmax)
+            if tmin_u is None or tmax_u is None:
+                return []
+
+            # Pull recent signals (append-only), filter to entered/exited within the window.
+            try:
+                recent = self.state_manager.get_recent_signals(limit=500)
+            except Exception:
+                recent = []
+
+            symbol_norm = str(getattr(self.config, "symbol", "MNQ") or "MNQ").upper()
+            trades: list[dict] = []
+            for rec in recent:
+                if not isinstance(rec, dict):
+                    continue
+                status = str(rec.get("status") or "").lower()
+                if status not in ("entered", "exited"):
+                    continue
+                sig = rec.get("signal", {}) or {}
+                sym = str(sig.get("symbol") or symbol_norm).upper()
+                if sym != symbol_norm:
+                    continue
+
+                entry_time_raw = rec.get("entry_time") or sig.get("timestamp") or rec.get("timestamp")
+                entry_time = _to_utc_naive(entry_time_raw)
+                if entry_time is None:
+                    continue
+
+                exit_time_raw = rec.get("exit_time") if status == "exited" else None
+                exit_time = _to_utc_naive(exit_time_raw) if exit_time_raw else None
+
+                # Include if entry or exit is inside window, or trade spans across it.
+                in_window = (tmin_u <= entry_time <= tmax_u)
+                if exit_time is not None:
+                    in_window = in_window or (tmin_u <= exit_time <= tmax_u) or (entry_time <= tmax_u and exit_time >= tmin_u)
+                if not in_window:
+                    continue
+
+                # Prices
+                entry_price = rec.get("entry_price") or sig.get("entry_price")
+                exit_price = rec.get("exit_price") if status == "exited" else None
+                pnl = rec.get("pnl") if status == "exited" else None
+
+                trades.append(
+                    {
+                        "signal_id": str(rec.get("signal_id") or ""),
+                        "direction": str(sig.get("direction") or "long"),
+                        "entry_time": entry_time_raw,
+                        "entry_price": entry_price,
+                        "exit_time": exit_time_raw,
+                        "exit_price": exit_price,
+                        "exit_reason": rec.get("exit_reason"),
+                        "pnl": pnl,
+                        "status": status,
+                    }
+                )
+
+            # Keep only the most recent N to avoid chart clutter.
+            trades = trades[-20:]
+            return trades
+        except Exception:
+            return []
     
     def _compute_mtf_trends(self, market_data: Optional[Dict] = None) -> dict:
         """

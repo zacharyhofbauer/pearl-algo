@@ -722,6 +722,8 @@ def format_home_card(
     buy_sell_pressure: str | None = None,  # e.g. "🟢 Pressure: BUYERS ▲▲ (Δ +18%, Vol 1.3x, 2h)"
     # Active trades (v5 calm-minimal)
     active_trades_count: int = 0,  # Number of currently active positions
+    active_trades_unrealized_pnl: float | None = None,  # Total unrealized PnL across active trades (USD)
+    active_trades_price_source: str | None = None,  # e.g., "level1", "historical"
     # Data staleness (v6 - separate from state staleness)
     data_age_minutes: float | None = None,  # Age of market data in minutes
     data_stale_threshold_minutes: float = 10.0,  # Minutes; show warning if older
@@ -934,7 +936,21 @@ def format_home_card(
 
     # CONDITIONAL: Active trades (only when > 0, calm-minimal)
     if active_trades_count > 0:
-        lines.append(f"🎯 *{active_trades_count} active trade{'s' if active_trades_count > 1 else ''}*")
+        # Optionally append unrealized PnL (total) when provided.
+        suffix = ""
+        if active_trades_unrealized_pnl is not None:
+            try:
+                pnl_emoji, pnl_str = format_pnl(float(active_trades_unrealized_pnl))
+                suffix = f"{_BULLET_SEP}{pnl_emoji} {pnl_str}"
+                src = (active_trades_price_source or "").lower()
+                if src in ("historical", "historical_fallback"):
+                    suffix += " (delayed)"
+            except Exception:
+                suffix = ""
+
+        lines.append(
+            f"🎯 *{active_trades_count} active trade{'s' if active_trades_count > 1 else ''}*{suffix}"
+        )
 
     # Last signal age (if available)
     if last_signal_age:

@@ -191,6 +191,8 @@ performance:
 virtual_pnl:
   enabled: true                       # Enable virtual TP/SL tracking for signal quality grading
   intrabar_tiebreak: "stop_loss"      # When TP and SL both touched in same bar: "stop_loss" (conservative) or "take_profit"
+  notify_entry: true                  # Send Telegram entry notification when a virtual trade is opened
+  notify_exit: true                   # Send Telegram exit notification when TP/SL is touched
 
 # Chart HUD (TradingView-style overlays)
 hud:

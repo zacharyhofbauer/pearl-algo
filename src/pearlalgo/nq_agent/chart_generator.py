@@ -2207,6 +2207,7 @@ class ChartGenerator:
         show_rsi: bool = True,
         show_pressure: bool = True,
         title_time: Optional[str] = None,
+        trades: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Path]:
         """
         Generate a TradingView-style dashboard chart.
@@ -2414,6 +2415,119 @@ class ChartGenerator:
             # If RSI is off but pressure is on, still provide panel ratios for stable layout
             if panel_ratios is None and volume_on and pressure_enabled:
                 panel_ratios = (7, 2, 2)
+
+            # Trade markers overlay (entries/exits) for transparency on push dashboards.
+            # NOTE: Keep this visually light; too many markers will clutter mobile charts.
+            if trades:
+                try:
+                    idx = df.index
+                    # Pre-allocate marker series (NaN by default)
+                    long_entry = pd.Series([np.nan] * len(df), index=idx)
+                    short_entry = pd.Series([np.nan] * len(df), index=idx)
+                    exit_mark = pd.Series([np.nan] * len(df), index=idx)
+
+                    idx_tz = getattr(idx, "tz", None)
+
+                    def _align_ts(raw):
+                        if not raw:
+                            return None
+                        try:
+                            tsx = pd.Timestamp(raw)
+                        except Exception:
+                            return None
+
+                        try:
+                            if idx_tz is None:
+                                # Normalize to naive UTC for matching.
+                                if tsx.tzinfo is not None:
+                                    tsx = tsx.tz_convert("UTC").tz_localize(None)
+                                else:
+                                    tsx = tsx.tz_localize(None) if hasattr(tsx, "tz_localize") else tsx
+                            else:
+                                # Normalize to the chart index timezone.
+                                if tsx.tzinfo is None:
+                                    # Assume UTC when missing tz.
+                                    tsx = tsx.tz_localize("UTC").tz_convert(idx_tz)
+                                else:
+                                    tsx = tsx.tz_convert(idx_tz)
+                        except Exception:
+                            return None
+                        return tsx
+
+                    for tr in trades[:20]:
+                        if not isinstance(tr, dict):
+                            continue
+                        direction = str(tr.get("direction") or "long").lower()
+
+                        et = _align_ts(tr.get("entry_time"))
+                        ep = tr.get("entry_price")
+                        if et is not None and ep is not None:
+                            try:
+                                ep_f = float(ep)
+                            except Exception:
+                                ep_f = 0.0
+                            if ep_f > 0:
+                                try:
+                                    pos = int(idx.get_indexer([et], method="nearest")[0])
+                                except Exception:
+                                    pos = -1
+                                if 0 <= pos < len(df):
+                                    if direction == "short":
+                                        short_entry.iloc[pos] = ep_f
+                                    else:
+                                        long_entry.iloc[pos] = ep_f
+
+                        xt = _align_ts(tr.get("exit_time"))
+                        xp = tr.get("exit_price")
+                        if xt is not None and xp is not None:
+                            try:
+                                xp_f = float(xp)
+                            except Exception:
+                                xp_f = 0.0
+                            if xp_f > 0:
+                                try:
+                                    pos = int(idx.get_indexer([xt], method="nearest")[0])
+                                except Exception:
+                                    pos = -1
+                                if 0 <= pos < len(df):
+                                    exit_mark.iloc[pos] = xp_f
+
+                    # Addplots for markers (only if we have any)
+                    if long_entry.notna().any():
+                        addplot.append(
+                            mpf.make_addplot(
+                                long_entry,
+                                type="scatter",
+                                marker="^",
+                                markersize=90,
+                                color=SIGNAL_LONG,
+                                alpha=0.9,
+                            )
+                        )
+                    if short_entry.notna().any():
+                        addplot.append(
+                            mpf.make_addplot(
+                                short_entry,
+                                type="scatter",
+                                marker="v",
+                                markersize=90,
+                                color=SIGNAL_SHORT,
+                                alpha=0.9,
+                            )
+                        )
+                    if exit_mark.notna().any():
+                        addplot.append(
+                            mpf.make_addplot(
+                                exit_mark,
+                                type="scatter",
+                                marker="o",
+                                markersize=65,
+                                color=TEXT_PRIMARY,
+                                alpha=0.85,
+                            )
+                        )
+                except Exception as e:
+                    logger.debug(f"Could not add trade markers to dashboard chart: {e}")
 
             # Title (use fixed title_time if provided for deterministic testing)
             if title_time is not None:

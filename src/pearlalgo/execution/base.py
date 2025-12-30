@@ -442,3 +442,4 @@ class ExecutionAdapter(ABC):
             "max_daily_loss": self.config.max_daily_loss,
         }
 
+

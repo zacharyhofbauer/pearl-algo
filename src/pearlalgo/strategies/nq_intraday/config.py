@@ -111,6 +111,10 @@ class NQIntradayConfig:
     # Virtual PnL tracking (signal grading without real IBKR fills)
     virtual_pnl_enabled: bool = True
     virtual_pnl_tiebreak: str = "stop_loss"  # "stop_loss" (conservative) or "take_profit"
+    # Virtual trade lifecycle notifications (Telegram)
+    # Default OFF to preserve "no Telegram spam" behavior; enable in config.yaml when desired.
+    virtual_pnl_notify_entry: bool = False
+    virtual_pnl_notify_exit: bool = False
 
     # HUD settings (TradingView-style chart overlays)
     hud_enabled: bool = True
@@ -236,6 +240,10 @@ class NQIntradayConfig:
                 config.virtual_pnl_enabled = bool(vpnl_cfg["enabled"])
             if "intrabar_tiebreak" in vpnl_cfg:
                 config.virtual_pnl_tiebreak = str(vpnl_cfg["intrabar_tiebreak"])
+            if "notify_entry" in vpnl_cfg:
+                config.virtual_pnl_notify_entry = bool(vpnl_cfg["notify_entry"])
+            if "notify_exit" in vpnl_cfg:
+                config.virtual_pnl_notify_exit = bool(vpnl_cfg["notify_exit"])
 
             # Load strategy variant settings
             strategy_cfg = config_data.get("strategy", {}) or {}

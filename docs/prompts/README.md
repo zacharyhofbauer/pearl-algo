@@ -78,6 +78,17 @@ Backtesting and strategy validation prompt. Use this when:
 
 **When to use:** When you need to validate and improve strategy backtesting, verify signal generation, or analyze strategy behavior. Focuses on backtesting and validation - strategy changes should use project_building.md.
 
+### `ats_execution.md`
+Automated Trading System (ATS) execution and learning prompt. Use this when:
+- Reviewing execution safety guards and precondition checks
+- Analyzing adaptive learning (bandit policy) behavior
+- Improving kill switch and emergency controls
+- Tuning learning parameters (thresholds, explore rate)
+- Planning safe rollout stages (shadow → paper → live)
+- Adding new safety checks or control mechanisms
+
+**When to use:** When you need to analyze, improve, or extend the automated execution system or adaptive learning layer. Focuses on execution safety and learning - signal generation changes should use project_building.md, Telegram UI changes should use telegram_suite.md.
+
 ## Usage
 
 1. Open the relevant prompt file

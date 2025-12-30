@@ -457,3 +457,4 @@ class TestMockExecution:
         
         assert adapter.armed is False
 
+
