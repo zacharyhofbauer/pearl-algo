@@ -47,6 +47,7 @@ from pearlalgo.utils.telegram_alerts import (
     format_home_card,
     format_gate_status,
     format_service_status,
+    format_session_window,
     safe_label,
     escape_subprocess_output,
     _format_currency,
@@ -518,8 +519,9 @@ class TelegramCommandHandler:
                 "🚦 *Gates (Futures/Session)*\n"
                 f"• *{LABEL_FUTURES}:* CME futures market hours (includes ETH). "
                 "When closed, no live data flows.\n"
-                f"• *{LABEL_SESSION}:* Strategy's trading window (9:30 AM - 4:00 PM ET). "
-                "Signals are suppressed outside this window."
+                f"• *{LABEL_SESSION}:* Strategy's configured trading window. "
+                "Signals are suppressed outside this window. "
+                "See /config for the exact session times."
             ),
             "active_trades": (
                 f"🎯 *{LABEL_ACTIVE_TRADES}*\n"
@@ -907,6 +909,11 @@ class TelegramCommandHandler:
             except Exception as e:
                 logger.debug(f"Could not get last signal age: {e}")
             
+            # Get session times from config for config-driven messaging
+            config_block = state.get("config", {})
+            session_start = config_block.get("start_time") if isinstance(config_block, dict) else None
+            session_end = config_block.get("end_time") if isinstance(config_block, dict) else None
+            
             # Build Home Card message with enhanced confidence/clarity cues (calm-minimal)
             message = format_home_card(
                 symbol=state.get("symbol", "MNQ"),
@@ -938,6 +945,9 @@ class TelegramCommandHandler:
                 # v6 fields for data staleness
                 data_age_minutes=data_age_minutes,
                 data_stale_threshold_minutes=data_stale_threshold_minutes,
+                # v7 fields for config-driven session messaging
+                session_start=session_start,
+                session_end=session_end,
             )
             
             # Use consistent main menu buttons
@@ -1291,14 +1301,14 @@ class TelegramCommandHandler:
                     pager_row.append(InlineKeyboardButton("◀ Older", callback_data="signals:page:older"))
                 if page > 0:
                     pager_row.append(InlineKeyboardButton("Newer ▶", callback_data="signals:page:newer"))
-                pager_row.append(InlineKeyboardButton("🔝", callback_data="signals:page:newest"))
+                pager_row.append(InlineKeyboardButton("🔝 Top", callback_data="signals:page:newest"))
                 keyboard.append(pager_row)
 
             # Quick actions
             keyboard.append([
                 InlineKeyboardButton("🆕 Last", callback_data="last_signal"),
                 InlineKeyboardButton("📊 Active", callback_data="active_trades"),
-                InlineKeyboardButton("🔄", callback_data="signals"),
+                InlineKeyboardButton("🔄 List", callback_data="signals"),
             ])
 
             if not page_signals:
@@ -3772,7 +3782,7 @@ class TelegramCommandHandler:
                 state = json.load(f)
             
             # Get activity pulse from last_successful_cycle (more accurate than state file mtime)
-            from pearlalgo.utils.telegram_alerts import format_activity_pulse, format_next_session_time
+            from pearlalgo.utils.telegram_alerts import format_activity_pulse, format_next_session_time, format_session_window
             from pearlalgo.utils.paths import parse_utc_timestamp
             
             last_cycle_seconds = None
@@ -3889,8 +3899,16 @@ class TelegramCommandHandler:
                 # Stale pulse - highlight potential issue
                 message += "⚠️ Scans appear stalled—check /health or logs\n"
             elif session_open is False:
-                next_session = format_next_session_time()
-                message += f"⏳ Waiting for session • {next_session}\n"
+                # Get session times from config for config-driven messaging
+                config_block = state.get("config", {})
+                session_start = config_block.get("start_time") if isinstance(config_block, dict) else None
+                session_end = config_block.get("end_time") if isinstance(config_block, dict) else None
+                next_session = format_next_session_time(session_start, session_end)
+                if session_start and session_end:
+                    session_window = format_session_window(session_start, session_end)
+                    message += f"⏳ Waiting for session ({session_window}) • {next_session}\n"
+                else:
+                    message += f"⏳ Waiting for session • {next_session}\n"
             elif futures_open is False:
                 message += "⏳ Waiting for market to open\n"
             else:
@@ -4756,13 +4774,11 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("⏹️ Stop", callback_data='stop_agent'),
                 InlineKeyboardButton("🔄 Restart", callback_data='restart_agent'),
                 InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
-                InlineKeyboardButton("🔄", callback_data='status'),
             ])
         else:
             keyboard.append([
                 InlineKeyboardButton("▶️ Start Agent", callback_data='start_agent'),
                 InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
-                InlineKeyboardButton("🔄", callback_data='status'),
             ])
         
         # Row 2: Quick Actions (most common monitoring needs)

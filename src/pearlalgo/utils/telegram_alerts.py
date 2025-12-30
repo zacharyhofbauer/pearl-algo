@@ -343,12 +343,28 @@ def format_activity_pulse(
         return "🔴", f"{PULSE_STALE} ({time_str})"
 
 
-def format_next_session_time() -> str:
+def format_next_session_time(
+    session_start: str | None = None,
+    session_end: str | None = None,
+) -> str:
     """
-    Get the next strategy session opening time (09:30 ET on next trading day).
+    Get the next strategy session opening time based on configured session times.
     
-    Returns formatted string like "Next session: 9:30 AM ET (Monday)"
+    Args:
+        session_start: Session start time in HH:MM format (e.g., "09:30" or "18:00")
+        session_end: Session end time in HH:MM format (e.g., "16:00" or "16:10")
+        
+    Returns:
+        Formatted string like "Opens today at 09:30 AM ET" or safe fallback.
+        
+    Note:
+        If session_start is not provided, returns a safe fallback message
+        that directs users to /config rather than showing hardcoded times.
     """
+    # Safe fallback when session times aren't provided
+    if not session_start:
+        return "See /config for session window"
+    
     try:
         from datetime import datetime, timezone, timedelta
         import pytz
@@ -356,22 +372,63 @@ def format_next_session_time() -> str:
         et_tz = pytz.timezone('US/Eastern')
         now = datetime.now(et_tz)
         
-        # Strategy session is 09:30 - 16:00 ET
-        session_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        # Parse session start time (HH:MM format)
+        try:
+            start_parts = session_start.split(":")
+            start_hour = int(start_parts[0])
+            start_minute = int(start_parts[1]) if len(start_parts) > 1 else 0
+        except (ValueError, IndexError):
+            return "See /config for session window"
         
-        # If we're before 09:30 today, next session is today
-        if now.hour < 9 or (now.hour == 9 and now.minute < 30):
-            next_open = session_open
+        # Parse session end time if provided (for cross-midnight detection)
+        end_hour = None
+        end_minute = None
+        if session_end:
+            try:
+                end_parts = session_end.split(":")
+                end_hour = int(end_parts[0])
+                end_minute = int(end_parts[1]) if len(end_parts) > 1 else 0
+            except (ValueError, IndexError):
+                pass
+        
+        # Detect cross-midnight session (e.g., 18:00 - 16:10)
+        # Cross-midnight means start_hour > end_hour (evening to afternoon next day)
+        is_cross_midnight = False
+        if end_hour is not None and start_hour > end_hour:
+            is_cross_midnight = True
+        
+        session_open = now.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+        
+        if is_cross_midnight:
+            # For cross-midnight sessions (e.g., 18:00 start):
+            # - If before start time today, next session is today at start_hour
+            # - If after start time, we're likely IN the session or past end, next is tomorrow
+            current_time_minutes = now.hour * 60 + now.minute
+            start_time_minutes = start_hour * 60 + start_minute
+            end_time_minutes = end_hour * 60 + end_minute if end_hour is not None else 0
+            
+            # We're "before session" if:
+            # - After end_time (afternoon) and before start_time (evening)
+            if end_time_minutes < current_time_minutes < start_time_minutes:
+                # Session opens later today
+                next_open = session_open
+            else:
+                # We're either in session or past it, next session is tomorrow
+                next_open = session_open + timedelta(days=1)
         else:
-            # Next session is tomorrow (or Monday if weekend)
-            next_open = session_open + timedelta(days=1)
+            # Standard same-day session (e.g., 09:30 - 16:00)
+            if now.hour < start_hour or (now.hour == start_hour and now.minute < start_minute):
+                next_open = session_open
+            else:
+                # Next session is tomorrow
+                next_open = session_open + timedelta(days=1)
         
-        # Skip weekends
+        # Skip weekends (futures typically closed Sat/Sun)
         while next_open.weekday() >= 5:  # 5=Sat, 6=Sun
             next_open += timedelta(days=1)
         
         day_name = next_open.strftime("%A")
-        time_str = next_open.strftime("%I:%M %p ET")
+        time_str = next_open.strftime("%I:%M %p ET").lstrip("0")  # Remove leading zero
         
         if next_open.date() == now.date():
             return f"Opens today at {time_str}"
@@ -380,7 +437,31 @@ def format_next_session_time() -> str:
         else:
             return f"Opens {day_name} at {time_str}"
     except Exception:
-        return "Next session: Check market calendar"
+        return "See /config for session window"
+
+
+def format_session_window(
+    session_start: str | None = None,
+    session_end: str | None = None,
+) -> str:
+    """
+    Format the configured session window for display.
+    
+    Args:
+        session_start: Session start time in HH:MM format (e.g., "09:30" or "18:00")
+        session_end: Session end time in HH:MM format (e.g., "16:00" or "16:10")
+        
+    Returns:
+        Formatted string like "18:00–16:10 ET" or safe fallback.
+    """
+    if not session_start or not session_end:
+        return "See /config"
+    
+    try:
+        # Format times for display (keep HH:MM format, add ET)
+        return f"{session_start}–{session_end} ET"
+    except Exception:
+        return "See /config"
 
 
 def format_signal_action_cue(
@@ -644,6 +725,9 @@ def format_home_card(
     # Data staleness (v6 - separate from state staleness)
     data_age_minutes: float | None = None,  # Age of market data in minutes
     data_stale_threshold_minutes: float = 10.0,  # Minutes; show warning if older
+    # Session window config (v7 - config-driven session messaging)
+    session_start: str | None = None,  # Session start time in HH:MM format (e.g., "18:00")
+    session_end: str | None = None,  # Session end time in HH:MM format (e.g., "16:10")
 ) -> str:
     """
     Build unified Home Card message for status/dashboard (balanced verbosity).
@@ -711,6 +795,8 @@ def format_home_card(
         active_trades_count: Number of currently active positions (shown when > 0)
         data_age_minutes: Age of market data in minutes (for v2 staleness callout)
         data_stale_threshold_minutes: Threshold in minutes for showing stale warning (default: 10)
+        session_start: Session start time in HH:MM format (e.g., "18:00") for config-driven messaging
+        session_end: Session end time in HH:MM format (e.g., "16:10") for config-driven messaging
 
     Returns:
         Formatted Home Card message string
@@ -785,8 +871,15 @@ def format_home_card(
 
     # CONDITIONAL: Gate expectation explanation (only when session closed)
     if strategy_session_open is False:
-        next_session = format_next_session_time()
-        lines.append(f"{_SUBLINE_PREFIX}ℹ️ Signals suppressed{_BULLET_SEP}{next_session}")
+        # Use config-driven session window if available
+        if session_start and session_end:
+            session_window = format_session_window(session_start, session_end)
+            next_session = format_next_session_time(session_start, session_end)
+            lines.append(f"{_SUBLINE_PREFIX}ℹ️ Signals suppressed{_BULLET_SEP}Session: {session_window}")
+            lines.append(f"{_SUBLINE_PREFIX}📅 {next_session}")
+        else:
+            # Safe fallback when session config not available
+            lines.append(f"{_SUBLINE_PREFIX}ℹ️ Signals suppressed{_BULLET_SEP}See /config for session window")
     elif futures_market_open is False and strategy_session_open is not False:
         lines.append(f"{_SUBLINE_PREFIX}ℹ️ Data may be delayed (market closed)")
     

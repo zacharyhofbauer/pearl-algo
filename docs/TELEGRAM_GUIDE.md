@@ -149,8 +149,8 @@ Returns the current agent status, including:
 - Activity pulse (time since last scan)
 - Gates (standardized terminology):
   - **Futures** (CME ETH + maintenance break; affects data freshness)
-  - **Session** (strategy window: 09:30–16:00 ET; when signals are allowed)
-  - When session is closed, shows next session opening time
+  - **Session** (config-driven strategy window; when signals are allowed)
+  - When session is closed, shows configured window and next session opening time
 - Scans and signals (clarified):
   - **Scans**: session/total (total persists across restarts)
   - **Signals**: generated vs delivered vs failed
@@ -693,7 +693,7 @@ The UI uses consistent labels across all views:
 | **Scans** | Per-cycle processing iterations |
 | **Signals** | Trading opportunities generated |
 | **Futures** | CME futures market open/closed |
-| **Session** | Strategy session window (9:30 AM - 4:00 PM ET) |
+| **Session** | Strategy session window (config-driven; see /config) |
 | **Active Trades** | Currently open positions |
 | **Buffer** | Rolling bar data held in memory |
 
@@ -717,13 +717,14 @@ Signal alerts use a decision-first, compact layout:
 *Entry:* $21,234.50  •  R:R 2.1:1
 *Stop:* $21,200.00 (34.5 pts)
 *TP:* $21,300.00 (65.5 pts)
+*Size:* 15 MNQ • Risk: $250
 
 ⏳ Monitor for BUY entry at target price
 
 🟢 75% confidence (High)
 🧭 Trending Bullish • ✅ MTF
 
-`momentum_brea` • tap Details
+`momentum_brea`
 ```
 
 **Layout order:**
@@ -747,7 +748,7 @@ Full reasoning and timestamps live in the Details view.
 
 ✅ *Position ACTIVE* - Monitor stop/TP
 
-`momentum_brea` • tap Details
+`momentum_brea`
 ```
 
 ### 9.5 Exit Notification (Calm-Minimal)
@@ -761,7 +762,7 @@ P&L appears first (most important information):
 $21,234.50 → $21,300.00 (+65.5 / +0.3%)
 🎯 Take Profit
 
-`momentum_brea` • tap Details
+`momentum_brea`
 ```
 
 ### 9.6 Improved Error Messages

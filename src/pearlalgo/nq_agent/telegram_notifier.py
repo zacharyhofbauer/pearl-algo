@@ -39,6 +39,7 @@ from pearlalgo.utils.telegram_alerts import (
     format_home_card,
     format_gate_status,
     format_service_status,
+    format_session_window,
     # New UX improvement helpers
     format_activity_pulse,
     format_next_session_time,
@@ -337,6 +338,17 @@ class NQAgentTelegramNotifier:
         if take_profit:
             tp_dist = abs(take_profit - entry_price) if entry_price else 0
             message += f"*TP:* ${take_profit:.2f} ({tp_dist:.1f} pts)\n"
+        
+        # Size + Risk (compact single line, only if available)
+        position_size = signal.get("position_size")
+        risk_amount = signal.get("risk_amount")
+        if position_size or risk_amount:
+            size_risk_parts = []
+            if position_size:
+                size_risk_parts.append(f"{position_size} MNQ")
+            if risk_amount:
+                size_risk_parts.append(f"Risk: ${risk_amount:,.0f}")
+            message += f"*Size:* {' • '.join(size_risk_parts)}\n"
 
         # Action cue (immediately after plan - what to do next)
         status = str(signal.get("status") or "generated")
@@ -366,8 +378,12 @@ class NQAgentTelegramNotifier:
             message += f"🧭 {' • '.join(context_parts)}\n"
 
         # Signal ID for cross-referencing (compact footer)
+        # Only show "tap Details" when command handler is running (buttons will be attached)
         if signal_id:
-            message += f"\n`{signal_id[:12]}` • tap Details"
+            if _is_command_handler_running():
+                message += f"\n`{signal_id[:12]}` • tap Details"
+            else:
+                message += f"\n`{signal_id[:12]}`"
 
         return message
     
@@ -775,15 +791,30 @@ class NQAgentTelegramNotifier:
                 tp_dist = abs(take_profit - entry_price)
                 message += f"*TP:* ${take_profit:.2f} ({tp_dist:.1f} pts)\n"
             
+            # Size + Risk (compact single line, only if available)
+            position_size = signal.get("position_size")
+            risk_amount = signal.get("risk_amount")
+            if position_size or risk_amount:
+                size_risk_parts = []
+                if position_size:
+                    size_risk_parts.append(f"{position_size} MNQ")
+                if risk_amount:
+                    size_risk_parts.append(f"Risk: ${risk_amount:,.0f}")
+                message += f"*Size:* {' • '.join(size_risk_parts)}\n"
+            
             # Action cue (immediate)
             message += f"\n✅ *Position ACTIVE* - Monitor stop/TP\n"
             
-            # Compact footer
-            message += f"\n`{signal_id[:12]}` • tap Details"
+            # Compact footer - only show "tap Details" when command handler is running
+            handler_running = _is_command_handler_running()
+            if handler_running:
+                message += f"\n`{signal_id[:12]}` • tap Details"
+            else:
+                message += f"\n`{signal_id[:12]}`"
             
             # Build optional deep-link buttons
             reply_markup = None
-            if _is_command_handler_running():
+            if handler_running:
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     keyboard = [
@@ -899,12 +930,16 @@ class NQAgentTelegramNotifier:
             reason_icon = exit_icons.get(exit_reason.lower(), "ℹ️")
             message += f"{reason_icon} {exit_reason_display}\n"
             
-            # Compact footer
-            message += f"\n`{signal_id[:12]}` • tap Details"
+            # Compact footer - only show "tap Details" when command handler is running
+            handler_running = _is_command_handler_running()
+            if handler_running:
+                message += f"\n`{signal_id[:12]}` • tap Details"
+            else:
+                message += f"\n`{signal_id[:12]}`"
             
             # Build optional deep-link buttons
             reply_markup = None
-            if _is_command_handler_running():
+            if handler_running:
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     keyboard = [
@@ -1458,6 +1493,11 @@ class NQAgentTelegramNotifier:
                 except Exception:
                     pass
             
+            # Get session times from config for config-driven messaging
+            config_block = status.get("config", {})
+            session_start = config_block.get("start_time") if isinstance(config_block, dict) else None
+            session_end = config_block.get("end_time") if isinstance(config_block, dict) else None
+            
             message = format_home_card(
                 symbol=symbol,
                 time_str=time_str,
@@ -1491,6 +1531,9 @@ class NQAgentTelegramNotifier:
                 data_stale_threshold_minutes=data_stale_threshold_minutes,
                 # v7 field: activity pulse for push dashboards
                 last_cycle_seconds=last_cycle_seconds,
+                # v8 fields: config-driven session messaging
+                session_start=session_start,
+                session_end=session_end,
             )
             
             # Add MTF snapshot (push-specific enhancement)
@@ -1747,13 +1790,20 @@ class NQAgentTelegramNotifier:
             message += format_gate_status(futures_market_open, strategy_session_open) + "\n"
 
             # What to expect (reduced false confidence in timing)
+            # Get session times from config for config-driven messaging
+            session_start = config.get("start_time")
+            session_end = config.get("end_time")
+            
             message += "\n*What's next:*\n"
             if strategy_session_open is True:
                 message += "• Scanning for signals when conditions align\n"
                 message += "• No guaranteed timing—watch /activity for updates\n"
             elif strategy_session_open is False:
-                next_session = format_next_session_time()
-                message += f"• Waiting for session • {next_session}\n"
+                next_session = format_next_session_time(session_start, session_end)
+                if session_start and session_end:
+                    session_window = format_session_window(session_start, session_end)
+                    message += f"• Session: {session_window}\n"
+                message += f"• {next_session}\n"
                 message += "• Use /activity to check status\n"
             else:
                 message += "• Checking market conditions...\n"

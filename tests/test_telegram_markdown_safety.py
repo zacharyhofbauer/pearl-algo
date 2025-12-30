@@ -13,6 +13,8 @@ from pearlalgo.utils.telegram_alerts import (
     escape_markdown,
     escape_subprocess_output,
     safe_label,
+    format_next_session_time,
+    format_session_window,
 )
 
 
@@ -135,6 +137,66 @@ class TestSafeLabel:
     def test_handles_none(self):
         """None should return empty string."""
         assert safe_label(None) == ""
+
+
+class TestSessionWindowFormatting:
+    """Tests for config-driven session window formatting."""
+    
+    def test_format_session_window_with_valid_times(self):
+        """Session window should be formatted correctly."""
+        result = format_session_window("18:00", "16:10")
+        assert result == "18:00–16:10 ET"
+    
+    def test_format_session_window_standard_times(self):
+        """Standard session times should be formatted correctly."""
+        result = format_session_window("09:30", "16:00")
+        assert result == "09:30–16:00 ET"
+    
+    def test_format_session_window_missing_start(self):
+        """Missing start time should return safe fallback."""
+        result = format_session_window(None, "16:00")
+        assert result == "See /config"
+    
+    def test_format_session_window_missing_end(self):
+        """Missing end time should return safe fallback."""
+        result = format_session_window("09:30", None)
+        assert result == "See /config"
+    
+    def test_format_session_window_both_missing(self):
+        """Both missing should return safe fallback."""
+        result = format_session_window(None, None)
+        assert result == "See /config"
+
+
+class TestNextSessionTimeFormatting:
+    """Tests for config-driven next session time formatting."""
+    
+    def test_format_next_session_time_with_valid_times(self):
+        """Next session time should include opening message when config provided."""
+        result = format_next_session_time("09:30", "16:00")
+        # Should contain a time and "Opens"
+        assert "Opens" in result or "/config" in result
+    
+    def test_format_next_session_time_cross_midnight(self):
+        """Cross-midnight session should be handled."""
+        result = format_next_session_time("18:00", "16:10")
+        # Should contain a time and "Opens" or safe fallback
+        assert "Opens" in result or "/config" in result
+    
+    def test_format_next_session_time_missing_start(self):
+        """Missing start time should return safe fallback."""
+        result = format_next_session_time(None, "16:00")
+        assert "See /config" in result
+    
+    def test_format_next_session_time_missing_times(self):
+        """Missing times should return safe fallback."""
+        result = format_next_session_time()
+        assert "See /config" in result
+    
+    def test_format_next_session_time_invalid_format(self):
+        """Invalid time format should return safe fallback."""
+        result = format_next_session_time("invalid", "16:00")
+        assert "See /config" in result
 
 
 class TestMarkdownSafetyRegression:
