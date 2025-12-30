@@ -137,7 +137,7 @@ EXECUTION PHASES (PRIORITY ORDER)
 Execute cleanup in this strict sequence:
 
 Phase 1: Discovery (Read-Only)
-- Scan repository structure (src/, scripts/, tests/, docs/, prompts/)
+- Scan repository structure (src/, scripts/, tests/, docs/, docs/prompts/)
 - Map all imports and dependencies (AST analysis recommended)
 - Identify duplicate patterns (similar function names, overlapping utilities)
 - Document current file count and organization
@@ -272,7 +272,7 @@ Enforce:
 
 Documentation exists to reduce confusion, not preserve history.
 
-Review all documentation in docs/ and prompts in prompts/:
+Review all documentation in docs/ and prompts in docs/prompts/:
 - Delete redundant content (merged into other docs)
 - Delete outdated explanations
 - Merge overlapping documents
@@ -343,7 +343,7 @@ No feature is considered finished unless code, tests, and documentation agree.
 
 8. PROMPT REFINEMENT (OPTIONAL - ONLY IF NEEDED)
 
-If prompts in prompts/ directory show signs of issues, refine them:
+If prompts in docs/prompts/ directory show signs of issues, refine them:
 
 Review prompts for:
 - Redundancy or contradiction within the prompt
@@ -359,7 +359,7 @@ Refinement principles:
 - Document significant changes in prompt comments or version notes
 
 If refinement is needed:
-- Update the prompt file in prompts/
+- Update the prompt file in docs/prompts/
 - Ensure it still aligns with current project structure and conventions
 - Verify all file paths and references are correct
 - Keep the refinement focused on clarity and accuracy, not style preferences
