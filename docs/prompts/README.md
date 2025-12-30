@@ -68,6 +68,16 @@ NQ Agent verification and performance stewardship prompt. Use this when:
 
 **When to use:** When you need to verify, monitor, or fine-tune the trading agent. Focuses on agent verification and performance - strategy changes should use project_building.md.
 
+### `backtesting_upgrades.md`
+Backtesting and strategy validation prompt. Use this when:
+- Evaluating strategy signal existence and frequency
+- Validating strategy behavior across market regimes
+- Analyzing condition blocking and over-filtering
+- Testing trade lifecycle under historical replay
+- Improving backtest observability and explainability
+
+**When to use:** When you need to validate and improve strategy backtesting, verify signal generation, or analyze strategy behavior. Focuses on backtesting and validation - strategy changes should use project_building.md.
+
 ## Usage
 
 1. Open the relevant prompt file
