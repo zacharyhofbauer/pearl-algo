@@ -1205,7 +1205,9 @@ class NQAgentService:
                         if self.bandit_policy is not None:
                             try:
                                 signal_type = str(sig.get("type") or "unknown")
-                                is_win = (exit_reason == "take_profit")
+                                # Use perf["is_win"] which is computed from actual PnL
+                                # (more accurate than exit_reason == "take_profit")
+                                is_win = bool(perf.get("is_win", pnl_value > 0))
                                 self.bandit_policy.record_outcome(
                                     signal_id=sig_id,
                                     signal_type=signal_type,
@@ -2108,15 +2110,73 @@ class NQAgentService:
         - arm_request.flag: Arm the execution adapter
         - disarm_request.flag: Disarm the execution adapter
         - kill_request.flag: Cancel all orders and disarm
+        
+        Safety features:
+        - Flags older than FLAG_TTL_SECONDS are ignored and deleted (prevents stale flags)
+        - Flags are always cleared even when execution_adapter is None (prevents accumulation)
         """
-        if self.execution_adapter is None:
-            return
+        FLAG_TTL_SECONDS = 300  # 5 minutes - ignore flags older than this
+        
+        def _is_flag_stale(flag_file: Path) -> bool:
+            """Check if a flag file is stale (older than TTL)."""
+            try:
+                content = flag_file.read_text()
+                # Parse timestamp from "xxx_requested_at=2025-01-01T00:00:00+00:00"
+                if "requested_at=" in content:
+                    ts_str = content.split("requested_at=")[1].strip()
+                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+                    return age_seconds > FLAG_TTL_SECONDS
+                # If no timestamp, check file modification time
+                mtime = datetime.fromtimestamp(flag_file.stat().st_mtime, tz=timezone.utc)
+                age_seconds = (datetime.now(timezone.utc) - mtime).total_seconds()
+                return age_seconds > FLAG_TTL_SECONDS
+            except Exception:
+                # If we can't determine age, treat as stale for safety
+                return True
         
         try:
             state_dir = self.state_manager.state_dir
             
-            # Check for kill flag (highest priority)
+            # Define flag files
             kill_file = state_dir / "kill_request.flag"
+            disarm_file = state_dir / "disarm_request.flag"
+            arm_file = state_dir / "arm_request.flag"
+            
+            # ==========================================================================
+            # Always clear stale flags (prevents accumulation when adapter is disabled)
+            # ==========================================================================
+            for flag_file in [kill_file, disarm_file, arm_file]:
+                if flag_file.exists() and _is_flag_stale(flag_file):
+                    logger.warning(f"Clearing stale flag file: {flag_file.name} (older than {FLAG_TTL_SECONDS}s)")
+                    flag_file.unlink(missing_ok=True)
+            
+            # ==========================================================================
+            # If execution adapter is None, clear any remaining flags and warn
+            # ==========================================================================
+            if self.execution_adapter is None:
+                for flag_file, action in [(kill_file, "kill"), (disarm_file, "disarm"), (arm_file, "arm")]:
+                    if flag_file.exists():
+                        logger.warning(
+                            f"Clearing {action} flag - execution adapter is disabled. "
+                            f"Enable execution.enabled in config to use /arm, /disarm, /kill commands."
+                        )
+                        flag_file.unlink(missing_ok=True)
+                        # Notify user that the command was ignored
+                        try:
+                            await self.telegram_notifier.telegram.send_message(
+                                f"⚠️ *{action.upper()} IGNORED*\n\n"
+                                f"Execution adapter is disabled.\n"
+                                f"Set `execution.enabled: true` in config and restart to enable ATS.",
+                                parse_mode="Markdown",
+                            )
+                        except Exception:
+                            pass
+                return
+            
+            # ==========================================================================
+            # Process kill flag (highest priority)
+            # ==========================================================================
             if kill_file.exists():
                 logger.warning("🚨 KILL flag detected - cancelling all orders and disarming")
                 try:
@@ -2141,8 +2201,9 @@ class NQAgentService:
                     kill_file.unlink(missing_ok=True)
                 return  # Skip arm/disarm after kill
             
-            # Check for disarm flag
-            disarm_file = state_dir / "disarm_request.flag"
+            # ==========================================================================
+            # Process disarm flag
+            # ==========================================================================
             if disarm_file.exists():
                 logger.info("🔒 DISARM flag detected - disarming execution adapter")
                 self.execution_adapter.disarm()
@@ -2159,8 +2220,9 @@ class NQAgentService:
                     pass
                 return  # Skip arm after disarm
             
-            # Check for arm flag
-            arm_file = state_dir / "arm_request.flag"
+            # ==========================================================================
+            # Process arm flag
+            # ==========================================================================
             if arm_file.exists():
                 logger.info("🔫 ARM flag detected - arming execution adapter")
                 success = self.execution_adapter.arm()
@@ -2521,6 +2583,22 @@ class NQAgentService:
                     )
         except Exception:
             pass
+
+        # ==========================================================================
+        # ATS (Automated Trading System) status - for Telegram commands
+        # ==========================================================================
+        # Persist execution and learning status so /arm, /positions, /policy commands
+        # can read accurate state even when service is running.
+        state["execution"] = (
+            self.execution_adapter.get_status()
+            if self.execution_adapter is not None
+            else {"enabled": False, "armed": False, "mode": "disabled"}
+        )
+        state["learning"] = (
+            self.bandit_policy.get_status()
+            if self.bandit_policy is not None
+            else {"enabled": False, "mode": "disabled"}
+        )
 
         self.state_manager.save_state(state)
 

@@ -194,7 +194,16 @@ class TestExecutionPreconditions:
     
     def test_symbol_whitelist_allows_known(self, adapter):
         """Symbol in whitelist should be allowed."""
-        signal = {"signal_id": "test", "type": "test", "symbol": "MNQ"}
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "long",
+            "entry_price": 20000.0,
+            "stop_loss": 19980.0,
+            "take_profit": 20030.0,
+            "position_size": 1,
+        }
         decision = adapter.check_preconditions(signal)
         
         assert decision.execute is True
@@ -247,11 +256,243 @@ class TestExecutionPreconditions:
     
     def test_all_preconditions_pass(self, adapter):
         """All preconditions met should allow order."""
-        signal = {"signal_id": "test", "type": "new_type", "symbol": "MNQ"}
+        signal = {
+            "signal_id": "test",
+            "type": "new_type",
+            "symbol": "MNQ",
+            "direction": "long",
+            "entry_price": 20000.0,
+            "stop_loss": 19980.0,
+            "take_profit": 20030.0,
+            "position_size": 1,
+        }
         decision = adapter.check_preconditions(signal)
         
         assert decision.execute is True
         assert "preconditions_passed" in decision.reason
+
+
+class TestBracketValidation:
+    """Tests for bracket order geometry validation."""
+    
+    @pytest.fixture
+    def config(self):
+        """Create test config."""
+        return ExecutionConfig(
+            enabled=True,
+            armed=True,
+            mode=ExecutionMode.PAPER,
+            max_positions=1,
+            max_orders_per_day=5,
+            cooldown_seconds=60,
+            symbol_whitelist=["MNQ"],
+        )
+    
+    @pytest.fixture
+    def adapter(self, config):
+        """Create mock adapter."""
+        return MockExecutionAdapter(config)
+    
+    def test_invalid_direction_blocks(self, adapter):
+        """Invalid direction should block execution."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "sideways",  # Invalid
+            "entry_price": 20000.0,
+            "stop_loss": 19980.0,
+            "take_profit": 20030.0,
+            "position_size": 1,
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is False
+        assert "invalid_direction" in decision.reason
+    
+    def test_missing_direction_blocks(self, adapter):
+        """Missing direction should block execution."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "entry_price": 20000.0,
+            "stop_loss": 19980.0,
+            "take_profit": 20030.0,
+            "position_size": 1,
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is False
+        assert "invalid_direction" in decision.reason
+    
+    def test_non_positive_entry_price_blocks(self, adapter):
+        """Non-positive entry price should block execution."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "long",
+            "entry_price": 0,  # Invalid
+            "stop_loss": 19980.0,
+            "take_profit": 20030.0,
+            "position_size": 1,
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is False
+        assert "invalid_prices:non_positive" in decision.reason
+    
+    def test_non_positive_stop_loss_blocks(self, adapter):
+        """Non-positive stop loss should block execution."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "long",
+            "entry_price": 20000.0,
+            "stop_loss": -100.0,  # Invalid
+            "take_profit": 20030.0,
+            "position_size": 1,
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is False
+        assert "invalid_prices:non_positive" in decision.reason
+    
+    def test_invalid_long_bracket_geometry_blocks(self, adapter):
+        """Invalid long bracket geometry (SL >= entry) should block."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "long",
+            "entry_price": 20000.0,
+            "stop_loss": 20010.0,  # SL above entry - invalid for long
+            "take_profit": 20030.0,
+            "position_size": 1,
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is False
+        assert "invalid_bracket_geometry:long" in decision.reason
+    
+    def test_invalid_long_bracket_geometry_tp_blocks(self, adapter):
+        """Invalid long bracket geometry (TP <= entry) should block."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "long",
+            "entry_price": 20000.0,
+            "stop_loss": 19980.0,
+            "take_profit": 19990.0,  # TP below entry - invalid for long
+            "position_size": 1,
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is False
+        assert "invalid_bracket_geometry:long" in decision.reason
+    
+    def test_valid_long_bracket_passes(self, adapter):
+        """Valid long bracket (SL < entry < TP) should pass."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "long",
+            "entry_price": 20000.0,
+            "stop_loss": 19980.0,  # Below entry
+            "take_profit": 20030.0,  # Above entry
+            "position_size": 1,
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is True
+    
+    def test_invalid_short_bracket_geometry_blocks(self, adapter):
+        """Invalid short bracket geometry (SL <= entry) should block."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "short",
+            "entry_price": 20000.0,
+            "stop_loss": 19990.0,  # SL below entry - invalid for short
+            "take_profit": 19970.0,
+            "position_size": 1,
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is False
+        assert "invalid_bracket_geometry:short" in decision.reason
+    
+    def test_invalid_short_bracket_geometry_tp_blocks(self, adapter):
+        """Invalid short bracket geometry (TP >= entry) should block."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "short",
+            "entry_price": 20000.0,
+            "stop_loss": 20020.0,
+            "take_profit": 20010.0,  # TP above entry - invalid for short
+            "position_size": 1,
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is False
+        assert "invalid_bracket_geometry:short" in decision.reason
+    
+    def test_valid_short_bracket_passes(self, adapter):
+        """Valid short bracket (TP < entry < SL) should pass."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "short",
+            "entry_price": 20000.0,
+            "stop_loss": 20020.0,  # Above entry
+            "take_profit": 19970.0,  # Below entry
+            "position_size": 1,
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is True
+    
+    def test_non_positive_position_size_blocks(self, adapter):
+        """Non-positive position size should block execution."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "long",
+            "entry_price": 20000.0,
+            "stop_loss": 19980.0,
+            "take_profit": 20030.0,
+            "position_size": 0,  # Invalid
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is False
+        assert "invalid_position_size:non_positive" in decision.reason
+    
+    def test_negative_position_size_blocks(self, adapter):
+        """Negative position size should block execution."""
+        signal = {
+            "signal_id": "test",
+            "type": "test",
+            "symbol": "MNQ",
+            "direction": "long",
+            "entry_price": 20000.0,
+            "stop_loss": 19980.0,
+            "take_profit": 20030.0,
+            "position_size": -5,  # Invalid
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        assert decision.execute is False
+        assert "invalid_position_size:non_positive" in decision.reason
 
 
 class TestArmDisarm:
@@ -438,6 +679,11 @@ class TestMockExecution:
             "signal_id": "test_1",
             "type": "sr_bounce",
             "symbol": "MNQ",
+            "direction": "long",
+            "entry_price": 20000.0,
+            "stop_loss": 19980.0,
+            "take_profit": 20030.0,
+            "position_size": 1,
         }
         
         result = await adapter.place_bracket(signal)

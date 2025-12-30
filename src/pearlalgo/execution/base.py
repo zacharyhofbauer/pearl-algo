@@ -337,6 +337,73 @@ class ExecutionAdapter(ABC):
                     signal_id=signal_id,
                 )
         
+        # ==========================================================================
+        # BRACKET VALIDATION: Ensure signal has valid order geometry
+        # ==========================================================================
+        
+        # Check 8: Direction must be "long" or "short"
+        direction = str(signal.get("direction", "")).lower()
+        if direction not in ("long", "short"):
+            return ExecutionDecision(
+                execute=False,
+                reason=f"invalid_direction:{direction}",
+                signal_id=signal_id,
+            )
+        
+        # Check 9: Prices must be positive numbers
+        try:
+            entry_price = float(signal.get("entry_price", 0))
+            stop_loss = float(signal.get("stop_loss", 0))
+            take_profit = float(signal.get("take_profit", 0))
+        except (TypeError, ValueError):
+            return ExecutionDecision(
+                execute=False,
+                reason="invalid_prices:non_numeric",
+                signal_id=signal_id,
+            )
+        
+        if entry_price <= 0 or stop_loss <= 0 or take_profit <= 0:
+            return ExecutionDecision(
+                execute=False,
+                reason=f"invalid_prices:non_positive:entry={entry_price},sl={stop_loss},tp={take_profit}",
+                signal_id=signal_id,
+            )
+        
+        # Check 10: Bracket geometry must be correct for direction
+        # Long: stop_loss < entry_price < take_profit
+        # Short: take_profit < entry_price < stop_loss
+        if direction == "long":
+            if not (stop_loss < entry_price < take_profit):
+                return ExecutionDecision(
+                    execute=False,
+                    reason=f"invalid_bracket_geometry:long:sl={stop_loss},entry={entry_price},tp={take_profit}",
+                    signal_id=signal_id,
+                )
+        else:  # short
+            if not (take_profit < entry_price < stop_loss):
+                return ExecutionDecision(
+                    execute=False,
+                    reason=f"invalid_bracket_geometry:short:tp={take_profit},entry={entry_price},sl={stop_loss}",
+                    signal_id=signal_id,
+                )
+        
+        # Check 11: Position size must be a positive integer
+        try:
+            position_size = int(signal.get("position_size", 0))
+        except (TypeError, ValueError):
+            return ExecutionDecision(
+                execute=False,
+                reason="invalid_position_size:non_integer",
+                signal_id=signal_id,
+            )
+        
+        if position_size <= 0:
+            return ExecutionDecision(
+                execute=False,
+                reason=f"invalid_position_size:non_positive:{position_size}",
+                signal_id=signal_id,
+            )
+        
         # All checks passed
         return ExecutionDecision(
             execute=True,
