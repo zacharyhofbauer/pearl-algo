@@ -76,6 +76,15 @@ def main() -> None:
     print(f"Avg confidence:  {result.avg_confidence:.3f}")
     print(f"Avg R:R (if set): {result.avg_risk_reward:.2f}:1")
 
+    # Behavioral verification diagnostics (signal density + bottlenecks + common gates)
+    if result.verification:
+        print("\n=== Verification Summary ===")
+        print(result.verification.format_compact())
+        if result.verification.top_gate_reasons:
+            print("\nTop scanner gate reasons:")
+            for reason in result.verification.top_gate_reasons:
+                print(f"  - {reason}")
+
     if result.total_signals == 0:
         print("\nNo signals were generated on this dataset. Check market hours and data quality.")
 

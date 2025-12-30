@@ -157,6 +157,7 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("last_signal", self._handle_last_signal))
         self.application.add_handler(CommandHandler("active_trades", self._handle_active_trades))
         self.application.add_handler(CommandHandler("backtest", self._handle_backtest))
+        self.application.add_handler(CommandHandler("reports", self._handle_backtest_reports))
         self.application.add_handler(CommandHandler("test_signal", self._handle_test_signal))
         self.application.add_handler(CommandHandler("performance", self._handle_performance))
         # Read-only operational helpers
@@ -2012,37 +2013,21 @@ class TelegramCommandHandler:
             tick_value = 2.0 if symbol == "MNQ" else 20.0
             symbol_label = f"{symbol} (${tick_value:.0f}/pt)"
 
+            # Simple, clean UI - smart defaults, no confusing options
             message = (
                 "📊 *Backtest Strategy*\n\n"
-                f"*Mode:* {mode_label}\n"
-                f"*Symbol:* {symbol_label}\n\n"
-                f"*Contracts:* {pos_size} {symbol}  |  *Slippage:* {slippage_ticks} ticks\n"
-                f"*Max positions:* {max_pos}\n\n"
-                "Select backtest duration:\n\n"
-                "Tip: 2 weeks is a good starting point. 4-6 weeks for deeper validation."
+                f"*Symbol:* {symbol} (${tick_value:.0f}/pt)\n\n"
+                "Select how far back to test:\n\n"
+                "_2 weeks recommended for quick validation_"
             )
             reply_markup = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton("1 Week", callback_data='backtest_1w'),
-                    InlineKeyboardButton("2 Weeks", callback_data='backtest_2w'),
+                    InlineKeyboardButton("2 Weeks ⭐", callback_data='backtest_2w'),
                 ],
                 [
-                    InlineKeyboardButton("3 Weeks", callback_data='backtest_3w'),
                     InlineKeyboardButton("4 Weeks", callback_data='backtest_4w'),
-                ],
-                [
-                    InlineKeyboardButton("5 Weeks", callback_data='backtest_5w'),
                     InlineKeyboardButton("6 Weeks", callback_data='backtest_6w'),
-                ],
-                [
-                    InlineKeyboardButton(
-                        "✅ 5m mode" if mode == "5m" else "5m mode",
-                        callback_data="backtest_setmode_5m",
-                    ),
-                    InlineKeyboardButton(
-                        "✅ 1m legacy" if mode == "1m" else "1m legacy",
-                        callback_data="backtest_setmode_1m",
-                    ),
                 ],
                 [
                     InlineKeyboardButton(
@@ -2055,44 +2040,9 @@ class TelegramCommandHandler:
                     ),
                 ],
                 [
-                    InlineKeyboardButton(
-                        "✅ 1x" if pos_size == 1 else "1x",
-                        callback_data="backtest_setpos_1",
-                    ),
-                    InlineKeyboardButton(
-                        "✅ 5x" if pos_size == 5 else "5x",
-                        callback_data="backtest_setpos_5",
-                    ),
-                    InlineKeyboardButton(
-                        "✅ 10x" if pos_size == 10 else "10x",
-                        callback_data="backtest_setpos_10",
-                    ),
+                    InlineKeyboardButton("📂 Past Reports", callback_data='reports'),
+                    InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
                 ],
-                [
-                    InlineKeyboardButton(
-                        "✅ slip 0.5" if slippage_ticks == 0.5 else "slip 0.5",
-                        callback_data="backtest_setslip_0.5",
-                    ),
-                    InlineKeyboardButton(
-                        "✅ slip 1.0" if slippage_ticks == 1.0 else "slip 1.0",
-                        callback_data="backtest_setslip_1.0",
-                    ),
-                ],
-                [
-                    InlineKeyboardButton(
-                        "✅ max 1" if max_pos == 1 else "max 1",
-                        callback_data="backtest_setmaxpos_1",
-                    ),
-                    InlineKeyboardButton(
-                        "✅ max 2" if max_pos == 2 else "max 2",
-                        callback_data="backtest_setmaxpos_2",
-                    ),
-                    InlineKeyboardButton(
-                        "✅ max 3" if max_pos == 3 else "max 3",
-                        callback_data="backtest_setmaxpos_3",
-                    ),
-                ],
-                [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
             ])
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             return
@@ -2643,6 +2593,344 @@ class TelegramCommandHandler:
                 reply_markup=self._get_back_to_menu_button(),
             )
     
+    async def _handle_backtest_reports(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        page: int = 0,
+    ) -> None:
+        """Handle /reports command - browse saved backtest reports from reports/ directory."""
+        logger.info(f"Received backtest_reports request from chat {update.effective_chat.id}")
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        try:
+            # Find reports directory (relative to project root)
+            reports_dir = Path(self.state_dir.parent / "reports")
+            if not reports_dir.exists():
+                # Try alternate location
+                reports_dir = Path.cwd() / "reports"
+
+            if not reports_dir.exists():
+                await self._send_message_or_edit(
+                    update, context,
+                    "📂 *Backtest Reports*\n\n"
+                    "No reports directory found.\n\n"
+                    "Run a backtest using the CLI to generate reports:\n"
+                    "`python scripts/backtesting/backtest_cli.py full --data-path <file>`",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📉 Run Backtest", callback_data='backtest')],
+                        [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
+                    ]),
+                )
+                return
+
+            # List report directories (sorted by modification time, newest first)
+            report_dirs = sorted(
+                [d for d in reports_dir.iterdir() if d.is_dir() and d.name.startswith("backtest_")],
+                key=lambda d: d.stat().st_mtime,
+                reverse=True,
+            )
+
+            if not report_dirs:
+                await self._send_message_or_edit(
+                    update, context,
+                    "📂 *Backtest Reports*\n\n"
+                    "No saved reports found.\n\n"
+                    "Run a backtest using the CLI to generate reports:\n"
+                    "`python scripts/backtesting/backtest_cli.py full --data-path <file>`",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📉 Run Backtest", callback_data='backtest')],
+                        [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
+                    ]),
+                )
+                return
+
+            # Paginate (5 reports per page)
+            page_size = 5
+            total_reports = len(report_dirs)
+            total_pages = (total_reports + page_size - 1) // page_size
+            page = max(0, min(page, total_pages - 1))
+            start_idx = page * page_size
+            end_idx = min(start_idx + page_size, total_reports)
+            page_reports = report_dirs[start_idx:end_idx]
+
+            message = f"📂 *Backtest Reports* ({total_reports} total)\n\n"
+
+            keyboard = []
+            for rd in page_reports:
+                # Parse report name for display
+                # Format: backtest_<symbol>_<tf>_<start>_<end>_<timestamp>
+                parts = rd.name.split("_")
+                if len(parts) >= 5:
+                    symbol = parts[1]
+                    tf = parts[2]
+                    start_date = parts[3] if len(parts) > 3 else "?"
+                    end_date = parts[4] if len(parts) > 4 else "?"
+                    label = f"{symbol} {tf} ({start_date}→{end_date})"
+                else:
+                    label = rd.name[-30:] if len(rd.name) > 30 else rd.name
+
+                # Load summary for quick metrics
+                summary_file = rd / "summary.json"
+                if summary_file.exists():
+                    try:
+                        with open(summary_file) as f:
+                            summary = json.load(f)
+                        metrics = summary.get("metrics", {})
+                        pnl = metrics.get("total_pnl", 0)
+                        wr = metrics.get("win_rate", 0) or 0
+                        pnl_str = f"${pnl:+,.0f}" if pnl else "$0"
+                        label = f"{label} • {pnl_str} • {wr*100:.0f}%WR"
+                    except Exception:
+                        pass
+
+                keyboard.append([
+                    InlineKeyboardButton(label, callback_data=f'report_detail:{rd.name}')
+                ])
+
+            # Pagination buttons
+            if total_pages > 1:
+                nav_row = []
+                if page > 0:
+                    nav_row.append(InlineKeyboardButton("◀️ Prev", callback_data=f'reports_page:{page-1}'))
+                nav_row.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data='noop'))
+                if page < total_pages - 1:
+                    nav_row.append(InlineKeyboardButton("Next ▶️", callback_data=f'reports_page:{page+1}'))
+                keyboard.append(nav_row)
+
+            keyboard.append([
+                InlineKeyboardButton("📉 New Backtest", callback_data='backtest'),
+                InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
+            ])
+
+            await self._send_message_or_edit(
+                update, context,
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
+        except Exception as e:
+            logger.error(f"Error listing backtest reports: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ Error loading reports: {str(e)}",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+
+    async def _handle_report_detail(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        report_name: str,
+    ) -> None:
+        """Show details of a specific backtest report."""
+        logger.info(f"Showing report detail: {report_name}")
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        try:
+            # Find report directory
+            reports_dir = Path(self.state_dir.parent / "reports")
+            if not reports_dir.exists():
+                reports_dir = Path.cwd() / "reports"
+
+            report_dir = reports_dir / report_name
+            if not report_dir.exists():
+                await self._send_message_or_edit(
+                    update, context,
+                    f"❌ Report not found: `{report_name}`",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📂 Reports", callback_data='reports')],
+                        [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
+                    ]),
+                )
+                return
+
+            summary_file = report_dir / "summary.json"
+            if not summary_file.exists():
+                await self._send_message_or_edit(
+                    update, context,
+                    f"❌ Report summary not found for `{report_name}`",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📂 Reports", callback_data='reports')],
+                        [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
+                    ]),
+                )
+                return
+
+            with open(summary_file) as f:
+                summary = json.load(f)
+
+            metrics = summary.get("metrics", {})
+            date_range = summary.get("date_range", {})
+            verification = summary.get("verification", {})
+
+            # Format message
+            symbol = summary.get("symbol", "?")
+            tf = summary.get("decision_timeframe", "?")
+            
+            actual_start = date_range.get("actual_start", "?")[:10] if date_range.get("actual_start") else "?"
+            actual_end = date_range.get("actual_end", "?")[:10] if date_range.get("actual_end") else "?"
+
+            total_trades = metrics.get("total_trades", 0) or 0
+            win_rate = (metrics.get("win_rate", 0) or 0) * 100
+            pf = metrics.get("profit_factor", 0) or 0
+            total_pnl = metrics.get("total_pnl", 0) or 0
+            max_dd = metrics.get("max_drawdown", 0) or 0
+            sharpe = metrics.get("sharpe_ratio", 0) or 0
+            total_signals = metrics.get("total_signals", 0) or 0
+            avg_conf = metrics.get("avg_confidence", 0) or 0
+            avg_rr = metrics.get("avg_risk_reward", 0) or 0
+
+            message = (
+                f"📊 *Report: {symbol} {tf}*\n"
+                f"Period: {actual_start} → {actual_end}\n\n"
+                f"*Performance*\n"
+                f"Trades: {total_trades} | Win Rate: {win_rate:.1f}%\n"
+                f"P&L: ${total_pnl:+,.2f} | PF: {pf:.2f}\n"
+                f"Max DD: ${max_dd:,.2f} | Sharpe: {sharpe:.2f}\n\n"
+                f"*Signals*\n"
+                f"Total: {total_signals} | Avg Conf: {avg_conf:.2f}\n"
+                f"Avg R:R: {avg_rr:.2f}:1\n"
+            )
+
+            # Verification summary
+            if verification:
+                exec_summary = verification.get("execution_summary", {})
+                opened = exec_summary.get("signals_opened", 0)
+                skipped = exec_summary.get("signals_skipped_concurrency", 0)
+                if opened or skipped:
+                    message += f"\n*Execution*\n{opened} opened, {skipped} skipped\n"
+
+                bottlenecks = verification.get("bottleneck_summary", {})
+                if bottlenecks:
+                    top_3 = sorted(bottlenecks.items(), key=lambda x: -x[1])[:3]
+                    bn_str = ", ".join([f"{k}: {v}" for k, v in top_3])
+                    message += f"\n*Bottlenecks*\n{bn_str}\n"
+
+            # Warning if present
+            warning = date_range.get("warning")
+            if warning:
+                message += f"\n⚠️ {warning}\n"
+
+            # Build artifact buttons
+            keyboard = []
+            
+            # Check available artifacts
+            if (report_dir / "chart_overview.png").exists():
+                keyboard.append([
+                    InlineKeyboardButton("📈 View Chart", callback_data=f'report_artifact:{report_name}:chart'),
+                ])
+            
+            artifact_row = []
+            if (report_dir / "trades.csv").exists():
+                artifact_row.append(InlineKeyboardButton("📄 Trades", callback_data=f'report_artifact:{report_name}:trades'))
+            if (report_dir / "signals.csv").exists():
+                artifact_row.append(InlineKeyboardButton("📄 Signals", callback_data=f'report_artifact:{report_name}:signals'))
+            if artifact_row:
+                keyboard.append(artifact_row)
+
+            artifact_row2 = []
+            if (report_dir / "skipped_signals.csv").exists():
+                artifact_row2.append(InlineKeyboardButton("📄 Skipped", callback_data=f'report_artifact:{report_name}:skipped'))
+            if (report_dir / "summary.json").exists():
+                artifact_row2.append(InlineKeyboardButton("📄 Summary", callback_data=f'report_artifact:{report_name}:summary'))
+            if artifact_row2:
+                keyboard.append(artifact_row2)
+
+            keyboard.append([
+                InlineKeyboardButton("📂 All Reports", callback_data='reports'),
+                InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
+            ])
+
+            await self._send_message_or_edit(
+                update, context,
+                message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
+        except Exception as e:
+            logger.error(f"Error showing report detail: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ Error loading report: {str(e)}",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+
+    async def _handle_report_artifact(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        report_name: str,
+        artifact: str,
+    ) -> None:
+        """Send a specific artifact from a backtest report."""
+        logger.info(f"Sending report artifact: {report_name}/{artifact}")
+        if not await self._check_authorized(update):
+            return
+
+        try:
+            reports_dir = Path(self.state_dir.parent / "reports")
+            if not reports_dir.exists():
+                reports_dir = Path.cwd() / "reports"
+
+            report_dir = reports_dir / report_name
+            
+            # Map artifact type to file
+            file_map = {
+                "chart": "chart_overview.png",
+                "trades": "trades.csv",
+                "signals": "signals.csv",
+                "skipped": "skipped_signals.csv",
+                "summary": "summary.json",
+            }
+            
+            filename = file_map.get(artifact)
+            if not filename:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"❌ Unknown artifact type: {artifact}",
+                )
+                return
+
+            filepath = report_dir / filename
+            if not filepath.exists():
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"❌ Artifact not found: {filename}",
+                )
+                return
+
+            await context.bot.send_chat_action(
+                chat_id=update.effective_chat.id,
+                action="upload_photo" if artifact == "chart" else "upload_document",
+            )
+
+            if artifact == "chart":
+                with open(filepath, "rb") as f:
+                    await context.bot.send_photo(
+                        chat_id=update.effective_chat.id,
+                        photo=f,
+                        caption=f"📊 {report_name}",
+                    )
+            else:
+                with open(filepath, "rb") as f:
+                    await context.bot.send_document(
+                        chat_id=update.effective_chat.id,
+                        document=f,
+                        filename=filepath.name,
+                    )
+
+        except Exception as e:
+            logger.error(f"Error sending report artifact: {e}", exc_info=True)
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"❌ Error sending artifact: {str(e)}",
+            )
+
     async def _handle_test_signal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /test_signal command - generate a test signal with chart for testing."""
         logger.info(f"Received /test_signal command from chat {update.effective_chat.id}")
@@ -4266,10 +4554,15 @@ class TelegramCommandHandler:
             InlineKeyboardButton("💚 Health", callback_data='health'),
         ])
         
-        # Row 5: Secondary (config, backtest, help)
+        # Row 5: Secondary (config, backtest, reports, help)
         keyboard.append([
             InlineKeyboardButton("⚙️ Config", callback_data='config'),
             InlineKeyboardButton("📉 Backtest", callback_data='backtest'),
+            InlineKeyboardButton("📂 Reports", callback_data='reports'),
+        ])
+        
+        # Row 6: Help
+        keyboard.append([
             InlineKeyboardButton("❓ Help", callback_data='help'),
         ])
         
@@ -4650,6 +4943,26 @@ class TelegramCommandHandler:
             await self._handle_test_signal(update, context)
         elif callback_data == 'backtest':
             await self._handle_backtest(update, context)
+        elif callback_data == 'reports':
+            await self._handle_backtest_reports(update, context)
+        elif callback_data.startswith('reports_page:'):
+            try:
+                page = int(callback_data.split(':')[1])
+            except Exception:
+                page = 0
+            await self._handle_backtest_reports(update, context, page=page)
+        elif callback_data.startswith('report_detail:'):
+            report_name = callback_data.split(':', 1)[1]
+            await self._handle_report_detail(update, context, report_name)
+        elif callback_data.startswith('report_artifact:'):
+            parts = callback_data.split(':')
+            if len(parts) >= 3:
+                report_name = parts[1]
+                artifact = parts[2]
+                await self._handle_report_artifact(update, context, report_name, artifact)
+        elif callback_data == 'noop':
+            # No-op callback for UI elements (page counter, etc.)
+            pass
         elif callback_data.startswith("backtest_export:"):
             kind = callback_data.split("backtest_export:", 1)[1].strip()
             await self._handle_backtest_export(update, context, kind)

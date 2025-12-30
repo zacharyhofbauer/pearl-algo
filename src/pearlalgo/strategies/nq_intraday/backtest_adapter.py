@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 import json
 
 import pandas as pd
 import numpy as np
+
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore[assignment]
+
+try:
+    _ET_TZ = ZoneInfo("America/New_York") if ZoneInfo is not None else None
+except Exception:  # pragma: no cover
+    _ET_TZ = None
 
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
@@ -164,11 +174,32 @@ class VerificationSummary:
         # Execution explainability (why trades < signals)
         if self.execution_summary:
             opened = self.execution_summary.get("signals_opened", 0)
-            skipped = self.execution_summary.get("signals_skipped_concurrency", 0)
+            skipped_concurrency = self.execution_summary.get("signals_skipped_concurrency", 0)
+            skipped_risk = self.execution_summary.get("signals_skipped_risk_budget", 0)
+            skipped_stop_cap = self.execution_summary.get("signals_skipped_stop_cap", 0)
+            skipped_invalid = self.execution_summary.get("signals_skipped_invalid_prices", 0)
             max_pos = self.execution_summary.get("max_concurrent_trades", 0)
-            if opened or skipped:
+            
+            total_skipped = skipped_concurrency + skipped_risk + skipped_stop_cap + skipped_invalid
+            
+            if opened or total_skipped:
                 max_part = f" (max {max_pos})" if max_pos else ""
-                lines.append(f"🎯 Trades: {opened} opened, {skipped} skipped{max_part}")
+                # Show breakdown if multiple skip reasons
+                skip_parts = []
+                if skipped_concurrency:
+                    skip_parts.append(f"{skipped_concurrency} concurrency")
+                if skipped_risk:
+                    skip_parts.append(f"{skipped_risk} risk")
+                if skipped_stop_cap:
+                    skip_parts.append(f"{skipped_stop_cap} stop cap")
+                if skipped_invalid:
+                    skip_parts.append(f"{skipped_invalid} invalid")
+                
+                if len(skip_parts) > 1:
+                    skip_str = ", ".join(skip_parts)
+                    lines.append(f"🎯 Trades: {opened} opened, {total_skipped} skipped ({skip_str}){max_part}")
+                else:
+                    lines.append(f"🎯 Trades: {opened} opened, {total_skipped} skipped{max_part}")
         
         return "\n".join(lines) if lines else "No verification data"
 
@@ -198,6 +229,7 @@ class BacktestResult:
     avg_loss: Optional[float] = None
     avg_hold_time_minutes: Optional[float] = None
     trades: Optional[List[Dict]] = field(default=None)  # Optional: trade journal
+    skipped_signals: Optional[List[Dict]] = field(default=None)  # Skipped signals with reasons
     # Verification diagnostics
     verification: Optional[VerificationSummary] = None
 
@@ -296,8 +328,15 @@ def _compute_verification_summary(
         # Count and sort gate reasons
         reason_counts: Dict[str, int] = {}
         for reason in gate_reasons:
-            # Simplify reason (extract key part)
-            key = reason.split(":")[0].strip() if ":" in reason else reason[:50]
+            # Simplify reason (extract key part).
+            # IMPORTANT: do NOT split on ":" blindly because many reasons contain
+            # time strings like "11:30-13:00" which would get truncated.
+            # We only split on ": " (colon+space), which is the common pattern
+            # for "Label: details" reasons (e.g., "Low volume: 42 < 100").
+            if ": " in reason:
+                key = reason.split(": ", 1)[0].strip()
+            else:
+                key = reason[:80]
             reason_counts[key] = reason_counts.get(key, 0) + 1
         
         sorted_reasons = sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)
@@ -633,6 +672,27 @@ def run_signal_backtest(
     )
 
 
+@dataclass
+class SkippedSignal:
+    """Record of a skipped signal with reason."""
+    timestamp: str
+    signal_type: str
+    direction: str
+    stop_distance_points: float
+    skip_reason: str
+    computed_contracts: Optional[int] = None
+    
+    def to_dict(self) -> Dict:
+        return {
+            "timestamp": self.timestamp,
+            "signal_type": self.signal_type,
+            "direction": self.direction,
+            "stop_distance_points": self.stop_distance_points,
+            "skip_reason": self.skip_reason,
+            "computed_contracts": self.computed_contracts,
+        }
+
+
 class TradeSimulator:
     """
     Simulates trade execution from signals on historical data.
@@ -643,6 +703,9 @@ class TradeSimulator:
     - End-of-day position close
     - P&L calculation with slippage
     - Trade journal with full details
+    - Risk-based position sizing (optional)
+    - Stop distance caps (optional)
+    - Detailed skip tracking for execution explainability
     """
 
     def __init__(
@@ -651,7 +714,15 @@ class TradeSimulator:
         slippage_ticks: float = 0.5,  # Slippage in ticks
         commission_per_trade: float = 0.0,  # Commission per contract
         max_concurrent_trades: int = 1,
-        eod_close_time: time = time(15, 45),  # Close positions before 4pm ET
+        eod_close_time: time = time(15, 45),  # Close positions before session end (ET, session-aware)
+        session_start_time: Optional[time] = None,
+        session_end_time: Optional[time] = None,
+        # Risk-based sizing (optional)
+        account_balance: Optional[float] = None,
+        max_risk_per_trade: float = 0.01,  # 1% default
+        risk_budget_dollars: Optional[float] = None,
+        max_contracts: int = 10,
+        max_stop_points: Optional[float] = None,  # Stop distance cap
     ):
         """
         Initialize trade simulator.
@@ -661,7 +732,15 @@ class TradeSimulator:
             slippage_ticks: Slippage in ticks (0.25 per tick for NQ)
             commission_per_trade: Commission per contract
             max_concurrent_trades: Maximum concurrent positions
-            eod_close_time: Time to close positions (ET)
+            eod_close_time: Time to close positions (ET, compared on the *session end date*)
+            session_start_time: Session start time (ET). If provided, EOD close becomes session-aware for
+                                cross-midnight sessions (e.g., 18:00–16:10).
+            session_end_time: Session end time (ET). See session_start_time.
+            account_balance: Account balance for risk-based sizing (optional)
+            max_risk_per_trade: Max risk per trade as fraction (default 0.01 = 1%)
+            risk_budget_dollars: Direct dollar risk budget per trade (overrides account_balance calc)
+            max_contracts: Maximum contracts per trade
+            max_stop_points: Maximum allowed stop distance in points (trades exceeding this are skipped)
         """
         self.tick_value = tick_value
         self.slippage_ticks = slippage_ticks
@@ -669,11 +748,132 @@ class TradeSimulator:
         self.commission_per_trade = commission_per_trade
         self.max_concurrent_trades = max_concurrent_trades
         self.eod_close_time = eod_close_time
+        self.session_start_time = session_start_time
+        self.session_end_time = session_end_time
+        
+        # Risk-based sizing
+        self.account_balance = account_balance
+        self.max_risk_per_trade = max_risk_per_trade
+        self.risk_budget_dollars = risk_budget_dollars
+        self.max_contracts = max_contracts
+        self.max_stop_points = max_stop_points
+        self.use_risk_sizing = account_balance is not None or risk_budget_dollars is not None
         
         self.open_trades: List[Trade] = []
         self.closed_trades: List[Trade] = []
+        self.skipped_signals: List[SkippedSignal] = []
         self.equity_curve: List[float] = []
         self.peak_equity: float = 0.0
+
+    def _compute_position_size(self, signal: Dict) -> Tuple[int, Optional[str]]:
+        """Compute position size from risk config.
+        
+        Returns (contracts, skip_reason) where skip_reason is None if trade should proceed.
+        """
+        entry = signal.get("entry_price", 0)
+        stop = signal.get("stop_loss", 0)
+        direction = signal.get("direction", "long")
+
+        if not entry or not stop or entry <= 0 or stop <= 0:
+            return 0, "invalid_prices"
+
+        # Calculate stop distance in points
+        if direction == "long":
+            stop_distance = abs(entry - stop)
+        else:
+            stop_distance = abs(stop - entry)
+
+        if stop_distance <= 0:
+            return 0, "zero_stop_distance"
+
+        # Check stop distance cap
+        if self.max_stop_points and stop_distance > self.max_stop_points:
+            return 0, f"stop_exceeds_cap ({stop_distance:.1f} > {self.max_stop_points})"
+
+        # If no risk-based sizing, return max_contracts
+        if not self.use_risk_sizing:
+            return self.max_contracts, None
+
+        # Calculate risk budget
+        if self.risk_budget_dollars:
+            risk_budget = self.risk_budget_dollars
+        elif self.account_balance:
+            risk_budget = self.account_balance * self.max_risk_per_trade
+        else:
+            return self.max_contracts, None
+
+        # Contracts = risk_budget / (stop_distance * tick_value)
+        risk_per_contract = stop_distance * self.tick_value
+        if risk_per_contract <= 0:
+            return 0, "zero_risk_per_contract"
+
+        contracts = int(risk_budget / risk_per_contract)
+
+        # Clamp to max
+        contracts = min(contracts, self.max_contracts)
+
+        if contracts < 1:
+            return 0, f"insufficient_risk_budget (need ${risk_per_contract:.2f}/contract, have ${risk_budget:.2f})"
+
+        return contracts, None
+
+    def _to_et(self, dt: datetime) -> datetime:
+        """
+        Convert a datetime to ET (America/New_York) if possible.
+
+        Notes:
+        - Bar timestamps are expected to be timezone-aware (UTC) in our backtests.
+        - If dt is naive or ET timezone is unavailable, we return dt unchanged.
+        """
+        if _ET_TZ is None:
+            return dt
+        try:
+            if dt.tzinfo is None:
+                return dt
+            return dt.astimezone(_ET_TZ)
+        except Exception:
+            return dt
+
+    def _get_session_bounds_et(self, et_dt: datetime) -> Optional[Tuple[datetime, datetime]]:
+        """
+        Compute (session_start_dt, session_end_dt) for the session containing et_dt.
+
+        If session times aren't provided, returns None (caller should fallback to naive behavior).
+
+        Supports same-day sessions (start <= end) and cross-midnight sessions (start > end).
+        """
+        if self.session_start_time is None or self.session_end_time is None:
+            return None
+
+        start = self.session_start_time
+        end = self.session_end_time
+
+        # Require a date to anchor session windows.
+        day = et_dt.date()
+        t = et_dt.time()
+
+        if start <= end:
+            # Same-day session (e.g., 09:30–16:00).
+            session_start = datetime.combine(day, start, tzinfo=et_dt.tzinfo)
+            session_end = datetime.combine(day, end, tzinfo=et_dt.tzinfo)
+            # If we're before start time, treat as "not in session" for windowing purposes.
+            if t < start:
+                return None
+            return (session_start, session_end)
+
+        # Cross-midnight session (e.g., 18:00–16:10).
+        if t >= start:
+            session_start = datetime.combine(day, start, tzinfo=et_dt.tzinfo)
+            session_end = datetime.combine(day + timedelta(days=1), end, tzinfo=et_dt.tzinfo)
+            return (session_start, session_end)
+
+        if t <= end:
+            session_start = datetime.combine(day - timedelta(days=1), start, tzinfo=et_dt.tzinfo)
+            session_end = datetime.combine(day, end, tzinfo=et_dt.tzinfo)
+            return (session_start, session_end)
+
+        # Between end and start (session closed).
+        return None
 
     def simulate(
         self,
@@ -687,13 +887,14 @@ class TradeSimulator:
         Args:
             df: OHLCV DataFrame with DateTimeIndex
             signals: List of signal dictionaries
-            position_size: Number of contracts per trade
+            position_size: Number of contracts per trade (can be overridden by risk-based sizing)
             
         Returns:
             Tuple of (closed_trades, metrics_dict)
         """
         self.open_trades = []
         self.closed_trades = []
+        self.skipped_signals = []
         self.equity_curve = [0.0]
         self.peak_equity = 0.0
         
@@ -705,6 +906,9 @@ class TradeSimulator:
             "signals_timestamp_not_in_data": 0,
             "signals_opened": 0,
             "signals_skipped_concurrency": 0,
+            "signals_skipped_risk_budget": 0,
+            "signals_skipped_stop_cap": 0,
+            "signals_skipped_invalid_prices": 0,
             "max_concurrent_trades": int(self.max_concurrent_trades),
         }
 
@@ -755,11 +959,32 @@ class TradeSimulator:
             # Look for new signals at this bar
             if bar_time in signals_by_time:
                 for signal_idx, signal in signals_by_time[bar_time]:
-                    if len(self.open_trades) < self.max_concurrent_trades:
-                        self._open_trade(signal, bar, bar_time, position_size, signal_idx)
-                        execution_stats["signals_opened"] += 1
-                    else:
+                    # Check concurrency first
+                    if len(self.open_trades) >= self.max_concurrent_trades:
                         execution_stats["signals_skipped_concurrency"] += 1
+                        self._record_skipped_signal(signal, "concurrency_limit")
+                        continue
+                    
+                    # Compute position size (with risk controls)
+                    computed_size, skip_reason = self._compute_position_size(signal)
+                    
+                    if skip_reason:
+                        # Categorize skip reason for stats
+                        if "stop_exceeds_cap" in skip_reason:
+                            execution_stats["signals_skipped_stop_cap"] += 1
+                        elif "risk_budget" in skip_reason or "risk_per_contract" in skip_reason:
+                            execution_stats["signals_skipped_risk_budget"] += 1
+                        else:
+                            execution_stats["signals_skipped_invalid_prices"] += 1
+                        
+                        self._record_skipped_signal(signal, skip_reason, computed_size)
+                        continue
+                    
+                    # Use computed size if risk-based, otherwise use provided position_size
+                    effective_size = computed_size if self.use_risk_sizing else position_size
+                    
+                    self._open_trade(signal, bar, bar_time, effective_size, signal_idx)
+                    execution_stats["signals_opened"] += 1
             
             # Update equity curve
             unrealized_pnl = sum(
@@ -787,6 +1012,31 @@ class TradeSimulator:
         metrics.update(execution_stats)
         
         return self.closed_trades, metrics
+
+    def _record_skipped_signal(
+        self,
+        signal: Dict,
+        reason: str,
+        computed_contracts: Optional[int] = None,
+    ) -> None:
+        """Record a skipped signal for execution explainability."""
+        entry = signal.get("entry_price", 0)
+        stop = signal.get("stop_loss", 0)
+        direction = signal.get("direction", "long")
+        
+        if direction == "long":
+            stop_distance = abs(entry - stop) if entry and stop else 0
+        else:
+            stop_distance = abs(stop - entry) if entry and stop else 0
+        
+        self.skipped_signals.append(SkippedSignal(
+            timestamp=signal.get("timestamp", ""),
+            signal_type=signal.get("type", "unknown"),
+            direction=direction,
+            stop_distance_points=stop_distance,
+            skip_reason=reason,
+            computed_contracts=computed_contracts,
+        ))
 
     def _open_trade(
         self,
@@ -857,13 +1107,33 @@ class TradeSimulator:
 
     def _check_eod_close(self, bar: pd.Series, bar_time: datetime) -> None:
         """Close positions at end of day."""
-        # Extract time component
-        if hasattr(bar_time, 'time'):
-            current_time = bar_time.time()
-        else:
-            current_time = bar_time
-            
-        if current_time >= self.eod_close_time:
+        # IMPORTANT:
+        # - eod_close_time is defined in ET (America/New_York).
+        # - For cross-midnight futures sessions (e.g., 18:00–16:10), comparing only the clock time
+        #   is wrong (18:30 ET would incorrectly be treated as "after 15:45").
+        # - We therefore compare against the *session end date* when session bounds are known.
+        et_dt = self._to_et(bar_time) if isinstance(bar_time, datetime) else bar_time
+
+        # Session-aware close (preferred when session times are provided).
+        session_bounds = self._get_session_bounds_et(et_dt) if isinstance(et_dt, datetime) else None
+        if session_bounds is not None and isinstance(et_dt, datetime):
+            _, session_end = session_bounds
+            eod_dt = datetime.combine(session_end.date(), self.eod_close_time, tzinfo=session_end.tzinfo)
+
+            # If we've passed the session end, force-close as well (safety net).
+            if et_dt >= session_end or et_dt >= eod_dt:
+                for trade in list(self.open_trades):
+                    self._close_trade(trade, bar["close"], bar_time, ExitReason.END_OF_DAY)
+            return
+
+        # Fallback (legacy): compare ET clock time only. This is correct for same-day sessions,
+        # but is NOT correct for cross-midnight sessions; callers should pass session_start/end.
+        try:
+            current_time = et_dt.time() if isinstance(et_dt, datetime) else et_dt  # type: ignore[assignment]
+        except Exception:
+            current_time = bar_time.time() if isinstance(bar_time, datetime) else bar_time  # type: ignore[assignment]
+
+        if isinstance(current_time, time) and current_time >= self.eod_close_time:
             for trade in list(self.open_trades):
                 self._close_trade(trade, bar["close"], bar_time, ExitReason.END_OF_DAY)
 
@@ -998,6 +1268,12 @@ def run_full_backtest(
     slippage_ticks: float = 0.5,
     max_concurrent_trades: int = 1,
     return_trades: bool = True,
+    # Risk-based sizing (optional)
+    account_balance: Optional[float] = None,
+    max_risk_per_trade: float = 0.01,
+    risk_budget_dollars: Optional[float] = None,
+    max_contracts: int = 10,
+    max_stop_points: Optional[float] = None,
 ) -> BacktestResult:
     """
     Run full trade simulation backtest with P&L tracking.
@@ -1008,10 +1284,15 @@ def run_full_backtest(
     Args:
         df_1m: 1-minute OHLCV DataFrame with DateTimeIndex
         config: Strategy configuration
-        position_size: Number of contracts per trade
+        position_size: Number of contracts per trade (ignored if risk-based sizing is used)
         tick_value: Dollar value per point (MNQ = $2)
         slippage_ticks: Slippage in ticks
         return_trades: If True, include trade journal in result
+        account_balance: Account balance for risk-based sizing (optional)
+        max_risk_per_trade: Max risk per trade as fraction (default 0.01 = 1%)
+        risk_budget_dollars: Direct dollar risk budget per trade
+        max_contracts: Maximum contracts per trade
+        max_stop_points: Maximum allowed stop distance in points
         
     Returns:
         BacktestResult with full metrics and optional trade journal
@@ -1038,10 +1319,26 @@ def run_full_backtest(
         )
     
     # Run trade simulation
+    # IMPORTANT: Pass session start/end so end-of-day close is session-aware for futures
+    # cross-midnight sessions (e.g., 18:00–16:10).
+    try:
+        session_start = time.fromisoformat(config.start_time) if config and getattr(config, "start_time", None) else None
+        session_end = time.fromisoformat(config.end_time) if config and getattr(config, "end_time", None) else None
+    except Exception:
+        session_start = None
+        session_end = None
+
     simulator = TradeSimulator(
         tick_value=tick_value,
         slippage_ticks=slippage_ticks,
         max_concurrent_trades=max_concurrent_trades,
+        session_start_time=session_start,
+        session_end_time=session_end,
+        account_balance=account_balance,
+        max_risk_per_trade=max_risk_per_trade,
+        risk_budget_dollars=risk_budget_dollars,
+        max_contracts=max_contracts,
+        max_stop_points=max_stop_points,
     )
     
     closed_trades, metrics = simulator.simulate(
@@ -1052,6 +1349,7 @@ def run_full_backtest(
     
     # Convert trades to dict for JSON serialization
     trades_list = [t.to_dict() for t in closed_trades] if return_trades else None
+    skipped_list = [s.to_dict() for s in simulator.skipped_signals] if return_trades else None
 
     # Attach execution explainability to verification (why trades < signals)
     if signal_result.verification is not None:
@@ -1059,6 +1357,9 @@ def run_full_backtest(
             "signals_total": int(metrics.get("signals_total", 0) or 0),
             "signals_opened": int(metrics.get("signals_opened", 0) or 0),
             "signals_skipped_concurrency": int(metrics.get("signals_skipped_concurrency", 0) or 0),
+            "signals_skipped_risk_budget": int(metrics.get("signals_skipped_risk_budget", 0) or 0),
+            "signals_skipped_stop_cap": int(metrics.get("signals_skipped_stop_cap", 0) or 0),
+            "signals_skipped_invalid_prices": int(metrics.get("signals_skipped_invalid_prices", 0) or 0),
             "signals_missing_timestamp": int(metrics.get("signals_missing_timestamp", 0) or 0),
             "signals_timestamp_not_in_data": int(metrics.get("signals_timestamp_not_in_data", 0) or 0),
             "max_concurrent_trades": int(metrics.get("max_concurrent_trades", max_concurrent_trades) or max_concurrent_trades),
@@ -1084,6 +1385,7 @@ def run_full_backtest(
         avg_loss=metrics["avg_loss"],
         avg_hold_time_minutes=metrics["avg_hold_time_minutes"],
         trades=trades_list,
+        skipped_signals=skipped_list,
         verification=signal_result.verification,
     )
 
@@ -1099,8 +1401,32 @@ def run_full_backtest_5m_decision(
     decision_rule: str = "5min",
     context_rule_1: str = "1h",
     context_rule_2: str = "4h",
+    # Risk-based sizing (optional)
+    account_balance: Optional[float] = None,
+    max_risk_per_trade: float = 0.01,
+    risk_budget_dollars: Optional[float] = None,
+    max_contracts: int = 10,
+    max_stop_points: Optional[float] = None,
 ) -> BacktestResult:
-    """Full trade-simulation backtest using 5m decision bars and 1h/4h context."""
+    """Full trade-simulation backtest using 5m decision bars and 1h/4h context.
+    
+    Args:
+        df_1m: 1-minute OHLCV DataFrame
+        config: Strategy configuration
+        position_size: Contracts per trade (ignored if risk-based sizing used)
+        tick_value: Dollar value per point (MNQ = $2)
+        slippage_ticks: Slippage in ticks
+        max_concurrent_trades: Max concurrent positions
+        return_trades: Include trade journal in result
+        decision_rule: Decision bar resample rule (default "5min")
+        context_rule_1: First context timeframe (default "1h")
+        context_rule_2: Second context timeframe (default "4h")
+        account_balance: Account balance for risk-based sizing
+        max_risk_per_trade: Max risk per trade fraction (default 0.01)
+        risk_budget_dollars: Direct dollar risk budget per trade
+        max_contracts: Maximum contracts per trade
+        max_stop_points: Max stop distance cap (points)
+    """
     if config is None:
         config = NQIntradayConfig()
 
@@ -1135,10 +1461,26 @@ def run_full_backtest_5m_decision(
             verification=signal_result.verification,
         )
 
+    # IMPORTANT: Pass session start/end so end-of-day close is session-aware for futures
+    # cross-midnight sessions (e.g., 18:00–16:10).
+    try:
+        session_start = time.fromisoformat(config.start_time) if config and getattr(config, "start_time", None) else None
+        session_end = time.fromisoformat(config.end_time) if config and getattr(config, "end_time", None) else None
+    except Exception:
+        session_start = None
+        session_end = None
+
     simulator = TradeSimulator(
         tick_value=tick_value,
         slippage_ticks=slippage_ticks,
         max_concurrent_trades=max_concurrent_trades,
+        session_start_time=session_start,
+        session_end_time=session_end,
+        account_balance=account_balance,
+        max_risk_per_trade=max_risk_per_trade,
+        risk_budget_dollars=risk_budget_dollars,
+        max_contracts=max_contracts,
+        max_stop_points=max_stop_points,
     )
 
     closed_trades, metrics = simulator.simulate(
@@ -1148,6 +1490,7 @@ def run_full_backtest_5m_decision(
     )
 
     trades_list = [t.to_dict() for t in closed_trades] if return_trades else None
+    skipped_list = [s.to_dict() for s in simulator.skipped_signals] if return_trades else None
 
     # Attach execution explainability to verification (why trades < signals)
     if signal_result.verification is not None:
@@ -1155,6 +1498,9 @@ def run_full_backtest_5m_decision(
             "signals_total": int(metrics.get("signals_total", 0) or 0),
             "signals_opened": int(metrics.get("signals_opened", 0) or 0),
             "signals_skipped_concurrency": int(metrics.get("signals_skipped_concurrency", 0) or 0),
+            "signals_skipped_risk_budget": int(metrics.get("signals_skipped_risk_budget", 0) or 0),
+            "signals_skipped_stop_cap": int(metrics.get("signals_skipped_stop_cap", 0) or 0),
+            "signals_skipped_invalid_prices": int(metrics.get("signals_skipped_invalid_prices", 0) or 0),
             "signals_missing_timestamp": int(metrics.get("signals_missing_timestamp", 0) or 0),
             "signals_timestamp_not_in_data": int(metrics.get("signals_timestamp_not_in_data", 0) or 0),
             "max_concurrent_trades": int(metrics.get("max_concurrent_trades", max_concurrent_trades) or max_concurrent_trades),
@@ -1180,6 +1526,7 @@ def run_full_backtest_5m_decision(
         avg_loss=metrics["avg_loss"],
         avg_hold_time_minutes=metrics["avg_hold_time_minutes"],
         trades=trades_list,
+        skipped_signals=skipped_list,
         verification=signal_result.verification,
     )
 
