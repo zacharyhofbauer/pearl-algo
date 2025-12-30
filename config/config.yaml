@@ -305,3 +305,54 @@ prop_firm:
   # Risk management assumptions (percent of account)
   max_risk_per_trade_pct: 1.0  # 1% of account
   max_drawdown_pct: 10.0       # 10% of account
+
+# =============================================================================
+# CLAUDE MONITOR (AI-Powered Monitoring & Assistance)
+# =============================================================================
+# Claude-powered monitoring service for intelligent alerts and suggestions.
+# Requires ANTHROPIC_API_KEY in .env and [llm] extra installed.
+claude_monitor:
+  enabled: true                        # Master toggle for Claude monitoring
+  
+  # Analysis intervals (seconds)
+  realtime_monitoring: true            # Enable real-time monitoring (every minute)
+  realtime_interval_seconds: 60        # Real-time check interval
+  frequent_interval_seconds: 900       # Frequent analysis interval (15 minutes)
+  code_analysis_interval_hours: 1      # How often to run code analysis
+  
+  # Daily reports
+  daily_report_enabled: true           # Send daily performance report
+  daily_report_time: "09:00"           # Time to send (ET)
+  
+  # Weekly reports
+  weekly_report_enabled: true          # Send weekly strategic report
+  weekly_report_day: "monday"          # Day to send
+  weekly_report_time: "09:00"          # Time to send (ET)
+  
+  # Alert configuration
+  alert_levels:                        # Which alert levels to send
+    - critical
+    - warning
+    - info
+  dedup_window_seconds: 900            # Deduplication window (15 minutes)
+  max_alerts_per_hour: 20              # Rate limit for alerts
+  
+  # Quiet hours (suppress non-critical alerts)
+  quiet_hours_start: "22:00"           # Start of quiet hours (ET)
+  quiet_hours_end: "07:00"             # End of quiet hours (ET)
+  suppress_info_during_quiet: true     # Suppress INFO alerts during quiet hours
+  
+  # Suggestions
+  max_suggestions_per_analysis: 5      # Maximum suggestions per analysis cycle
+  auto_apply_enabled: false            # Require manual approval by default
+  max_auto_changes_per_day: 3          # Maximum auto-applied changes per day
+  
+  # Analysis lookback periods
+  signal_analysis_lookback_hours: 24   # Signal analysis window
+  system_analysis_lookback_hours: 48   # System health window
+  market_analysis_lookback_hours: 168  # Market analysis window (1 week)
+  
+  # Claude API settings (can also be set via env vars)
+  # model: "claude-sonnet-4-20250514"  # Default model
+  # max_tokens: 8000                   # Max response tokens
+  # timeout: 180                       # Request timeout (seconds)

@@ -218,6 +218,17 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("positions", self._handle_positions))
         self.application.add_handler(CommandHandler("policy", self._handle_policy))
         
+        # Claude Monitor commands (AI-powered monitoring and suggestions)
+        self.application.add_handler(CommandHandler("claude_status", self._handle_claude_status))
+        self.application.add_handler(CommandHandler("analyze_now", self._handle_analyze_now))
+        self.application.add_handler(CommandHandler("analyze_signals", self._handle_analyze_signals))
+        self.application.add_handler(CommandHandler("analyze_system", self._handle_analyze_system))
+        self.application.add_handler(CommandHandler("analyze_market", self._handle_analyze_market))
+        self.application.add_handler(CommandHandler("suggest_config", self._handle_suggest_config))
+        self.application.add_handler(CommandHandler("suggestions", self._handle_suggestions))
+        self.application.add_handler(CommandHandler("apply_suggestion", self._handle_apply_suggestion))
+        self.application.add_handler(CommandHandler("claude_reports", self._handle_claude_reports))
+        
         # Claude message handler (for chat mode and wizard text input)
         # Must be added AFTER command handlers, lower priority group
         self.application.add_handler(
@@ -7015,6 +7026,531 @@ class TelegramCommandHandler:
             
         except Exception as e:
             logger.error(f"Error handling /policy: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    # =========================================================================
+    # Claude Monitor Commands
+    # =========================================================================
+    
+    def _get_claude_monitor(self):
+        """Get or create Claude monitor service instance."""
+        if not hasattr(self, '_claude_monitor'):
+            try:
+                from pearlalgo.claude_monitor import ClaudeMonitorService
+                self._claude_monitor = ClaudeMonitorService(
+                    state_dir=self.state_dir,
+                    telegram_bot_token=self.bot_token,
+                    telegram_chat_id=self.chat_id,
+                )
+            except ImportError:
+                self._claude_monitor = None
+            except Exception as e:
+                logger.warning(f"Could not initialize Claude monitor: {e}")
+                self._claude_monitor = None
+        return self._claude_monitor
+    
+    async def _handle_claude_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /claude_status - Show Claude monitor health & recent insights."""
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /claude_status command from {update.effective_user.id}")
+        
+        try:
+            monitor = self._get_claude_monitor()
+            
+            if not monitor:
+                await update.message.reply_text(
+                    "🤖 *Claude Monitor*\n\n"
+                    "Claude monitor is not available.\n"
+                    "Check that `anthropic` package is installed.",
+                    parse_mode="Markdown",
+                )
+                return
+            
+            status = monitor.get_status()
+            stats = status.get("monitor_state", {})
+            
+            # Format status
+            running_emoji = "🟢" if status.get("running") else "⚪"
+            claude_emoji = "✅" if status.get("claude_available") else "❌"
+            telegram_emoji = "✅" if status.get("telegram_configured") else "❌"
+            
+            message = (
+                "🤖 *Claude Monitor Status*\n\n"
+                f"{running_emoji} Running: `{status.get('running', False)}`\n"
+                f"{claude_emoji} Claude API: `{'available' if status.get('claude_available') else 'unavailable'}`\n"
+                f"{telegram_emoji} Telegram: `{'configured' if status.get('telegram_configured') else 'not configured'}`\n\n"
+                f"*Stats:*\n"
+                f"• Analyses: `{stats.get('analysis_count', 0)}`\n"
+                f"• Alerts sent: `{stats.get('alert_count', 0)}`\n"
+                f"• Active suggestions: `{stats.get('active_suggestions', 0)}`\n"
+                f"• Applied changes: `{stats.get('applied_count', 0)}`\n"
+            )
+            
+            # Add last analysis time
+            last_analysis = status.get("last_analysis")
+            if last_analysis:
+                message += f"\n_Last analysis: {last_analysis}_"
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error handling /claude_status: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_analyze_now(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /analyze_now - Force immediate comprehensive analysis."""
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /analyze_now command from {update.effective_user.id}")
+        
+        try:
+            monitor = self._get_claude_monitor()
+            
+            if not monitor:
+                await update.message.reply_text("❌ Claude monitor not available")
+                return
+            
+            await update.message.reply_text("🔄 Running comprehensive analysis...")
+            
+            # Run analysis
+            analysis = await monitor.force_analysis()
+            
+            # Format results
+            message = "🤖 *Analysis Complete*\n\n"
+            
+            for dimension, result in analysis.items():
+                if dimension in ("timestamp", "status"):
+                    continue
+                if not isinstance(result, dict):
+                    continue
+                
+                status = result.get("status", "unknown")
+                status_emoji = {
+                    "healthy": "🟢",
+                    "degraded": "🟡",
+                    "critical": "🔴",
+                    "warning": "🟡",
+                    "favorable": "🟢",
+                    "neutral": "⚪",
+                }.get(status, "⚪")
+                
+                findings_count = len(result.get("findings", []))
+                recs_count = len(result.get("recommendations", []))
+                
+                message += f"{status_emoji} *{dimension.title()}*: {status}\n"
+                if findings_count > 0:
+                    message += f"   • {findings_count} finding(s)\n"
+                if recs_count > 0:
+                    message += f"   • {recs_count} recommendation(s)\n"
+            
+            # Key insights
+            for dimension, result in analysis.items():
+                if isinstance(result, dict) and "summary" in result:
+                    insight = result["summary"].get("key_insight")
+                    if insight:
+                        message += f"\n💡 _{insight}_"
+                        break
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error handling /analyze_now: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_analyze_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /analyze_signals - Deep dive on signal quality."""
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /analyze_signals command from {update.effective_user.id}")
+        
+        try:
+            monitor = self._get_claude_monitor()
+            
+            if not monitor:
+                await update.message.reply_text("❌ Claude monitor not available")
+                return
+            
+            await update.message.reply_text("🔄 Analyzing signal quality...")
+            
+            result = await monitor.analyze_signals()
+            
+            # Format results
+            status_emoji = {"healthy": "🟢", "degraded": "🟡", "critical": "🔴"}.get(
+                result.get("status", ""), "⚪"
+            )
+            
+            message = f"{status_emoji} *Signal Analysis*\n\n"
+            
+            summary = result.get("summary", {})
+            message += f"*Signals Analyzed:* `{summary.get('total_signals', 0)}`\n"
+            
+            win_rate = summary.get("overall_win_rate")
+            if win_rate is not None:
+                wr_emoji = "🟢" if win_rate >= 0.5 else "🔴"
+                message += f"*Win Rate:* {wr_emoji} `{win_rate:.1%}`\n"
+            
+            if summary.get("best_signal_type"):
+                message += f"*Best Type:* `{summary['best_signal_type']}`\n"
+            if summary.get("worst_signal_type"):
+                message += f"*Worst Type:* `{summary['worst_signal_type']}`\n"
+            
+            # Show findings
+            findings = result.get("findings", [])
+            if findings:
+                message += f"\n*Findings ({len(findings)}):*\n"
+                for f in findings[:5]:
+                    severity_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡"}.get(
+                        f.get("severity", ""), "🔵"
+                    )
+                    message += f"{severity_emoji} {f.get('title', 'Finding')}\n"
+            
+            # Key insight
+            if summary.get("key_insight"):
+                message += f"\n💡 _{summary['key_insight']}_"
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error handling /analyze_signals: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_analyze_system(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /analyze_system - System health report."""
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /analyze_system command from {update.effective_user.id}")
+        
+        try:
+            monitor = self._get_claude_monitor()
+            
+            if not monitor:
+                await update.message.reply_text("❌ Claude monitor not available")
+                return
+            
+            await update.message.reply_text("🔄 Analyzing system health...")
+            
+            result = await monitor.analyze_system()
+            
+            # Format results
+            status_emoji = {
+                "healthy": "🟢",
+                "degraded": "🟡",
+                "critical": "🔴",
+                "warning": "🟡",
+            }.get(result.get("status", ""), "⚪")
+            
+            message = f"{status_emoji} *System Health Analysis*\n\n"
+            
+            metrics = result.get("metrics", {})
+            
+            # Running status
+            running_emoji = "🟢" if metrics.get("running") else "🔴"
+            message += f"{running_emoji} Agent Running: `{metrics.get('running', False)}`\n"
+            
+            if metrics.get("paused"):
+                message += f"⏸️ Agent Paused: `True`\n"
+            
+            # Error counts
+            cons_errors = metrics.get("consecutive_errors", 0)
+            if cons_errors > 0:
+                message += f"⚠️ Consecutive Errors: `{cons_errors}`\n"
+            
+            conn_failures = metrics.get("connection_failures", 0)
+            if conn_failures > 0:
+                message += f"🔌 Connection Failures: `{conn_failures}`\n"
+            
+            # Data freshness
+            data_fresh = metrics.get("data_fresh")
+            if data_fresh is not None:
+                fresh_emoji = "✅" if data_fresh else "❌"
+                message += f"{fresh_emoji} Data Fresh: `{data_fresh}`\n"
+            
+            # Show findings
+            findings = result.get("findings", [])
+            if findings:
+                message += f"\n*Issues ({len(findings)}):*\n"
+                for f in findings[:5]:
+                    severity_emoji = {"critical": "🔴", "high": "🟠", "medium": "🟡"}.get(
+                        f.get("severity", ""), "🔵"
+                    )
+                    message += f"{severity_emoji} {f.get('title', 'Issue')}\n"
+            else:
+                message += "\n✅ No issues detected"
+            
+            # Key insight
+            summary = result.get("summary", {})
+            if summary.get("key_insight"):
+                message += f"\n\n💡 _{summary['key_insight']}_"
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error handling /analyze_system: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_analyze_market(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /analyze_market - Market conditions & regime analysis."""
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /analyze_market command from {update.effective_user.id}")
+        
+        try:
+            monitor = self._get_claude_monitor()
+            
+            if not monitor:
+                await update.message.reply_text("❌ Claude monitor not available")
+                return
+            
+            await update.message.reply_text("🔄 Analyzing market conditions...")
+            
+            result = await monitor.analyze_market()
+            
+            # Format results
+            message = "📊 *Market Analysis*\n\n"
+            
+            # Regime
+            regime = result.get("regime", {})
+            regime_type = regime.get("type", "unknown")
+            confidence = regime.get("confidence", 0)
+            
+            regime_emoji = {
+                "trending_bullish": "📈",
+                "trending_bearish": "📉",
+                "ranging": "↔️",
+                "choppy": "🌊",
+                "closed": "🔒",
+            }.get(regime_type, "❓")
+            
+            message += f"{regime_emoji} *Regime:* `{regime_type.replace('_', ' ').title()}`\n"
+            message += f"   Confidence: `{confidence:.0%}`\n"
+            
+            # Volatility
+            vol = result.get("volatility", {})
+            vol_level = vol.get("level", "unknown")
+            vol_emoji = {"high": "🔥", "normal": "➖", "low": "❄️"}.get(vol_level, "❓")
+            message += f"{vol_emoji} *Volatility:* `{vol_level.title()}`\n"
+            
+            # Session
+            session = result.get("session", {})
+            session_name = session.get("active", "unknown")
+            message += f"🕐 *Session:* `{session_name.title()}`\n"
+            
+            # Trading bias
+            summary = result.get("summary", {})
+            bias = summary.get("trading_bias", "neutral")
+            bias_emoji = {"long": "📈", "short": "📉", "neutral": "➖"}.get(bias, "➖")
+            message += f"{bias_emoji} *Bias:* `{bias.title()}`\n"
+            
+            # Key insight
+            if summary.get("key_insight"):
+                message += f"\n💡 _{summary['key_insight']}_"
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error handling /analyze_market: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_suggest_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /suggest_config - Get configuration tuning suggestions."""
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /suggest_config command from {update.effective_user.id}")
+        
+        try:
+            monitor = self._get_claude_monitor()
+            
+            if not monitor:
+                await update.message.reply_text("❌ Claude monitor not available")
+                return
+            
+            await update.message.reply_text("🔄 Generating configuration suggestions...")
+            
+            # Run analysis to generate suggestions
+            analysis = await monitor.force_analysis()
+            suggestions = monitor.get_active_suggestions()
+            
+            # Filter to config suggestions
+            config_suggestions = [
+                s for s in suggestions
+                if s.get("type") in ("config_change", "parameter_tune")
+            ]
+            
+            if not config_suggestions:
+                # Check recommendations from analysis
+                all_recs = []
+                for dim, result in analysis.items():
+                    if isinstance(result, dict):
+                        all_recs.extend(result.get("recommendations", []))
+                
+                config_recs = [r for r in all_recs if r.get("config_path")]
+                
+                if config_recs:
+                    message = "💡 *Config Recommendations*\n\n"
+                    for rec in config_recs[:5]:
+                        message += f"*{rec.get('title', 'Recommendation')}*\n"
+                        if rec.get("config_path"):
+                            message += f"Path: `{rec['config_path']}`\n"
+                        if rec.get("new_value") is not None:
+                            message += f"Suggested: `{rec['new_value']}`\n"
+                        if rec.get("rationale"):
+                            message += f"_{rec['rationale']}_\n"
+                        message += "\n"
+                else:
+                    message = "✅ No configuration changes recommended at this time."
+            else:
+                message = "💡 *Config Suggestions*\n\n"
+                for sug in config_suggestions[:5]:
+                    message += f"*{sug.get('title', 'Suggestion')}* (`{sug.get('id')}`)\n"
+                    if sug.get("config_path"):
+                        message += f"Path: `{sug['config_path']}`\n"
+                        message += f"Current: `{sug.get('old_value')}`\n"
+                        message += f"Suggested: `{sug.get('new_value')}`\n"
+                    message += f"_{sug.get('rationale', '')[:100]}_\n\n"
+                
+                message += "\nUse `/apply_suggestion <id>` to apply."
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error handling /suggest_config: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_suggestions(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /suggestions - List all active suggestions."""
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /suggestions command from {update.effective_user.id}")
+        
+        try:
+            monitor = self._get_claude_monitor()
+            
+            if not monitor:
+                await update.message.reply_text("❌ Claude monitor not available")
+                return
+            
+            suggestions = monitor.get_active_suggestions()
+            
+            if not suggestions:
+                await update.message.reply_text("✅ No active suggestions.")
+                return
+            
+            message = f"💡 *Active Suggestions ({len(suggestions)})*\n\n"
+            
+            for sug in suggestions[:10]:
+                priority_emoji = {"high": "🔺", "medium": "🔸", "low": "🔹"}.get(
+                    sug.get("priority", "medium"), "•"
+                )
+                
+                message += f"{priority_emoji} *{sug.get('title', 'Suggestion')}*\n"
+                message += f"   ID: `{sug.get('id')}`\n"
+                message += f"   Type: `{sug.get('type', 'unknown')}`\n"
+                if sug.get("description"):
+                    desc = sug["description"][:60] + "..." if len(sug.get("description", "")) > 60 else sug.get("description", "")
+                    message += f"   _{desc}_\n"
+                message += "\n"
+            
+            message += "\nUse `/apply_suggestion <id>` to apply."
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error handling /suggestions: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_apply_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /apply_suggestion <id> - Apply a suggestion."""
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /apply_suggestion command from {update.effective_user.id}")
+        
+        try:
+            monitor = self._get_claude_monitor()
+            
+            if not monitor:
+                await update.message.reply_text("❌ Claude monitor not available")
+                return
+            
+            # Get suggestion ID from args
+            args = context.args
+            if not args:
+                await update.message.reply_text(
+                    "Usage: `/apply_suggestion <suggestion_id>`\n\n"
+                    "Use `/suggestions` to see available suggestions.",
+                    parse_mode="Markdown",
+                )
+                return
+            
+            suggestion_id = args[0]
+            
+            # Get suggestion details
+            suggestion = monitor.monitor_state.get_suggestion(suggestion_id)
+            
+            if not suggestion:
+                await update.message.reply_text(f"❌ Suggestion `{suggestion_id}` not found.")
+                return
+            
+            # For now, just mark as applied (actual application handled by action executor)
+            result = monitor.apply_suggestion(suggestion_id)
+            
+            if result.get("success"):
+                await update.message.reply_text(
+                    f"✅ Suggestion `{suggestion_id}` marked as applied.\n\n"
+                    f"*{suggestion.get('title', 'Suggestion')}*\n"
+                    f"_{suggestion.get('description', '')[:200]}_\n\n"
+                    "Note: Manual application may be required for config/code changes.",
+                    parse_mode="Markdown",
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ Could not apply suggestion: {result.get('error', 'Unknown error')}"
+                )
+            
+        except Exception as e:
+            logger.error(f"Error handling /apply_suggestion: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_claude_reports(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /claude_reports - Configure daily/weekly reports."""
+        if not self._is_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /claude_reports command from {update.effective_user.id}")
+        
+        try:
+            monitor = self._get_claude_monitor()
+            
+            if not monitor:
+                await update.message.reply_text("❌ Claude monitor not available")
+                return
+            
+            # Show current report settings
+            daily_emoji = "✅" if monitor.daily_report_enabled else "❌"
+            weekly_emoji = "✅" if monitor.weekly_report_enabled else "❌"
+            
+            message = (
+                "📊 *Claude Report Settings*\n\n"
+                f"{daily_emoji} Daily Report: `{'Enabled' if monitor.daily_report_enabled else 'Disabled'}`\n"
+                f"   Time: `{monitor.daily_report_time} ET`\n\n"
+                f"{weekly_emoji} Weekly Report: `{'Enabled' if monitor.weekly_report_enabled else 'Disabled'}`\n"
+                f"   Day: `{monitor.weekly_report_day.title()}`\n"
+                f"   Time: `{monitor.weekly_report_time} ET`\n\n"
+                "_Configure in `config/config.yaml` under `claude_monitor:`_"
+            )
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error handling /claude_reports: {e}", exc_info=True)
             await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
     
     async def start(self):

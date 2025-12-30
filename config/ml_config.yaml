@@ -6,8 +6,7 @@ learning:
   enabled: true
   
   # Mode: "shadow" (observe only) or "live" (affects execution)
-  # SAFETY: Start with shadow, only switch to live after validation
-  mode: "shadow"
+  mode: "live"
 
   # =========================================================================
   # Layer 1: Feature Engineering
@@ -38,7 +37,7 @@ learning:
   # =========================================================================
   contextual_bandit:
     enabled: true
-    mode: "shadow"
+    mode: "live"
     
     # Exploration settings
     explore_rate: 0.1
@@ -62,7 +61,7 @@ learning:
   # =========================================================================
   ensemble:
     enabled: true
-    mode: "shadow"
+    mode: "live"
     
     # Model weights (should sum to 1.0)
     logistic_weight: 0.3

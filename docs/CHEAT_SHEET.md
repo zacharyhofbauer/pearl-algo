@@ -120,6 +120,20 @@
   ```
   Example: `/ai_patch src/pearlalgo/utils/retry.py add jitter to backoff`
 
+- **Claude Monitor** (AI-powered monitoring, requires setup):
+  ```
+  /claude_status       # Claude monitor health & insights
+  /analyze_now         # Force immediate analysis
+  /analyze_signals     # Signal quality deep dive
+  /analyze_system      # System health report
+  /analyze_market      # Market conditions & regime
+  /suggest_config      # Configuration suggestions
+  /suggestions         # List active suggestions
+  /apply_suggestion    # Apply a suggestion
+  /claude_reports      # Report settings
+  ```
+  See `docs/CLAUDE_MONITOR_GUIDE.md` for full documentation.
+
 ### From Terminal (Traditional)
 
 - **Service lifecycle**
