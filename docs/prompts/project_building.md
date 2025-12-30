@@ -297,5 +297,5 @@ Both prompts respect the same architectural boundaries and constraints defined i
 
 ========================================
 
-END OF PROMPT
+
 
