@@ -84,7 +84,7 @@ learning:
 **Duration:** 1-2 weeks or until 50+ virtual outcomes
 
 **Verify:**
-- Policy state file growing: `state/policy_state.json`
+- Policy state file growing: `data/nq_agent_state/policy_state.json`
 - Signal types being tracked
 - Win rates aligning with expectations
 
@@ -239,9 +239,9 @@ BanditPolicy: WIN recorded for sr_bounce | pnl=$150.00 | new_win_rate=67%
 ```
 
 ### State Files
-- `state/state.json`: Includes execution and learning status
-- `state/policy_state.json`: Per-signal-type statistics
-- `state/signals.jsonl`: Signal history with execution status
+- `data/nq_agent_state/state.json`: Includes execution and learning status
+- `data/nq_agent_state/policy_state.json`: Per-signal-type statistics
+- `data/nq_agent_state/signals.jsonl`: Signal history with execution status
 
 ## Troubleshooting
 

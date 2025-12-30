@@ -287,9 +287,11 @@ class NQAgentService:
         if LEARNING_AVAILABLE and learning_settings.get("enabled", True):
             try:
                 self._bandit_config = BanditConfig.from_dict(learning_settings)
+                # Use state_manager.state_dir to ensure policy_state.json is written
+                # alongside state.json (where Telegram commands expect it)
                 self.bandit_policy = BanditPolicy(
                     config=self._bandit_config,
-                    state_dir=state_dir,
+                    state_dir=self.state_manager.state_dir,
                 )
                 logger.info(
                     f"Bandit policy initialized: mode={self._bandit_config.mode}, "

@@ -41,6 +41,11 @@ All other documents must remain consistent with this summary.
   - Claude AI integration for code generation via Telegram
   - Setup, usage examples, and security considerations
   - Patch application workflow
+- `ATS_ROLLOUT_GUIDE.md`
+  - Safe rollout procedures for execution and learning layers
+  - Staging (shadow → dry_run → paper → live)
+  - Telegram commands: `/arm`, `/disarm`, `/kill`, `/positions`, `/policy`
+  - Safety features and rollback procedures
 
 ## 3. Testing and Validation
 

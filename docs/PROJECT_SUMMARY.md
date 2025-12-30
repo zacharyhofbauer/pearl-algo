@@ -398,6 +398,14 @@ pearlalgo-dev-ai-agents/
 │   │   ├── volume_profile.py   # Volume profile analysis
 │   │   ├── order_flow.py       # Order flow analysis
 │   │   └── backtest_adapter.py # Backtesting adapter
+│   ├── execution/              # ATS Execution Layer (disabled by default)
+│   │   ├── base.py             # ExecutionAdapter interface, ExecutionConfig
+│   │   └── ibkr/               # IBKR execution implementation
+│   │       ├── adapter.py      # IBKR bracket order adapter
+│   │       └── tasks.py        # Order placement/cancellation tasks
+│   ├── learning/               # Adaptive Learning Layer (shadow mode by default)
+│   │   ├── bandit_policy.py    # Thompson sampling policy
+│   │   └── policy_state.py     # Policy statistics persistence
 │   ├── data_providers/         # Data Providers
 │   │   ├── base.py             # Abstract interface
 │   │   ├── factory.py          # Provider factory
@@ -445,13 +453,15 @@ pearlalgo-dev-ai-agents/
 │   │   └── watchdog_nq_agent.py         # State freshness watchdog (cron/systemd timer)
 │   ├── maintenance/                # Maintenance/hygiene scripts
 │   │   └── purge_runtime_artifacts.sh   # Safe cleanup (requires --yes)
+│   ├── backtesting/               # Backtesting scripts
+│   │   └── backtest_cli.py            # Canonical backtest CLI (signal + full modes)
 │   └── testing/                    # Testing and validation scripts
 │       ├── test_all.py                  # Unified test runner
 │       ├── validate_strategy.py         # Comprehensive validation
 │       ├── run_tests.sh                 # Run pytest unit tests
 │       ├── smoke_test_ibkr.py           # IBKR smoke test
 │       ├── check_no_secrets.py          # Secret detection guardrail
-│       ├── backtest_nq_strategy.py      # Strategy backtesting
+│       ├── backtest_nq_strategy.py      # Strategy backtesting (deprecated wrapper)
 │       ├── test_data_quality.py         # Data quality validation
 │       └── test_e2e_simulation.py       # End-to-end simulation
 │
@@ -507,6 +517,8 @@ These boundaries prevent accidental coupling, keep strategies portable, and make
 | `config`         | `pearlalgo.config.*`, `pearlalgo.utils.*`       | `data_providers`, `strategies`, `nq_agent` |
 | `data_providers` | `pearlalgo.data_providers.*`, `config`, `utils` | `strategies`, `nq_agent`     |
 | `strategies`     | `pearlalgo.strategies.*`, `config`, `utils`     | `data_providers`, `nq_agent` |
+| `execution`      | `pearlalgo.execution.*`, `config`, `utils`      | `data_providers`, `strategies`, `learning`, `nq_agent` |
+| `learning`       | `pearlalgo.learning.*`, `config`, `utils`       | `data_providers`, `strategies`, `execution`, `nq_agent` |
 | `nq_agent`       | Any internal layer (orchestration layer)        | —                            |
 
 #### Rationale
@@ -515,6 +527,8 @@ These boundaries prevent accidental coupling, keep strategies portable, and make
 - **`config`** provides settings and loaders; it may use utils for logging but must stay agnostic to higher layers.
 - **`data_providers`** abstract market data sources; they must not know about strategies or the agent orchestration.
 - **`strategies`** contain trading logic; they must remain independent of specific data providers and the orchestrating agent so they can be tested in isolation or reused elsewhere.
+- **`execution`** contains ATS execution logic (IBKR bracket orders, safety guards); independent of strategy and agent orchestration.
+- **`learning`** contains adaptive policy logic (Thompson sampling bandit); independent of strategy and agent orchestration.
 - **`nq_agent`** is the top-level orchestration layer that wires everything together.
 
 #### Enforcement
@@ -1153,10 +1167,13 @@ Use `docs/prompts/project_building.md` cycle template for structured improvement
    - Currently focused on MNQ futures (prop firm optimized)
    - **Future**: Multi-symbol support planned
 
-4. **No Automatic Execution**:
-   - Signals are notifications only
-   - Manual execution required
-   - **Future**: Execution integration planned
+4. **Automated Execution (ATS)** - Disabled by Default:
+   - ATS execution and learning layers are **implemented and wired** in `src/pearlalgo/execution/` and `src/pearlalgo/learning/`
+   - **Default**: `execution.enabled: false` and `learning.mode: shadow` (observe-only)
+   - When enabled, supports IBKR bracket orders (entry + stop + take profit)
+   - Adaptive bandit policy learns from signal type outcomes
+   - See `docs/ATS_ROLLOUT_GUIDE.md` for safe rollout procedures
+   - Telegram commands: `/arm`, `/disarm`, `/kill`, `/positions`, `/policy`
 
 ### Technical Debt
 

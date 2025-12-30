@@ -2816,7 +2816,7 @@ class TelegramCommandHandler:
                     "2. Choose a shorter backtest window (1–2 weeks)\n"
                     "3. Use command line with an existing data file:\n"
                     "```bash\n"
-                    "python3 scripts/testing/backtest_nq_strategy.py data.parquet\n"
+                    "python scripts/backtesting/backtest_cli.py signal --data-path data.parquet\n"
                     "```\n"
                     "4. If it still fails, retry later (IBKR side)"
                 )

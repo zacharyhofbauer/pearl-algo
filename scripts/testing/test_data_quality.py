@@ -35,12 +35,14 @@ def test_timestamp_handling():
     print("=" * 70)
     print()
     
-    # Create mock provider
+    # Create mock provider with all simulation quirks disabled for deterministic testing
     mock_provider = MockDataProvider(
         base_price=17500.0,
         volatility=25.0,
         trend=0.5,
         simulate_delayed_data=False,  # Disable for timestamp test
+        simulate_timeouts=False,  # Disable for deterministic test
+        simulate_connection_issues=False,  # Disable for deterministic test
     )
     
     # Fetch data
@@ -128,33 +130,44 @@ def test_market_hours_edge_cases():
 
 
 async def test_stale_data_detection():
-    """Test 3: Stale data detection."""
+    """Test 3: Stale data detection.
+    
+    This test verifies the system can detect stale/delayed data by:
+    1. Creating a mock provider that shifts ALL timestamps backward by 20 minutes
+    2. Checking that the fetcher detects the data staleness
+    """
     print("=" * 70)
     print("Test 3: Stale Data Detection")
     print("=" * 70)
     print()
     
-    # Create mock provider with stale data
+    # Fixed stale offset for deterministic testing
+    STALE_OFFSET_MINUTES = 20
+    
+    # Create mock provider that produces deterministically stale data
     class StaleMockProvider(MockDataProvider):
         def fetch_historical(self, symbol, start, end, timeframe="1m"):
+            # Disable random delays for deterministic behavior
+            original_delayed = self.simulate_delayed_data
+            self.simulate_delayed_data = False
+            
             df = super().fetch_historical(symbol, start, end, timeframe)
-            if not df.empty:
-                # Make latest bar 15 minutes old (stale) by manipulating index
-                if isinstance(df.index, pd.DatetimeIndex):
-                    stale_time = datetime.now(timezone.utc) - timedelta(minutes=15)
-                    # Create new index with stale time for last bar
-                    new_index = df.index[:-1].tolist() + [stale_time]
-                    df.index = pd.DatetimeIndex(new_index)
-                elif "timestamp" in df.columns:
-                    latest_idx = df.index[-1]
-                    stale_time = datetime.now(timezone.utc) - timedelta(minutes=15)
-                    df.at[latest_idx, "timestamp"] = stale_time
+            
+            self.simulate_delayed_data = original_delayed
+            
+            if not df.empty and isinstance(df.index, pd.DatetimeIndex):
+                # Shift ALL timestamps backward by STALE_OFFSET_MINUTES
+                # This simulates a data feed that's stuck/delayed
+                stale_offset = timedelta(minutes=STALE_OFFSET_MINUTES)
+                df.index = df.index - stale_offset
+            
             return df
     
     stale_provider = StaleMockProvider(
         base_price=17500.0,
         volatility=25.0,
         trend=0.5,
+        simulate_delayed_data=False,  # Explicitly disable for determinism
         simulate_timeouts=False,
         simulate_connection_issues=False,
     )
@@ -183,17 +196,27 @@ async def test_stale_data_detection():
         print("⚠️  No timestamp available in data")
         return False
     
-    age_minutes = (datetime.now(timezone.utc) - latest_timestamp.replace(tzinfo=timezone.utc)).total_seconds() / 60
+    # Ensure timezone-aware comparison
+    if latest_timestamp.tzinfo is None:
+        latest_timestamp = latest_timestamp.replace(tzinfo=timezone.utc)
     
-    print(f"✅ Stale data detected: latest bar is {age_minutes:.1f} minutes old")
+    age_seconds = (datetime.now(timezone.utc) - latest_timestamp).total_seconds()
+    age_minutes = age_seconds / 60
     
-    if age_minutes > 10:
-        print("✅ Stale data threshold (10 minutes) would trigger alert")
+    print(f"✅ Latest bar timestamp: {latest_timestamp}")
+    print(f"✅ Data age: {age_minutes:.1f} minutes (expected ~{STALE_OFFSET_MINUTES} minutes)")
+    
+    # Verify data is at least STALE_OFFSET_MINUTES - 2 minutes old (allow small timing variance)
+    min_expected_age = STALE_OFFSET_MINUTES - 2
+    
+    if age_minutes >= min_expected_age:
+        print(f"✅ Stale data correctly detected: {age_minutes:.1f} >= {min_expected_age} minutes")
+        if age_minutes >= 10:
+            print("✅ Stale data threshold (10 minutes) would trigger alert in production")
         return True
     else:
-        print(f"⚠️  Data age {age_minutes:.1f} minutes is below threshold (expected 15 minutes)")
-        # Still pass if we can detect the age
-        return age_minutes > 5  # At least detect it's stale
+        print(f"❌ Data age {age_minutes:.1f} minutes is less than expected {min_expected_age} minutes")
+        return False
 
 
 async def main():

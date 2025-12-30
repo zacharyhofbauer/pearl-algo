@@ -38,6 +38,18 @@ Key scripts (to keep as canonical):
 - `set_bot_commands.py`
   - **Role**: Helper to set BotFather commands via Telegram API using `python-telegram-bot`.
 
+## Backtesting (`scripts/backtesting/`)
+
+Backtesting scripts for strategy validation on historical data.
+
+- `backtest_cli.py`
+  - **Role**: Canonical unified backtest CLI.
+  - **Modes**: `signal` (fast signal-only) and `full` (trade simulation with risk-based sizing).
+  - **Usage**: `python scripts/backtesting/backtest_cli.py signal --data-path data.parquet`
+  - **Features**: Date range slicing, chart generation, HTML reports.
+- `run_variants.py`
+  - **Role**: Run multiple strategy variants for comparison.
+
 ## Testing (`scripts/testing/`)
 
 - `test_all.py`
@@ -51,7 +63,8 @@ Key scripts (to keep as canonical):
 - `test_mplfinance_chart.py`
   - **Role**: Chart generation smoke test (mplfinance).
 - `backtest_nq_strategy.py`
-  - **Role**: Offline backtest helper over cached parquet data.
+  - **Role**: **Deprecated** wrapper. Use `scripts/backtesting/backtest_cli.py signal` instead.
+  - **Behavior**: Delegates to `backtest_cli.py` with deprecation warning.
 - `smoke_test_ibkr.py`
   - **Role**: Quick connectivity and entitlement smoke test for IBKR.
 - `validate_strategy.py`

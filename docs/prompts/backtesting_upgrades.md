@@ -191,7 +191,7 @@ PearlAlgo-Specific Assumptions:
 - Risk parameters are set (1% risk, 1.5x ATR stops, 1.2:1 min R:R ratio)
 - Confidence thresholds are configured (minimum 50%)
 - Stop distance cap: 25 points max (configurable via max_stop_points)
-- Historical data is available (data/historical/MNQ_1m_2w.parquet, MNQ_1m_6w.parquet)
+- Historical data may be cached (check data/historical/ for available files like MNQ_1m_2w.parquet)
 - Decision timeframe: 1m (default), 5m (optional via --decision 5m)
 - Backtest adapter correctly simulates strategy behavior with risk-based sizing
 
@@ -552,10 +552,10 @@ Key Files:
 - scripts/testing/backtest_nq_strategy.py
 
 Data Sources:
-- data/historical/MNQ_1m_2w.parquet: 2 weeks of 1-minute historical OHLCV data
-- data/historical/MNQ_1m_6w.parquet: 6 weeks of 1-minute historical OHLCV data
+- data/historical/: Directory for cached historical OHLCV parquet files
+- Files are named by symbol and duration (e.g., MNQ_1m_2w.parquet, MNQ_1m_6m.parquet)
 - Format: open, high, low, close, volume columns, DatetimeIndex (UTC)
-- Cached data reused across backtests
+- Cached data reused across backtests; generate via Telegram /backtest or fetch via IBKR
 
 Backtest Modes:
 - Signal-only: run_signal_backtest() - Fast, no trade simulation, signal analysis
@@ -565,7 +565,7 @@ Backtest Modes:
 
 Usage Examples:
 - Signal-only (1m decision): python scripts/backtesting/backtest_cli.py signal --data-path data/historical/MNQ_1m_2w.parquet --decision 1m
-- Signal-only (5m decision): python scripts/backtesting/backtest_cli.py signal --data-path data/historical/MNQ_1m_6w.parquet --decision 5m
+- Signal-only (5m decision): python scripts/backtesting/backtest_cli.py signal --data-path data/historical/MNQ_1m_2w.parquet --decision 5m
 - Full backtest: python scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --contracts 5
 - With risk-based sizing: python scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --account-balance 50000 --max-risk-per-trade 0.01
 - With stop cap: python scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --max-stop-points 30

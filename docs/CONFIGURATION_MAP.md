@@ -43,6 +43,12 @@ Optional logging environment variables (for systemd/journald):
   - **Used by**: `pearlalgo.utils.logging_config.setup_logging()`
   - **Purpose**: Set to `true` or `1` to include `extra={...}` context in text log lines. Default: `false`.
 
+Optional AI/LLM environment variables (for Claude AI integration):
+
+- `ANTHROPIC_API_KEY`
+  - **Used by**: `pearlalgo.nq_agent.telegram_command_handler` (`/ai_patch` command)
+  - **Purpose**: API key for Claude AI code generation. Only required if using the AI patch feature.
+
 No other environment variables are required by the running agent; keep any additions explicit and documented here.
 
 ### 1.2 Service configuration (`config/config.yaml`)
@@ -67,6 +73,14 @@ Key sections and their consumers:
 - `market_hours`
   - **Used by**: `pearlalgo.utils.market_hours` and strategy session logic.
   - **Purpose**: Define market hours and session windows for trading logic.
+- `execution.*` (ATS; disabled by default)
+  - **Used by**: `pearlalgo.execution.ibkr.adapter`, `pearlalgo.nq_agent.service`
+  - **Purpose**: Automated execution configuration (enabled, armed, mode, limits, whitelist).
+  - **Defaults**: `enabled: false`, `armed: false`, `mode: dry_run`
+- `learning.*` (ATS; shadow mode by default)
+  - **Used by**: `pearlalgo.learning.bandit_policy`, `pearlalgo.nq_agent.service`
+  - **Purpose**: Adaptive learning policy configuration (mode, thresholds, priors).
+  - **Defaults**: `enabled: true`, `mode: shadow`
 
 Notes:
 - `data.enable_mtf_cache`, `data.mtf_refresh_seconds_5m`, `data.mtf_refresh_seconds_15m` (default OFF) control how often 5m/15m history is refreshed.

@@ -220,60 +220,6 @@ class SkippedSignal:
         }
 
 
-def compute_position_size(
-    signal: Dict,
-    risk_config: RiskConfig,
-    tick_value: float = 2.0,  # MNQ: $2/pt
-) -> Tuple[int, Optional[str]]:
-    """Compute position size from risk config.
-    
-    Returns (contracts, skip_reason) where skip_reason is None if trade should proceed.
-    """
-    entry = signal.get("entry_price", 0)
-    stop = signal.get("stop_loss", 0)
-    direction = signal.get("direction", "long")
-
-    if not entry or not stop or entry <= 0 or stop <= 0:
-        return 0, "invalid_prices"
-
-    # Calculate stop distance in points
-    if direction == "long":
-        stop_distance = abs(entry - stop)
-    else:
-        stop_distance = abs(stop - entry)
-
-    if stop_distance <= 0:
-        return 0, "zero_stop_distance"
-
-    # Check stop distance cap
-    if risk_config.max_stop_points and stop_distance > risk_config.max_stop_points:
-        return 0, f"stop_exceeds_cap ({stop_distance:.1f} > {risk_config.max_stop_points})"
-
-    # Calculate risk budget
-    if risk_config.risk_budget_dollars:
-        risk_budget = risk_config.risk_budget_dollars
-    elif risk_config.account_balance:
-        risk_budget = risk_config.account_balance * risk_config.max_risk_per_trade
-    else:
-        # No risk-based sizing, use max_contracts
-        return risk_config.max_contracts, None
-
-    # Contracts = risk_budget / (stop_distance * tick_value)
-    risk_per_contract = stop_distance * tick_value
-    if risk_per_contract <= 0:
-        return 0, "zero_risk_per_contract"
-
-    contracts = int(risk_budget / risk_per_contract)
-
-    # Clamp to max
-    contracts = min(contracts, risk_config.max_contracts)
-
-    if contracts < 1:
-        return 0, f"insufficient_risk_budget (need ${risk_per_contract:.2f}/contract, have ${risk_budget:.2f})"
-
-    return contracts, None
-
-
 # ============================================================================
 # Report Writer
 # ============================================================================

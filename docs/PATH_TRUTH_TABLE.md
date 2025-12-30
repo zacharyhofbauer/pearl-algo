@@ -48,6 +48,9 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Python modules**:
   - Strategy config/logic: `pearlalgo.strategies.nq_intraday.*`
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
+- **Backtesting scripts** (`scripts/backtesting/`):
+  - `backtest_cli.py` – canonical unified backtest CLI (signal + full trade modes)
+  - `run_variants.py` – run multiple strategy variants
 - **Testing scripts** (`scripts/testing/`):
   - `run_tests.sh` – pytest unit test runner (canonical)
   - `test_all.py` – unified validation runner (telegram / signals / service / arch)
@@ -57,7 +60,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `test_signal_starvation_fixes.py`
   - `test_data_quality.py`, `test_e2e_simulation.py`
   - `test_mplfinance_chart.py`
-  - `backtest_nq_strategy.py`
+  - `backtest_nq_strategy.py` – **deprecated**, use `scripts/backtesting/backtest_cli.py signal`
   - `check_signals.py`
   - `generate_dashboard_baseline.py` – generate deterministic baseline image for visual regression tests
   - `generate_entry_exit_baselines.py` – generate deterministic entry/exit baseline images for visual regression tests
@@ -67,6 +70,20 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `docs/TESTING_GUIDE.md`
   - `docs/MOCK_DATA_WARNING.md`
   - Relevant sections of `docs/PROJECT_SUMMARY.md`
+
+## Execution (ATS)
+
+- **Logical component**: Automated Trading System (execution + learning)
+- **Python modules**:
+  - `pearlalgo.execution.base` – ExecutionAdapter interface, ExecutionConfig
+  - `pearlalgo.execution.ibkr.adapter` – IBKR bracket order implementation
+  - `pearlalgo.execution.ibkr.tasks` – Order placement tasks
+  - `pearlalgo.learning.bandit_policy` – Thompson sampling policy
+  - `pearlalgo.learning.policy_state` – Policy statistics persistence
+- **State files** (in `data/nq_agent_state/`):
+  - `policy_state.json` – Per-signal-type bandit statistics
+- **Docs**:
+  - `docs/ATS_ROLLOUT_GUIDE.md` – Safe rollout procedures
 
 ## Configuration
 

@@ -520,8 +520,8 @@ Configuration:
 - config/config.yaml: execution.* and learning.* blocks
 
 State Files:
-- state/state.json: Includes execution and learning status
-- state/policy_state.json: Per-signal-type learning statistics
+- data/nq_agent_state/state.json: Includes execution and learning status
+- data/nq_agent_state/policy_state.json: Per-signal-type learning statistics
 
 Documentation:
 - docs/ATS_ROLLOUT_GUIDE.md: Safe rollout procedures and stages

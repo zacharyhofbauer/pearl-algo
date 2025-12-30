@@ -82,3 +82,25 @@ forbidden_modules = [
     "pearlalgo.data_providers",
     "pearlalgo.nq_agent",
 ]
+
+[[tool.importlinter.contracts]]
+name = "execution does not depend on higher layers"
+type = "forbidden"
+source_modules = ["pearlalgo.execution"]
+forbidden_modules = [
+    "pearlalgo.data_providers",
+    "pearlalgo.strategies",
+    "pearlalgo.learning",
+    "pearlalgo.nq_agent",
+]
+
+[[tool.importlinter.contracts]]
+name = "learning does not depend on higher layers"
+type = "forbidden"
+source_modules = ["pearlalgo.learning"]
+forbidden_modules = [
+    "pearlalgo.data_providers",
+    "pearlalgo.strategies",
+    "pearlalgo.execution",
+    "pearlalgo.nq_agent",
+]

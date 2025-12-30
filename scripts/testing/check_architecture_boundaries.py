@@ -15,6 +15,8 @@ Layers and allowed dependencies:
 - config:         may import config, utils
 - data_providers: may import data_providers, config, utils
 - strategies:     may import strategies, config, utils
+- execution:      may import execution, config, utils (ATS execution layer)
+- learning:       may import learning, config, utils (adaptive learning layer)
 - nq_agent:       may import any internal layer (orchestration)
 
 Exit codes:
@@ -36,7 +38,7 @@ from typing import Dict, List, Optional, Set, Tuple
 # ---------------------------------------------------------------------------
 
 # Layers under src/pearlalgo/
-LAYERS = {"utils", "config", "data_providers", "strategies", "nq_agent"}
+LAYERS = {"utils", "config", "data_providers", "strategies", "execution", "learning", "nq_agent"}
 
 # For each layer, which other pearlalgo.* layers it MAY import.
 # Imports of stdlib and third-party packages are always allowed.
@@ -45,6 +47,8 @@ ALLOWED_IMPORTS: Dict[str, Set[str]] = {
     "config": {"config", "utils"},
     "data_providers": {"data_providers", "config", "utils"},
     "strategies": {"strategies", "config", "utils"},
+    "execution": {"execution", "config", "utils"},  # ATS execution layer
+    "learning": {"learning", "config", "utils"},  # Adaptive learning layer
     "nq_agent": LAYERS,  # orchestration layer can import anything
 }
 

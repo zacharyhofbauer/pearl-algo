@@ -1,93 +1,84 @@
 #!/usr/bin/env python3
-"""Offline signal-only backtest for the MNQ intraday strategy.
+"""DEPRECATED: Compatibility shim for signal-only backtests.
 
-Usage:
+This script is retained for backward compatibility. It delegates to the
+canonical backtest CLI:
 
+    python scripts/backtesting/backtest_cli.py signal --data-path <file>
+
+Usage (deprecated):
     python3 scripts/testing/backtest_nq_strategy.py path/to/mnq_1m.parquet
 
-The input file must be a pandas-compatible file (parquet or CSV) with a
-DateTime index (or a column named `timestamp`) and at least `open`, `high`,
-`low`, `close`, `volume` columns.
-
-This script does **not** place trades; it reuses the live strategy stack
-(`NQIntradayStrategy` and `NQSignalGenerator`) to generate signals
-bar-by-bar and prints a compact summary so you can sanity-check signal
-frequency and quality on historical data.
+Prefer the canonical CLI for new work:
+    python scripts/backtesting/backtest_cli.py signal --data-path path/to/mnq_1m.parquet
 """
 
 from __future__ import annotations
 
-import argparse
+import sys
+import warnings
 from pathlib import Path
 
-import pandas as pd
-
-from pearlalgo.strategies.nq_intraday.backtest_adapter import (
-    NQIntradayConfig,
-    BacktestResult,
-    run_signal_backtest,
-)
+# Add project root for imports
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 
-def _load_dataframe(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        raise FileNotFoundError(path)
+def main() -> int:
+    warnings.warn(
+        "scripts/testing/backtest_nq_strategy.py is deprecated. "
+        "Use: python scripts/backtesting/backtest_cli.py signal --data-path <file>",
+        DeprecationWarning,
+        stacklevel=1,
+    )
+    print(
+        "⚠️  DEPRECATION WARNING: This script is deprecated.\n"
+        "   Prefer: python scripts/backtesting/backtest_cli.py signal --data-path <file>\n"
+    )
 
-    if path.suffix.lower() in {".parquet", ".pq"}:
-        df = pd.read_parquet(path)
-    elif path.suffix.lower() in {".csv"}:
-        df = pd.read_csv(path)
-    else:
-        raise ValueError(f"Unsupported file type: {path.suffix}")
+    if len(sys.argv) < 2:
+        print("Usage: python3 scripts/testing/backtest_nq_strategy.py <data_path>")
+        print("\nCanonical CLI usage:")
+        print("  python scripts/backtesting/backtest_cli.py signal --data-path <file>")
+        return 1
 
-    # Normalize index
-    if not isinstance(df.index, pd.DatetimeIndex):
-        # Try common column names
-        for col in ("timestamp", "time", "datetime", "date"):
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], utc=True)
-                df = df.set_index(col)
-                break
-    if not isinstance(df.index, pd.DatetimeIndex):
-        raise ValueError("DataFrame must have a DateTime index or a 'timestamp' column")
+    data_path = sys.argv[1]
 
-    # Ensure sorted by time
-    df = df.sort_index()
-    return df
+    # Import and run the canonical CLI's signal mode
+    # We avoid subprocess to maintain the same process/environment
+    from scripts.backtesting.backtest_cli import (
+        load_ohlcv_data,
+        slice_by_date_range,
+        print_summary,
+        BacktestReport,
+    )
+    from pearlalgo.strategies.nq_intraday.backtest_adapter import (
+        NQIntradayConfig,
+        run_signal_backtest,
+    )
 
+    try:
+        df = load_ohlcv_data(Path(data_path))
+        print(f"Loaded {len(df):,} bars from {data_path}")
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Backtest MNQ intraday strategy in signal-only mode.")
-    parser.add_argument("data_path", type=str, help="Path to MNQ 1m historical data (parquet or CSV)")
-    args = parser.parse_args()
+        # No date slicing (full dataset), same as old behavior
+        df_sliced, date_info = slice_by_date_range(df, start=None, end=None)
+        config = NQIntradayConfig.from_config_file()
+        result = run_signal_backtest(df_sliced, config=config, return_signals=True)
 
-    data_path = Path(args.data_path)
-    df = _load_dataframe(data_path)
+        report = BacktestReport(
+            symbol=config.symbol,
+            decision_timeframe="1m",
+            date_range=date_info,
+            result=result,
+        )
+        print_summary(report)
+        return 0
 
-    print(f"Loaded {len(df):,} bars from {data_path}")
-
-    config = NQIntradayConfig.from_config_file()
-    result: BacktestResult = run_signal_backtest(df, config=config)
-
-    print("\n=== MNQ Intraday Signal Backtest (Signal-only) ===")
-    print(f"Symbol: {config.symbol} | Timeframe: {config.timeframe} | Scan interval: {config.scan_interval}s")
-    print(f"Total bars:      {result.total_bars:,}")
-    print(f"Total signals:   {result.total_signals:,}")
-    print(f"Avg confidence:  {result.avg_confidence:.3f}")
-    print(f"Avg R:R (if set): {result.avg_risk_reward:.2f}:1")
-
-    # Behavioral verification diagnostics (signal density + bottlenecks + common gates)
-    if result.verification:
-        print("\n=== Verification Summary ===")
-        print(result.verification.format_compact())
-        if result.verification.top_gate_reasons:
-            print("\nTop scanner gate reasons:")
-            for reason in result.verification.top_gate_reasons:
-                print(f"  - {reason}")
-
-    if result.total_signals == 0:
-        print("\nNo signals were generated on this dataset. Check market hours and data quality.")
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

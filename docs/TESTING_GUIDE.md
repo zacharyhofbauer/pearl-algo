@@ -516,10 +516,12 @@ python3 scripts/testing/check_architecture_boundaries.py --verbose
 
 The boundary checker scans all Python files under `src/pearlalgo/` and verifies that:
 
-- `utils/` does not import from `config`, `data_providers`, `strategies`, or `nq_agent`
-- `config/` does not import from `data_providers`, `strategies`, or `nq_agent`
-- `data_providers/` does not import from `strategies` or `nq_agent`
-- `strategies/` does not import from `data_providers` or `nq_agent`
+- `utils/` does not import from `config`, `data_providers`, `strategies`, `execution`, `learning`, or `nq_agent`
+- `config/` does not import from `data_providers`, `strategies`, `execution`, `learning`, or `nq_agent`
+- `data_providers/` does not import from `strategies`, `execution`, `learning`, or `nq_agent`
+- `strategies/` does not import from `data_providers`, `execution`, `learning`, or `nq_agent`
+- `execution/` does not import from `data_providers`, `strategies`, `learning`, or `nq_agent`
+- `learning/` does not import from `data_providers`, `strategies`, `execution`, or `nq_agent`
 - `nq_agent/` may import from any internal layer (it's the orchestration layer)
 
 ### When to Run
@@ -803,7 +805,7 @@ This section summarizes the current test coverage and highlights areas for futur
 - `test_data_quality.py` – data quality checks
 - `test_e2e_simulation.py` – end‑to‑end simulation
 - `test_mplfinance_chart.py` – chart generation smoke test
-- `backtest_nq_strategy.py` – offline backtest helper
+- `backtest_nq_strategy.py` – **deprecated**, use `scripts/backtesting/backtest_cli.py signal`
 - `check_signals.py` – signals file diagnostics (format/count/validity)
 - `smoke_test_ibkr.py` – IBKR connectivity smoke test
 - `validate_strategy.py` – strategy validation helper

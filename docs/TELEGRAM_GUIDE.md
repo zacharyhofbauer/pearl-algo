@@ -267,7 +267,27 @@ Generates an on-demand price chart.
 - These commands acknowledge receipt but don't perform actions
 - For full control, use the service control commands above
 
-### 3.11 Claude AI (Mobile Cursor)
+### 3.11 ATS Execution Commands (When Enabled)
+
+These commands control the Automated Trading System. **ATS is disabled by default** (`execution.enabled: false`).
+
+See [ATS_ROLLOUT_GUIDE.md](ATS_ROLLOUT_GUIDE.md) for safe rollout procedures before enabling.
+
+| Command | Description |
+|---------|-------------|
+| `/arm` | Arm execution adapter for order placement |
+| `/disarm` | Disarm execution (stops new orders, existing positions continue) |
+| `/kill` | **Emergency**: Cancel all orders AND disarm |
+| `/positions` | Show current positions and execution status |
+| `/policy` | Show bandit policy status and per-signal-type statistics |
+
+**Safety notes:**
+- ATS starts **disarmed** even when enabled; must `/arm` to place orders
+- `/kill` is the emergency stop; cancels all pending orders immediately
+- Daily loss limit triggers automatic disarm (see `execution.max_daily_loss`)
+- Learning runs in **shadow mode** by default (observe only, no execution impact)
+
+### 3.12 Claude AI (Mobile Cursor)
 
 Claude AI is integrated as a **mobile Cursor-like experience**. Chat with Claude, get code patches, and fix issues — all from your phone.
 
