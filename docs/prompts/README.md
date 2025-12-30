@@ -18,6 +18,16 @@ Comprehensive prompt for codebase cleanup, consolidation, and validation tasks. 
 
 **When to use:** Periodic codebase hygiene sessions, after major feature additions, or when technical debt becomes noticeable.
 
+### `project_building.md`
+Forward-looking prompt for architectural evolution and continuous improvement. Use this when:
+- Exploring improvement opportunities
+- Proposing enhancements to existing functionality
+- Discussing architectural evolution
+- Identifying long-term opportunities
+- Challenging assumptions and constraints
+
+**When to use:** When the codebase is clean and stable, and you're ready to evolve and improve the system. Complements project_cleanup.md - use cleanup first, then building.
+
 ## Usage
 
 1. Open the relevant prompt file

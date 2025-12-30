@@ -1688,14 +1688,33 @@ class TelegramCommandHandler:
                 if not cached_data.empty:
                     # We REQUIRE a timestamp for backtests. Older caches were saved without it (lost index).
                     if 'timestamp' in cached_data.columns:
-                        cached_data['timestamp'] = pd.to_datetime(cached_data['timestamp'])
+                        cached_data['timestamp'] = pd.to_datetime(cached_data['timestamp'], utc=True)
                         cached_data = cached_data.dropna(subset=["timestamp"])
                         # Normalize return shape: keep timestamp column, but ensure DatetimeIndex for resampling.
                         cached_data = cached_data.sort_values('timestamp')
                         cached_data = cached_data.drop_duplicates(subset=['timestamp'], keep='first')
                         cached_data = cached_data.set_index('timestamp', drop=False)
-                        logger.info(f"✅ Using cached data: {len(cached_data):,} bars")
-                        return cached_data
+                        
+                        # VALIDATION: Check that cached data actually covers the requested date range
+                        # Allow some tolerance for weekends/holidays (at least 5 trading days per week)
+                        if len(cached_data) > 0:
+                            cache_start = cached_data.index.min()
+                            cache_end = cached_data.index.max()
+                            cache_days = (cache_end - cache_start).days
+                            min_required_days = max(1, (weeks * 5) - 3)  # ~5 trading days/week with tolerance
+                            
+                            if cache_days >= min_required_days:
+                                logger.info(f"✅ Using cached data: {len(cached_data):,} bars ({cache_days} days: {cache_start.date()} to {cache_end.date()})")
+                                return cached_data
+                            else:
+                                logger.warning(
+                                    f"Cache {cache_file.name} has only {cache_days} days of data "
+                                    f"(need ~{min_required_days}+ days for {weeks} weeks). Deleting stale cache."
+                                )
+                                try:
+                                    cache_file.unlink()
+                                except Exception:
+                                    pass
 
                     if isinstance(cached_data.index, pd.DatetimeIndex):
                         cached_data = cached_data.reset_index()
@@ -1704,13 +1723,31 @@ class TelegramCommandHandler:
                             first_col = cached_data.columns[0]
                             cached_data = cached_data.rename(columns={first_col: 'timestamp'})
                         if 'timestamp' in cached_data.columns:
-                            cached_data['timestamp'] = pd.to_datetime(cached_data['timestamp'])
+                            cached_data['timestamp'] = pd.to_datetime(cached_data['timestamp'], utc=True)
                             cached_data = cached_data.dropna(subset=["timestamp"])
                             cached_data = cached_data.sort_values('timestamp')
                             cached_data = cached_data.drop_duplicates(subset=['timestamp'], keep='first')
                             cached_data = cached_data.set_index('timestamp', drop=False)
-                            logger.info(f"✅ Using cached data: {len(cached_data):,} bars")
-                            return cached_data
+                            
+                            # VALIDATION: Check that cached data actually covers the requested date range
+                            if len(cached_data) > 0:
+                                cache_start = cached_data.index.min()
+                                cache_end = cached_data.index.max()
+                                cache_days = (cache_end - cache_start).days
+                                min_required_days = max(1, (weeks * 5) - 3)
+                                
+                                if cache_days >= min_required_days:
+                                    logger.info(f"✅ Using cached data: {len(cached_data):,} bars ({cache_days} days: {cache_start.date()} to {cache_end.date()})")
+                                    return cached_data
+                                else:
+                                    logger.warning(
+                                        f"Cache {cache_file.name} has only {cache_days} days of data "
+                                        f"(need ~{min_required_days}+ days for {weeks} weeks). Deleting stale cache."
+                                    )
+                                    try:
+                                        cache_file.unlink()
+                                    except Exception:
+                                        pass
 
                     logger.warning("Cached data missing timestamp; deleting invalid cache and re-fetching")
                     try:
@@ -2041,6 +2078,9 @@ class TelegramCommandHandler:
                 ],
                 [
                     InlineKeyboardButton("📂 Past Reports", callback_data='reports'),
+                    InlineKeyboardButton("🗑️ Clear Cache", callback_data='backtest_clearcache'),
+                ],
+                [
                     InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
                 ],
             ])
@@ -2227,25 +2267,57 @@ class TelegramCommandHandler:
                     }
                     
                     # Convert back to format expected by chart generator (reset index to get timestamp column)
-                    if mode == "5m":
-                        # Show the chart on 5-minute candles (matches trading workflow)
-                        agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
-                        if "volume" in backtest_data.columns:
-                            agg["volume"] = "sum"
-                        df_5m = backtest_data.resample("5min").agg(agg).dropna()
-                        chart_data = df_5m.reset_index()
+                    # SMART TIMEFRAME: For long backtests, use higher timeframes for readable charts
+                    # - 1-2 weeks: 5m candles (~288-576 candles)
+                    # - 3-4 weeks: 1H candles (~120-160 candles)
+                    # - 5-6 weeks: 4H candles (~60-90 candles)
+                    agg = {"open": "first", "high": "max", "low": "min", "close": "last"}
+                    if "volume" in backtest_data.columns:
+                        agg["volume"] = "sum"
+                    
+                    if weeks <= 2:
+                        # Short backtest: use 5m candles for detail
+                        chart_tf = "5min"
+                        chart_tf_label = "5m"
+                    elif weeks <= 4:
+                        # Medium backtest: use 1H candles for readability
+                        chart_tf = "1H"
+                        chart_tf_label = "1H"
                     else:
-                        chart_data = backtest_data.reset_index()
+                        # Long backtest: use 4H candles for overview
+                        chart_tf = "4H"
+                        chart_tf_label = "4H"
+                    
+                    df_resampled = backtest_data.resample(chart_tf).agg(agg).dropna()
+                    chart_data = df_resampled.reset_index()
+                    
                     if 'timestamp' not in chart_data.columns and chart_data.index.name == 'timestamp':
                         chart_data = chart_data.reset_index()
+                    
+                    # Update title to show chart timeframe
+                    chart_title = (
+                        f"Backtest Results ({data_start} to {data_end}) - "
+                        f"{result.total_signals} Signals - "
+                        f"{chart_tf_label} chart"
+                    )
+                    
+                    # Use larger figure for longer backtests
+                    if weeks >= 4:
+                        figsize = (18, 10)
+                        dpi = 180
+                    else:
+                        figsize = (16, 9)
+                        dpi = 150
                     
                     chart_path = self.chart_generator.generate_backtest_chart(
                         chart_data,
                         signals_from_backtest,
-                        'MNQ',
+                        symbol,
                         chart_title,
                         performance_data=performance_data,
-                        timeframe=("5m" if mode == "5m" else "1m"),
+                        timeframe=chart_tf_label,
+                        figsize=figsize,
+                        dpi=dpi,
                     )
                             
                     # Format results message
@@ -2373,12 +2445,12 @@ class TelegramCommandHandler:
                                     await context.bot.send_photo(
                                         chat_id=update.effective_chat.id,
                                         photo=photo,
-                                        caption=f"📊 Backtest Chart ({weeks} Week{'s' if weeks > 1 else ''}, {mode} mode)"
+                                        caption=f"📊 Backtest Chart ({weeks} Week{'s' if weeks > 1 else ''}, {chart_tf_label} candles)"
                                     )
                                 else:
                                     await update.message.reply_photo(
                                         photo=photo,
-                                        caption=f"📊 Backtest Chart ({weeks} Week{'s' if weeks > 1 else ''}, {mode} mode)"
+                                        caption=f"📊 Backtest Chart ({weeks} Week{'s' if weeks > 1 else ''}, {chart_tf_label} candles)"
                                     )
                             chart_path.unlink()
                         except Exception as e:
@@ -5017,6 +5089,34 @@ class TelegramCommandHandler:
             if hasattr(context, "user_data"):
                 context.user_data["backtest_max_positions"] = max_pos
             await self._handle_backtest(update, context, weeks=None)
+        elif callback_data == 'backtest_clearcache':
+            # Clear historical data cache to force re-fetch
+            try:
+                cache_dir = self._historical_cache_dir
+                deleted_count = 0
+                if cache_dir.exists():
+                    for cache_file in cache_dir.glob("*.parquet"):
+                        try:
+                            cache_file.unlink()
+                            deleted_count += 1
+                        except Exception:
+                            pass
+                await self._send_message_or_edit(
+                    update, context,
+                    f"🗑️ *Cache Cleared*\n\n"
+                    f"Deleted {deleted_count} cached data file(s).\n"
+                    f"Next backtest will fetch fresh data from IBKR.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📊 Run Backtest", callback_data='backtest')],
+                        [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
+                    ])
+                )
+            except Exception as e:
+                await self._send_message_or_edit(
+                    update, context,
+                    f"❌ Error clearing cache: {e}",
+                    reply_markup=self._get_back_to_menu_button()
+                )
         elif callback_data.startswith('backtest_'):
             # Handle backtest duration selection (backtest_1w, backtest_2w, etc.)
             try:
