@@ -204,3 +204,4 @@ class TestSignalExpiry:
         assert metrics["total_signals"] == 2
         assert metrics["exited_signals"] == 1
 
+

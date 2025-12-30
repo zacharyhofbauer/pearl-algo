@@ -284,3 +284,4 @@ Only run after intentional visual changes with explicit approval.
 |------|--------|--------|
 | 2025-12-29 | Initial visual schema documentation | AI Agent |
 
+

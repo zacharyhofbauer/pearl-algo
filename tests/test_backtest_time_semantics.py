@@ -430,3 +430,4 @@ class TestBacktestFunctionDeterminism:
         # Trading days should be computed
         assert result.verification.trading_days >= 0
 
+

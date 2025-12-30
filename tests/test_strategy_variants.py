@@ -210,3 +210,4 @@ class TestFromConfigFile:
         assert isinstance(config.enabled_signals, list)
         assert isinstance(config.disabled_signals, list)
 
+

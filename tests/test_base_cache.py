@@ -281,3 +281,4 @@ async def test_historical_fallback_extracts_timestamp_from_column(monkeypatch: p
     assert "timestamp" in df.columns, "Strategy buffer should have timestamp column"
     assert "index" not in df.columns, "Strategy buffer should not have index column"
 
+

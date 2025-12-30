@@ -387,3 +387,4 @@ class TestSkippedSignal:
         assert d["stop_distance_points"] == 100.0
         assert "stop_exceeds_cap" in d["skip_reason"]
 
+
