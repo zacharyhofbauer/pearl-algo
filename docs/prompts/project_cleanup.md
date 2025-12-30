@@ -118,7 +118,7 @@ Perform a structured cleanup, consolidation, verification, and forward-alignment
 - Configuration (config/, .env, defaults in code)
 - Documentation (docs/)
 - Tests (tests/)
-- Prompts (prompts/)
+- Prompts (docs/prompts/)
 
 Goal: Make the codebase:
 - Easier to reason about

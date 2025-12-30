@@ -8,8 +8,9 @@ symbol: "MNQ"  # Mini NQ (1/10th size of NQ, prop-firm friendly)
 # Timeframe
 timeframe: "1m"  # 1-minute bars for decision stream (more opportunities), 5m/15m for MTF context
 
-# Scan Interval (seconds)
-scan_interval: 30  # Check for signals every 30 seconds (faster for scalping)
+# Scan Interval (seconds) - base interval when adaptive_cadence_enabled is false
+# When adaptive_cadence_enabled: true (default), this is overridden by the active/idle/closed intervals below
+scan_interval: 30  # Base scan interval (overridden by adaptive cadence when enabled)
 
 # Strategy session window (NY time / ET).
 # This controls when the strategy is allowed to generate signals.
@@ -29,7 +30,7 @@ risk:
   max_risk_per_trade: 0.01  # 1% max risk per trade (prop firm conservative)
   max_drawdown: 0.10        # 10% account drawdown limit (prop firm typical)
   stop_loss_atr_multiplier: 1.5  # Tighter stops for scalping
-  take_profit_risk_reward: 1.5   # 1.5:1 R/R for quick scalps
+  take_profit_risk_reward: 1.5   # Target R:R for TP calculation (filter uses signals.min_risk_reward)
   min_position_size: 5      # Minimum MNQ contracts per trade
   max_position_size: 15     # Maximum MNQ contracts per trade
 
@@ -86,7 +87,7 @@ data:
 signals:
   duplicate_window_seconds: 300      # 5 minutes
   min_confidence: 0.50               # Minimum signal confidence
-  min_risk_reward: 1.2               # Reduced from 1.5 - was blocking 98 signals
+  min_risk_reward: 1.2               # R:R filter threshold (signals below this are rejected; tuned from 1.5)
   duplicate_price_threshold_pct: 0.5 # 0.5% price difference for duplicate detection
   volatility_threshold: 0.0005       # Reduced from 0.001 - was blocking 543 signals
   avoid_lunch_lull: false            # Disabled - was blocking 72 signals

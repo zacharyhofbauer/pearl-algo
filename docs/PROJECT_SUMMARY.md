@@ -34,7 +34,7 @@
 
 - ✅ **Fully Automated**: Runs 24/7 with minimal intervention
 - ✅ **Prop Firm Optimized**: MNQ contracts (5-15 per trade), 1% risk per trade, 10% max drawdown
-- ✅ **Scalping Focus**: 30-second scan interval, tighter stops (1.5x ATR), quick profits (1.5:1 R:R)
+- ✅ **Scalping Focus**: Adaptive cadence (5s active, 30s idle), tighter stops (1.5x ATR), quick profits (1.2:1 min R:R filter)
 - ✅ **Real-time Data**: Connects to Interactive Brokers (IBKR) Gateway for live market data
 - ✅ **Intelligent Signals**: Uses technical analysis to generate high-confidence trading signals
 - ✅ **Mobile-Friendly Notifications**: Rich Telegram notifications optimized for mobile viewing
@@ -100,7 +100,7 @@ The MNQ Trading Agent is designed to:
 
 ### Component Interaction Flow
 
-1. **Service Loop** (every 30 seconds for scalping, configurable):
+1. **Service Loop** (adaptive cadence: 5s during active session, 30s during idle, 300s when market closed):
    - Fetches latest market data via Data Fetcher
    - Monitors IB Gateway connection status
    - Analyzes data using Strategy
@@ -122,7 +122,7 @@ The MNQ Trading Agent is designed to:
 ### 1. NQ Agent Service (`src/pearlalgo/nq_agent/`)
 
 **Main Service** (`service.py`):
-- 24/7 service loop with configurable scan interval (30s default for scalping)
+- 24/7 service loop with adaptive cadence (5s active, 30s idle, 300s market closed; base scan_interval configurable)
 - Circuit breaker (pauses after 10 consecutive errors)
 - Connection failure detection and alerts
 - Automatic recovery and error handling
@@ -194,14 +194,14 @@ The MNQ Trading Agent is designed to:
 - Validates scanner results
 - Filters signals by confidence threshold (minimum 50% for prop firm)
 - Calculates entry, stop-loss, and take-profit levels
-- Risk/reward ratio validation (minimum 1.5:1 for quick scalps)
+- Risk/reward ratio validation (minimum 1.2:1 R:R filter, configurable via `signals.min_risk_reward`)
 - Position sizing calculation (5-15 MNQ contracts)
 - Risk amount calculation (MNQ tick value: $2/point)
 - Duplicate signal prevention (5-minute window)
 
 **Config** (`config.py`):
 - Strategy configuration (symbol: MNQ, timeframe, risk parameters)
-- Prop firm defaults: 1% risk, 1.5x ATR stops, 1.5:1 R:R, 5-15 contracts
+- Prop firm defaults: 1% risk, 1.5x ATR stops, 1.2:1 min R:R filter, 5-15 contracts
 - Loads from `config/config.yaml` or uses defaults
 
 ### 3. Data Providers (`src/pearlalgo/data_providers/`)
@@ -612,8 +612,8 @@ symbol: "MNQ"  # Mini NQ (1/10th size of NQ, better for prop firms)
 # Timeframe
 timeframe: "1m"  # 1-minute decision stream (5m/15m for MTF context)
 
-# Scan Interval (seconds)
-scan_interval: 30  # Check for signals every 30 seconds
+# Scan Interval (seconds) - base interval; adaptive cadence overrides dynamically
+scan_interval: 30  # Base scan interval (adaptive cadence uses 5s active, 30s idle, 300s closed)
 
 # Telegram Notifications
 telegram:
@@ -626,9 +626,13 @@ risk:
   max_risk_per_trade: 0.01      # 1% max risk per trade (prop firm conservative)
   max_drawdown: 0.10            # 10% account drawdown limit (prop firm typical)
   stop_loss_atr_multiplier: 1.5 # Tighter stops for scalping
-  take_profit_risk_reward: 1.5  # 1.5:1 R/R for quick profits
+  take_profit_risk_reward: 1.5  # Target R:R for TP calculation (filter uses signals.min_risk_reward)
   min_position_size: 5          # Minimum contracts per trade
   max_position_size: 15         # Maximum contracts per trade
+
+# Signal Filtering (actual R:R filter threshold)
+signals:
+  min_risk_reward: 1.2          # Minimum R:R to pass filter (tuned from 1.5)
 ```
 
 ### Configuration Precedence
@@ -665,13 +669,13 @@ In practice:
 
 ### 1. Automated Trading Signal Generation (Prop Firm Optimized)
 
-- **Real-time Analysis**: Scans market data every 30 seconds (faster for scalping)
+- **Real-time Analysis**: Adaptive cadence (5s active session, 30s idle, 300s market closed)
 - **Technical Indicators**: RSI, MACD, ATR, EMA, Bollinger Bands, VWAP, Volume Profile
 - **Pattern Detection**: Momentum, mean reversion, breakout signals
 - **Confidence Filtering**: Minimum 50% confidence threshold (prop firm adjusted)
-- **Risk/Reward Validation**: Minimum 1.5:1 R/R ratio (quick scalps)
-- **Position Sizing**: 5-15 MNQ contracts per trade
-- **Session Filters**: Avoids lunch lull (11:30 AM - 1:00 PM ET)
+- **Risk/Reward Validation**: Minimum 1.2:1 R/R ratio (configurable via `signals.min_risk_reward`)
+- **Position Sizing**: 5-15 MNQ contracts per trade (dynamic sizing available)
+- **Session Filters**: Configurable lunch lull avoidance (disabled by default)
 
 ### 2. Mobile-Optimized Telegram Notifications
 
@@ -1237,8 +1241,8 @@ journalctl -u pearlalgo-mnq.service -f
 - **Max Risk/Trade**: 1% of account (prop firm conservative)
 - **Max Drawdown**: 10% daily (prop firm typical)
 - **Stop Loss**: 1.5x ATR (tighter for scalping)
-- **Take Profit**: 1.5:1 R:R (quick profits)
-- **Scan Interval**: 30 seconds (faster for scalping)
+- **Take Profit**: Target uses 1.5:1 R:R; filter minimum is 1.2:1
+- **Scan Interval**: Adaptive cadence (5s active, 30s idle, 300s market closed)
 
 ### Example Trade
 

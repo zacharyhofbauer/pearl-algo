@@ -61,6 +61,8 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `check_signals.py`
   - `generate_dashboard_baseline.py` – generate deterministic baseline image for visual regression tests
   - `generate_entry_exit_baselines.py` – generate deterministic entry/exit baseline images for visual regression tests
+  - `live_probe_mnq.py` – read-only IBKR MNQ data verification probe (connection, contract, freshness)
+  - `soak_test_mock_service.py` – bounded soak test harness (memory drift, cadence, error rate monitoring)
 - **Docs**:
   - `docs/TESTING_GUIDE.md`
   - `docs/MOCK_DATA_WARNING.md`

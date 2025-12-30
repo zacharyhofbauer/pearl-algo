@@ -66,6 +66,14 @@ Key scripts (to keep as canonical):
   - **Behavior**: Renders entry and exit charts; outputs to `tests/fixtures/charts/entry_baseline.png` and `tests/fixtures/charts/exit_baseline.png`.
 - `check_no_secrets.py`
   - **Role**: Secret detection guardrail; scans codebase for accidentally committed secrets/tokens.
+- `live_probe_mnq.py`
+  - **Role**: Read-only IBKR MNQ data verification probe.
+  - **Behavior**: Validates connection, contract resolution, latest bar fetch, historical data, and data freshness without modifying state.
+  - **Usage**: `python3 scripts/testing/live_probe_mnq.py [--verbose]`
+- `soak_test_mock_service.py`
+  - **Role**: Bounded soak test harness for service loop validation.
+  - **Behavior**: Runs the service loop with mock data for a configurable duration; monitors memory drift, cadence metrics, and error rates.
+  - **Usage**: `python3 scripts/testing/soak_test_mock_service.py [--duration SECONDS] [--verbose]`
 
 ## Maintenance (`scripts/maintenance/`)
 
