@@ -2,7 +2,7 @@
 """
 Strategy Validation Script
 
-Quick validation to check if the NQ trading strategy is working correctly.
+Quick validation to check if the MNQ trading strategy is working correctly.
 Tests multiple aspects: signal generation, data fetching, service health, etc.
 """
 
@@ -78,9 +78,9 @@ async def test_signal_generation():
     
     try:
         # Create mock data provider with conditions that should generate signals
-        # NOTE: Using realistic NQ price range (~17,500) but synthetic data for testing logic only
+        # NOTE: Using realistic Nasdaq futures price levels (~17,500) but synthetic data for testing logic only
         mock_provider = MockDataProvider(
-            base_price=17500.0,  # Realistic NQ futures price
+            base_price=17500.0,  # Realistic Nasdaq futures price level (MNQ tracks the same index)
             volatility=50.0,  # Higher volatility for signal generation
             trend=2.0,  # Strong uptrend
         )
@@ -88,11 +88,11 @@ async def test_signal_generation():
         # Generate data
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=2)
-        df = mock_provider.fetch_historical("NQ", start, end, "1m")
-        latest_bar = await mock_provider.get_latest_bar("NQ")
+        df = mock_provider.fetch_historical("MNQ", start, end, "1m")
+        latest_bar = await mock_provider.get_latest_bar("MNQ")
         
         # Create strategy
-        config = NQIntradayConfig(symbol="NQ", timeframe="1m")
+        config = NQIntradayConfig(symbol="MNQ", timeframe="1m")
         strategy = NQIntradayStrategy(config=config)
         
         # Generate signals
@@ -156,12 +156,12 @@ async def test_data_fetching():
         
         # NOTE: Using synthetic mock data - prices are not real market data
         mock_provider = MockDataProvider(
-            base_price=17500.0,  # Realistic NQ futures price
+            base_price=17500.0,  # Realistic Nasdaq futures price level
             volatility=25.0,  # Realistic intraday volatility
             trend=0.5,
         )
         
-        config = NQIntradayConfig(symbol="NQ", timeframe="1m")
+        config = NQIntradayConfig(symbol="MNQ", timeframe="1m")
         fetcher = NQAgentDataFetcher(mock_provider, config=config)
         
         market_data = await fetcher.fetch_latest_data()
@@ -193,12 +193,12 @@ async def test_service_initialization():
     try:
         # NOTE: Using synthetic mock data - prices are not real market data
         mock_provider = MockDataProvider(
-            base_price=17500.0,  # Realistic NQ futures price
+            base_price=17500.0,  # Realistic Nasdaq futures price level
             volatility=25.0,  # Realistic intraday volatility
             trend=0.5,
         )
         
-        config = NQIntradayConfig(symbol="NQ", timeframe="1m", scan_interval=60)
+        config = NQIntradayConfig(symbol="MNQ", timeframe="1m", scan_interval=60)
         
         service = NQAgentService(
             data_provider=mock_provider,
@@ -340,8 +340,8 @@ async def test_telegram_integration():
 
 async def main():
     """Run all validation tests."""
-    print_header("NQ Trading Strategy Validation")
-    print("This script validates that your NQ trading strategy is working correctly.")
+    print_header("MNQ Trading Strategy Validation")
+    print("This script validates that your MNQ trading strategy is working correctly.")
     print("It tests signal generation, data fetching, service initialization, and more.\n")
     
     results = []

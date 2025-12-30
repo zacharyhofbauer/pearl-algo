@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -140,7 +142,21 @@ def compute_sessions(
         keys = list(grp.groups.keys())[-max_segments_per_session:]
 
         for k in keys:
-            g = grp.get_group(k)
+            # pandas FutureWarning (pandas>=2.3):
+            # When grouping with a length-1 list-like, get_group will require a
+            # length-1 tuple key in a future version. Suppress the warning
+            # without changing behavior (chart output determinism depends on it).
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"When grouping with a length-1 list-like.*",
+                    category=FutureWarning,
+                )
+                try:
+                    g = grp.get_group(k)
+                except KeyError:
+                    # Forward-compat (future pandas may require a 1-tuple key)
+                    g = grp.get_group((k,))
             if g.empty:
                 continue
 

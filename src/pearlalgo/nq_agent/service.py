@@ -850,11 +850,18 @@ class NQAgentService:
                 # Mask for bars strictly after entry time
                 if entry_time:
                     import numpy as _np  # local import to avoid polluting namespace
-                    entry_ts_np = _np.datetime64(pd.Timestamp(entry_time).tz_convert("UTC"))
+                    # numpy datetime64 has no timezone concept; normalize to UTC then strip tz
+                    # to avoid noisy warnings and ensure a stable comparison baseline.
+                    entry_ts = pd.Timestamp(entry_time)
+                    if entry_ts.tzinfo is None:
+                        entry_ts = entry_ts.tz_localize("UTC")
+                    else:
+                        entry_ts = entry_ts.tz_convert("UTC")
+                    entry_ts_np = entry_ts.tz_localize(None).to_datetime64()
                     after_entry_mask = bar_times_arr > entry_ts_np
                 else:
                     import numpy as _np
-                    after_entry_mask = _np.array([True] * len(df))
+                    after_entry_mask = _np.ones(len(df), dtype=bool)
 
                 # Mask for valid bars (positive high/low)
                 valid_mask = (bar_highs > 0) & (bar_lows > 0)

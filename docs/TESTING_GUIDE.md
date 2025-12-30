@@ -46,8 +46,11 @@ python3 scripts/testing/validate_strategy.py
 
 ### Option 3: Automated Test Script
 ```bash
-# Run all unit tests
+# Run unit tests (pytest)
 ./scripts/testing/run_tests.sh
+
+# Or run pytest directly:
+pytest tests/
 ```
 
 ---

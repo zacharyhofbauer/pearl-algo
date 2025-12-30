@@ -37,21 +37,24 @@ if ! python3 -c "import pearlalgo" 2>/dev/null; then
     fi
 fi
 
-# Run tests using unified test runner
-echo "=" * 60
-echo "Running Tests (Unified Test Runner)"
-echo "=" * 60
+# Ensure pytest is available
+if ! python3 -c "import pytest" 2>/dev/null; then
+    echo "❌ pytest is not installed in this Python environment."
+    echo "   Install dev dependencies (recommended inside .venv):"
+    echo "     pip install -e '.[dev]'"
+    exit 1
+fi
+
+# Run unit tests via pytest (canonical suite under tests/)
+echo "============================================================"
+echo "Running Unit Tests (pytest)"
+echo "============================================================"
 echo ""
-echo "Note: This script uses the unified test runner (test_all.py)"
-echo "For individual test modes, run: python3 scripts/testing/test_all.py [mode]"
+echo "Tip: For integration-style validation (Telegram/signals/service/arch), use:"
+echo "  python3 scripts/testing/test_all.py [mode]"
 echo ""
 
-python3 scripts/testing/test_all.py
-
-echo ""
-echo "=" * 60
-echo "✅ All tests completed"
-echo "=" * 60
+python3 -m pytest "$@"
 
 
 

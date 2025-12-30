@@ -26,6 +26,7 @@ journal/
 telemetry/
 reports/
 state_cache/
+tests/artifacts/
 
 # Temporary debug/test images
 tmp_debug_*.png

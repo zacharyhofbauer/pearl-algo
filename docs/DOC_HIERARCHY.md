@@ -41,7 +41,7 @@ All other documents must remain consistent with this summary.
 ## 3. Testing and Validation
 
 - `TESTING_GUIDE.md`
-  - How to run tests via `scripts/testing/test_all.py` and `run_tests.sh`
+  - How to run tests via `scripts/testing/test_all.py` (validation runner) and `run_tests.sh` (pytest unit tests)
   - Explanation of major test suites (integration, IBKR, Telegram, strategy)
   - Includes guidance on when and how to use the mock data provider
   - Test coverage and gaps analysis
@@ -57,6 +57,8 @@ All other documents must remain consistent with this summary.
   - Canonical script roles and naming conventions under `scripts/`
 - `CONFIGURATION_MAP.md`
   - Mapping of environment variables, `config/config.yaml`, and code defaults to their consumers
+- `CHART_VISUAL_SCHEMA.md`
+  - Visual semantics + regression contracts for chart outputs (source: `src/pearlalgo/nq_agent/chart_generator.py`)
 
 ## 5. Cross‑references
 

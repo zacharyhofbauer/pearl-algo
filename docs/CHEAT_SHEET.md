@@ -162,7 +162,8 @@
 
 - **Offline quick-run** (fast sanity check):
   ```bash
-  python3 scripts/testing/backtest_nq_strategy.py data/historical/MNQ_1m_2m.parquet
+  ls -1 data/historical/*.parquet
+  python3 scripts/testing/backtest_nq_strategy.py data/historical/<pick_one>.parquet
   ```
 
 - **Requires command handler running:**

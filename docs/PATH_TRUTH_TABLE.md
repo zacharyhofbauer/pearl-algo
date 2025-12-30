@@ -50,8 +50,8 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - Strategy config/logic: `pearlalgo.strategies.nq_intraday.*`
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
 - **Testing scripts** (`scripts/testing/`):
-  - `test_all.py` – master test runner
-  - `run_tests.sh` – convenience wrapper
+  - `run_tests.sh` – pytest unit test runner (canonical)
+  - `test_all.py` – unified validation runner (telegram / signals / service / arch)
   - `validate_strategy.py`
   - `smoke_test_ibkr.py`
   - `check_no_secrets.py` – secret detection guardrail
@@ -61,6 +61,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `backtest_nq_strategy.py`
   - `check_signals.py`
   - `generate_dashboard_baseline.py` – generate deterministic baseline image for visual regression tests
+  - `generate_entry_exit_baselines.py` – generate deterministic entry/exit baseline images for visual regression tests
 - **Docs**:
   - `docs/TESTING_GUIDE.md`
   - `docs/MOCK_DATA_WARNING.md`

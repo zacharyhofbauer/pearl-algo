@@ -453,7 +453,7 @@ pearlalgo-dev-ai-agents/
 │   └── testing/                    # Testing and validation scripts
 │       ├── test_all.py                  # Unified test runner
 │       ├── validate_strategy.py         # Comprehensive validation
-│       ├── run_tests.sh                 # Run all tests
+│       ├── run_tests.sh                 # Run pytest unit tests
 │       ├── smoke_test_ibkr.py           # IBKR smoke test
 │       ├── check_no_secrets.py          # Secret detection guardrail
 │       ├── backtest_nq_strategy.py      # Strategy backtesting
@@ -742,7 +742,7 @@ In practice:
    - Telegram notification testing
 
 3. **Testing & Validation Scripts** (`scripts/testing/`):
-   - `test_all.py`: Unified runner (telegram / signals / short-run service)
+   - `test_all.py`: Unified runner (telegram / signals / short-run service / arch)
    - `validate_strategy.py`: Strategy validation helper
    - `smoke_test_ibkr.py`: IBKR connectivity + entitlement smoke test
    - `test_data_quality.py`, `test_e2e_simulation.py`, `test_signal_starvation_fixes.py`: Targeted validations
@@ -754,7 +754,7 @@ In practice:
 # Unified test runner (recommended)
 python3 scripts/testing/test_all.py
 
-# Or use test script
+# Unit tests (pytest)
 ./scripts/testing/run_tests.sh
 ```
 

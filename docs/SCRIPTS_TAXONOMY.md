@@ -41,9 +41,9 @@ Key scripts (to keep as canonical):
 ## Testing (`scripts/testing/`)
 
 - `test_all.py`
-  - **Role**: Unified test runner supporting modes: `telegram`, `signals`, `service`.
+  - **Role**: Unified validation runner supporting modes: `telegram`, `signals`, `service`, `arch`.
 - `run_tests.sh`
-  - **Role**: Developer convenience script; activates `.venv` if present, ensures package is installed, then calls `test_all.py`.
+  - **Role**: Developer convenience script to run the pytest unit suite under `tests/` (uses `.venv` when present).
 - `test_signal_starvation_fixes.py`
   - **Role**: Strategy regression validations (anti-starvation fixes).
 - `test_data_quality.py`, `test_e2e_simulation.py`
@@ -61,6 +61,9 @@ Key scripts (to keep as canonical):
 - `generate_dashboard_baseline.py`
   - **Role**: Generate deterministic dashboard baseline image for visual regression testing.
   - **Behavior**: Creates fixed synthetic OHLCV data and renders a chart with deterministic parameters; outputs to `tests/fixtures/charts/dashboard_baseline.png`.
+- `generate_entry_exit_baselines.py`
+  - **Role**: Generate deterministic entry/exit baseline images for visual regression testing.
+  - **Behavior**: Renders entry and exit charts; outputs to `tests/fixtures/charts/entry_baseline.png` and `tests/fixtures/charts/exit_baseline.png`.
 - `check_no_secrets.py`
   - **Role**: Secret detection guardrail; scans codebase for accidentally committed secrets/tokens.
 
