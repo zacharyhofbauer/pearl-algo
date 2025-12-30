@@ -1470,6 +1470,308 @@ class ChartGenerator:
             logger.error(f"Error generating exit chart with mplfinance: {e}", exc_info=True)
             return None
     
+    def generate_trade_chart(
+        self,
+        trade: Dict,
+        buffer_data: pd.DataFrame,
+        symbol: str = "MNQ",
+        timeframe: Optional[str] = None,
+        *,
+        lookback_bars: int = 30,
+        forward_bars: int = 15,
+        show_hold_shading: bool = True,
+        show_hud: bool = True,
+        figsize: Optional[Tuple[float, float]] = None,
+        dpi: Optional[int] = None,
+    ) -> Optional[Path]:
+        """Generate a focused chart centered on a single trade's entry-to-exit window.
+
+        This method is designed for backtest report "trade gallery" views, showing
+        each trade in isolation with clear entry/exit markers and optional hold-period
+        shading.
+
+        Args:
+            trade: Trade dict with keys:
+                - entry_time: ISO timestamp or datetime
+                - exit_time: ISO timestamp or datetime
+                - entry_price: float
+                - exit_price: float
+                - direction: "long" or "short"
+                - stop_loss: float (optional)
+                - take_profit: float (optional)
+                - pnl: float (optional, for title)
+                - exit_reason: str (optional, for title)
+            buffer_data: Full OHLCV DataFrame (will be sliced to trade window)
+            symbol: Symbol name for title
+            timeframe: Timeframe label for title
+            lookback_bars: Bars to show before entry
+            forward_bars: Bars to show after exit
+            show_hold_shading: If True, shade the entry-to-exit hold period
+            show_hud: If True, apply HUD overlays (sessions, levels)
+            figsize: Optional override for figure size
+            dpi: Optional override for DPI
+
+        Returns:
+            Path to generated PNG, or None on failure
+        """
+        if not MPLFINANCE_AVAILABLE:
+            return None
+
+        try:
+            if buffer_data is None or buffer_data.empty:
+                logger.warning("Cannot generate trade chart: buffer data is empty")
+                return None
+
+            # Parse trade data
+            entry_time = self._safe_parse_dt(trade.get("entry_time"))
+            exit_time = self._safe_parse_dt(trade.get("exit_time"))
+            entry_price = float(trade.get("entry_price") or 0)
+            exit_price = float(trade.get("exit_price") or 0)
+            direction = (trade.get("direction") or "long").lower()
+            stop_loss = float(trade.get("stop_loss") or 0)
+            take_profit = float(trade.get("take_profit") or 0)
+            pnl = trade.get("pnl")
+            exit_reason = trade.get("exit_reason") or "exit"
+
+            if entry_price <= 0:
+                logger.warning("Cannot generate trade chart: invalid entry price")
+                return None
+
+            # Slice data around trade window
+            df_full = buffer_data.copy()
+            if not isinstance(df_full.index, pd.DatetimeIndex):
+                # Try to set timestamp as index
+                if "timestamp" in df_full.columns:
+                    df_full["timestamp"] = pd.to_datetime(df_full["timestamp"])
+                    df_full = df_full.set_index("timestamp")
+                else:
+                    logger.warning("Cannot generate trade chart: no timestamp index")
+                    return None
+
+            # Find entry/exit bar indices
+            entry_idx = None
+            exit_idx = None
+            if entry_time is not None:
+                try:
+                    # Align timezone
+                    if getattr(df_full.index, "tz", None) is not None:
+                        if entry_time.tzinfo is None:
+                            entry_time = entry_time.tz_localize(df_full.index.tz)
+                        else:
+                            entry_time = entry_time.tz_convert(df_full.index.tz)
+                    entry_idx = df_full.index.get_indexer([entry_time], method="nearest")[0]
+                except Exception:
+                    pass
+
+            if exit_time is not None:
+                try:
+                    if getattr(df_full.index, "tz", None) is not None:
+                        if exit_time.tzinfo is None:
+                            exit_time = exit_time.tz_localize(df_full.index.tz)
+                        else:
+                            exit_time = exit_time.tz_convert(df_full.index.tz)
+                    exit_idx = df_full.index.get_indexer([exit_time], method="nearest")[0]
+                except Exception:
+                    pass
+
+            # Default to last bars if indices not found
+            if entry_idx is None:
+                entry_idx = max(0, len(df_full) - lookback_bars - forward_bars)
+            if exit_idx is None:
+                exit_idx = min(len(df_full) - 1, entry_idx + lookback_bars)
+
+            # Compute slice bounds
+            start_idx = max(0, entry_idx - lookback_bars)
+            end_idx = min(len(df_full), exit_idx + forward_bars + 1)
+
+            chart_data = df_full.iloc[start_idx:end_idx].copy()
+            if chart_data.empty:
+                logger.warning("Cannot generate trade chart: sliced data is empty")
+                return None
+
+            df = self._prepare_data(chart_data)
+
+            # Recompute entry/exit positions in sliced data
+            entry_x = entry_idx - start_idx
+            exit_x = exit_idx - start_idx
+
+            # Create indicators
+            addplot = self._add_indicators(df)
+
+            # Add Entry/SL/TP lines
+            if entry_price > 0:
+                entry_lines = self._add_entry_sl_tp_lines(df, entry_price, stop_loss, take_profit, direction)
+                addplot.extend(entry_lines)
+
+            # Add exit line
+            if exit_price > 0:
+                exit_series = pd.Series([exit_price] * len(df), index=df.index)
+                addplot.append(mpf.make_addplot(
+                    exit_series,
+                    color=MA_COLORS[0],
+                    width=2.5,
+                    linestyle='-',
+                    alpha=0.9,
+                    label=f'Exit: ${exit_price:.2f}'
+                ))
+
+            # RSI panel
+            volume_on = "Volume" in df.columns
+            panel_ratios = None
+            if self.config.show_rsi:
+                close = df["Close"]
+                delta = close.diff()
+                gain = delta.clip(lower=0).rolling(self.config.rsi_period).mean()
+                loss = (-delta.clip(upper=0)).rolling(self.config.rsi_period).mean()
+                rs = gain / loss.replace(0, np.nan)
+                rsi = 100 - (100 / (1 + rs))
+
+                rsi_panel = 2 if volume_on else 1
+                addplot.append(
+                    mpf.make_addplot(rsi, panel=rsi_panel, color="#b388ff", width=1.2, ylabel="RSI", alpha=0.9)
+                )
+                for lvl, a in ((30, 0.25), (50, 0.18), (70, 0.25)):
+                    addplot.append(
+                        mpf.make_addplot(
+                            pd.Series([lvl] * len(df), index=df.index),
+                            panel=rsi_panel,
+                            color=TEXT_SECONDARY,
+                            width=1.0,
+                            linestyle="--",
+                            alpha=a,
+                        )
+                    )
+                panel_ratios = (6, 2, 2) if volume_on else (7, 3)
+
+            # Title
+            signal_type = trade.get("signal_type", trade.get("type", "trade")).replace("_", " ").title()
+            result_str = ""
+            if pnl is not None:
+                result_str = f" - {'WIN' if float(pnl) > 0 else 'LOSS'} (${float(pnl):,.2f})"
+            tf_label = timeframe or self.config.timeframe
+            title = f"{symbol} {direction.upper()} {signal_type}{result_str} ({tf_label})"
+
+            # Save to temp file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+            temp_path = Path(temp_file.name)
+            temp_file.close()
+
+            # Plot kwargs
+            plot_kwargs = dict(
+                type='candle',
+                style=self.style,
+                addplot=addplot if addplot else None,
+                volume=volume_on,
+                title=title,
+                ylabel='Price ($)',
+                ylabel_lower='Volume',
+                figsize=figsize or (14, 9),
+                show_nontrading=False,
+                tight_layout=True,
+                returnfig=True,
+                scale_width_adjustment=dict(candle=1.5, volume=0.8, lines=1.0),
+                update_width_config=dict(candle_linewidth=1.4, candle_width=0.8),
+            )
+            if volume_on:
+                plot_kwargs['volume_panel'] = 1
+            if panel_ratios is not None:
+                plot_kwargs['panel_ratios'] = panel_ratios
+
+            fig, axlist = mpf.plot(df, **plot_kwargs)
+
+            # Get price axis
+            ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
+
+            if ax_price is not None:
+                # Hold-period shading (entry_x to exit_x)
+                if show_hold_shading and 0 <= entry_x < len(df) and 0 <= exit_x < len(df):
+                    shade_color = SIGNAL_LONG if pnl is not None and float(pnl) > 0 else SIGNAL_SHORT
+                    ax_price.axvspan(
+                        float(entry_x), float(exit_x),
+                        color=shade_color,
+                        alpha=0.12,
+                        zorder=ZORDER_SESSION_SHADING,
+                    )
+
+                # Entry/Exit markers
+                try:
+                    ymin, ymax = ax_price.get_ylim()
+                    marker_offset = (ymax - ymin) * 0.015
+
+                    # Entry marker (triangle pointing in trade direction)
+                    if 0 <= entry_x < len(df):
+                        entry_marker = "^" if direction == "long" else "v"
+                        entry_marker_y = entry_price - marker_offset if direction == "long" else entry_price + marker_offset
+                        ax_price.scatter(
+                            [entry_x], [entry_marker_y],
+                            marker=entry_marker,
+                            s=200,
+                            color=ENTRY_COLOR,
+                            zorder=ZORDER_TEXT_LABELS,
+                            edgecolors='white',
+                            linewidths=1.0,
+                        )
+
+                    # Exit marker (X)
+                    if 0 <= exit_x < len(df) and exit_price > 0:
+                        ax_price.scatter(
+                            [exit_x], [exit_price],
+                            marker='X',
+                            s=180,
+                            color=MA_COLORS[0],
+                            zorder=ZORDER_TEXT_LABELS,
+                            edgecolors='white',
+                            linewidths=1.0,
+                        )
+                except Exception:
+                    pass
+
+                # HUD overlays
+                if show_hud:
+                    # Build signal dict for HUD compatibility
+                    signal_dict = {
+                        "entry_price": entry_price,
+                        "stop_loss": stop_loss,
+                        "take_profit": take_profit,
+                        "direction": direction,
+                    }
+                    self._apply_hud(
+                        fig,
+                        ax_price,
+                        df,
+                        signal_dict,
+                        direction,
+                        extra_levels=[
+                            {
+                                "price": float(exit_price),
+                                "label": f"Exit ({exit_reason})",
+                                "color": MA_COLORS[0],
+                                "priority": 90,
+                                "linestyle": "-",
+                                "lw": 1.6,
+                                "alpha": 0.9,
+                            }
+                        ] if exit_price > 0 else None,
+                    )
+
+            # Save
+            fig.savefig(
+                str(temp_path),
+                dpi=dpi or self.dpi,
+                facecolor=DARK_BG,
+                edgecolor="none",
+                bbox_inches="tight",
+                pad_inches=0.25,
+            )
+            plt.close(fig)
+
+            logger.debug(f"Generated trade chart: {temp_path}")
+            return temp_path
+
+        except Exception as e:
+            logger.error(f"Error generating trade chart: {e}", exc_info=True)
+            return None
+
     def generate_backtest_chart(
         self,
         backtest_data: pd.DataFrame,
@@ -1478,8 +1780,25 @@ class ChartGenerator:
         title: str = "Backtest Results",
         performance_data: Optional[Dict] = None,
         timeframe: Optional[str] = None,
+        *,
+        figsize: Optional[Tuple[float, float]] = None,
+        dpi: Optional[int] = None,
     ) -> Optional[Path]:
-        """Generate backtest chart using mplfinance."""
+        """Generate backtest chart using mplfinance.
+
+        Args:
+            backtest_data: OHLCV DataFrame for the backtest period
+            signals: List of signal dicts with timestamp, direction, etc.
+            symbol: Symbol name for title
+            title: Chart title prefix
+            performance_data: Optional performance metrics for title
+            timeframe: Timeframe label for title
+            figsize: Optional override for figure size (default: (14, 9))
+            dpi: Optional override for DPI (default: self.dpi)
+
+        Returns:
+            Path to generated PNG, or None on failure
+        """
         if not MPLFINANCE_AVAILABLE:
             return None
         
@@ -1569,6 +1888,10 @@ class ChartGenerator:
             temp_path = Path(temp_file.name)
             temp_file.close()
             
+            # Use provided figsize/dpi or defaults
+            effective_figsize = figsize or (14, 9)
+            effective_dpi = dpi or self.dpi
+
             # Plot with mplfinance (wider candles, suppress too-much-data warning)
             mpf.plot(
                 df,
@@ -1579,10 +1902,10 @@ class ChartGenerator:
                 title=chart_title,
                 ylabel='Price ($)',
                 ylabel_lower='Volume',
-                figsize=(14, 9),
+                figsize=effective_figsize,
                 savefig=dict(
                     fname=str(temp_path),
-                    dpi=self.dpi,
+                    dpi=effective_dpi,
                     facecolor=DARK_BG,
                     edgecolor='none',
                     bbox_inches='tight'

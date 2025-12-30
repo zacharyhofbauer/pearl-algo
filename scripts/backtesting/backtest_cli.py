@@ -296,7 +296,24 @@ class BacktestReport:
         return f"backtest_{self.symbol}_{self.decision_timeframe}_{start}_{end}_{self.run_timestamp}"
 
 
-def write_report(report: BacktestReport, output_dir: Path) -> Path:
+@dataclass
+class ChartOptions:
+    """Options for chart generation in backtest reports."""
+    mode: str = "overview"  # "none", "overview", "trade_gallery"
+    trade_charts_max: int = 50
+    trade_chart_lookback_bars: int = 30
+    trade_chart_forward_bars: int = 15
+    chart_preset: str = "default"  # "default", "wide"
+    show_hud: bool = True
+
+
+def write_report(
+    report: BacktestReport,
+    output_dir: Path,
+    *,
+    chart_options: Optional[ChartOptions] = None,
+    ohlcv_data: Optional[pd.DataFrame] = None,
+) -> Path:
     """Write backtest report to directory.
     
     Creates:
@@ -304,15 +321,25 @@ def write_report(report: BacktestReport, output_dir: Path) -> Path:
         - signals.csv
         - trades.csv (if full backtest)
         - skipped_signals.csv (if any)
-        - chart_overview.png
-        - index.html (optional simple viewer)
+        - chart_overview.png (if chart_options.mode != "none")
+        - trades/ directory with per-trade PNGs (if chart_options.mode == "trade_gallery")
+        - trades.html (if trade gallery enabled)
+        - index.html (simple viewer)
     
-    Returns path to report directory.
+    Args:
+        report: BacktestReport with results
+        output_dir: Base output directory
+        chart_options: Optional chart generation options
+        ohlcv_data: Optional OHLCV DataFrame for chart generation
+    
+    Returns:
+        Path to report directory.
     """
     report_dir = output_dir / report.get_report_dir_name()
     report_dir.mkdir(parents=True, exist_ok=True)
 
     result = report.result
+    opts = chart_options or ChartOptions()
 
     # 1. Summary JSON
     summary = {
@@ -377,11 +404,22 @@ def write_report(report: BacktestReport, output_dir: Path) -> Path:
         skipped_df = pd.DataFrame([s.to_dict() for s in report.skipped_signals])
         skipped_df.to_csv(report_dir / "skipped_signals.csv", index=False)
 
-    # 5. Chart overview (if signals available)
+    # 5. Generate trade gallery (if enabled and trades exist)
+    trade_chart_paths: List[str] = []
+    if opts.mode == "trade_gallery" and result.trades and ohlcv_data is not None:
+        trade_chart_paths = _generate_trade_gallery(
+            report, report_dir, ohlcv_data, opts
+        )
+
+    # 6. Chart overview (if signals available)
     _generate_overview_chart(report, report_dir)
 
-    # 6. Index HTML
-    _generate_index_html(report, report_dir)
+    # 7. Trades HTML (if trade gallery was generated)
+    if trade_chart_paths:
+        _generate_trades_html(report, report_dir, trade_chart_paths)
+
+    # 8. Index HTML
+    _generate_index_html(report, report_dir, has_trade_gallery=bool(trade_chart_paths))
 
     return report_dir
 
@@ -409,7 +447,265 @@ def _generate_overview_chart(report: BacktestReport, report_dir: Path) -> Option
         return None
 
 
-def _generate_index_html(report: BacktestReport, report_dir: Path) -> None:
+def _generate_trade_gallery(
+    report: BacktestReport,
+    report_dir: Path,
+    ohlcv_data: pd.DataFrame,
+    opts: ChartOptions,
+) -> List[str]:
+    """Generate per-trade chart PNGs in trades/ subdirectory.
+    
+    Returns list of relative paths to generated chart files.
+    """
+    trades = report.result.trades
+    if not trades:
+        return []
+
+    trades_dir = report_dir / "trades"
+    trades_dir.mkdir(parents=True, exist_ok=True)
+
+    # Limit number of trade charts
+    max_charts = opts.trade_charts_max
+    trades_to_chart = trades[-max_charts:] if len(trades) > max_charts else trades
+
+    # Determine figsize/dpi based on preset
+    if opts.chart_preset == "wide":
+        figsize = (18, 10)
+        dpi = 180
+    else:
+        figsize = (14, 9)
+        dpi = 150
+
+    chart_gen = ChartGenerator(ChartConfig())
+    chart_paths: List[str] = []
+
+    for i, trade in enumerate(trades_to_chart):
+        try:
+            # Generate chart
+            chart_path = chart_gen.generate_trade_chart(
+                trade,
+                ohlcv_data,
+                symbol=report.symbol,
+                timeframe=report.decision_timeframe,
+                lookback_bars=opts.trade_chart_lookback_bars,
+                forward_bars=opts.trade_chart_forward_bars,
+                show_hold_shading=True,
+                show_hud=opts.show_hud,
+                figsize=figsize,
+                dpi=dpi,
+            )
+            if chart_path:
+                # Move to trades directory with sequential naming
+                dest_name = f"trade_{i+1:03d}.png"
+                dest_path = trades_dir / dest_name
+                import shutil
+                shutil.move(str(chart_path), str(dest_path))
+                chart_paths.append(f"trades/{dest_name}")
+        except Exception as e:
+            print(f"Warning: Could not generate chart for trade {i+1}: {e}")
+            continue
+
+    return chart_paths
+
+
+def _generate_trades_html(
+    report: BacktestReport,
+    report_dir: Path,
+    chart_paths: List[str],
+) -> None:
+    """Generate trades.html viewer with trade gallery."""
+    trades = report.result.trades or []
+    
+    # Build table rows
+    table_rows = ""
+    for i, (trade, chart_path) in enumerate(zip(trades[-len(chart_paths):], chart_paths)):
+        entry_time = trade.get("entry_time", "")
+        exit_time = trade.get("exit_time", "")
+        direction = trade.get("direction", "long")
+        entry_price = trade.get("entry_price", 0)
+        exit_price = trade.get("exit_price", 0)
+        pnl = trade.get("pnl", 0)
+        exit_reason = trade.get("exit_reason", "")
+        
+        pnl_class = "positive" if pnl > 0 else "negative"
+        pnl_sign = "+" if pnl > 0 else ""
+        
+        table_rows += f"""
+        <tr class="trade-row" data-chart="{chart_path}">
+            <td>{i+1}</td>
+            <td>{entry_time[:19] if entry_time else ''}</td>
+            <td>{exit_time[:19] if exit_time else ''}</td>
+            <td class="{direction}">{direction.upper()}</td>
+            <td>${entry_price:,.2f}</td>
+            <td>${exit_price:,.2f}</td>
+            <td class="{pnl_class}">{pnl_sign}${pnl:,.2f}</td>
+            <td>{exit_reason}</td>
+        </tr>
+        """
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Trade Gallery - {report.symbol}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }}
+        h1, h2 {{ color: #fff; }}
+        .container {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 1800px;
+            margin: 0 auto;
+        }}
+        @media (max-width: 1200px) {{
+            .container {{ grid-template-columns: 1fr; }}
+        }}
+        .trades-panel {{
+            background: #252525;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }}
+        .chart-panel {{
+            background: #252525;
+            border-radius: 8px;
+            padding: 15px;
+            position: sticky;
+            top: 20px;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }}
+        th, td {{
+            border: 1px solid #444;
+            padding: 8px 10px;
+            text-align: left;
+        }}
+        th {{ background: #333; position: sticky; top: 0; }}
+        tr:nth-child(even) {{ background: #2a2a2a; }}
+        tr.trade-row {{ cursor: pointer; }}
+        tr.trade-row:hover {{ background: #3a3a3a; }}
+        tr.trade-row.selected {{ background: #2962ff33; border-left: 3px solid #2962ff; }}
+        .positive {{ color: #26a69a; }}
+        .negative {{ color: #ef5350; }}
+        .long {{ color: #26a69a; }}
+        .short {{ color: #ef5350; }}
+        img {{
+            max-width: 100%;
+            border-radius: 4px;
+        }}
+        .back-link {{
+            display: inline-block;
+            margin-bottom: 15px;
+            color: #64b5f6;
+            text-decoration: none;
+        }}
+        .back-link:hover {{ text-decoration: underline; }}
+        .stats {{
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }}
+        .stat {{
+            background: #333;
+            padding: 10px 15px;
+            border-radius: 4px;
+        }}
+        .stat-label {{ font-size: 12px; color: #888; }}
+        .stat-value {{ font-size: 18px; font-weight: bold; }}
+    </style>
+</head>
+<body>
+    <a href="index.html" class="back-link">← Back to Summary</a>
+    <h1>Trade Gallery: {report.symbol}</h1>
+    
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-label">Total Trades</div>
+            <div class="stat-value">{len(trades)}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Win Rate</div>
+            <div class="stat-value">{(report.result.win_rate or 0) * 100:.1f}%</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Total P&L</div>
+            <div class="stat-value {'positive' if (report.result.total_pnl or 0) > 0 else 'negative'}">${report.result.total_pnl or 0:,.2f}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Charts Generated</div>
+            <div class="stat-value">{len(chart_paths)}</div>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="trades-panel">
+            <h2>Trades</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Entry Time</th>
+                        <th>Exit Time</th>
+                        <th>Dir</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>P&L</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {table_rows}
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="chart-panel">
+            <h2>Trade Chart</h2>
+            <img id="trade-chart" src="{chart_paths[0] if chart_paths else ''}" alt="Select a trade to view chart">
+        </div>
+    </div>
+    
+    <script>
+        document.querySelectorAll('.trade-row').forEach(row => {{
+            row.addEventListener('click', function() {{
+                // Update selection
+                document.querySelectorAll('.trade-row').forEach(r => r.classList.remove('selected'));
+                this.classList.add('selected');
+                
+                // Update chart
+                const chartPath = this.dataset.chart;
+                document.getElementById('trade-chart').src = chartPath;
+            }});
+        }});
+        
+        // Select first row by default
+        const firstRow = document.querySelector('.trade-row');
+        if (firstRow) firstRow.classList.add('selected');
+    </script>
+</body>
+</html>
+"""
+    with open(report_dir / "trades.html", "w") as f:
+        f.write(html)
+
+
+def _generate_index_html(
+    report: BacktestReport,
+    report_dir: Path,
+    *,
+    has_trade_gallery: bool = False,
+) -> None:
     """Generate simple HTML viewer."""
     result = report.result
     dr = report.date_range
@@ -431,32 +727,152 @@ def _generate_index_html(report: BacktestReport, report_dir: Path) -> None:
     for name, value in metrics:
         metrics_rows += f"<tr><td>{name}</td><td>{value}</td></tr>\n"
 
-    # Verification summary
+    # Verification summary with enhanced explainability
     verification_html = ""
+    is_quiet_backtest = result.total_signals < 5  # Few or no signals
+    
     if result.verification:
         v = result.verification
+        
+        # Determine alert status
+        alert_class = "alert-warning" if is_quiet_backtest else ""
+        alert_message = ""
+        if result.total_signals == 0:
+            alert_message = '<div class="alert alert-danger">No signals were generated during this backtest period. Review the bottlenecks and gate reasons below to understand why.</div>'
+        elif result.total_signals < 5:
+            alert_message = '<div class="alert alert-warning">Very few signals were generated. This may indicate restrictive filter conditions or unsuitable market conditions during this period.</div>'
+        
         verification_html = f"""
-        <h3>Verification Summary</h3>
-        <ul>
-            <li>Signals/Day: {v.signals_per_day:.1f}</li>
-            <li>Trading Days: {v.trading_days}</li>
-        </ul>
+        <h2>Strategy Health & Explainability</h2>
+        {alert_message}
+        
+        <div class="verification-grid">
+            <div class="verification-card">
+                <h4>Signal Density</h4>
+                <div class="stat-row">
+                    <span class="stat-label">Signals/Day:</span>
+                    <span class="stat-value {'low-value' if v.signals_per_day < 1 else ''}">{v.signals_per_day:.2f}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Signals/Hour:</span>
+                    <span class="stat-value">{v.signals_per_hour:.3f}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Trading Days:</span>
+                    <span class="stat-value">{v.trading_days}</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Trading Hours:</span>
+                    <span class="stat-value">{v.trading_hours}</span>
+                </div>
+            </div>
         """
+        
+        # Signal type distribution
+        if v.signal_type_distribution:
+            verification_html += """
+            <div class="verification-card">
+                <h4>Signal Type Distribution</h4>
+            """
+            for sig_type, count in sorted(v.signal_type_distribution.items(), key=lambda x: -x[1]):
+                verification_html += f'<div class="stat-row"><span class="stat-label">{sig_type}:</span><span class="stat-value">{count}</span></div>'
+            verification_html += "</div>"
+        
+        # Regime distribution
+        if v.regime_distribution:
+            verification_html += """
+            <div class="verification-card">
+                <h4>Regime Distribution</h4>
+            """
+            for regime, count in sorted(v.regime_distribution.items(), key=lambda x: -x[1]):
+                verification_html += f'<div class="stat-row"><span class="stat-label">{regime}:</span><span class="stat-value">{count}</span></div>'
+            verification_html += "</div>"
+        
+        # Volatility distribution
+        if v.volatility_distribution:
+            verification_html += """
+            <div class="verification-card">
+                <h4>Volatility Distribution</h4>
+            """
+            for vol_level, count in sorted(v.volatility_distribution.items(), key=lambda x: -x[1]):
+                verification_html += f'<div class="stat-row"><span class="stat-label">{vol_level}:</span><span class="stat-value">{count}</span></div>'
+            verification_html += "</div>"
+        
+        # Session distribution
+        if v.session_distribution:
+            verification_html += """
+            <div class="verification-card">
+                <h4>Session Distribution</h4>
+            """
+            for session, count in sorted(v.session_distribution.items(), key=lambda x: -x[1]):
+                verification_html += f'<div class="stat-row"><span class="stat-label">{session}:</span><span class="stat-value">{count}</span></div>'
+            verification_html += "</div>"
+        
+        verification_html += "</div>"  # Close verification-grid
+        
+        # Bottlenecks section (highlighted for quiet backtests)
         if v.bottleneck_summary:
-            verification_html += "<h4>Bottlenecks</h4><ul>"
-            for k, cnt in sorted(v.bottleneck_summary.items(), key=lambda x: -x[1])[:5]:
-                verification_html += f"<li>{k}: {cnt}</li>"
-            verification_html += "</ul>"
+            bottleneck_class = "highlight" if is_quiet_backtest else ""
+            verification_html += f"""
+            <div class="bottleneck-section {bottleneck_class}">
+                <h3>Bottlenecks (Why Signals Were Rejected)</h3>
+                <p class="section-hint">These conditions prevented potential signals from being generated:</p>
+                <table class="bottleneck-table">
+                    <thead><tr><th>Condition</th><th>Count</th><th>%</th></tr></thead>
+                    <tbody>
+            """
+            total_bottlenecks = sum(v.bottleneck_summary.values())
+            for k, cnt in sorted(v.bottleneck_summary.items(), key=lambda x: -x[1])[:10]:
+                pct = (cnt / total_bottlenecks * 100) if total_bottlenecks > 0 else 0
+                verification_html += f'<tr><td>{k}</td><td>{cnt:,}</td><td>{pct:.1f}%</td></tr>'
+            verification_html += """
+                    </tbody>
+                </table>
+            </div>
+            """
+        
+        # Top gate reasons (most important for explaining quiet backtests)
+        if v.top_gate_reasons:
+            gate_class = "highlight" if is_quiet_backtest else ""
+            verification_html += f"""
+            <div class="gate-reasons-section {gate_class}">
+                <h3>Top Gate Reasons</h3>
+                <p class="section-hint">Most common reasons the scanner gate rejected potential entries:</p>
+                <ol class="gate-reasons-list">
+            """
+            for reason in v.top_gate_reasons[:10]:
+                verification_html += f'<li>{reason}</li>'
+            verification_html += """
+                </ol>
+            </div>
+            """
+        
+        # Execution summary (for full backtests)
         if v.execution_summary:
-            verification_html += "<h4>Execution</h4><ul>"
+            verification_html += """
+            <div class="execution-section">
+                <h3>Execution Summary</h3>
+                <p class="section-hint">Trade execution outcomes:</p>
+                <table class="execution-table">
+                    <tbody>
+            """
             for k, cnt in v.execution_summary.items():
-                verification_html += f"<li>{k}: {cnt}</li>"
-            verification_html += "</ul>"
+                verification_html += f'<tr><td>{k}</td><td>{cnt:,}</td></tr>'
+            verification_html += """
+                    </tbody>
+                </table>
+            </div>
+            """
 
     # Date range warning
     warning_html = ""
     if dr.warning:
-        warning_html = f'<p style="color: orange;">⚠️ {dr.warning}</p>'
+        warning_html = f'<p style="color: orange;">Warning: {dr.warning}</p>'
+
+    # Trade gallery link
+    trade_gallery_html = ""
+    if has_trade_gallery:
+        trade_gallery_html = '<a href="trades.html" class="gallery-link">View Trade Gallery</a>'
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -464,7 +880,7 @@ def _generate_index_html(report: BacktestReport, report_dir: Path) -> None:
     <title>Backtest Report - {report.symbol}</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 20px; background: #1a1a1a; color: #e0e0e0; }}
-        h1, h2, h3, h4 {{ color: #fff; }}
+        h1, h2, h3, h4 {{ color: #fff; margin-top: 1.5em; }}
         table {{ border-collapse: collapse; margin: 10px 0; }}
         th, td {{ border: 1px solid #444; padding: 8px 12px; text-align: left; }}
         th {{ background: #333; }}
@@ -474,6 +890,90 @@ def _generate_index_html(report: BacktestReport, report_dir: Path) -> None:
         img {{ max-width: 100%; margin: 10px 0; border-radius: 8px; }}
         .files {{ margin: 20px 0; }}
         .files a {{ color: #64b5f6; margin-right: 15px; }}
+        .gallery-link {{
+            display: inline-block;
+            background: #2962ff;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: bold;
+            margin: 15px 0;
+        }}
+        .gallery-link:hover {{ background: #1e4bd8; }}
+        
+        /* Verification/Explainability styles */
+        .alert {{
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-weight: 500;
+        }}
+        .alert-danger {{
+            background: #ef535033;
+            border-left: 4px solid #ef5350;
+            color: #ffcdd2;
+        }}
+        .alert-warning {{
+            background: #ff980033;
+            border-left: 4px solid #ff9800;
+            color: #ffe0b2;
+        }}
+        .verification-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px;
+            margin: 15px 0;
+        }}
+        .verification-card {{
+            background: #252525;
+            border-radius: 8px;
+            padding: 15px;
+        }}
+        .verification-card h4 {{
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .stat-row {{
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            border-bottom: 1px solid #333;
+        }}
+        .stat-row:last-child {{ border-bottom: none; }}
+        .stat-label {{ color: #aaa; }}
+        .stat-value {{ font-weight: bold; color: #fff; }}
+        .stat-value.low-value {{ color: #ff9800; }}
+        
+        .bottleneck-section, .gate-reasons-section, .execution-section {{
+            background: #252525;
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin: 15px 0;
+        }}
+        .bottleneck-section.highlight, .gate-reasons-section.highlight {{
+            border-left: 4px solid #ff9800;
+            background: #2a2520;
+        }}
+        .section-hint {{
+            color: #888;
+            font-size: 13px;
+            margin: 5px 0 15px 0;
+        }}
+        .bottleneck-table, .execution-table {{
+            width: 100%;
+        }}
+        .gate-reasons-list {{
+            margin: 0;
+            padding-left: 20px;
+        }}
+        .gate-reasons-list li {{
+            padding: 5px 0;
+            color: #ddd;
+        }}
     </style>
 </head>
 <body>
@@ -482,6 +982,8 @@ def _generate_index_html(report: BacktestReport, report_dir: Path) -> None:
     <p>Timeframe: {report.decision_timeframe}</p>
     <p>Run: {report.run_timestamp}</p>
     {warning_html}
+
+    {trade_gallery_html}
 
     <h2>Performance Metrics</h2>
     <table>
@@ -675,6 +1177,43 @@ def main() -> int:
         p.add_argument("--lookback-weeks", type=int, help="Alternative to --start: weeks of lookback from end")
         p.add_argument("--output-dir", default="reports", help="Output directory for reports")
         p.add_argument("--no-report", action="store_true", help="Skip writing report files")
+        
+        # Chart generation options
+        p.add_argument(
+            "--charts",
+            choices=["none", "overview", "trade_gallery"],
+            default="overview",
+            help="Chart generation mode (default: overview)"
+        )
+        p.add_argument(
+            "--trade-charts-max",
+            type=int,
+            default=50,
+            help="Max number of per-trade charts to generate (default: 50)"
+        )
+        p.add_argument(
+            "--trade-chart-lookback",
+            type=int,
+            default=30,
+            help="Bars to show before entry in trade charts (default: 30)"
+        )
+        p.add_argument(
+            "--trade-chart-forward",
+            type=int,
+            default=15,
+            help="Bars to show after exit in trade charts (default: 15)"
+        )
+        p.add_argument(
+            "--chart-preset",
+            choices=["default", "wide"],
+            default="default",
+            help="Chart size preset (default: default, wide: larger for better readability)"
+        )
+        p.add_argument(
+            "--no-hud",
+            action="store_true",
+            help="Disable HUD overlays on trade charts"
+        )
 
     # Signal mode
     signal_parser = subparsers.add_parser("signal", help="Signal-only backtest (fast)")
@@ -706,16 +1245,47 @@ def main() -> int:
         # Write report
         if not args.no_report:
             output_dir = Path(args.output_dir)
-            report_dir = write_report(report, output_dir)
-            print(f"\nReport written to: {report_dir}")
-
-            # Generate chart if we have data and signals
-            if report.result.signals:
+            
+            # Build chart options from CLI args
+            chart_options = ChartOptions(
+                mode=args.charts,
+                trade_charts_max=args.trade_charts_max,
+                trade_chart_lookback_bars=args.trade_chart_lookback,
+                trade_chart_forward_bars=args.trade_chart_forward,
+                chart_preset=args.chart_preset,
+                show_hud=not args.no_hud,
+            )
+            
+            # Load OHLCV data for chart generation if needed
+            ohlcv_data = None
+            if args.charts != "none" and (report.result.signals or report.result.trades):
                 try:
                     df = load_ohlcv_data(Path(args.data_path))
                     start = pd.to_datetime(args.start, utc=True) if args.start else None
                     end = pd.to_datetime(args.end, utc=True) if args.end else None
-                    df_sliced, _ = slice_by_date_range(df, start, end, getattr(args, "lookback_weeks", None))
+                    ohlcv_data, _ = slice_by_date_range(df, start, end, getattr(args, "lookback_weeks", None))
+                except Exception as e:
+                    print(f"Warning: Could not load data for charts: {e}")
+            
+            # Write report with chart options
+            report_dir = write_report(
+                report,
+                output_dir,
+                chart_options=chart_options,
+                ohlcv_data=ohlcv_data,
+            )
+            print(f"\nReport written to: {report_dir}")
+
+            # Generate overview chart if we have data and signals (and charts mode is not none)
+            if args.charts != "none" and report.result.signals and ohlcv_data is not None:
+                try:
+                    # Determine figsize/dpi based on preset
+                    if args.chart_preset == "wide":
+                        figsize = (18, 10)
+                        dpi = 180
+                    else:
+                        figsize = (14, 9)
+                        dpi = 150
 
                     chart_gen = ChartGenerator(ChartConfig())
                     
@@ -724,19 +1294,27 @@ def main() -> int:
                     title = f"Backtest Results ({dr.actual_start.strftime('%Y-%m-%d')} to {dr.actual_end.strftime('%Y-%m-%d')}) - {report.result.total_signals} Signals - {args.decision} decision"
                     
                     chart_path = chart_gen.generate_backtest_chart(
-                        df_sliced,
+                        ohlcv_data,
                         report.result.signals,
                         symbol=report.symbol,
                         title=title,
                         timeframe=args.decision,
+                        figsize=figsize,
+                        dpi=dpi,
                     )
                     if chart_path:
                         import shutil
                         dest = report_dir / "chart_overview.png"
                         shutil.move(str(chart_path), str(dest))
-                        print(f"Chart saved to: {dest}")
+                        print(f"Overview chart saved to: {dest}")
                 except Exception as e:
-                    print(f"Warning: Could not generate chart: {e}")
+                    print(f"Warning: Could not generate overview chart: {e}")
+            
+            # Print trade gallery info if generated
+            if args.charts == "trade_gallery" and report.result.trades:
+                trades_html = report_dir / "trades.html"
+                if trades_html.exists():
+                    print(f"Trade gallery available at: {trades_html}")
 
         return 0
 

@@ -132,6 +132,31 @@ class NQIntradayConfig:
     hud_show_rsi: bool = True
     hud_rsi_period: int = 14
 
+    # ==========================================================================
+    # EXPERIMENTAL: Bayesian Quality Gate (non-default)
+    # Uses Beta-Binomial posterior for uncertainty-aware signal filtering.
+    # Enable with: bayesian_gate_enabled: true in config.yaml
+    # ==========================================================================
+    bayesian_gate_enabled: bool = False
+    bayesian_gate_min_credible_wr: float = 0.52  # Minimum credible lower bound
+    bayesian_gate_credible_level: float = 0.95   # 95% credible interval
+    bayesian_gate_min_samples: int = 10          # Min samples before strict gating
+    bayesian_gate_time_decay: float = 0.0        # Time decay rate (0 = none)
+    bayesian_gate_max_history_days: int = 90     # Max age of historical data
+
+    # ==========================================================================
+    # EXPERIMENTAL: ML Signal Filter (non-default)
+    # Uses offline-trained model for signal quality filtering.
+    # Requires: pip install pearlalgo[ml]
+    # Enable with: ml_filter_enabled: true in config.yaml
+    # ==========================================================================
+    ml_filter_enabled: bool = False
+    ml_filter_model_path: Optional[str] = None   # Path to trained model (.joblib)
+    ml_filter_model_version: str = "v0.0.0"      # Model version for tracking
+    ml_filter_min_probability: float = 0.55      # Min P(win) to pass filter
+    ml_filter_calibration_mode: bool = False     # Use for confidence calibration
+    ml_filter_calibration_scaling: float = 0.5   # Scaling factor for calibration
+
     @classmethod
     def from_config_file(cls, config_path: Optional[Path] = None, variant: Optional[str] = None) -> "NQIntradayConfig":
         """Load configuration from config.yaml file.
@@ -283,6 +308,36 @@ class NQIntradayConfig:
                 config.hud_show_rsi = bool(hud_cfg["show_rsi"])
             if "rsi_period" in hud_cfg:
                 config.hud_rsi_period = int(hud_cfg["rsi_period"])
+
+            # Load experimental Bayesian gate settings
+            bayesian_cfg = config_data.get("bayesian_gate", {}) or {}
+            if "enabled" in bayesian_cfg:
+                config.bayesian_gate_enabled = bool(bayesian_cfg["enabled"])
+            if "min_credible_wr" in bayesian_cfg:
+                config.bayesian_gate_min_credible_wr = float(bayesian_cfg["min_credible_wr"])
+            if "credible_level" in bayesian_cfg:
+                config.bayesian_gate_credible_level = float(bayesian_cfg["credible_level"])
+            if "min_samples" in bayesian_cfg:
+                config.bayesian_gate_min_samples = int(bayesian_cfg["min_samples"])
+            if "time_decay" in bayesian_cfg:
+                config.bayesian_gate_time_decay = float(bayesian_cfg["time_decay"])
+            if "max_history_days" in bayesian_cfg:
+                config.bayesian_gate_max_history_days = int(bayesian_cfg["max_history_days"])
+
+            # Load experimental ML filter settings
+            ml_cfg = config_data.get("ml_filter", {}) or {}
+            if "enabled" in ml_cfg:
+                config.ml_filter_enabled = bool(ml_cfg["enabled"])
+            if "model_path" in ml_cfg:
+                config.ml_filter_model_path = str(ml_cfg["model_path"])
+            if "model_version" in ml_cfg:
+                config.ml_filter_model_version = str(ml_cfg["model_version"])
+            if "min_probability" in ml_cfg:
+                config.ml_filter_min_probability = float(ml_cfg["min_probability"])
+            if "calibration_mode" in ml_cfg:
+                config.ml_filter_calibration_mode = bool(ml_cfg["calibration_mode"])
+            if "calibration_scaling" in ml_cfg:
+                config.ml_filter_calibration_scaling = float(ml_cfg["calibration_scaling"])
 
         except Exception as e:  # pragma: no cover - defensive logging
             import logging
