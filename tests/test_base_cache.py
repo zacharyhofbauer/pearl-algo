@@ -282,3 +282,4 @@ async def test_historical_fallback_extracts_timestamp_from_column(monkeypatch: p
     assert "index" not in df.columns, "Strategy buffer should not have index column"
 
 
+

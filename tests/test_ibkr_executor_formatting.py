@@ -227,3 +227,4 @@ class TestModuleImportIsDeterministic:
             assert _fmt_int(100) == "100"
             assert _fmt_int(None) == "N/A"
 
+

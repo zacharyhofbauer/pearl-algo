@@ -478,3 +478,4 @@ class TestMessageLimits:
         if sent_messages:
             assert len(sent_messages[0]) <= TELEGRAM_MESSAGE_LIMIT
 
+
