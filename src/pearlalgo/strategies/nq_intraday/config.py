@@ -2,15 +2,36 @@
 NQ Intraday Strategy Configuration
 
 Configuration settings for MNQ intraday trading strategy.
+Supports strategy variants for A/B testing different configurations.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from pearlalgo.config.config_file import load_config_yaml
+
+
+# Default signal types based on backtest analysis
+# Winners: sr_bounce, mean_reversion, momentum_short
+# Losers: momentum_long (0/5 wins), engulfing (0/3 wins)
+DEFAULT_ENABLED_SIGNALS = [
+    "sr_bounce",
+    "mean_reversion_long",
+    "mean_reversion_short",
+    "momentum_short",
+    "breakout_long",
+    "breakout_short",
+    "vwap_reversion",
+]
+
+DEFAULT_DISABLED_SIGNALS = [
+    "momentum_long",      # 0/5 wins in backtest - broken
+    "engulfing_short",    # 0/3 wins in backtest - broken
+    "engulfing_long",     # Untested, disable for safety
+]
 
 
 @dataclass
@@ -20,6 +41,8 @@ class NQIntradayConfig:
     This config is MNQ-native: all sizing, tick values, and risk assumptions
     are expressed directly in terms of MNQ contracts ($2/point), matching the
     production docs and `config/config.yaml`.
+    
+    Supports strategy variants via enabled_signals/disabled_signals for A/B testing.
     """
 
     # Symbol
@@ -34,15 +57,15 @@ class NQIntradayConfig:
     # Signal parameters
     lookback_periods: int = 20  # Number of bars for indicators
     min_volume: int = 100  # Minimum volume threshold
-    volatility_threshold: float = 0.001  # Minimum volatility (0.1% of price)
+    volatility_threshold: float = 0.0005  # Reduced from 0.001 - less restrictive
 
     # Risk parameters (Prop Firm Style, MNQ-native)
-    max_position_size: int = 15  # Maximum MNQ contracts per trade
+    max_position_size: int = 25  # Increased for $200+ scalp targets
     min_position_size: int = 5   # Minimum MNQ contracts per trade
     stop_loss_ticks: int = 15    # 15 ticks ≈ 3.75 points
     take_profit_ticks: int = 22  # 22 ticks ≈ 5.5 points (≈1.5:1 R:R)
     stop_loss_atr_multiplier: float = 1.5  # Tighter stops for scalping
-    take_profit_risk_reward: float = 1.5   # 1.5:1 R/R for quick scalps
+    take_profit_risk_reward: float = 1.2   # Reduced from 1.5 - less restrictive
     max_risk_per_trade: float = 0.01       # 1% max risk per trade
 
     # MNQ contract specs
@@ -51,13 +74,39 @@ class NQIntradayConfig:
     # Time filters (Prop Firm Trading Hours)
     start_time: str = "09:30"  # Market open (ET)
     end_time: str = "16:00"    # Market close (ET)
-    # Avoid lunch lull for scalping (11:30-13:00 ET)
-    avoid_lunch_lull: bool = True
+    # Avoid lunch lull for scalping (11:30-13:00 ET) - now optional
+    avoid_lunch_lull: bool = False  # Disabled by default - was blocking 72 signals
 
-    # Enable/disable features
+    # Enable/disable features (legacy - use enabled_signals instead)
     enable_momentum: bool = True
     enable_mean_reversion: bool = True
     enable_breakout: bool = True
+
+    # Strategy variant configuration (A/B testing)
+    # Signal types to enable (if empty, uses legacy enable_* flags)
+    enabled_signals: List[str] = field(default_factory=lambda: DEFAULT_ENABLED_SIGNALS.copy())
+    # Signal types to explicitly disable (takes precedence over enabled_signals)
+    disabled_signals: List[str] = field(default_factory=lambda: DEFAULT_DISABLED_SIGNALS.copy())
+    
+    # Dynamic position sizing (for $200+ scalp targets)
+    enable_dynamic_sizing: bool = True
+    base_contracts: int = 5          # Base position size
+    high_conf_contracts: int = 15    # For confidence > 0.8
+    max_conf_contracts: int = 25     # For confidence > 0.9 + winning signal type
+    high_conf_threshold: float = 0.80
+    max_conf_threshold: float = 0.90
+    
+    # Scalp target presets (points)
+    scalp_target_points: float = 20.0   # Default target for $200 with 5 contracts
+    scalp_stop_points: float = 12.0     # Default stop
+    use_scalp_presets: bool = False     # Override ATR-based stops/targets
+    
+    # Winning signal types (get priority in dynamic sizing)
+    winning_signal_types: List[str] = field(default_factory=lambda: [
+        "sr_bounce",
+        "mean_reversion_long",
+        "momentum_short",
+    ])
 
     # Virtual PnL tracking (signal grading without real IBKR fills)
     virtual_pnl_enabled: bool = True
@@ -84,13 +133,15 @@ class NQIntradayConfig:
     hud_rsi_period: int = 14
 
     @classmethod
-    def from_config_file(cls, config_path: Optional[Path] = None) -> "NQIntradayConfig":
+    def from_config_file(cls, config_path: Optional[Path] = None, variant: Optional[str] = None) -> "NQIntradayConfig":
         """Load configuration from config.yaml file.
 
         Uses the unified config loader with environment variable substitution.
+        Supports strategy variants for A/B testing.
 
         Args:
             config_path: Path to config.yaml (defaults to config/config.yaml)
+            variant: Optional variant name to load (e.g., "aggressive_scalp", "conservative")
 
         Returns:
             NQIntradayConfig instance
@@ -140,12 +191,59 @@ class NQIntradayConfig:
             if "min_position_size" in risk_config:
                 config.min_position_size = int(risk_config["min_position_size"])
 
+            # Load signal generation settings
+            signals_cfg = config_data.get("signals", {}) or {}
+            if "min_risk_reward" in signals_cfg:
+                config.take_profit_risk_reward = float(signals_cfg["min_risk_reward"])
+            if "min_confidence" in signals_cfg:
+                # Store for use in signal filtering
+                pass  # Handled by signal_generator
+            if "volatility_threshold" in signals_cfg:
+                config.volatility_threshold = float(signals_cfg["volatility_threshold"])
+            if "avoid_lunch_lull" in signals_cfg:
+                config.avoid_lunch_lull = bool(signals_cfg["avoid_lunch_lull"])
+
             # Load virtual PnL settings
             vpnl_cfg = config_data.get("virtual_pnl", {}) or {}
             if "enabled" in vpnl_cfg:
                 config.virtual_pnl_enabled = bool(vpnl_cfg["enabled"])
             if "intrabar_tiebreak" in vpnl_cfg:
                 config.virtual_pnl_tiebreak = str(vpnl_cfg["intrabar_tiebreak"])
+
+            # Load strategy variant settings
+            strategy_cfg = config_data.get("strategy", {}) or {}
+            if "enabled_signals" in strategy_cfg:
+                config.enabled_signals = list(strategy_cfg["enabled_signals"])
+            if "disabled_signals" in strategy_cfg:
+                config.disabled_signals = list(strategy_cfg["disabled_signals"])
+            if "enable_dynamic_sizing" in strategy_cfg:
+                config.enable_dynamic_sizing = bool(strategy_cfg["enable_dynamic_sizing"])
+            if "base_contracts" in strategy_cfg:
+                config.base_contracts = int(strategy_cfg["base_contracts"])
+            if "high_conf_contracts" in strategy_cfg:
+                config.high_conf_contracts = int(strategy_cfg["high_conf_contracts"])
+            if "max_conf_contracts" in strategy_cfg:
+                config.max_conf_contracts = int(strategy_cfg["max_conf_contracts"])
+            if "high_conf_threshold" in strategy_cfg:
+                config.high_conf_threshold = float(strategy_cfg["high_conf_threshold"])
+            if "max_conf_threshold" in strategy_cfg:
+                config.max_conf_threshold = float(strategy_cfg["max_conf_threshold"])
+            if "winning_signal_types" in strategy_cfg:
+                config.winning_signal_types = list(strategy_cfg["winning_signal_types"])
+            
+            # Scalp presets
+            if "scalp_target_points" in strategy_cfg:
+                config.scalp_target_points = float(strategy_cfg["scalp_target_points"])
+            if "scalp_stop_points" in strategy_cfg:
+                config.scalp_stop_points = float(strategy_cfg["scalp_stop_points"])
+            if "use_scalp_presets" in strategy_cfg:
+                config.use_scalp_presets = bool(strategy_cfg["use_scalp_presets"])
+
+            # Load specific variant if requested
+            if variant:
+                variants_cfg = config_data.get("strategy_variants", {}) or {}
+                if variant in variants_cfg:
+                    config._apply_variant(variants_cfg[variant])
 
             # Load HUD settings
             hud_cfg = config_data.get("hud", {}) or {}
@@ -193,3 +291,142 @@ class NQIntradayConfig:
             logger.warning(f"Could not parse config data: {e}")
 
         return config
+
+    def _apply_variant(self, variant_cfg: dict) -> None:
+        """Apply a strategy variant configuration overlay."""
+        if "enabled_signals" in variant_cfg:
+            self.enabled_signals = list(variant_cfg["enabled_signals"])
+        if "disabled_signals" in variant_cfg:
+            self.disabled_signals = list(variant_cfg["disabled_signals"])
+        if "min_risk_reward" in variant_cfg:
+            self.take_profit_risk_reward = float(variant_cfg["min_risk_reward"])
+        if "min_confidence" in variant_cfg:
+            # This would need to be passed to signal generator
+            pass
+        if "volatility_threshold" in variant_cfg:
+            self.volatility_threshold = float(variant_cfg["volatility_threshold"])
+        if "target_points" in variant_cfg:
+            self.scalp_target_points = float(variant_cfg["target_points"])
+            self.use_scalp_presets = True
+        if "max_stop_points" in variant_cfg:
+            self.scalp_stop_points = float(variant_cfg["max_stop_points"])
+            self.use_scalp_presets = True
+        if "position_multiplier" in variant_cfg:
+            mult = float(variant_cfg["position_multiplier"])
+            self.base_contracts = int(self.base_contracts * mult)
+            self.high_conf_contracts = int(self.high_conf_contracts * mult)
+            self.max_conf_contracts = int(self.max_conf_contracts * mult)
+        if "base_contracts" in variant_cfg:
+            self.base_contracts = int(variant_cfg["base_contracts"])
+        if "avoid_lunch_lull" in variant_cfg:
+            self.avoid_lunch_lull = bool(variant_cfg["avoid_lunch_lull"])
+
+    def is_signal_enabled(self, signal_type: str) -> bool:
+        """Check if a signal type is enabled based on configuration.
+        
+        Args:
+            signal_type: Signal type name (e.g., "momentum_long", "sr_bounce")
+            
+        Returns:
+            True if the signal type should be generated
+        """
+        # Disabled list takes precedence
+        if signal_type in self.disabled_signals:
+            return False
+        
+        # If enabled list is specified, signal must be in it
+        if self.enabled_signals:
+            # Check for exact match or prefix match (e.g., "sr_bounce" matches "sr_bounce_long")
+            for enabled in self.enabled_signals:
+                if signal_type == enabled or signal_type.startswith(enabled):
+                    return True
+            return False
+        
+        # Fall back to legacy enable_* flags
+        if "momentum" in signal_type:
+            return self.enable_momentum
+        if "mean_reversion" in signal_type:
+            return self.enable_mean_reversion
+        if "breakout" in signal_type:
+            return self.enable_breakout
+        
+        # Default: enabled
+        return True
+
+    def get_position_size(self, confidence: float, signal_type: str) -> int:
+        """Calculate position size based on confidence and signal type.
+        
+        For $200+ scalp targets with dynamic sizing:
+        - Base: 5 contracts
+        - High confidence (>0.8): 10-15 contracts
+        - Max confidence (>0.9) + winning type: 20-25 contracts
+        
+        Args:
+            confidence: Signal confidence (0.0 to 1.0)
+            signal_type: Signal type name
+            
+        Returns:
+            Position size in contracts
+        """
+        if not self.enable_dynamic_sizing:
+            return self.base_contracts
+        
+        # Check if winning signal type
+        is_winning_type = any(
+            signal_type == wt or signal_type.startswith(wt)
+            for wt in self.winning_signal_types
+        )
+        
+        # Max confidence + winning type = max contracts
+        if confidence >= self.max_conf_threshold and is_winning_type:
+            return self.max_conf_contracts
+        
+        # High confidence = high contracts
+        if confidence >= self.high_conf_threshold:
+            return self.high_conf_contracts
+        
+        # Default: base contracts
+        return self.base_contracts
+
+    @classmethod
+    def get_variant_presets(cls) -> dict:
+        """Get predefined strategy variant configurations.
+        
+        Returns:
+            Dict of variant name -> variant config dict
+        """
+        return {
+            "default": {
+                "description": "Balanced default - disabled broken signals",
+                "enabled_signals": DEFAULT_ENABLED_SIGNALS,
+                "disabled_signals": DEFAULT_DISABLED_SIGNALS,
+                "min_risk_reward": 1.2,
+                "volatility_threshold": 0.0005,
+            },
+            "aggressive_scalp": {
+                "description": "Aggressive scalping - winners only, tight targets",
+                "enabled_signals": ["sr_bounce", "mean_reversion"],
+                "disabled_signals": ["momentum_long", "engulfing", "breakout"],
+                "min_risk_reward": 1.0,
+                "target_points": 20,
+                "max_stop_points": 15,
+                "base_contracts": 10,
+            },
+            "conservative": {
+                "description": "Conservative - high confidence only",
+                "enabled_signals": ["sr_bounce", "mean_reversion_long", "momentum_short"],
+                "disabled_signals": ["momentum_long", "engulfing", "breakout"],
+                "min_risk_reward": 1.5,
+                "min_confidence": 0.75,
+            },
+            "high_volume": {
+                "description": "High volume scalping - 25 contracts on best setups",
+                "enabled_signals": ["sr_bounce", "mean_reversion"],
+                "disabled_signals": ["momentum_long", "engulfing"],
+                "base_contracts": 15,
+                "high_conf_contracts": 20,
+                "max_conf_contracts": 25,
+                "target_points": 10,  # Tighter target for larger size
+                "max_stop_points": 8,
+            },
+        }

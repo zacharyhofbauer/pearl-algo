@@ -405,8 +405,25 @@ class NQScanner:
         atr = float(latest.get("atr", 0))
 
         def calculate_stop_take(direction: str, entry: float, atr_val: float) -> tuple[float, float]:
-            """Calculate stop loss and take profit using ATR."""
-            if atr_val == 0:
+            """Calculate stop loss and take profit using ATR or scalp presets.
+            
+            If use_scalp_presets is enabled in config, uses fixed point values
+            optimized for $200+ scalp targets:
+            | Contracts | Target Pts | Stop Pts | R:R  | Target $ |
+            |-----------|-----------|----------|------|----------|
+            | 5         | 25        | 15       | 1.67 | $250     |
+            | 10        | 15        | 10       | 1.50 | $300     |
+            | 15        | 12        | 8        | 1.50 | $360     |
+            | 25        | 10        | 6        | 1.67 | $500     |
+            """
+            # Check for scalp presets (fixed point values for consistent targets)
+            use_scalp = getattr(self.config, "use_scalp_presets", False)
+            if use_scalp:
+                scalp_target = getattr(self.config, "scalp_target_points", 20.0)
+                scalp_stop = getattr(self.config, "scalp_stop_points", 12.0)
+                stop_loss_dist = scalp_stop
+                take_profit_dist = scalp_target
+            elif atr_val == 0:
                 # Fallback to tick-based if ATR not available
                 stop_loss_dist = self.config.stop_loss_ticks * 0.25
                 take_profit_dist = self.config.take_profit_ticks * 0.25
@@ -544,9 +561,10 @@ class NQScanner:
             logger.debug("Skipping signals during lunch lull (prop firm style)")
             return signals
 
-        # Momentum signal (fast MA crosses above slow MA with MACD confirmation)
+        # Momentum LONG signal (fast MA crosses above slow MA with MACD confirmation)
+        # NOTE: momentum_long has 0/5 win rate in backtest - disabled by default via config
         # Disable momentum during lunch lull (low volume, choppy)
-        if self.config.enable_momentum and session != "lunch_lull":
+        if self.config.enable_momentum and self.config.is_signal_enabled("momentum_long") and session != "lunch_lull":
             if len(df) >= 2:
                 prev = df.iloc[-2]
                 if (
@@ -624,7 +642,8 @@ class NQScanner:
                         logger.debug("Momentum long signal rejected due to MTF conflict")
 
         # Momentum SHORT signal (fast MA crosses below slow MA with MACD confirmation)
-        if self.config.enable_momentum and session != "lunch_lull":
+        # NOTE: momentum_short has positive win rate - keep enabled
+        if self.config.enable_momentum and self.config.is_signal_enabled("momentum_short") and session != "lunch_lull":
             if len(df) >= 2:
                 prev = df.iloc[-2]
                 if (
@@ -697,8 +716,9 @@ class NQScanner:
                     else:
                         logger.debug("Momentum short signal rejected due to MTF conflict")
 
-        # Mean reversion signal (RSI oversold with multiple confirmations)
-        if self.config.enable_mean_reversion and session != "opening":
+        # Mean reversion LONG signal (RSI oversold with multiple confirmations)
+        # NOTE: mean_reversion_long has 2 wins in backtest - keep enabled
+        if self.config.enable_mean_reversion and self.config.is_signal_enabled("mean_reversion_long") and session != "opening":
             # Mean reversion: check relative RSI movement OR absolute level
             # During fast moves, RSI may not reach <35 but can drop rapidly (40→35 in 3 bars)
             # Relative movement captures momentum shifts during fast pullbacks
@@ -802,7 +822,7 @@ class NQScanner:
                     logger.debug("Mean reversion long signal rejected due to strong MTF conflict")
 
         # Mean reversion SHORT signal (RSI overbought with price at upper Bollinger Band)
-        if self.config.enable_mean_reversion and session != "opening":
+        if self.config.enable_mean_reversion and self.config.is_signal_enabled("mean_reversion_short") and session != "opening":
             # Mean reversion SHORT: check relative RSI movement up OR absolute overbought
             rsi = latest.get("rsi", 50)
             rsi_momentum_up = False
@@ -893,8 +913,8 @@ class NQScanner:
                 else:
                     logger.debug("Mean reversion short signal rejected due to strong MTF conflict")
 
-        # Breakout signal (price breaks above recent high with volume)
-        if self.config.enable_breakout:
+        # Breakout LONG signal (price breaks above recent high with volume)
+        if self.config.enable_breakout and self.config.is_signal_enabled("breakout_long"):
             if len(df) >= 5:
                 recent_high = df["high"].tail(5).max()
                 
@@ -1018,7 +1038,7 @@ class NQScanner:
                         logger.debug("Breakout long signal rejected due to MTF conflict")
 
         # Breakout SHORT signal (price breaks below recent low with volume)
-        if self.config.enable_breakout:
+        if self.config.enable_breakout and self.config.is_signal_enabled("breakout_short"):
             if len(df) >= 5:
                 recent_low = df["low"].tail(5).min()
                 
@@ -1131,7 +1151,7 @@ class NQScanner:
                         logger.debug("Breakout short signal rejected due to MTF conflict")
 
         # VWAP reversion signals (price returning to VWAP)
-        if self.config.enable_mean_reversion and vwap_data.get("vwap", 0) > 0:
+        if self.config.enable_mean_reversion and self.config.is_signal_enabled("vwap_reversion") and vwap_data.get("vwap", 0) > 0:
             vwap_signals = self._scan_vwap_reversion(
                 df, latest, current_price, atr, vwap_data, regime,
                 mtf_analysis, volume_profile_data, order_flow_data,
@@ -1140,8 +1160,9 @@ class NQScanner:
             signals.extend(vwap_signals)
 
         # Support/Resistance bounce signals
+        # NOTE: sr_bounce has 3 wins in backtest - best performing signal type
         sr_levels = self._identify_support_resistance(df)
-        if sr_levels:
+        if sr_levels and self.config.is_signal_enabled("sr_bounce"):
             sr_signals = self._scan_sr_levels(
                 df, latest, current_price, atr, sr_levels, regime,
                 mtf_analysis, vwap_data, volume_profile_data, order_flow_data,
@@ -1150,12 +1171,14 @@ class NQScanner:
             signals.extend(sr_signals)
 
         # Engulfing candle pattern signals
-        engulfing_signals = self._scan_engulfing_patterns(
-            df, latest, current_price, atr, regime,
-            mtf_analysis, vwap_data, volume_profile_data, order_flow_data,
-            calculate_stop_take, calculate_signal_score
-        )
-        signals.extend(engulfing_signals)
+        # NOTE: engulfing has 0/3 wins in backtest - disabled by default via config
+        if self.config.is_signal_enabled("engulfing"):
+            engulfing_signals = self._scan_engulfing_patterns(
+                df, latest, current_price, atr, regime,
+                mtf_analysis, vwap_data, volume_profile_data, order_flow_data,
+                calculate_stop_take, calculate_signal_score
+            )
+            signals.extend(engulfing_signals)
 
         # Attach a compact HUD context to every signal for TradingView-style chart rendering.
         # Keep this computed once per scan cycle (not per signal) for performance.

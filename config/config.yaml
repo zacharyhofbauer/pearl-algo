@@ -78,8 +78,74 @@ data:
 signals:
   duplicate_window_seconds: 300      # 5 minutes
   min_confidence: 0.50               # Minimum signal confidence
-  min_risk_reward: 1.5               # Minimum R:R ratio
+  min_risk_reward: 1.2               # Reduced from 1.5 - was blocking 98 signals
   duplicate_price_threshold_pct: 0.5 # 0.5% price difference for duplicate detection
+  volatility_threshold: 0.0005       # Reduced from 0.001 - was blocking 543 signals
+  avoid_lunch_lull: false            # Disabled - was blocking 72 signals
+
+# Strategy configuration (signal types, position sizing, A/B testing)
+strategy:
+  # Signal types to enable (based on backtest analysis)
+  # Winners: sr_bounce (3 wins), mean_reversion_long (2 wins), momentum_short (1 win)
+  enabled_signals:
+    - sr_bounce
+    - mean_reversion_long
+    - mean_reversion_short
+    - momentum_short
+    - breakout_long
+    - breakout_short
+    - vwap_reversion
+  
+  # Signal types to disable (0 wins in backtest)
+  disabled_signals:
+    - momentum_long      # 0/5 wins - broken
+    - engulfing_short    # 0/3 wins - broken
+    - engulfing_long     # Untested - disabled for safety
+  
+  # Dynamic position sizing for $200+ scalp targets
+  enable_dynamic_sizing: true
+  base_contracts: 5          # Base position size
+  high_conf_contracts: 15    # For confidence > 0.8
+  max_conf_contracts: 25     # For confidence > 0.9 + winning signal type
+  high_conf_threshold: 0.80
+  max_conf_threshold: 0.90
+  
+  # Winning signal types (get max contracts when high confidence)
+  winning_signal_types:
+    - sr_bounce
+    - mean_reversion_long
+    - momentum_short
+  
+  # Scalp presets (optional - override ATR-based stops/targets)
+  use_scalp_presets: false
+  scalp_target_points: 20.0   # For $200 with 5 contracts
+  scalp_stop_points: 12.0
+
+# Strategy variants for A/B testing
+# Use: python scripts/backtesting/run_variants.py --data-path <file>
+strategy_variants:
+  aggressive_scalp:
+    enabled_signals: [sr_bounce, mean_reversion]
+    disabled_signals: [momentum_long, engulfing, breakout]
+    min_risk_reward: 1.0
+    target_points: 20
+    max_stop_points: 15
+    base_contracts: 10
+  
+  conservative:
+    enabled_signals: [sr_bounce, mean_reversion_long, momentum_short]
+    disabled_signals: [momentum_long, engulfing, breakout]
+    min_risk_reward: 1.5
+    min_confidence: 0.75
+  
+  high_volume:
+    enabled_signals: [sr_bounce, mean_reversion]
+    disabled_signals: [momentum_long, engulfing]
+    base_contracts: 15
+    high_conf_contracts: 20
+    max_conf_contracts: 25
+    target_points: 10
+    max_stop_points: 8
 
 # Performance tracking
 performance:

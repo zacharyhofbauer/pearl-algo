@@ -723,6 +723,8 @@ class TradeSimulator:
         risk_budget_dollars: Optional[float] = None,
         max_contracts: int = 10,
         max_stop_points: Optional[float] = None,  # Stop distance cap
+        # Dynamic sizing (confidence-based)
+        config: Optional["NQIntradayConfig"] = None,  # Pass config for dynamic sizing
     ):
         """
         Initialize trade simulator.
@@ -741,6 +743,7 @@ class TradeSimulator:
             risk_budget_dollars: Direct dollar risk budget per trade (overrides account_balance calc)
             max_contracts: Maximum contracts per trade
             max_stop_points: Maximum allowed stop distance in points (trades exceeding this are skipped)
+            config: NQIntradayConfig for dynamic sizing based on confidence and signal type
         """
         self.tick_value = tick_value
         self.slippage_ticks = slippage_ticks
@@ -759,6 +762,9 @@ class TradeSimulator:
         self.max_stop_points = max_stop_points
         self.use_risk_sizing = account_balance is not None or risk_budget_dollars is not None
         
+        # Dynamic sizing config
+        self.config = config
+        
         self.open_trades: List[Trade] = []
         self.closed_trades: List[Trade] = []
         self.skipped_signals: List[SkippedSignal] = []
@@ -766,7 +772,16 @@ class TradeSimulator:
         self.peak_equity: float = 0.0
 
     def _compute_position_size(self, signal: Dict) -> Tuple[int, Optional[str]]:
-        """Compute position size from risk config.
+        """Compute position size from risk config and/or dynamic sizing.
+        
+        Dynamic sizing (if config provided with enable_dynamic_sizing=True):
+        - Base: 5 contracts
+        - High confidence (>0.8): 10-15 contracts  
+        - Max confidence (>0.9) + winning signal type: 20-25 contracts
+        
+        Risk-based sizing (if account_balance or risk_budget_dollars provided):
+        - Computes contracts from stop distance and risk budget
+        - Capped by max_contracts
         
         Returns (contracts, skip_reason) where skip_reason is None if trade should proceed.
         """
@@ -790,7 +805,29 @@ class TradeSimulator:
         if self.max_stop_points and stop_distance > self.max_stop_points:
             return 0, f"stop_exceeds_cap ({stop_distance:.1f} > {self.max_stop_points})"
 
-        # If no risk-based sizing, return max_contracts
+        # Dynamic sizing based on confidence and signal type
+        if self.config and getattr(self.config, "enable_dynamic_sizing", False):
+            confidence = signal.get("confidence", 0.5)
+            signal_type = signal.get("type", "unknown")
+            contracts = self.config.get_position_size(confidence, signal_type)
+            
+            # Still apply risk-based cap if configured
+            if self.use_risk_sizing:
+                if self.risk_budget_dollars:
+                    risk_budget = self.risk_budget_dollars
+                elif self.account_balance:
+                    risk_budget = self.account_balance * self.max_risk_per_trade
+                else:
+                    risk_budget = float("inf")
+                
+                risk_per_contract = stop_distance * self.tick_value
+                if risk_per_contract > 0:
+                    max_from_risk = int(risk_budget / risk_per_contract)
+                    contracts = min(contracts, max_from_risk)
+            
+            return max(1, contracts), None
+
+        # Risk-based sizing (if no dynamic sizing)
         if not self.use_risk_sizing:
             return self.max_contracts, None
 
@@ -1339,6 +1376,7 @@ def run_full_backtest(
         risk_budget_dollars=risk_budget_dollars,
         max_contracts=max_contracts,
         max_stop_points=max_stop_points,
+        config=config,  # Pass config for dynamic sizing based on confidence/signal type
     )
     
     closed_trades, metrics = simulator.simulate(
@@ -1481,6 +1519,7 @@ def run_full_backtest_5m_decision(
         risk_budget_dollars=risk_budget_dollars,
         max_contracts=max_contracts,
         max_stop_points=max_stop_points,
+        config=config,  # Pass config for dynamic sizing based on confidence/signal type
     )
 
     closed_trades, metrics = simulator.simulate(
