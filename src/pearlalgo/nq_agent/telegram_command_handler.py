@@ -73,6 +73,24 @@ except ImportError:
     ChartGenerator = None
     ChartConfig = None
 
+# Claude client for /ai_patch command (optional [llm] extra)
+try:
+    from pearlalgo.utils.claude_client import (
+        ClaudeClient,
+        ClaudeClientError,
+        ClaudeNotAvailableError,
+        ClaudeAPIKeyMissingError,
+        ClaudeAPIError,
+        ANTHROPIC_AVAILABLE,
+    )
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+    ClaudeClient = None  # type: ignore
+    ClaudeClientError = Exception  # type: ignore
+    ClaudeNotAvailableError = Exception  # type: ignore
+    ClaudeAPIKeyMissingError = Exception  # type: ignore
+    ClaudeAPIError = Exception  # type: ignore
+
 
 class TelegramCommandHandler:
     """
@@ -183,6 +201,9 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("start_agent", self._handle_start_agent))
         self.application.add_handler(CommandHandler("stop_agent", self._handle_stop_agent))
         self.application.add_handler(CommandHandler("restart_agent", self._handle_restart_agent))
+        
+        # AI/LLM commands (optional, requires [llm] extra)
+        self.application.add_handler(CommandHandler("ai_patch", self._handle_ai_patch))
         
         # Callback query handler (for inline buttons)
         self.application.add_handler(CallbackQueryHandler(self._handle_callback))
@@ -4417,6 +4438,306 @@ class TelegramCommandHandler:
             gateway_api_ready=gateway_api_ready,
         )
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+
+    # -------------------------------------------------------------------------
+    # AI/LLM Commands (optional, requires [llm] extra)
+    # -------------------------------------------------------------------------
+    
+    # Paths that are blocked from /ai_patch for security
+    _AI_PATCH_BLOCKED_PATHS = {
+        "data/",
+        "logs/",
+        ".env",
+        "ibkr/",
+        ".venv/",
+        ".git/",
+        "__pycache__/",
+        "*.pyc",
+        "*.pyo",
+        "*.parquet",
+        "*.json",  # block state/config JSON by default
+    }
+    
+    # File size limit for reading (prevent massive files in prompt)
+    _AI_PATCH_MAX_FILE_SIZE = 100_000  # 100KB
+    
+    def _is_path_blocked(self, file_path: str) -> bool:
+        """Check if a path is blocked from AI patch operations."""
+        normalized = file_path.replace("\\", "/").lower()
+        
+        for blocked in self._AI_PATCH_BLOCKED_PATHS:
+            if blocked.startswith("*"):
+                # Wildcard suffix match
+                if normalized.endswith(blocked[1:]):
+                    return True
+            elif blocked.endswith("/"):
+                # Directory prefix match
+                if normalized.startswith(blocked) or f"/{blocked}" in normalized:
+                    return True
+            else:
+                # Exact match or filename match
+                if normalized == blocked or normalized.endswith(f"/{blocked}"):
+                    return True
+        
+        return False
+    
+    async def _handle_ai_patch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle /ai_patch command - generate a unified diff patch using Claude.
+        
+        Usage: /ai_patch <file1>[,file2,...] <task description>
+        
+        Example: /ai_patch src/pearlalgo/utils/retry.py add exponential backoff with jitter
+        """
+        logger.info(f"Received /ai_patch command from chat {update.effective_chat.id}")
+        
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        # Check if anthropic is available
+        if not ANTHROPIC_AVAILABLE:
+            await self._send_message_or_edit(
+                update, context,
+                "❌ *AI Patch Not Available*\n\n"
+                "The `anthropic` package is not installed.\n"
+                "Install with: `pip install -e .[llm]`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        # Parse arguments: first token is file(s), rest is the task
+        args = context.args if context.args else []
+        
+        if len(args) < 2:
+            await self._send_message_or_edit(
+                update, context,
+                "📝 *AI Patch - Usage*\n\n"
+                "`/ai_patch <file(s)> <task>`\n\n"
+                "*Examples:*\n"
+                "• `/ai_patch src/pearlalgo/utils/retry.py add jitter to backoff`\n"
+                "• `/ai_patch src/foo.py,src/bar.py refactor X into Y`\n\n"
+                "*Notes:*\n"
+                "• First argument is file path(s), comma-separated for multiple\n"
+                "• Remaining arguments are the task description\n"
+                "• Blocked paths: `data/`, `logs/`, `.env`, `ibkr/`, `.venv/`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        # Parse file paths (comma-separated first argument)
+        file_arg = args[0]
+        file_paths = [p.strip() for p in file_arg.split(",") if p.strip()]
+        task = " ".join(args[1:])
+        
+        if not file_paths:
+            await self._send_message_or_edit(
+                update, context,
+                "❌ No file paths provided.\n\nUsage: `/ai_patch <file(s)> <task>`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        if not task:
+            await self._send_message_or_edit(
+                update, context,
+                "❌ No task provided.\n\nUsage: `/ai_patch <file(s)> <task>`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        # Check for blocked paths
+        blocked_files = [f for f in file_paths if self._is_path_blocked(f)]
+        if blocked_files:
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ *Blocked Path(s)*\n\n"
+                f"The following paths are not allowed:\n"
+                f"`{', '.join(blocked_files)}`\n\n"
+                f"Blocked: `data/`, `logs/`, `.env`, `ibkr/`, `.venv/`, `.git/`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        # Show typing indicator
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        # Send "working" message
+        await self._send_message_or_edit(
+            update, context,
+            f"🤖 *Generating patch...*\n\n"
+            f"*Files:* `{', '.join(file_paths)}`\n"
+            f"*Task:* {task[:100]}{'...' if len(task) > 100 else ''}\n\n"
+            f"This may take 30-60 seconds.",
+            reply_markup=None,
+        )
+        
+        # Get project root
+        project_root = Path(__file__).parent.parent.parent.parent
+        
+        # Read file contents
+        files_content: Dict[str, str] = {}
+        missing_files: List[str] = []
+        too_large_files: List[str] = []
+        
+        for file_path in file_paths:
+            full_path = project_root / file_path
+            
+            # Security: ensure path is within project
+            try:
+                resolved = full_path.resolve()
+                if not str(resolved).startswith(str(project_root.resolve())):
+                    logger.warning(f"Path traversal attempt blocked: {file_path}")
+                    missing_files.append(f"{file_path} (outside project)")
+                    continue
+            except Exception:
+                missing_files.append(file_path)
+                continue
+            
+            if not full_path.exists():
+                missing_files.append(file_path)
+                continue
+            
+            if not full_path.is_file():
+                missing_files.append(f"{file_path} (not a file)")
+                continue
+            
+            # Check file size
+            try:
+                file_size = full_path.stat().st_size
+                if file_size > self._AI_PATCH_MAX_FILE_SIZE:
+                    too_large_files.append(f"{file_path} ({file_size // 1024}KB)")
+                    continue
+            except Exception:
+                missing_files.append(f"{file_path} (unreadable)")
+                continue
+            
+            # Read file content
+            try:
+                content = full_path.read_text(encoding="utf-8", errors="replace")
+                files_content[file_path] = content
+            except Exception as e:
+                logger.warning(f"Could not read {file_path}: {e}")
+                missing_files.append(f"{file_path} (read error)")
+        
+        # Report errors
+        if missing_files or too_large_files:
+            error_parts = []
+            if missing_files:
+                error_parts.append(f"*Missing/invalid:* `{', '.join(missing_files)}`")
+            if too_large_files:
+                error_parts.append(f"*Too large (>100KB):* `{', '.join(too_large_files)}`")
+            
+            if not files_content:
+                await self._send_message_or_edit(
+                    update, context,
+                    f"❌ *No valid files to process*\n\n" + "\n".join(error_parts),
+                    reply_markup=self._get_back_to_menu_button(),
+                )
+                return
+            else:
+                # Some files valid, some not - warn but continue
+                logger.warning(f"Some files could not be read: {missing_files + too_large_files}")
+        
+        # Try to create Claude client and generate patch
+        try:
+            client = ClaudeClient()
+            diff_output = client.generate_patch(files=files_content, task=task)
+            
+        except ClaudeAPIKeyMissingError:
+            await self._send_message_or_edit(
+                update, context,
+                "❌ *API Key Not Configured*\n\n"
+                "`ANTHROPIC_API_KEY` not set in `.env`.\n\n"
+                "Get your API key from https://console.anthropic.com/",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        except ClaudeAPIError as e:
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ *Claude API Error*\n\n`{str(e)[:200]}`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        except ClaudeClientError as e:
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ *Claude Error*\n\n`{str(e)[:200]}`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        except Exception as e:
+            logger.error(f"Unexpected error in ai_patch: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ *Unexpected Error*\n\n`{str(e)[:200]}`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        # Check if we got a valid diff
+        if not diff_output or not diff_output.strip():
+            await self._send_message_or_edit(
+                update, context,
+                "⚠️ *Empty Response*\n\n"
+                "Claude returned an empty response. The task may be unclear or the files may already satisfy the requirement.",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        # Decide delivery method based on size
+        # Telegram message limit is ~4096 chars, but we want some margin
+        INLINE_LIMIT = 3500
+        
+        if len(diff_output) <= INLINE_LIMIT:
+            # Send inline (use code block for formatting)
+            # Escape any backticks in the diff to prevent markdown issues
+            safe_diff = diff_output.replace("`", "'")
+            message = (
+                f"✅ *Patch Generated*\n\n"
+                f"*Files:* `{', '.join(file_paths)}`\n"
+                f"*Task:* {task[:80]}{'...' if len(task) > 80 else ''}\n\n"
+                f"```diff\n{safe_diff}\n```\n\n"
+                f"💡 Apply with: `git apply patch.diff`"
+            )
+            await self._send_message_or_edit(
+                update, context,
+                message,
+                reply_markup=self._get_back_to_menu_button(),
+            )
+        else:
+            # Send as document
+            import io
+            diff_bytes = diff_output.encode("utf-8")
+            diff_file = io.BytesIO(diff_bytes)
+            diff_file.name = "patch.diff"
+            
+            # Send the file
+            await context.bot.send_chat_action(
+                chat_id=update.effective_chat.id,
+                action="upload_document"
+            )
+            
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=diff_file,
+                filename="patch.diff",
+                caption=(
+                    f"✅ *Patch Generated*\n\n"
+                    f"*Files:* `{', '.join(file_paths)}`\n"
+                    f"*Task:* {task[:80]}{'...' if len(task) > 80 else ''}\n\n"
+                    f"💡 Apply with: `git apply patch.diff`"
+                ),
+                parse_mode="Markdown",
+            )
+            
+            # Send follow-up message with buttons
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📄 Patch file sent above.",
+                reply_markup=self._get_back_to_menu_button(),
+            )
 
     async def _handle_signal_detail(
         self,

@@ -38,6 +38,7 @@ It combines quick start steps, command setup, and command behavior.
    glossary - Explain key terms (Scans, Signals, Gates, etc.)
    chart - Generate on-demand price chart
    settings - Customize Telegram UI preferences
+   ai_patch - Generate code patch via Claude (requires setup)
    help - Show available commands
    ```
 5. BotFather will confirm the commands are set.
@@ -265,6 +266,54 @@ Generates an on-demand price chart.
 - Currently **informational only** (use `/stop_agent` and `/start_agent` instead)
 - These commands acknowledge receipt but don't perform actions
 - For full control, use the service control commands above
+
+### 3.11 `/ai_patch` (AI Code Generation)
+
+Generate code patches using Claude AI directly from Telegram. Useful for quick fixes when you're on mobile.
+
+> **Full documentation:** See [AI_PATCH_GUIDE.md](AI_PATCH_GUIDE.md) for complete setup, usage, and troubleshooting.
+
+**Setup Required:**
+
+1. Install the LLM extra: `pip install -e .[llm]`
+2. Add your Anthropic API key to `.env`:
+   ```bash
+   ANTHROPIC_API_KEY=sk-ant-api03-...
+   ```
+3. Restart the Telegram command handler
+
+**Usage:**
+
+```
+/ai_patch <file(s)> <task description>
+```
+
+**Examples:**
+
+- `/ai_patch src/pearlalgo/utils/retry.py add exponential backoff with jitter`
+- `/ai_patch src/foo.py,src/bar.py refactor the logging to use structured format`
+
+**Features:**
+
+- First argument is file path(s), comma-separated for multiple files
+- Remaining arguments are the task description
+- Returns a unified diff patch (inline for small patches, `.diff` file for large ones)
+- Apply with: `git apply patch.diff`
+
+**Security:**
+
+- Only your authorized chat ID can use this command
+- Blocked paths: `data/`, `logs/`, `.env`, `ibkr/`, `.venv/`, `.git/`
+- File size limit: 100KB per file
+- Path traversal protection
+
+**Optional Configuration (in `.env`):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANTHROPIC_MODEL` | `claude-sonnet-4-20250514` | Claude model to use |
+| `ANTHROPIC_MAX_TOKENS` | `4096` | Max response tokens |
+| `ANTHROPIC_TIMEOUT` | `120` | Request timeout (seconds) |
 
 ---
 

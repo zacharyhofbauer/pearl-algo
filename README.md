@@ -30,6 +30,8 @@ cp env.example .env
 
 - **[PROJECT_SUMMARY.md](docs/PROJECT_SUMMARY.md)** - Complete system reference (single source of truth)
 - **[NQ_AGENT_GUIDE.md](docs/NQ_AGENT_GUIDE.md)** - Operational guide (how to run and operate)
+- **[TELEGRAM_GUIDE.md](docs/TELEGRAM_GUIDE.md)** - Telegram integration and remote control
+- **[AI_PATCH_GUIDE.md](docs/AI_PATCH_GUIDE.md)** - Generate code patches via Telegram + Claude
 - **[TESTING_GUIDE.md](docs/TESTING_GUIDE.md)** - Complete testing guide
 - **[GATEWAY.md](docs/GATEWAY.md)** - IBKR Gateway setup
 

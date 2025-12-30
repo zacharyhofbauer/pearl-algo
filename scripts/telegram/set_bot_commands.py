@@ -62,6 +62,8 @@ def set_bot_commands():
         BotCommand('config', 'Show key configuration values'),
         BotCommand('health', 'Check agent health status'),
         BotCommand('help', 'Show available commands'),
+        # AI/LLM (requires [llm] extra)
+        BotCommand('ai_patch', 'Generate code patch via Claude'),
     ]
     
     try:

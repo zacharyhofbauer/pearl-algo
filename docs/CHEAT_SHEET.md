@@ -114,6 +114,12 @@
   /settings           # UI preferences (dashboard buttons, auto-chart, etc.)
   ```
 
+- **AI Code Generation** (requires setup, see below):
+  ```
+  /ai_patch <file(s)> <task>   # Generate code patch via Claude
+  ```
+  Example: `/ai_patch src/pearlalgo/utils/retry.py add jitter to backoff`
+
 ### From Terminal (Traditional)
 
 - **Service lifecycle**
@@ -266,5 +272,51 @@ journalctl -u pearlalgo-mnq.service -p err
 - **Services & scripts**: `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/`
 - **Logs**: stdout/stderr (foreground), journald (systemd), or Docker logs
 - **Deep-dive docs**: `NQ_AGENT_GUIDE.md`, `GATEWAY.md`, `TELEGRAM_GUIDE.md`, `PROJECT_SUMMARY.md`
+
+---
+
+## 8. AI Patch Setup (Optional)
+
+Generate code patches from Telegram using Claude AI. Useful for quick fixes when mobile.
+
+> **Full guide:** See [AI_PATCH_GUIDE.md](AI_PATCH_GUIDE.md) for detailed documentation.
+
+**One-time setup:**
+
+```bash
+# Install LLM extra
+pip install -e .[llm]
+
+# Add to .env (get key from https://console.anthropic.com/)
+echo 'ANTHROPIC_API_KEY=sk-ant-api03-...' >> .env
+
+# Restart command handler
+pkill -f telegram_command_handler
+./scripts/telegram/start_command_handler.sh --background
+```
+
+**Usage from Telegram:**
+
+```
+/ai_patch <file(s)> <task>
+```
+
+**Examples:**
+
+```
+/ai_patch src/pearlalgo/utils/retry.py add jitter to backoff
+/ai_patch src/foo.py,src/bar.py refactor X to Y
+```
+
+**Apply the patch:**
+
+```bash
+# Save the .diff file from Telegram, then:
+git apply patch.diff
+```
+
+**Blocked paths** (for security): `data/`, `logs/`, `.env`, `ibkr/`, `.venv/`
+
+---
 
 This cheat sheet is the **primary quick-reference** for PEARLalgo operations. Keep it updated as workflows evolve.
