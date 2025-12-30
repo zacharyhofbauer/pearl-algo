@@ -28,6 +28,7 @@ from pearlalgo.utils.paths import parse_utc_timestamp
 from pearlalgo.utils.retry import async_retry_with_backoff
 from pearlalgo.utils.telegram_alerts import (
     TelegramAlerts,
+    TelegramPrefs,
     _format_separator,
     _format_uptime,
     _format_currency,
@@ -40,6 +41,7 @@ from pearlalgo.utils.telegram_alerts import (
     format_gate_status,
     format_service_status,
     format_session_window,
+    safe_label,
     # New UX improvement helpers
     format_activity_pulse,
     format_next_session_time,
@@ -107,6 +109,9 @@ class NQAgentTelegramNotifier:
         self.chat_id = chat_id
         self.telegram: Optional[TelegramAlerts] = None
         self.chart_generator: Optional[ChartGenerator] = None
+        
+        # Initialize Telegram UI preferences
+        self.prefs = TelegramPrefs()
 
         # Initialize TelegramAlerts if credentials provided
         if enabled and bot_token and chat_id:
@@ -193,9 +198,10 @@ class NQAgentTelegramNotifier:
                     logger.debug(f"Could not build signal buttons: {e}")
                     reply_markup = None
             
-            # Generate and send chart if available
+            # Generate and send chart if auto-chart is enabled and chart generator is available
             chart_path = None
-            if self.chart_generator and buffer_data is not None and not buffer_data.empty:
+            auto_chart = self.prefs.auto_chart_on_signal if self.prefs else False
+            if auto_chart and self.chart_generator and buffer_data is not None and not buffer_data.empty:
                 try:
                     symbol = signal.get("symbol", "MNQ")
                     chart_path = self.chart_generator.generate_entry_chart(signal, buffer_data, symbol)
@@ -205,7 +211,7 @@ class NQAgentTelegramNotifier:
             # Send message (disable dedupe for signals: prices/confidence differences matter).
             success = await self.telegram.send_message(message, dedupe=False, reply_markup=reply_markup)
             
-            # Send chart if generated
+            # Send chart if generated (only when auto_chart is enabled)
             if chart_path and chart_path.exists():
                 try:
                     await self._send_photo(chart_path)
@@ -496,7 +502,7 @@ class NQAgentTelegramNotifier:
         Returns:
             Formatted message string
         """
-        symbol = signal.get("symbol", "NQ")  # Default to NQ (using NQ with scaled contract sizes)
+        symbol = signal.get("symbol", "MNQ")  # Default to MNQ (micro Nasdaq)
         signal_type = signal.get("type", "unknown").replace("_", " ").title()
         direction = signal.get("direction", "long").upper()
         entry_price = signal.get("entry_price", 0)
@@ -565,9 +571,8 @@ class NQAgentTelegramNotifier:
             conf_tier = "Low"
             conf_emoji = "🔴"
 
-        # Build message
-        message = f"🎯 *{symbol} {direction} | {signal_type}*\n"
-        message += "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        # Build message (mobile-friendly: no long separators)
+        message = f"🎯 *{symbol} {direction} | {signal_type}*\n\n"
 
         # Regime and session context
         message += f"*REGIME:* {regime_str}\n"
@@ -1013,7 +1018,7 @@ class NQAgentTelegramNotifier:
         Returns:
             Formatted message string
         """
-        symbol = signal.get("symbol", "NQ")  # Default to NQ (using NQ with scaled contract sizes)
+        symbol = signal.get("symbol", "MNQ")  # Default to MNQ (micro Nasdaq)
         signal_type = signal.get("type", "unknown")
         direction = signal.get("direction", "").upper()
         entry_price = signal.get("entry_price", 0)
@@ -1547,10 +1552,26 @@ class NQAgentTelegramNotifier:
                 except Exception:
                     pass
             
-            # Build optional inline buttons when command handler is running
-            # Push dashboards: keep calm-minimal by default (no inline menu buttons).
-            # Operators can use /status, /activity, or open the command handler UI when needed.
-            await self.telegram.send_message(message)
+            # Build optional inline buttons when dashboard_buttons pref is enabled AND
+            # the command handler is running. Default is off (calm-minimal).
+            reply_markup = None
+            show_buttons = self.prefs.dashboard_buttons if self.prefs else False
+            if show_buttons and _is_command_handler_running():
+                try:
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("🏠 Menu", callback_data="start"),
+                            InlineKeyboardButton("📈 Activity", callback_data="activity"),
+                            InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
+                        ],
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                except Exception as e:
+                    logger.debug(f"Could not build dashboard buttons: {e}")
+                    reply_markup = None
+            
+            await self.telegram.send_message(message, reply_markup=reply_markup)
             return True
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_dashboard")
@@ -1578,6 +1599,15 @@ class NQAgentTelegramNotifier:
 
         try:
             is_recovery = alert_type == "recovery"
+            
+            # Non-critical alerts can be snoozed (except recovery and circuit_breaker)
+            # Critical alerts are always sent regardless of snooze setting
+            critical_types = {"recovery", "circuit_breaker"}
+            is_critical = alert_type in critical_types
+            
+            if not is_critical and self.prefs and self.prefs.snooze_noncritical_alerts:
+                logger.info(f"Data quality alert '{alert_type}' suppressed (snoozed)")
+                return True  # Return True to indicate "handled" (just suppressed)
 
             # Recovery messages should be positive + not labeled as risk warnings.
             if is_recovery:
@@ -1846,10 +1876,10 @@ class NQAgentTelegramNotifier:
             shutdown_reason = summary.get('shutdown_reason', 'Normal shutdown')
             message = f"🛑 *NQ {LABEL_AGENT} Stopped*\n"
             
-            # Show shutdown reason
+            # Show shutdown reason (escaped for markdown safety)
             if shutdown_reason and shutdown_reason != "Normal shutdown":
                 reason_emoji = "⚠️" if "Error" in shutdown_reason or "interrupt" in shutdown_reason.lower() else "ℹ️"
-                message += f"{reason_emoji} *Reason:* {shutdown_reason}\n"
+                message += f"{reason_emoji} *Reason:* {safe_label(str(shutdown_reason))}\n"
             message += "\n"
 
             # Session summary (mobile-friendly, using standardized terminology)
@@ -1970,9 +2000,9 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
-            # Format message with clear explanation
+            # Format message with clear explanation (escaped for markdown safety)
             message = f"🛑 *Circuit Breaker Activated*\n\n"
-            message += f"*Reason:* {reason}\n"
+            message += f"*Reason:* {safe_label(str(reason))}\n"
 
             # What happened
             if details:
@@ -2020,8 +2050,9 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
+            issue = safe_label(str(recovery_info.get('issue', 'Unknown')))
             message = f"✅ *Service Recovered*\n\n"
-            message += f"*Issue:* {recovery_info.get('issue', 'Unknown')}\n"
+            message += f"*Issue:* {issue}\n"
             message += f"*Time:* {recovery_info.get('recovery_time_seconds', 0):.0f}s\n"
             message += f"*Status:* Normal operation\n"
 
@@ -2060,10 +2091,12 @@ class NQAgentTelegramNotifier:
             if error_types:
                 message += f"\n*By Type:*\n"
                 for error_type, count in sorted(error_types.items(), key=lambda x: x[1], reverse=True):
-                    message += f"• {error_type}: {count}\n"
+                    message += f"• {safe_label(str(error_type))}: {count}\n"
 
             if last_error:
-                message += f"\n*Last Error:*\n{last_error[:200]}\n"
+                # Escape error message for markdown safety
+                escaped_error = safe_label(str(last_error)[:200])
+                message += f"\n*Last Error:*\n{escaped_error}\n"
 
             await self.telegram.send_message(message)
             return True

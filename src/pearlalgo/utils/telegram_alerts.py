@@ -961,6 +961,174 @@ def format_home_card(
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# TelegramPrefs: Persistent UI preferences for Telegram bot
+# ---------------------------------------------------------------------------
+
+class TelegramPrefs:
+    """
+    Persistent UI preferences for Telegram bot.
+    
+    Stored as JSON in the state directory. All settings default to current
+    calm-minimal behavior so existing users see no change until they opt-in.
+    """
+    
+    # Default values (calm-minimal by default)
+    DEFAULTS = {
+        "dashboard_buttons": False,         # Show inline buttons on push dashboards
+        "signal_detail_expanded": False,    # Show expanded context in signal details
+        "auto_chart_on_signal": False,      # Automatically generate chart with signal push
+        "snooze_noncritical_alerts": False, # Temporarily suppress non-critical data alerts
+        "snooze_until": None,               # ISO timestamp when snooze expires (if snoozed)
+    }
+    
+    # Human-readable labels for settings UI
+    LABELS = {
+        "dashboard_buttons": "Dashboard Buttons",
+        "signal_detail_expanded": "Expanded Signal Details",
+        "auto_chart_on_signal": "Auto-Chart on Signal",
+        "snooze_noncritical_alerts": "Snooze Non-Critical Alerts",
+    }
+    
+    # Descriptions for settings UI
+    DESCRIPTIONS = {
+        "dashboard_buttons": "Add Menu/Activity/Data Quality buttons to push dashboards",
+        "signal_detail_expanded": "Show full context (regime, MTF, VWAP) in signal details by default",
+        "auto_chart_on_signal": "Automatically generate and send chart with each signal alert",
+        "snooze_noncritical_alerts": "Temporarily suppress non-critical data quality alerts (1 hour)",
+    }
+    
+    def __init__(self, state_dir=None):
+        """
+        Initialize preferences.
+        
+        Args:
+            state_dir: Path to state directory (defaults to standard location)
+        """
+        from pathlib import Path
+        
+        if state_dir is None:
+            try:
+                from pearlalgo.utils.paths import ensure_state_dir
+                state_dir = ensure_state_dir()
+            except ImportError:
+                state_dir = Path("data/nq_agent_state")
+        
+        self._prefs_file = Path(state_dir) / "telegram_prefs.json"
+        self._prefs = dict(self.DEFAULTS)
+        self._load()
+    
+    def _load(self):
+        """Load preferences from file."""
+        import json
+        
+        if self._prefs_file.exists():
+            try:
+                with open(self._prefs_file, "r") as f:
+                    stored = json.load(f)
+                # Merge with defaults (handles new settings gracefully)
+                for key in self.DEFAULTS:
+                    if key in stored:
+                        self._prefs[key] = stored[key]
+            except Exception as e:
+                logger.warning(f"Could not load Telegram prefs: {e}")
+    
+    def _save(self):
+        """Save preferences to file."""
+        import json
+        
+        try:
+            self._prefs_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._prefs_file, "w") as f:
+                json.dump(self._prefs, f, indent=2, default=str)
+        except Exception as e:
+            logger.warning(f"Could not save Telegram prefs: {e}")
+    
+    def get(self, key: str, default=None):
+        """Get a preference value."""
+        return self._prefs.get(key, default if default is not None else self.DEFAULTS.get(key))
+    
+    def set(self, key: str, value) -> bool:
+        """Set a preference value and save."""
+        if key not in self.DEFAULTS:
+            return False
+        self._prefs[key] = value
+        self._save()
+        return True
+    
+    def toggle(self, key: str) -> bool:
+        """Toggle a boolean preference and return new value."""
+        if key not in self.DEFAULTS:
+            return False
+        current = self._prefs.get(key, self.DEFAULTS.get(key))
+        if isinstance(current, bool):
+            self._prefs[key] = not current
+            self._save()
+            return self._prefs[key]
+        return False
+    
+    def reset(self):
+        """Reset all preferences to defaults."""
+        self._prefs = dict(self.DEFAULTS)
+        self._save()
+    
+    def all(self) -> dict:
+        """Get all preferences as a dictionary."""
+        return dict(self._prefs)
+    
+    # Convenience properties for common checks
+    @property
+    def dashboard_buttons(self) -> bool:
+        return self._prefs.get("dashboard_buttons", False)
+    
+    @property
+    def signal_detail_expanded(self) -> bool:
+        return self._prefs.get("signal_detail_expanded", False)
+    
+    @property
+    def auto_chart_on_signal(self) -> bool:
+        return self._prefs.get("auto_chart_on_signal", False)
+    
+    @property
+    def snooze_noncritical_alerts(self) -> bool:
+        """Check if non-critical alerts are snoozed (and snooze hasn't expired)."""
+        if not self._prefs.get("snooze_noncritical_alerts", False):
+            return False
+        
+        # Check if snooze has expired
+        snooze_until = self._prefs.get("snooze_until")
+        if snooze_until:
+            try:
+                from datetime import datetime, timezone
+                expiry = datetime.fromisoformat(str(snooze_until).replace("Z", "+00:00"))
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) > expiry:
+                    # Snooze expired - auto-disable
+                    self._prefs["snooze_noncritical_alerts"] = False
+                    self._prefs["snooze_until"] = None
+                    self._save()
+                    return False
+            except Exception:
+                pass
+        return True
+    
+    def enable_snooze(self, hours: float = 1.0):
+        """Enable snooze for non-critical alerts."""
+        from datetime import datetime, timezone, timedelta
+        
+        expiry = datetime.now(timezone.utc) + timedelta(hours=hours)
+        self._prefs["snooze_noncritical_alerts"] = True
+        self._prefs["snooze_until"] = expiry.isoformat()
+        self._save()
+    
+    def disable_snooze(self):
+        """Disable snooze for non-critical alerts."""
+        self._prefs["snooze_noncritical_alerts"] = False
+        self._prefs["snooze_until"] = None
+        self._save()
+
+
 class TelegramAlerts:
     """Telegram alert sender for trading notifications."""
 

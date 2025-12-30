@@ -51,6 +51,7 @@ from pearlalgo.utils.telegram_alerts import (
     safe_label,
     escape_subprocess_output,
     _format_currency,
+    TelegramPrefs,
     # Standardized terminology constants
     LABEL_AGENT,
     LABEL_GATEWAY,
@@ -114,6 +115,9 @@ class TelegramCommandHandler:
         # Initialize service controller for remote control
         self.service_controller = ServiceController()
         
+        # Initialize Telegram UI preferences
+        self.prefs = TelegramPrefs(state_dir=state_dir)
+        
         # Initialize chart generator if available
         self.chart_generator = None
         if CHART_GENERATOR_AVAILABLE:
@@ -170,6 +174,7 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("glossary", self._handle_glossary))
         self.application.add_handler(CommandHandler("explain", self._handle_glossary))  # Alias
         self.application.add_handler(CommandHandler("chart", self._handle_chart))
+        self.application.add_handler(CommandHandler("settings", self._handle_settings))
         
         # Service control commands (start/stop gateway and agent)
         self.application.add_handler(CommandHandler("start_gateway", self._handle_start_gateway))
@@ -419,19 +424,15 @@ class TelegramCommandHandler:
         gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
         
         message = (
-            "🤖 *NQ Agent Bot*\n\n"
-            "Welcome! This is the *main menu* for controlling your NQ trading agent.\n\n"
-            "💡 *Important:*\n"
-            "• `/start` shows this menu (does NOT start the agent)\n"
-            "• Use '▶️ Start Agent' button below to start the agent\n"
-            "• Or use `/start_agent` command\n\n"
-            "📋 *Quick Start:*\n"
-            f"1. Check {LABEL_GATEWAY} status first\n"
+            "🤖 *MNQ Trading Bot*\n\n"
+            f"{'🟢' if agent_running else '⬜'} *Agent:* {STATE_RUNNING if agent_running else STATE_STOPPED}\n"
+            f"{'🟢' if gateway_running else '⬜'} *Gateway:* {STATE_RUNNING if gateway_running else STATE_STOPPED}\n\n"
+            "💡 `/start` = this menu (to start the agent, use ▶️ Start button below)\n\n"
+            "*Quick Start:*\n"
+            f"1. Check {LABEL_GATEWAY} status\n"
             f"2. Start {LABEL_AGENT} when ready\n"
             "3. Monitor via Status & Signals\n\n"
-            f"*Current State:*\n"
-            f"{'🟢' if agent_running else '🔴'} {LABEL_AGENT}: {STATE_RUNNING if agent_running else STATE_STOPPED}\n"
-            f"{'🟢' if gateway_running else '🔴'} {LABEL_GATEWAY}: {STATE_RUNNING if gateway_running else STATE_STOPPED}"
+            "⚙️ Tap *Settings* to customize your Telegram UI."
         )
         
         reply_markup = self._get_main_menu_buttons(
@@ -449,14 +450,18 @@ class TelegramCommandHandler:
             return
         
         message = (
-            "📚 *NQ Agent Bot Help*\n\n"
-            "*Navigation:*\n"
-            "Use the buttons below each message to navigate. No need to type commands!\n\n"
-            "*Available Actions:*\n"
+            "📚 *Help*\n\n"
+            "*Navigation:* Use buttons below each view.\n\n"
+            "*Key Commands:*\n"
+            "• /status - Agent status + Home Card\n"
+            "• /signals - Signal history\n"
+            "• /chart - On-demand chart\n"
+            "• /settings - UI preferences\n\n"
+            "*Actions:*\n"
             "• Service Control: Start/Stop Agent & Gateway\n"
-            "• Monitoring: Status, Signals, Performance\n"
-            "• Configuration: View settings and health\n\n"
-            "*Tip:* All actions are available via buttons for easy UI navigation."
+            "• Monitoring: Status, Signals, Performance, Activity\n"
+            "• Data: Quality checks, Backtest, Reports\n\n"
+            "💡 Most actions available via Main Menu buttons."
         )
         
         gateway_status = self.service_controller.get_gateway_status()
@@ -572,6 +577,104 @@ class TelegramCommandHandler:
             [
                 InlineKeyboardButton("🚦 Gates", callback_data="glossary_gates"),
                 InlineKeyboardButton("🎯 Trades", callback_data="glossary_active_trades"),
+            ],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+    
+    async def _handle_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle /settings command - show and manage Telegram UI preferences.
+        
+        Provides toggles for:
+        - Dashboard buttons on push alerts
+        - Expanded signal details
+        - Auto-chart on signal push
+        - Snooze non-critical alerts
+        """
+        logger.info(f"Received /settings command from chat {update.effective_chat.id}")
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        await self._render_settings_menu(update, context)
+    
+    async def _render_settings_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Render the settings menu with current preference values."""
+        prefs = self.prefs.all()
+        
+        def toggle_icon(key: str) -> str:
+            """Get toggle icon for a boolean setting."""
+            return "✅" if prefs.get(key, False) else "⬜"
+        
+        message = "⚙️ *Telegram Settings*\n\n"
+        message += "Customize your Telegram UI experience. Changes take effect immediately.\n\n"
+        
+        # Dashboard buttons
+        message += f"{toggle_icon('dashboard_buttons')} *Dashboard Buttons*\n"
+        message += "   Add quick-action buttons to push dashboards\n\n"
+        
+        # Signal detail verbosity
+        message += f"{toggle_icon('signal_detail_expanded')} *Expanded Signal Details*\n"
+        message += "   Show full context (regime, MTF, VWAP) by default\n\n"
+        
+        # Auto-chart on signal
+        message += f"{toggle_icon('auto_chart_on_signal')} *Auto-Chart on Signal*\n"
+        message += "   Automatically send chart with each signal alert\n\n"
+        
+        # Snooze non-critical alerts
+        snooze_active = self.prefs.snooze_noncritical_alerts
+        snooze_icon = "🔕" if snooze_active else "🔔"
+        message += f"{snooze_icon} *Snooze Non-Critical Alerts*\n"
+        if snooze_active:
+            snooze_until = prefs.get("snooze_until")
+            if snooze_until:
+                try:
+                    from datetime import datetime, timezone
+                    expiry = datetime.fromisoformat(str(snooze_until).replace("Z", "+00:00"))
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=timezone.utc)
+                    remaining = (expiry - datetime.now(timezone.utc)).total_seconds() / 60
+                    message += f"   🔕 Snoozed for {remaining:.0f} more minutes\n\n"
+                except Exception:
+                    message += "   🔕 Currently snoozed\n\n"
+            else:
+                message += "   🔕 Currently snoozed\n\n"
+        else:
+            message += "   Temporarily suppress non-critical data alerts\n\n"
+        
+        message += "💡 *Tip:* Tap a button to toggle a setting."
+        
+        # Build toggle buttons
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    f"{toggle_icon('dashboard_buttons')} Dashboard Buttons",
+                    callback_data="settings:toggle:dashboard_buttons"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{toggle_icon('signal_detail_expanded')} Expanded Details",
+                    callback_data="settings:toggle:signal_detail_expanded"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{toggle_icon('auto_chart_on_signal')} Auto-Chart",
+                    callback_data="settings:toggle:auto_chart_on_signal"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{snooze_icon} {'Unsnooze Alerts' if snooze_active else 'Snooze 1h'}",
+                    callback_data="settings:snooze"
+                ),
+            ],
+            [
+                InlineKeyboardButton("🔄 Reset Defaults", callback_data="settings:reset"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="settings"),
             ],
             [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
         ]
@@ -1274,16 +1377,19 @@ class TelegramCommandHandler:
 
             keyboard: List[List[InlineKeyboardButton]] = []
 
-            # Compact filter controls (reduced from 4 rows to 2)
-            # Row 1: Direction + Confidence
+            # Compact filter controls
+            # Row 1: Direction filters
             keyboard.append([
                 InlineKeyboardButton("✓All" if dir_filter == "all" else "All", callback_data="signals:setdir:all"),
-                InlineKeyboardButton("✓L" if dir_filter == "long" else "L", callback_data="signals:setdir:long"),
-                InlineKeyboardButton("✓S" if dir_filter == "short" else "S", callback_data="signals:setdir:short"),
-                InlineKeyboardButton("│", callback_data="signals:noop"),
+                InlineKeyboardButton("✓Long" if dir_filter == "long" else "Long", callback_data="signals:setdir:long"),
+                InlineKeyboardButton("✓Short" if dir_filter == "short" else "Short", callback_data="signals:setdir:short"),
+            ])
+            # Row 2: Confidence filters (with 60% option)
+            keyboard.append([
                 InlineKeyboardButton("✓0%" if min_conf == 0.0 else "0%", callback_data="signals:setconf:0.0"),
-                InlineKeyboardButton("✓50" if min_conf == 0.5 else "50", callback_data="signals:setconf:0.5"),
-                InlineKeyboardButton("✓70" if min_conf == 0.7 else "70", callback_data="signals:setconf:0.7"),
+                InlineKeyboardButton("✓50%" if min_conf == 0.5 else "50%", callback_data="signals:setconf:0.5"),
+                InlineKeyboardButton("✓60%" if min_conf == 0.6 else "60%", callback_data="signals:setconf:0.6"),
+                InlineKeyboardButton("✓70%" if min_conf == 0.7 else "70%", callback_data="signals:setconf:0.7"),
             ])
             # Row 2: Signal type filters
             keyboard.append([
@@ -1339,14 +1445,15 @@ class TelegramCommandHandler:
                     # Compact one-liner: status, type, direction, confidence, age
                     message += f"{i}. {status_emoji} {safe_label(signal_type)} {dir_label} • {conf_val:.0%}{age_part}\n"
                     
-                    # Second line: entry price + PnL for exited, or short status for others
+                    # Second line: entry price + PnL for exited, or just price for others
+                    # (signal ID hidden for cleaner list - tap ℹ️{n} for details)
                     if status == "exited":
                         pnl = float(sig_data.get("pnl", 0.0) or 0.0)
                         pnl_emoji, pnl_str = format_pnl(pnl)
                         exit_reason = safe_label(str(sig_data.get("exit_reason", "") or "")[:16])
                         message += f"   {pnl_emoji} {pnl_str} ({exit_reason}) @ ${entry_price:.2f}\n\n"
                     else:
-                        message += f"   Entry: ${entry_price:.2f} | `{signal_id[:8]}…`\n\n"
+                        message += f"   Entry: ${entry_price:.2f}\n\n"
 
                 # Compact numeric grid for actions (batch multiple signals per row)
                 action_buttons: List[InlineKeyboardButton] = []
@@ -3826,7 +3933,7 @@ class TelegramCommandHandler:
                 message += f"⏸️ *{LABEL_AGENT}:* {STATE_PAUSED}\n"
                 pause_reason = state.get("pause_reason")
                 if pause_reason:
-                    message += f"   Reason: {pause_reason}\n"
+                    message += f"   Reason: {safe_label(str(pause_reason))}\n"
             else:
                 message += f"🟢 *{LABEL_AGENT}:* {STATE_RUNNING}\n"
             
@@ -4404,12 +4511,9 @@ class TelegramCommandHandler:
             sig_ts = found.get("timestamp") or signal.get("timestamp")
             age_str = format_time_ago(sig_ts)
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             # DECISION-FIRST LAYOUT: Trade plan at the top for fast action
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             message = f"{status_emoji} *Signal Detail*\n"
-            message += f"{dir_emoji} *{sig_type.replace('_', ' ').title()}* {dir_label}\n"
-            message += "━━━━━━━━━━━━━━━━━━━━━\n\n"
+            message += f"{dir_emoji} *{sig_type.replace('_', ' ').title()}* {dir_label}\n\n"
 
             # Trade Plan (always visible first)
             message += "📋 *Trade Plan*\n"
@@ -4436,7 +4540,7 @@ class TelegramCommandHandler:
             if status == "exited":
                 pnl = float(found.get("pnl", 0.0) or 0.0)
                 pnl_emoji, pnl_str = format_pnl(pnl)
-                exit_reason = str(found.get("exit_reason", "") or "")
+                exit_reason = safe_label(str(found.get("exit_reason", "") or ""))
                 message += f"{pnl_emoji} *P&L:* {pnl_str}"
                 if exit_reason:
                     message += f" ({exit_reason})"
@@ -4444,10 +4548,19 @@ class TelegramCommandHandler:
 
             message += f"🆔 `{sig_id[:16]}…`\n"
 
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # CONTEXT BLOCKS: Trader-facing labels, collapsible conceptually
-            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            # Optional enhanced context
+            # Check if context should be shown (based on prefs or explicit expand request)
+            show_context = self.prefs.signal_detail_expanded if self.prefs else False
+            
+            # Check if this is an explicit context expand request (via callback)
+            user_data = context.user_data if hasattr(context, "user_data") else {}
+            force_expand = user_data.get("signal_context_expanded", False)
+            if force_expand:
+                show_context = True
+                # Reset the flag
+                if hasattr(context, "user_data"):
+                    context.user_data["signal_context_expanded"] = False
+
+            # Optional enhanced context (shown based on signal_detail_expanded pref or explicit request)
             regime = signal.get("regime", {}) or {}
             mtf = signal.get("mtf_analysis", {}) or {}
             vwap = signal.get("vwap_data", {}) or {}
@@ -4455,82 +4568,98 @@ class TelegramCommandHandler:
             quality = signal.get("quality_score", {}) or {}
             sr_levels = signal.get("sr_levels", {}) or {}
 
-            context_lines = []
+            # Check if there's any context to show
+            has_context = bool(
+                quality or 
+                (regime and regime.get("regime")) or 
+                mtf.get("alignment") or 
+                (vwap and vwap.get("vwap")) or 
+                (flow and flow.get("recent_trend")) or 
+                sr_levels
+            )
 
-            # Quality metrics (trader-facing labels)
-            if quality:
-                q_parts = []
-                if "quality_score" in quality:
-                    q_parts.append(f"Score: {float(quality.get('quality_score', 0.0)):.2f}")
-                if "confluence_score" in quality:
-                    q_parts.append(f"Confluence: {float(quality.get('confluence_score', 0.0)):.2f}")
-                if "historical_wr" in quality:
-                    q_parts.append(f"Historical WR: {float(quality.get('historical_wr', 0.0)):.0%}")
-                if q_parts:
-                    context_lines.append("🧠 *Quality:* " + " • ".join(q_parts))
+            if show_context and has_context:
+                context_lines = []
 
-            # Regime context
-            if regime and regime.get("regime"):
-                r_regime = str(regime.get("regime", "")).replace("_", " ").title()
-                r_vol = str(regime.get("volatility", "")).title()
-                r_session = str(regime.get("session", "")).replace("_", " ").title()
-                context_lines.append(f"🧭 *Regime:* {r_regime} | {r_vol} Vol | {r_session}")
+                # Quality metrics (trader-facing labels)
+                if quality:
+                    q_parts = []
+                    if "quality_score" in quality:
+                        q_parts.append(f"Score: {float(quality.get('quality_score', 0.0)):.2f}")
+                    if "confluence_score" in quality:
+                        q_parts.append(f"Confluence: {float(quality.get('confluence_score', 0.0)):.2f}")
+                    if "historical_wr" in quality:
+                        q_parts.append(f"Historical WR: {float(quality.get('historical_wr', 0.0)):.0%}")
+                    if q_parts:
+                        context_lines.append("🧠 *Quality:* " + " • ".join(q_parts))
 
-            # MTF alignment
-            alignment = mtf.get("alignment")
-            if alignment:
-                mtf_score = mtf.get("alignment_score")
-                mtf_str = f"🧩 *MTF:* {alignment.title()}"
-                if mtf_score is not None:
-                    mtf_str += f" ({float(mtf_score):.2f})"
-                context_lines.append(mtf_str)
+                # Regime context
+                if regime and regime.get("regime"):
+                    r_regime = str(regime.get("regime", "")).replace("_", " ").title()
+                    r_vol = str(regime.get("volatility", "")).title()
+                    r_session = str(regime.get("session", "")).replace("_", " ").title()
+                    context_lines.append(f"🧭 *Regime:* {r_regime} | {r_vol} Vol | {r_session}")
 
-            # VWAP position
-            if vwap and vwap.get("vwap"):
-                vwap_val = float(vwap.get("vwap", 0.0))
-                dist_pct = vwap.get("distance_pct")
-                vwap_str = f"📍 *VWAP:* ${vwap_val:.2f}"
-                if dist_pct is not None:
-                    vwap_str += f" ({float(dist_pct):+.2f}%)"
-                context_lines.append(vwap_str)
+                # MTF alignment
+                alignment = mtf.get("alignment")
+                if alignment:
+                    mtf_score = mtf.get("alignment_score")
+                    mtf_str = f"🧩 *MTF:* {alignment.title()}"
+                    if mtf_score is not None:
+                        mtf_str += f" ({float(mtf_score):.2f})"
+                    context_lines.append(mtf_str)
 
-            # Order flow
-            if flow and flow.get("recent_trend"):
-                flow_trend = str(flow.get("recent_trend", "")).title()
-                net = flow.get("net_pressure")
-                flow_str = f"🌊 *Flow:* {flow_trend}"
-                if net is not None:
-                    flow_str += f" ({float(net):+.2f})"
-                context_lines.append(flow_str)
+                # VWAP position
+                if vwap and vwap.get("vwap"):
+                    vwap_val = float(vwap.get("vwap", 0.0))
+                    dist_pct = vwap.get("distance_pct")
+                    vwap_str = f"📍 *VWAP:* ${vwap_val:.2f}"
+                    if dist_pct is not None:
+                        vwap_str += f" ({float(dist_pct):+.2f}%)"
+                    context_lines.append(vwap_str)
 
-            # S/R levels
-            if sr_levels:
-                sup = sr_levels.get("strongest_support")
-                res = sr_levels.get("strongest_resistance")
-                if sup or res:
-                    lvl_parts = []
-                    if sup:
-                        lvl_parts.append(f"Sup: ${float(sup):.2f}")
-                    if res:
-                        lvl_parts.append(f"Res: ${float(res):.2f}")
-                    context_lines.append("🧱 *Levels:* " + " | ".join(lvl_parts))
+                # Order flow
+                if flow and flow.get("recent_trend"):
+                    flow_trend = str(flow.get("recent_trend", "")).title()
+                    net = flow.get("net_pressure")
+                    flow_str = f"🌊 *Flow:* {flow_trend}"
+                    if net is not None:
+                        flow_str += f" ({float(net):+.2f})"
+                    context_lines.append(flow_str)
 
-            if context_lines:
-                message += "\n" + "\n".join(context_lines) + "\n"
+                # S/R levels
+                if sr_levels:
+                    sup = sr_levels.get("strongest_support")
+                    res = sr_levels.get("strongest_resistance")
+                    if sup or res:
+                        lvl_parts = []
+                        if sup:
+                            lvl_parts.append(f"Sup: ${float(sup):.2f}")
+                        if res:
+                            lvl_parts.append(f"Res: ${float(res):.2f}")
+                        context_lines.append("🧱 *Levels:* " + " | ".join(lvl_parts))
 
-            # Keyboard with chart and navigation
+                if context_lines:
+                    message += "\n" + "\n".join(context_lines) + "\n"
+
+            # Keyboard with chart, context, and navigation
             keyboard = []
+            
+            # Row 1: Chart + Context (if context is available and hidden)
+            row1 = []
             if sig_id and self.chart_generator:
-                keyboard.append([
-                    InlineKeyboardButton("📊 View Chart", callback_data=f"signal_chart_{sig_id[:16]}"),
-                    InlineKeyboardButton("🔔 Signals", callback_data="signals"),
-                ])
-            else:
-                keyboard.append([InlineKeyboardButton("🔔 Signals", callback_data="signals")])
+                row1.append(InlineKeyboardButton("📊 Chart", callback_data=f"signal_chart_{sig_id[:16]}"))
+            if has_context and not show_context:
+                row1.append(InlineKeyboardButton("🧠 Context", callback_data=f"signal_context_{sig_id[:16]}"))
+            if row1:
+                keyboard.append(row1)
+            
+            # Row 2: Signals navigation
             keyboard.append([
-                InlineKeyboardButton("📊 Active Trades", callback_data="active_trades"),
-                InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
+                InlineKeyboardButton("🔔 Signals", callback_data="signals"),
+                InlineKeyboardButton("📊 Active", callback_data="active_trades"),
             ])
+            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
             await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
 
         except Exception as e:
@@ -4807,9 +4936,10 @@ class TelegramCommandHandler:
             InlineKeyboardButton("📂 Reports", callback_data='reports'),
         ])
         
-        # Row 6: Help
+        # Row 6: Help + Settings
         keyboard.append([
             InlineKeyboardButton("❓ Help", callback_data='help'),
+            InlineKeyboardButton("⚙️ Settings", callback_data='settings'),
         ])
         
         return InlineKeyboardMarkup(keyboard)
@@ -5167,6 +5297,25 @@ class TelegramCommandHandler:
             context.args = [term]
             await self._handle_glossary(update, context)
             context.args = []  # Reset
+        elif callback_data == 'settings':
+            await self._handle_settings(update, context)
+        elif callback_data.startswith('settings:toggle:'):
+            # Toggle a boolean setting
+            key = callback_data.replace('settings:toggle:', '')
+            if key in TelegramPrefs.DEFAULTS:
+                self.prefs.toggle(key)
+                await self._render_settings_menu(update, context)
+        elif callback_data == 'settings:snooze':
+            # Toggle snooze for non-critical alerts
+            if self.prefs.snooze_noncritical_alerts:
+                self.prefs.disable_snooze()
+            else:
+                self.prefs.enable_snooze(hours=1.0)
+            await self._render_settings_menu(update, context)
+        elif callback_data == 'settings:reset':
+            # Reset all settings to defaults
+            self.prefs.reset()
+            await self._render_settings_menu(update, context)
         elif callback_data == 'chart':
             await self._handle_chart(update, context)
         elif callback_data == 'chart_12h':
@@ -5316,6 +5465,12 @@ class TelegramCommandHandler:
             await self._handle_signal_chart(update, context, signal_id_prefix)
         elif callback_data.startswith('signal_detail_'):
             signal_id_prefix = callback_data.replace('signal_detail_', '')
+            await self._handle_signal_detail(update, context, signal_id_prefix)
+        elif callback_data.startswith('signal_context_'):
+            # Show signal detail with expanded context
+            signal_id_prefix = callback_data.replace('signal_context_', '')
+            if hasattr(context, "user_data"):
+                context.user_data["signal_context_expanded"] = True
             await self._handle_signal_detail(update, context, signal_id_prefix)
         elif callback_data.startswith('confirm:'):
             action = callback_data.replace('confirm:', '', 1).strip()

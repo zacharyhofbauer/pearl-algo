@@ -111,6 +111,7 @@
   /performance        # 7-day performance
   /config             # Configuration values
   /health             # Health check
+  /settings           # UI preferences (dashboard buttons, auto-chart, etc.)
   ```
 
 ### From Terminal (Traditional)
@@ -180,6 +181,7 @@
     - `/performance` – 7‑day performance summary
     - `/config` – Show key configuration values
     - `/health` – Basic health check
+    - `/settings` – UI preferences (dashboard buttons, auto-chart, snooze alerts)
     - `/help` – Command help
 
 ---

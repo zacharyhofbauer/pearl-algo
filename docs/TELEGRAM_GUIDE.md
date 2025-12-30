@@ -37,6 +37,7 @@ It combines quick start steps, command setup, and command behavior.
    health - Show basic agent health (read-only)
    glossary - Explain key terms (Scans, Signals, Gates, etc.)
    chart - Generate on-demand price chart
+   settings - Customize Telegram UI preferences
    help - Show available commands
    ```
 5. BotFather will confirm the commands are set.
@@ -220,7 +221,31 @@ Explains key terms used in the UI:
 - `/glossary` – Show all terms with drill-down buttons
 - `/glossary scans` – Show detailed explanation for "Scans"
 
-### 3.8 `/chart`
+### 3.8 `/settings`
+
+Customize your Telegram UI preferences. Changes take effect immediately.
+
+**Available Settings:**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Dashboard Buttons** | Off | Add quick-action buttons (Menu/Activity/Data Quality) to push dashboards |
+| **Expanded Signal Details** | Off | Show full context (regime, MTF, VWAP) by default in signal details |
+| **Auto-Chart on Signal** | Off | Automatically generate and send chart with each signal alert |
+| **Snooze Non-Critical Alerts** | Off | Temporarily suppress non-critical data quality alerts (1 hour) |
+
+**Usage:**
+- `/settings` – Open settings menu with toggle buttons
+- Tap a button to toggle a setting on/off
+- "Reset Defaults" returns all settings to calm-minimal defaults
+
+**Notes:**
+- All settings default to **off** (calm-minimal by default)
+- Snooze auto-expires after 1 hour
+- Critical alerts (circuit breaker, recovery) are never snoozed
+- Settings are stored in `data/nq_agent_state/telegram_prefs.json`
+
+### 3.9 `/chart`
 
 Generates an on-demand price chart.
 
@@ -235,7 +260,7 @@ Generates an on-demand price chart.
 - Pressure panel (if enabled)
 - Timeframe toggle buttons: 12h, 16h, 24h (with checkmark on active)
 
-### 3.9 `/pause` and `/resume` (Legacy)
+### 3.10 `/pause` and `/resume` (Legacy)
 
 - Currently **informational only** (use `/stop_agent` and `/start_agent` instead)
 - These commands acknowledge receipt but don't perform actions
@@ -447,6 +472,7 @@ The `/status` command includes inline buttons for quick actions:
 | `/performance` | Performance metrics | Instant | 7-day summary |
 | `/config` | Configuration | Instant | Read-only |
 | `/health` | Health check | Instant | Read-only |
+| `/settings` | UI preferences | Instant | Toggle buttons |
 
 ### 7.6 Advanced Usage
 
@@ -591,8 +617,11 @@ The bot features a **fully UI-driven interface** with inline keyboard buttons. N
   - **Stop Agent** / **Restart** (if agent running)
   - **Start Agent** (if agent stopped)
   - **Gateway ✅/🟡/❌** / **Refresh** (tri-state: ready / authenticating / stopped)
-  - **Status** / **Signals** / **Performance**
-  - **Config** / **Health** / **Help**
+  - **Last Signal** / **Active Trades** / **Activity**
+  - **Signals** / **Performance**
+  - **Data Quality** / **Health**
+  - **Config** / **Backtest** / **Reports**
+  - **Help** / **Settings**
 
 **Signals View:**
 - Access via `/signals` or "🔔 Signals" button
@@ -857,12 +886,21 @@ This ensures operators don't see "green" indicators based on outdated data.
 
 ### 9.12 Push Dashboard Buttons
 
-Push dashboards no longer include inline “menu” buttons by default (to save space and reduce clutter).
+Push dashboards no longer include inline "menu" buttons by default (calm-minimal).
 
-Use:
+**Enable Dashboard Buttons:**
+Use `/settings` → toggle **Dashboard Buttons** to add a compact button row (Menu/Activity/Data Quality) to push dashboards.
+
+**Without buttons (default):**
 - `/status` for the full interactive Home Card (with buttons)
-- `/activity` for liveness (“is it doing anything?”)
+- `/activity` for liveness ("is it doing anything?")
 - `/data_quality` for triage when something looks off
+
+**With buttons enabled:**
+Push dashboards include a single row:
+```
+🏠 Menu   📈 Activity   🛡 Data Quality
+```
 
 ---
 
