@@ -34,6 +34,7 @@ class ServiceController:
     def _run_script(
         self,
         script_path: Path,
+        args: Optional[list[str]] = None,
         timeout: int = 60,
         check: bool = True,
     ) -> Tuple[bool, str, str]:
@@ -58,8 +59,9 @@ class ServiceController:
             script_path.chmod(0o755)
 
             # Run script with timeout
+            cmd = [str(script_path)] + (args or [])
             result = subprocess.run(
-                [str(script_path)],
+                cmd,
                 cwd=str(self.project_root),
                 capture_output=True,
                 text=True,
@@ -81,11 +83,16 @@ class ServiceController:
         Returns:
             Dictionary with success status and message
         """
-        script = self.scripts_dir / "gateway" / "start_ibgateway_ibc.sh"
+        script = self.scripts_dir / "gateway" / "gateway.sh"
         logger.info("Starting IBKR Gateway via Telegram command")
 
         # Gateway startup can take 60+ seconds (authentication, etc.)
-        success, stdout, stderr = self._run_script(script, timeout=120, check=False)
+        success, stdout, stderr = self._run_script(
+            script,
+            args=["start"],
+            timeout=120,
+            check=False,
+        )
 
         if success:
             # Check if actually running
@@ -116,10 +123,15 @@ class ServiceController:
         Returns:
             Dictionary with success status and message
         """
-        script = self.scripts_dir / "gateway" / "stop_ibgateway_ibc.sh"
+        script = self.scripts_dir / "gateway" / "gateway.sh"
         logger.info("Stopping IBKR Gateway via Telegram command")
 
-        success, stdout, stderr = self._run_script(script, timeout=30, check=False)
+        success, stdout, stderr = self._run_script(
+            script,
+            args=["stop"],
+            timeout=30,
+            check=False,
+        )
 
         # Verify it's stopped
         await asyncio.sleep(2)
@@ -444,9 +456,9 @@ class ServiceController:
 
     async def check_api_ready(self) -> Dict[str, Any]:
         """Check whether IBKR Gateway API is ready (script if present, else port probe)."""
-        script = self.scripts_dir / "gateway" / "check_api_ready.sh"
+        script = self.scripts_dir / "gateway" / "gateway.sh"
         if script.exists():
-            success, stdout, stderr = self._run_script(script, timeout=30, check=False)
+            success, stdout, stderr = self._run_script(script, args=["api-ready"], timeout=30, check=False)
             return {
                 "success": success,
                 "message": "🟢 API READY" if success else "🔴 API NOT READY",

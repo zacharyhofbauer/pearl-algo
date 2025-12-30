@@ -403,7 +403,7 @@ The Telegram bot provides complete remote control of your MNQ Agent system, incl
 
 **`/start_gateway`**
 - Starts IBKR Gateway remotely
-- Executes `./scripts/gateway/start_ibgateway_ibc.sh`
+- Executes `./scripts/gateway/gateway.sh start`
 - Waits up to 120 seconds for Gateway to start
 - Verifies Gateway process is running and API port 4002 is listening
 - **Note:** Gateway startup requires 2FA approval via IBKR mobile app
@@ -411,7 +411,7 @@ The Telegram bot provides complete remote control of your MNQ Agent system, incl
 
 **`/stop_gateway`**
 - Stops IBKR Gateway gracefully
-- Executes `./scripts/gateway/stop_ibgateway_ibc.sh`
+- Executes `./scripts/gateway/gateway.sh stop`
 - Verifies Gateway process is stopped
 
 **`/gateway_status`**
@@ -590,8 +590,8 @@ You can combine commands for automated workflows:
 
 The Telegram commands execute the same shell scripts you'd run manually:
 
-- `/start_gateway` → `./scripts/gateway/start_ibgateway_ibc.sh`
-- `/stop_gateway` → `./scripts/gateway/stop_ibgateway_ibc.sh`
+- `/start_gateway` → `./scripts/gateway/gateway.sh start`
+- `/stop_gateway` → `./scripts/gateway/gateway.sh stop`
 - `/start_agent` → `./scripts/lifecycle/start_nq_agent_service.sh --background`
 - `/stop_agent` → `./scripts/lifecycle/stop_nq_agent_service.sh`
 

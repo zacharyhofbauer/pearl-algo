@@ -55,7 +55,7 @@ fi
 # Check if IBKR Gateway is running
 if ! pgrep -f "java.*IBC.jar" > /dev/null; then
     echo "⚠️  Warning: IBKR Gateway doesn't appear to be running"
-    echo "   Start it with: ./scripts/gateway/start_ibgateway_ibc.sh"
+    echo "   Start it with: ./scripts/gateway/gateway.sh start"
     # In non-interactive contexts (e.g. Telegram command handler), do not block on input.
     # Preserve the prompt's default answer ("N") by failing fast.
     if [ -t 0 ]; then

@@ -440,11 +440,7 @@ pearlalgo-dev-ai-agents/
 │   │   ├── stop_nq_agent_service.sh     # Stop service
 │   │   └── check_nq_agent_status.sh      # Check status
 │   ├── gateway/                    # IBKR Gateway scripts
-│   │   ├── start_ibgateway_ibc.sh       # Start IB Gateway
-│   │   ├── check_gateway_status.sh      # Check Gateway status
-│   │   ├── setup_ibgateway.sh           # Complete gateway setup
-│   │   ├── setup_vnc_for_login.sh       # VNC setup
-│   │   └── disable_auto_sleep.sh        # System settings
+│   │   └── gateway.sh                  # Gateway CLI (start/stop/status/2FA/VNC/setup)
 │   ├── telegram/                   # Telegram command-handler scripts
 │   │   ├── start_command_handler.sh     # Start handler (foreground/background)
 │   │   ├── check_command_handler.sh     # Check handler status
@@ -820,10 +816,10 @@ pip install -e .
 # Add IBKR_HOST, IBKR_PORT, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 # 4. Start IBKR Gateway
-./scripts/gateway/start_ibgateway_ibc.sh
+./scripts/gateway/gateway.sh start
 
 # 5. Verify Gateway
-./scripts/gateway/check_gateway_status.sh
+./scripts/gateway/gateway.sh status
 ```
 
 ### Running the Service
@@ -907,7 +903,7 @@ docker run --rm -it \\
 ### Daily Operations
 
 **Morning Checklist**:
-1. Verify IBKR Gateway is running: `./scripts/gateway/check_gateway_status.sh`
+1. Verify IBKR Gateway is running: `./scripts/gateway/gateway.sh status`
 2. Check service status: `./scripts/lifecycle/check_nq_agent_status.sh`
 3. Review overnight errors/status (Telegram and/or `journalctl -u pearlalgo-mnq.service --since yesterday`)
 
@@ -1190,13 +1186,13 @@ Use `docs/prompts/project_building.md` cycle template for structured improvement
 
 ```bash
 # Start IBKR Gateway
-./scripts/gateway/start_ibgateway_ibc.sh
+./scripts/gateway/gateway.sh start
 
 # Check Gateway Status
-./scripts/gateway/check_gateway_status.sh
+./scripts/gateway/gateway.sh status
 
 # Setup IBKR Gateway (first time)
-./scripts/gateway/setup_ibgateway.sh
+./scripts/gateway/gateway.sh setup
 
 # Start MNQ Agent Service
 ./scripts/lifecycle/start_nq_agent_service.sh

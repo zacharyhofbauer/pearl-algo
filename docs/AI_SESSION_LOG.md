@@ -688,4 +688,21 @@ pytest tests/test_on_demand_chart_visual_regression.py -v
 | Max DD | $1,792.86 | $2,559.91 |
 | Sharpe | 0.12 | **0.29** |
 
+### Gateway Script Consolidation (Script Count Reduction)
+
+**Goal:** Reduce the number of `scripts/gateway/*` files (not just provide a wrapper).
+
+**Action:** Consolidated all gateway lifecycle/diagnostics/VNC/2FA/setup helpers into **one** canonical script:
+- `scripts/gateway/gateway.sh`
+
+**Files deleted (legacy):** 16 scripts under `scripts/gateway/` (start/stop/status/api-ready/monitor/2FA/VNC/setup helpers).
+
+**Code wiring updated:**
+- `src/pearlalgo/utils/service_controller.py` now runs `./scripts/gateway/gateway.sh start|stop|api-ready`
+- Updated operator-facing instructions in docs + runtime suggestions in Python modules to reference `gateway.sh`.
+
+**Verification:**
+- `./scripts/gateway/gateway.sh help` (prints subcommands)
+- Full pytest suite: `674 passed, 1 skipped`
+
 

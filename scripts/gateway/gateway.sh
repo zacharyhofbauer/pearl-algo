@@ -3,54 +3,1039 @@
 # Category: Gateway
 # Purpose: Consolidated entry point for IBKR Gateway lifecycle + diagnostics
 # Usage:
-#   ./scripts/gateway/gateway.sh <command>
+#   ./scripts/gateway/gateway.sh <command> [args...]
 #
 # Commands:
-#   start           Start Gateway headless via IBC
-#   stop            Stop Gateway (IBC)
-#   status          Check Gateway status
-#   api-ready       Check API port readiness
-#   tws-conflict    Detect TWS/Gateway conflicts
-#   2fa-status      Check whether 2FA is required
-#   wait-2fa        Wait for 2FA approval (mobile)
-#   complete-2fa    Complete 2FA via VNC
-#   auto-2fa        Auto-enter 2FA code (if applicable)
-#   monitor         Monitor until API is ready
-#   setup           One-time gateway + IBC setup
-#   vnc-setup       One-time VNC setup for manual login
-#   vnc-config-api  One-time API config via VNC
-#   disable-sleep   Disable auto-sleep (host helper)
+#   start               Start Gateway headless via IBC (Xvfb DISPLAY=:99)
+#   start-vnc           Start Gateway via IBC on VNC display (:1) for manual interaction
+#   stop                Stop Gateway (IBC)
+#   status              Check Gateway status
+#   api-ready           Check API port readiness (exit 0 if ready)
+#   monitor             Monitor until API is ready (max 5 minutes)
+#   tws-conflict         Detect TWS/Gateway conflicts and Error 162 hints
+#   test-api            Attempt short API connect using ib_insync
+#   2fa-status          Check whether 2FA is required (log-based)
+#   wait-2fa            Wait for 2FA approval (mobile; max 10 minutes)
+#   complete-2fa        Start VNC (if needed) and print 2FA entry instructions
+#   auto-2fa [CODE]     Attempt to auto-enter 2FA code (requires xdotool)
+#   setup [mode] [ibc]  One-time gateway + IBC setup (mode=readonly/full, ibc=yes/no)
+#   vnc-setup           One-time VNC setup for manual login
+#   vnc-config-api      One-time API config guidance via VNC
+#   disable-sleep       Disable auto-sleep (host helper)
 #
 # Notes:
-# - This script delegates to existing per-purpose scripts to preserve compatibility.
-# - It is meant to reduce the need to remember 10+ script names.
+# - This script is the canonical gateway CLI; legacy per-purpose scripts were consolidated.
+# - No trading logic lives here.
 # ============================================================================
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+IBC_DIR="$PROJECT_DIR/ibkr/ibc"
+IBC_LOG_DIR="$PROJECT_DIR/ibkr/ibc/logs"
+JTS_DIR="$PROJECT_DIR/ibkr/Jts"
+API_PORT=4002
+
+
+_gateway_pid() {
+  pgrep -f "java.*IBC.jar" 2>/dev/null | head -1 || true
+}
+
+
+_gateway_running() {
+  pgrep -f "java.*IBC.jar" >/dev/null 2>&1
+}
+
+
+_api_listening() {
+  ss -tuln 2>/dev/null | grep -q ":${API_PORT}"
+}
+
+
+_ensure_xvfb() {
+  echo "Ensuring Xvfb virtual display is running..."
+  if ! pgrep -f "Xvfb :99" >/dev/null 2>&1; then
+    Xvfb :99 -screen 0 1024x768x24 &
+    sleep 2
+  else
+    echo "Xvfb already running on DISPLAY=:99"
+  fi
+  export DISPLAY=:99
+}
+
+
+_ensure_vnc() {
+  # Ensure a VNC display :1 is available. We accept either Xtigervnc or Xvnc patterns.
+  if ! pgrep -f "Xtigervnc.*:1" >/dev/null 2>&1 && ! pgrep -f "Xvnc.*:1" >/dev/null 2>&1; then
+    echo "⚠️  VNC server may not be running on :1"
+    echo "   Starting VNC server..."
+    vncserver :1 -geometry 1024x768 -depth 24 2>&1 | head -5
+    sleep 2
+  fi
+  export DISPLAY=:1
+}
+
+
+cmd_start() {
+  cd "$PROJECT_DIR"
+  echo "=== Starting IB Gateway with IBC (Read-Only Mode) ==="
+  echo ""
+
+  if _gateway_running; then
+    echo "⚠️  IB Gateway is already running!"
+    ps aux | grep "IBC.jar" | grep -v grep
+    echo ""
+    echo "To stop it: ./scripts/gateway/gateway.sh stop"
+    exit 1
+  fi
+
+  if [ ! -f "$IBC_DIR/config-auto.ini" ]; then
+    echo "❌ IBC not configured."
+    echo "   Run: ./scripts/gateway/gateway.sh setup"
+    exit 1
+  fi
+
+  _ensure_xvfb
+
+  echo "Starting IB Gateway..."
+  cd "$IBC_DIR"
+
+  LOG_FILE="logs/gateway_$(date +%Y%m%d_%H%M%S).log"
+  nohup ./gatewaystart.sh -inline > "$LOG_FILE" 2>&1 &
+  IBC_PID=$!
+
+  echo "IB Gateway starting (PID: $IBC_PID)"
+  echo "Log file: $IBC_DIR/$LOG_FILE"
+  echo ""
+
+  echo "Waiting for Gateway to start and authenticate..."
+  sleep 10
+
+  if ! ps -p "$IBC_PID" >/dev/null 2>&1; then
+    echo "⚠️  Process exited - checking logs..."
+    tail -30 "$LOG_FILE" 2>/dev/null | tail -15 || true
+    echo ""
+    echo "Check full log: tail -f $IBC_DIR/$LOG_FILE"
+    exit 1
+  fi
+
+  echo "✅ IB Gateway process is running"
+
+  echo "Waiting for authentication and API to become available..."
+  for i in {1..12}; do
+    sleep 5
+    if _api_listening; then
+      echo "✅ API port ${API_PORT} is listening!"
+      echo ""
+      echo "=== IB Gateway is ready for data access ==="
+      echo ""
+      echo "Gateway is running and authenticated."
+      echo "It will stay running until you stop it."
+      echo ""
+      echo "To stop Gateway: ./scripts/gateway/gateway.sh stop"
+      echo "To view logs: tail -f $IBC_DIR/$LOG_FILE"
+      echo ""
+      echo "Test connection:"
+      echo "  cd $PROJECT_DIR"
+      echo "  python3 scripts/testing/smoke_test_ibkr.py"
+      exit 0
+    fi
+    echo "  Still waiting... ($i/12)"
+  done
+
+  echo "⚠️  Port ${API_PORT} not listening after 60 seconds"
+  echo ""
+  echo "📱 If you're using IBKR mobile app for 2FA:"
+  echo "   1. Check your mobile app for a login approval notification"
+  echo "   2. Tap 'Approve' or 'Allow' to approve the login"
+  echo "   3. Gateway will automatically continue after approval"
+  echo ""
+  echo "   To monitor authentication progress:"
+  echo "   ./scripts/gateway/gateway.sh wait-2fa"
+  echo ""
+  echo "Check status:"
+  echo "  ./scripts/gateway/gateway.sh status"
+  echo ""
+  echo "View logs:"
+  echo "  tail -f $IBC_DIR/$LOG_FILE"
+  echo "  tail -f $IBC_DIR/logs/ibc-*.txt"
+  echo ""
+  echo "To stop IB Gateway: ./scripts/gateway/gateway.sh stop"
+  exit 1
+}
+
+
+cmd_start_vnc() {
+  cd "$PROJECT_DIR"
+  echo "=== Starting IB Gateway with IBC on VNC Display ==="
+  echo ""
+
+  _ensure_vnc
+  echo "✅ VNC server is running on :1"
+  echo ""
+
+  if _gateway_running; then
+    echo "⚠️  IB Gateway is already running!"
+    ps aux | grep "IBC.jar" | grep -v grep
+    echo ""
+    echo "To stop it: ./scripts/gateway/gateway.sh stop"
+    exit 1
+  fi
+
+  if [ ! -f "$IBC_DIR/config-auto.ini" ]; then
+    echo "❌ IBC not configured."
+    echo "   Run: ./scripts/gateway/gateway.sh setup"
+    exit 1
+  fi
+
+  echo "Starting IB Gateway on VNC display :1..."
+  cd "$IBC_DIR"
+  export DISPLAY=:1
+
+  LOG_FILE="logs/gateway_$(date +%Y%m%d_%H%M%S).log"
+  nohup ./gatewaystart.sh -inline > "$LOG_FILE" 2>&1 &
+  IBC_PID=$!
+
+  echo "IB Gateway starting on VNC display :1 (PID: $IBC_PID)"
+  echo "Log file: $IBC_DIR/$LOG_FILE"
+  echo ""
+  echo "✅ Gateway should now be visible in your VNC viewer!"
+  echo ""
+  SERVER_IP="$(hostname -I | awk '{print $1}' 2>/dev/null || echo 'localhost')"
+  echo "Connect to VNC:"
+  echo "  vncviewer ${SERVER_IP}:5901"
+  echo "  (or use SSH tunnel: ssh -L 5901:localhost:5901 <user>@${SERVER_IP})"
+  echo ""
+  echo "Check API status:"
+  echo "  ./scripts/gateway/gateway.sh api-ready"
+}
+
+
+cmd_stop() {
+  cd "$PROJECT_DIR"
+  echo "=== Stopping IB Gateway ==="
+  echo ""
+
+  GATEWAY_PID="$(_gateway_pid)"
+  if [ -z "$GATEWAY_PID" ]; then
+    echo "❌ IB Gateway is not running"
+    exit 1
+  fi
+
+  echo "Found Gateway process: $GATEWAY_PID"
+  echo "Stopping Gateway..."
+
+  if [ -f "$PROJECT_DIR/ibkr/ibc/stop.sh" ]; then
+    echo "Using IBC stop script..."
+    cd "$PROJECT_DIR/ibkr/ibc"
+    ./stop.sh 2>/dev/null || true
+    sleep 3
+  else
+    echo "IBC stop script not found, killing process directly..."
+    kill "$GATEWAY_PID" 2>/dev/null || true
+    sleep 2
+  fi
+
+  if _gateway_running; then
+    echo "⚠️  Process didn't stop gracefully, force killing..."
+    pkill -9 -f "java.*IBC.jar" || true
+    sleep 1
+  fi
+
+  if _gateway_running; then
+    echo "❌ Failed to stop Gateway"
+    exit 1
+  fi
+
+  echo "✅ IB Gateway stopped"
+}
+
+
+cmd_status() {
+  cd "$PROJECT_DIR"
+  echo "=== IBKR Gateway Status ==="
+  echo ""
+
+  if _gateway_running; then
+    echo "✅ Gateway Process: RUNNING"
+    ps aux | grep "IBC.jar" | grep -v grep | awk '{print "   PID: " $2 ", Started: " $9}'
+  else
+    echo "❌ Gateway Process: NOT RUNNING"
+  fi
+
+  echo ""
+
+  if _api_listening; then
+    echo "✅ API Port ${API_PORT}: LISTENING"
+    ss -tuln | grep ":${API_PORT}" | awk '{print "   " $0}'
+  else
+    echo "❌ API Port ${API_PORT}: NOT LISTENING"
+  fi
+
+  echo ""
+
+  LATEST_LOG="$(ls -t "$IBC_LOG_DIR"/gateway_*.log 2>/dev/null | head -1 || true)"
+  if [ -n "$LATEST_LOG" ]; then
+    echo "📄 Latest Log: $LATEST_LOG"
+    echo "   Last modified: $(stat -c %y "$LATEST_LOG" 2>/dev/null | cut -d. -f1)"
+  else
+    echo "📄 Latest Log: Not found"
+  fi
+
+  echo ""
+
+  if _gateway_running && _api_listening; then
+    echo "🎉 Gateway is RUNNING and READY for data access!"
+  elif _gateway_running; then
+    echo "⚠️  Gateway is running but API not ready yet (may still be authenticating)"
+  else
+    echo "❌ Gateway is not running. Start it with: ./scripts/gateway/gateway.sh start"
+  fi
+}
+
+
+cmd_api_ready() {
+  cd "$PROJECT_DIR"
+  echo "Checking Gateway API status..."
+  echo ""
+
+  if ! _gateway_running; then
+    echo "❌ Gateway is not running"
+    exit 1
+  fi
+
+  GATEWAY_PID="$(_gateway_pid)"
+  echo "✅ Gateway is running (PID: $GATEWAY_PID)"
+  echo ""
+
+  if _api_listening; then
+    echo "✅✅✅ API port ${API_PORT} is LISTENING!"
+    echo ""
+    echo "Gateway is ready for connections!"
+    echo ""
+    echo "You can now start the NQ Agent service:"
+    echo "   ./scripts/lifecycle/start_nq_agent_service.sh"
+    exit 0
+  fi
+
+  echo "⏳ API port ${API_PORT} is not yet listening"
+  echo ""
+  echo "Gateway is still authenticating or starting up..."
+  echo ""
+  echo "If you approved the login in your mobile app, wait 30-60 seconds"
+  echo "and run this command again:"
+  echo "   ./scripts/gateway/gateway.sh api-ready"
+  echo ""
+  echo "Or monitor continuously:"
+  echo "   ./scripts/gateway/gateway.sh monitor"
+  exit 1
+}
+
+
+cmd_monitor() {
+  cd "$PROJECT_DIR"
+  echo "=== Monitoring Gateway until API is ready ==="
+  echo ""
+
+  MAX_WAIT=300
+  CHECK_INTERVAL=5
+  ELAPSED=0
+
+  while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
+    if _api_listening; then
+      echo ""
+      echo "✅✅✅ SUCCESS! API port ${API_PORT} is listening!"
+      echo ""
+      echo "Gateway is ready for connections!"
+      echo ""
+      echo "You can now start the NQ Agent service:"
+      echo "   ./scripts/lifecycle/start_nq_agent_service.sh"
+      exit 0
+    fi
+
+    if [ $((ELAPSED % 15)) -eq 0 ] && [ "$ELAPSED" -gt 0 ]; then
+      echo "   Still waiting... (${ELAPSED}s elapsed)"
+      if ! _gateway_running; then
+        echo "   ⚠️  Gateway process not running!"
+        exit 1
+      fi
+    fi
+
+    sleep "$CHECK_INTERVAL"
+    ELAPSED=$((ELAPSED + CHECK_INTERVAL))
+  done
+
+  echo ""
+  echo "⏱️  Timeout after ${MAX_WAIT} seconds"
+  echo "   Check Gateway status: ./scripts/gateway/gateway.sh tws-conflict"
+  exit 1
+}
+
+
+cmd_tws_conflict() {
+  cd "$PROJECT_DIR"
+  echo "=== IBKR Connection Conflict Check ==="
+  echo ""
+
+  GATEWAY_PID="$(pgrep -f "java.*IBC.jar" 2>/dev/null || true)"
+  if [ -n "$GATEWAY_PID" ]; then
+    echo "✅ IBKR Gateway: RUNNING (PID: $GATEWAY_PID)"
+  else
+    echo "❌ IBKR Gateway: NOT RUNNING"
+  fi
+
+  echo ""
+
+  TWS_PIDS="$(pgrep -f "tws|Trader Workstation" 2>/dev/null | while read -r pid; do
+    cmd=$(ps -p "$pid" -o cmd --no-headers 2>/dev/null || true)
+    if [ -n "$GATEWAY_PID" ] && [ "$pid" = "$GATEWAY_PID" ]; then
+      continue
+    fi
+    if echo "$cmd" | grep -qE "(ibcstart|gatewaystart|IBC\.jar|IbcGateway)"; then
+      continue
+    fi
+    if echo "$cmd" | grep -q "gateway.sh"; then
+      continue
+    fi
+    echo "$pid"
+  done)"
+
+  if [ -n "$TWS_PIDS" ]; then
+    echo "⚠️  WARNING: TWS (Trader Workstation) processes detected:"
+    for PID in $TWS_PIDS; do
+      ps -p "$PID" -o pid,cmd --no-headers 2>/dev/null | awk '{print "   PID " $1 ": " substr($0, index($0,$2))}'
+    done
+    echo ""
+    echo "💡 If TWS is connected from a different IP, you'll get Error 162."
+    echo "   Solution: Close TWS or disconnect it, then restart Gateway."
+  else
+    echo "✅ No TWS processes detected (Gateway-only mode)"
+  fi
+
+  echo ""
+
+  if [ -f "logs/nq_agent.log" ]; then
+    ERROR_162_COUNT="$(grep -c "Error 162\|TWS session\|different IP" logs/nq_agent.log 2>/dev/null || echo "0")"
+    ERROR_162_COUNT="$(echo "$ERROR_162_COUNT" | tr -d '\n' | head -1)"
+    if [ -n "$ERROR_162_COUNT" ] && [ "$ERROR_162_COUNT" -gt 0 ] 2>/dev/null; then
+      echo "⚠️  Error 162 detected in logs ($ERROR_162_COUNT occurrences)"
+      echo "   Recent occurrences:"
+      grep "Error 162\|TWS session\|different IP" logs/nq_agent.log | tail -3 | sed 's/^/   /'
+      echo ""
+      echo "💡 This indicates a TWS/Gateway IP conflict."
+    else
+      echo "✅ No Error 162 in recent logs"
+    fi
+  fi
+}
+
+
+cmd_test_api() {
+  cd "$PROJECT_DIR"
+  echo "=== Testing API Connection ==="
+  echo ""
+
+  if ! _gateway_running; then
+    echo "❌ Gateway is not running"
+    exit 1
+  fi
+
+  echo "✅ Gateway is running"
+  echo ""
+  echo "Attempting API connection to trigger any pending dialogs..."
+  echo ""
+
+  python3 << 'EOF'
+from ib_insync import IB
+
+ib = IB()
+try:
+    print("Connecting to Gateway at 127.0.0.1:4002...")
+    ib.connect("127.0.0.1", 4002, clientId=99, timeout=5)
+    if ib.isConnected():
+        print("✅✅✅ SUCCESS! API connection established!")
+        print("   Gateway is ready for connections")
+        ib.disconnect()
+        raise SystemExit(0)
+    print("❌ Connection failed")
+    raise SystemExit(1)
+except Exception as e:
+    err = str(e).lower()
+    if "connection refused" in err or "111" in str(e):
+        print("⏳ API port not yet listening")
+        print("   Gateway may still be starting up")
+        print("   Or there may be a dialog waiting for approval")
+    elif "write access" in err or "permission" in err:
+        print("⚠️  Write access dialog may be blocking connection")
+        print("   Check Gateway logs for 'API client needs write access' dialog")
+    else:
+        print(f"❌ Connection error: {e}")
+    raise SystemExit(1)
+EOF
+}
+
+
+cmd_2fa_status() {
+  cd "$PROJECT_DIR"
+  echo "=== IBKR Gateway 2FA Status Check ==="
+  echo ""
+
+  if _gateway_running; then
+    GATEWAY_PID="$(_gateway_pid)"
+    echo "✅ Gateway is running (PID: $GATEWAY_PID)"
+  else
+    echo "❌ Gateway is NOT running"
+    echo "   Start it: ./scripts/gateway/gateway.sh start"
+    exit 1
+  fi
+
+  if _api_listening; then
+    echo "✅ API port ${API_PORT} is LISTENING - Gateway is ready!"
+    echo ""
+    echo "You can now start the NQ Agent service:"
+    echo "   ./scripts/lifecycle/start_nq_agent_service.sh"
+    exit 0
+  fi
+
+  echo "⚠️  API port ${API_PORT} is NOT listening yet"
+  echo ""
+
+  LATEST_LOG="$(ls -t "$IBC_LOG_DIR"/ibc-*.txt 2>/dev/null | head -1 || true)"
+  if [ -n "$LATEST_LOG" ]; then
+    echo "📋 Recent Gateway activity:"
+    echo ""
+    tail -20 "$LATEST_LOG" | grep -E "2FA|Second Factor|Authentication|Authenticated|Logged|main window|API" | tail -5 || true
+    echo ""
+
+    if grep -q "Second Factor Authentication" "$LATEST_LOG" && ! grep -q "Authenticated\|Logged.*in" "$LATEST_LOG"; then
+      echo "🔐 Gateway is WAITING for 2FA authentication"
+      echo ""
+      echo "To complete 2FA:"
+      echo "  ./scripts/gateway/gateway.sh complete-2fa"
+    elif grep -q "Authenticated\|Logged.*in\|main window" "$LATEST_LOG"; then
+      echo "✅ Gateway appears to be authenticated"
+      echo "   Waiting for API port to become available..."
+    fi
+  else
+    echo "⚠️  Could not find Gateway logs"
+  fi
+
+  echo ""
+  echo "=== Quick Commands ==="
+  echo "Check API port: ss -tuln | grep ${API_PORT}"
+  echo "View Gateway logs: tail -f ibkr/ibc/logs/ibc-*.txt"
+  echo "Check Gateway process: ps aux | grep IBC.jar"
+}
+
+
+cmd_wait_2fa() {
+  cd "$PROJECT_DIR"
+  echo "=== Waiting for IBKR Mobile App 2FA Approval ==="
+  echo ""
+
+  if ! _gateway_running; then
+    echo "❌ IB Gateway is not running!"
+    echo "   Start it first: ./scripts/gateway/gateway.sh start"
+    exit 1
+  fi
+
+  GATEWAY_PID="$(_gateway_pid)"
+  echo "✅ Gateway is running (PID: $GATEWAY_PID)"
+  echo ""
+
+  LATEST_LOG="$(ls -t "$IBC_LOG_DIR"/ibc-*.txt 2>/dev/null | head -1 || true)"
+  if [ -z "$LATEST_LOG" ]; then
+    echo "⚠️  Could not find IBC log file"
+  else
+    echo "📋 Monitoring log: $LATEST_LOG"
+  fi
+
+  echo ""
+  echo "📱 ACTION REQUIRED:"
+  echo "   1. Check your IBKR mobile app"
+  echo "   2. You should see a login approval notification"
+  echo "   3. Tap 'Approve' or 'Allow' to approve the login"
+  echo ""
+  echo "⏳ Waiting for authentication to complete..."
+  echo ""
+
+  MAX_WAIT=600
+  CHECK_INTERVAL=2
+  ELAPSED=0
+
+  while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
+    if _api_listening; then
+      echo ""
+      echo "✅✅✅ SUCCESS! Gateway is authenticated and API is ready!"
+      echo ""
+      echo "You can now start the NQ Agent service:"
+      echo "   ./scripts/lifecycle/start_nq_agent_service.sh"
+      exit 0
+    fi
+
+    if [ -n "${LATEST_LOG:-}" ] && [ -f "${LATEST_LOG:-}" ]; then
+      if grep -qi "logged in\|authenticated\|main window" "$LATEST_LOG" 2>/dev/null; then
+        echo "   ℹ️  Log shows authentication may have completed..."
+      fi
+    fi
+
+    if ! ps -p "$GATEWAY_PID" >/dev/null 2>&1; then
+      echo ""
+      echo "❌ Gateway process exited!"
+      if [ -n "${LATEST_LOG:-}" ]; then
+        echo "   Check logs: tail -50 $LATEST_LOG"
+      fi
+      exit 1
+    fi
+
+    if [ $((ELAPSED % 10)) -eq 0 ] && [ "$ELAPSED" -gt 0 ]; then
+      echo "   Still waiting... (${ELAPSED}s elapsed)"
+      echo "   📱 Remember to approve the login in your IBKR mobile app!"
+    fi
+
+    sleep "$CHECK_INTERVAL"
+    ELAPSED=$((ELAPSED + CHECK_INTERVAL))
+  done
+
+  echo ""
+  echo "⏱️  Timeout after ${MAX_WAIT} seconds"
+  echo ""
+  echo "📋 Troubleshooting:"
+  echo "   1. Did you approve the login in your IBKR mobile app?"
+  echo "   2. Check Gateway status: ./scripts/gateway/gateway.sh tws-conflict"
+  if [ -n "${LATEST_LOG:-}" ]; then
+    echo "   3. Check logs: tail -50 $LATEST_LOG"
+  fi
+  echo "   4. Check if API port is ready: ss -tuln | grep ${API_PORT}"
+  exit 1
+}
+
+
+cmd_complete_2fa() {
+  cd "$PROJECT_DIR"
+  echo "=== Complete 2FA Authentication for IBKR Gateway ==="
+  echo ""
+
+  if ! _gateway_running; then
+    echo "❌ IB Gateway is not running!"
+    echo "   Start it first: ./scripts/gateway/gateway.sh start"
+    exit 1
+  fi
+
+  echo "✅ Gateway is running and may be waiting for 2FA"
+  echo ""
+
+  VNC_DISPLAY=":1"
+  if pgrep -f "Xvnc.*${VNC_DISPLAY}" >/dev/null 2>&1; then
+    echo "✅ VNC server already running on ${VNC_DISPLAY}"
+  else
+    echo "Starting VNC server on ${VNC_DISPLAY}..."
+    vncserver ${VNC_DISPLAY} -geometry 1024x768 -depth 24 2>&1 | tee /tmp/vnc_start.log >/dev/null
+  fi
+
+  SERVER_IP="$(hostname -I | awk '{print $1}' 2>/dev/null || echo 'localhost')"
+
+  echo ""
+  echo "=== Connect to VNC ==="
+  echo ""
+  echo "Option 1: Direct connection:"
+  echo "   vncviewer ${SERVER_IP}:5901"
+  echo ""
+  echo "Option 2: SSH tunnel (recommended):"
+  echo "   ssh -L 5901:localhost:5901 ${USER}@${SERVER_IP}"
+  echo "   Then: vncviewer localhost:5901"
+  echo ""
+  echo "=== In VNC Session ==="
+  echo ""
+  echo "1. Look for the 'Second Factor Authentication' dialog"
+  echo "2. Enter your 2FA code from your authenticator app"
+  echo "3. Click 'OK' or 'Submit'"
+  echo ""
+  echo "After authentication:"
+  echo "  ./scripts/gateway/gateway.sh api-ready"
+}
+
+
+cmd_auto_2fa() {
+  # Directly inlined from the legacy script; kept as a utility.
+  twofa_arg="${1:-}"
+
+  echo "=== Auto 2FA Entry for IBKR Gateway ==="
+  echo ""
+
+  if ! _gateway_running; then
+    echo "❌ IB Gateway is not running!"
+    exit 1
+  fi
+
+  echo "✅ Gateway is running"
+  echo ""
+
+  TWOFA_FILE="$HOME/.ibkr_2fa_code"
+  TWOFA_TIMEOUT=300
+
+  echo "Waiting for 2FA code..."
+  echo ""
+  echo "Option 1: Write 2FA code to file:"
+  echo "   echo 'YOUR_2FA_CODE' > $TWOFA_FILE"
+  echo ""
+  echo "Option 2: Set environment variable:"
+  echo "   export IBKR_2FA_CODE='YOUR_2FA_CODE'"
+  echo "   ./scripts/gateway/gateway.sh auto-2fa"
+  echo ""
+  echo "Option 3: Pass as argument:"
+  echo "   ./scripts/gateway/gateway.sh auto-2fa YOUR_2FA_CODE"
+  echo ""
+
+  TWOFA_CODE=""
+  if [ -n "$twofa_arg" ]; then
+    TWOFA_CODE="$twofa_arg"
+    echo "✅ 2FA code provided as argument"
+  elif [ -n "${IBKR_2FA_CODE:-}" ]; then
+    TWOFA_CODE="$IBKR_2FA_CODE"
+    echo "✅ 2FA code found in environment variable"
+  elif [ -f "$TWOFA_FILE" ]; then
+    FILE_AGE=$(($(date +%s) - $(stat -c %Y "$TWOFA_FILE" 2>/dev/null || echo 0)))
+    if [ "$FILE_AGE" -lt 60 ]; then
+      TWOFA_CODE="$(cat "$TWOFA_FILE" | tr -d '\n\r ' | head -c 10)"
+      echo "✅ 2FA code read from file (age: ${FILE_AGE}s)"
+      rm -f "$TWOFA_FILE"
+    else
+      echo "⚠️  2FA file too old (${FILE_AGE}s), waiting for new code..."
+    fi
+  fi
+
+  if [ -z "$TWOFA_CODE" ]; then
+    echo ""
+    echo "⏳ Waiting for 2FA code (timeout: ${TWOFA_TIMEOUT}s)..."
+    echo "   Write code to: $TWOFA_FILE"
+    echo ""
+    START_TIME=$(date +%s)
+    while [ $(($(date +%s) - $START_TIME)) -lt $TWOFA_TIMEOUT ]; do
+      if [ -f "$TWOFA_FILE" ]; then
+        FILE_AGE=$(($(date +%s) - $(stat -c %Y "$TWOFA_FILE" 2>/dev/null || echo 0)))
+        if [ "$FILE_AGE" -lt 60 ]; then
+          TWOFA_CODE="$(cat "$TWOFA_FILE" | tr -d '\n\r ' | head -c 10)"
+          echo "✅ Got 2FA code from file!"
+          rm -f "$TWOFA_FILE"
+          break
+        fi
+      fi
+      sleep 1
+    done
+  fi
+
+  if [ -z "$TWOFA_CODE" ]; then
+    echo "❌ No 2FA code received within timeout"
+    exit 1
+  fi
+
+  echo ""
+  echo "🔑 2FA Code: ${TWOFA_CODE:0:2}****"
+  echo ""
+
+  if ! command -v xdotool >/dev/null 2>&1; then
+    echo "⚠️  xdotool not installed - cannot automate GUI"
+    echo ""
+    echo "To install xdotool:"
+    echo "   sudo apt-get install xdotool"
+    echo ""
+    echo "Or manually enter the code in the Gateway window."
+    exit 1
+  fi
+
+  echo "✅ Using xdotool for GUI automation"
+  echo "   Searching for 2FA dialog..."
+
+  for DISPLAY_NUM in ":99" ":1" ""; do
+    if [ -n "$DISPLAY_NUM" ]; then
+      export DISPLAY="$DISPLAY_NUM"
+    fi
+
+    DIALOG_WIN=""
+    for _i in {1..30}; do
+      DIALOG_WIN="$(xdotool search --name "Second Factor Authentication" 2>/dev/null | head -1 || true)"
+      if [ -n "$DIALOG_WIN" ]; then
+        echo "   ✅ Found 2FA dialog (window: $DIALOG_WIN)"
+        break
+      fi
+      sleep 1
+    done
+
+    if [ -n "$DIALOG_WIN" ]; then
+      xdotool windowactivate "$DIALOG_WIN" 2>/dev/null || true
+      sleep 0.5
+      echo "   Entering 2FA code..."
+      xdotool type --clearmodifiers "$TWOFA_CODE" 2>/dev/null || true
+      sleep 0.5
+      xdotool click 1 2>/dev/null || true
+      sleep 0.2
+      xdotool type --clearmodifiers "$TWOFA_CODE" 2>/dev/null || true
+      sleep 0.5
+      echo "   Submitting..."
+      xdotool key Return 2>/dev/null || true
+      sleep 0.5
+      echo "   ✅ 2FA code entered and submitted!"
+      echo ""
+      echo "   Waiting 30 seconds for Gateway to authenticate..."
+      sleep 30
+      if _api_listening; then
+        echo "   ✅ API port ${API_PORT} is listening - Gateway authenticated!"
+        exit 0
+      fi
+      echo "   ⚠️  API port not yet ready, but code was entered"
+      exit 0
+    fi
+  done
+
+  echo "   ⚠️  Could not find 2FA dialog window"
+  exit 1
+}
+
+
+cmd_vnc_setup() {
+  echo "=== VNC Setup for IBKR Gateway Manual Login ==="
+  echo ""
+
+  if pgrep -f "Xvnc.*:1" >/dev/null 2>&1; then
+    echo "⚠️  VNC server already running on :1"
+    echo "   To kill it: vncserver -kill :1"
+    echo ""
+    SERVER_IP="$(hostname -I | awk '{print $1}' 2>/dev/null || echo 'localhost')"
+    echo "✅ Connect via VNC:"
+    echo "   vncviewer $SERVER_IP:5901"
+    exit 0
+  fi
+
+  echo "Starting VNC server on display :1..."
+  vncserver :1 -geometry 1024x768 -depth 24
+
+  SERVER_IP="$(hostname -I | awk '{print $1}' 2>/dev/null || echo 'localhost')"
+  echo ""
+  echo "=== Connection Instructions ==="
+  echo "1. Connect via VNC: vncviewer $SERVER_IP:5901"
+  echo "2. In VNC, start Gateway:"
+  echo "   cd $PROJECT_DIR/ibkr/ibc"
+  echo "   export DISPLAY=:1"
+  echo "   ./gatewaystart.sh"
+  echo "3. Complete login + 2FA"
+  echo "4. After login, stop VNC: vncserver -kill :1"
+  echo "5. Future starts are headless: ./scripts/gateway/gateway.sh start"
+}
+
+
+cmd_vnc_config_api() {
+  cd "$PROJECT_DIR"
+  echo "=== Configure Gateway API Settings (One-Time VNC Setup) ==="
+  echo ""
+
+  if ! _gateway_running; then
+    echo "❌ Gateway is not running!"
+    echo "   Start it first: ./scripts/gateway/gateway.sh start-vnc"
+    exit 1
+  fi
+
+  echo "✅ Gateway is running"
+  echo ""
+
+  VNC_DISPLAY=":1"
+  if ! pgrep -f "Xvnc.*${VNC_DISPLAY}" >/dev/null 2>&1; then
+    echo "Starting VNC server..."
+    vncserver ${VNC_DISPLAY} -geometry 1024x768 -depth 24
+    echo "✅ VNC server started"
+  else
+    echo "✅ VNC server already running"
+  fi
+
+  SERVER_IP="$(hostname -I | awk '{print $1}' 2>/dev/null || echo 'localhost')"
+  echo ""
+  echo "Connect: vncviewer ${SERVER_IP}:5901"
+  echo ""
+  echo "In Gateway UI:"
+  echo "  - Configure → Settings → API → Settings"
+  echo "  - Enable 'ActiveX and Socket Clients'"
+  echo "  - Socket port: ${API_PORT}"
+  echo "  - Trusted IPs: 127.0.0.1"
+  echo "  - Approve any 'API client needs write access' dialog (if shown)"
+  echo ""
+  echo "Then verify:"
+  echo "  ./scripts/gateway/gateway.sh api-ready"
+}
+
+
+cmd_setup() {
+  mode="${1:-readonly}"   # readonly or full
+  ibc_mode="${2:-yes}"    # yes or no
+
+  echo "=== IB Gateway Complete Setup ==="
+  echo ""
+  echo "Mode: $mode"
+  echo "IBC Configuration: $ibc_mode"
+  echo ""
+
+  echo "1. Configuring jts.ini for API access..."
+  mkdir -p "$JTS_DIR"
+
+  if ! grep -q "SocketPort" "$JTS_DIR/jts.ini" 2>/dev/null; then
+    cat >> "$JTS_DIR/jts.ini" << 'EOF'
+
+# API Configuration for Read-Only Data Access (added automatically)
+SocketPort=4002
+ReadOnlyAPI=true
+EnableReadOnlyAPI=true
+MasterAPIclientId=0
+ApiOnly=true
+TrustedIPs=127.0.0.1
+UseSSL=false
+EOF
+    echo "   ✅ API settings added"
+  else
+    echo "   ✅ API settings already exist"
+  fi
+
+  if [ "$ibc_mode" = "yes" ]; then
+    echo ""
+    echo "2. Configuring IBC (IB Controller)..."
+    cd "$IBC_DIR" || exit 1
+
+    if [ -f config-auto.ini ]; then
+      cp config-auto.ini "config-auto.ini.backup.$(date +%Y%m%d_%H%M%S)"
+    fi
+
+    cat > config-auto.ini << EOF
+# IB Controller Configuration - Read-Only Data Access
+# This configuration enables API access for data retrieval only (no trading)
+
+# Trading Mode: paper trading account (safer for data access)
+TradingMode=paper
+
+# API Settings - READ ONLY
+ReadOnlyApi=yes
+EnableAPI=yes
+
+# IB Directory (where Gateway settings are stored)
+IbDir=$JTS_DIR
+
+# Auto-restart settings (optional - keeps Gateway running)
+AutoRestart=yes
+RestartDaily=yes
+RestartTime=03:00
+
+# Logging
+LogComponents=yes
+LogToFile=yes
+EOF
+
+    echo "   ✅ IBC configured for read-only API access"
+  fi
+
+  echo ""
+  echo "=== Setup Complete ==="
+  echo ""
+  echo "Next steps:"
+  echo "  1. Start IB Gateway:"
+  echo "     ./scripts/gateway/gateway.sh start"
+  echo "  2. Check status:"
+  echo "     ./scripts/gateway/gateway.sh status"
+  echo "  3. Test connection:"
+  echo "     python3 scripts/testing/smoke_test_ibkr.py"
+}
+
+
+cmd_disable_sleep() {
+  # Inlined from disable_auto_sleep.sh
+  set -e
+  echo "🔧 Disabling auto-sleep on Beelink..."
+
+  if [ "${EUID:-0}" -ne 0 ]; then
+    echo "⚠️  Some commands require sudo. You may be prompted for your password."
+    SUDO="sudo"
+  else
+    SUDO=""
+  fi
+
+  echo "📱 Disabling GNOME power manager sleep timeouts..."
+  gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 0 2>/dev/null || echo "  (GNOME settings not available, skipping)"
+  gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout 0 2>/dev/null || echo "  (GNOME settings not available, skipping)"
+  gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' 2>/dev/null || echo "  (GNOME settings not available, skipping)"
+  gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing' 2>/dev/null || echo "  (GNOME settings not available, skipping)"
+
+  echo "⚙️  Configuring systemd-logind..."
+  LOGIND_CONF="/etc/systemd/logind.conf"
+  LOGIND_CONF_BAK="/etc/systemd/logind.conf.backup.$(date +%Y%m%d_%H%M%S)"
+
+  if [ -f "$LOGIND_CONF" ]; then
+    $SUDO cp "$LOGIND_CONF" "$LOGIND_CONF_BAK"
+    echo "  ✓ Backed up original config to $LOGIND_CONF_BAK"
+  fi
+
+  $SUDO tee -a "$LOGIND_CONF" > /dev/null <<EOF
+
+# Disable auto-sleep for NQ Agent (added by gateway.sh disable-sleep)
+HandleLidSwitch=ignore
+HandleLidSwitchExternalPower=ignore
+HandleLidSwitchDocked=ignore
+HandlePowerKey=ignore
+HandleSuspendKey=ignore
+IdleAction=ignore
+EOF
+
+  echo "  ✓ Updated systemd-logind.conf"
+  echo "🔄 Restarting systemd-logind..."
+  $SUDO systemctl restart systemd-logind 2>/dev/null || echo "  ⚠️  Could not restart systemd-logind (may require reboot)"
+
+  echo "🚫 Masking sleep targets..."
+  $SUDO systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || echo "  ⚠️  Could not mask sleep targets"
+
+  echo "⏸️  Setting idle action to ignore..."
+  $SUDO systemctl set-property --runtime systemd-logind.service IdleAction=ignore 2>/dev/null || echo "  ⚠️  Could not set idle action"
+
+  if command -v xset >/dev/null 2>&1 && [ -n "${DISPLAY:-}" ]; then
+    echo "🖥️  Disabling X11 DPMS (Display Power Management)..."
+    xset s off 2>/dev/null || true
+    xset -dpms 2>/dev/null || true
+    xset s noblank 2>/dev/null || true
+    echo "  ✓ Disabled X11 screen saver and DPMS"
+  fi
+
+  if command -v systemd-inhibit >/dev/null 2>&1; then
+    echo "🔒 systemd-inhibit available (can be used to prevent sleep)"
+  fi
+
+  echo ""
+  echo "✅ Auto-sleep disabled!"
+  echo ""
+  echo "📝 Summary:"
+  echo "  • GNOME power manager: Sleep disabled"
+  echo "  • systemd-logind: Sleep actions ignored"
+  echo "  • Sleep targets: Masked"
+  echo ""
+  echo "⚠️  Note: Some changes may require a reboot to take full effect."
+}
 
 print_help() {
-  sed -n '1,120p' "$0" | sed -n '/^# ===/,$p' >/dev/null 2>&1 || true
   cat <<'EOF'
 Usage:
   ./scripts/gateway/gateway.sh <command>
 
 Commands:
-  start           Start Gateway headless via IBC
-  stop            Stop Gateway (IBC)
-  status          Check Gateway status
-  api-ready       Check API port readiness
-  tws-conflict    Detect TWS/Gateway conflicts
-  2fa-status      Check whether 2FA is required
-  wait-2fa        Wait for 2FA approval (mobile)
-  complete-2fa    Complete 2FA via VNC
-  auto-2fa        Auto-enter 2FA code (if applicable)
-  monitor         Monitor until API is ready
-  setup           One-time gateway + IBC setup
-  vnc-setup       One-time VNC setup for manual login
-  vnc-config-api  One-time API config via VNC
-  disable-sleep   Disable auto-sleep (host helper)
+  start               Start Gateway headless via IBC (Xvfb DISPLAY=:99)
+  start-vnc           Start Gateway via IBC on VNC display (:1)
+  stop                Stop Gateway (IBC)
+  status              Check Gateway status
+  api-ready           Check API port readiness (exit 0 if ready)
+  monitor             Monitor until API is ready (max 5 minutes)
+  tws-conflict         Detect TWS/Gateway conflicts and Error 162 hints
+  test-api            Attempt short API connect using ib_insync
+  2fa-status          Check whether 2FA is required (log-based)
+  wait-2fa            Wait for 2FA approval (mobile; max 10 minutes)
+  complete-2fa        Start VNC (if needed) and print 2FA entry instructions
+  auto-2fa [CODE]     Attempt to auto-enter 2FA code (requires xdotool)
+  setup [mode] [ibc]  One-time gateway + IBC setup (mode=readonly/full, ibc=yes/no)
+  vnc-setup           One-time VNC setup for manual login
+  vnc-config-api      One-time API config guidance via VNC
+  disable-sleep       Disable auto-sleep (host helper)
   help            Show this help
 EOF
 }
@@ -64,46 +1049,52 @@ case "$cmd" in
     exit 0
     ;;
   start)
-    exec "$SCRIPT_DIR/start_ibgateway_ibc.sh" "$@"
+    cmd_start "$@"
+    ;;
+  start-vnc)
+    cmd_start_vnc "$@"
     ;;
   stop)
-    exec "$SCRIPT_DIR/stop_ibgateway_ibc.sh" "$@"
+    cmd_stop "$@"
     ;;
   status)
-    exec "$SCRIPT_DIR/check_gateway_status.sh" "$@"
+    cmd_status "$@"
     ;;
   api-ready)
-    exec "$SCRIPT_DIR/check_api_ready.sh" "$@"
+    cmd_api_ready "$@"
     ;;
   tws-conflict)
-    exec "$SCRIPT_DIR/check_tws_conflict.sh" "$@"
+    cmd_tws_conflict "$@"
+    ;;
+  test-api)
+    cmd_test_api "$@"
     ;;
   2fa-status)
-    exec "$SCRIPT_DIR/check_gateway_2fa_status.sh" "$@"
+    cmd_2fa_status "$@"
     ;;
   wait-2fa)
-    exec "$SCRIPT_DIR/wait_for_2fa_approval.sh" "$@"
+    cmd_wait_2fa "$@"
     ;;
   complete-2fa)
-    exec "$SCRIPT_DIR/complete_2fa_vnc.sh" "$@"
+    cmd_complete_2fa "$@"
     ;;
   auto-2fa)
-    exec "$SCRIPT_DIR/auto_2fa.sh" "$@"
+    cmd_auto_2fa "$@"
     ;;
   monitor)
-    exec "$SCRIPT_DIR/monitor_until_ready.sh" "$@"
+    cmd_monitor "$@"
     ;;
   setup)
-    exec "$SCRIPT_DIR/setup_ibgateway.sh" "$@"
+    cmd_setup "$@"
     ;;
   vnc-setup)
-    exec "$SCRIPT_DIR/setup_vnc_for_login.sh" "$@"
+    cmd_vnc_setup "$@"
     ;;
   vnc-config-api)
-    exec "$SCRIPT_DIR/configure_gateway_api_vnc.sh" "$@"
+    cmd_vnc_config_api "$@"
     ;;
   disable-sleep)
-    exec "$SCRIPT_DIR/disable_auto_sleep.sh" "$@"
+    cmd_disable_sleep "$@"
     ;;
   *)
     echo "Unknown command: $cmd" >&2

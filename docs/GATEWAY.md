@@ -3,16 +3,9 @@
 ## Prerequisites
 
 - **Java 17+** installed and available on `$PATH` (required by IB Gateway/IBC).
-- IB Gateway and IBC installed under `ibkr/` per `scripts/gateway/setup_ibgateway.sh`.
+- IB Gateway and IBC installed under `ibkr/` per `scripts/gateway/gateway.sh setup`.
 
 ## 🚀 Start Gateway (Headless)
-
-```bash
-cd /path/to/pearlalgo-dev-ai-agents
-./scripts/gateway/start_ibgateway_ibc.sh
-```
-
-Or (consolidated entry point):
 
 ```bash
 cd /path/to/pearlalgo-dev-ai-agents
@@ -28,12 +21,6 @@ cd /path/to/pearlalgo-dev-ai-agents
 ## 🛑 Stop Gateway
 
 ```bash
-./scripts/gateway/stop_ibgateway_ibc.sh
-```
-
-Or:
-
-```bash
 ./scripts/gateway/gateway.sh stop
 ```
 
@@ -44,13 +31,6 @@ pkill -9 -f "java.*IBC.jar"
 ```
 
 ## ✅ Check Gateway Status
-
-```bash
-cd /path/to/pearlalgo-dev-ai-agents
-./scripts/gateway/check_gateway_status.sh
-```
-
-Or:
 
 ```bash
 cd /path/to/pearlalgo-dev-ai-agents
@@ -103,7 +83,7 @@ Instead of using a VNC terminal, run commands from your main terminal:
 
 ```bash
 # Check Gateway status
-ssh <user>@<server> "./scripts/gateway/check_tws_conflict.sh"
+ssh <user>@<server> "./scripts/gateway/gateway.sh tws-conflict"
 
 # Check if 2FA is needed
 ssh <user>@<server> "tail -20 ibkr/ibc/logs/ibc-*.txt | grep -i '2fa\\|authentication'"
@@ -122,7 +102,7 @@ export DISPLAY=:1
 
 # Run Gateway start command
 cd /path/to/pearlalgo-dev-ai-agents
-./scripts/gateway/start_ibgateway_ibc.sh
+./scripts/gateway/gateway.sh start
 ```
 
 Then verify Gateway readiness from your main terminal:
@@ -135,7 +115,7 @@ ss -tuln | grep 4002
 
 ```bash
 # 1. Stop Gateway
-./scripts/gateway/stop_ibgateway_ibc.sh
+./scripts/gateway/gateway.sh stop
 
 # 2. Start VNC
 vncserver :1
@@ -180,7 +160,7 @@ ss -tuln | grep 5901 && echo "✅ VNC running" || echo "❌ Not running"
 pkill -9 -f "java.*IBC.jar"
 pkill -9 -f "ibcstart.sh"
 sleep 3
-./scripts/gateway/start_ibgateway_ibc.sh
+./scripts/gateway/gateway.sh start
 ```
 
 ### Gateway running but API not ready
@@ -204,22 +184,22 @@ find ibkr/Jts -name "autorestart" -type f -delete
 ### Start Gateway
 ```bash
 cd /path/to/pearlalgo-dev-ai-agents
-./scripts/gateway/start_ibgateway_ibc.sh
-./scripts/gateway/check_gateway_status.sh
+./scripts/gateway/gateway.sh start
+./scripts/gateway/gateway.sh status
 ```
 
 ### Stop Gateway
 ```bash
 pkill -f "java.*IBC.jar"
-./scripts/gateway/check_gateway_status.sh
+./scripts/gateway/gateway.sh status
 ```
 
 ### Restart Gateway
 ```bash
-./scripts/gateway/stop_ibgateway_ibc.sh
+./scripts/gateway/gateway.sh stop
 sleep 5
 cd /path/to/pearlalgo-dev-ai-agents
-./scripts/gateway/start_ibgateway_ibc.sh
+./scripts/gateway/gateway.sh start
 ```
 
 ---

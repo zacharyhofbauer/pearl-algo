@@ -67,8 +67,8 @@
 
 2. **Start IBKR Gateway**
    ```bash
-   ./scripts/gateway/start_ibgateway_ibc.sh
-   ./scripts/gateway/check_gateway_status.sh   # expect: RUNNING + API READY
+   ./scripts/gateway/gateway.sh start
+   ./scripts/gateway/gateway.sh status   # expect: RUNNING + API READY
    ```
 
 3. **Start NQ Agent Service**
@@ -133,9 +133,10 @@
 
 - **Gateway**
   ```bash
-  ./scripts/gateway/start_ibgateway_ibc.sh
-  ./scripts/gateway/stop_ibgateway_ibc.sh
-  ./scripts/gateway/check_gateway_status.sh
+  ./scripts/gateway/gateway.sh start        # start (headless, IBC)
+  ./scripts/gateway/gateway.sh stop         # stop
+  ./scripts/gateway/gateway.sh status       # status (process + port + logs)
+  ./scripts/gateway/gateway.sh api-ready    # exit 0 when API is ready
   ```
 
 - **Telegram Command Handler**
@@ -203,7 +204,7 @@
 
 - **No market data / no signals:**
   ```bash
-  ./scripts/gateway/check_gateway_status.sh
+  ./scripts/gateway/gateway.sh status
   cat data/nq_agent_state/state.json | jq .buffer_size
   ```
 

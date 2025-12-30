@@ -475,7 +475,7 @@ class GetLatestBarTask(Task):
                                 f"   6. Also check: Settings → Trading Permissions → API User Activity Certification\n"
                                 f"   7. Complete any required certifications for futures/API access\n"
                                 f"   8. Wait 2-3 minutes for changes to propagate\n"
-                                f"   9. Restart Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh && sleep 5 && ./scripts/gateway/start_ibgateway_ibc.sh\n"
+                                f"   9. Restart Gateway: ./scripts/gateway/gateway.sh stop && sleep 5 && ./scripts/gateway/gateway.sh start\n"
                                 f"   10. Wait 30 seconds for Gateway to fully connect\n"
                                 f"   11. Restart service: ./scripts/lifecycle/start_nq_agent_service.sh\n"
                                 f"   \n"
@@ -797,7 +797,7 @@ class GetLatestBarTask(Task):
                         f"   📋 Solution:\n"
                         f"   1. Close TWS or disconnect it completely\n"
                         f"   2. Wait 30 seconds for session to clear\n"
-                        f"   3. Restart Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh && ./scripts/gateway/start_ibgateway_ibc.sh\n"
+                        f"   3. Restart Gateway: ./scripts/gateway/gateway.sh stop && ./scripts/gateway/gateway.sh start\n"
                         f"   4. Restart service\n"
                         f"   \n"
                         f"   Error: {e}"
@@ -1295,7 +1295,7 @@ class IBKRExecutor:
                                     logger.warning(
                                         f"⚠️  WARNING: Connected to PAPER TRADING account ({account_id})\n"
                                         f"   To use LIVE trading, set TradingMode=live in ibkr/ibc/config-auto.ini\n"
-                                        f"   Then restart Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh && ./scripts/gateway/start_ibgateway_ibc.sh"
+                                        f"   Then restart Gateway: ./scripts/gateway/gateway.sh stop && ./scripts/gateway/gateway.sh start"
                                     )
                                 else:
                                     logger.info(f"✅ Connected to LIVE account: {account_id}")

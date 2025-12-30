@@ -17,17 +17,9 @@ This document standardizes the roles of all scripts under `scripts/` and identif
 
 Gateway scripts orchestrate IBKR Gateway lifecycle and 2FA flows. They do **not** contain trading logic.
 
-Key scripts (to keep as canonical):
+Canonical script:
 
-- `gateway.sh` – consolidated entry point (subcommands) that delegates to the scripts below.
-- `start_ibgateway_ibc.sh`, `stop_ibgateway_ibc.sh` – start/stop Gateway via IBC.
-- `check_gateway_status.sh` – check if Gateway is running.
-- `check_api_ready.sh`, `check_gateway_2fa_status.sh`, `test_api_connection.sh` – verify authentication and API connectivity.
-- `check_tws_conflict.sh` – detect TWS/Gateway conflicts.
-- `auto_2fa.sh`, `wait_for_2fa_approval.sh`, `complete_2fa_vnc.sh`, `setup_vnc_for_login.sh`, `configure_gateway_api_vnc.sh` – 2FA + VNC workflows.
-- `monitor_until_ready.sh` – wait for Gateway readiness.
-- `disable_auto_sleep.sh` – prevent OS sleep (environmental helper).
-- `setup_ibgateway.sh` – initial setup/orchestration.
+- `gateway.sh` – consolidated gateway CLI (subcommands for start/stop/status/2FA/VNC/setup).
 
 ## Telegram (`scripts/telegram/`)
 

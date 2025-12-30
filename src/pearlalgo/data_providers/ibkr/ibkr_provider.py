@@ -264,7 +264,7 @@ class IBKRProvider(DataProvider):
                         f"   📋 Solution:\n"
                         f"   1. Close TWS or disconnect it completely (check all devices)\n"
                         f"   2. Wait 30-60 seconds for session to clear\n"
-                        f"   3. Restart Gateway: ./scripts/gateway/stop_ibgateway_ibc.sh && ./scripts/gateway/start_ibgateway_ibc.sh\n"
+                        f"   3. Restart Gateway: ./scripts/gateway/gateway.sh stop && ./scripts/gateway/gateway.sh start\n"
                         f"   4. Restart service\n"
                         f"   \n"
                         f"   Note: This error blocks historical data. Level 1 real-time data may still work.\n"

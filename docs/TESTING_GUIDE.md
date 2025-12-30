@@ -289,7 +289,7 @@ python3 scripts/testing/test_all.py service
 #### 1. Connection Status
 ```bash
 # Check IB Gateway
-./scripts/gateway/check_gateway_status.sh
+./scripts/gateway/gateway.sh status
 
 # Check agent status
 ./scripts/lifecycle/check_nq_agent_status.sh
@@ -571,9 +571,9 @@ Both tools can be run side-by-side; choose whichever fits your workflow.
 3. Network issues
 
 **Solutions:**
-1. Start IB Gateway: `./scripts/gateway/start_ibgateway_ibc.sh`
+1. Start IB Gateway: `./scripts/gateway/gateway.sh start`
 2. Check port: `netstat -tlnp | grep 4002`
-3. Verify connection: `./scripts/gateway/check_gateway_status.sh`
+3. Verify connection: `./scripts/gateway/gateway.sh status`
 
 ### Telegram Notifications Not Working
 
@@ -595,7 +595,7 @@ Both tools can be run side-by-side; choose whichever fits your workflow.
 3. Configuration errors
 
 **Solutions:**
-1. Check IB Gateway: `./scripts/gateway/check_gateway_status.sh`
+1. Check IB Gateway: `./scripts/gateway/gateway.sh status`
 2. Install dependencies: `pip install -e .`
 3. Check logs: foreground terminal output or `journalctl -u pearlalgo-mnq.service --since -10m`
 

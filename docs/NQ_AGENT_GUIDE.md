@@ -25,7 +25,7 @@
 cd /path/to/pearlalgo-dev-ai-agents
 
 # 1. Ensure IBKR Gateway is running
-./scripts/gateway/check_gateway_status.sh
+./scripts/gateway/gateway.sh status
 
 # 2. Start MNQ Agent Service (foreground - shows live logs in terminal)
 ./scripts/lifecycle/start_nq_agent_service.sh
@@ -73,13 +73,13 @@ PEARLALGO_DATA_PROVIDER=ibkr
 ### 3. Setup IBKR Gateway
 ```bash
 # Complete gateway setup (configures API, IBC, etc.)
-./scripts/gateway/setup_ibgateway.sh
+./scripts/gateway/gateway.sh setup
 
 # Start gateway
-./scripts/gateway/start_ibgateway_ibc.sh
+./scripts/gateway/gateway.sh start
 
 # Verify gateway is running
-./scripts/gateway/check_gateway_status.sh
+./scripts/gateway/gateway.sh status
 ```
 
 For detailed gateway setup, see `GATEWAY.md`.
@@ -212,7 +212,7 @@ R:R: 1.47:1
 ### Morning Checklist
 1. **Verify IBKR Gateway:**
    ```bash
-   ./scripts/gateway/check_gateway_status.sh
+   ./scripts/gateway/gateway.sh status
    ```
 
 2. **Check Service Status:**
@@ -337,11 +337,11 @@ The status server reads from `state.json` and does not affect the trading agent.
 
 1. **Check IBKR Gateway:**
    ```bash
-   ./scripts/gateway/check_gateway_status.sh
+   ./scripts/gateway/gateway.sh status
    ```
    If not running, start it:
    ```bash
-   ./scripts/gateway/start_ibgateway_ibc.sh
+   ./scripts/gateway/gateway.sh start
    ```
 
 2. **Check Telegram credentials:**
@@ -416,7 +416,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 1. **Check for stale data alerts** in Telegram
 2. **Verify IBKR Gateway is connected:**
    ```bash
-   ./scripts/gateway/check_gateway_status.sh
+   ./scripts/gateway/gateway.sh status
    ```
 3. **Check buffer size** (should be > 10 bars)
 4. **Review data quality alerts:**
@@ -433,7 +433,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 **Solution:**
 1. **Check for TWS/Gateway conflicts:**
    ```bash
-   ./scripts/gateway/check_tws_conflict.sh
+   ./scripts/gateway/gateway.sh tws-conflict
    ```
 
 2. **Close TWS or disconnect it:**
@@ -443,8 +443,8 @@ The status server reads from `state.json` and does not affect the trading agent.
 
 3. **Restart Gateway:**
    ```bash
-   ./scripts/gateway/stop_ibgateway_ibc.sh
-   ./scripts/gateway/start_ibgateway_ibc.sh
+   ./scripts/gateway/gateway.sh stop
+   ./scripts/gateway/gateway.sh start
    ```
 
 4. **Restart NQ Agent Service:**

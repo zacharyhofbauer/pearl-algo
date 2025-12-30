@@ -14,10 +14,10 @@ cp env.example .env
 # Required keys: IBKR_HOST, IBKR_PORT, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 # 3. Setup IBKR Gateway (first time)
-./scripts/gateway/setup_ibgateway.sh
+./scripts/gateway/gateway.sh setup
 
 # 4. Start IBKR Gateway
-./scripts/gateway/start_ibgateway_ibc.sh
+./scripts/gateway/gateway.sh start
 
 # 5. Start MNQ Agent Service
 ./scripts/lifecycle/start_nq_agent_service.sh

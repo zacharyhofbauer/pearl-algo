@@ -2792,7 +2792,7 @@ class NQAgentService:
                 {
                     "connection_failures": self.connection_failures,
                     "error_type": "connection",
-                    "suggestion": "Run: ./scripts/gateway/check_gateway_status.sh or ./scripts/gateway/start_ibgateway_ibc.sh",
+                    "suggestion": "Run: ./scripts/gateway/gateway.sh status or ./scripts/gateway/gateway.sh start",
                 },
             )
             self.last_connection_failure_alert = now

@@ -33,7 +33,7 @@ If the market is closed, **Error 354 can be expected**. In that case the agent m
 From the repo root:
 
 ```bash
-./scripts/gateway/check_gateway_status.sh
+./scripts/gateway/gateway.sh status
 ```
 
 You should see:
@@ -82,9 +82,9 @@ If anything is pending, complete it and wait a few minutes for propagation.
 From the repo root:
 
 ```bash
-./scripts/gateway/stop_ibgateway_ibc.sh
+./scripts/gateway/gateway.sh stop
 sleep 5
-./scripts/gateway/start_ibgateway_ibc.sh
+./scripts/gateway/gateway.sh start
 ```
 
 ### Step D — Validate via smoke test
@@ -109,7 +109,7 @@ If you see **Error 162** (TWS session conflict / “different IP”):
 Helper:
 
 ```bash
-./scripts/gateway/check_tws_conflict.sh
+./scripts/gateway/gateway.sh tws-conflict
 ```
 
 ---
