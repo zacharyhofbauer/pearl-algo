@@ -43,6 +43,12 @@ ENTRY_COLOR = "#2962ff"
 VWAP_COLOR = "#2196f3"
 MA_COLORS = ['#2196f3', '#9c27b0', '#f44336']
 
+# Zone colors (LuxAlgo/ChartPrime style)
+SUPPLY_ZONE_COLOR = "#2157f3"  # LuxAlgo supply zone (resistance) - blue
+DEMAND_ZONE_COLOR = "#ff5d00"  # LuxAlgo demand zone (support) - orange
+POWER_CHANNEL_RESISTANCE = "#ff00ff"  # ChartPrime power channel upper - fuchsia
+POWER_CHANNEL_SUPPORT = "#00ff00"  # ChartPrime power channel lower - lime
+
 # Z-order constants for layering (lower = further back)
 ZORDER_SESSION_SHADING = 0
 ZORDER_ZONES = 1
@@ -904,8 +910,8 @@ class ChartGenerator:
 
         try:
             # Colors from Pine reference (LuxAlgo): supply blue, demand orange.
-            sup_color = "#2157f3"
-            dem_color = "#ff5d00"
+            sup_color = SUPPLY_ZONE_COLOR
+            dem_color = DEMAND_ZONE_COLOR
 
             s_top = float(supply.get("top", 0.0) or 0.0)
             s_bot = float(supply.get("bottom", 0.0) or 0.0)
@@ -933,8 +939,8 @@ class ChartGenerator:
             return
 
         try:
-            t_col = "#ff00ff"  # fuchsia (Pine default)
-            b_col = "#00ff00"  # lime (Pine default)
+            t_col = POWER_CHANNEL_RESISTANCE  # fuchsia (Pine default)
+            b_col = POWER_CHANNEL_SUPPORT  # lime (Pine default)
 
             res_top = float(pc.get("res_area_top", 0.0) or 0.0)
             res_bot = float(pc.get("res_area_bottom", 0.0) or 0.0)

@@ -59,14 +59,14 @@ A great chart feels boring — because the trader never has to wonder whether it
 
 ### Zone Colors (HUD Overlays)
 
-| Element | Hex | Alpha | Usage |
-|---------|-----|-------|-------|
-| Supply Zone | `#2157f3` | 0.18 | LuxAlgo-style supply area (resistance) |
-| Demand Zone | `#ff5d00` | 0.18 | LuxAlgo-style demand area (support) |
-| Power Channel Resistance | `#ff00ff` | 0.10 | ChartPrime-style upper channel |
-| Power Channel Support | `#00ff00` | 0.10 | ChartPrime-style lower channel |
-| RR Box Profit | `#26a69a` | 0.20-0.22 | Risk/reward profit zone |
-| RR Box Risk | `#ef5350` | 0.20-0.22 | Risk/reward loss zone |
+| Element | Hex | Constant | Alpha | Usage |
+|---------|-----|----------|-------|-------|
+| Supply Zone | `#2157f3` | `SUPPLY_ZONE_COLOR` | 0.18 | LuxAlgo-style supply area (resistance) |
+| Demand Zone | `#ff5d00` | `DEMAND_ZONE_COLOR` | 0.18 | LuxAlgo-style demand area (support) |
+| Power Channel Resistance | `#ff00ff` | `POWER_CHANNEL_RESISTANCE` | 0.10 | ChartPrime-style upper channel |
+| Power Channel Support | `#00ff00` | `POWER_CHANNEL_SUPPORT` | 0.10 | ChartPrime-style lower channel |
+| RR Box Profit | `#26a69a` | `SIGNAL_LONG` | 0.20-0.22 | Risk/reward profit zone |
+| RR Box Risk | `#ef5350` | `SIGNAL_SHORT` | 0.20-0.22 | Risk/reward loss zone |
 
 **Contract**: Zones use low alpha to avoid obscuring candles. Zone shading is informational, not directive.
 

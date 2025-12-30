@@ -43,6 +43,58 @@ def test_prop_firm_session_cross_midnight_rules() -> None:
     assert scanner.is_market_hours(_to_utc(2025, 12, 27, 10, 0)) is False
 
 
+def test_session_open_from_bar_timestamp() -> None:
+    """
+    Test that is_market_hours accepts a datetime parameter (latest_bar timestamp).
+    
+    This validates the session-open-from-bar-time behavior where we prefer
+    the latest_bar timestamp over wall-clock time to reduce drift issues.
+    """
+    cfg = NQIntradayConfig()
+    cfg.start_time = "18:00"  # type: ignore[assignment]
+    cfg.end_time = "16:10"  # type: ignore[assignment]
+
+    scanner = NQScanner(config=cfg)
+
+    # Test with explicit bar timestamp during session (Monday 3:40 AM ET = inside 18:00-16:10)
+    bar_time_inside = _to_utc(2025, 12, 22, 3, 40)  # Monday 3:40 AM ET
+    assert scanner.is_market_hours(dt=bar_time_inside) is True
+
+    # Test with explicit bar timestamp outside session (Monday 5:00 PM ET = outside 18:00-16:10)
+    bar_time_outside = _to_utc(2025, 12, 22, 17, 0)  # Monday 5:00 PM ET  
+    assert scanner.is_market_hours(dt=bar_time_outside) is False
+
+    # Test with None (falls back to wall-clock, behavior depends on current time)
+    # Just verify it doesn't crash
+    result = scanner.is_market_hours(dt=None)
+    assert isinstance(result, bool)
+
+
+def test_session_open_timezone_handling() -> None:
+    """
+    Test that is_market_hours handles various timezone inputs correctly.
+    """
+    cfg = NQIntradayConfig()
+    cfg.start_time = "18:00"  # type: ignore[assignment]
+    cfg.end_time = "16:10"  # type: ignore[assignment]
+
+    scanner = NQScanner(config=cfg)
+
+    # UTC timestamp during session
+    utc_inside = datetime(2025, 12, 22, 8, 40, tzinfo=timezone.utc)  # 3:40 AM ET
+    assert scanner.is_market_hours(dt=utc_inside) is True
+
+    # UTC timestamp outside session
+    utc_outside = datetime(2025, 12, 22, 22, 0, tzinfo=timezone.utc)  # 5:00 PM ET
+    assert scanner.is_market_hours(dt=utc_outside) is False
+
+    # Naive datetime (should be treated as UTC)
+    naive_inside = datetime(2025, 12, 22, 8, 40)  # 3:40 AM ET if treated as UTC
+    result = scanner.is_market_hours(dt=naive_inside)
+    # The scanner should handle this - verify it doesn't crash
+    assert isinstance(result, bool)
+
+
 
 
 

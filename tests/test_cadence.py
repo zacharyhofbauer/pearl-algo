@@ -190,6 +190,90 @@ class TestCadenceScheduler:
         # Allow for timing variance
         assert lag >= 40, f"Expected lag >= 40ms, got {lag}ms"
 
+    def test_set_interval_changes_interval(self) -> None:
+        """set_interval should change the interval for future cycles."""
+        scheduler = CadenceScheduler(interval_seconds=30.0)
+        
+        # Run one cycle to establish schedule
+        scheduler.mark_cycle_start()
+        scheduler.mark_cycle_end()
+        
+        # Change interval
+        scheduler.set_interval(5.0)
+        
+        assert scheduler.interval_seconds == 5.0
+        # Schedule should be reset to avoid catch-up storms
+        assert scheduler._next_scheduled is None
+
+    def test_set_interval_no_change_when_same(self) -> None:
+        """set_interval should not reset if interval is unchanged."""
+        scheduler = CadenceScheduler(interval_seconds=30.0)
+        
+        # Run one cycle to establish schedule
+        scheduler.mark_cycle_start()
+        scheduler.mark_cycle_end()
+        
+        original_scheduled = scheduler._next_scheduled
+        
+        # Set same interval
+        scheduler.set_interval(30.0)
+        
+        # Schedule should NOT be reset
+        assert scheduler._next_scheduled == original_scheduled
+
+    def test_set_interval_rejects_invalid(self) -> None:
+        """set_interval should reject non-positive intervals."""
+        scheduler = CadenceScheduler(interval_seconds=30.0)
+        
+        with pytest.raises(ValueError):
+            scheduler.set_interval(0.0)
+        
+        with pytest.raises(ValueError):
+            scheduler.set_interval(-5.0)
+
+    def test_set_interval_preserves_history(self) -> None:
+        """set_interval should preserve duration history and missed_cycles count."""
+        scheduler = CadenceScheduler(interval_seconds=0.1)
+        
+        # Run some cycles to build history
+        for _ in range(5):
+            scheduler.mark_cycle_start()
+            time.sleep(0.01)
+            scheduler.mark_cycle_end()
+            time.sleep(0.05)
+        
+        metrics_before = scheduler.get_metrics()
+        history_size_before = len(scheduler._duration_history)
+        missed_before = scheduler._total_missed_cycles
+        
+        # Change interval
+        scheduler.set_interval(5.0)
+        
+        # History should be preserved
+        assert len(scheduler._duration_history) == history_size_before
+        assert scheduler._total_missed_cycles == missed_before
+
+    def test_set_interval_no_catchup_storm(self) -> None:
+        """Changing interval should not cause catch-up storms from old timing."""
+        scheduler = CadenceScheduler(interval_seconds=1.0)
+        
+        # Run one cycle
+        scheduler.mark_cycle_start()
+        scheduler.mark_cycle_end()
+        
+        # Simulate being behind by manipulating schedule
+        scheduler._next_scheduled -= 5.0  # 5 seconds behind
+        
+        # Change interval (should reset schedule)
+        scheduler.set_interval(0.5)
+        
+        # Next cycle should not report missed cycles from old timing
+        scheduler.mark_cycle_start()
+        sleep_time = scheduler.mark_cycle_end()
+        
+        # Sleep time should be approximately the new interval (not trying to catch up)
+        assert 0.4 <= sleep_time <= 0.6
+
 
 class TestComputeSleepTimeFixedCadence:
     """Tests for the pure function version."""

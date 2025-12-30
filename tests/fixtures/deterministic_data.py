@@ -158,6 +158,79 @@ def generate_deterministic_exit_data(
     return exit_price, exit_reason, round(pnl, 2)
 
 
+def generate_deterministic_backtest_signals(
+    data: pd.DataFrame,
+    num_signals: int = 8,
+) -> list[dict]:
+    """
+    Generate deterministic signals for backtest chart testing.
+    
+    Creates a mix of long/short signals with win/loss outcomes
+    spread across the data range for visual regression testing.
+    
+    Args:
+        data: OHLCV DataFrame from generate_deterministic_ohlcv()
+        num_signals: Number of signals to generate (default 8)
+    
+    Returns:
+        List of signal dicts compatible with ChartGenerator.generate_backtest_chart()
+    """
+    signals = []
+    num_bars = len(data)
+    
+    # Spread signals evenly across data range (skip first/last 10%)
+    start_idx = int(num_bars * 0.1)
+    end_idx = int(num_bars * 0.9)
+    step = (end_idx - start_idx) // num_signals
+    
+    for i in range(num_signals):
+        idx = start_idx + (i * step)
+        if idx >= len(data):
+            break
+            
+        # Alternate long/short
+        direction = "long" if i % 2 == 0 else "short"
+        
+        entry_price = float(data["close"].iloc[idx])
+        entry_timestamp = data["timestamp"].iloc[idx]
+        
+        # Alternating win/loss pattern for visual variety
+        is_win = i % 3 != 0  # 2 wins, 1 loss pattern
+        
+        if direction == "long":
+            stop_loss = entry_price - 15.0
+            take_profit = entry_price + 22.5
+            if is_win:
+                exit_price = take_profit
+                pnl = (exit_price - entry_price) * 2.0
+            else:
+                exit_price = stop_loss
+                pnl = (exit_price - entry_price) * 2.0
+        else:
+            stop_loss = entry_price + 15.0
+            take_profit = entry_price - 22.5
+            if is_win:
+                exit_price = take_profit
+                pnl = (entry_price - exit_price) * 2.0
+            else:
+                exit_price = stop_loss
+                pnl = (entry_price - exit_price) * 2.0
+        
+        signals.append({
+            "type": "momentum_breakout",
+            "direction": direction,
+            "entry_price": round(entry_price, 2),
+            "stop_loss": round(stop_loss, 2),
+            "take_profit": round(take_profit, 2),
+            "exit_price": round(exit_price, 2),
+            "pnl": round(pnl, 2),
+            "timestamp": entry_timestamp.isoformat() if hasattr(entry_timestamp, "isoformat") else str(entry_timestamp),
+            "reason": f"test_signal_{i}",
+        })
+    
+    return signals
+
+
 
 
 

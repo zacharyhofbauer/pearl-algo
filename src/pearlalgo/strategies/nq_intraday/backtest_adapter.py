@@ -390,9 +390,19 @@ def run_signal_backtest_5m_decision(
     Notes:
     - Internally we reuse the existing strategy stack, but feed it resampled bars.
     - We pass 1h/4h into the MTF analyzer slots (df_5m/df_15m); the analyzer is generic.
+    - Config timeframe is overridden to match decision_rule so scanner threshold scaling is correct.
     """
     if config is None:
         config = NQIntradayConfig()
+    
+    # Override timeframe to match decision bars for correct threshold scaling
+    # Scanner uses config.timeframe to scale volume/volatility thresholds
+    # E.g., "5min" -> "5m", "1min" -> "1m"
+    decision_timeframe = decision_rule.replace("min", "m")
+    if config.timeframe != decision_timeframe:
+        # Create a shallow copy to avoid mutating the original config
+        from dataclasses import replace
+        config = replace(config, timeframe=decision_timeframe)
 
     if df_1m.empty:
         return BacktestResult(
@@ -1492,9 +1502,19 @@ def run_full_backtest_5m_decision(
         risk_budget_dollars: Direct dollar risk budget per trade
         max_contracts: Maximum contracts per trade
         max_stop_points: Max stop distance cap (points)
+    
+    Note:
+        Config timeframe is overridden to match decision_rule so scanner threshold scaling is correct.
     """
     if config is None:
         config = NQIntradayConfig()
+    
+    # Override timeframe to match decision bars for correct threshold scaling
+    # Scanner uses config.timeframe to scale volume/volatility thresholds
+    decision_timeframe = decision_rule.replace("min", "m")
+    if config.timeframe != decision_timeframe:
+        from dataclasses import replace
+        config = replace(config, timeframe=decision_timeframe)
 
     # Generate signals on decision bars
     signal_result = run_signal_backtest_5m_decision(

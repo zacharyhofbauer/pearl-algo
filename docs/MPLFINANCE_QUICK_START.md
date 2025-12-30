@@ -100,8 +100,11 @@ pytest tests/test_dashboard_chart_visual_regression.py -v
 # Entry/Exit chart tests (13 tests)
 pytest tests/test_entry_exit_chart_visual_regression.py -v
 
+# Backtest chart tests (8 tests)
+pytest tests/test_backtest_chart_visual_regression.py -v
+
 # Run all chart visual regression tests
-pytest tests/test_dashboard_chart_visual_regression.py tests/test_entry_exit_chart_visual_regression.py -v
+pytest tests/test_dashboard_chart_visual_regression.py tests/test_entry_exit_chart_visual_regression.py tests/test_backtest_chart_visual_regression.py -v
 ```
 
 Test coverage includes:
@@ -126,12 +129,16 @@ python3 scripts/testing/generate_entry_exit_baselines.py --entry-only
 
 # Exit only
 python3 scripts/testing/generate_entry_exit_baselines.py --exit-only
+
+# Backtest chart baseline
+python3 scripts/testing/generate_backtest_baseline.py
 ```
 
 Baseline images are stored in: `tests/fixtures/charts/`
 - `dashboard_baseline.png`
 - `entry_baseline.png`
 - `exit_baseline.png`
+- `backtest_baseline.png`
 
 ### Visual Schema Reference
 

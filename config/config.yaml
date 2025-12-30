@@ -46,6 +46,14 @@ service:
   # Performance optimization: skip heavy analysis when bar hasn't advanced.
   # High leverage for 5m bars + 30s scan interval (5 of 6 cycles are repeats).
   enable_new_bar_gating: true   # Skip strategy.analyze() if df hasn't advanced (default ON)
+  
+  # Adaptive cadence: dynamically adjust scan interval based on market/session state.
+  # Profile: fast_active (5s active, 30s idle, 300s closed, 60s paused)
+  adaptive_cadence_enabled: true          # Master toggle for adaptive cadence
+  scan_interval_active_seconds: 5         # When strategy_session_open (active trading)
+  scan_interval_idle_seconds: 30          # When futures open but strategy session closed
+  scan_interval_market_closed_seconds: 300  # When futures market closed (weekends, maintenance)
+  scan_interval_paused_seconds: 60        # When service is paused
 
 # Circuit breaker
 circuit_breaker:

@@ -195,6 +195,16 @@ class NQAgentService:
         self._analysis_skip_count: int = 0
         self._analysis_run_count: int = 0
 
+        # Adaptive cadence configuration (fast-active profile)
+        # Dynamically adjusts scan interval based on market/session state.
+        self._adaptive_cadence_enabled = bool(service_settings.get("adaptive_cadence_enabled", False))
+        self._scan_interval_active = float(service_settings.get("scan_interval_active_seconds", 5))
+        self._scan_interval_idle = float(service_settings.get("scan_interval_idle_seconds", 30))
+        self._scan_interval_market_closed = float(service_settings.get("scan_interval_market_closed_seconds", 300))
+        self._scan_interval_paused = float(service_settings.get("scan_interval_paused_seconds", 60))
+        self._effective_interval: float = float(self.config.scan_interval)  # Current effective interval
+        self._last_effective_interval: float = self._effective_interval  # For detecting changes
+
         # Cadence scheduler for fixed-interval timing (start-to-start)
         # "fixed" = start-to-start timing with skip-ahead for missed cycles
         # "sleep_after" = legacy sleep-after-work semantics
@@ -362,6 +372,23 @@ class NQAgentService:
         )
 
         while not self.shutdown_requested:
+            # Adaptive cadence: compute effective interval for this cycle
+            if self._adaptive_cadence_enabled:
+                self._effective_interval = self._compute_effective_interval()
+                if self._effective_interval != self._last_effective_interval:
+                    logger.info(
+                        f"Adaptive cadence: interval changed {self._last_effective_interval}s → {self._effective_interval}s",
+                        extra={
+                            "old_interval": self._last_effective_interval,
+                            "new_interval": self._effective_interval,
+                            "cycle": self.cycle_count,
+                        },
+                    )
+                    # Update cadence scheduler with new interval
+                    if self.cadence_scheduler:
+                        self.cadence_scheduler.set_interval(self._effective_interval)
+                    self._last_effective_interval = self._effective_interval
+
             # Mark cycle start for cadence tracking (fixed-cadence mode)
             if self.cadence_scheduler:
                 cadence_lag = self.cadence_scheduler.mark_cycle_start()
@@ -554,11 +581,14 @@ class NQAgentService:
                 
                 # Log cycle summary for observability
                 data_fresh = True
+                latest_bar_time: Optional[datetime] = None
                 if market_data.get("latest_bar"):
-                    latest_bar_time = market_data["latest_bar"].get("timestamp")
-                    if latest_bar_time:
-                        if isinstance(latest_bar_time, str):
-                            latest_bar_time = parse_utc_timestamp(latest_bar_time)
+                    raw_bar_time = market_data["latest_bar"].get("timestamp")
+                    if raw_bar_time:
+                        if isinstance(raw_bar_time, str):
+                            latest_bar_time = parse_utc_timestamp(raw_bar_time)
+                        else:
+                            latest_bar_time = raw_bar_time
                         # Timezone-safe age computation: convert to UTC if aware, assume UTC if naive
                         if latest_bar_time.tzinfo is None:
                             latest_bar_time = latest_bar_time.replace(tzinfo=timezone.utc)
@@ -568,7 +598,9 @@ class NQAgentService:
                         stale_threshold_seconds = self.stale_data_threshold_minutes * 60
                         data_fresh = age_seconds < stale_threshold_seconds
                 
-                strategy_session_open = self.strategy.scanner.is_market_hours()
+                # Prefer latest_bar timestamp for session check (reduces wall-clock drift issues).
+                # Fall back to wall-clock time if no latest_bar available.
+                strategy_session_open = self.strategy.scanner.is_market_hours(dt=latest_bar_time)
                 futures_market_open = False
                 try:
                     futures_market_open = bool(get_market_hours().is_market_open())
@@ -1375,6 +1407,69 @@ class NQAgentService:
         
         return trends
 
+    def _compute_effective_interval(self) -> float:
+        """
+        Compute the effective scan interval based on current market/session state.
+        
+        Adaptive cadence profile (fast-active):
+        - paused: scan_interval_paused_seconds (60s default)
+        - futures_market_closed: scan_interval_market_closed_seconds (300s default)
+        - futures_open, strategy_session_closed: scan_interval_idle_seconds (30s default)
+        - strategy_session_open: scan_interval_active_seconds (5s default)
+        
+        Uses cached latest_bar timestamp when available to reduce wall-clock drift.
+        
+        Returns:
+            Effective interval in seconds.
+        """
+        # If adaptive cadence is disabled, use base config interval
+        if not self._adaptive_cadence_enabled:
+            return float(self.config.scan_interval)
+        
+        # Priority 1: paused state
+        if self.paused:
+            return self._scan_interval_paused
+        
+        # Priority 2: check futures market
+        futures_open = False
+        try:
+            futures_open = bool(get_market_hours().is_market_open())
+        except Exception:
+            # If market hours check fails, assume open (conservative)
+            futures_open = True
+        
+        if not futures_open:
+            return self._scan_interval_market_closed
+        
+        # Priority 3: check strategy session (prefer cached bar time over wall-clock)
+        bar_time: Optional[datetime] = None
+        try:
+            last_market_data = getattr(self.data_fetcher, "_last_market_data", None) or {}
+            latest_bar = last_market_data.get("latest_bar")
+            if latest_bar and isinstance(latest_bar, dict):
+                raw_ts = latest_bar.get("timestamp")
+                if raw_ts:
+                    if isinstance(raw_ts, str):
+                        bar_time = parse_utc_timestamp(raw_ts)
+                    else:
+                        bar_time = raw_ts
+                    if bar_time and bar_time.tzinfo is None:
+                        bar_time = bar_time.replace(tzinfo=timezone.utc)
+        except Exception:
+            bar_time = None
+        
+        session_open = False
+        try:
+            session_open = bool(self.strategy.scanner.is_market_hours(dt=bar_time))
+        except Exception:
+            # If session check fails, assume closed (conservative)
+            session_open = False
+        
+        if session_open:
+            return self._scan_interval_active
+        else:
+            return self._scan_interval_idle
+
     def _get_quiet_reason(
         self,
         market_data: Optional[Dict] = None,
@@ -1395,8 +1490,20 @@ class NQAgentService:
             String reason code like "StrategySessionClosed", "FuturesMarketClosed", etc.
         """
         try:
+            # Extract latest_bar timestamp for session check (prefer bar time over wall-clock)
+            bar_time: Optional[datetime] = None
+            if market_data and market_data.get("latest_bar"):
+                raw_ts = market_data["latest_bar"].get("timestamp")
+                if raw_ts:
+                    if isinstance(raw_ts, str):
+                        bar_time = parse_utc_timestamp(raw_ts)
+                    else:
+                        bar_time = raw_ts
+                    if bar_time and bar_time.tzinfo is None:
+                        bar_time = bar_time.replace(tzinfo=timezone.utc)
+            
             # Check strategy session first (more specific)
-            strategy_session_open = self.strategy.scanner.is_market_hours()
+            strategy_session_open = self.strategy.scanner.is_market_hours(dt=bar_time)
             if not strategy_session_open:
                 return "StrategySessionClosed"
             
@@ -1633,9 +1740,15 @@ class NQAgentService:
                 "symbol": self.config.symbol,
                 "timeframe": self.config.timeframe,
                 "scan_interval": self.config.scan_interval,
+                # Session window (for Telegram UI observability)
+                "session_start_time": getattr(self.config, "start_time", "18:00"),
+                "session_end_time": getattr(self.config, "end_time", "16:10"),
+                # Adaptive cadence config
+                "adaptive_cadence_enabled": self._adaptive_cadence_enabled,
+                "scan_interval_effective": self._effective_interval,
             },
             # Cadence metrics for observability
-            "cadence_mode": self.cadence_mode,
+            "cadence_mode": "adaptive" if self._adaptive_cadence_enabled else self.cadence_mode,
             "cadence_metrics": (
                 self.cadence_scheduler.get_metrics().to_dict()
                 if self.cadence_scheduler
@@ -1756,9 +1869,19 @@ class NQAgentService:
                 "symbol": self.config.symbol,
                 "timeframe": self.config.timeframe,
                 "scan_interval": self.config.scan_interval,
+                # Session window (for Telegram UI observability)
+                "session_start_time": getattr(self.config, "start_time", "18:00"),
+                "session_end_time": getattr(self.config, "end_time", "16:10"),
+                # Adaptive cadence config
+                "adaptive_cadence_enabled": self._adaptive_cadence_enabled,
+                "scan_interval_active": self._scan_interval_active,
+                "scan_interval_idle": self._scan_interval_idle,
+                "scan_interval_market_closed": self._scan_interval_market_closed,
+                "scan_interval_paused": self._scan_interval_paused,
+                "scan_interval_effective": self._effective_interval,
             },
             # Cadence metrics for observability
-            "cadence_mode": self.cadence_mode,
+            "cadence_mode": "adaptive" if self._adaptive_cadence_enabled else self.cadence_mode,
             "cadence_metrics": (
                 self.cadence_scheduler.get_metrics().to_dict()
                 if self.cadence_scheduler

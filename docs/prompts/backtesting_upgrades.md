@@ -188,10 +188,12 @@ The burden of proof lies on the strategy.
 
 PearlAlgo-Specific Assumptions:
 - Strategy session window is configured (default 18:00-16:10 ET, NY time)
-- Risk parameters are set (1% risk, 1.5x ATR stops, 1.5:1 R:R)
+- Risk parameters are set (1% risk, 1.5x ATR stops, 1.2:1 min R:R ratio)
 - Confidence thresholds are configured (minimum 50%)
-- Historical data is available (data/historical/MNQ_1m_*.parquet)
-- Backtest adapter correctly simulates strategy behavior
+- Stop distance cap: 25 points max (configurable via max_stop_points)
+- Historical data is available (data/historical/MNQ_1m_2w.parquet, MNQ_1m_6w.parquet)
+- Decision timeframe: 1m (default), 5m (optional via --decision 5m)
+- Backtest adapter correctly simulates strategy behavior with risk-based sizing
 
 ========================================
 
@@ -550,23 +552,35 @@ Key Files:
 - scripts/testing/backtest_nq_strategy.py
 
 Data Sources:
-- data/historical/MNQ_1m_*.parquet: Historical OHLCV data
-- Format: open, high, low, close, volume columns, DatetimeIndex
+- data/historical/MNQ_1m_2w.parquet: 2 weeks of 1-minute historical OHLCV data
+- data/historical/MNQ_1m_6w.parquet: 6 weeks of 1-minute historical OHLCV data
+- Format: open, high, low, close, volume columns, DatetimeIndex (UTC)
 - Cached data reused across backtests
 
 Backtest Modes:
 - Signal-only: run_signal_backtest() - Fast, no trade simulation, signal analysis
-- Full backtest: run_full_backtest() - Complete trade simulation with P&L
-- 5m decision: Variants using 5-minute decision stream instead of 1m
+- Full backtest: run_full_backtest() - Complete trade simulation with P&L, skipped signals tracking
+- 5m decision: Variants using 5-minute decision stream (run_*_5m_decision variants)
+  - Note: 5m decision mode automatically overrides config.timeframe to 5m for correct scanner threshold scaling
 
 Usage Examples:
-- Signal-only: python scripts/backtesting/backtest_cli.py signal --data-path data/historical/MNQ_1m_1w.parquet
-- Full backtest: python scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_1w.parquet --contracts 5
+- Signal-only (1m decision): python scripts/backtesting/backtest_cli.py signal --data-path data/historical/MNQ_1m_2w.parquet --decision 1m
+- Signal-only (5m decision): python scripts/backtesting/backtest_cli.py signal --data-path data/historical/MNQ_1m_6w.parquet --decision 5m
+- Full backtest: python scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --contracts 5
+- With risk-based sizing: python scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --account-balance 50000 --max-risk-per-trade 0.01
+- With stop cap: python scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --max-stop-points 30
 - With date range: --start 2025-12-01 --end 2025-12-15
+- With lookback: --lookback-weeks 2
 
 Reports:
 - Output to reports/backtest_<symbol>_<decision>_<start>_<end>_<run_ts>/
-- Includes signal analysis, trade results, charts, condition breakdowns
+- Includes:
+  - summary.json: All metrics, verification summary, execution summary, risk config
+  - signals.csv: All generated signals with details
+  - trades.csv: All executed trades with P&L
+  - skipped_signals.csv: Signals that were skipped with skip reasons (concurrency, risk budget, stop cap)
+  - index.html: Interactive report viewer with signal/trade tables and charts
+  - trades.html: Trade gallery with per-trade charts (if --charts trade_gallery)
 
 Documentation:
 - docs/TESTING_GUIDE.md: Complete backtesting guide
@@ -574,5 +588,5 @@ Documentation:
 
 ========================================
 
-END OF PROMPT
+
 

@@ -184,6 +184,25 @@ class CadenceScheduler:
         self._cycle_start_utc = None
         # Keep history and missed count for observability
 
+    def set_interval(self, new_interval_seconds: float) -> None:
+        """
+        Change the cadence interval at runtime.
+        
+        Resets the schedule to avoid catch-up storms when transitioning
+        between different intervals (e.g., adaptive cadence switching).
+        
+        Args:
+            new_interval_seconds: New interval in seconds (must be > 0)
+        """
+        if new_interval_seconds <= 0:
+            raise ValueError(f"Interval must be positive, got {new_interval_seconds}")
+        
+        if new_interval_seconds != self.interval_seconds:
+            self.interval_seconds = new_interval_seconds
+            # Reset schedule to prevent catch-up storms from old timing
+            self._next_scheduled = None
+            # Do NOT reset cycle_start or history - current cycle continues normally
+
 
 def compute_sleep_time_fixed_cadence(
     cycle_start_mono: float,

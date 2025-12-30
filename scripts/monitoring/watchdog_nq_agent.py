@@ -118,7 +118,12 @@ def check_state(state: dict, verbose: bool = False) -> tuple[int, str, list[str]
     pause_reason = state.get("pause_reason")
     last_updated = parse_timestamp(state.get("last_updated"))
     last_successful_cycle = parse_timestamp(state.get("last_successful_cycle"))
-    scan_interval = state.get("config", {}).get("scan_interval", 30)
+    config = state.get("config", {})
+    # Use effective interval if available (adaptive cadence), otherwise fall back to base config
+    scan_interval_effective = config.get("scan_interval_effective")
+    scan_interval_base = config.get("scan_interval", 30)
+    scan_interval = float(scan_interval_effective if scan_interval_effective is not None else scan_interval_base)
+    adaptive_cadence_enabled = config.get("adaptive_cadence_enabled", False)
     signals_send_failures = int(state.get("signals_send_failures", 0) or 0)
     signals_send_failures_session = int(state.get("signals_send_failures_session", 0) or 0)
     futures_market_open = state.get("futures_market_open")
@@ -135,7 +140,11 @@ def check_state(state: dict, verbose: bool = False) -> tuple[int, str, list[str]
         details.append(f"Paused: {paused} (reason: {pause_reason})")
         details.append(f"Last updated: {last_updated}")
         details.append(f"Last successful cycle: {last_successful_cycle}")
-        details.append(f"Scan interval: {scan_interval}s")
+        # Show adaptive cadence info if enabled
+        if adaptive_cadence_enabled:
+            details.append(f"Scan interval: {scan_interval}s (effective, adaptive cadence enabled)")
+        else:
+            details.append(f"Scan interval: {scan_interval}s")
         details.append(f"Futures market open: {futures_market_open}")
         details.append(f"Strategy session open: {strategy_session_open}")
         details.append(f"Data fresh: {data_fresh}")

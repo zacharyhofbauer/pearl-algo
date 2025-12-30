@@ -374,10 +374,7 @@ def write_report(
             "max_contracts": report.risk_config.max_contracts,
             "max_stop_points": report.risk_config.max_stop_points,
         } if report.risk_config else None,
-        "execution_summary": {
-            "signals_skipped_total": len(report.skipped_signals),
-            "skipped_by_reason": _count_skip_reasons(report.skipped_signals),
-        } if report.skipped_signals else None,
+        "execution_summary": _build_execution_summary(report),
     }
 
     with open(report_dir / "summary.json", "w") as f:
@@ -432,6 +429,30 @@ def _count_skip_reasons(skipped: List[SkippedSignal]) -> Dict[str, int]:
         reason = s.skip_reason.split(" (")[0]
         counts[reason] = counts.get(reason, 0) + 1
     return counts
+
+
+def _build_execution_summary(report: BacktestReport) -> Optional[Dict]:
+    """Build execution summary combining engine verification data and skipped signals.
+    
+    Returns comprehensive execution breakdown for JSON export.
+    """
+    # Prefer engine verification summary if available (most complete)
+    if report.result.verification and report.result.verification.execution_summary:
+        exec_summary = dict(report.result.verification.execution_summary)
+        # Add skipped signals breakdown by reason
+        if report.skipped_signals:
+            exec_summary["skipped_signals_total"] = len(report.skipped_signals)
+            exec_summary["skipped_by_reason"] = _count_skip_reasons(report.skipped_signals)
+        return exec_summary
+    
+    # Fallback to skipped signals only
+    if report.skipped_signals:
+        return {
+            "skipped_signals_total": len(report.skipped_signals),
+            "skipped_by_reason": _count_skip_reasons(report.skipped_signals),
+        }
+    
+    return None
 
 
 def _generate_overview_chart(report: BacktestReport, report_dir: Path) -> Optional[Path]:
@@ -1101,6 +1122,12 @@ def run_full_mode(args) -> BacktestReport:
             slippage_ticks=args.slippage_ticks,
             max_concurrent_trades=args.max_pos,
             return_trades=True,
+            # Risk-based sizing parameters
+            account_balance=args.account_balance,
+            max_risk_per_trade=args.max_risk_per_trade,
+            risk_budget_dollars=args.risk_budget,
+            max_contracts=args.contracts,
+            max_stop_points=args.max_stop_points,
         )
     else:
         result = run_full_backtest(
@@ -1111,12 +1138,27 @@ def run_full_mode(args) -> BacktestReport:
             slippage_ticks=args.slippage_ticks,
             max_concurrent_trades=args.max_pos,
             return_trades=True,
+            # Risk-based sizing parameters
+            account_balance=args.account_balance,
+            max_risk_per_trade=args.max_risk_per_trade,
+            risk_budget_dollars=args.risk_budget,
+            max_contracts=args.contracts,
+            max_stop_points=args.max_stop_points,
         )
 
-    # Track skipped signals if we have risk-based sizing
+    # Convert engine skipped signals to CLI SkippedSignal format for report
+    # The engine (TradeSimulator) tracks all skip reasons: concurrency, risk budget, stop cap, invalid prices
     skipped_signals: List[SkippedSignal] = []
-    # Note: The current TradeSimulator tracks concurrency skips internally.
-    # Risk-based skips would require modifying the simulator; for now we just report concurrency skips.
+    if result.skipped_signals:
+        for skip_dict in result.skipped_signals:
+            skipped_signals.append(SkippedSignal(
+                timestamp=skip_dict.get("timestamp", ""),
+                signal_type=skip_dict.get("signal_type", "unknown"),
+                direction=skip_dict.get("direction", "long"),
+                stop_distance_points=skip_dict.get("stop_distance_points", 0.0),
+                skip_reason=skip_dict.get("skip_reason", "unknown"),
+                computed_contracts=skip_dict.get("computed_contracts"),
+            ))
 
     return BacktestReport(
         symbol=config.symbol,
