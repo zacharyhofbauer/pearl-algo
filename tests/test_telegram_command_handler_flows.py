@@ -479,4 +479,99 @@ class TestMessageLimits:
             assert len(sent_messages[0]) <= TELEGRAM_MESSAGE_LIMIT
 
 
+class TestGetTradesForChart:
+    """Test the _get_trades_for_chart helper method."""
+
+    def test_empty_chart_data_returns_empty_list(self, handler_with_mocks):
+        """Test that empty chart data returns an empty list."""
+        handler = handler_with_mocks
+        import pandas as pd
+        
+        # None input
+        result = handler._get_trades_for_chart(None, symbol="MNQ")
+        assert result == []
+        
+        # Empty DataFrame
+        result = handler._get_trades_for_chart(pd.DataFrame(), symbol="MNQ")
+        assert result == []
+
+    def test_no_matching_signals_returns_empty_list(self, handler_with_mocks):
+        """Test that no matching signals returns an empty list."""
+        handler = handler_with_mocks
+        import pandas as pd
+        from datetime import datetime, timezone, timedelta
+        
+        # Create chart data with a time window
+        now = datetime.now(timezone.utc)
+        chart_data = pd.DataFrame({
+            "timestamp": [now - timedelta(hours=2), now - timedelta(hours=1), now],
+            "close": [100.0, 101.0, 102.0],
+        })
+        
+        # No signals from state manager
+        handler.state_manager.get_recent_signals.return_value = []
+        
+        result = handler._get_trades_for_chart(chart_data, symbol="MNQ")
+        assert result == []
+
+    def test_matching_signals_returned(self, handler_with_mocks):
+        """Test that matching signals are returned as trades."""
+        handler = handler_with_mocks
+        import pandas as pd
+        from datetime import datetime, timezone, timedelta
+        
+        # Create chart data with a time window
+        now = datetime.now(timezone.utc)
+        chart_data = pd.DataFrame({
+            "timestamp": [now - timedelta(hours=2), now - timedelta(hours=1), now],
+            "close": [100.0, 101.0, 102.0],
+        })
+        
+        # Signal that falls within the window
+        handler.state_manager.get_recent_signals.return_value = [
+            {
+                "signal_id": "test_123",
+                "status": "entered",
+                "entry_time": (now - timedelta(hours=1)).isoformat(),
+                "entry_price": 101.0,
+                "signal": {
+                    "symbol": "MNQ",
+                    "direction": "long",
+                    "entry_price": 101.0,
+                },
+            }
+        ]
+        
+        result = handler._get_trades_for_chart(chart_data, symbol="MNQ")
+        assert len(result) == 1
+        assert result[0]["signal_id"] == "test_123"
+        assert result[0]["direction"] == "long"
+
+    def test_filters_by_symbol(self, handler_with_mocks):
+        """Test that trades are filtered by symbol."""
+        handler = handler_with_mocks
+        import pandas as pd
+        from datetime import datetime, timezone, timedelta
+        
+        now = datetime.now(timezone.utc)
+        chart_data = pd.DataFrame({
+            "timestamp": [now - timedelta(hours=2), now - timedelta(hours=1), now],
+            "close": [100.0, 101.0, 102.0],
+        })
+        
+        # Signal for different symbol
+        handler.state_manager.get_recent_signals.return_value = [
+            {
+                "signal_id": "test_456",
+                "status": "entered",
+                "entry_time": (now - timedelta(hours=1)).isoformat(),
+                "signal": {
+                    "symbol": "ES",  # Different symbol
+                    "direction": "long",
+                },
+            }
+        ]
+        
+        result = handler._get_trades_for_chart(chart_data, symbol="MNQ")
+        assert len(result) == 0  # Filtered out
 

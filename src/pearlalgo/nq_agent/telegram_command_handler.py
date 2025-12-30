@@ -317,6 +317,111 @@ class TelegramCommandHandler:
             logger.debug(f"Could not compute signals file stats: {e}")
             return stats
 
+    def _get_trades_for_chart(self, chart_data: Optional[pd.DataFrame], *, symbol: str = "MNQ") -> List[Dict]:
+        """
+        Build a compact list of recent trades (entries/exits) that fall within the chart window.
+
+        This is used to overlay trade markers on `/chart` images so users can visually
+        relate recent P&L outcomes to price action.
+        """
+        try:
+            if chart_data is None or not isinstance(chart_data, pd.DataFrame) or chart_data.empty:
+                return []
+
+            # Determine chart time window (normalize to naive UTC for stable comparisons)
+            tmin = None
+            tmax = None
+            if "timestamp" in chart_data.columns:
+                ts = pd.to_datetime(chart_data["timestamp"], errors="coerce")
+                ts = ts.dropna()
+                if ts.empty:
+                    return []
+                tmin = pd.Timestamp(ts.min())
+                tmax = pd.Timestamp(ts.max())
+            elif isinstance(chart_data.index, pd.DatetimeIndex) and len(chart_data.index) > 0:
+                tmin = pd.Timestamp(chart_data.index.min())
+                tmax = pd.Timestamp(chart_data.index.max())
+            if tmin is None or tmax is None:
+                return []
+
+            def _to_utc_naive(x):
+                if not x:
+                    return None
+                try:
+                    tsx = pd.Timestamp(x)
+                except Exception:
+                    return None
+                try:
+                    if tsx.tzinfo is not None:
+                        tsx = tsx.tz_convert("UTC").tz_localize(None)
+                except Exception:
+                    # If tz_convert fails, fall back to stripping tz
+                    try:
+                        tsx = tsx.tz_localize(None)
+                    except Exception:
+                        pass
+                return tsx
+
+            tmin_u = _to_utc_naive(tmin)
+            tmax_u = _to_utc_naive(tmax)
+            if tmin_u is None or tmax_u is None:
+                return []
+
+            # Pull recent signals (append-only), filter to entered/exited within the window.
+            try:
+                recent = self.state_manager.get_recent_signals(limit=500)
+            except Exception:
+                recent = []
+
+            symbol_norm = str(symbol or "MNQ").upper()
+            trades: List[Dict] = []
+            for rec in recent:
+                if not isinstance(rec, dict):
+                    continue
+                status = str(rec.get("status") or "").lower()
+                if status not in ("entered", "exited"):
+                    continue
+
+                sig = rec.get("signal", {}) or {}
+                sym = str(sig.get("symbol") or symbol_norm).upper()
+                if sym != symbol_norm:
+                    continue
+
+                entry_time_raw = rec.get("entry_time") or sig.get("timestamp") or rec.get("timestamp")
+                entry_time = _to_utc_naive(entry_time_raw)
+                if entry_time is None:
+                    continue
+
+                exit_time_raw = rec.get("exit_time") if status == "exited" else None
+                exit_time = _to_utc_naive(exit_time_raw) if exit_time_raw else None
+
+                # Include if entry or exit is inside window, or trade spans across it.
+                in_window = (tmin_u <= entry_time <= tmax_u)
+                if exit_time is not None:
+                    in_window = in_window or (tmin_u <= exit_time <= tmax_u) or (entry_time <= tmax_u and exit_time >= tmin_u)
+                if not in_window:
+                    continue
+
+                trades.append(
+                    {
+                        "signal_id": str(rec.get("signal_id") or ""),
+                        "direction": str(sig.get("direction") or "long"),
+                        "entry_time": entry_time_raw,
+                        "entry_price": rec.get("entry_price") or sig.get("entry_price"),
+                        "exit_time": exit_time_raw,
+                        "exit_price": rec.get("exit_price") if status == "exited" else None,
+                        "exit_reason": rec.get("exit_reason"),
+                        "pnl": rec.get("pnl") if status == "exited" else None,
+                        "is_win": rec.get("is_win") if status == "exited" else None,
+                        "status": status,
+                    }
+                )
+
+            # Keep only the most recent N to avoid chart clutter.
+            return trades[-20:]
+        except Exception:
+            return []
+
     # -------------------------------------------------------------------------
     # State parsing helpers (robust fallback chain for data age / price)
     # -------------------------------------------------------------------------
@@ -822,12 +927,19 @@ class TelegramCommandHandler:
             lookback_bars = int(round((lookback_hours * 60.0) / float(tf_minutes)))
             lookback_bars = max(20, lookback_bars)  # ensure enough context for indicators/overlays
 
+            # Use the exact same window for both chart rendering and trade overlay filtering.
+            chart_data = df.tail(min(int(lookback_bars), len(df))).copy()
+            range_label = f"{int(round(lookback_hours))}h"
+            trades = self._get_trades_for_chart(chart_data, symbol=symbol)
+
             chart_path = self.chart_generator.generate_dashboard_chart(
-                df,
+                chart_data,
                 symbol=symbol,
                 timeframe=timeframe,
-                lookback_bars=min(int(lookback_bars), len(df)),
+                lookback_bars=len(chart_data),
+                range_label=range_label,
                 show_pressure=True,
+                trades=trades,
             )
             
             if chart_path and chart_path.exists():

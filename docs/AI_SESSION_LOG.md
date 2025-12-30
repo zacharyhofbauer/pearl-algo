@@ -705,4 +705,218 @@ pytest tests/test_on_demand_chart_visual_regression.py -v
 - `./scripts/gateway/gateway.sh help` (prints subcommands)
 - Full pytest suite: `674 passed, 1 skipped`
 
+---
+
+## Session: 2025-12-30 (Incremental Audit Pass #2)
+
+**Session Goal:** Incremental cleanup → verify → backtest/ATS/Telegram/chart audit → testing → consolidate session per `docs/prompts/master_task_prompt.md`.
+
+**Operator Status:** Away/unavailable. Autonomous execution mode.
+
+---
+
+### Phase 0 — Pre-flight Discovery
+
+**Timestamp:** 2025-12-30 22:17 UTC
+
+#### Discovery Summary
+
+| Area | Status |
+|------|--------|
+| Repository structure | ✅ Intact, matches previous session |
+| Git status | 2 uncommitted WIP files (chart marker enhancements) |
+| Test suite | 674 passed, 1 skipped |
+| Architecture boundaries | ✅ Clean (strict mode) |
+| Agent state | Running (5930+ cycles), 0 errors |
+| Safety defaults | ✅ Execution disabled/disarmed, learning shadow |
+
+#### Uncommitted Changes Detected
+
+| File | Change Type | Notes |
+|------|-------------|-------|
+| `chart_generator.py` | Enhancement | Win/loss color-coded trade markers (green/red) |
+| `telegram_command_handler.py` | Enhancement | `_get_trades_for_chart()` helper for chart overlays |
+
+---
+
+### Phase 1-2 — Cleanup Planning & Execution
+
+**Result:** No deletions or merges required. Codebase remains clean from previous session.
+
+---
+
+### Phase 3 — Baseline Verification
+
+| Check | Result |
+|-------|--------|
+| Architecture boundaries (strict) | ✅ PASS |
+| pytest suite | 674 passed, 1 skipped |
+| Regressions | None |
+
+---
+
+### Phase 4 — Backtesting Verification
+
+**Data:** `data/historical/MNQ_1m_2w.parquet` (2025-12-15 to 2025-12-29)
+
+| Metric | Value |
+|--------|-------|
+| Signals | 76 (5.8/day) |
+| Trades | 60 |
+| Win Rate | 48.3% |
+| Profit Factor | 1.28 |
+| Total P&L | $1,931.48 |
+| Max Drawdown | $2,559.91 |
+| Sharpe | 0.29 |
+
+**Observation:** Results consistent with previous session's config-tuned baseline.
+
+---
+
+### Phase 5 — NQ Agent Verification
+
+| Check | Status |
+|-------|--------|
+| Service running | ✅ True |
+| Cycle count | 5941+ |
+| Consecutive errors | 0 |
+| Cadence effective | 300s (market closed) |
+| Execution | Disabled/Disarmed |
+| Learning mode | Shadow |
+| Soak test | ✅ PASSED (no memory drift) |
+
+---
+
+### Phase 6 — ATS Execution Safety
+
+| Check | Status |
+|-------|--------|
+| Safety defaults (code) | ✅ `enabled=False`, `armed=False`, `mode=DRY_RUN` |
+| Config safety | ✅ `mode: dry_run` |
+| Precondition gates | ✅ 11 gates verified |
+| Execution tests | 37 passed |
+
+---
+
+### Phase 7 — Telegram Suite
+
+| Check | Status |
+|-------|--------|
+| Telegram tests | 136 passed |
+| Message formatting | ✅ |
+| Markdown safety | ✅ |
+| Home card UX | ✅ |
+
+---
+
+### Phase 8 — Charting Suite
+
+| Check | Status |
+|-------|--------|
+| Visual regression tests | 36 passed |
+| All chart types | ✅ (dashboard, entry/exit, backtest, on-demand) |
+| Determinism | ✅ |
+
+---
+
+### Phase 9 — Proposals
+
+#### Safe Now (LANE A)
+
+| # | Proposal | Risk |
+|---|----------|------|
+| 1 | Commit uncommitted WIP changes | Low |
+
+#### Safe Later
+
+| # | Proposal | Risk |
+|---|----------|------|
+| 2 | Regenerate visual baselines for new trade markers | Low |
+| 3 | Add more test coverage for trade marker logic | Low |
+
+#### Needs Approval (LANE B)
+
+| # | Proposal | Risk |
+|---|----------|------|
+| 4 | Enable ATS paper trading | **HIGH** |
+| 5 | Further volatility/regime tuning | **HIGH** |
+
+---
+
+### Phase 10 — Testing Additions
+
+**Gap Found:** `_get_trades_for_chart()` method lacked test coverage.
+
+**Fix:** Added 4 tests to `tests/test_telegram_command_handler_flows.py`:
+- `test_empty_chart_data_returns_empty_list`
+- `test_no_matching_signals_returns_empty_list`
+- `test_matching_signals_returned`
+- `test_filters_by_symbol`
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Tests passed | 674 | **678** |
+
+---
+
+### Phase 11 — Final Consolidation
+
+#### Changes Made This Session
+
+| File | Action | Risk |
+|------|--------|------|
+| `tests/test_telegram_command_handler_flows.py` | UPDATE | Low — Added 4 tests for `_get_trades_for_chart()` |
+| `docs/AI_SESSION_LOG.md` | UPDATE | None — Session artifact log |
+
+#### Commands Run
+
+```bash
+# Phase 0 - Discovery
+git status --porcelain
+git log --oneline -5
+
+# Phase 3 - Verification
+PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
+pytest tests/ -v --tb=short
+
+# Phase 4 - Backtesting
+python3 scripts/backtesting/backtest_cli.py signal --data-path data/historical/MNQ_1m_2w.parquet --decision 5m
+python3 scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --contracts 5 --decision 5m
+
+# Phase 5 - Soak Test
+python3 scripts/testing/soak_test_mock_service.py --duration 10 --verbose
+
+# Phase 6 - Execution Tests
+pytest tests/test_execution_adapter.py -v
+
+# Phase 7 - Telegram Tests
+pytest tests/test_telegram*.py -v
+
+# Phase 8 - Visual Regression
+pytest tests/test_*_chart_visual_regression.py -v
+
+# Phase 10 - Full Suite After Changes
+pytest tests/ --tb=line -q
+```
+
+#### Assumptions Made
+
+1. Uncommitted WIP changes (trade markers) are intentional enhancements in progress.
+2. Agent should not be disrupted during audit.
+3. Cached parquet data represents valid historical MNQ data.
+
+#### Final Session Summary
+
+- **Cleanup:** No changes needed; codebase was already clean
+- **Architecture:** All module boundaries verified; 0 violations
+- **Tests:** 678 passed, 0 failed, 1 skipped (+4 new tests)
+- **Backtest:** 76 signals, 60 trades, $1,931.48 profit (5 contracts)
+- **ATS Safety:** All preconditions verified; kill switch functional
+- **Telegram:** 136 tests pass; UX guidelines followed
+- **Charting:** 36 visual regression tests pass; schema intact
+- **Agent:** Running healthy (5941+ cycles, 0 errors)
+
+---
+
+## Session End
 

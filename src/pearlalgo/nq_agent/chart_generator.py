@@ -2421,11 +2421,6 @@ class ChartGenerator:
             if trades:
                 try:
                     idx = df.index
-                    # Pre-allocate marker series (NaN by default)
-                    long_entry = pd.Series([np.nan] * len(df), index=idx)
-                    short_entry = pd.Series([np.nan] * len(df), index=idx)
-                    exit_mark = pd.Series([np.nan] * len(df), index=idx)
-
                     idx_tz = getattr(idx, "tz", None)
 
                     def _align_ts(raw):
@@ -2454,28 +2449,70 @@ class ChartGenerator:
                             return None
                         return tsx
 
+                    # Pre-allocate marker series (NaN by default).
+                    # We color entries/exits by outcome (pnl) when available:
+                    #   - Green = win, Red = loss
+                    # and keep marker SHAPE = direction (^ long, v short).
+                    win_long_y = pd.Series(np.nan, index=idx)
+                    loss_long_y = pd.Series(np.nan, index=idx)
+                    open_long_y = pd.Series(np.nan, index=idx)
+                    win_short_y = pd.Series(np.nan, index=idx)
+                    loss_short_y = pd.Series(np.nan, index=idx)
+                    open_short_y = pd.Series(np.nan, index=idx)
+
+                    win_exit_y = pd.Series(np.nan, index=idx)
+                    loss_exit_y = pd.Series(np.nan, index=idx)
+                    exit_y = pd.Series(np.nan, index=idx)  # unknown outcome / missing pnl
+
+                    # Dynamic sizing (avoid clutter when many markers).
+                    n_trades = max(1, min(20, len([t for t in trades if isinstance(t, dict)])))
+                    entry_size = int(max(55.0, min(90.0, 90.0 * math.sqrt(10.0 / float(n_trades)))))
+                    exit_size = int(max(45.0, min(70.0, 65.0 * math.sqrt(10.0 / float(n_trades)))))
+
                     for tr in trades[:20]:
                         if not isinstance(tr, dict):
                             continue
                         direction = str(tr.get("direction") or "long").lower()
 
-                        et = _align_ts(tr.get("entry_time"))
-                        ep = tr.get("entry_price")
-                        if et is not None and ep is not None:
+                        # Outcome (prefer pnl if available; fall back to is_win bool if present)
+                        pnl_val = tr.get("pnl", None)
+                        is_win: Optional[bool] = None
+                        if pnl_val is not None:
                             try:
-                                ep_f = float(ep)
+                                is_win = float(pnl_val) > 0
                             except Exception:
-                                ep_f = 0.0
-                            if ep_f > 0:
+                                is_win = None
+                        if is_win is None and isinstance(tr.get("is_win"), bool):
+                            is_win = bool(tr.get("is_win"))
+
+                        et = _align_ts(tr.get("entry_time"))
+                        if et is not None:
+                            try:
+                                pos = int(idx.get_indexer([et], method="nearest")[0])
+                            except Exception:
+                                pos = -1
+                            if 0 <= pos < len(df):
+                                # Place entries at/near candle extremes for visibility (TradingView-like).
                                 try:
-                                    pos = int(idx.get_indexer([et], method="nearest")[0])
-                                except Exception:
-                                    pos = -1
-                                if 0 <= pos < len(df):
                                     if direction == "short":
-                                        short_entry.iloc[pos] = ep_f
+                                        y = float(df["High"].iloc[pos]) * 1.001
+                                        if is_win is True:
+                                            win_short_y.iloc[pos] = y
+                                        elif is_win is False:
+                                            loss_short_y.iloc[pos] = y
+                                        else:
+                                            open_short_y.iloc[pos] = y
                                     else:
-                                        long_entry.iloc[pos] = ep_f
+                                        y = float(df["Low"].iloc[pos]) * 0.999
+                                        if is_win is True:
+                                            win_long_y.iloc[pos] = y
+                                        elif is_win is False:
+                                            loss_long_y.iloc[pos] = y
+                                        else:
+                                            open_long_y.iloc[pos] = y
+                                except Exception:
+                                    # If High/Low missing for any reason, skip entry marker.
+                                    pass
 
                         xt = _align_ts(tr.get("exit_time"))
                         xp = tr.get("exit_price")
@@ -2490,40 +2527,114 @@ class ChartGenerator:
                                 except Exception:
                                     pos = -1
                                 if 0 <= pos < len(df):
-                                    exit_mark.iloc[pos] = xp_f
+                                    if is_win is True:
+                                        win_exit_y.iloc[pos] = xp_f
+                                    elif is_win is False:
+                                        loss_exit_y.iloc[pos] = xp_f
+                                    else:
+                                        exit_y.iloc[pos] = xp_f
 
                     # Addplots for markers (only if we have any)
-                    if long_entry.notna().any():
+                    if not win_long_y.isna().all():
                         addplot.append(
                             mpf.make_addplot(
-                                long_entry,
+                                win_long_y,
                                 type="scatter",
                                 marker="^",
-                                markersize=90,
-                                color=SIGNAL_LONG,
+                                markersize=entry_size,
+                                color=SIGNAL_LONG,  # win
                                 alpha=0.9,
                             )
                         )
-                    if short_entry.notna().any():
+                    if not loss_long_y.isna().all():
                         addplot.append(
                             mpf.make_addplot(
-                                short_entry,
+                                loss_long_y,
+                                type="scatter",
+                                marker="^",
+                                markersize=entry_size,
+                                color=SIGNAL_SHORT,  # loss
+                                alpha=0.9,
+                            )
+                        )
+                    if not open_long_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                open_long_y,
+                                type="scatter",
+                                marker="^",
+                                markersize=max(45, int(entry_size * 0.85)),
+                                color=SIGNAL_LONG,
+                                alpha=0.55,
+                            )
+                        )
+
+                    if not win_short_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                win_short_y,
                                 type="scatter",
                                 marker="v",
-                                markersize=90,
-                                color=SIGNAL_SHORT,
+                                markersize=entry_size,
+                                color=SIGNAL_LONG,  # win
                                 alpha=0.9,
                             )
                         )
-                    if exit_mark.notna().any():
+                    if not loss_short_y.isna().all():
                         addplot.append(
                             mpf.make_addplot(
-                                exit_mark,
+                                loss_short_y,
+                                type="scatter",
+                                marker="v",
+                                markersize=entry_size,
+                                color=SIGNAL_SHORT,  # loss
+                                alpha=0.9,
+                            )
+                        )
+                    if not open_short_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                open_short_y,
+                                type="scatter",
+                                marker="v",
+                                markersize=max(45, int(entry_size * 0.85)),
+                                color=SIGNAL_SHORT,
+                                alpha=0.55,
+                            )
+                        )
+
+                    # Exit markers (colored by outcome when available)
+                    if not win_exit_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                win_exit_y,
                                 type="scatter",
                                 marker="o",
-                                markersize=65,
-                                color=TEXT_PRIMARY,
+                                markersize=exit_size,
+                                color=SIGNAL_LONG,
                                 alpha=0.85,
+                            )
+                        )
+                    if not loss_exit_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                loss_exit_y,
+                                type="scatter",
+                                marker="o",
+                                markersize=exit_size,
+                                color=SIGNAL_SHORT,
+                                alpha=0.85,
+                            )
+                        )
+                    if not exit_y.isna().all():
+                        addplot.append(
+                            mpf.make_addplot(
+                                exit_y,
+                                type="scatter",
+                                marker="o",
+                                markersize=max(40, int(exit_size * 0.9)),
+                                color=TEXT_PRIMARY,
+                                alpha=0.7,
                             )
                         )
                 except Exception as e:
