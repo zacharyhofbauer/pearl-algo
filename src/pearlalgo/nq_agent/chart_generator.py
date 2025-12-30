@@ -1772,6 +1772,168 @@ class ChartGenerator:
             logger.error(f"Error generating trade chart: {e}", exc_info=True)
             return None
 
+    def generate_equity_curve_chart(
+        self,
+        trades: List[Dict],
+        symbol: str = "MNQ",
+        title: str = "Backtest Equity Curve",
+        performance_data: Optional[Dict] = None,
+        *,
+        figsize: Tuple[float, float] = (16, 9),
+        dpi: int = 150,
+    ) -> Optional[Path]:
+        """Generate equity curve chart from trades.
+        
+        For long backtests, equity curve is more informative than candlesticks.
+        Shows cumulative P&L over time with drawdown shading.
+        
+        Args:
+            trades: List of trade dicts with entry_time, exit_time, pnl
+            symbol: Symbol name for title
+            title: Chart title
+            performance_data: Optional performance metrics for annotations
+            figsize: Figure size
+            dpi: Resolution
+            
+        Returns:
+            Path to generated PNG, or None on failure
+        """
+        if not trades:
+            logger.warning("Cannot generate equity curve: no trades")
+            return None
+        
+        try:
+            # Build equity curve from trades
+            trade_times = []
+            trade_pnls = []
+            
+            for trade in trades:
+                exit_time = trade.get("exit_time")
+                pnl = trade.get("pnl", 0)
+                
+                if exit_time:
+                    try:
+                        dt = pd.to_datetime(exit_time)
+                        trade_times.append(dt)
+                        trade_pnls.append(float(pnl))
+                    except Exception:
+                        continue
+            
+            if not trade_times:
+                logger.warning("Cannot generate equity curve: no valid trade times")
+                return None
+            
+            # Create DataFrame
+            equity_df = pd.DataFrame({
+                'time': trade_times,
+                'pnl': trade_pnls,
+            }).sort_values('time')
+            
+            equity_df['cumulative_pnl'] = equity_df['pnl'].cumsum()
+            equity_df['cumulative_max'] = equity_df['cumulative_pnl'].cummax()
+            equity_df['drawdown'] = equity_df['cumulative_pnl'] - equity_df['cumulative_max']
+            
+            # Create figure
+            fig, (ax_equity, ax_dd) = plt.subplots(
+                2, 1, figsize=figsize,
+                gridspec_kw={'height_ratios': [3, 1]},
+                facecolor=DARK_BG,
+            )
+            
+            # Equity curve
+            ax_equity.plot(
+                equity_df['time'],
+                equity_df['cumulative_pnl'],
+                color=SIGNAL_LONG,
+                linewidth=2.5,
+                alpha=0.9,
+            )
+            ax_equity.fill_between(
+                equity_df['time'],
+                0,
+                equity_df['cumulative_pnl'],
+                where=equity_df['cumulative_pnl'] >= 0,
+                color=SIGNAL_LONG,
+                alpha=0.2,
+            )
+            ax_equity.fill_between(
+                equity_df['time'],
+                0,
+                equity_df['cumulative_pnl'],
+                where=equity_df['cumulative_pnl'] < 0,
+                color=SIGNAL_SHORT,
+                alpha=0.2,
+            )
+            ax_equity.axhline(0, color=TEXT_SECONDARY, linestyle='--', linewidth=1, alpha=0.5)
+            ax_equity.set_ylabel('Cumulative P&L ($)', color=TEXT_PRIMARY)
+            ax_equity.set_title(title, color=TEXT_PRIMARY, fontsize=14, pad=15)
+            ax_equity.grid(True, alpha=0.2, color=GRID_COLOR)
+            ax_equity.tick_params(colors=TEXT_PRIMARY)
+            
+            # Drawdown chart
+            ax_dd.fill_between(
+                equity_df['time'],
+                0,
+                equity_df['drawdown'],
+                color=SIGNAL_SHORT,
+                alpha=0.4,
+            )
+            ax_dd.set_ylabel('Drawdown ($)', color=TEXT_PRIMARY)
+            ax_dd.set_xlabel('Date', color=TEXT_PRIMARY)
+            ax_dd.grid(True, alpha=0.2, color=GRID_COLOR)
+            ax_dd.tick_params(colors=TEXT_PRIMARY)
+            
+            # Add performance annotations if available
+            if performance_data:
+                stats_text = (
+                    f"Trades: {performance_data.get('total_trades', 0)}\n"
+                    f"Win Rate: {performance_data.get('win_rate', 0):.1%}\n"
+                    f"Total P&L: ${performance_data.get('total_pnl', 0):,.0f}\n"
+                    f"Max DD: ${abs(performance_data.get('max_drawdown', 0)):,.0f}\n"
+                    f"Sharpe: {performance_data.get('sharpe_ratio', 0):.2f}"
+                )
+                ax_equity.text(
+                    0.02, 0.98,
+                    stats_text,
+                    transform=ax_equity.transAxes,
+                    fontsize=10,
+                    verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor=DARK_BG, alpha=0.8, edgecolor=GRID_COLOR),
+                    color=TEXT_PRIMARY,
+                )
+            
+            # Style
+            for ax in [ax_equity, ax_dd]:
+                ax.set_facecolor(DARK_BG)
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.spines['left'].set_color(GRID_COLOR)
+                ax.spines['bottom'].set_color(GRID_COLOR)
+            
+            plt.tight_layout()
+            
+            # Save
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+            temp_path = Path(temp_file.name)
+            temp_file.close()
+            
+            fig.savefig(
+                str(temp_path),
+                dpi=dpi,
+                facecolor=DARK_BG,
+                edgecolor="none",
+                bbox_inches="tight",
+                pad_inches=0.25,
+            )
+            plt.close(fig)
+            
+            logger.debug(f"Generated equity curve chart: {temp_path}")
+            return temp_path
+            
+        except Exception as e:
+            logger.error(f"Error generating equity curve chart: {e}", exc_info=True)
+            return None
+
     def generate_backtest_chart(
         self,
         backtest_data: pd.DataFrame,
@@ -1783,6 +1945,7 @@ class ChartGenerator:
         *,
         figsize: Optional[Tuple[float, float]] = None,
         dpi: Optional[int] = None,
+        use_line_chart: bool = False,
     ) -> Optional[Path]:
         """Generate backtest chart using mplfinance.
 
@@ -1892,31 +2055,39 @@ class ChartGenerator:
             effective_figsize = figsize or (14, 9)
             effective_dpi = dpi or self.dpi
 
-            # Plot with mplfinance (wider candles, suppress too-much-data warning)
-            mpf.plot(
-                df,
-                type='candle',
-                style=self.style,
-                addplot=addplot if addplot else None,
-                volume=True if 'Volume' in df.columns else False,
-                title=chart_title,
-                ylabel='Price ($)',
-                ylabel_lower='Volume',
-                figsize=effective_figsize,
-                savefig=dict(
+            # Use line chart for long backtests (clearer than thousands of candles)
+            chart_type = 'line' if use_line_chart else 'candle'
+            
+            plot_kwargs = {
+                'type': chart_type,
+                'style': self.style,
+                'addplot': addplot if addplot else None,
+                'volume': True if 'Volume' in df.columns else False,
+                'title': chart_title,
+                'ylabel': 'Price ($)',
+                'ylabel_lower': 'Volume',
+                'figsize': effective_figsize,
+                'savefig': dict(
                     fname=str(temp_path),
                     dpi=effective_dpi,
                     facecolor=DARK_BG,
                     edgecolor='none',
                     bbox_inches='tight'
                 ),
-                show_nontrading=False,
-                tight_layout=True,
-                returnfig=False,
-                scale_width_adjustment=dict(candle=1.4, volume=0.8, lines=1.0),
-                update_width_config=dict(candle_linewidth=1.2, candle_width=0.7),
-                warn_too_much_data=5000,
-            )
+                'show_nontrading': False,
+                'tight_layout': True,
+                'returnfig': False,
+                'warn_too_much_data': 10000,
+            }
+            
+            if chart_type == 'candle':
+                plot_kwargs.update({
+                    'scale_width_adjustment': dict(candle=1.4, volume=0.8, lines=1.0),
+                    'update_width_config': dict(candle_linewidth=1.2, candle_width=0.7),
+                })
+            
+            # Plot with mplfinance
+            mpf.plot(df, **plot_kwargs)
             
             logger.debug(f"Generated backtest chart with mplfinance: {temp_path}")
             return temp_path

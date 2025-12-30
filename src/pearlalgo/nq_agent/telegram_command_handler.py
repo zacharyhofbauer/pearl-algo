@@ -2304,12 +2304,32 @@ class TelegramCommandHandler:
                     # Use larger figure for longer backtests
                     if weeks >= 4:
                         figsize = (18, 10)
-                        dpi = 180
+                        dpi = 200
                     else:
                         figsize = (16, 9)
                         dpi = 150
                     
-                    chart_path = self.chart_generator.generate_backtest_chart(
+                    # For long backtests (4+ weeks), generate equity curve as primary chart
+                    # For shorter backtests, use traditional candlestick/line price chart
+                    chart_path = None
+                    equity_chart_path = None
+                    
+                    if weeks >= 4 and result.trades:
+                        # Generate equity curve (most informative for long backtests)
+                        equity_chart_path = self.chart_generator.generate_equity_curve_chart(
+                            result.trades,
+                            symbol,
+                            f"{symbol} Backtest Equity Curve ({data_start} to {data_end})",
+                            performance_data=performance_data,
+                            figsize=figsize,
+                            dpi=dpi,
+                        )
+                        # Set as primary chart
+                        chart_path = equity_chart_path
+                    
+                    # Generate price chart (line chart for 6+ weeks, candles for shorter)
+                    use_line = weeks >= 6
+                    price_chart_path = self.chart_generator.generate_backtest_chart(
                         chart_data,
                         signals_from_backtest,
                         symbol,
@@ -2318,7 +2338,12 @@ class TelegramCommandHandler:
                         timeframe=chart_tf_label,
                         figsize=figsize,
                         dpi=dpi,
+                        use_line_chart=use_line,
                     )
+                    
+                    # Use price chart as primary if we don't have equity curve
+                    if chart_path is None:
+                        chart_path = price_chart_path
                             
                     # Format results message
                     data_start = backtest_data.index[0].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
@@ -2437,22 +2462,38 @@ class TelegramCommandHandler:
                     
                     await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
                     
-                    # Send chart
+                    # Send charts
+                    # For long backtests (4+ weeks), send equity curve first, then price chart
+                    # For short backtests, send price chart only
                     if chart_path and chart_path.exists():
                         try:
+                            # Send primary chart (equity curve for 4+ weeks, price chart otherwise)
+                            chart_type = "Equity Curve" if weeks >= 4 and equity_chart_path else "Price Chart"
                             with open(chart_path, 'rb') as photo:
                                 if update.callback_query:
                                     await context.bot.send_photo(
                                         chat_id=update.effective_chat.id,
                                         photo=photo,
-                                        caption=f"📊 Backtest Chart ({weeks} Week{'s' if weeks > 1 else ''}, {chart_tf_label} candles)"
+                                        caption=f"📈 {chart_type} ({weeks} Week{'s' if weeks > 1 else ''})"
                                     )
                                 else:
                                     await update.message.reply_photo(
                                         photo=photo,
-                                        caption=f"📊 Backtest Chart ({weeks} Week{'s' if weeks > 1 else ''}, {chart_tf_label} candles)"
+                                        caption=f"📈 {chart_type} ({weeks} Week{'s' if weeks > 1 else ''})"
                                     )
                             chart_path.unlink()
+                            
+                            # For long backtests, also send the price chart
+                            if weeks >= 4 and price_chart_path and price_chart_path.exists() and price_chart_path != chart_path:
+                                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+                                chart_type_label = "Line" if use_line else "Candlestick"
+                                with open(price_chart_path, 'rb') as photo:
+                                    await context.bot.send_photo(
+                                        chat_id=update.effective_chat.id,
+                                        photo=photo,
+                                        caption=f"📊 {chart_type_label} Chart ({weeks} Week{'s' if weeks > 1 else ''}, {chart_tf_label} bars)"
+                                    )
+                                price_chart_path.unlink()
                         except Exception as e:
                             logger.error(f"Error sending backtest chart: {e}")
                 else:
