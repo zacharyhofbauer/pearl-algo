@@ -96,6 +96,10 @@ class VerificationSummary:
     # Condition bottlenecks (why signals were rejected or not generated)
     bottleneck_summary: Dict[str, int] = field(default_factory=dict)  # e.g., {"low_volume": 42, ...}
     top_gate_reasons: List[str] = field(default_factory=list)  # Most common scanner gate reasons
+
+    # Execution / trade simulation explainability (why trades < signals)
+    # Populated only in full backtests that run TradeSimulator.
+    execution_summary: Dict[str, int] = field(default_factory=dict)
     
     # Data coverage
     date_range_start: Optional[str] = None
@@ -114,12 +118,28 @@ class VerificationSummary:
             "session_distribution": self.session_distribution,
             "bottleneck_summary": self.bottleneck_summary,
             "top_gate_reasons": self.top_gate_reasons,
+            "execution_summary": self.execution_summary,
             "date_range_start": self.date_range_start,
             "date_range_end": self.date_range_end,
         }
     
     def format_compact(self) -> str:
         """Format as compact string for Telegram display."""
+        def _label(key: str) -> str:
+            # Avoid underscores which can be interpreted by Telegram Markdown.
+            mapping = {
+                "rejected_confidence": "Confidence",
+                "rejected_risk_reward": "R:R",
+                "rejected_quality_scorer": "Quality",
+                "rejected_order_book": "Order book",
+                "rejected_invalid_prices": "Bad prices",
+                "duplicates_filtered": "Duplicates",
+                "rejected_market_hours": "Session closed",
+            }
+            if key in mapping:
+                return mapping[key]
+            return key.replace("_", " ")
+
         lines = []
         
         # Signal density
@@ -138,8 +158,17 @@ class VerificationSummary:
         if self.bottleneck_summary:
             sorted_bottlenecks = sorted(self.bottleneck_summary.items(), key=lambda x: x[1], reverse=True)[:3]
             if sorted_bottlenecks:
-                bottleneck_str = ", ".join([f"{k}: {v}" for k, v in sorted_bottlenecks])
+                bottleneck_str = ", ".join([f"{_label(k)}: {v}" for k, v in sorted_bottlenecks])
                 lines.append(f"🚧 Bottlenecks: {bottleneck_str}")
+
+        # Execution explainability (why trades < signals)
+        if self.execution_summary:
+            opened = self.execution_summary.get("signals_opened", 0)
+            skipped = self.execution_summary.get("signals_skipped_concurrency", 0)
+            max_pos = self.execution_summary.get("max_concurrent_trades", 0)
+            if opened or skipped:
+                max_part = f" (max {max_pos})" if max_pos else ""
+                lines.append(f"🎯 Trades: {opened} opened, {skipped} skipped{max_part}")
         
         return "\n".join(lines) if lines else "No verification data"
 
@@ -668,14 +697,47 @@ class TradeSimulator:
         self.equity_curve = [0.0]
         self.peak_equity = 0.0
         
+        # Execution explainability counters (helps explain why trades < signals)
+        execution_stats: Dict[str, int] = {
+            "signals_total": int(len(signals)),
+            "signals_missing_timestamp": 0,
+            "signals_timestamp_parse_fail": 0,
+            "signals_timestamp_not_in_data": 0,
+            "signals_opened": 0,
+            "signals_skipped_concurrency": 0,
+            "max_concurrent_trades": int(self.max_concurrent_trades),
+        }
+
         # Convert signals to dict keyed by timestamp for efficient lookup
-        signals_by_time = {}
+        signals_by_time: Dict[pd.Timestamp, List[Tuple[int, Dict]]] = {}
+        index_tz = df.index.tz if isinstance(df.index, pd.DatetimeIndex) else None
+        index_set = set(df.index) if isinstance(df.index, pd.DatetimeIndex) else set()
+
         for i, signal in enumerate(signals):
-            ts = signal.get("timestamp")
-            if ts:
-                if isinstance(ts, str):
-                    ts = pd.Timestamp(ts)
-                signals_by_time.setdefault(ts, []).append((i, signal))
+            ts_raw = signal.get("timestamp")
+            if not ts_raw:
+                execution_stats["signals_missing_timestamp"] += 1
+                continue
+            try:
+                ts = pd.Timestamp(ts_raw) if not isinstance(ts_raw, pd.Timestamp) else ts_raw
+            except Exception:
+                execution_stats["signals_timestamp_parse_fail"] += 1
+                continue
+
+            # Normalize timezone semantics to match df index for equality checks.
+            try:
+                if index_tz is not None and ts.tzinfo is None:
+                    ts = ts.tz_localize(index_tz)
+                elif index_tz is None and ts.tzinfo is not None:
+                    ts = ts.tz_convert(None)
+            except Exception:
+                # If tz normalization fails, keep original; it will likely not match any bar_time.
+                pass
+
+            if index_set and ts not in index_set:
+                execution_stats["signals_timestamp_not_in_data"] += 1
+
+            signals_by_time.setdefault(ts, []).append((i, signal))
         
         current_equity = 0.0
         max_drawdown = 0.0
@@ -695,6 +757,9 @@ class TradeSimulator:
                 for signal_idx, signal in signals_by_time[bar_time]:
                     if len(self.open_trades) < self.max_concurrent_trades:
                         self._open_trade(signal, bar, bar_time, position_size, signal_idx)
+                        execution_stats["signals_opened"] += 1
+                    else:
+                        execution_stats["signals_skipped_concurrency"] += 1
             
             # Update equity curve
             unrealized_pnl = sum(
@@ -719,6 +784,7 @@ class TradeSimulator:
         
         # Calculate metrics
         metrics = self._calculate_metrics(max_drawdown)
+        metrics.update(execution_stats)
         
         return self.closed_trades, metrics
 
@@ -930,6 +996,7 @@ def run_full_backtest(
     position_size: int = 1,
     tick_value: float = 2.0,
     slippage_ticks: float = 0.5,
+    max_concurrent_trades: int = 1,
     return_trades: bool = True,
 ) -> BacktestResult:
     """
@@ -974,6 +1041,7 @@ def run_full_backtest(
     simulator = TradeSimulator(
         tick_value=tick_value,
         slippage_ticks=slippage_ticks,
+        max_concurrent_trades=max_concurrent_trades,
     )
     
     closed_trades, metrics = simulator.simulate(
@@ -984,6 +1052,17 @@ def run_full_backtest(
     
     # Convert trades to dict for JSON serialization
     trades_list = [t.to_dict() for t in closed_trades] if return_trades else None
+
+    # Attach execution explainability to verification (why trades < signals)
+    if signal_result.verification is not None:
+        signal_result.verification.execution_summary = {
+            "signals_total": int(metrics.get("signals_total", 0) or 0),
+            "signals_opened": int(metrics.get("signals_opened", 0) or 0),
+            "signals_skipped_concurrency": int(metrics.get("signals_skipped_concurrency", 0) or 0),
+            "signals_missing_timestamp": int(metrics.get("signals_missing_timestamp", 0) or 0),
+            "signals_timestamp_not_in_data": int(metrics.get("signals_timestamp_not_in_data", 0) or 0),
+            "max_concurrent_trades": int(metrics.get("max_concurrent_trades", max_concurrent_trades) or max_concurrent_trades),
+        }
     
     return BacktestResult(
         total_bars=signal_result.total_bars,
@@ -1015,6 +1094,7 @@ def run_full_backtest_5m_decision(
     position_size: int = 1,
     tick_value: float = 2.0,
     slippage_ticks: float = 0.5,
+    max_concurrent_trades: int = 1,
     return_trades: bool = True,
     decision_rule: str = "5min",
     context_rule_1: str = "1h",
@@ -1058,6 +1138,7 @@ def run_full_backtest_5m_decision(
     simulator = TradeSimulator(
         tick_value=tick_value,
         slippage_ticks=slippage_ticks,
+        max_concurrent_trades=max_concurrent_trades,
     )
 
     closed_trades, metrics = simulator.simulate(
@@ -1067,6 +1148,17 @@ def run_full_backtest_5m_decision(
     )
 
     trades_list = [t.to_dict() for t in closed_trades] if return_trades else None
+
+    # Attach execution explainability to verification (why trades < signals)
+    if signal_result.verification is not None:
+        signal_result.verification.execution_summary = {
+            "signals_total": int(metrics.get("signals_total", 0) or 0),
+            "signals_opened": int(metrics.get("signals_opened", 0) or 0),
+            "signals_skipped_concurrency": int(metrics.get("signals_skipped_concurrency", 0) or 0),
+            "signals_missing_timestamp": int(metrics.get("signals_missing_timestamp", 0) or 0),
+            "signals_timestamp_not_in_data": int(metrics.get("signals_timestamp_not_in_data", 0) or 0),
+            "max_concurrent_trades": int(metrics.get("max_concurrent_trades", max_concurrent_trades) or max_concurrent_trades),
+        }
 
     return BacktestResult(
         total_bars=signal_result.total_bars,

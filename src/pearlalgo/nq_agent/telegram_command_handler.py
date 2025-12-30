@@ -1996,6 +1996,14 @@ class TelegramCommandHandler:
                 slippage_ticks = float(user_data.get("backtest_slippage_ticks", 0.5) or 0.5)
             except Exception:
                 slippage_ticks = 0.5
+
+            # Execution policy: maximum concurrent positions (trade simulator)
+            try:
+                max_pos = int(user_data.get("backtest_max_positions", 1) or 1)
+            except Exception:
+                max_pos = 1
+            if max_pos not in (1, 2, 3):
+                max_pos = 1
             
             # Symbol selection (MNQ or NQ, default MNQ)
             symbol = user_data.get("backtest_symbol", "MNQ") if hasattr(context, "user_data") else "MNQ"
@@ -2008,7 +2016,8 @@ class TelegramCommandHandler:
                 "📊 *Backtest Strategy*\n\n"
                 f"*Mode:* {mode_label}\n"
                 f"*Symbol:* {symbol_label}\n\n"
-                f"*Contracts:* {pos_size} {symbol}  |  *Slippage:* {slippage_ticks} ticks\n\n"
+                f"*Contracts:* {pos_size} {symbol}  |  *Slippage:* {slippage_ticks} ticks\n"
+                f"*Max positions:* {max_pos}\n\n"
                 "Select backtest duration:\n\n"
                 "Tip: 2 weeks is a good starting point. 4-6 weeks for deeper validation."
             )
@@ -2067,6 +2076,20 @@ class TelegramCommandHandler:
                     InlineKeyboardButton(
                         "✅ slip 1.0" if slippage_ticks == 1.0 else "slip 1.0",
                         callback_data="backtest_setslip_1.0",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        "✅ max 1" if max_pos == 1 else "max 1",
+                        callback_data="backtest_setmaxpos_1",
+                    ),
+                    InlineKeyboardButton(
+                        "✅ max 2" if max_pos == 2 else "max 2",
+                        callback_data="backtest_setmaxpos_2",
+                    ),
+                    InlineKeyboardButton(
+                        "✅ max 3" if max_pos == 3 else "max 3",
+                        callback_data="backtest_setmaxpos_3",
                     ),
                 ],
                 [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
@@ -2172,6 +2195,14 @@ class TelegramCommandHandler:
                     slippage_ticks = 0.5
                 if slippage_ticks not in (0.5, 1.0):
                     slippage_ticks = 0.5
+
+                # Execution policy: maximum concurrent positions (trade simulator)
+                try:
+                    max_pos = int(user_data.get("backtest_max_positions", 1) or 1)
+                except Exception:
+                    max_pos = 1
+                if max_pos not in (1, 2, 3):
+                    max_pos = 1
                 
                 # Symbol selection (MNQ or NQ, default MNQ)
                 symbol = user_data.get("backtest_symbol", "MNQ") if hasattr(context, "user_data") else "MNQ"
@@ -2188,6 +2219,7 @@ class TelegramCommandHandler:
                         position_size=pos_size,
                         tick_value=tick_value,
                         slippage_ticks=slippage_ticks,
+                        max_concurrent_trades=max_pos,
                         return_trades=True,
                         decision_rule="5min",
                         context_rule_1="1h",
@@ -2200,6 +2232,7 @@ class TelegramCommandHandler:
                         position_size=pos_size,
                         tick_value=tick_value,
                         slippage_ticks=slippage_ticks,
+                        max_concurrent_trades=max_pos,
                         return_trades=True,
                     )
                         
@@ -2288,7 +2321,7 @@ class TelegramCommandHandler:
                         f"*Signals Generated:* {result.total_signals}\n"
                         f"*Signals on Chart:* {signals_shown}\n\n"
                         f"*Symbol:* {symbol} (${tick_value:.0f}/pt)  |  *Contracts:* {pos_size}\n"
-                        f"*Slippage:* {slippage_ticks} ticks\n"
+                        f"*Slippage:* {slippage_ticks} ticks  |  *Max pos:* {max_pos}\n"
                         f"*Trades:* {trades_display}  |  *Win Rate:* {win_rate_display}  |  *PF:* {profit_factor_display}\n"
                         f"*Avg Confidence:* {result.avg_confidence:.2f}\n"
                         f"*Avg R:R:* {result.avg_risk_reward:.2f}:1\n"
@@ -2302,7 +2335,7 @@ class TelegramCommandHandler:
                         exports_dir = self.state_dir / "exports"
                         exports_dir.mkdir(parents=True, exist_ok=True)
                         ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                        base_name = f"backtest_{mode}_{symbol}_{weeks}w_{ts_tag}"
+                        base_name = f"backtest_{mode}_{symbol}_{weeks}w_mp{max_pos}_{ts_tag}"
 
                         # Metrics JSON (always) - now includes compact verification summary
                         metrics_path = exports_dir / f"{base_name}_metrics.json"
@@ -2313,6 +2346,7 @@ class TelegramCommandHandler:
                             "weeks": weeks,
                             "contracts": pos_size,
                             "slippage_ticks": slippage_ticks,
+                            "max_concurrent_trades": max_pos,
                             "total_bars": result.total_bars,
                             "total_signals": result.total_signals,
                             "avg_confidence": result.avg_confidence,
@@ -2469,7 +2503,12 @@ class TelegramCommandHandler:
         context: ContextTypes.DEFAULT_TYPE,
         kind: str,
     ) -> None:
-        """Send the most recent backtest export artifact (CSV/JSON)."""
+        """Send the most recent backtest export artifact (CSV/JSON/Metrics/Verification).
+
+        Important UX note:
+        - Do NOT edit/replace the backtest results message when exporting, otherwise
+          the user loses access to the other export buttons.
+        """
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
@@ -2484,14 +2523,35 @@ class TelegramCommandHandler:
 
         target = paths.get(key)
         if not target:
-            await self._send_message_or_edit(
-                update,
-                context,
-                "❌ *No export available*\n\nRun a backtest first, then try export again.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📉 Backtest", callback_data="backtest")],
-                    [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
-                ]),
+            # Fallback: if the handler was restarted (lost in-memory user_data),
+            # try to locate the most recent export artifact from disk.
+            try:
+                exports_dir = self.state_dir / "exports"
+                suffix_by_key = {
+                    "csv": "_trades.csv",
+                    "json": "_trades.json",
+                    "metrics": "_metrics.json",
+                    "verification": "_verification.json",
+                }
+                suffix = suffix_by_key.get(key, "_metrics.json")
+                candidates = sorted(
+                    exports_dir.glob(f"backtest_*{suffix}"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if candidates:
+                    target = str(candidates[0])
+            except Exception:
+                target = None
+
+        if not target:
+            # Send a new message (do not replace the backtest results).
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=(
+                    "❌ *No export available*\n\n"
+                    "Run a backtest first, then try export again."
+                ),
             )
             return
 
@@ -2507,25 +2567,12 @@ class TelegramCommandHandler:
                     document=f,
                     filename=p.name,
                 )
-
-            await self._send_message_or_edit(
-                update,
-                context,
-                f"✅ Sent `{p.name}`",
-                reply_markup=InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
-                        InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
-                    ]
-                ]),
-            )
         except Exception as e:
             logger.error(f"Error exporting backtest artifact: {e}", exc_info=True)
-            await self._send_message_or_edit(
-                update,
-                context,
-                f"❌ *Export failed*\n\n`{str(e)}`",
-                reply_markup=self._get_back_to_menu_button(),
+            # Send a new message (do not replace the backtest results).
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"❌ *Export failed*\n\n`{str(e)}`",
             )
 
     async def _handle_performance_export(
@@ -4644,6 +4691,18 @@ class TelegramCommandHandler:
                 symbol = "MNQ"
             if hasattr(context, "user_data"):
                 context.user_data["backtest_symbol"] = symbol
+            await self._handle_backtest(update, context, weeks=None)
+        elif callback_data.startswith("backtest_setmaxpos_"):
+            # Set max concurrent positions for backtest trade simulation
+            raw = callback_data.replace("backtest_setmaxpos_", "")
+            try:
+                max_pos = int(raw)
+            except Exception:
+                max_pos = 1
+            if max_pos not in (1, 2, 3):
+                max_pos = 1
+            if hasattr(context, "user_data"):
+                context.user_data["backtest_max_positions"] = max_pos
             await self._handle_backtest(update, context, weeks=None)
         elif callback_data.startswith('backtest_'):
             # Handle backtest duration selection (backtest_1w, backtest_2w, etc.)
