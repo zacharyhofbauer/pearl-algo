@@ -82,6 +82,26 @@ signals:
   duplicate_price_threshold_pct: 0.5 # 0.5% price difference for duplicate detection
   volatility_threshold: 0.0005       # Reduced from 0.001 - was blocking 543 signals
   avoid_lunch_lull: false            # Disabled - was blocking 72 signals
+  
+  # Stop-distance cap (risk control)
+  # Caps maximum stop distance in points; scales target to preserve RR ratio.
+  # 25 pts = $250 risk @ 5 MNQ contracts, $500 @ 10 contracts
+  max_stop_points: 25.0              # Maximum stop distance in points (0 = disabled)
+  
+  # Per-signal-type regime/session filters
+  # Signals are rejected if current regime/session is NOT in the allowed list.
+  # Empty list = no filter (all regimes/sessions allowed).
+  regime_filters:
+    mean_reversion_long:
+      allowed_regimes: [ranging]
+      disallowed_volatility: [high]
+    mean_reversion_short:
+      allowed_regimes: [ranging]
+      disallowed_volatility: [high]
+    sr_bounce_short:
+      disallowed_regimes: [trending_bullish]
+    momentum_short:
+      allowed_regimes: [trending_bearish]
 
 # Strategy configuration (signal types, position sizing, A/B testing)
 strategy:

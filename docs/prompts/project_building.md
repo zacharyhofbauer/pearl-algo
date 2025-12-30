@@ -297,5 +297,98 @@ Both prompts respect the same architectural boundaries and constraints defined i
 
 ========================================
 
+CYCLE TEMPLATE
+
+Each improvement cycle should follow this structure:
+
+PHASE 1: EXPLORATION (low commitment)
+
+Label all findings explicitly:
+- [EXPLORATION] - Ideas being surfaced, not yet evaluated
+- [OPPORTUNITY] - Validated improvement opportunity
+- [QUESTION] - Clarification needed before proceeding
+- [CONSTRAINT] - Factor limiting options
+
+Deliverables:
+1. System strengths worth preserving
+2. Constraints shaping decisions
+3. Ranked opportunity clusters (by dimension: correctness, reliability, performance, observability, security, maintainability, extensibility, devex)
+4. Explicit do-not-change boundaries
+
+PHASE 2: PROPOSAL (medium commitment)
+
+Label proposals explicitly:
+- [SAFE] - Backward-compatible, low risk
+- [GUARDED] - Requires flag or rollout strategy
+- [APPROVAL-REQUIRED] - Needs explicit sign-off
+- [DEFERRED] - Good idea, not for this cycle
+
+Deliverables:
+1. Concrete changes with file paths
+2. Expected benefits and success signals
+3. Risks, unknowns, and mitigation
+4. Implementation order and dependencies
+
+PHASE 3: IMPLEMENTATION (high commitment)
+
+Gates before execution:
+- [ ] Changes respect module boundaries (run: python3 scripts/testing/test_all.py arch)
+- [ ] No state schema breaking changes (see docs/PROJECT_SUMMARY.md State Schema)
+- [ ] Tests exist or will be added for new behavior
+- [ ] docs/PROJECT_SUMMARY.md remains authoritative (update if needed)
+
+Deliverables:
+1. Code changes with clear atomic commits
+2. Tests for new/changed behavior
+3. Documentation updates as needed
+4. Verification that boundary check passes
+
+PHASE 4: VERIFICATION
+
+Post-implementation checks:
+- [ ] Architecture boundary check passes (PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch)
+- [ ] Unit tests pass (pytest tests/)
+- [ ] Integration smoke test (if applicable)
+- [ ] docs/PROJECT_SUMMARY.md is up to date
+
+========================================
+
+BOUNDARY ENFORCEMENT
+
+Module boundaries are defined in docs/PROJECT_SUMMARY.md and enforced by:
+
+  scripts/testing/check_architecture_boundaries.py
+
+Run via unified test runner:
+
+  # Warn-only (default)
+  python3 scripts/testing/test_all.py arch
+
+  # Strict enforcement (exit 1 on violations)
+  PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
+
+Dependency matrix (from docs/PROJECT_SUMMARY.md):
+
+| Source Layer     | May Import                                      | Must NOT Import              |
+|------------------|-------------------------------------------------|------------------------------|
+| utils            | pearlalgo.utils.*, stdlib, third-party          | config, data_providers, strategies, nq_agent |
+| config           | pearlalgo.config.*, pearlalgo.utils.*           | data_providers, strategies, nq_agent |
+| data_providers   | pearlalgo.data_providers.*, config, utils       | strategies, nq_agent         |
+| strategies       | pearlalgo.strategies.*, config, utils           | data_providers, nq_agent     |
+| nq_agent         | Any internal layer (orchestration layer)        | —                            |
+
+========================================
+
+AUTHORITATIVE REFERENCES
+
+- docs/PROJECT_SUMMARY.md: Architecture, state schema, module boundaries, configuration
+- docs/MARKET_DATA_SUBSCRIPTION.md: IBKR Error 354 resolution guide
+- docs/GATEWAY.md: IBKR Gateway operational procedures
+- docs/TESTING_GUIDE.md: Testing procedures and categories
+
+These docs are the source of truth. If code and docs disagree, investigate before changing either.
+
+========================================
+
 
 

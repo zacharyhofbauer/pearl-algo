@@ -2472,6 +2472,8 @@ class TelegramCommandHandler:
                         try:
                             if getattr(result, "trades", None):
                                 tstats: Dict[str, Dict[str, float]] = {}
+                                # Also track by regime
+                                regime_stats: Dict[str, Dict[str, Dict[str, float]]] = {}
                                 for t in (result.trades or []):
                                     st = str(t.get("signal_type") or "unknown")
                                     try:
@@ -2484,6 +2486,17 @@ class TelegramCommandHandler:
                                     tstats[st]["n"] += 1.0
                                     tstats[st]["wins"] += win
                                     tstats[st]["pnl_total"] += pnl
+                                    
+                                    # Track by regime (signal_type -> regime -> stats)
+                                    regime = str(t.get("regime") or "unknown")
+                                    if st not in regime_stats:
+                                        regime_stats[st] = {}
+                                    if regime not in regime_stats[st]:
+                                        regime_stats[st][regime] = {"n": 0.0, "wins": 0.0, "pnl_total": 0.0}
+                                    regime_stats[st][regime]["n"] += 1.0
+                                    regime_stats[st][regime]["wins"] += win
+                                    regime_stats[st][regime]["pnl_total"] += pnl
+                                    
                                 # Add win_rate per type
                                 out: Dict[str, Dict[str, float]] = {}
                                 for st, v in tstats.items():
@@ -2496,6 +2509,21 @@ class TelegramCommandHandler:
                                         "pnl_total": float(v.get("pnl_total", 0.0) or 0.0),
                                     }
                                 metrics_obj["trade_type_stats"] = out
+                                
+                                # Compute regime breakdown with win_rate
+                                regime_out: Dict[str, Dict[str, Dict[str, float]]] = {}
+                                for st, regimes in regime_stats.items():
+                                    regime_out[st] = {}
+                                    for regime, v in regimes.items():
+                                        n = float(v.get("n", 0.0) or 0.0)
+                                        w = float(v.get("wins", 0.0) or 0.0)
+                                        regime_out[st][regime] = {
+                                            "n": n,
+                                            "wins": w,
+                                            "win_rate": (w / n) if n > 0 else 0.0,
+                                            "pnl_total": float(v.get("pnl_total", 0.0) or 0.0),
+                                        }
+                                metrics_obj["trade_type_by_regime"] = regime_out
                         except Exception:
                             pass
                         # Embed compact verification in metrics

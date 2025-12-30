@@ -56,6 +56,11 @@ class Trade:
     max_adverse_excursion: float = 0.0  # Maximum drawdown during trade
     bars_held: int = 0
     
+    # Regime context (for trade-type-by-regime analysis)
+    regime: Optional[str] = None  # e.g., "trending_bullish", "ranging"
+    volatility: Optional[str] = None  # e.g., "low", "normal", "high"
+    session: Optional[str] = None  # e.g., "opening", "morning_trend"
+    
     def to_dict(self) -> Dict:
         """Convert trade to dictionary."""
         return {
@@ -76,6 +81,9 @@ class Trade:
             "max_favorable_excursion": self.max_favorable_excursion,
             "max_adverse_excursion": self.max_adverse_excursion,
             "bars_held": self.bars_held,
+            "regime": self.regime,
+            "volatility": self.volatility,
+            "session": self.session,
         }
 
 
@@ -145,6 +153,8 @@ class VerificationSummary:
                 "rejected_invalid_prices": "Bad prices",
                 "duplicates_filtered": "Duplicates",
                 "rejected_market_hours": "Session closed",
+                "rejected_regime_filter": "Regime",
+                "stop_cap_applied": "Stop capped",
             }
             if key in mapping:
                 return mapping[key]
@@ -418,6 +428,8 @@ def run_signal_backtest_5m_decision(
         "rejected_invalid_prices": 0,
         "duplicates_filtered": 0,
         "rejected_market_hours": 0,
+        "rejected_regime_filter": 0,
+        "stop_cap_applied": 0,
     }
 
     # Fixed rolling window to avoid O(n^2) slicing.
@@ -461,9 +473,12 @@ def run_signal_backtest_5m_decision(
                     bottleneck_counts["rejected_order_book"] += diag.rejected_order_book
                     bottleneck_counts["rejected_invalid_prices"] += diag.rejected_invalid_prices
                     bottleneck_counts["duplicates_filtered"] += diag.duplicates_filtered
+                    bottleneck_counts["rejected_regime_filter"] += diag.rejected_regime_filter
+                    bottleneck_counts["stop_cap_applied"] += diag.stop_cap_applied
                     if diag.rejected_market_hours:
                         bottleneck_counts["rejected_market_hours"] += 1
                     all_gate_reasons.extend(diag.scanner_gate_reasons)
+                    all_gate_reasons.extend(diag.regime_filter_reasons)
             
             for s in new_signals:
                 s.setdefault("timestamp", latest_ts.isoformat())
@@ -559,6 +574,8 @@ def run_signal_backtest(
         "rejected_invalid_prices": 0,
         "duplicates_filtered": 0,
         "rejected_market_hours": 0,
+        "rejected_regime_filter": 0,
+        "stop_cap_applied": 0,
     }
 
     if df_1m.empty:
@@ -617,9 +634,12 @@ def run_signal_backtest(
                     bottleneck_counts["rejected_order_book"] += diag.rejected_order_book
                     bottleneck_counts["rejected_invalid_prices"] += diag.rejected_invalid_prices
                     bottleneck_counts["duplicates_filtered"] += diag.duplicates_filtered
+                    bottleneck_counts["rejected_regime_filter"] += diag.rejected_regime_filter
+                    bottleneck_counts["stop_cap_applied"] += diag.stop_cap_applied
                     if diag.rejected_market_hours:
                         bottleneck_counts["rejected_market_hours"] += 1
                     all_gate_reasons.extend(diag.scanner_gate_reasons)
+                    all_gate_reasons.extend(diag.regime_filter_reasons)
             
             for s in new_signals:
                 # Ensure timestamp is always present for downstream charting/backtest reporting
@@ -1093,6 +1113,11 @@ class TradeSimulator:
         else:
             entry_price -= self.slippage_points
         
+        # Extract regime context from signal (for trade-type-by-regime analysis)
+        regime_ctx = signal.get("regime", {})
+        if not isinstance(regime_ctx, dict):
+            regime_ctx = {}
+        
         trade = Trade(
             signal_id=f"sig_{signal_idx}_{bar_time.strftime('%Y%m%d_%H%M')}",
             signal_type=signal.get("type", "unknown"),
@@ -1103,6 +1128,9 @@ class TradeSimulator:
             take_profit=signal.get("take_profit", 0),
             position_size=position_size,
             confidence=signal.get("confidence", 0),
+            regime=regime_ctx.get("regime"),
+            volatility=regime_ctx.get("volatility"),
+            session=regime_ctx.get("session"),
         )
         
         self.open_trades.append(trade)

@@ -340,7 +340,7 @@ class IBKRProvider(DataProvider):
             # Determine if futures or stock
             is_futures = symbol.upper() in self.futures_symbols
 
-            logger.info(f"Submitting GetLatestBarTask for {symbol} (will try Level 1 since you have CME Real-Time NP,L1)")
+            logger.info(f"Submitting GetLatestBarTask for {symbol} (requesting Level 1 real-time data)")
             
             # Submit task to executor
             task_id = str(uuid.uuid4())
@@ -354,12 +354,19 @@ class IBKRProvider(DataProvider):
             result = await asyncio.wrap_future(future)
             
             if result:
-                logger.info(f"✅ GetLatestBarTask completed for {symbol}, data_level={result.get('_data_level', 'unknown')}")
+                data_level = result.get('_data_level', 'unknown')
+                market_open = result.get('_market_open_assumption')
+                market_str = f", market_open={market_open}" if market_open is not None else ""
+                logger.info(f"✅ GetLatestBarTask completed for {symbol}: data_level={data_level}{market_str}")
             else:
-                logger.warning(f"⚠️  GetLatestBarTask returned None for {symbol}")
+                logger.warning(f"⚠️  GetLatestBarTask returned None for {symbol} (check docs/MARKET_DATA_SUBSCRIPTION.md if Error 354)")
 
             return result
 
         except Exception as e:
-            logger.error(f"❌ Error fetching latest bar for {symbol}: {e}", exc_info=True)
+            logger.error(
+                f"❌ Error fetching latest bar for {symbol}: {e} "
+                f"(if Error 354, see docs/MARKET_DATA_SUBSCRIPTION.md)",
+                exc_info=True,
+            )
             return None

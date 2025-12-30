@@ -1010,7 +1010,60 @@ ExecStartPost=/bin/sh -c 'until curl -sf http://localhost:9100/healthz; do sleep
 
 ## Roadmap & Future Enhancements
 
-### High Priority
+### Ranked Opportunity Clusters
+
+The following opportunity clusters are ranked by leverage and risk, updated as of 2025-12-30.
+Use `docs/prompts/project_building.md` cycle template for structured improvement iterations.
+
+#### 1. Operational Risk (Highest Leverage)
+
+**Why first**: IBKR data quality impacts correctness, reliability, observability, and operator trust.
+
+- **IBKR connectivity + entitlement clarity**: Reduce "silent degradation" to historical fallback; make data-level visible in logs and state.
+- **Market-open truth source**: Single implementation reused across agent + IBKR executor (see `utils/market_hours.py`).
+- **Error 354 handling**: Clear guidance in `docs/MARKET_DATA_SUBSCRIPTION.md`; executor messaging should not hard-code entitlement claims.
+
+#### 2. Correctness: Market-Hours + Holiday/Early-Close Coverage
+
+- Move beyond fixed-date holidays; add observance rules (weekend → Monday).
+- Enable configurable overrides via `config.yaml` (`market_hours.enable_config_overrides`).
+- Handle variable holidays: Good Friday, Memorial Day, Labor Day, Thanksgiving.
+
+#### 3. Observability & Ops Maturity
+
+- Operator-focused dashboards: data-level, freshness buckets, cache hit rates.
+- "Quiet reasons" in dashboard (why no signals: session closed, no opportunity, stale data).
+- Restart cause tracking and correlation with `run_id`.
+
+#### 4. Risk Management & Circuit Breakers
+
+- More explicit pause/resume semantics ("degradation mode" vs "hard stop").
+- Stronger containment for partial failures (data vs execution vs notifications).
+- Clearer recovery criteria before auto-resume.
+
+#### 5. Signal Quality & Correctness
+
+- Calibration workflow: confidence distribution analysis, false-positive tracking.
+- Duplicate suppression tuning (price threshold, time window).
+- Regime gating (trending vs ranging market detection).
+
+#### 6. Security Hardening
+
+- Telegram auth tightening (command authorization, rate limiting).
+- Secrets hygiene audit (no credentials in logs, state files, or error messages).
+- Dependency pinning policy and supply-chain review.
+
+#### 7. DevEx & Test Velocity
+
+- Faster test tiers (unit < 1s, integration < 10s, smoke < 30s).
+- Deterministic fixtures (no network calls in unit tests).
+- Clearer local run workflows and CI ergonomics.
+
+---
+
+### Detailed Enhancement Backlog
+
+#### High Priority
 
 1. **Market Hours Improvements**:
    - Market holiday calendar + early closes/observance rules (DST is already handled; calendar coverage is the gap)
@@ -1033,7 +1086,7 @@ ExecStartPost=/bin/sh -c 'until curl -sf http://localhost:9100/healthz; do sleep
    - Better stale data detection
    - Data source health monitoring
 
-### Medium Priority
+#### Medium Priority
 
 5. **Performance Tracking**:
    - Detailed analytics dashboard
@@ -1053,7 +1106,7 @@ ExecStartPost=/bin/sh -c 'until curl -sf http://localhost:9100/healthz; do sleep
    - Daily performance summary emails
    - Service restart notifications
 
-### Low Priority / Future
+#### Low Priority / Future
 
 8. **Backtesting Integration**:
    - Historical backtesting framework
@@ -1078,11 +1131,14 @@ ExecStartPost=/bin/sh -c 'until curl -sf http://localhost:9100/healthz; do sleep
 ### Current Limitations
 
 1. **Market Data Subscription**:
-   - Real-time market data subscription not available (Error 354)
-   - Using delayed/historical data instead
-   - **Workaround**: Using last bar from historical data (working)
-   - **Solution**: Subscribe to CME Real-Time (Level 1) - $1.25/month
+   - Level 1 real-time data is preferred when available
+   - Error 354 ("not subscribed") may occur if:
+     - Market is closed (expected behavior during non-trading hours)
+     - Subscription not active/paid, or API acknowledgment not signed
+   - **Fallback behavior**: When Level 1 fails, system uses historical bars (degradation mode — data may be stale)
+   - **Solution**: Ensure CME Real-Time (Level 1) subscription is active + acknowledged for API
    - **Guide**: See [MARKET_DATA_SUBSCRIPTION.md](MARKET_DATA_SUBSCRIPTION.md) for detailed instructions
+   - **Metadata**: Data source is tracked via `_data_level` field in latest_bar (`level1` vs `historical`)
 
 2. **Signal Generation**:
    - Only generates signals during the configured strategy session window (default 18:00–16:10 ET, NY time)
@@ -1102,8 +1158,8 @@ ExecStartPost=/bin/sh -c 'until curl -sf http://localhost:9100/healthz; do sleep
 
 1. **Market Calendar Coverage**: Holiday/early-close coverage is intentionally incomplete by default; optional overrides exist (disabled by default).
 2. **Error Recovery**: Basic recovery (could be more sophisticated)
-3. **Data Validation**: Good baseline validation, but edge-case hardening is ongoing (see testing notes / xfailed cases)
-4. **Volume Profile Robustness**: Known bug on `inf` values in volume profile calculations (tracked via xfailed test)
+3. **Data Validation**: Good baseline validation, but edge-case hardening is ongoing (see testing notes)
+4. **Volume Profile Robustness**: Fixed — `inf` values in volume profile calculations are now sanitized (see `test_signal_generation_edge_cases.py`)
 5. **Testing Coverage**: Good coverage, but could be expanded
 
 ---

@@ -54,6 +54,47 @@ def _is_valid_price(value: Any) -> bool:
         return False
 
 
+def _fmt_price(value: Any, default: str = "N/A") -> str:
+    """
+    Safely format a price value for logging.
+    
+    Never raises - returns default string if value is invalid.
+    
+    Args:
+        value: Price value (may be None, NaN, or invalid)
+        default: String to return if value is invalid
+        
+    Returns:
+        Formatted price string (e.g., "$17500.25") or default
+    """
+    if value is None:
+        return default
+    try:
+        float_val = float(value)
+        if math.isnan(float_val) or math.isinf(float_val):
+            return default
+        return f"${float_val:.2f}"
+    except (ValueError, TypeError):
+        return default
+
+
+def _fmt_int(value: Any, default: str = "N/A") -> str:
+    """
+    Safely format an integer value for logging.
+    
+    Never raises - returns default string if value is invalid.
+    """
+    if value is None:
+        return default
+    try:
+        float_val = float(value)
+        if math.isnan(float_val) or math.isinf(float_val):
+            return default
+        return str(int(float_val))
+    except (ValueError, TypeError):
+        return default
+
+
 def _calculate_order_book_metrics(bids: List[Any], asks: List[Any]) -> Dict[str, Any]:
     """
     Calculate order book metrics from bid/ask levels.
@@ -229,48 +270,24 @@ class GetLatestBarTask(Task):
 
         # REMOVED: All Level 2 code - user has Level 1 subscription only
         # Directly request Level 1 market data
-        # Check if market is likely open (CME futures: ETH Sun 6PM ET - Fri 5PM ET, with Mon-Thu 5-6PM maintenance break)
-        # This helps explain Error 354 when market is closed
+        # Use unified market hours detection from utils.market_hours
+        # This ensures consistent behavior with the rest of the codebase
         from datetime import datetime, timezone
-        try:
-            from zoneinfo import ZoneInfo
-            et_tz = ZoneInfo('America/New_York')
-        except ImportError:
-            # Fallback for older Python versions
-            import pytz
-            try:
-                et_tz = pytz.timezone('America/New_York')
-            except Exception:
-                # Last resort: use UTC offset (not ideal but works)
-                from datetime import timedelta
-                et_tz = timezone(timedelta(hours=-5))  # EST offset (approximate)
-        now_et = datetime.now(et_tz)
-        weekday = now_et.weekday()  # 0=Monday, 6=Sunday
-        hour_et = now_et.hour
-        minute_et = now_et.minute
-        time_et = hour_et + minute_et / 60.0
+        from pearlalgo.utils.market_hours import get_market_hours
         
-        # CME futures market hours:
-        # - ETH: Sun 6:00 PM ET - Fri 5:00 PM ET (continuous)
-        # - Maintenance break: Mon-Thu 5:00 PM - 6:00 PM ET
-        is_market_open = False
-        market_status = ""
-        if weekday == 6:  # Sunday
-            is_market_open = time_et >= 18.0  # After 6 PM ET
-            market_status = "Market opens at 6:00 PM ET on Sunday" if time_et < 18.0 else "Market is open (ETH)"
-        elif weekday < 4:  # Monday-Thursday
-            if 17.0 <= time_et < 18.0:  # 5-6 PM ET maintenance break
-                is_market_open = False
-                market_status = "Market is in maintenance break (5:00-6:00 PM ET)"
-            else:
-                is_market_open = True
-                market_status = "Market is open (ETH)"
-        elif weekday == 4:  # Friday
-            is_market_open = time_et < 17.0  # Before 5 PM ET
-            market_status = "Market closed for weekend (closes at 5:00 PM ET Friday)" if time_et >= 17.0 else "Market is open (ETH)"
-        else:  # Saturday
-            is_market_open = False
-            market_status = "Market closed (opens Sunday 6:00 PM ET)"
+        try:
+            market_hours = get_market_hours()
+            is_market_open = market_hours.is_market_open()
+            market_status_info = market_hours.get_market_status()
+            market_status = (
+                "Market is open (ETH)" if is_market_open 
+                else f"Market closed (next open: {market_status_info.get('next_open_et', 'unknown')})"
+            )
+        except Exception as mh_err:
+            # Fallback: assume market could be open, let IBKR tell us
+            logger.warning(f"Could not determine market hours: {mh_err}, assuming market may be open")
+            is_market_open = True
+            market_status = "Market status unknown (assuming may be open)"
         
         # Request Level 1 market data (ONLY - no Level 2)
         _log_trace(f"📡 Step 2: Requesting Level 1 market data for {self.symbol}")
@@ -499,14 +516,14 @@ class GetLatestBarTask(Task):
                     
                     logger.info(
                         f"   Data received:\n"
-                        f"   - Last: ${last_price:.2f}\n"
-                        f"   - Close: ${last_price:.2f}\n"
-                        f"   - Bid: ${bid_val:.2f if bid_val else 'N/A'}\n"
-                        f"   - Ask: ${ask_val:.2f if ask_val else 'N/A'}\n"
-                        f"   - Volume: {volume_val}\n"
-                        f"   - Open: ${open_val:.2f}\n"
-                        f"   - High: ${high_val:.2f}\n"
-                        f"   - Low: ${low_val:.2f}"
+                        f"   - Last: {_fmt_price(last_price)}\n"
+                        f"   - Close: {_fmt_price(last_price)}\n"
+                        f"   - Bid: {_fmt_price(bid_val)}\n"
+                        f"   - Ask: {_fmt_price(ask_val)}\n"
+                        f"   - Volume: {_fmt_int(volume_val)}\n"
+                        f"   - Open: {_fmt_price(open_val)}\n"
+                        f"   - High: {_fmt_price(high_val)}\n"
+                        f"   - Low: {_fmt_price(low_val)}"
                     )
                     
                     result = {
@@ -518,7 +535,8 @@ class GetLatestBarTask(Task):
                         "volume": volume_val,
                         "bid": bid_val,
                         "ask": ask_val,
-                        "_data_level": "level1",  # Metadata
+                        "_data_level": "level1",  # Metadata: live Level 1 data
+                        "_market_open_assumption": is_market_open,  # Metadata: market hours at fetch time
                     }
                     # Add empty order book structure for consistency
                     result.update({
@@ -537,7 +555,10 @@ class GetLatestBarTask(Task):
                     except Exception as cancel_e:
                         logger.debug(f"   Note: Error cancelling snapshot (may already be complete): {cancel_e}")
                     
-                    logger.info(f"✅✅✅ SUCCESS: Retrieved Level 1 LIVE data for {self.symbol}: ${last_price:.2f} (bid: ${bid_val:.2f if bid_val else 'N/A'}, ask: ${ask_val:.2f if ask_val else 'N/A'})")
+                    logger.info(
+                        f"✅✅✅ SUCCESS: Retrieved Level 1 LIVE data for {self.symbol}: "
+                        f"{_fmt_price(last_price)} (bid: {_fmt_price(bid_val)}, ask: {_fmt_price(ask_val)})"
+                    )
                     return result
                 else:
                     # No valid price (all NaN or None) - snapshot request failed
@@ -728,8 +749,9 @@ class GetLatestBarTask(Task):
                     "volume": int(latest_bar.volume),
                     "bid": None,  # Not available from historical data
                     "ask": None,  # Not available from historical data
-                    "_data_level": "historical",  # Metadata
-                    "_historical_eth": used_eth if used_eth is not None else False,  # Track if ETH was used (includes all sessions)
+                    "_data_level": "historical",  # Metadata: fallback to historical bars
+                    "_historical_eth": used_eth if used_eth is not None else False,  # Track if ETH was used
+                    "_market_open_assumption": is_market_open,  # Metadata: market hours at fetch time
                 }
                 # Add empty order book structure for consistency
                 result.update({

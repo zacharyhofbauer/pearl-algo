@@ -31,6 +31,7 @@ class SignalDiagnostics:
     raw_signals: int = 0
     validated_signals: int = 0
     duplicates_filtered: int = 0
+    stop_cap_applied: int = 0  # Signals where stop was capped
     
     # Rejection reasons
     rejected_market_hours: bool = False  # Filtered by market hours gate
@@ -39,9 +40,11 @@ class SignalDiagnostics:
     rejected_quality_scorer: int = 0  # Failed quality score threshold
     rejected_order_book: int = 0  # Filtered by order book imbalance
     rejected_invalid_prices: int = 0  # Invalid entry/stop/target prices
+    rejected_regime_filter: int = 0  # Filtered by regime/session filter
     
     # Scanner gate reasons (from NQScanner.get_gate_reasons())
     scanner_gate_reasons: List[str] = field(default_factory=list)
+    regime_filter_reasons: List[str] = field(default_factory=list)  # Reasons for regime filter rejections
     
     # Context
     market_hours_checked: bool = False
@@ -54,13 +57,16 @@ class SignalDiagnostics:
             "raw_signals": self.raw_signals,
             "validated_signals": self.validated_signals,
             "duplicates_filtered": self.duplicates_filtered,
+            "stop_cap_applied": self.stop_cap_applied,
             "rejected_market_hours": self.rejected_market_hours,
             "rejected_confidence": self.rejected_confidence,
             "rejected_risk_reward": self.rejected_risk_reward,
             "rejected_quality_scorer": self.rejected_quality_scorer,
             "rejected_order_book": self.rejected_order_book,
             "rejected_invalid_prices": self.rejected_invalid_prices,
+            "rejected_regime_filter": self.rejected_regime_filter,
             "scanner_gate_reasons": self.scanner_gate_reasons,
+            "regime_filter_reasons": self.regime_filter_reasons,
             "market_hours_checked": self.market_hours_checked,
             "order_book_available": self.order_book_available,
             "timestamp": self.timestamp,
@@ -111,9 +117,15 @@ class SignalDiagnostics:
             rejections.append(f"{self.rejected_order_book} OB")
         if self.rejected_invalid_prices > 0:
             rejections.append(f"{self.rejected_invalid_prices} price")
+        if self.rejected_regime_filter > 0:
+            rejections.append(f"{self.rejected_regime_filter} regime")
         
         if rejections:
             parts.append(f"| Filtered: {', '.join(rejections)}")
+        
+        # Note stop cap applications
+        if self.stop_cap_applied > 0:
+            parts.append(f"| {self.stop_cap_applied} stop-capped")
         
         return " ".join(parts)
     
@@ -155,11 +167,17 @@ class SignalDiagnostics:
                 rejections.append(f"Invalid prices: {self.rejected_invalid_prices}")
             if self.duplicates_filtered > 0:
                 rejections.append(f"Duplicates: {self.duplicates_filtered}")
+            if self.rejected_regime_filter > 0:
+                rejections.append(f"Regime filter: {self.rejected_regime_filter}")
             
             if rejections:
                 lines.append("Filtered out:")
                 for rej in rejections:
                     lines.append(f"  • {rej}")
+        
+        # Note stop cap applications
+        if self.stop_cap_applied > 0:
+            lines.append(f"Stop-capped: {self.stop_cap_applied} signals")
         
         return "\n".join(lines) if lines else "No diagnostic data"
 
@@ -197,11 +215,27 @@ class NQSignalGenerator:
         self._duplicate_price_threshold_pct = (
             signal_settings.get("duplicate_price_threshold_pct", 0.5) / 100.0
         )
+        
+        # Stop-cap configuration (risk control)
+        # If > 0, caps stop distance in points and scales target to preserve RR
+        self._max_stop_points = signal_settings.get("max_stop_points", 0.0)
+        
+        # Target RR ratio from risk config (for stop-cap target scaling)
+        risk_settings = service_config.get("risk", {})
+        self._take_profit_risk_reward = risk_settings.get("take_profit_risk_reward", 1.5)
+        
+        # Per-signal-type regime/session filters
+        # Format: { "signal_type": { "allowed_regimes": [...], "disallowed_regimes": [...], ... } }
+        self._regime_filters: Dict = signal_settings.get("regime_filters", {})
 
         # Per-cycle diagnostics for observability
         self.last_diagnostics: Optional[SignalDiagnostics] = None
 
-        logger.info("NQSignalGenerator initialized")
+        logger.info(
+            "NQSignalGenerator initialized (max_stop_points=%.1f, regime_filters=%d types)",
+            self._max_stop_points,
+            len(self._regime_filters),
+        )
 
     def generate(self, market_data: Dict) -> List[Dict]:
         """Generate trading signals from market data.
@@ -288,6 +322,18 @@ class NQSignalGenerator:
         # Validate and filter signals
         validated_signals = []
         for signal in raw_signals:
+            # Apply regime/session filter first (config-driven per signal type)
+            regime_check = self._check_regime_filter(signal)
+            if not regime_check["passed"]:
+                diagnostics.rejected_regime_filter += 1
+                diagnostics.regime_filter_reasons.append(regime_check.get("reason", "unknown"))
+                logger.debug(
+                    "Signal filtered by regime: type=%s, reason=%s",
+                    signal.get("type"),
+                    regime_check.get("reason"),
+                )
+                continue
+            
             # Apply order book filter if Level 2 data available
             if order_book_available:
                 order_book_imbalance = latest_bar.get("imbalance", 0.0)
@@ -323,6 +369,10 @@ class NQSignalGenerator:
                 continue
 
             validated_signal = self._format_signal(signal, market_data)
+            
+            # Track stop-cap applications
+            if validated_signal.get("_stop_cap_applied", False):
+                diagnostics.stop_cap_applied += 1
 
             # Apply order book confidence adjustment if available
             if order_book_available:
@@ -608,6 +658,83 @@ class NQSignalGenerator:
 
         return {"valid": True, "reason": None}
 
+    def _check_regime_filter(self, signal: Dict) -> Dict:
+        """Check if signal passes regime/session filter.
+        
+        Config-driven per-signal-type filtering based on market regime, volatility, and session.
+        
+        Args:
+            signal: Signal dictionary with 'type' and 'regime' keys
+            
+        Returns:
+            Dict with 'passed' (bool) and optional 'reason' (str)
+        """
+        signal_type = signal.get("type", "")
+        
+        # No filter configured for this signal type = pass
+        filter_config = self._regime_filters.get(signal_type)
+        if not filter_config:
+            return {"passed": True}
+        
+        # Extract regime context from signal
+        regime = signal.get("regime", {})
+        if not isinstance(regime, dict):
+            return {"passed": True}  # No regime context = pass
+        
+        current_regime = regime.get("regime", "unknown")
+        current_volatility = regime.get("volatility", "normal")
+        current_session = regime.get("session", "unknown")
+        
+        # Check allowed_regimes (whitelist)
+        allowed_regimes = filter_config.get("allowed_regimes", [])
+        if allowed_regimes and current_regime not in allowed_regimes:
+            return {
+                "passed": False,
+                "reason": f"{signal_type}: regime '{current_regime}' not in allowed {allowed_regimes}",
+            }
+        
+        # Check disallowed_regimes (blacklist)
+        disallowed_regimes = filter_config.get("disallowed_regimes", [])
+        if disallowed_regimes and current_regime in disallowed_regimes:
+            return {
+                "passed": False,
+                "reason": f"{signal_type}: regime '{current_regime}' is disallowed",
+            }
+        
+        # Check allowed_volatility (whitelist)
+        allowed_volatility = filter_config.get("allowed_volatility", [])
+        if allowed_volatility and current_volatility not in allowed_volatility:
+            return {
+                "passed": False,
+                "reason": f"{signal_type}: volatility '{current_volatility}' not in allowed {allowed_volatility}",
+            }
+        
+        # Check disallowed_volatility (blacklist)
+        disallowed_volatility = filter_config.get("disallowed_volatility", [])
+        if disallowed_volatility and current_volatility in disallowed_volatility:
+            return {
+                "passed": False,
+                "reason": f"{signal_type}: volatility '{current_volatility}' is disallowed",
+            }
+        
+        # Check allowed_sessions (whitelist)
+        allowed_sessions = filter_config.get("allowed_sessions", [])
+        if allowed_sessions and current_session not in allowed_sessions:
+            return {
+                "passed": False,
+                "reason": f"{signal_type}: session '{current_session}' not in allowed {allowed_sessions}",
+            }
+        
+        # Check disallowed_sessions (blacklist)
+        disallowed_sessions = filter_config.get("disallowed_sessions", [])
+        if disallowed_sessions and current_session in disallowed_sessions:
+            return {
+                "passed": False,
+                "reason": f"{signal_type}: session '{current_session}' is disallowed",
+            }
+        
+        return {"passed": True}
+
     def _format_signal(self, signal: Dict, market_data: Dict) -> Dict:
         """Format signal with additional metadata.
 
@@ -654,6 +781,45 @@ class NQSignalGenerator:
                 risk_points = abs(entry_price - stop_loss)
             else:
                 risk_points = abs(stop_loss - entry_price)
+
+            # Apply stop-cap if configured (risk control)
+            # Caps stop distance in points and scales target to preserve RR ratio
+            stop_cap_applied = False
+            if self._max_stop_points > 0 and risk_points > self._max_stop_points:
+                original_risk_points = risk_points
+                risk_points = self._max_stop_points
+                
+                # Recalculate stop loss
+                if signal["direction"] == "long":
+                    stop_loss = entry_price - risk_points
+                else:
+                    stop_loss = entry_price + risk_points
+                
+                # Scale target to preserve RR ratio
+                target_points = risk_points * self._take_profit_risk_reward
+                if signal["direction"] == "long":
+                    take_profit = entry_price + target_points
+                else:
+                    take_profit = entry_price - target_points
+                
+                # Update signal with capped values
+                formatted["stop_loss"] = stop_loss
+                formatted["take_profit"] = take_profit
+                stop_cap_applied = True
+                
+                logger.debug(
+                    "Stop-cap applied: %s | risk %.1f -> %.1f pts | stop %.2f -> %.2f | target %.2f -> %.2f",
+                    signal.get("type"),
+                    original_risk_points,
+                    risk_points,
+                    signal.get("stop_loss"),
+                    stop_loss,
+                    signal.get("take_profit"),
+                    take_profit,
+                )
+            
+            # Mark if stop-cap was applied (for diagnostics tracking)
+            formatted["_stop_cap_applied"] = stop_cap_applied
 
             # Risk = points * tick_value * contracts
             risk_amount = risk_points * tick_value * position_size
