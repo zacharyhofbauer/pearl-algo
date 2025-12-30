@@ -38,6 +38,16 @@ Comprehensive testing and verification strategy for validating system reliabilit
 
 **When to use:** When you need to validate reliability, discover edge cases, or design comprehensive test coverage. Works alongside cleanup and building prompts - test what you build and clean.
 
+### `telegram_suite.md`
+Telegram UI/UX analysis and improvement prompt for the trading bot interface. Use this when:
+- Analyzing Telegram message clarity and usability
+- Improving trader confidence and comprehension
+- Refining message formats and layouts
+- Enhancing command discoverability
+- Optimizing mobile experience
+
+**When to use:** When you need to improve the Telegram bot interface, message clarity, or user experience. Focuses on UI/UX only - backend logic changes should use project_building.md.
+
 ## Usage
 
 1. Open the relevant prompt file
