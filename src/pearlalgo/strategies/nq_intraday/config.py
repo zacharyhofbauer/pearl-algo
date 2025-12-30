@@ -227,6 +227,8 @@ class NQIntradayConfig:
                 config.volatility_threshold = float(signals_cfg["volatility_threshold"])
             if "avoid_lunch_lull" in signals_cfg:
                 config.avoid_lunch_lull = bool(signals_cfg["avoid_lunch_lull"])
+            if "min_volume" in signals_cfg:
+                config.min_volume = int(signals_cfg["min_volume"])
 
             # Load virtual PnL settings
             vpnl_cfg = config_data.get("virtual_pnl", {}) or {}

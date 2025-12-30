@@ -95,6 +95,10 @@ class NQScanner:
         
         We scale relative to 5m as the reference timeframe (the original defaults).
         
+        Note: The config.min_volume is respected directly (no hard-coded symbol floors).
+        For 24h futures trading (Tokyo/London/NY), set signals.min_volume in config.yaml
+        to a value that works across all sessions (e.g., 50-100 for 5m reference).
+        
         Returns:
             Tuple of (min_volume, volatility_threshold) scaled for this timeframe.
         """
@@ -104,13 +108,10 @@ class NQScanner:
         # Scale factor: 1m = 0.2, 5m = 1.0, 15m = 3.0
         scale = tf_minutes / ref_minutes
         
-        # Volume scales roughly linearly with bar duration
+        # Volume scales roughly linearly with bar duration.
+        # Use configured min_volume directly (no hard-coded symbol floors).
+        # Safety floor of 10 prevents 0-volume bars from passing.
         base_min_volume = self.config.min_volume
-        if self.config.symbol == "NQ":
-            base_min_volume = max(base_min_volume, 100)
-        elif self.config.symbol == "MNQ":
-            base_min_volume = max(base_min_volume, 500)
-        
         scaled_min_volume = max(10, int(base_min_volume * scale))
         
         # Volatility (ATR/price) scales with sqrt of bar duration (rough heuristic)

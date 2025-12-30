@@ -195,6 +195,11 @@ class NQAgentService:
         self._analysis_skip_count: int = 0
         self._analysis_run_count: int = 0
 
+        # Quiet reason / signal diagnostics observability (persisted to state.json)
+        # These track why the bot is quiet so `/status` and dashboards can show it.
+        self._last_quiet_reason: Optional[str] = None
+        self._last_signal_diagnostics: Optional[str] = None
+
         # Adaptive cadence configuration (fast-active profile)
         # Dynamically adjusts scan interval based on market/session state.
         self._adaptive_cadence_enabled = bool(service_settings.get("adaptive_cadence_enabled", False))
@@ -521,6 +526,10 @@ class NQAgentService:
                     # Determine quiet reason for observability
                     quiet_reason = self._get_quiet_reason(market_data, has_data=False)
                     
+                    # Persist to instance variables for _save_state() (surfaced in /status)
+                    self._last_quiet_reason = quiet_reason
+                    self._last_signal_diagnostics = None
+                    
                     logger.debug(
                         "No market data available, waiting",
                         extra={
@@ -663,6 +672,15 @@ class NQAgentService:
                         if diag is not None:
                             # Render as compact string for Telegram (e.g., "Raw: 3 → Valid: 0 | Filtered: 2 conf")
                             signal_diagnostics = diag.format_compact() if hasattr(diag, 'format_compact') else str(diag)
+                else:
+                    # Signals were generated - clear quiet state
+                    quiet_reason = "Active"
+                    signal_diagnostics = None
+                
+                # Persist to instance variables for _save_state() (surfaced in /status)
+                self._last_quiet_reason = quiet_reason
+                self._last_signal_diagnostics = signal_diagnostics
+                
                 await self._check_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
 
                 # Save state periodically
@@ -1540,6 +1558,13 @@ class NQAgentService:
                         age_seconds = (datetime.now(timezone.utc) - bar_time).total_seconds()
                         if age_seconds > self.stale_data_threshold_minutes * 60:
                             return "StaleData"
+                    
+                    # Check if Level 1 real-time data is unavailable (market open but historical fallback)
+                    # This surfaces the missing API acknowledgement issue in /status
+                    data_level = latest_bar.get("_data_level")
+                    if data_level == "historical" and futures_market_open:
+                        # Data is fresh but coming from historical fallback, not live Level 1
+                        return "Level1Unavailable"
                 
                 # No signals but data is fresh - strategy just didn't find opportunities
                 return "NoOpportunity"
@@ -1890,6 +1915,10 @@ class NQAgentService:
             # Buy/Sell pressure (volume-based proxy) for /status parity with push dashboard
             "buy_sell_pressure": None,
             "buy_sell_pressure_raw": None,
+            # Quiet reason / signal diagnostics observability (why no signals?)
+            # These are set each cycle and surfaced in /status and dashboards.
+            "quiet_reason": self._last_quiet_reason,
+            "signal_diagnostics": self._last_signal_diagnostics,
             # Operational metadata
             "run_id": run_id,
             "version": version,

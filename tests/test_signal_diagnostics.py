@@ -5,6 +5,7 @@ Validates:
 - Diagnostics track raw signals, validated signals, and rejections
 - format_compact produces useful summaries
 - Diagnostics are stored on the generator
+- Volume gate scaling works correctly for 24h trading
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ from pearlalgo.strategies.nq_intraday.signal_generator import (
     NQSignalGenerator,
     SignalDiagnostics,
 )
+from pearlalgo.strategies.nq_intraday.scanner import NQScanner
+from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 
 
 class TestSignalDiagnostics:
@@ -217,6 +220,133 @@ class TestDiagnosticsInDashboard:
         
         # "Session closed" is a simple message, should not show 🔍
         assert "🔍" not in message
+
+    def test_format_home_card_level1_unavailable_reason(self) -> None:
+        """Level1Unavailable quiet reason should show actionable message."""
+        from pearlalgo.utils.telegram_alerts import format_home_card
+        
+        message = format_home_card(
+            symbol="MNQ",
+            time_str="10:30 AM ET",
+            agent_running=True,
+            gateway_running=True,
+            futures_market_open=True,
+            strategy_session_open=True,
+            quiet_reason="Level1Unavailable",
+            signal_diagnostics=None,
+        )
+        
+        # Should show the Level1Unavailable message
+        assert "historical fallback" in message.lower() or "live quotes" in message.lower()
+        # Should show actionable cue
+        assert "API Acknowledgement" in message or "Market Data" in message
+
+
+class TestVolumeGateScaling:
+    """Tests for volume gate scaling in NQScanner.
+    
+    The volume gate should scale correctly for different timeframes
+    and should NOT have hard-coded symbol floors that block signals.
+    """
+
+    def test_mnq_1m_volume_gate_scales_correctly(self) -> None:
+        """MNQ 1m volume gate should scale to ~20 (not 100+).
+        
+        With min_volume=100 (5m reference), 1m scaling should be:
+        100 * (1/5) = 20
+        
+        This allows signals during Tokyo/London sessions where
+        volume can be 30-60 per 1m bar.
+        """
+        config = NQIntradayConfig(
+            symbol="MNQ",
+            timeframe="1m",
+            min_volume=100,  # 5m reference
+        )
+        scanner = NQScanner(config=config)
+        
+        scaled_vol, scaled_atr = scanner._get_scaled_thresholds()
+        
+        # 1m is 1/5 of 5m reference, so: 100 * 0.2 = 20
+        assert scaled_vol == 20, f"Expected 20, got {scaled_vol}"
+        
+        # Volatility should also scale (sqrt of 0.2 ≈ 0.45)
+        assert 0.0001 < scaled_atr < 0.001  # Reasonable range
+
+    def test_mnq_5m_volume_gate_equals_config(self) -> None:
+        """MNQ 5m volume gate should equal config.min_volume (no scaling)."""
+        config = NQIntradayConfig(
+            symbol="MNQ",
+            timeframe="5m",
+            min_volume=100,
+        )
+        scanner = NQScanner(config=config)
+        
+        scaled_vol, _ = scanner._get_scaled_thresholds()
+        
+        # 5m is reference, so: 100 * 1.0 = 100
+        assert scaled_vol == 100, f"Expected 100, got {scaled_vol}"
+
+    def test_mnq_15m_volume_gate_scales_up(self) -> None:
+        """MNQ 15m volume gate should scale up to 300."""
+        config = NQIntradayConfig(
+            symbol="MNQ",
+            timeframe="15m",
+            min_volume=100,
+        )
+        scanner = NQScanner(config=config)
+        
+        scaled_vol, _ = scanner._get_scaled_thresholds()
+        
+        # 15m is 3x 5m reference, so: 100 * 3.0 = 300
+        assert scaled_vol == 300, f"Expected 300, got {scaled_vol}"
+
+    def test_volume_gate_respects_safety_floor(self) -> None:
+        """Volume gate should have safety floor of 10 (not 0)."""
+        config = NQIntradayConfig(
+            symbol="MNQ",
+            timeframe="1m",
+            min_volume=10,  # Very low base
+        )
+        scanner = NQScanner(config=config)
+        
+        scaled_vol, _ = scanner._get_scaled_thresholds()
+        
+        # 10 * 0.2 = 2, but floor is 10
+        assert scaled_vol == 10, f"Expected 10 (floor), got {scaled_vol}"
+
+    def test_nq_volume_gate_no_hardcoded_floor(self) -> None:
+        """NQ volume gate should respect config (no hardcoded floor)."""
+        config = NQIntradayConfig(
+            symbol="NQ",
+            timeframe="5m",
+            min_volume=50,  # Lower than old hardcoded floor
+        )
+        scanner = NQScanner(config=config)
+        
+        scaled_vol, _ = scanner._get_scaled_thresholds()
+        
+        # Should respect config, not have hardcoded 100 floor
+        assert scaled_vol == 50, f"Expected 50, got {scaled_vol}"
+
+    def test_low_volume_config_for_overnight_trading(self) -> None:
+        """Config can be set for low-volume overnight sessions."""
+        # Tokyo session typical volume: 30-60 per 1m bar
+        # Setting min_volume=50 for 5m reference → 10 for 1m
+        config = NQIntradayConfig(
+            symbol="MNQ",
+            timeframe="1m",
+            min_volume=50,  # Lower for 24h trading
+        )
+        scanner = NQScanner(config=config)
+        
+        scaled_vol, _ = scanner._get_scaled_thresholds()
+        
+        # 50 * 0.2 = 10
+        assert scaled_vol == 10, f"Expected 10, got {scaled_vol}"
+        
+        # Verify a typical Tokyo bar (volume=45) would pass
+        assert 45 > scaled_vol, "Tokyo session bars (vol=45) should pass gate"
 
 
 

@@ -61,6 +61,13 @@ class TestStateSchemaFields:
         "connection_timeout_minutes",
     }
     
+    # Optional fields added for "why no signals?" diagnostics (v0.3.0+)
+    # These may be None but should exist in state after agent restart
+    OPTIONAL_DIAGNOSTIC_FIELDS = {
+        "quiet_reason",          # Why bot is quiet (e.g., NoOpportunity, Level1Unavailable)
+        "signal_diagnostics",    # Compact explanation of signal filtering
+    }
+    
     # All stable fields (for documentation / full validation)
     REQUIRED_STABLE_FIELDS = CORE_STABLE_FIELDS | EXTENDED_STABLE_FIELDS
     
@@ -115,6 +122,39 @@ class TestStateSchemaFields:
         
         missing = self.EXTENDED_STABLE_FIELDS - set(state.keys())
         assert not missing, f"Missing extended stable fields: {missing}"
+    
+    def test_state_has_diagnostic_fields_when_fresh(self):
+        """Verify fresh state.json includes diagnostic fields (quiet_reason, signal_diagnostics).
+        
+        These fields are added in v0.3.0+ for "why no signals?" observability.
+        They may be None but the keys should exist after agent restart.
+        """
+        state_file = project_root / "data" / "nq_agent_state" / "state.json"
+        
+        if not state_file.exists():
+            pytest.skip("state.json not present")
+        
+        with open(state_file) as f:
+            state = json.load(f)
+        
+        # Check for a marker field that only exists in v0.3.0+ schema
+        if "quiet_reason" not in state:
+            pytest.skip(
+                "state.json is from agent version < v0.3.0 (missing 'quiet_reason' field). "
+                "Restart agent to get new diagnostic fields."
+            )
+        
+        missing = self.OPTIONAL_DIAGNOSTIC_FIELDS - set(state.keys())
+        assert not missing, f"Missing diagnostic fields: {missing}"
+        
+        # Verify quiet_reason is a valid value (or None)
+        quiet_reason = state.get("quiet_reason")
+        valid_reasons = {
+            None, "Active", "NoOpportunity", "StrategySessionClosed",
+            "FuturesMarketClosed", "StaleData", "DataGap", "NoData",
+            "Level1Unavailable", "Unknown",
+        }
+        assert quiet_reason in valid_reasons, f"Invalid quiet_reason: {quiet_reason}"
     
     def test_config_has_required_fields(self):
         """Verify config section has required fields."""

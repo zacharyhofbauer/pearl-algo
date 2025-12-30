@@ -63,7 +63,11 @@ def set_bot_commands():
         BotCommand('health', 'Check agent health status'),
         BotCommand('help', 'Show available commands'),
         # AI/LLM (requires [llm] extra)
+        BotCommand('ai', 'Open Claude AI hub'),
         BotCommand('ai_patch', 'Generate code patch via Claude'),
+        BotCommand('ai_on', 'Enable Claude chat mode'),
+        BotCommand('ai_off', 'Disable Claude chat mode'),
+        BotCommand('ai_reset', 'Reset Claude chat history'),
     ]
     
     try:

@@ -92,6 +92,12 @@ signals:
   volatility_threshold: 0.0005       # Reduced from 0.001 - was blocking 543 signals
   avoid_lunch_lull: false            # Disabled - was blocking 72 signals
   
+  # Volume gate (minimum volume per bar to consider for signals)
+  # Referenced to 5m bars, scales for other timeframes (1m = 0.2x, 15m = 3x).
+  # Set lower for 24h futures trading (Tokyo/London have lower volume than NY).
+  # 100 for 5m → 20 for 1m bars, which passes most live bars (observed: 300-700).
+  min_volume: 100
+  
   # Stop-distance cap (risk control)
   # Caps maximum stop distance in points; scales target to preserve RR ratio.
   # 25 pts = $250 risk @ 5 MNQ contracts, $500 @ 10 contracts

@@ -52,12 +52,42 @@ Example output format:
 --- a/path/to/file.py
 +++ b/path/to/file.py
 @@ -10,6 +10,7 @@ def existing_function():
-     existing_line1
-     existing_line2
+    existing_line1
+    existing_line2
 +    new_line_added
-     existing_line3
+    existing_line3
 
 If multiple files need changes, include all of them in the same diff output."""
+
+
+CHAT_SYSTEM_PROMPT = """You are Claude, an AI assistant integrated into a Telegram bot for a trading system development project (PearlAlgo MNQ Trading Agent).
+
+You're acting as a mobile Cursor-style assistant. The user is likely on their phone and wants quick, helpful responses.
+
+CONTEXT:
+- This is a Python trading system with IBKR integration, Telegram notifications, and signal generation.
+- Key directories: src/pearlalgo/ (source), tests/, scripts/, docs/, config/
+- The codebase follows strict module boundaries (utils -> config -> data_providers -> strategies -> nq_agent).
+
+GUIDELINES:
+1. Be concise - the user is on mobile.
+2. When discussing code, mention file paths so the user knows where to look.
+3. For code changes, suggest using the Patch wizard (available in the Claude menu).
+4. You can help with: debugging, explaining code, architecture questions, planning changes, reviewing approaches.
+5. Don't generate long code blocks - suggest patches instead for actual changes.
+6. If you need to see specific files, ask the user to use the Patch wizard which can show file contents.
+
+Be helpful, direct, and practical."""
+
+
+FILE_SUGGEST_SYSTEM_PROMPT = """You are a file suggestion assistant. Given a task description and a list of available files in a codebase, identify which files are most likely relevant to the task.
+
+Return a JSON array of file paths, ordered by relevance (most relevant first). Include at most 8 files.
+
+Example output:
+["src/pearlalgo/utils/retry.py", "src/pearlalgo/nq_agent/main.py"]
+
+ONLY output the JSON array, nothing else. No explanations, no markdown."""
 
 
 class ClaudeClientError(Exception):
@@ -228,6 +258,126 @@ class ClaudeClient:
     def is_available(self) -> bool:
         """Check if the client is ready to make API calls."""
         return ANTHROPIC_AVAILABLE and bool(self._api_key)
+    
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """
+        Send a chat message to Claude and get a response.
+        
+        Args:
+            messages: List of message dicts with 'role' and 'content' keys.
+                      Roles should be 'user' or 'assistant'.
+            system_prompt: Optional system prompt (defaults to CHAT_SYSTEM_PROMPT)
+        
+        Returns:
+            Claude's response text
+        
+        Raises:
+            ClaudeAPIError: If the API request fails
+        """
+        system = system_prompt or CHAT_SYSTEM_PROMPT
+        
+        logger.info(
+            "Sending chat to Claude",
+            extra={"message_count": len(messages)}
+        )
+        
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=self._max_tokens,
+                system=system,
+                messages=messages,
+            )
+            
+            if response.content and len(response.content) > 0:
+                result = response.content[0].text
+                logger.info(
+                    "Received chat response from Claude",
+                    extra={"response_length": len(result), "stop_reason": response.stop_reason}
+                )
+                return result
+            else:
+                raise ClaudeAPIError("Empty response from Claude API")
+                
+        except anthropic.APIConnectionError as e:
+            logger.error(f"Claude API connection error: {e}")
+            raise ClaudeAPIError(f"Connection error: {e}") from e
+        except anthropic.RateLimitError as e:
+            logger.error(f"Claude API rate limit: {e}")
+            raise ClaudeAPIError(f"Rate limit exceeded: {e}") from e
+        except anthropic.APIStatusError as e:
+            logger.error(f"Claude API status error: {e}")
+            raise ClaudeAPIError(f"API error ({e.status_code}): {e.message}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error calling Claude: {e}")
+            raise ClaudeAPIError(f"Unexpected error: {e}") from e
+    
+    def suggest_files(
+        self,
+        task: str,
+        available_files: list[str],
+    ) -> list[str]:
+        """
+        Ask Claude to suggest relevant files for a task.
+        
+        Args:
+            task: Description of the change/task
+            available_files: List of available file paths
+        
+        Returns:
+            List of suggested file paths (ordered by relevance)
+        
+        Raises:
+            ClaudeAPIError: If the API request fails
+        """
+        import json
+        
+        # Limit file list to avoid token overflow
+        files_preview = available_files[:500]
+        
+        user_message = f"""TASK: {task}
+
+AVAILABLE FILES:
+{chr(10).join(files_preview)}
+
+Which files are most relevant to this task? Return a JSON array of file paths."""
+        
+        logger.info(
+            "Requesting file suggestions from Claude",
+            extra={"task_preview": task[:100], "file_count": len(files_preview)}
+        )
+        
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=1024,
+                system=FILE_SUGGEST_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_message}],
+            )
+            
+            if response.content and len(response.content) > 0:
+                result = response.content[0].text.strip()
+                # Parse JSON array
+                try:
+                    suggested = json.loads(result)
+                    if isinstance(suggested, list):
+                        # Filter to only include files that actually exist in our list
+                        valid = [f for f in suggested if f in available_files]
+                        logger.info(f"Claude suggested {len(valid)} files")
+                        return valid[:8]
+                except json.JSONDecodeError:
+                    logger.warning(f"Could not parse Claude file suggestions: {result[:200]}")
+                    return []
+            
+            return []
+                
+        except Exception as e:
+            logger.error(f"Error getting file suggestions: {e}")
+            return []
 
 
 def get_claude_client() -> Optional[ClaudeClient]:

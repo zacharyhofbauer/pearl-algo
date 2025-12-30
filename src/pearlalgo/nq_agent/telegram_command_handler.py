@@ -73,7 +73,7 @@ except ImportError:
     ChartGenerator = None
     ChartConfig = None
 
-# Claude client for /ai_patch command (optional [llm] extra)
+# Claude client for /ai_patch command and Claude hub (optional [llm] extra)
 try:
     from pearlalgo.utils.claude_client import (
         ClaudeClient,
@@ -82,6 +82,7 @@ try:
         ClaudeAPIKeyMissingError,
         ClaudeAPIError,
         ANTHROPIC_AVAILABLE,
+        get_claude_client,
     )
 except ImportError:
     ANTHROPIC_AVAILABLE = False
@@ -90,6 +91,7 @@ except ImportError:
     ClaudeNotAvailableError = Exception  # type: ignore
     ClaudeAPIKeyMissingError = Exception  # type: ignore
     ClaudeAPIError = Exception  # type: ignore
+    get_claude_client = lambda: None  # type: ignore
 
 
 class TelegramCommandHandler:
@@ -204,6 +206,17 @@ class TelegramCommandHandler:
         
         # AI/LLM commands (optional, requires [llm] extra)
         self.application.add_handler(CommandHandler("ai_patch", self._handle_ai_patch))
+        self.application.add_handler(CommandHandler("ai", self._handle_ai_hub))
+        self.application.add_handler(CommandHandler("ai_on", self._handle_ai_on))
+        self.application.add_handler(CommandHandler("ai_off", self._handle_ai_off))
+        self.application.add_handler(CommandHandler("ai_reset", self._handle_ai_reset))
+        
+        # Claude message handler (for chat mode and wizard text input)
+        # Must be added AFTER command handlers, lower priority group
+        self.application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_claude_message),
+            group=1  # Lower priority than logging handler
+        )
         
         # Callback query handler (for inline buttons)
         self.application.add_handler(CallbackQueryHandler(self._handle_callback))
@@ -4739,6 +4752,759 @@ class TelegramCommandHandler:
                 reply_markup=self._get_back_to_menu_button(),
             )
 
+    # -------------------------------------------------------------------------
+    # Claude Hub (mobile Cursor-like AI assistant)
+    # -------------------------------------------------------------------------
+    
+    def _get_claude_hub_buttons(self, chat_mode_enabled: bool = False) -> InlineKeyboardMarkup:
+        """Generate Claude hub inline keyboard buttons."""
+        chat_toggle_text = "💬 Chat: ON ✓" if chat_mode_enabled else "💬 Chat: OFF"
+        keyboard = [
+            [InlineKeyboardButton(chat_toggle_text, callback_data='claude_chat_toggle')],
+            [InlineKeyboardButton("🧩 Patch Wizard", callback_data='claude_patch_wizard')],
+            [InlineKeyboardButton("🧼 Reset Chat", callback_data='claude_reset')],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
+        ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    def _get_claude_wizard_files_buttons(
+        self,
+        suggested_files: list[str],
+        selected_files: set[str],
+    ) -> InlineKeyboardMarkup:
+        """Generate file selection buttons for patch wizard."""
+        keyboard = []
+        
+        # File toggle buttons (max 6 visible at once)
+        for filepath in suggested_files[:6]:
+            # Shorten path for display
+            display_path = filepath
+            if len(display_path) > 35:
+                display_path = "..." + filepath[-32:]
+            
+            is_selected = filepath in selected_files
+            prefix = "✓ " if is_selected else "○ "
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{prefix}{display_path}",
+                    callback_data=f'claude_file_toggle:{filepath}'
+                ),
+                InlineKeyboardButton("👁", callback_data=f'claude_file_preview:{filepath}'),
+            ])
+        
+        # Action buttons
+        action_row = []
+        if selected_files:
+            action_row.append(InlineKeyboardButton("✅ Generate Patch", callback_data='claude_generate_patch'))
+        action_row.append(InlineKeyboardButton("🔍 Refine", callback_data='claude_refine_search'))
+        keyboard.append(action_row)
+        
+        # Cancel button
+        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data='claude_cancel')])
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    def _discover_project_files(self) -> list[str]:
+        """
+        Discover all editable files in the project (for search/suggestion).
+        
+        Returns paths relative to project root.
+        Excludes blocked directories and file types.
+        """
+        project_root = Path(__file__).parent.parent.parent.parent
+        
+        allowed_roots = ["src", "tests", "scripts", "docs", "config"]
+        blocked_dirs = {".git", ".venv", "__pycache__", "node_modules", "ibkr", "data", "logs", "telemetry"}
+        blocked_suffixes = {".pyc", ".pyo", ".parquet", ".pkl", ".db", ".sqlite"}
+        
+        files = []
+        
+        for root_dir in allowed_roots:
+            root_path = project_root / root_dir
+            if not root_path.exists():
+                continue
+            
+            for filepath in root_path.rglob("*"):
+                if not filepath.is_file():
+                    continue
+                
+                # Check for blocked directories in path
+                path_parts = set(filepath.relative_to(project_root).parts)
+                if path_parts & blocked_dirs:
+                    continue
+                
+                # Check for blocked suffixes
+                if filepath.suffix.lower() in blocked_suffixes:
+                    continue
+                
+                # Check file size (skip very large files)
+                try:
+                    if filepath.stat().st_size > 100 * 1024:  # 100KB
+                        continue
+                except Exception:
+                    continue
+                
+                rel_path = str(filepath.relative_to(project_root))
+                files.append(rel_path)
+        
+        return sorted(files)
+    
+    def _search_files(self, query: str, all_files: list[str], limit: int = 8) -> list[str]:
+        """
+        Search files by query (filename and path matching).
+        
+        Returns most relevant files first.
+        """
+        if not query:
+            return all_files[:limit]
+        
+        query_lower = query.lower()
+        query_words = query_lower.split()
+        
+        scored_files = []
+        for filepath in all_files:
+            path_lower = filepath.lower()
+            filename_lower = Path(filepath).name.lower()
+            
+            # Score based on matches
+            score = 0
+            
+            # Exact filename match (highest)
+            if filename_lower == query_lower:
+                score += 100
+            
+            # Filename contains query
+            if query_lower in filename_lower:
+                score += 50
+            
+            # Path contains query
+            if query_lower in path_lower:
+                score += 20
+            
+            # Word matches
+            for word in query_words:
+                if word in filename_lower:
+                    score += 10
+                if word in path_lower:
+                    score += 5
+            
+            if score > 0:
+                scored_files.append((score, filepath))
+        
+        # Sort by score descending, then alphabetically
+        scored_files.sort(key=lambda x: (-x[0], x[1]))
+        
+        return [f for _, f in scored_files[:limit]]
+    
+    async def _handle_ai_hub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /ai command and Claude hub screen."""
+        logger.info(f"Received Claude hub request from chat {update.effective_chat.id}")
+        
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        if not ANTHROPIC_AVAILABLE:
+            await self._send_message_or_edit(
+                update, context,
+                "❌ *Claude Not Available*\n\n"
+                "Install with: `pip install -e .[llm]`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        # Check if chat mode is enabled (from persistent prefs)
+        chat_mode = self.prefs.get("ai_chat_mode", False) if self.prefs else False
+        
+        # Get chat history length for display
+        chat_history = context.user_data.get("claude_chat_history", []) if hasattr(context, "user_data") else []
+        history_info = f"\n📝 Chat history: {len(chat_history)} messages" if chat_history else ""
+        
+        status = "🟢 Chat mode ON - send any message" if chat_mode else "⚪ Chat mode OFF"
+        
+        message = (
+            "🤖 *Claude AI Hub*\n\n"
+            f"{status}\n"
+            f"{history_info}\n\n"
+            "*Features:*\n"
+            "• *Chat mode* - Talk to Claude like Cursor\n"
+            "• *Patch wizard* - Describe a change, get a diff\n\n"
+            "💡 When chat is ON, just send a message to talk to Claude."
+        )
+        
+        await self._send_message_or_edit(
+            update, context,
+            message,
+            reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=chat_mode),
+        )
+    
+    async def _handle_ai_on(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /ai_on command - enable chat mode."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        # Set in persistent prefs
+        if self.prefs:
+            self.prefs.set("ai_chat_mode", True)
+        
+        await self._send_message_or_edit(
+            update, context,
+            "🟢 *Claude Chat Mode: ON*\n\n"
+            "Send any message to chat with Claude.\n"
+            "Use `/ai_off` to disable.",
+            reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=True),
+        )
+    
+    async def _handle_ai_off(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /ai_off command - disable chat mode."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        # Set in persistent prefs
+        if self.prefs:
+            self.prefs.set("ai_chat_mode", False)
+        
+        await self._send_message_or_edit(
+            update, context,
+            "⚪ *Claude Chat Mode: OFF*\n\n"
+            "Regular messages will no longer go to Claude.\n"
+            "Use `/ai_on` or tap Claude in the menu to enable.",
+            reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=False),
+        )
+    
+    async def _handle_ai_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /ai_reset command - reset chat history."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        if hasattr(context, "user_data"):
+            context.user_data["claude_chat_history"] = []
+            context.user_data.pop("claude_wizard_state", None)
+            context.user_data.pop("claude_wizard_task", None)
+            context.user_data.pop("claude_wizard_files", None)
+        
+        chat_mode = self.prefs.get("ai_chat_mode", False) if self.prefs else False
+        
+        await self._send_message_or_edit(
+            update, context,
+            "🧼 *Chat Reset*\n\n"
+            "Chat history cleared. Starting fresh.",
+            reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=chat_mode),
+        )
+    
+    async def _handle_claude_chat_toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Toggle Claude chat mode on/off (persistent setting)."""
+        if self.prefs:
+            self.prefs.toggle("ai_chat_mode")
+        
+        # Re-render the hub
+        await self._handle_ai_hub(update, context)
+    
+    async def _handle_claude_patch_wizard_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start the patch wizard - ask for task description."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        # Set wizard state
+        if hasattr(context, "user_data"):
+            context.user_data["claude_wizard_state"] = "awaiting_task"
+            context.user_data["claude_wizard_task"] = None
+            context.user_data["claude_wizard_files"] = set()
+            context.user_data["claude_wizard_suggested"] = []
+        
+        await self._send_message_or_edit(
+            update, context,
+            "🧩 *Patch Wizard*\n\n"
+            "*Step 1:* Describe what you want to change.\n\n"
+            "Just type your task in plain English, e.g.:\n"
+            "• _add exponential backoff to retry logic_\n"
+            "• _fix the rate limit handling in API client_\n"
+            "• _add a docstring to the calculate_pnl function_\n\n"
+            "I'll suggest relevant files for you to pick from.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Cancel", callback_data='claude_cancel')],
+            ]),
+        )
+    
+    async def _handle_claude_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle plain text messages for Claude chat mode and wizard.
+        
+        Routes messages based on current state:
+        - If in wizard "awaiting_task" state -> process as wizard task
+        - If in wizard "refine_search" state -> search for files
+        - If chat mode enabled -> send to Claude
+        - Otherwise -> ignore (let other handlers process)
+        """
+        if not update.message or not update.message.text:
+            return
+        
+        if not await self._check_authorized(update):
+            return
+        
+        text = update.message.text.strip()
+        if not text:
+            return
+        
+        # Check wizard state first (session-based)
+        wizard_state = context.user_data.get("claude_wizard_state") if hasattr(context, "user_data") else None
+        
+        if wizard_state == "awaiting_task":
+            await self._process_wizard_task(update, context, text)
+            return
+        
+        if wizard_state == "refine_search":
+            await self._process_wizard_search(update, context, text)
+            return
+        
+        # Check chat mode (persistent preference)
+        chat_mode = self.prefs.get("ai_chat_mode", False) if self.prefs else False
+        
+        if chat_mode:
+            await self._process_claude_chat(update, context, text)
+            return
+        
+        # Not in chat mode and not in wizard - ignore message
+        # (Let other handlers or default behavior handle it)
+    
+    async def _process_wizard_task(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task: str):
+        """Process wizard task description and suggest files."""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        # Store task
+        if hasattr(context, "user_data"):
+            context.user_data["claude_wizard_task"] = task
+            context.user_data["claude_wizard_state"] = "selecting_files"
+            context.user_data["claude_wizard_files"] = set()
+        
+        # Discover project files
+        all_files = self._discover_project_files()
+        
+        # Try to get suggestions from Claude
+        suggested_files = []
+        try:
+            client = get_claude_client()
+            if client:
+                import asyncio
+                # Run in thread to avoid blocking
+                suggested_files = await asyncio.to_thread(
+                    client.suggest_files, task, all_files
+                )
+        except Exception as e:
+            logger.warning(f"Could not get Claude file suggestions: {e}")
+        
+        # Fallback to local search if Claude didn't suggest
+        if not suggested_files:
+            suggested_files = self._search_files(task, all_files)
+        
+        # Store suggestions
+        if hasattr(context, "user_data"):
+            context.user_data["claude_wizard_suggested"] = suggested_files
+        
+        if not suggested_files:
+            await self._send_message_or_edit(
+                update, context,
+                "🧩 *Patch Wizard*\n\n"
+                f"*Task:* {task[:100]}{'...' if len(task) > 100 else ''}\n\n"
+                "⚠️ No matching files found.\n\n"
+                "Try using 🔍 Refine to search for specific files.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔍 Search Files", callback_data='claude_refine_search')],
+                    [InlineKeyboardButton("❌ Cancel", callback_data='claude_cancel')],
+                ]),
+            )
+            return
+        
+        await self._send_message_or_edit(
+            update, context,
+            "🧩 *Patch Wizard*\n\n"
+            f"*Task:* {task[:100]}{'...' if len(task) > 100 else ''}\n\n"
+            "*Step 2:* Select files to modify\n"
+            "Tap to toggle selection, 👁 to preview.\n"
+            "Then tap ✅ Generate Patch.",
+            reply_markup=self._get_claude_wizard_files_buttons(suggested_files, set()),
+        )
+    
+    async def _process_wizard_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
+        """Process file search query in wizard."""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        # Search files
+        all_files = self._discover_project_files()
+        matching_files = self._search_files(query, all_files)
+        
+        # Merge with existing suggestions (keep selected ones)
+        existing_suggested = context.user_data.get("claude_wizard_suggested", []) if hasattr(context, "user_data") else []
+        selected_files = context.user_data.get("claude_wizard_files", set()) if hasattr(context, "user_data") else set()
+        
+        # Combine: matching files first, then previously suggested (deduplicated)
+        combined = []
+        seen = set()
+        for f in matching_files + existing_suggested:
+            if f not in seen:
+                combined.append(f)
+                seen.add(f)
+        
+        # Update suggestions
+        if hasattr(context, "user_data"):
+            context.user_data["claude_wizard_suggested"] = combined[:8]
+            context.user_data["claude_wizard_state"] = "selecting_files"
+        
+        task = context.user_data.get("claude_wizard_task", "") if hasattr(context, "user_data") else ""
+        
+        await self._send_message_or_edit(
+            update, context,
+            "🧩 *Patch Wizard*\n\n"
+            f"*Task:* {task[:80]}{'...' if len(task) > 80 else ''}\n"
+            f"*Search:* `{query}`\n\n"
+            f"Found {len(matching_files)} matching files.\n"
+            "Tap to select, 👁 to preview.",
+            reply_markup=self._get_claude_wizard_files_buttons(combined[:8], selected_files),
+        )
+    
+    async def _process_claude_chat(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        """Process a chat message and get Claude's response."""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        # Get chat history
+        chat_history = context.user_data.get("claude_chat_history", []) if hasattr(context, "user_data") else []
+        
+        # Add user message to history
+        chat_history.append({"role": "user", "content": text})
+        
+        # Keep history bounded (last 20 messages)
+        if len(chat_history) > 20:
+            chat_history = chat_history[-20:]
+        
+        try:
+            client = get_claude_client()
+            if not client:
+                await update.message.reply_text(
+                    "❌ Claude not available. Check API key.",
+                    reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=True),
+                )
+                return
+            
+            import asyncio
+            # Run in thread to avoid blocking
+            response = await asyncio.to_thread(client.chat, chat_history)
+            
+            # Add assistant response to history
+            chat_history.append({"role": "assistant", "content": response})
+            
+            # Save history
+            if hasattr(context, "user_data"):
+                context.user_data["claude_chat_history"] = chat_history
+            
+            # Send response (handle long responses)
+            if len(response) > 4000:
+                # Send as file
+                import io
+                response_file = io.BytesIO(response.encode("utf-8"))
+                response_file.name = "response.txt"
+                
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=response_file,
+                    filename="claude_response.txt",
+                    caption="📝 Response was too long, sent as file.",
+                )
+            else:
+                await update.message.reply_text(response)
+                
+        except ClaudeAPIKeyMissingError:
+            await update.message.reply_text(
+                "❌ `ANTHROPIC_API_KEY` not set in `.env`.",
+                parse_mode="Markdown",
+            )
+        except ClaudeAPIError as e:
+            await update.message.reply_text(f"❌ Claude error: {str(e)[:200]}")
+        except Exception as e:
+            logger.error(f"Error in Claude chat: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:200]}")
+    
+    async def _handle_claude_file_toggle(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        filepath: str,
+    ):
+        """Toggle file selection in patch wizard."""
+        selected_files = context.user_data.get("claude_wizard_files", set()) if hasattr(context, "user_data") else set()
+        
+        if filepath in selected_files:
+            selected_files.discard(filepath)
+        else:
+            selected_files.add(filepath)
+        
+        if hasattr(context, "user_data"):
+            context.user_data["claude_wizard_files"] = selected_files
+        
+        # Re-render file selection
+        suggested = context.user_data.get("claude_wizard_suggested", []) if hasattr(context, "user_data") else []
+        task = context.user_data.get("claude_wizard_task", "") if hasattr(context, "user_data") else ""
+        
+        selected_display = ", ".join(Path(f).name for f in selected_files) if selected_files else "none"
+        
+        await self._send_message_or_edit(
+            update, context,
+            "🧩 *Patch Wizard*\n\n"
+            f"*Task:* {task[:80]}{'...' if len(task) > 80 else ''}\n"
+            f"*Selected:* {selected_display}\n\n"
+            "Tap to toggle, 👁 to preview.",
+            reply_markup=self._get_claude_wizard_files_buttons(suggested, selected_files),
+        )
+    
+    async def _handle_claude_file_preview(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        filepath: str,
+    ):
+        """Preview a file's content (first ~50 lines)."""
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        project_root = Path(__file__).parent.parent.parent.parent
+        full_path = project_root / filepath
+        
+        # Security check
+        try:
+            resolved = full_path.resolve()
+            if not str(resolved).startswith(str(project_root.resolve())):
+                await self._send_message_or_edit(
+                    update, context,
+                    f"❌ Invalid path: `{filepath}`",
+                    reply_markup=self._get_back_to_menu_button(),
+                )
+                return
+        except Exception:
+            pass
+        
+        if not full_path.exists() or not full_path.is_file():
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ File not found: `{filepath}`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        try:
+            content = full_path.read_text(encoding="utf-8", errors="replace")
+            lines = content.split("\n")
+            
+            # Show first 50 lines max
+            preview_lines = lines[:50]
+            preview = "\n".join(preview_lines)
+            
+            # Truncate if too long for message
+            if len(preview) > 3000:
+                preview = preview[:3000] + "\n... (truncated)"
+            
+            truncated = len(lines) > 50
+            
+            await self._send_message_or_edit(
+                update, context,
+                f"👁 *Preview:* `{filepath}`\n"
+                f"({len(lines)} lines{', showing first 50' if truncated else ''})\n\n"
+                f"```\n{preview}\n```",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Back to Files", callback_data='claude_patch_wizard')],
+                    [InlineKeyboardButton("❌ Cancel Wizard", callback_data='claude_cancel')],
+                ]),
+            )
+        except Exception as e:
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ Could not read file: `{str(e)[:100]}`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+    
+    async def _handle_claude_generate_patch(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Generate patch from wizard selections."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        task = context.user_data.get("claude_wizard_task", "") if hasattr(context, "user_data") else ""
+        selected_files = context.user_data.get("claude_wizard_files", set()) if hasattr(context, "user_data") else set()
+        
+        if not task:
+            await self._send_message_or_edit(
+                update, context,
+                "❌ No task specified. Start the wizard again.",
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+            return
+        
+        if not selected_files:
+            await self._send_message_or_edit(
+                update, context,
+                "❌ No files selected. Please select at least one file.",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        # Clear wizard state
+        if hasattr(context, "user_data"):
+            context.user_data.pop("claude_wizard_state", None)
+        
+        # Show working message
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await self._send_message_or_edit(
+            update, context,
+            "🤖 *Generating patch...*\n\n"
+            f"*Files:* `{', '.join(Path(f).name for f in selected_files)}`\n"
+            f"*Task:* {task[:100]}{'...' if len(task) > 100 else ''}\n\n"
+            "This may take 30-60 seconds.",
+            reply_markup=None,
+        )
+        
+        # Read file contents
+        project_root = Path(__file__).parent.parent.parent.parent
+        files_content: Dict[str, str] = {}
+        errors = []
+        
+        for filepath in selected_files:
+            full_path = project_root / filepath
+            try:
+                resolved = full_path.resolve()
+                if not str(resolved).startswith(str(project_root.resolve())):
+                    errors.append(f"{filepath} (outside project)")
+                    continue
+                    
+                if not full_path.exists():
+                    errors.append(f"{filepath} (not found)")
+                    continue
+                
+                content = full_path.read_text(encoding="utf-8", errors="replace")
+                files_content[filepath] = content
+            except Exception as e:
+                errors.append(f"{filepath} ({str(e)[:30]})")
+        
+        if not files_content:
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ Could not read any files:\n`{', '.join(errors)}`",
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+            return
+        
+        # Generate patch
+        try:
+            import asyncio
+            client = ClaudeClient()
+            diff_output = await asyncio.to_thread(
+                client.generate_patch,
+                files=files_content,
+                task=task,
+            )
+            
+        except ClaudeAPIKeyMissingError:
+            await self._send_message_or_edit(
+                update, context,
+                "❌ *API Key Not Configured*\n\n"
+                "`ANTHROPIC_API_KEY` not set in `.env`.",
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+            return
+        except ClaudeAPIError as e:
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ *Claude API Error*\n\n`{str(e)[:200]}`",
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+            return
+        except Exception as e:
+            logger.error(f"Error generating patch: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ *Error*\n\n`{str(e)[:200]}`",
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+            return
+        
+        # Check if we got a valid diff
+        if not diff_output or not diff_output.strip():
+            await self._send_message_or_edit(
+                update, context,
+                "⚠️ *Empty Response*\n\n"
+                "Claude returned an empty response. Try rephrasing the task.",
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+            return
+        
+        # Deliver patch
+        INLINE_LIMIT = 3500
+        file_names = ", ".join(Path(f).name for f in selected_files)
+        
+        if len(diff_output) <= INLINE_LIMIT:
+            safe_diff = diff_output.replace("`", "'")
+            message = (
+                f"✅ *Patch Generated*\n\n"
+                f"*Files:* `{file_names}`\n"
+                f"*Task:* {task[:80]}{'...' if len(task) > 80 else ''}\n\n"
+                f"```diff\n{safe_diff}\n```\n\n"
+                f"💡 Apply with: `git apply patch.diff`"
+            )
+            await self._send_message_or_edit(
+                update, context,
+                message,
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+        else:
+            import io
+            diff_bytes = diff_output.encode("utf-8")
+            diff_file = io.BytesIO(diff_bytes)
+            diff_file.name = "patch.diff"
+            
+            await context.bot.send_chat_action(
+                chat_id=update.effective_chat.id,
+                action="upload_document"
+            )
+            
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=diff_file,
+                filename="patch.diff",
+                caption=(
+                    f"✅ *Patch Generated*\n\n"
+                    f"*Files:* `{file_names}`\n"
+                    f"*Task:* {task[:80]}{'...' if len(task) > 80 else ''}\n\n"
+                    f"💡 Apply with: `git apply patch.diff`"
+                ),
+                parse_mode="Markdown",
+            )
+            
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="📄 Patch file sent above.",
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+    
+    async def _handle_claude_refine_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Prompt user to refine file search."""
+        if hasattr(context, "user_data"):
+            context.user_data["claude_wizard_state"] = "refine_search"
+        
+        task = context.user_data.get("claude_wizard_task", "") if hasattr(context, "user_data") else ""
+        
+        await self._send_message_or_edit(
+            update, context,
+            "🔍 *Search Files*\n\n"
+            f"*Task:* {task[:80]}{'...' if len(task) > 80 else ''}\n\n"
+            "Type a search term (filename or keyword):\n"
+            "• `retry` - find files with 'retry' in name\n"
+            "• `telegram` - find telegram-related files\n"
+            "• `handler` - find handler files",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Cancel", callback_data='claude_cancel')],
+            ]),
+        )
+
     async def _handle_signal_detail(
         self,
         update: Update,
@@ -5262,6 +6028,12 @@ class TelegramCommandHandler:
             InlineKeyboardButton("❓ Help", callback_data='help'),
             InlineKeyboardButton("⚙️ Settings", callback_data='settings'),
         ])
+        
+        # Row 7: Claude AI (if available)
+        if ANTHROPIC_AVAILABLE:
+            keyboard.append([
+                InlineKeyboardButton("🤖 Claude", callback_data='claude_hub'),
+            ])
         
         return InlineKeyboardMarkup(keyboard)
     
@@ -5806,6 +6578,34 @@ class TelegramCommandHandler:
                 f"⚠️ {callback_data.title()} requires service integration.\n"
                 "Use /stop_agent and /start_agent for full control."
             )
+        # Claude hub callbacks
+        elif callback_data == 'claude_hub':
+            await self._handle_ai_hub(update, context)
+        elif callback_data == 'claude_chat_toggle':
+            await self._handle_claude_chat_toggle(update, context)
+        elif callback_data == 'claude_patch_wizard':
+            await self._handle_claude_patch_wizard_start(update, context)
+        elif callback_data == 'claude_reset':
+            await self._handle_ai_reset(update, context)
+        elif callback_data == 'claude_cancel':
+            # Cancel any wizard state and return to hub
+            if hasattr(context, "user_data"):
+                context.user_data.pop("claude_wizard_state", None)
+                context.user_data.pop("claude_wizard_task", None)
+                context.user_data.pop("claude_wizard_files", None)
+            await self._handle_ai_hub(update, context)
+        elif callback_data.startswith('claude_file_toggle:'):
+            # Toggle file selection in patch wizard
+            filepath = callback_data.replace('claude_file_toggle:', '')
+            await self._handle_claude_file_toggle(update, context, filepath)
+        elif callback_data.startswith('claude_file_preview:'):
+            # Preview a file in patch wizard
+            filepath = callback_data.replace('claude_file_preview:', '')
+            await self._handle_claude_file_preview(update, context, filepath)
+        elif callback_data == 'claude_generate_patch':
+            await self._handle_claude_generate_patch(update, context)
+        elif callback_data == 'claude_refine_search':
+            await self._handle_claude_refine_search(update, context)
         else:
             await query.edit_message_text(f"❌ Unknown action: {callback_data}")
     

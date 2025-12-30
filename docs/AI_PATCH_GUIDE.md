@@ -1,17 +1,22 @@
 # AI Patch Guide
 
-> **Generate code patches from Telegram using Claude AI.**
-> Fix bugs, add features, and refactor code—all from your phone.
+> **Claude AI integration for Telegram — your mobile Cursor.**
+> Chat, get patches, fix bugs, and refactor code—all from your phone.
 
 ---
 
 ## Overview
 
-The `/ai_patch` command lets you request code changes via Telegram. Claude analyzes your files, understands the task, and returns a unified diff patch that you can apply with `git apply`.
+PearlAlgo integrates Claude AI directly into Telegram, giving you a **mobile Cursor-like experience**:
+
+- **Claude Hub** (`/ai` or tap `🤖 Claude`) - Your AI command center
+- **Chat Mode** - Have conversations with Claude about your code
+- **Patch Wizard** - Describe what you want changed, pick files visually, get a diff
 
 **Why this exists:**
 - Fix issues while away from your desk
 - Quick iterations without opening an IDE
+- No need to memorize file paths — just describe what you want
 - Mobile-friendly development workflow
 - Secure: changes are reviewed before applying
 
@@ -58,7 +63,100 @@ python3 scripts/telegram/set_bot_commands.py
 
 ---
 
-## Usage
+## Claude Hub
+
+The Claude Hub is your AI command center in Telegram.
+
+### Accessing the Hub
+
+- **From Main Menu:** Tap `🤖 Claude`
+- **Command:** `/ai`
+
+### Hub Features
+
+| Button | Description |
+|--------|-------------|
+| 💬 Chat: ON/OFF | Toggle chat mode |
+| 🧩 Patch Wizard | Start task-first patch flow |
+| 🧼 Reset Chat | Clear conversation history |
+
+---
+
+## Chat Mode
+
+Chat mode turns Telegram into a **mobile Cursor side panel**. When enabled, any plain text message you send goes directly to Claude.
+
+### Enable/Disable
+
+- **Via Hub:** Tap `💬 Chat: ON/OFF`
+- **Commands:**
+  - `/ai_on` - Enable chat mode
+  - `/ai_off` - Disable chat mode
+  - `/ai_reset` - Clear chat history
+
+### What You Can Ask
+
+- **Explain code:** "What does the retry logic in telegram_alerts.py do?"
+- **Debug help:** "Why might I be getting a ConnectionResetError in the data provider?"
+- **Architecture:** "How does the signal flow from strategy to Telegram notification?"
+- **Planning:** "What's the best way to add rate limiting to the API client?"
+
+### Tips for Mobile Chat
+
+- Keep questions focused — Claude responds concisely
+- For code changes, use the Patch Wizard instead of asking for code blocks
+- Chat history persists across messages but resets on `/ai_reset` or handler restart
+
+---
+
+## Patch Wizard (Task-First)
+
+The Patch Wizard is a **mobile-friendly** way to generate patches without typing file paths.
+
+### How It Works
+
+1. **Describe your change** in plain English
+2. **Claude suggests files** based on your description
+3. **Select files** with tap-to-toggle buttons (👁 to preview)
+4. **Generate patch** and apply with `git apply`
+
+### Starting the Wizard
+
+- **From Hub:** Tap `🧩 Patch Wizard`
+- **From Main Menu:** `🤖 Claude` → `🧩 Patch Wizard`
+
+### Example Flow
+
+```
+You: Tap "🧩 Patch Wizard"
+
+Bot: "What do you want to change?"
+
+You: "add exponential backoff with jitter to the retry logic"
+
+Bot: Shows file suggestions:
+   ○ src/pearlalgo/utils/retry.py         👁
+   ○ src/pearlalgo/utils/telegram_alerts.py 👁
+   ○ src/pearlalgo/data_providers/ibkr.py  👁
+   [🔍 Refine] [❌ Cancel]
+
+You: Tap to select files, then "✅ Generate Patch"
+
+Bot: Returns unified diff (inline or as patch.diff file)
+```
+
+### Refining File Search
+
+If the suggested files aren't right:
+1. Tap `🔍 Refine`
+2. Type a search term (filename or keyword)
+3. New matches appear as toggle buttons
+
+---
+
+## Direct Command: `/ai_patch`
+
+For power users who know their file paths, the direct command is still available:
 
 ### Basic Syntax
 
@@ -427,6 +525,13 @@ Claude API usage is billed by Anthropic. Typical costs:
 ---
 
 ## Changelog
+
+### v2.0.0 (2024-12-30)
+- **Claude Hub** - Central AI command center (`/ai` or `🤖 Claude` button)
+- **Chat Mode** - Talk to Claude like mobile Cursor (`/ai_on`, `/ai_off`, `/ai_reset`)
+- **Patch Wizard** - Task-first flow with file suggestions (no path memorization)
+- **File Discovery** - Automatic file search and preview
+- **Persistent Settings** - Chat mode preference persists across restarts
 
 ### v1.0.0 (2024-12-30)
 - Initial release

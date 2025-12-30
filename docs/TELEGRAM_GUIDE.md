@@ -267,9 +267,9 @@ Generates an on-demand price chart.
 - These commands acknowledge receipt but don't perform actions
 - For full control, use the service control commands above
 
-### 3.11 `/ai_patch` (AI Code Generation)
+### 3.11 Claude AI (Mobile Cursor)
 
-Generate code patches using Claude AI directly from Telegram. Useful for quick fixes when you're on mobile.
+Claude AI is integrated as a **mobile Cursor-like experience**. Chat with Claude, get code patches, and fix issues — all from your phone.
 
 > **Full documentation:** See [AI_PATCH_GUIDE.md](AI_PATCH_GUIDE.md) for complete setup, usage, and troubleshooting.
 
@@ -282,38 +282,46 @@ Generate code patches using Claude AI directly from Telegram. Useful for quick f
    ```
 3. Restart the Telegram command handler
 
-**Usage:**
+**Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `/ai` | Open Claude Hub (or tap `🤖 Claude` in menu) |
+| `/ai_on` | Enable chat mode (messages go to Claude) |
+| `/ai_off` | Disable chat mode |
+| `/ai_reset` | Clear chat history |
+| `/ai_patch <files> <task>` | Direct patch generation (power user) |
+
+**Claude Hub Features:**
+
+- **💬 Chat Mode** - Toggle to chat with Claude about your code
+- **🧩 Patch Wizard** - Task-first flow (describe change → pick files → get diff)
+- **🧼 Reset** - Clear conversation history
+
+**Patch Wizard (No Path Typing):**
+
+1. Tap `🧩 Patch Wizard`
+2. Describe what you want to change in plain English
+3. Claude suggests relevant files — tap to select
+4. Tap `✅ Generate Patch`
+5. Apply with `git apply patch.diff`
+
+**Direct Command (Power Users):**
 
 ```
 /ai_patch <file(s)> <task description>
 ```
 
-**Examples:**
-
+Examples:
 - `/ai_patch src/pearlalgo/utils/retry.py add exponential backoff with jitter`
-- `/ai_patch src/foo.py,src/bar.py refactor the logging to use structured format`
-
-**Features:**
-
-- First argument is file path(s), comma-separated for multiple files
-- Remaining arguments are the task description
-- Returns a unified diff patch (inline for small patches, `.diff` file for large ones)
-- Apply with: `git apply patch.diff`
+- `/ai_patch src/foo.py,src/bar.py refactor the logging`
 
 **Security:**
 
-- Only your authorized chat ID can use this command
+- Only your authorized chat ID can use these commands
 - Blocked paths: `data/`, `logs/`, `.env`, `ibkr/`, `.venv/`, `.git/`
 - File size limit: 100KB per file
 - Path traversal protection
-
-**Optional Configuration (in `.env`):**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ANTHROPIC_MODEL` | `claude-sonnet-4-20250514` | Claude model to use |
-| `ANTHROPIC_MAX_TOKENS` | `4096` | Max response tokens |
-| `ANTHROPIC_TIMEOUT` | `120` | Request timeout (seconds) |
 
 ---
 

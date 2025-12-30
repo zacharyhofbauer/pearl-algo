@@ -893,6 +893,7 @@ def format_home_card(
             "DataGap": "📉 Data gap detected",
             "NoData": "📭 Waiting for data",
             "NoOpportunity": "👀 Scanning (no setups)",
+            "Level1Unavailable": "📡 Using historical fallback (no live quotes)",
             "Active": None,  # Don't show when active
             "Unknown": "❓ Status unknown",
         }.get(quiet_reason, f"ℹ️ {quiet_reason}")
@@ -901,6 +902,9 @@ def format_home_card(
         # Actionable cue for StaleData
         if quiet_reason == "StaleData":
             lines.append(f"{_SUBLINE_PREFIX}💡 Run /data_quality for details")
+        # Actionable cue for Level1Unavailable (missing API acknowledgement)
+        if quiet_reason == "Level1Unavailable":
+            lines.append(f"{_SUBLINE_PREFIX}💡 Check IBKR Market Data API Acknowledgement")
     
     # CONDITIONAL: Signal diagnostics (when quiet reason is NoOpportunity and we have details)
     # V2 spec: Suppress when data is stale to avoid misleading derived context
@@ -980,6 +984,7 @@ class TelegramPrefs:
         "auto_chart_on_signal": False,      # Automatically generate chart with signal push
         "snooze_noncritical_alerts": False, # Temporarily suppress non-critical data alerts
         "snooze_until": None,               # ISO timestamp when snooze expires (if snoozed)
+        "ai_chat_mode": False,              # Claude AI chat mode (messages go to Claude)
     }
     
     # Human-readable labels for settings UI
@@ -988,6 +993,7 @@ class TelegramPrefs:
         "signal_detail_expanded": "Expanded Signal Details",
         "auto_chart_on_signal": "Auto-Chart on Signal",
         "snooze_noncritical_alerts": "Snooze Non-Critical Alerts",
+        "ai_chat_mode": "Claude Chat Mode",
     }
     
     # Descriptions for settings UI
@@ -996,6 +1002,7 @@ class TelegramPrefs:
         "signal_detail_expanded": "Show full context (regime, MTF, VWAP) in signal details by default",
         "auto_chart_on_signal": "Automatically generate and send chart with each signal alert",
         "snooze_noncritical_alerts": "Temporarily suppress non-critical data quality alerts (1 hour)",
+        "ai_chat_mode": "Send plain messages to Claude AI (mobile Cursor mode)",
     }
     
     def __init__(self, state_dir=None):
