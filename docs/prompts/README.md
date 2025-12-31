@@ -2,28 +2,26 @@
 
 This directory contains reusable AI promptbooks for daily development tasks with the PearlAlgo codebase.
 
-## Quick Start (One-Paste Workflow)
+## Quick Start (Paste-As-Is)
 
 For fast, efficient sessions, use the **Engineering Promptbook** as your single entrypoint:
 
 1. Open `promptbook_engineering.md`
-2. Edit the **RUN CONFIGURATION** block at the top:
-   - Set `RUN_MODE`: `FAST`, `STANDARD`, or `DEEP`
-   - Set `RUN_SCOPE`: `engineering`, `trading`, `ux`, or `all`
-   - Toggle individual phases on/off
-3. Copy and paste into your AI assistant
-4. The promptbook orchestrates everything automatically
+2. Copy/paste the entire file into your AI assistant (**no edits required**)
+3. Optional: to change mode/scope/toggles, paste an **OVERRIDES** YAML block *above* the promptbook in your message (examples below)
 
-**Example configurations:**
+**Example OVERRIDES blocks:**
 
-```
-# Quick cleanup session
+```yaml
+# Quick cleanup session (skip building/tests)
 RUN_MODE: FAST
 RUN_SCOPE: engineering
 RUN_CLEANUP: true
 RUN_BUILDING: false
 RUN_TESTS: false
+```
 
+```yaml
 # Full multi-domain session
 RUN_MODE: STANDARD
 RUN_SCOPE: all
@@ -39,7 +37,7 @@ The main promptbook for development sessions. Handles:
 - Testing (coverage analysis, test additions)
 - **Orchestration**: Can invoke Trading and UX promptbooks via `RUN_SCOPE`
 
-**When to use:** Start here for any development session. Set `RUN_SCOPE=all` for comprehensive multi-domain work.
+**When to use:** Start here for any development session. For comprehensive multi-domain work, use OVERRIDES: `RUN_SCOPE: all`.
 
 ### `promptbook_trading.md`
 
@@ -48,7 +46,7 @@ Trading system verification and improvement. Handles:
 - **NQ Agent**: Lifecycle verification, state consistency, observability
 - **ATS Execution**: Safety audit, kill switch verification, learning review
 
-**When to use:** Standalone for trading-focused sessions, or invoked via Engineering promptbook with `RUN_SCOPE=trading` or `RUN_SCOPE=all`.
+**When to use:** Standalone for trading-focused sessions, or invoked via Engineering promptbook when its `RUN_SCOPE` is `trading` or `all` (set via OVERRIDES).
 
 ### `promptbook_ux.md`
 
@@ -56,7 +54,7 @@ User experience surfaces. Handles:
 - **Telegram**: Message clarity, interaction quality, command UX
 - **Charting**: Visual integrity, schema verification, trust contracts
 
-**When to use:** Standalone for UX-focused sessions, or invoked via Engineering promptbook with `RUN_SCOPE=ux` or `RUN_SCOPE=all`.
+**When to use:** Standalone for UX-focused sessions, or invoked via Engineering promptbook when its `RUN_SCOPE` is `ux` or `all` (set via OVERRIDES).
 
 ## Run Modes
 
@@ -83,20 +81,19 @@ All promptbooks include a **Prompt Drift Audit** phase that:
 - Detects contradictions with `docs/PROJECT_SUMMARY.md`
 - Proposes patches for approval (does NOT auto-apply)
 
-Enable with `RUN_PROMPT_DRIFT_AUDIT: true` to keep prompts aligned with the codebase.
+Enable/disable via OVERRIDES (`RUN_PROMPT_DRIFT_AUDIT: true|false`) to keep prompts aligned with the codebase.
 
 ## Usage Patterns
 
 ### Daily Development Session
-```
-promptbook_engineering.md
-RUN_MODE: STANDARD
-RUN_SCOPE: engineering
-```
+
+Paste `promptbook_engineering.md` as-is (defaults to `RUN_MODE: STANDARD`, `RUN_SCOPE: engineering`).
 
 ### Pre-Trading Session Check
-```
-promptbook_trading.md
+
+Paste `promptbook_trading.md` with this OVERRIDES block above it:
+
+```yaml
 RUN_MODE: FAST
 RUN_BACKTESTING: false
 RUN_NQ_AGENT_VERIFICATION: true
@@ -104,19 +101,17 @@ RUN_ATS_SAFETY_AUDIT: true
 ```
 
 ### Comprehensive Multi-Domain Session
-```
-promptbook_engineering.md
+
+Paste `promptbook_engineering.md` with this OVERRIDES block above it:
+
+```yaml
 RUN_MODE: STANDARD
 RUN_SCOPE: all
 ```
 
 ### UX-Focused Improvement Session
-```
-promptbook_ux.md
-RUN_MODE: STANDARD
-RUN_TELEGRAM_AUDIT: true
-RUN_CHARTING_AUDIT: true
-```
+
+Paste `promptbook_ux.md` as-is (defaults to `RUN_MODE: STANDARD`, both audits enabled).
 
 ## Key Concepts
 

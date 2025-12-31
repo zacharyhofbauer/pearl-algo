@@ -1,18 +1,27 @@
 PearlAlgo UX Promptbook (Telegram + Charting)
 
 ========================================
-RUN CONFIGURATION (EDIT BEFORE PASTING)
+PASTE-AS-IS DEFAULTS (NO EDITS REQUIRED)
 ========================================
 
-RUN_MODE: STANDARD
-  # FAST     - Quick audit, high-level findings
-  # STANDARD - Balanced depth, full UX review
-  # DEEP     - Comprehensive visual regression, all message types
+Agent: do **not** ask the operator to fill out a worksheet. Use the defaults below unless the operator supplies an OVERRIDES YAML block **above** this promptbook in their message.
 
-TOGGLES (set true/false):
+DEFAULTS:
+  RUN_MODE: STANDARD            # FAST | STANDARD | DEEP
   RUN_TELEGRAM_AUDIT: true
   RUN_CHARTING_AUDIT: true
   RUN_PROMPT_DRIFT_AUDIT: true
+
+Optional OVERRIDES format (operator-supplied, outside this file):
+```yaml
+RUN_MODE: FAST
+RUN_CHARTING_AUDIT: false
+```
+
+RUN_MODE meaning:
+- FAST: Quick audit, high-level findings
+- STANDARD: Balanced depth, full UX review
+- DEEP: Comprehensive visual regression, all message types
 
 ========================================
 PURPOSE
@@ -22,7 +31,7 @@ Unified prompt for PearlAlgo user experience surfaces. Covers:
 - Telegram UI/UX analysis and improvement (message clarity, interaction quality)
 - Chart generation and visualization integrity (visual schema, trader trust)
 
-This promptbook can be invoked standalone or via promptbook_engineering.md with RUN_SCOPE=ux or RUN_SCOPE=all.
+This promptbook can be invoked standalone, or via `docs/prompts/promptbook_engineering.md` when its `RUN_SCOPE` is `ux` or `all` (set via OVERRIDES).
 
 ========================================
 AUTONOMOUS EXECUTION MODE
@@ -152,7 +161,7 @@ For each improvement, provide:
 - Risk assessment (could it confuse?)
 - Classification: LANE A (safe) or LANE B (needs review)
 
-Format:
+Output template (agent fills this in — operator does not):
 ```
 IMPROVEMENT: [brief description]
 Classification: LANE_A | LANE_B
@@ -252,7 +261,7 @@ Change Classification:
 - Experimental: Not default, requires opt-in
 - Requires approval: Changes visual semantics
 
-Format:
+Output template (agent fills this in — operator does not):
 ```
 CHART IMPROVEMENT: [brief description]
 Classification: NO_OP | SAFE_REFACTOR | OPTIONAL | EXPERIMENTAL | REQUIRES_APPROVAL

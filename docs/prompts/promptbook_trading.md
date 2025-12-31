@@ -1,19 +1,28 @@
 PearlAlgo Trading Promptbook
 
 ========================================
-RUN CONFIGURATION (EDIT BEFORE PASTING)
+PASTE-AS-IS DEFAULTS (NO EDITS REQUIRED)
 ========================================
 
-RUN_MODE: STANDARD
-  # FAST     - Quick verification, skip deep analysis
-  # STANDARD - Balanced depth, full workflow
-  # DEEP     - Thorough analysis, all backtests, comprehensive audit
+Agent: do **not** ask the operator to fill out a worksheet. Use the defaults below unless the operator supplies an OVERRIDES YAML block **above** this promptbook in their message.
 
-TOGGLES (set true/false):
+DEFAULTS:
+  RUN_MODE: STANDARD            # FAST | STANDARD | DEEP
   RUN_BACKTESTING: true
   RUN_NQ_AGENT_VERIFICATION: true
   RUN_ATS_SAFETY_AUDIT: true
   RUN_PROMPT_DRIFT_AUDIT: true
+
+Optional OVERRIDES format (operator-supplied, outside this file):
+```yaml
+RUN_MODE: FAST
+RUN_BACKTESTING: false
+```
+
+RUN_MODE meaning:
+- FAST: Quick verification, skip deep analysis
+- STANDARD: Balanced depth, full workflow
+- DEEP: Thorough analysis, all backtests, comprehensive audit
 
 ========================================
 PURPOSE
@@ -24,7 +33,7 @@ Unified prompt for PearlAlgo trading system verification and improvement. Covers
 - NQ agent verification and performance stewardship
 - ATS execution safety and adaptive learning audit
 
-This promptbook can be invoked standalone or via promptbook_engineering.md with RUN_SCOPE=trading or RUN_SCOPE=all.
+This promptbook can be invoked standalone, or via `docs/prompts/promptbook_engineering.md` when its `RUN_SCOPE` is `trading` or `all` (set via OVERRIDES).
 
 ========================================
 AUTONOMOUS EXECUTION MODE
@@ -144,7 +153,7 @@ Identify which filters/conditions block signals most:
 
 Goal: Understand if signal scarcity is intentional or over-constrained
 
-1.4 FULL BACKTEST (if RUN_MODE=STANDARD or DEEP)
+1.4 FULL BACKTEST (if RUN_MODE is STANDARD or DEEP)
 Run full trade simulation:
 ```bash
 python scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --contracts 5

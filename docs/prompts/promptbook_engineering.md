@@ -1,25 +1,36 @@
 PearlAlgo Engineering Promptbook (Entrypoint/Orchestrator)
 
 ========================================
-RUN CONFIGURATION (EDIT BEFORE PASTING)
+PASTE-AS-IS DEFAULTS (NO EDITS REQUIRED)
 ========================================
 
-RUN_MODE: STANDARD
-  # FAST     - Quick scan, high-level findings, skip deep analysis
-  # STANDARD - Balanced depth, full workflow, recommended for most sessions
-  # DEEP     - Thorough analysis, all verifications, longer runtime
+Agent: do **not** ask the operator to fill out a worksheet. Use the defaults below unless the operator supplies an OVERRIDES YAML block **above** this promptbook in their message.
 
-RUN_SCOPE: engineering
-  # engineering - Cleanup + building + testing only
-  # trading     - Backtesting + NQ agent + ATS execution (reads promptbook_trading.md)
-  # ux          - Telegram + charting (reads promptbook_ux.md)
-  # all         - Full orchestrated session across all domains
-
-TOGGLES (set true/false):
+DEFAULTS:
+  RUN_MODE: STANDARD            # FAST | STANDARD | DEEP
+  RUN_SCOPE: engineering        # engineering | trading | ux | all
   RUN_CLEANUP: true
   RUN_BUILDING: true
   RUN_TESTS: true
   RUN_PROMPT_DRIFT_AUDIT: true
+
+Optional OVERRIDES format (operator-supplied, outside this file):
+```yaml
+RUN_MODE: FAST
+RUN_SCOPE: all
+RUN_TESTS: false
+```
+
+RUN_MODE meaning:
+- FAST: Quick scan, high-level findings, skip deep analysis
+- STANDARD: Balanced depth, full workflow (recommended)
+- DEEP: Thorough analysis, all verifications, longer runtime
+
+RUN_SCOPE meaning:
+- engineering: Cleanup + building + testing only
+- trading: Reads and executes `docs/prompts/promptbook_trading.md`
+- ux: Reads and executes `docs/prompts/promptbook_ux.md`
+- all: Engineering + trading + UX (full session)
 
 ========================================
 PURPOSE
@@ -219,14 +230,14 @@ Design tests for:
 PHASE 4: DOMAIN ORCHESTRATION (if RUN_SCOPE includes trading/ux/all)
 ========================================
 
-4.1 TRADING DOMAIN (if RUN_SCOPE=trading or all)
+4.1 TRADING DOMAIN (if RUN_SCOPE is trading or all)
 Read and execute: docs/prompts/promptbook_trading.md
 - Backtesting verification & upgrades
 - NQ agent verification & observability
 - ATS execution safety & learning audit
 - Output: Per-domain findings and changes
 
-4.2 UX DOMAIN (if RUN_SCOPE=ux or all)
+4.2 UX DOMAIN (if RUN_SCOPE is ux or all)
 Read and execute: docs/prompts/promptbook_ux.md
 - Telegram suite UX audit
 - Charting suite visual integrity audit
@@ -259,7 +270,7 @@ Generate a diff/patch for each promptbook that needs updates:
 - Do NOT apply changes automatically
 - Present for operator approval
 
-Format:
+Output template (agent fills this in — operator does not):
 ```
 PROMPT DRIFT PATCH - [filename]
 Classification: SAFE_TO_FIX | NEEDS_REVIEW
