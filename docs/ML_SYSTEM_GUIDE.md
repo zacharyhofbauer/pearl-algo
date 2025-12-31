@@ -1,5 +1,12 @@
 # PearlAlgo ML System Guide
 
+> **STATUS: Future Enhancement**
+> 
+> Layers 2-5 (Contextual Bandits, Ensemble Scoring, Regime Detection, Meta-Learning) are fully 
+> implemented with tests and configuration but **NOT yet integrated** into the main trading service.
+> Currently only the basic Thompson Sampling policy (`bandit_policy.py`) is active in production.
+> See `config/ml_config.yaml` for configuration when ready to enable advanced ML features.
+
 ## Overview
 
 The ML-Enhanced Trading System is a 5-layer machine learning stack that continuously learns from every trade, adapts to market regimes, and optimizes trading decisions.
