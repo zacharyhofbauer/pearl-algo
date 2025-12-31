@@ -5201,12 +5201,61 @@ class TelegramCommandHandler:
         )
     
     async def _handle_claude_patch_wizard_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Start the patch wizard - ask for task description."""
+        """Start the patch wizard - offer Auto or Manual mode."""
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
         
         # Set wizard state
+        if hasattr(context, "user_data"):
+            context.user_data["claude_wizard_state"] = "choose_mode"
+            context.user_data["claude_wizard_task"] = None
+            context.user_data["claude_wizard_files"] = set()
+            context.user_data["claude_wizard_suggested"] = []
+        
+        await self._send_message_or_edit(
+            update, context,
+            "🧩 *Patch Wizard*\n\n"
+            "Choose your mode:\n\n"
+            "🚀 *Auto* — Just describe what you want.\n"
+            "_Claude finds files & generates patch automatically._\n\n"
+            "🔧 *Manual* — Select files yourself.\n"
+            "_More control, but requires file navigation._",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🚀 Auto (Recommended)", callback_data='claude_wizard_auto')],
+                [InlineKeyboardButton("🔧 Manual", callback_data='claude_wizard_manual')],
+                [InlineKeyboardButton("❌ Cancel", callback_data='claude_cancel')],
+            ]),
+        )
+    
+    async def _handle_claude_wizard_auto_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start auto patch mode - Claude does everything."""
+        if not await self._check_authorized(update):
+            return
+        
+        if hasattr(context, "user_data"):
+            context.user_data["claude_wizard_state"] = "auto_awaiting_task"
+            context.user_data["claude_wizard_task"] = None
+        
+        await self._send_message_or_edit(
+            update, context,
+            "🚀 *Auto Patch*\n\n"
+            "Just describe what you want to change:\n\n"
+            "_Examples:_\n"
+            "• `add rate limiting to the API client`\n"
+            "• `fix the bug where signals aren't sent`\n"
+            "• `add logging to the order executor`\n\n"
+            "I'll find the right files and generate a patch automatically.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Cancel", callback_data='claude_cancel')],
+            ]),
+        )
+    
+    async def _handle_claude_wizard_manual_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start manual patch mode - user selects files."""
+        if not await self._check_authorized(update):
+            return
+        
         if hasattr(context, "user_data"):
             context.user_data["claude_wizard_state"] = "awaiting_task"
             context.user_data["claude_wizard_task"] = None
@@ -5215,17 +5264,187 @@ class TelegramCommandHandler:
         
         await self._send_message_or_edit(
             update, context,
-            "🧩 *Patch Wizard*\n\n"
+            "🔧 *Manual Patch*\n\n"
             "*Step 1:* Describe what you want to change.\n\n"
-            "Just type your task in plain English, e.g.:\n"
-            "• _add exponential backoff to retry logic_\n"
-            "• _fix the rate limit handling in API client_\n"
-            "• _add a docstring to the calculate_pnl function_\n\n"
-            "I'll suggest relevant files for you to pick from.",
+            "I'll suggest files and you can pick which ones to include.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("❌ Cancel", callback_data='claude_cancel')],
             ]),
         )
+    
+    async def _process_auto_patch(self, update: Update, context: ContextTypes.DEFAULT_TYPE, task: str):
+        """
+        Fully agentic patch generation - Claude finds files and generates patch automatically.
+        """
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        # Send progress message
+        progress_msg = await update.message.reply_text(
+            "🔍 *Analyzing your request...*\n\n"
+            "Claude is:\n"
+            "1️⃣ Understanding your task\n"
+            "2️⃣ Searching for relevant files\n"
+            "3️⃣ Reading file contents\n"
+            "4️⃣ Generating patch\n\n"
+            "_This may take 15-30 seconds..._",
+            parse_mode="Markdown",
+        )
+        
+        try:
+            # Discover all project files
+            all_files = self._discover_project_files()
+            
+            # Get Claude to suggest the most relevant files
+            client = get_claude_client()
+            if not client:
+                await progress_msg.edit_text(
+                    "❌ Claude not available.\n\n"
+                    "Make sure `ANTHROPIC_API_KEY` is set in `.env`",
+                    parse_mode="Markdown",
+                )
+                return
+            
+            import asyncio
+            
+            # Step 1: Let Claude identify relevant files
+            suggested_files = await asyncio.to_thread(
+                client.suggest_files, task, all_files, limit=8
+            )
+            
+            if not suggested_files:
+                # Fallback to local search
+                suggested_files = self._search_files(task, all_files)[:5]
+            
+            if not suggested_files:
+                await progress_msg.edit_text(
+                    "⚠️ *Couldn't find relevant files*\n\n"
+                    "Try being more specific about which component "
+                    "or file you want to modify.",
+                    parse_mode="Markdown",
+                    reply_markup=self._get_claude_hub_buttons(),
+                )
+                return
+            
+            # Update progress
+            file_list = "\n".join(f"• `{f.split('/')[-1]}`" for f in suggested_files[:5])
+            await progress_msg.edit_text(
+                f"🔍 *Found relevant files:*\n{file_list}\n\n"
+                "📝 Generating patch...",
+                parse_mode="Markdown",
+            )
+            
+            # Step 2: Read file contents
+            file_contents = {}
+            errors = []
+            for filepath in suggested_files:
+                try:
+                    full_path = self._resolve_project_path(filepath)
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    # Limit content to avoid token issues
+                    if len(content) > 15000:
+                        content = content[:15000] + "\n\n... [truncated for length] ..."
+                    file_contents[filepath] = content
+                except Exception as e:
+                    errors.append(filepath)
+            
+            if not file_contents:
+                await progress_msg.edit_text(
+                    f"❌ Could not read files:\n`{', '.join(errors)}`",
+                    parse_mode="Markdown",
+                    reply_markup=self._get_claude_hub_buttons(),
+                )
+                return
+            
+            # Step 3: Generate patch
+            try:
+                diff_output = await asyncio.to_thread(
+                    client.generate_patch, task, file_contents
+                )
+            except ClaudeAPIKeyMissingError:
+                await progress_msg.edit_text(
+                    "❌ *API Key Not Configured*\n\n"
+                    "`ANTHROPIC_API_KEY` not set in `.env`.",
+                    parse_mode="Markdown",
+                    reply_markup=self._get_claude_hub_buttons(),
+                )
+                return
+            except Exception as e:
+                logger.error(f"Error generating patch: {e}", exc_info=True)
+                await progress_msg.edit_text(
+                    f"❌ *Error*\n\n`{str(e)[:200]}`",
+                    parse_mode="Markdown",
+                    reply_markup=self._get_claude_hub_buttons(),
+                )
+                return
+            
+            # Check if we got a valid diff
+            if not diff_output or not diff_output.strip():
+                await progress_msg.edit_text(
+                    "⚠️ *No changes needed*\n\n"
+                    "Claude analyzed the files but didn't generate any changes.\n"
+                    "Try rephrasing your request.",
+                    parse_mode="Markdown",
+                    reply_markup=self._get_claude_hub_buttons(),
+                )
+                return
+            
+            # Deliver patch
+            INLINE_LIMIT = 3500
+            if len(diff_output) <= INLINE_LIMIT:
+                message = (
+                    f"✅ *Auto Patch Generated*\n\n"
+                    f"📋 Task: _{task[:100]}_\n"
+                    f"📁 Files: `{len(file_contents)}`\n\n"
+                    f"```diff\n{diff_output}\n```\n\n"
+                    "💡 Copy and apply with `git apply` or review in Cursor."
+                )
+                await progress_msg.edit_text(
+                    message,
+                    parse_mode="Markdown",
+                    reply_markup=self._get_claude_hub_buttons(),
+                )
+            else:
+                # Send as file
+                import io
+                diff_bytes = diff_output.encode("utf-8")
+                diff_file = io.BytesIO(diff_bytes)
+                diff_file.name = "auto_patch.diff"
+                
+                await progress_msg.edit_text(
+                    f"✅ *Auto Patch Generated*\n\n"
+                    f"📋 Task: _{task[:100]}_\n"
+                    f"📁 Files: `{len(file_contents)}`\n\n"
+                    "Patch is large - sending as file...",
+                    parse_mode="Markdown",
+                )
+                
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=diff_file,
+                    filename="auto_patch.diff",
+                    caption=f"🚀 Auto Patch: {task[:50]}...\n\nApply with: `git apply auto_patch.diff`",
+                    parse_mode="Markdown",
+                )
+                
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="📄 Patch file sent above.",
+                    reply_markup=self._get_claude_hub_buttons(),
+                )
+            
+        except Exception as e:
+            logger.error(f"Auto patch error: {e}", exc_info=True)
+            await progress_msg.edit_text(
+                f"❌ *Error*\n\n`{str(e)[:300]}`",
+                parse_mode="Markdown",
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+        finally:
+            # Clear wizard state
+            if hasattr(context, "user_data"):
+                context.user_data.pop("claude_wizard_state", None)
+                context.user_data.pop("claude_wizard_task", None)
     
     async def _handle_claude_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
@@ -5249,6 +5468,10 @@ class TelegramCommandHandler:
         
         # Check wizard state first (session-based)
         wizard_state = context.user_data.get("claude_wizard_state") if hasattr(context, "user_data") else None
+        
+        if wizard_state == "auto_awaiting_task":
+            await self._process_auto_patch(update, context, text)
+            return
         
         if wizard_state == "awaiting_task":
             await self._process_wizard_task(update, context, text)
@@ -6782,6 +7005,10 @@ class TelegramCommandHandler:
             await self._handle_claude_chat_toggle(update, context)
         elif callback_data == 'claude_patch_wizard':
             await self._handle_claude_patch_wizard_start(update, context)
+        elif callback_data == 'claude_wizard_auto':
+            await self._handle_claude_wizard_auto_start(update, context)
+        elif callback_data == 'claude_wizard_manual':
+            await self._handle_claude_wizard_manual_start(update, context)
         elif callback_data == 'claude_reset':
             await self._handle_ai_reset(update, context)
         elif callback_data == 'claude_cancel':
@@ -6831,7 +7058,7 @@ class TelegramCommandHandler:
         
         SAFETY: Requires authorized chat ID. Changes are persistent.
         """
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /arm command from {update.effective_user.id}")
@@ -6886,7 +7113,7 @@ class TelegramCommandHandler:
         
         SAFETY: Immediately prevents new orders. Does NOT cancel existing orders.
         """
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /disarm command from {update.effective_user.id}")
@@ -6920,7 +7147,7 @@ class TelegramCommandHandler:
         
         SAFETY: Emergency kill switch. Immediately disarms and cancels all orders.
         """
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"🚨 Received /kill command from {update.effective_user.id}")
@@ -6958,7 +7185,7 @@ class TelegramCommandHandler:
         
         Read-only command.
         """
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /positions command from {update.effective_user.id}")
@@ -7009,7 +7236,7 @@ class TelegramCommandHandler:
         
         Read-only command showing learning/policy state.
         """
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /policy command from {update.effective_user.id}")
@@ -7121,7 +7348,7 @@ class TelegramCommandHandler:
     
     async def _handle_claude_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /claude_status - Show Claude monitor health & recent insights."""
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /claude_status command from {update.effective_user.id}")
@@ -7171,7 +7398,7 @@ class TelegramCommandHandler:
     
     async def _handle_analyze_now(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /analyze_now - Force immediate comprehensive analysis."""
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /analyze_now command from {update.effective_user.id}")
@@ -7232,7 +7459,7 @@ class TelegramCommandHandler:
     
     async def _handle_analyze_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /analyze_signals - Deep dive on signal quality."""
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /analyze_signals command from {update.effective_user.id}")
@@ -7290,7 +7517,7 @@ class TelegramCommandHandler:
     
     async def _handle_analyze_system(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /analyze_system - System health report."""
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /analyze_system command from {update.effective_user.id}")
@@ -7365,7 +7592,7 @@ class TelegramCommandHandler:
     
     async def _handle_analyze_market(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /analyze_market - Market conditions & regime analysis."""
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /analyze_market command from {update.effective_user.id}")
@@ -7429,7 +7656,7 @@ class TelegramCommandHandler:
     
     async def _handle_suggest_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /suggest_config - Get configuration tuning suggestions."""
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /suggest_config command from {update.effective_user.id}")
@@ -7495,7 +7722,7 @@ class TelegramCommandHandler:
     
     async def _handle_suggestions(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /suggestions - List all active suggestions."""
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /suggestions command from {update.effective_user.id}")
@@ -7538,7 +7765,7 @@ class TelegramCommandHandler:
     
     async def _handle_apply_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /apply_suggestion <id> - Apply a suggestion."""
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /apply_suggestion command from {update.effective_user.id}")
@@ -7591,7 +7818,7 @@ class TelegramCommandHandler:
     
     async def _handle_claude_reports(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /claude_reports - Configure daily/weekly reports."""
-        if not self._is_authorized(update):
+        if not await self._check_authorized(update):
             return
         
         logger.info(f"📡 Received /claude_reports command from {update.effective_user.id}")
