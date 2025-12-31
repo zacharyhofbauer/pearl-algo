@@ -631,6 +631,43 @@ class TestDailyReset:
         adapter.update_daily_pnl(-50.0)
         
         assert adapter._daily_pnl == 50.0
+    
+    def test_daily_loss_limit_auto_disarms(self):
+        """Should auto-disarm when daily loss limit is hit."""
+        config = ExecutionConfig(
+            enabled=True, 
+            armed=True, 
+            max_daily_loss=500.0,
+            symbol_whitelist=["MNQ"],
+        )
+        adapter = MockExecutionAdapter(config)
+        
+        # Simulate losses approaching limit
+        adapter.update_daily_pnl(-400.0)
+        assert adapter.armed  # Still armed
+        
+        # Simulate crossing limit
+        adapter.update_daily_pnl(-150.0)  # Total -550
+        
+        # Check preconditions should auto-disarm
+        signal = {
+            "signal_id": "test_loss_limit",
+            "symbol": "MNQ",
+            "type": "test",
+            "direction": "long",
+            "entry_price": 25000.0,
+            "stop_loss": 24990.0,
+            "take_profit": 25020.0,
+            "position_size": 1,
+        }
+        decision = adapter.check_preconditions(signal)
+        
+        # Should reject execution
+        assert not decision.execute
+        assert "daily_loss_limit_hit" in decision.reason
+        
+        # Should auto-disarm
+        assert not adapter.armed
 
 
 @pytest.mark.asyncio

@@ -445,3 +445,4 @@ class MarketAnalyzer:
             "ai_enhanced": True,
         }
 
+

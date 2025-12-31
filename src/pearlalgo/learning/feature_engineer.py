@@ -888,3 +888,4 @@ class FeatureEngineer:
         weight = 1.0 / len(self._feature_names)
         return {name: weight for name in self._feature_names}
 
+

@@ -223,3 +223,4 @@ class TestFeatureEngineer:
         fv = feature_engineer.compute_features(df)
         assert isinstance(fv, FeatureVector)
 
+

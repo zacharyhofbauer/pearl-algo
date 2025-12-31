@@ -237,3 +237,4 @@ class AnalysisEngine:
             "analyzers_initialized": self._signal_analyzer is not None,
         }
 
+

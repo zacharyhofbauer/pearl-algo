@@ -2095,6 +2095,9 @@ class NQAgentService:
         
         In fixed-cadence mode, computes sleep time to maintain start-to-start timing.
         In legacy mode, sleeps for the full scan_interval after work completes.
+        
+        SAFETY: Breaks long sleeps into 5-second chunks to check control flags
+        (kill/disarm/arm) promptly, even when scan_interval_market_closed is long.
         """
         if self.cadence_scheduler:
             # Fixed-cadence mode: compute sleep time based on cycle end
@@ -2109,10 +2112,33 @@ class NQAgentService:
                     f"{metrics.missed_cycles} cycles skipped total"
                 )
             
-            await asyncio.sleep(sleep_time)
+            # SAFETY: Break long sleeps into chunks to check control flags promptly
+            await self._interruptible_sleep(sleep_time)
         else:
             # Legacy mode: sleep full interval after work
-            await asyncio.sleep(self.config.scan_interval)
+            await self._interruptible_sleep(self.config.scan_interval)
+    
+    async def _interruptible_sleep(self, total_seconds: float) -> None:
+        """
+        Sleep for the specified duration, checking control flags every 5 seconds.
+        
+        This ensures kill/disarm commands are processed promptly even during
+        long sleep intervals (e.g., market_closed = 300s).
+        
+        Args:
+            total_seconds: Total sleep duration in seconds
+        """
+        FLAG_CHECK_INTERVAL = 5.0  # Check flags every 5 seconds
+        
+        remaining = total_seconds
+        while remaining > 0 and not self.shutdown_requested:
+            chunk = min(remaining, FLAG_CHECK_INTERVAL)
+            await asyncio.sleep(chunk)
+            remaining -= chunk
+            
+            # Check for control flags during long sleeps
+            if remaining > 0:
+                await self._check_execution_control_flags()
 
     async def _notify_error(self, title: str, message: str) -> None:
         """Notify about errors via Telegram."""

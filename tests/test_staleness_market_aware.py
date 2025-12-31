@@ -144,3 +144,4 @@ class TestMarketAwareStaleness:
 
         assert DataQualityChecker.MARKET_CLOSED_STALE_THRESHOLD_MINUTES == 60
 
+

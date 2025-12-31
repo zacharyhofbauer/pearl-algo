@@ -266,3 +266,4 @@ class TestTradeRecord:
         assert d["pnl"] == 40.0
         assert d["features"]["rsi"] == 0.65
 
+

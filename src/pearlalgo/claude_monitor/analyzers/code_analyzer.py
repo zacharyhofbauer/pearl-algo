@@ -286,3 +286,4 @@ class CodeAnalyzer:
         else:
             return f"{len(findings)} minor issues noted"
 
+

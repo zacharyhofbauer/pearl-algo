@@ -608,3 +608,4 @@ class RiskMetricsCalculator:
         self._equity_curve = [0.0]
         logger.info("RiskMetricsCalculator cleared")
 
+

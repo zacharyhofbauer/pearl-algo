@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from pearlalgo.utils.logger import logger
+
 
 class ExecutionMode(Enum):
     """Execution mode controls whether real orders are placed."""
@@ -320,7 +322,15 @@ class ExecutionAdapter(ABC):
             )
         
         # Check 6: Daily loss limit (kill switch)
+        # SAFETY: Auto-disarm when daily loss limit is hit to prevent further execution
+        # until operator explicitly re-arms (requires manual intervention)
         if self._daily_pnl <= -self.config.max_daily_loss:
+            if self._armed:
+                self.disarm()
+                logger.warning(
+                    f"🚨 AUTO-DISARM: Daily loss limit hit (${self._daily_pnl:.2f}). "
+                    f"Re-arm manually with /arm when ready."
+                )
             return ExecutionDecision(
                 execute=False,
                 reason=f"daily_loss_limit_hit:{self._daily_pnl:.2f}",

@@ -155,3 +155,4 @@ class TestDataLevelDashboard:
         # Level1 (any case) should not show extra indicator
         assert "Historical fallback" not in message_mixed
 
+

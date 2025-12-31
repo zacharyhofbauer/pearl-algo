@@ -324,3 +324,4 @@ class SystemAnalyzer:
         
         return f"{len(findings)} minor issues detected"
 
+

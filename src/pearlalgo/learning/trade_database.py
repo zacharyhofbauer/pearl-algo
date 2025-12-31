@@ -555,3 +555,4 @@ class TradeDatabase:
             "last_trade": time_range[1],
         }
 
+
