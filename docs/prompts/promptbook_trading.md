@@ -181,9 +181,9 @@ Scope: Agent lifecycle, reliability, and observability
 
 2.1 AGENT COMPONENT SCAN
 Read and understand:
-- src/pearlalgo/nq_agent/service.py - Main service loop (30-second interval)
-- src/pearlalgo/nq_agent/scanner.py - Market scanning
-- src/pearlalgo/nq_agent/signal_generator.py - Signal validation
+- src/pearlalgo/nq_agent/service.py - Main service loop (adaptive cadence: 5s active, 30s idle, 300s closed)
+- src/pearlalgo/strategies/nq_intraday/scanner.py - Market scanning
+- src/pearlalgo/strategies/nq_intraday/signal_generator.py - Signal validation
 - src/pearlalgo/nq_agent/state_manager.py - State persistence
 - src/pearlalgo/nq_agent/performance_tracker.py - Performance metrics
 
@@ -193,13 +193,13 @@ State files:
 
 2.2 LIFECYCLE VERIFICATION
 Verify:
-- 30-second scan interval accuracy (no drift, no silent stalls)
+- Adaptive cadence accuracy (5s active, 30s idle, 300s closed; no drift, no silent stalls)
 - Market hours vs strategy session awareness
 - State persistence and recovery across restarts
 - Circuit breaker correctness (10 consecutive errors -> pause)
 
 Monitoring questions:
-- Is agent scanning every 30 seconds? (check cycle_count, last_successful_cycle)
+- Is agent scanning at the expected cadence? (check cycle_count, last_successful_cycle, cadence_metrics)
 - Is data fresh? (check latest_bar_age_minutes, data_fresh flag)
 - Are signals generated when conditions met? (check signal_count, signals.jsonl)
 - Are errors handled? (check error_count, consecutive_errors)
@@ -388,8 +388,8 @@ Backtesting:
 
 NQ Agent:
 - src/pearlalgo/nq_agent/service.py
-- src/pearlalgo/nq_agent/scanner.py
-- src/pearlalgo/nq_agent/signal_generator.py
+- src/pearlalgo/strategies/nq_intraday/scanner.py
+- src/pearlalgo/strategies/nq_intraday/signal_generator.py
 - src/pearlalgo/nq_agent/state_manager.py
 - data/nq_agent_state/state.json
 

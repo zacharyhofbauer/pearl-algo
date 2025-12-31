@@ -618,7 +618,7 @@ class TelegramCommandHandler:
             "• Service Control: Start/Stop Agent & Gateway\n"
             "• Monitoring: Status, Signals, Performance, Activity\n"
             "• Data: Quality checks, Backtest, Reports\n\n"
-            "💡 Most actions available via Main Menu buttons."
+            "💡 `/start` keeps the menu minimal — advanced tools are still available via commands."
         )
         
         gateway_status = self.service_controller.get_gateway_status()
@@ -803,8 +803,19 @@ class TelegramCommandHandler:
         
         message += "💡 *Tip:* Tap a button to toggle a setting."
         
-        # Build toggle buttons
+        # Build settings buttons
         keyboard = [
+            # Navigation / secondary tools (kept here to keep /start uncluttered)
+            [
+                InlineKeyboardButton("❓ Help", callback_data="help"),
+                InlineKeyboardButton("⚙️ Config", callback_data="config"),
+            ],
+        ]
+        if ANTHROPIC_AVAILABLE:
+            keyboard.append([InlineKeyboardButton("🤖 Claude", callback_data="claude_hub")])
+
+        # Preferences (toggles)
+        keyboard += [
             [
                 InlineKeyboardButton(
                     f"{toggle_icon('dashboard_buttons')} Dashboard Buttons",
@@ -1547,34 +1558,10 @@ class TelegramCommandHandler:
             page_signals.reverse()
 
             message = "🔔 *Signals*\n\n"
-            message += f"*Stored:* {total_count}  |  *Matching filters:* {filtered_count}\n"
+            message += f"*Stored:* {total_count}\n"
             message += f"*Page:* {page + 1}/{total_pages}  |  *Showing:* {len(page_signals)}\n\n"
-            message += f"*Filters:* dir={dir_filter}, type={type_filter}, conf≥{int(min_conf*100)}%\n\n"
 
             keyboard: List[List[InlineKeyboardButton]] = []
-
-            # Compact filter controls
-            # Row 1: Direction filters
-            keyboard.append([
-                InlineKeyboardButton("✓All" if dir_filter == "all" else "All", callback_data="signals:setdir:all"),
-                InlineKeyboardButton("✓Long" if dir_filter == "long" else "Long", callback_data="signals:setdir:long"),
-                InlineKeyboardButton("✓Short" if dir_filter == "short" else "Short", callback_data="signals:setdir:short"),
-            ])
-            # Row 2: Confidence filters (with 60% option)
-            keyboard.append([
-                InlineKeyboardButton("✓0%" if min_conf == 0.0 else "0%", callback_data="signals:setconf:0.0"),
-                InlineKeyboardButton("✓50%" if min_conf == 0.5 else "50%", callback_data="signals:setconf:0.5"),
-                InlineKeyboardButton("✓60%" if min_conf == 0.6 else "60%", callback_data="signals:setconf:0.6"),
-                InlineKeyboardButton("✓70%" if min_conf == 0.7 else "70%", callback_data="signals:setconf:0.7"),
-            ])
-            # Row 2: Signal type filters
-            keyboard.append([
-                InlineKeyboardButton("✓All" if type_filter == "all" else "All", callback_data="signals:settype:all"),
-                InlineKeyboardButton("✓Mom" if type_filter == "momentum" else "Mom", callback_data="signals:settype:momentum"),
-                InlineKeyboardButton("✓MR" if type_filter == "mean_reversion" else "MR", callback_data="signals:settype:mean_reversion"),
-                InlineKeyboardButton("✓BO" if type_filter == "breakout" else "BO", callback_data="signals:settype:breakout"),
-                InlineKeyboardButton("✓Oth" if type_filter == "other" else "Oth", callback_data="signals:settype:other"),
-            ])
 
             # Paging row (compact)
             if filtered_count > 0 and total_pages > 1:
@@ -1585,13 +1572,6 @@ class TelegramCommandHandler:
                     pager_row.append(InlineKeyboardButton("Newer ▶", callback_data="signals:page:newer"))
                 pager_row.append(InlineKeyboardButton("🔝 Top", callback_data="signals:page:newest"))
                 keyboard.append(pager_row)
-
-            # Quick actions
-            keyboard.append([
-                InlineKeyboardButton("🆕 Last", callback_data="last_signal"),
-                InlineKeyboardButton("📊 Active", callback_data="active_trades"),
-                InlineKeyboardButton("🔄 List", callback_data="signals"),
-            ])
 
             if not page_signals:
                 message += "📭 No signals match these filters.\n"
@@ -1644,10 +1624,6 @@ class TelegramCommandHandler:
                     keyboard.append(action_buttons[j : j + 5])
 
             # Navigation
-            keyboard.append([
-                InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
-                InlineKeyboardButton("📈 Performance", callback_data="performance"),
-            ])
             keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
 
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1764,9 +1740,8 @@ class TelegramCommandHandler:
                 ])
             keyboard.append([
                 InlineKeyboardButton("🔔 All Signals", callback_data='signals'),
-                InlineKeyboardButton("📈 Performance", callback_data='performance'),
+                InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
             ])
-            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='start')])
             reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
             
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -3077,7 +3052,6 @@ class TelegramCommandHandler:
                 context,
                 "❌ *No export available*\n\nOpen `/performance` first to generate export files.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📈 Performance", callback_data="performance")],
                     [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
                 ]),
             )
@@ -3101,10 +3075,7 @@ class TelegramCommandHandler:
                 context,
                 f"✅ Sent `{p.name}`",
                 reply_markup=InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("📈 Performance", callback_data="performance"),
-                        InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
-                    ]
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
                 ]),
             )
         except Exception as e:
@@ -4205,10 +4176,6 @@ class TelegramCommandHandler:
                 [
                     InlineKeyboardButton("🔄 Refresh", callback_data="activity"),
                     InlineKeyboardButton("📊 Active Trades", callback_data="active_trades"),
-                ],
-                [
-                    InlineKeyboardButton("🔔 Signals", callback_data="signals"),
-                    InlineKeyboardButton("📈 Performance", callback_data="performance"),
                 ],
                 [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
             ]
@@ -6379,81 +6346,54 @@ class TelegramCommandHandler:
         gateway_api_ready: Optional[bool] = None,
     ) -> InlineKeyboardMarkup:
         """
-        Generate main menu inline keyboard buttons (unified Home Card layout).
-        
-        Layout optimized for quick access and discoverability:
-        - Row 1: Agent control (Start/Stop/Restart) + Gateway status
-        - Row 2: Quick Actions (Last Signal, Active Trades, Activity)
-        - Row 3: Signals + Performance (most-used monitoring)
-        - Row 4: Data Quality + Health (system status)
-        - Row 5: Config + Backtest + Help
-        
+        Generate main menu inline keyboard buttons (minimal layout).
+
+        Principles:
+        - Keep /start uncluttered (core actions only)
+        - Put secondary tools under /settings (Help, Config, Claude, etc.)
+
+        Layout:
+        - Row 1: Agent control + Gateway status
+        - Row 2: Signals + Performance
+        - Row 3: Settings
+
         Gateway indicator tri-state:
-        - ✅ when running and API ready
-        - 🟡 when running but API not ready (authenticating/2FA)
-        - ❌ when stopped
+        - ✅ running and API ready
+        - 🟡 running but API not ready (authenticating/2FA)
+        - ❌ stopped
         """
         keyboard = []
         
-        # Row 1: Agent control + Gateway (service management with tri-state indicator)
+        # Row 1: Agent control + Gateway
         if gateway_running:
             if gateway_api_ready is True:
-                gateway_status_text = "🔌 ✅"  # Running + API ready
+                gateway_status_text = "🔌 ✅"
             elif gateway_api_ready is False:
-                gateway_status_text = "🔌 🟡"  # Running but API not ready
+                gateway_status_text = "🔌 🟡"
             else:
-                gateway_status_text = "🔌 ✅"  # Assume ready if not specified (backward compat)
+                gateway_status_text = "🔌 ✅"
         else:
-            gateway_status_text = "🔌 ❌"  # Stopped
+            gateway_status_text = "🔌 ❌"
         if agent_running:
             keyboard.append([
                 InlineKeyboardButton("⏹️ Stop", callback_data='stop_agent'),
-                InlineKeyboardButton("🔄 Restart", callback_data='restart_agent'),
+                InlineKeyboardButton("🔄 Restart Agent", callback_data='restart_agent'),
                 InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
             ])
         else:
             keyboard.append([
-                InlineKeyboardButton("▶️ Start Agent", callback_data='start_agent'),
+                InlineKeyboardButton("▶️ Start", callback_data='start_agent'),
                 InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
             ])
         
-        # Row 2: Quick Actions (most common monitoring needs)
-        keyboard.append([
-            InlineKeyboardButton("🆕 Last Signal", callback_data='last_signal'),
-            InlineKeyboardButton("📊 Active", callback_data='active_trades'),
-            InlineKeyboardButton("📈 Activity", callback_data='activity'),
-        ])
-        
-        # Row 3: Signals + Performance (primary monitoring)
+        # Row 2: Monitoring (core)
         keyboard.append([
             InlineKeyboardButton("🔔 Signals", callback_data='signals'),
             InlineKeyboardButton("📈 Performance", callback_data='performance'),
         ])
-        
-        # Row 4: System status
-        keyboard.append([
-            InlineKeyboardButton("🛡 Data Quality", callback_data='data_quality'),
-            InlineKeyboardButton("💚 Health", callback_data='health'),
-        ])
-        
-        # Row 5: Secondary (config, backtest, reports, help)
-        keyboard.append([
-            InlineKeyboardButton("⚙️ Config", callback_data='config'),
-            InlineKeyboardButton("📉 Backtest", callback_data='backtest'),
-            InlineKeyboardButton("📂 Reports", callback_data='reports'),
-        ])
-        
-        # Row 6: Help + Settings
-        keyboard.append([
-            InlineKeyboardButton("❓ Help", callback_data='help'),
-            InlineKeyboardButton("⚙️ Settings", callback_data='settings'),
-        ])
-        
-        # Row 7: Claude AI (if available)
-        if ANTHROPIC_AVAILABLE:
-            keyboard.append([
-                InlineKeyboardButton("🤖 Claude", callback_data='claude_hub'),
-            ])
+
+        # Row 3: Settings (secondary tools live inside)
+        keyboard.append([InlineKeyboardButton("⚙️ Settings", callback_data='settings')])
         
         return InlineKeyboardMarkup(keyboard)
     
@@ -6499,14 +6439,8 @@ class TelegramCommandHandler:
         if has_signals:
             keyboard.append([
                 InlineKeyboardButton("🔄 Refresh", callback_data='signals'),
-                InlineKeyboardButton("📊 Last Signal", callback_data='last_signal'),
             ])
-        # Always include main menu button
         keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='start')])
-        keyboard.append([
-            InlineKeyboardButton("📈 Performance", callback_data='performance'),
-            InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
-        ])
         return InlineKeyboardMarkup(keyboard)
 
     def _get_confirm_buttons(
@@ -6572,10 +6506,7 @@ class TelegramCommandHandler:
                 message += f"\n{start_result['details']}"
 
             reply_markup = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
-                    InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
-                ],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
             ])
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             return
@@ -6600,10 +6531,9 @@ class TelegramCommandHandler:
 
             reply_markup = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
                     InlineKeyboardButton("🔌 Gateway Status", callback_data="gateway_status"),
+                    InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
                 ],
-                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
             ])
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             return

@@ -47,6 +47,7 @@ PIDS=$(pgrep -f "telegram_command_handler")
 if [ -n "$PIDS" ]; then
     echo "⚠️  Command Handler is already running (PID: $PIDS)"
     echo "   Stop it first with: pkill -f telegram_command_handler"
+    echo "   Or restart safely with: ./scripts/telegram/restart_command_handler.sh --background"
     exit 1
 fi
 

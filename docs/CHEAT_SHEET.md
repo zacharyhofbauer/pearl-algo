@@ -48,6 +48,10 @@
    ```bash
    ./scripts/telegram/start_command_handler.sh
    ```
+   **Restart (stop + start):**
+   ```bash
+   ./scripts/telegram/restart_command_handler.sh --background
+   ```
 
 2. **From Telegram, run:**
    ```

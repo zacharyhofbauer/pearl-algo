@@ -38,7 +38,7 @@ from typing import Dict, List, Optional, Set, Tuple
 # ---------------------------------------------------------------------------
 
 # Layers under src/pearlalgo/
-LAYERS = {"utils", "config", "data_providers", "strategies", "execution", "learning", "nq_agent"}
+LAYERS = {"utils", "config", "data_providers", "strategies", "execution", "learning", "nq_agent", "claude_monitor", "miniapp"}
 
 # For each layer, which other pearlalgo.* layers it MAY import.
 # Imports of stdlib and third-party packages are always allowed.
@@ -50,6 +50,8 @@ ALLOWED_IMPORTS: Dict[str, Set[str]] = {
     "execution": {"execution", "config", "utils"},  # ATS execution layer
     "learning": {"learning", "config", "utils"},  # Adaptive learning layer
     "nq_agent": LAYERS,  # orchestration layer can import anything
+    "claude_monitor": {"claude_monitor", "config", "utils", "nq_agent", "strategies"},  # AI monitor (optional)
+    "miniapp": {"miniapp", "config", "utils", "nq_agent"},  # Telegram Mini App (optional)
 }
 
 

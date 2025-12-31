@@ -22,6 +22,9 @@ if [ -z "$PIDS" ]; then
     echo ""
     echo "Or use the helper script:"
     echo "  ./scripts/telegram/start_command_handler.sh"
+    echo ""
+    echo "To restart it (stop + start):"
+    echo "  ./scripts/telegram/restart_command_handler.sh --background"
     exit 1
 else
     echo "✅ Command Handler is running (PID: $PIDS)"
@@ -31,6 +34,9 @@ else
     echo ""
     echo "To stop it:"
     echo "  pkill -f telegram_command_handler"
+    echo ""
+    echo "To restart it (stop + start):"
+    echo "  ./scripts/telegram/restart_command_handler.sh --background"
     exit 0
 fi
 
