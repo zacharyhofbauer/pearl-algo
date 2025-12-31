@@ -71,6 +71,13 @@ class IBKRExecutionAdapter(ExecutionAdapter):
         self._last_request_time: float = 0.0
         self._min_request_interval = 0.2  # 200ms between requests
         
+        # Auto-reconnection settings
+        self._reconnect_attempts: int = 0
+        self._max_reconnect_attempts: int = 5
+        self._reconnect_delay_seconds: float = 10.0
+        self._last_connection_check: float = 0.0
+        self._connection_check_interval: float = 30.0  # Check every 30 seconds
+        
         logger.info(
             f"IBKRExecutionAdapter initialized: "
             f"host={config.ibkr_host}, port={config.ibkr_port}, "
@@ -138,30 +145,34 @@ class IBKRExecutionAdapter(ExecutionAdapter):
         # Initialize IB connection
         self._ib = IB()
         
-        # Connect
-        try:
-            self._ib.connect(
-                host=self.config.ibkr_host,
-                port=self.config.ibkr_port,
-                clientId=self.config.ibkr_trading_client_id,
-                timeout=10,
-            )
-            self._connected = True
-            logger.info(
-                f"Connected to IBKR Gateway for execution "
-                f"(client_id={self.config.ibkr_trading_client_id})"
-            )
-        except Exception as e:
-            logger.error(f"Failed to connect to IBKR Gateway: {e}")
-            self._connected = False
+        # Initial connection
+        self._attempt_connect()
         
         # Main loop
         while not self._shutdown_event.is_set():
             try:
+                # Periodic connection health check
+                now = time.time()
+                if now - self._last_connection_check > self._connection_check_interval:
+                    self._last_connection_check = now
+                    self._check_and_reconnect()
+                
                 # Get task from queue
                 try:
                     task = self._task_queue.get(timeout=0.5)
                 except queue.Empty:
+                    continue
+                
+                # Check connection before executing task
+                if not self._ib or not self._ib.isConnected():
+                    logger.warning(f"Cannot execute task {task.task_id}: not connected to IBKR")
+                    with self._results_lock:
+                        future = self._results.pop(task.task_id, None)
+                        if future:
+                            future.set_result({
+                                "success": False,
+                                "error": "Not connected to IBKR Gateway",
+                            })
                     continue
                 
                 # Execute task
@@ -205,6 +216,94 @@ class IBKRExecutionAdapter(ExecutionAdapter):
             pass
         
         logger.info("IBKR Execution thread stopped")
+    
+    def _attempt_connect(self) -> bool:
+        """
+        Attempt to connect to IBKR Gateway.
+        
+        Returns:
+            True if connected successfully, False otherwise
+        """
+        try:
+            self._ib.connect(
+                host=self.config.ibkr_host,
+                port=self.config.ibkr_port,
+                clientId=self.config.ibkr_trading_client_id,
+                timeout=10,
+            )
+            self._connected = True
+            self._reconnect_attempts = 0  # Reset on successful connect
+            logger.info(
+                f"Connected to IBKR Gateway for execution "
+                f"(client_id={self.config.ibkr_trading_client_id})"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to connect to IBKR Gateway: {e}")
+            self._connected = False
+            return False
+    
+    def _check_and_reconnect(self) -> None:
+        """
+        Check connection health and attempt reconnection if needed.
+        
+        Called periodically from the executor loop.
+        """
+        # Check if still connected
+        if self._ib and self._ib.isConnected():
+            # Connection is healthy
+            if not self._connected:
+                # Update flag if it was out of sync
+                self._connected = True
+                logger.info("IBKR connection confirmed healthy")
+            return
+        
+        # Connection lost - update flag
+        if self._connected:
+            self._connected = False
+            logger.warning("IBKR connection lost - will attempt reconnection")
+        
+        # Check if we've exceeded max attempts
+        if self._reconnect_attempts >= self._max_reconnect_attempts:
+            # Reset counter after some time to allow future reconnection attempts
+            logger.error(
+                f"Max reconnection attempts ({self._max_reconnect_attempts}) reached. "
+                f"Will retry later."
+            )
+            # Reset after 5 minutes to allow retry
+            self._reconnect_attempts = 0
+            return
+        
+        # Attempt reconnection
+        self._reconnect_attempts += 1
+        logger.warning(
+            f"Attempting IBKR reconnection ({self._reconnect_attempts}/{self._max_reconnect_attempts})..."
+        )
+        
+        # Wait before reconnecting
+        time.sleep(self._reconnect_delay_seconds)
+        
+        # Try to reconnect
+        try:
+            # Disconnect first if partially connected
+            if self._ib:
+                try:
+                    self._ib.disconnect()
+                except Exception:
+                    pass
+            
+            # Create new connection
+            self._ib = IB()
+            if self._attempt_connect():
+                logger.info(
+                    f"✅ IBKR reconnection successful after {self._reconnect_attempts} attempt(s)"
+                )
+            else:
+                logger.warning(
+                    f"IBKR reconnection attempt {self._reconnect_attempts} failed"
+                )
+        except Exception as e:
+            logger.error(f"Error during IBKR reconnection: {e}", exc_info=True)
     
     def _submit_task(self, task: Any) -> ConcurrentFuture:
         """Submit a task to the executor."""

@@ -278,10 +278,40 @@ Only run after intentional visual changes with explicit approval.
 
 ---
 
+## Optional Configuration
+
+### Mobile Readability Enhancement (P7)
+
+Enable larger RR box fonts for mobile viewing:
+
+```python
+config = ChartConfig(
+    mobile_enhanced_fonts=True,
+    rr_box_font_size=10,  # Default 9pt, set to 10 for mobile
+)
+```
+
+### Compact Label Mode (P6)
+
+Reduce label clutter on range-bound days:
+
+```python
+config = ChartConfig(
+    compact_labels=True,  # Reduces max_right_labels to 6, merge_ticks to 6
+)
+```
+
+**Note**: These options are disabled by default to preserve baseline stability and existing visual contracts.
+
+---
+
 ## Document History
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2025-12-31 | Added optional config: mobile_enhanced_fonts, compact_labels | AI Agent |
+| 2025-12-31 | Added font size and alpha constants for code clarity | AI Agent |
+| 2025-12-31 | Added z-order comments explaining layering rationale | AI Agent |
 | 2025-12-29 | Initial visual schema documentation | AI Agent |
 
 

@@ -1505,6 +1505,11 @@ class NQAgentTelegramNotifier:
             session_start = config_block.get("start_time") if isinstance(config_block, dict) else None
             session_end = config_block.get("end_time") if isinstance(config_block, dict) else None
             
+            # Extract data level from latest_bar for IBKR data quality visibility
+            data_level = None
+            if latest_bar and isinstance(latest_bar, dict):
+                data_level = latest_bar.get('_data_level')
+            
             message = format_home_card(
                 symbol=symbol,
                 time_str=time_str,
@@ -1545,6 +1550,8 @@ class NQAgentTelegramNotifier:
                 # v8 fields: config-driven session messaging
                 session_start=session_start,
                 session_end=session_end,
+                # v9 field: IBKR data level indicator
+                data_level=data_level,
             )
 
             # Optional: recent exits (compact transparency for push dashboards).

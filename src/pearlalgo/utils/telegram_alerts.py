@@ -724,6 +724,8 @@ def format_home_card(
     active_trades_count: int = 0,  # Number of currently active positions
     active_trades_unrealized_pnl: float | None = None,  # Total unrealized PnL across active trades (USD)
     active_trades_price_source: str | None = None,  # e.g., "level1", "historical"
+    # Data level indicator (v9 - IBKR data quality visibility)
+    data_level: str | None = None,  # e.g., "level1", "historical", "unknown"
     # Data staleness (v6 - separate from state staleness)
     data_age_minutes: float | None = None,  # Age of market data in minutes
     data_stale_threshold_minutes: float = 10.0,  # Minutes; show warning if older
@@ -795,6 +797,7 @@ def format_home_card(
         quiet_reason: Why agent is quiet (e.g., "StrategySessionClosed", "NoOpportunity")
         buy_sell_pressure: Buy/Sell pressure proxy string (volume-based)
         active_trades_count: Number of currently active positions (shown when > 0)
+        data_level: Data level indicator ("level1", "historical", "unknown") for IBKR visibility
         data_age_minutes: Age of market data in minutes (for v2 staleness callout)
         data_stale_threshold_minutes: Threshold in minutes for showing stale warning (default: 10)
         session_start: Session start time in HH:MM format (e.g., "18:00") for config-driven messaging
@@ -824,6 +827,21 @@ def format_home_card(
         lines.append(price_line)
         if sparkline:
             lines.append(f"`{sparkline}`")
+
+    # Data level indicator (v9 - IBKR data quality visibility)
+    # Show data source when not level1 to alert operators of degraded state
+    data_level_normalized = (data_level or "").lower()
+    if data_level_normalized and data_level_normalized != "level1":
+        if data_level_normalized in ("historical", "historical_fallback"):
+            lines.append(f"📜 *Data:* Historical fallback")
+        elif data_level_normalized == "error":
+            lines.append(f"❌ *Data:* Fetch error")
+        elif data_level_normalized == "unknown":
+            lines.append(f"❓ *Data:* Unknown source")
+    elif data_level_normalized == "level1":
+        # Only show Level 1 indicator when agent is running and data is fresh
+        # Skip for calm/minimal display when healthy
+        pass
 
     lines.append("")  # Blank line separator
 

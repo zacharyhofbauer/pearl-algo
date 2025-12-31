@@ -1,141 +1,172 @@
 # Prompts Directory
 
-This directory contains reusable AI prompts for daily development tasks with the PearlAlgo codebase.
+This directory contains reusable AI promptbooks for daily development tasks with the PearlAlgo codebase.
 
-## Purpose
+## Quick Start (One-Paste Workflow)
 
-These prompts are designed to be copied and used with AI coding assistants (Cursor, Continue.dev, etc.) to provide consistent, high-quality guidance for common development workflows.
+For fast, efficient sessions, use the **Engineering Promptbook** as your single entrypoint:
 
-## Available Prompts
+1. Open `promptbook_engineering.md`
+2. Edit the **RUN CONFIGURATION** block at the top:
+   - Set `RUN_MODE`: `FAST`, `STANDARD`, or `DEEP`
+   - Set `RUN_SCOPE`: `engineering`, `trading`, `ux`, or `all`
+   - Toggle individual phases on/off
+3. Copy and paste into your AI assistant
+4. The promptbook orchestrates everything automatically
 
-### `project_cleanup.md`
-Comprehensive prompt for codebase cleanup, consolidation, and validation tasks. Use this when:
-- Cleaning up technical debt
-- Consolidating duplicate code
-- Removing unused files and references
-- Validating code/test/documentation alignment
-- Refining project structure
+**Example configurations:**
 
-**When to use:** Periodic codebase hygiene sessions, after major feature additions, or when technical debt becomes noticeable.
+```
+# Quick cleanup session
+RUN_MODE: FAST
+RUN_SCOPE: engineering
+RUN_CLEANUP: true
+RUN_BUILDING: false
+RUN_TESTS: false
 
-### `project_building.md`
-Forward-looking prompt for architectural evolution and continuous improvement. Use this when:
-- Exploring improvement opportunities
-- Proposing enhancements to existing functionality
-- Discussing architectural evolution
-- Identifying long-term opportunities
-- Challenging assumptions and constraints
+# Full multi-domain session
+RUN_MODE: STANDARD
+RUN_SCOPE: all
+```
 
-**When to use:** When the codebase is clean and stable, and you're ready to evolve and improve the system. Complements project_cleanup.md - use cleanup first, then building.
+## Available Promptbooks
 
-### `full_testing.md`
-Comprehensive testing and verification strategy for validating system reliability. Use this when:
-- Designing comprehensive test strategies
-- Discovering edge cases and failure modes
-- Stress-testing critical paths
-- Validating correctness and reliability
-- Proving system behavior under various conditions
+### `promptbook_engineering.md` (Entrypoint/Orchestrator)
 
-**When to use:** When you need to validate reliability, discover edge cases, or design comprehensive test coverage. Works alongside cleanup and building prompts - test what you build and clean.
+The main promptbook for development sessions. Handles:
+- Project cleanup (dead code, duplicates, broken references)
+- Project building (architectural evolution, improvements)
+- Testing (coverage analysis, test additions)
+- **Orchestration**: Can invoke Trading and UX promptbooks via `RUN_SCOPE`
 
-### `telegram_suite.md`
-Telegram UI/UX analysis and improvement prompt for the trading bot interface. Use this when:
-- Analyzing Telegram message clarity and usability
-- Improving trader confidence and comprehension
-- Refining message formats and layouts
-- Enhancing command discoverability
-- Optimizing mobile experience
+**When to use:** Start here for any development session. Set `RUN_SCOPE=all` for comprehensive multi-domain work.
 
-**When to use:** When you need to improve the Telegram bot interface, message clarity, or user experience. Focuses on UI/UX only - backend logic changes should use project_building.md.
+### `promptbook_trading.md`
 
-### `charting_suite.md`
-Chart generation and visualization integrity prompt for trading charts. Use this when:
-- Analyzing chart visual clarity and trader trust
-- Improving chart readability and consistency
-- Refining visual schema and color semantics
-- Enhancing chart layout and information hierarchy
-- Validating visual regressions
+Trading system verification and improvement. Handles:
+- **Backtesting**: Signal existence, condition blocking, regime analysis
+- **NQ Agent**: Lifecycle verification, state consistency, observability
+- **ATS Execution**: Safety audit, kill switch verification, learning review
 
-**When to use:** When you need to improve chart visualization, preserve visual integrity, or validate chart changes. Focuses on chart rendering only - signal logic changes should use project_building.md.
+**When to use:** Standalone for trading-focused sessions, or invoked via Engineering promptbook with `RUN_SCOPE=trading` or `RUN_SCOPE=all`.
 
-### `nq_agent.md`
-NQ Agent verification and performance stewardship prompt. Use this when:
-- Continuously verifying agent behavior and reliability
-- Monitoring agent performance and health
-- Testing agent lifecycle and state consistency
-- Validating signal generation integrity
-- Fine-tuning agent parameters and behavior
+### `promptbook_ux.md`
 
-**When to use:** When you need to verify, monitor, or fine-tune the trading agent. Focuses on agent verification and performance - strategy changes should use project_building.md.
+User experience surfaces. Handles:
+- **Telegram**: Message clarity, interaction quality, command UX
+- **Charting**: Visual integrity, schema verification, trust contracts
 
-### `backtesting_upgrades.md`
-Backtesting and strategy validation prompt. Use this when:
-- Evaluating strategy signal existence and frequency
-- Validating strategy behavior across market regimes
-- Analyzing condition blocking and over-filtering
-- Testing trade lifecycle under historical replay
-- Improving backtest observability and explainability
+**When to use:** Standalone for UX-focused sessions, or invoked via Engineering promptbook with `RUN_SCOPE=ux` or `RUN_SCOPE=all`.
 
-**When to use:** When you need to validate and improve strategy backtesting, verify signal generation, or analyze strategy behavior. Focuses on backtesting and validation - strategy changes should use project_building.md.
+## Run Modes
 
-### `ats_execution.md`
-Automated Trading System (ATS) execution and learning prompt. Use this when:
-- Reviewing execution safety guards and precondition checks
-- Analyzing adaptive learning (bandit policy) behavior
-- Improving kill switch and emergency controls
-- Tuning learning parameters (thresholds, explore rate)
-- Planning safe rollout stages (shadow → paper → live)
-- Adding new safety checks or control mechanisms
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `FAST` | Quick scan, high-level findings, skip deep analysis | Daily checks, quick audits |
+| `STANDARD` | Balanced depth, full workflow | Regular development sessions |
+| `DEEP` | Thorough analysis, all verifications, longer runtime | Pre-release, comprehensive audits |
 
-**When to use:** When you need to analyze, improve, or extend the automated execution system or adaptive learning layer. Focuses on execution safety and learning - signal generation changes should use project_building.md, Telegram UI changes should use telegram_suite.md.
+## Run Scopes (Engineering Promptbook)
 
-### `master_task_prompt.md`
-All-in-one “offline session” prompt that orchestrates the full workflow end-to-end (cleanup → verification → backtesting → ATS safety → Telegram UX → charting integrity → agent verification → testing). Use this when:
-- You want **one big prompt** to drive a multi-hour autonomous session
-- The operator will be away/unavailable and you want the agent to both **execute safe work** and **leave a clear plan/report**
+| Scope | What It Runs |
+|-------|--------------|
+| `engineering` | Cleanup + Building + Testing only |
+| `trading` | Reads and executes `promptbook_trading.md` |
+| `ux` | Reads and executes `promptbook_ux.md` |
+| `all` | Engineering + Trading + UX (full session) |
 
-**When to use:** When you want a single orchestrator prompt that references and sequences the other prompts, rather than choosing one workflow prompt at a time.
+## Self-Healing (Prompt Drift Audit)
 
-## Usage
+All promptbooks include a **Prompt Drift Audit** phase that:
+- Checks for referenced file paths that don't exist
+- Verifies commands match repository scripts
+- Detects contradictions with `docs/PROJECT_SUMMARY.md`
+- Proposes patches for approval (does NOT auto-apply)
 
-1. Open the relevant prompt file
-2. Copy the entire contents
-3. Paste into your AI assistant's prompt/chat interface
-4. The prompt will guide the AI through the task with appropriate context and constraints
+Enable with `RUN_PROMPT_DRIFT_AUDIT: true` to keep prompts aligned with the codebase.
 
-## Adding New Prompts
+## Usage Patterns
 
-When adding prompts from other tools (e.g., Continue.dev):
+### Daily Development Session
+```
+promptbook_engineering.md
+RUN_MODE: STANDARD
+RUN_SCOPE: engineering
+```
 
-1. Create a new `.md` file with a descriptive name (use underscores: `prompt_name.md`)
-2. Keep prompts focused on specific tasks or workflows
-3. Include:
-   - Clear purpose and authority level
-   - Project context specific to PearlAlgo
-   - Structured instructions
-   - Required output format (if applicable)
-4. Update this README to list the new prompt
+### Pre-Trading Session Check
+```
+promptbook_trading.md
+RUN_MODE: FAST
+RUN_BACKTESTING: false
+RUN_NQ_AGENT_VERIFICATION: true
+RUN_ATS_SAFETY_AUDIT: true
+```
 
-## Prompt Maintenance
+### Comprehensive Multi-Domain Session
+```
+promptbook_engineering.md
+RUN_MODE: STANDARD
+RUN_SCOPE: all
+```
 
-Prompts are reviewed and refined during codebase cleanup sessions (see `project_cleanup.md` section 8). They should:
-- Stay aligned with current project structure
-- Reference correct file paths and conventions
-- Remain clear and actionable
-- Avoid redundancy and contradiction
+### UX-Focused Improvement Session
+```
+promptbook_ux.md
+RUN_MODE: STANDARD
+RUN_TELEGRAM_AUDIT: true
+RUN_CHARTING_AUDIT: true
+```
 
-Only update prompts when there's a clear issue or outdated reference. Don't change working prompts for style preferences.
+## Key Concepts
+
+### Lane A vs Lane B
+
+All promptbooks use a two-lane system:
+
+- **LANE A (Safe Now)**: Changes the agent can implement autonomously
+  - Dead code removal, formatting fixes, test additions
+  - Observability improvements, documentation fixes
+  
+- **LANE B (Needs Review)**: Changes requiring human approval
+  - Strategy logic changes, risk parameter modifications
+  - State schema changes, semantic changes to messages/charts
+
+### Sources of Truth
+
+1. `docs/PROJECT_SUMMARY.md` - Architecture, state schema (highest authority)
+2. `promptbook_engineering.md` - Global constraints, orchestration
+3. Domain promptbooks - Scope-specific constraints
+
+### Required Outputs
+
+Every promptbook run produces:
+- Executive summary
+- What changed (file-level)
+- Verification results
+- Domain-specific findings
+- Prompt drift audit (if enabled)
+- Open issues / follow-ups (prioritized)
 
 ## Best Practices
 
-- **Keep prompts focused**: One prompt per specific workflow or task type
-- **Document intent**: Include a brief description of what the prompt does and when to use it
-- **Version control**: Prompts are version-controlled with the codebase
-- **Test in practice**: Use prompts and refine based on actual results
-- **Stay project-specific**: Include relevant PearlAlgo context (architecture, conventions, file paths)
+- **Start with Engineering**: Use `promptbook_engineering.md` as your entrypoint
+- **Set appropriate mode**: Use `FAST` for quick checks, `STANDARD` for regular work
+- **Enable drift audit**: Keep `RUN_PROMPT_DRIFT_AUDIT: true` to maintain prompt accuracy
+- **Review LANE B items**: Don't skip the "needs review" items in the output
+- **Apply drift patches**: When the audit proposes patches, review and apply them
+
+## Prompt Maintenance
+
+Prompts are self-healing via the Prompt Drift Audit. When drift is detected:
+
+1. The audit outputs a proposed patch
+2. Review the patch for correctness
+3. Apply if appropriate
+4. Commit the updated promptbook
+
+This keeps prompts aligned with the evolving codebase without manual maintenance.
 
 ---
 
-**Note:** These prompts are living documents. They should evolve as the project evolves, but changes should be intentional and justified.
-
-
+**Note:** These promptbooks are living documents. The self-healing mechanism helps them evolve with the project automatically.

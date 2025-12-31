@@ -1,6 +1,6 @@
 # AI Session Log
 
-> Auto-generated artifact log for AI-assisted sessions per `docs/prompts/master_task_prompt.md`.
+> Auto-generated artifact log for AI-assisted sessions per `docs/prompts/promptbook_engineering.md`.
 
 ---
 

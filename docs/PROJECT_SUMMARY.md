@@ -1,7 +1,7 @@
 # Project Summary - PearlAlgo MNQ Trading Agent
 
-**Version:** 0.2.1  
-**Last Updated:** 2025-12-30 (Hygiene Pass)  
+**Version:** 0.2.2  
+**Last Updated:** 2025-12-31 (IBKR Data Quality & Observability)  
 **Status:** Production-Ready  
 **Trading Style:** Prop Firm - Intraday Swings & Quick Scalps
 
@@ -587,6 +587,8 @@ It is read by the Telegram command handler (`/status`), the external watchdog, a
 - `config.symbol`, `config.timeframe`, `config.scan_interval` - Trading config
 - `cadence_metrics.*` - Cycle timing metrics (duration, percentiles, missed cycles)
 - `latest_bar.*` - Latest bar OHLCV data (for order book transparency)
+  - `latest_bar._data_level` - Data source indicator: `"level1"` (live real-time), `"historical"` (delayed fallback), `"error"`, or `"unknown"`
+  - `latest_bar._data_source` - Internal data source tracking: `"real-time"`, `"historical"`, `"historical_fallback"`, `"provider"`, `"fallback"`, `"unknown"`
 - `buy_sell_pressure`, `buy_sell_pressure_raw` - Volume pressure indicators
 
 ---
@@ -1026,7 +1028,7 @@ ExecStartPost=/bin/sh -c 'until curl -sf http://localhost:9100/healthz; do sleep
 ### Ranked Opportunity Clusters
 
 The following opportunity clusters are ranked by leverage and risk, updated as of 2025-12-30.
-Use `docs/prompts/project_building.md` cycle template for structured improvement iterations.
+Use `docs/prompts/promptbook_engineering.md` for structured improvement iterations.
 
 #### 1. Operational Risk (Highest Leverage)
 
@@ -1291,7 +1293,7 @@ The system is ready for production use and optimized for prop firm trading with 
 - `docs/GATEWAY.md` - IBKR Gateway setup
 - `docs/MARKET_DATA_SUBSCRIPTION.md` - How to get live market data (fix Error 354)
 
-**Last Updated:** 2025-12-30  
+**Last Updated:** 2025-12-31  
 **Current Configuration:** MNQ (Mini NQ) - Prop Firm Style Trading
 
 

@@ -50,11 +50,39 @@ POWER_CHANNEL_RESISTANCE = "#ff00ff"  # ChartPrime power channel upper - fuchsia
 POWER_CHANNEL_SUPPORT = "#00ff00"  # ChartPrime power channel lower - lime
 
 # Z-order constants for layering (lower = further back)
+# Session shading is ambient background - never obscures price data
 ZORDER_SESSION_SHADING = 0
+# Supply/demand zones, power channel, RR boxes - structural context behind candles
 ZORDER_ZONES = 1
+# Key levels, VWAP bands, S/R lines - reference lines visible but not dominant
 ZORDER_LEVEL_LINES = 2
-ZORDER_CANDLES = 3  # mplfinance default
+# Candlesticks - primary price data, always visible (mplfinance default)
+ZORDER_CANDLES = 3
+# Right labels, session names, RR text - critical info, never hidden
 ZORDER_TEXT_LABELS = 4
+
+# Font size constants (in points) - for consistent text sizing across chart elements
+FONT_SIZE_LABEL = 9           # Right-side level labels
+FONT_SIZE_SESSION = 8         # Session names (Tokyo/London/NY)
+FONT_SIZE_POWER_READOUT = 10  # Power channel buy/sell readout
+FONT_SIZE_RR_BOX = 9          # Risk/reward box USD labels
+FONT_SIZE_LEGEND = 8          # Dashboard legend text
+FONT_SIZE_TITLE = 14          # Equity curve chart title
+FONT_SIZE_SUMMARY = 10        # Performance summary text
+
+# Alpha (opacity) constants - for consistent transparency across chart elements
+# Low alpha values ensure zones don't obscure candles (visual contract)
+ALPHA_ZONE_SUPPLY_DEMAND = 0.18  # Supply/demand zone fills
+ALPHA_ZONE_POWER_CHANNEL = 0.10  # Power channel zone fills
+ALPHA_ZONE_RR_BOX_PROFIT = 0.20  # RR box profit zone
+ALPHA_ZONE_RR_BOX_RISK = 0.22    # RR box risk zone
+ALPHA_SESSION_SHADING = 0.08     # Session background shading
+ALPHA_LINE_PRIMARY = 0.9         # Entry line, primary levels
+ALPHA_LINE_SECONDARY = 0.7       # Stop/target, secondary levels
+ALPHA_LINE_CONTEXTUAL = 0.55     # S/R, session averages
+ALPHA_VWAP_BAND_1 = 0.35         # VWAP ±1 sigma bands
+ALPHA_VWAP_BAND_2 = 0.25         # VWAP ±2 sigma bands
+ALPHA_LEGEND_BG = 0.6            # Legend background
 
 
 def _stabilize_matplotlib_rcparams() -> None:
@@ -127,6 +155,19 @@ class ChartConfig:
     show_rsi: bool = True
     rsi_period: int = 14
 
+    # Optional mobile readability enhancement (P7 from visual integrity plan)
+    # When True, uses 10pt font for RR box labels (vs default 9pt) for better
+    # mobile readability on Telegram. Default False to preserve baseline stability.
+    mobile_enhanced_fonts: bool = False
+    rr_box_font_size: int = 9  # Default 9pt, set to 10 for mobile enhancement
+
+    # Compact label mode (P6 from visual integrity plan)
+    # When True, reduces label clutter for range-bound days:
+    # - max_right_labels reduced to 6 (from 12)
+    # - right_label_merge_ticks increased to 6 (from 4)
+    # Default False to preserve current behavior.
+    compact_labels: bool = False
+
     @classmethod
     def from_strategy_config(cls, strategy_config) -> "ChartConfig":
         """Create ChartConfig from NQIntradayConfig (or any object with hud_* attrs)."""
@@ -152,6 +193,9 @@ class ChartConfig:
             "hud_right_label_merge_ticks": "right_label_merge_ticks",
             "hud_show_rsi": "show_rsi",
             "hud_rsi_period": "rsi_period",
+            "hud_mobile_enhanced_fonts": "mobile_enhanced_fonts",
+            "hud_rr_box_font_size": "rr_box_font_size",
+            "hud_compact_labels": "compact_labels",
         }
         
         for src_attr, dst_attr in attr_map.items():
@@ -767,7 +811,7 @@ class ChartGenerator:
                 transform=trans,
                 ha="left",
                 va="center",
-                fontsize=9,
+                fontsize=FONT_SIZE_LABEL,
                 color=TEXT_PRIMARY,
                 bbox=dict(facecolor=rgba, edgecolor="none", boxstyle="round,pad=0.25"),
                 clip_on=False,
@@ -889,7 +933,7 @@ class ChartGenerator:
                         label,
                         ha="left",
                         va="bottom",
-                        fontsize=8,
+                        fontsize=FONT_SIZE_SESSION,
                         color=color,
                         alpha=0.9,
                         zorder=ZORDER_TEXT_LABELS,
@@ -919,12 +963,12 @@ class ChartGenerator:
             d_bot = float(demand.get("bottom", 0.0) or 0.0)
 
             if s_top > 0 and s_bot > 0 and s_top > s_bot:
-                ax.axhspan(s_bot, s_top, facecolor=sup_color, alpha=0.18, edgecolor="none", zorder=ZORDER_ZONES)
+                ax.axhspan(s_bot, s_top, facecolor=sup_color, alpha=ALPHA_ZONE_SUPPLY_DEMAND, edgecolor="none", zorder=ZORDER_ZONES)
                 ax.axhline(float(supply.get("avg", (s_top + s_bot) / 2.0)), color=sup_color, linewidth=1.0, alpha=0.7, zorder=ZORDER_ZONES)
                 ax.axhline(float(supply.get("wavg", (s_top + s_bot) / 2.0)), color=sup_color, linewidth=1.0, alpha=0.7, linestyle="--", zorder=ZORDER_ZONES)
 
             if d_top > 0 and d_bot > 0 and d_top > d_bot:
-                ax.axhspan(d_bot, d_top, facecolor=dem_color, alpha=0.18, edgecolor="none", zorder=ZORDER_ZONES)
+                ax.axhspan(d_bot, d_top, facecolor=dem_color, alpha=ALPHA_ZONE_SUPPLY_DEMAND, edgecolor="none", zorder=ZORDER_ZONES)
                 ax.axhline(float(demand.get("avg", (d_top + d_bot) / 2.0)), color=dem_color, linewidth=1.0, alpha=0.7, zorder=ZORDER_ZONES)
                 ax.axhline(float(demand.get("wavg", (d_top + d_bot) / 2.0)), color=dem_color, linewidth=1.0, alpha=0.7, linestyle="--", zorder=ZORDER_ZONES)
         except Exception:
@@ -949,10 +993,10 @@ class ChartGenerator:
             mid = float(pc.get("mid", 0.0) or 0.0)
 
             if res_top > 0 and res_bot > 0 and res_top > res_bot:
-                ax.axhspan(res_bot, res_top, facecolor=t_col, alpha=0.10, edgecolor="none", zorder=ZORDER_ZONES)
-                ax.axhline(res_top, color=t_col, linewidth=1.2, alpha=0.7, zorder=ZORDER_ZONES)
+                ax.axhspan(res_bot, res_top, facecolor=t_col, alpha=ALPHA_ZONE_POWER_CHANNEL, edgecolor="none", zorder=ZORDER_ZONES)
+                ax.axhline(res_top, color=t_col, linewidth=1.2, alpha=ALPHA_LINE_SECONDARY, zorder=ZORDER_ZONES)
             if sup_top > 0 and sup_bot > 0 and sup_top > sup_bot:
-                ax.axhspan(sup_bot, sup_top, facecolor=b_col, alpha=0.10, edgecolor="none", zorder=ZORDER_ZONES)
+                ax.axhspan(sup_bot, sup_top, facecolor=b_col, alpha=ALPHA_ZONE_POWER_CHANNEL, edgecolor="none", zorder=ZORDER_ZONES)
                 ax.axhline(sup_bot, color=b_col, linewidth=1.2, alpha=0.7, zorder=ZORDER_ZONES)
             if mid > 0:
                 ax.axhline(mid, color=TEXT_SECONDARY, linewidth=1.0, alpha=0.45, linestyle=":", zorder=ZORDER_ZONES)
@@ -970,7 +1014,7 @@ class ChartGenerator:
                     transform=ax.transAxes,
                     ha="left",
                     va="top",
-                    fontsize=10,
+                    fontsize=FONT_SIZE_POWER_READOUT,
                     color=TEXT_PRIMARY,
                     alpha=0.85,
                     zorder=ZORDER_TEXT_LABELS,
@@ -1003,7 +1047,7 @@ class ChartGenerator:
                 transform=ax.get_yaxis_transform(),
                 ha="left",
                 va="center",
-                fontsize=9,
+                fontsize=FONT_SIZE_LABEL,
                 color=TEXT_PRIMARY,
                 bbox=dict(facecolor=mcolors.to_rgba(col, alpha=0.35), edgecolor="none", boxstyle="round,pad=0.25"),
                 clip_on=False,
@@ -1055,8 +1099,8 @@ class ChartGenerator:
                 handles,
                 labels,
                 loc="upper left",
-                fontsize=8,
-                framealpha=0.6,
+                fontsize=FONT_SIZE_LEGEND,
+                framealpha=ALPHA_LEGEND_BG,
                 facecolor=DARK_BG,
                 edgecolor=GRID_COLOR,
                 labelcolor=TEXT_PRIMARY,
@@ -1114,6 +1158,8 @@ class ChartGenerator:
         ax.fill_between([x_start, x_end], reward_y0, reward_y1, color=SIGNAL_LONG, alpha=0.20, zorder=ZORDER_ZONES)
 
         # Labels (use ZORDER_TEXT_LABELS for visibility)
+        # Use configurable font size (default 9pt, optionally 10pt for mobile enhancement)
+        rr_font_size = self.config.rr_box_font_size if self.config.mobile_enhanced_fonts else FONT_SIZE_RR_BOX
         x_mid = x_start + (x_end - x_start) / 2
         ax.text(
             x_mid,
@@ -1121,7 +1167,7 @@ class ChartGenerator:
             f"+{reward_usd:.0f} USD\nR:R {rr:.2f}",
             ha="center",
             va="center",
-            fontsize=9,
+            fontsize=rr_font_size,
             color=TEXT_PRIMARY,
             bbox=dict(facecolor=mcolors.to_rgba(SIGNAL_LONG, alpha=0.22), edgecolor="none", boxstyle="round,pad=0.25"),
             zorder=ZORDER_TEXT_LABELS,
@@ -1132,7 +1178,7 @@ class ChartGenerator:
             f"-{risk_usd:.0f} USD",
             ha="center",
             va="center",
-            fontsize=9,
+            fontsize=rr_font_size,
             color=TEXT_PRIMARY,
             bbox=dict(facecolor=mcolors.to_rgba(SIGNAL_SHORT, alpha=0.22), edgecolor="none", boxstyle="round,pad=0.25"),
             zorder=ZORDER_TEXT_LABELS,
@@ -1184,13 +1230,20 @@ class ChartGenerator:
         if self.config.show_right_labels:
             tick_size = float(hud.get("tick_size") or 0.25)
             candidates, current_price = self._collect_level_candidates(df, signal, hud, extra_levels=extra_levels)
-            merged = self._merge_levels(candidates, tick_size=tick_size, merge_ticks=int(self.config.right_label_merge_ticks))
+            
+            # Apply compact label mode if enabled (P6 visual integrity plan)
+            # Reduces clutter on range-bound days by merging more aggressively
+            # and showing fewer labels
+            merge_ticks = 6 if self.config.compact_labels else int(self.config.right_label_merge_ticks)
+            max_labels = 6 if self.config.compact_labels else int(self.config.max_right_labels)
+            
+            merged = self._merge_levels(candidates, tick_size=tick_size, merge_ticks=merge_ticks)
             self._draw_right_labels(
                 fig,
                 ax_price,
                 merged,
                 current_price=current_price,
-                max_labels=int(self.config.max_right_labels),
+                max_labels=max_labels,
             )
     
     def generate_entry_chart(
@@ -1873,7 +1926,7 @@ class ChartGenerator:
             )
             ax_equity.axhline(0, color=TEXT_SECONDARY, linestyle='--', linewidth=1, alpha=0.5)
             ax_equity.set_ylabel('Cumulative P&L ($)', color=TEXT_PRIMARY)
-            ax_equity.set_title(title, color=TEXT_PRIMARY, fontsize=14, pad=15)
+            ax_equity.set_title(title, color=TEXT_PRIMARY, fontsize=FONT_SIZE_TITLE, pad=15)
             ax_equity.grid(True, alpha=0.2, color=GRID_COLOR)
             ax_equity.tick_params(colors=TEXT_PRIMARY)
             
@@ -1903,7 +1956,7 @@ class ChartGenerator:
                     0.02, 0.98,
                     stats_text,
                     transform=ax_equity.transAxes,
-                    fontsize=10,
+                    fontsize=FONT_SIZE_SUMMARY,
                     verticalalignment='top',
                     bbox=dict(boxstyle='round', facecolor=DARK_BG, alpha=0.8, edgecolor=GRID_COLOR),
                     color=TEXT_PRIMARY,

@@ -21,12 +21,16 @@ class DataQualityChecker:
     Provides methods to validate data freshness, completeness, and quality.
     """
 
+    # Market-closed staleness threshold (60 minutes) - expected when markets are closed
+    MARKET_CLOSED_STALE_THRESHOLD_MINUTES = 60
+
     def __init__(self, stale_data_threshold_minutes: int = 10):
         """
         Initialize data quality checker.
         
         Args:
             stale_data_threshold_minutes: Threshold in minutes for considering data stale
+                                          (used when market is open)
         """
         self.stale_data_threshold_minutes = stale_data_threshold_minutes
 
@@ -34,19 +38,28 @@ class DataQualityChecker:
         self,
         latest_bar: Optional[Dict],
         df: Optional[pd.DataFrame] = None,
+        market_open: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Check if data is fresh (not stale).
         
+        Uses market-aware thresholds:
+        - When market is open (market_open=True): strict threshold (default 10 min)
+        - When market is closed (market_open=False): relaxed threshold (60 min)
+        - When market_open=None: uses strict threshold (default behavior)
+        
         Args:
             latest_bar: Latest bar dictionary with timestamp
             df: DataFrame with timestamp column or DatetimeIndex (optional, used as fallback)
+            market_open: Whether the futures market is currently open (None = use strict threshold)
             
         Returns:
             Dictionary with:
             - is_fresh: bool - Whether data is fresh
             - age_minutes: float - Age of data in minutes
             - timestamp: Optional[datetime] - Timestamp of latest data
+            - threshold_minutes: float - The threshold used for freshness check
+            - market_aware: bool - Whether market-aware threshold was applied
         """
         now = datetime.now(timezone.utc)
         timestamp: Optional[datetime] = None
@@ -88,12 +101,24 @@ class DataQualityChecker:
                         timestamp = timestamp.replace(tzinfo=timezone.utc)
                     age_minutes = (now - timestamp).total_seconds() / 60
 
-        is_fresh = age_minutes < self.stale_data_threshold_minutes
+        # Market-aware threshold selection
+        # When market is closed, stale data is expected - use relaxed threshold
+        # When market is open (or unknown), use strict threshold
+        if market_open is False:
+            threshold = self.MARKET_CLOSED_STALE_THRESHOLD_MINUTES
+            market_aware = True
+        else:
+            threshold = self.stale_data_threshold_minutes
+            market_aware = market_open is not None
+
+        is_fresh = age_minutes < threshold
 
         return {
             "is_fresh": is_fresh,
             "age_minutes": age_minutes,
             "timestamp": timestamp,
+            "threshold_minutes": threshold,
+            "market_aware": market_aware,
         }
 
     def check_data_completeness(self, df: pd.DataFrame) -> Dict[str, Any]:

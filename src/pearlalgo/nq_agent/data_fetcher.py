@@ -136,11 +136,17 @@ class NQAgentDataFetcher:
                 logger.warning(f"Data contains missing values: {missing_dict}")
 
             # Check for stale data using DataQualityChecker
+            # Note: This check uses default threshold (strict). Market-aware threshold is applied
+            # at service level where market status is available.
             freshness_check = self.data_quality_checker.check_data_freshness(None, df)
             data_freshness_warning = not freshness_check["is_fresh"]
             if data_freshness_warning:
                 age_minutes = freshness_check["age_minutes"]
-                logger.warning(f"Data may be stale: latest historical bar is {age_minutes:.1f} minutes old (market may be closed or data subscription issue)")
+                threshold = freshness_check.get("threshold_minutes", self.stale_data_threshold_minutes)
+                logger.info(
+                    f"Historical data age: {age_minutes:.1f} min (threshold: {threshold} min). "
+                    f"May be expected if market is closed, or indicates data subscription issue if market is open."
+                )
 
             # Update buffer if we have data (bars-only contract: only real OHLCV bars).
             if not df.empty:
@@ -322,6 +328,18 @@ class NQAgentDataFetcher:
             
             # Add data source metadata to latest_bar for tracking
             latest_bar["_data_source"] = data_source
+            
+            # Add data level indicator for operator visibility (state.json + Telegram dashboard)
+            # Maps _data_source to user-friendly level: "level1" (live) vs "historical" (delayed)
+            data_level_map = {
+                "real-time": "level1",
+                "historical": "historical",
+                "historical_fallback": "historical",
+                "provider": "unknown",
+                "fallback": "error",
+                "unknown": "unknown",
+            }
+            latest_bar["_data_level"] = data_level_map.get(data_source, "unknown")
 
             # Update buffer from historical data ONLY (bars-only contract).
             # We do NOT append latest_bar as a synthetic row - that would pollute

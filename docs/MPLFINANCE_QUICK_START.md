@@ -143,6 +143,26 @@ Baseline images are stored in: `tests/fixtures/charts/`
 - `exit_baseline.png`
 - `backtest_baseline.png`
 - `on_demand_chart_12h_baseline.png`
+- `mobile_dashboard_baseline.png`
+
+### Additional test suites
+
+```bash
+# Cross-timeframe consistency tests (22 tests)
+pytest tests/test_cross_timeframe_chart_consistency.py -v
+
+# Mobile chart visual regression tests (8 tests)
+pytest tests/test_mobile_chart_visual_regression.py -v
+
+# Edge case stress tests (14 tests)
+pytest tests/test_chart_edge_cases.py -v
+```
+
+### Generating mobile baseline
+
+```bash
+python3 scripts/testing/generate_mobile_baseline.py
+```
 
 ### Visual Schema Reference
 

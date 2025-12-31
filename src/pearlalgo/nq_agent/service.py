@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -274,6 +274,14 @@ class NQAgentService:
                 logger.debug("Execution layer not available (import failed)")
             else:
                 logger.info("Execution adapter disabled (execution.enabled=false)")
+        
+        # Track last trading day for daily counter reset
+        self._last_trading_day: Optional[date] = None
+        
+        # Track execution connection state for alerts (avoid duplicate alerts)
+        self._execution_was_connected: Optional[bool] = None
+        self._last_connection_alert_time: Optional[datetime] = None
+        self._connection_alert_cooldown_seconds: int = 300  # 5 minutes between alerts
 
         # ==========================================================================
         # LEARNING (Adaptive Bandit Policy)
@@ -483,6 +491,12 @@ class NQAgentService:
         while not self.shutdown_requested:
             # Check for execution control flag files (from Telegram commands)
             await self._check_execution_control_flags()
+            
+            # Reset execution daily counters if new trading day
+            self._check_daily_reset()
+            
+            # Check execution adapter connection health and alert on issues
+            await self._check_execution_health()
             
             # Adaptive cadence: compute effective interval for this cycle
             if self._adaptive_cadence_enabled:
@@ -1216,6 +1230,15 @@ class NQAgentService:
                                 )
                             except Exception as policy_err:
                                 logger.debug(f"Could not record policy outcome: {policy_err}")
+                        
+                        # Update execution adapter's daily PnL for kill switch threshold
+                        # This ensures max_daily_loss limit triggers correctly
+                        if self.execution_adapter is not None:
+                            try:
+                                self.execution_adapter.update_daily_pnl(pnl_value)
+                                logger.debug(f"Updated execution daily PnL: {pnl_value:.2f}")
+                            except Exception as pnl_err:
+                                logger.debug(f"Could not update execution daily PnL: {pnl_err}")
 
                         # Optional: send Telegram EXIT notification (with chart) for virtual trades.
                         # This is config-gated to preserve default "no Telegram spam" behavior.
@@ -2102,6 +2125,104 @@ class NQAgentService:
         except Exception as e:
             logger.error(f"Error sending error notification: {e}")
 
+    def _check_daily_reset(self) -> None:
+        """
+        Reset execution daily counters at start of new trading day.
+        
+        This ensures:
+        - _orders_today counter resets to 0 each day
+        - _daily_pnl resets to 0.0 each day (for kill switch threshold)
+        - Per-signal-type cooldowns clear
+        
+        Called at start of each scan cycle in the main loop.
+        """
+        if self.execution_adapter is None:
+            return
+        
+        today = datetime.now(timezone.utc).date()
+        
+        if self._last_trading_day is None:
+            # First cycle - initialize but don't reset (may be mid-day startup)
+            self._last_trading_day = today
+            return
+        
+        if self._last_trading_day != today:
+            # New trading day - reset counters
+            self.execution_adapter.reset_daily_counters()
+            logger.info(
+                f"Execution daily counters reset for {today} "
+                f"(previous day: {self._last_trading_day})"
+            )
+            self._last_trading_day = today
+
+    async def _check_execution_health(self) -> None:
+        """
+        Check execution adapter connection health and send alerts on state changes.
+        
+        Sends Telegram alert when:
+        - Connection is lost (was connected, now disconnected)
+        - Connection is restored (was disconnected, now connected)
+        
+        Deduplicates alerts using cooldown to prevent spam.
+        """
+        if self.execution_adapter is None:
+            return
+        
+        # Only check if execution is enabled
+        if self._execution_config is None or not self._execution_config.enabled:
+            return
+        
+        is_connected = self.execution_adapter.is_connected()
+        now = datetime.now(timezone.utc)
+        
+        # Initialize state on first check
+        if self._execution_was_connected is None:
+            self._execution_was_connected = is_connected
+            return
+        
+        # Check for state change
+        if is_connected != self._execution_was_connected:
+            # Check cooldown to avoid alert spam
+            should_alert = True
+            if self._last_connection_alert_time is not None:
+                elapsed = (now - self._last_connection_alert_time).total_seconds()
+                if elapsed < self._connection_alert_cooldown_seconds:
+                    should_alert = False
+            
+            if should_alert:
+                self._last_connection_alert_time = now
+                
+                if is_connected:
+                    # Connection restored
+                    message = (
+                        "✅ *IBKR Execution Connected*\n\n"
+                        "Connection to IBKR Gateway has been restored.\n"
+                        f"Execution adapter is now {'armed' if self.execution_adapter.armed else 'disarmed'}."
+                    )
+                    logger.info("IBKR execution connection restored")
+                else:
+                    # Connection lost
+                    message = (
+                        "🔴 *IBKR Execution Disconnected*\n\n"
+                        "⚠️ Connection to IBKR Gateway has been lost.\n\n"
+                        "• Orders cannot be placed\n"
+                        "• Auto-reconnection will be attempted\n"
+                        "• Use `/positions` to check status"
+                    )
+                    logger.warning("IBKR execution connection lost")
+                
+                # Send Telegram alert
+                try:
+                    await self.telegram_notifier.telegram.send_message(
+                        message,
+                        parse_mode="Markdown",
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send connection alert: {e}")
+            
+            # Update state
+            self._execution_was_connected = is_connected
+
     async def _check_execution_control_flags(self) -> None:
         """
         Check for execution control flag files (from Telegram commands).
@@ -2416,11 +2537,21 @@ class NQAgentService:
         latest_bar_age_minutes = None
         data_fresh = None
         latest_bar = None
+        
+        # Get market status for market-aware freshness check
+        futures_market_open: Optional[bool] = None
+        try:
+            futures_market_open = bool(get_market_hours().is_market_open())
+        except Exception:
+            pass
+        
         try:
             last_market_data = getattr(self.data_fetcher, "_last_market_data", None) or {}
+            # Use market-aware freshness check to avoid false "stale" warnings when market is closed
             freshness = self.data_quality_checker.check_data_freshness(
                 last_market_data.get("latest_bar"),
                 last_market_data.get("df"),
+                market_open=futures_market_open,
             )
             ts = freshness.get("timestamp")
             if ts:
@@ -2551,10 +2682,8 @@ class NQAgentService:
             "run_id": run_id,
             "version": version,
         }
-        try:
-            state["futures_market_open"] = bool(get_market_hours().is_market_open())
-        except Exception:
-            state["futures_market_open"] = None
+        # Reuse futures_market_open from earlier check (avoid duplicate API call)
+        state["futures_market_open"] = futures_market_open
         try:
             state["strategy_session_open"] = bool(self.strategy.scanner.is_market_hours())
         except Exception:
