@@ -230,3 +230,4 @@ class PerformanceResponse(BaseModel):
     recent_exits: List[SignalSummary] = Field(default_factory=list)
 
 
+

@@ -510,3 +510,4 @@ def get_data_provider() -> MiniAppDataProvider:
     return MiniAppDataProvider()
 
 
+

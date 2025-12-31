@@ -287,3 +287,4 @@ class CodeAnalyzer:
             return f"{len(findings)} minor issues noted"
 
 
+

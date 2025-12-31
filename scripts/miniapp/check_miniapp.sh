@@ -79,3 +79,4 @@ echo "   Stop:   ./scripts/miniapp/stop_miniapp.sh"
 echo "   Logs:   tail -f $PROJECT_ROOT/logs/miniapp.log"
 
 
+
