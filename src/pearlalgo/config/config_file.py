@@ -170,6 +170,8 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     # ATS execution + learning layers (kept separate from strategy logic)
     "execution",
     "learning",
+    # Claude AI monitor
+    "claude_monitor",
 })
 
 # Config keys expected to be specific types after env substitution

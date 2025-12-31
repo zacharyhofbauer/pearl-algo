@@ -4898,15 +4898,34 @@ class TelegramCommandHandler:
     # Claude Hub (mobile Cursor-like AI assistant)
     # -------------------------------------------------------------------------
     
-    def _get_claude_hub_buttons(self, chat_mode_enabled: bool = False) -> InlineKeyboardMarkup:
+    def _get_claude_hub_buttons(self, chat_mode_enabled: bool = False, show_monitor: bool = False) -> InlineKeyboardMarkup:
         """Generate Claude hub inline keyboard buttons."""
         chat_toggle_text = "💬 Chat: ON ✓" if chat_mode_enabled else "💬 Chat: OFF"
-        keyboard = [
-            [InlineKeyboardButton(chat_toggle_text, callback_data='claude_chat_toggle')],
-            [InlineKeyboardButton("🧩 Patch Wizard", callback_data='claude_patch_wizard')],
-            [InlineKeyboardButton("🧼 Reset Chat", callback_data='claude_reset')],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
-        ]
+        
+        if show_monitor:
+            # Claude Monitor view
+            keyboard = [
+                [InlineKeyboardButton("📊 Analyze Now", callback_data='claude_analyze_now')],
+                [
+                    InlineKeyboardButton("📈 Signals", callback_data='claude_analyze_signals'),
+                    InlineKeyboardButton("🔧 System", callback_data='claude_analyze_system'),
+                ],
+                [
+                    InlineKeyboardButton("📉 Market", callback_data='claude_analyze_market'),
+                    InlineKeyboardButton("💡 Suggest", callback_data='claude_suggest_config'),
+                ],
+                [InlineKeyboardButton("📋 Suggestions", callback_data='claude_suggestions')],
+                [InlineKeyboardButton("⬅️ Back to Hub", callback_data='claude_hub')],
+            ]
+        else:
+            # Main Claude hub view
+            keyboard = [
+                [InlineKeyboardButton(chat_toggle_text, callback_data='claude_chat_toggle')],
+                [InlineKeyboardButton("🧩 Patch Wizard", callback_data='claude_patch_wizard')],
+                [InlineKeyboardButton("🔍 AI Monitor", callback_data='claude_monitor_hub')],
+                [InlineKeyboardButton("🧼 Reset Chat", callback_data='claude_reset')],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
+            ]
         return InlineKeyboardMarkup(keyboard)
     
     def _get_claude_wizard_files_buttons(
@@ -5144,6 +5163,42 @@ class TelegramCommandHandler:
         
         # Re-render the hub
         await self._handle_ai_hub(update, context)
+    
+    async def _handle_claude_monitor_hub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show Claude Monitor hub with analysis options."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        logger.info(f"📡 Claude Monitor hub requested from {update.effective_chat.id}")
+        
+        # Get monitor status
+        monitor = self._get_claude_monitor()
+        
+        if not monitor:
+            message = (
+                "🔍 *AI Monitor*\n\n"
+                "⚠️ Claude Monitor not fully available.\n"
+                "Check that `anthropic` package is installed.\n\n"
+                "_The analysis commands below will work with limited features._"
+            )
+        else:
+            stats = monitor.monitor_state.get_stats()
+            claude_ok = "✅" if monitor._claude else "⚠️"
+            
+            message = (
+                "🔍 *AI Monitor*\n\n"
+                f"{claude_ok} Claude API: `{'available' if monitor._claude else 'limited'}`\n"
+                f"📊 Analyses: `{stats.get('analysis_count', 0)}`\n"
+                f"💡 Suggestions: `{stats.get('active_suggestions', 0)}` active\n\n"
+                "*Analyze your trading agent:*"
+            )
+        
+        await self._send_message_or_edit(
+            update, context,
+            message,
+            reply_markup=self._get_claude_hub_buttons(show_monitor=True),
+        )
     
     async def _handle_claude_patch_wizard_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start the patch wizard - ask for task description."""
@@ -6748,6 +6803,21 @@ class TelegramCommandHandler:
             await self._handle_claude_generate_patch(update, context)
         elif callback_data == 'claude_refine_search':
             await self._handle_claude_refine_search(update, context)
+        # Claude Monitor callbacks
+        elif callback_data == 'claude_monitor_hub':
+            await self._handle_claude_monitor_hub(update, context)
+        elif callback_data == 'claude_analyze_now':
+            await self._handle_analyze_now(update, context)
+        elif callback_data == 'claude_analyze_signals':
+            await self._handle_analyze_signals(update, context)
+        elif callback_data == 'claude_analyze_system':
+            await self._handle_analyze_system(update, context)
+        elif callback_data == 'claude_analyze_market':
+            await self._handle_analyze_market(update, context)
+        elif callback_data == 'claude_suggest_config':
+            await self._handle_suggest_config(update, context)
+        elif callback_data == 'claude_suggestions':
+            await self._handle_suggestions(update, context)
         else:
             await query.edit_message_text(f"❌ Unknown action: {callback_data}")
     
