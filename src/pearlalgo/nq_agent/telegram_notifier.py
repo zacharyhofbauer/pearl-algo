@@ -185,6 +185,7 @@ class NQAgentTelegramNotifier:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     signal_id = str(signal.get("signal_id", "") or "")
                     keyboard = []
+                    show_nav = self.prefs.dashboard_buttons if self.prefs else False
                     if signal_id:
                         keyboard.append([
                             InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
@@ -192,7 +193,18 @@ class NQAgentTelegramNotifier:
                         ])
                     else:
                         keyboard.append([InlineKeyboardButton("🔔 Signals", callback_data="signals")])
-                    keyboard.append([InlineKeyboardButton("📊 Status", callback_data="status")])
+                    # Optional quick-nav row (reduces scrolling by making latest alert navigable)
+                    # Reuses the existing "Dashboard Buttons" preference (default off).
+                    if show_nav:
+                        keyboard.append(
+                            [
+                                InlineKeyboardButton("🏠 Menu", callback_data="start"),
+                                InlineKeyboardButton("📈 Performance", callback_data="performance"),
+                                InlineKeyboardButton("🎯 Trades", callback_data="active_trades"),
+                            ]
+                        )
+                    else:
+                        keyboard.append([InlineKeyboardButton("📊 Status", callback_data="status")])
                     reply_markup = InlineKeyboardMarkup(keyboard)
                 except Exception as e:
                     logger.debug(f"Could not build signal buttons: {e}")
@@ -822,12 +834,21 @@ class NQAgentTelegramNotifier:
             if handler_running:
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    show_nav = self.prefs.dashboard_buttons if self.prefs else False
                     keyboard = [
                         [
                             InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
                             InlineKeyboardButton("📊 Active", callback_data="active_trades"),
                         ],
                     ]
+                    if show_nav:
+                        keyboard.append(
+                            [
+                                InlineKeyboardButton("🏠 Menu", callback_data="start"),
+                                InlineKeyboardButton("📈 Performance", callback_data="performance"),
+                                InlineKeyboardButton("🔔 Signals", callback_data="signals"),
+                            ]
+                        )
                     reply_markup = InlineKeyboardMarkup(keyboard)
                 except Exception:
                     reply_markup = None
@@ -948,13 +969,23 @@ class NQAgentTelegramNotifier:
             if handler_running:
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    show_nav = self.prefs.dashboard_buttons if self.prefs else False
                     keyboard = [
                         [
                             InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
                             InlineKeyboardButton("📈 Performance", callback_data="performance"),
                         ],
-                        [InlineKeyboardButton("🔔 Signals", callback_data="signals")],
                     ]
+                    if show_nav:
+                        keyboard.append(
+                            [
+                                InlineKeyboardButton("🏠 Menu", callback_data="start"),
+                                InlineKeyboardButton("🎯 Trades", callback_data="active_trades"),
+                                InlineKeyboardButton("🔔 Signals", callback_data="signals"),
+                            ]
+                        )
+                    else:
+                        keyboard.append([InlineKeyboardButton("🔔 Signals", callback_data="signals")])
                     reply_markup = InlineKeyboardMarkup(keyboard)
                 except Exception:
                     reply_markup = None

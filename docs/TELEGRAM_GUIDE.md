@@ -248,7 +248,7 @@ Customize your Telegram UI preferences. Changes take effect immediately.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **Dashboard Buttons** | Off | Add quick-action buttons (Menu/Activity/Data Quality) to push dashboards |
+| **Dashboard Buttons** | Off | Add quick-action navigation buttons to dashboards and signal/trade alerts |
 | **Expanded Signal Details** | Off | Show full context (regime, MTF, VWAP) by default in signal details |
 | **Auto-Chart on Signal** | Off | Automatically generate and send chart with each signal alert |
 | **Snooze Non-Critical Alerts** | Off | Temporarily suppress non-critical data quality alerts (1 hour) |

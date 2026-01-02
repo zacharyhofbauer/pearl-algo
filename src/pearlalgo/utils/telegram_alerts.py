@@ -1032,7 +1032,7 @@ class TelegramPrefs:
     
     # Descriptions for settings UI
     DESCRIPTIONS = {
-        "dashboard_buttons": "Add Menu/Activity/Data Quality buttons to push dashboards",
+        "dashboard_buttons": "Add quick nav buttons to dashboards & signal/trade alerts",
         "signal_detail_expanded": "Show full context (regime, MTF, VWAP) in signal details by default",
         "auto_chart_on_signal": "Automatically generate and send chart with each signal alert",
         "snooze_noncritical_alerts": "Temporarily suppress non-critical data quality alerts (1 hour)",

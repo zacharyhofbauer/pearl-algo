@@ -775,7 +775,7 @@ class TelegramCommandHandler:
         
         # Dashboard buttons
         message += f"{toggle_icon('dashboard_buttons')} *Dashboard Buttons*\n"
-        message += "   Add quick-action buttons to push dashboards\n\n"
+        message += "   Add quick-action navigation buttons to dashboards & alerts\n\n"
         
         # Signal detail verbosity
         message += f"{toggle_icon('signal_detail_expanded')} *Expanded Signal Details*\n"
