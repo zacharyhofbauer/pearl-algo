@@ -145,6 +145,9 @@ You should see:
 
 | Command | Description |
 |---------|-------------|
+| `/start_monitor` | Start Claude monitor background service (daily reports + proactive alerts) |
+| `/stop_monitor` | Stop Claude monitor background service |
+| `/monitor_status` | Show monitor service status (alias/quick check) |
 | `/claude_status` | Show Claude monitor health & recent insights |
 | `/claude_reports` | Configure daily/weekly report settings |
 
@@ -214,6 +217,7 @@ All configuration is in `config/config.yaml` under `claude_monitor:`.
 ```yaml
 claude_monitor:
   enabled: true                        # Master toggle
+  timezone: "America/New_York"         # Timezone for reports + quiet hours (default: ET)
   
   # Monitoring intervals
   realtime_monitoring: true            # Every 60 seconds
@@ -227,7 +231,7 @@ claude_monitor:
 claude_monitor:
   # Daily report
   daily_report_enabled: true
-  daily_report_time: "09:00"           # ET timezone
+  daily_report_time: "09:00"           # Time in claude_monitor.timezone
   
   # Weekly report
   weekly_report_enabled: true
@@ -250,8 +254,8 @@ claude_monitor:
   max_alerts_per_hour: 20
   
   # Quiet hours
-  quiet_hours_start: "22:00"
-  quiet_hours_end: "07:00"
+  quiet_hours_start: "22:00"           # Time in claude_monitor.timezone
+  quiet_hours_end: "07:00"             # Time in claude_monitor.timezone
   suppress_info_during_quiet: true
 ```
 

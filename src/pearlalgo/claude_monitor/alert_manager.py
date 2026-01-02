@@ -17,6 +17,11 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp
 
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
+
 
 class AlertLevel(Enum):
     """Alert severity levels."""
@@ -121,6 +126,7 @@ class AlertManager:
         dedup_window_seconds: int = 900,  # 15 minutes
         quiet_start: Optional[str] = None,  # "22:00"
         quiet_end: Optional[str] = None,    # "07:00"
+        timezone_name: Optional[str] = None,
         suppress_info_during_quiet: bool = True,
         max_alerts_per_hour: int = 20,
         escalation_threshold: int = 3,  # Warnings before escalation
@@ -139,6 +145,15 @@ class AlertManager:
         self.dedup_window = timedelta(seconds=dedup_window_seconds)
         self.quiet_start = quiet_start
         self.quiet_end = quiet_end
+        self.timezone_name = str(timezone_name or "UTC")
+        self._tzinfo = timezone.utc
+        if ZoneInfo is not None:
+            try:
+                self._tzinfo = ZoneInfo(self.timezone_name)
+            except Exception:
+                logger.warning(f"Invalid timezone for AlertManager: {self.timezone_name}; falling back to UTC")
+                self.timezone_name = "UTC"
+                self._tzinfo = timezone.utc
         self.suppress_info_during_quiet = suppress_info_during_quiet
         self.max_alerts_per_hour = max_alerts_per_hour
         self.escalation_threshold = escalation_threshold
@@ -319,7 +334,11 @@ class AlertManager:
             start_h, start_m = map(int, self.quiet_start.split(":"))
             end_h, end_m = map(int, self.quiet_end.split(":"))
             
-            current = now.hour * 60 + now.minute
+            try:
+                local_now = now.astimezone(self._tzinfo)
+            except Exception:
+                local_now = now
+            current = local_now.hour * 60 + local_now.minute
             start = start_h * 60 + start_m
             end = end_h * 60 + end_m
             
@@ -355,6 +374,7 @@ class AlertManager:
             "active_dedup_entries": len(self._recent_alerts),
             "suppressed_count": len(self._suppressed),
             "warning_counts": dict(self._warning_counts),
+            "timezone": self.timezone_name,
         }
     
     def create_alert(

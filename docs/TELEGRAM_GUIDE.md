@@ -26,11 +26,16 @@ It combines quick start steps, command setup, and command behavior.
    start_agent - Start NQ Agent Service
    stop_agent - Stop NQ Agent Service
    restart_agent - Restart NQ Agent Service
+   start_monitor - Start Claude monitor service
+   stop_monitor - Stop Claude monitor service
+   monitor_status - Show monitor service status
    status - Get current agent status
    activity - Is the bot doing anything?
    signals - Show recent signals
    last_signal - Show most recent signal with chart
    active_trades - Show currently open positions
+   backtest - Run strategy backtest with chart
+   reports - Browse saved backtest reports
    performance - Show performance metrics
    data_quality - Check data freshness and quality
    config - Show key configuration values (read-only)
@@ -38,6 +43,19 @@ It combines quick start steps, command setup, and command behavior.
    glossary - Explain key terms (Scans, Signals, Gates, etc.)
    chart - Generate on-demand price chart
    settings - Customize Telegram UI preferences
+   ai - Open Claude AI hub
+   ai_on - Enable Claude chat mode
+   ai_off - Disable Claude chat mode
+   ai_reset - Reset Claude chat history
+   claude_status - Show Claude monitor status
+   analyze_now - Run full AI analysis now
+   analyze_signals - AI: analyze signal quality
+   analyze_system - AI: analyze system health
+   analyze_market - AI: analyze market conditions
+   suggest_config - AI: suggest config tuning
+   suggestions - AI: list active suggestions
+   apply_suggestion - AI: apply a suggestion by id
+   claude_reports - Show AI report schedule
    ai_patch - Generate code patch via Claude (requires setup)
    help - Show available commands
    ```
@@ -693,12 +711,12 @@ The bot features a **fully UI-driven interface** with inline keyboard buttons. N
 - Button layout:
   - **Stop Agent** / **Restart** (if agent running)
   - **Start Agent** (if agent stopped)
-  - **Gateway ✅/🟡/❌** / **Refresh** (tri-state: ready / authenticating / stopped)
-  - **Last Signal** / **Active Trades** / **Activity**
+  - **Gateway 🔌 ✅/🟡/❌** (tri-state: ready / authenticating / stopped)
+  - **Last Signal** / **Trades**
+  - **Activity** / **Data Quality**
   - **Signals** / **Performance**
-  - **Data Quality** / **Health**
-  - **Config** / **Backtest** / **Reports**
-  - **Help** / **Settings**
+  - **Backtest** / **Reports**
+  - **Settings** (includes Help, Config, Claude hub)
 
 **Signals View:**
 - Access via `/signals` or "🔔 Signals" button

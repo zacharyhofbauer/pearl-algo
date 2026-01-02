@@ -49,6 +49,8 @@ class MonitorState:
         self._alert_count = 0
         self._suggestion_count = 0
         self._applied_count = 0
+        self._last_daily_report_sent_at: Optional[str] = None
+        self._last_weekly_report_sent_at: Optional[str] = None
         
         # Load existing state
         self._load_state()
@@ -63,6 +65,8 @@ class MonitorState:
                     self._alert_count = state.get("alert_count", 0)
                     self._suggestion_count = state.get("suggestion_count", 0)
                     self._applied_count = state.get("applied_count", 0)
+                    self._last_daily_report_sent_at = state.get("last_daily_report_sent_at")
+                    self._last_weekly_report_sent_at = state.get("last_weekly_report_sent_at")
                     logger.debug(f"Loaded monitor state: {self._analysis_count} analyses, {self._applied_count} applied")
             
             if self.suggestions_file.exists():
@@ -81,12 +85,32 @@ class MonitorState:
                 "alert_count": self._alert_count,
                 "suggestion_count": self._suggestion_count,
                 "applied_count": self._applied_count,
+                "last_daily_report_sent_at": self._last_daily_report_sent_at,
+                "last_weekly_report_sent_at": self._last_weekly_report_sent_at,
                 "last_updated": get_utc_timestamp(),
             }
             with open(self.monitor_state_file, "w") as f:
                 json.dump(state, f, indent=2)
         except Exception as e:
             logger.error(f"Could not save monitor state: {e}")
+
+    def get_last_daily_report_sent_at(self) -> Optional[str]:
+        """Return the last daily report sent timestamp (UTC ISO) if known."""
+        return self._last_daily_report_sent_at
+
+    def set_last_daily_report_sent_at(self, timestamp: str) -> None:
+        """Persist the last daily report sent timestamp (UTC ISO)."""
+        self._last_daily_report_sent_at = timestamp
+        self._save_state()
+
+    def get_last_weekly_report_sent_at(self) -> Optional[str]:
+        """Return the last weekly report sent timestamp (UTC ISO) if known."""
+        return self._last_weekly_report_sent_at
+
+    def set_last_weekly_report_sent_at(self, timestamp: str) -> None:
+        """Persist the last weekly report sent timestamp (UTC ISO)."""
+        self._last_weekly_report_sent_at = timestamp
+        self._save_state()
     
     def record_analysis(
         self,

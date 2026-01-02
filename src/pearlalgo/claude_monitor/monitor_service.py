@@ -27,6 +27,12 @@ from pearlalgo.claude_monitor.alert_manager import AlertManager, Alert, AlertLev
 from pearlalgo.claude_monitor.suggestion_engine import SuggestionEngine, Suggestion
 from pearlalgo.claude_monitor.monitor_state import MonitorState
 
+# Timezone handling (Python 3.9+)
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
+
 # Claude client (optional [llm] extra)
 try:
     from pearlalgo.utils.claude_client import ClaudeClient, get_claude_client, ANTHROPIC_AVAILABLE
@@ -68,6 +74,17 @@ class ClaudeMonitorService:
         self.telegram_bot_token = telegram_bot_token
         self.telegram_chat_id = telegram_chat_id
         self.config = config or {}
+
+        # Timezone for reports + quiet hours. Config comments default to ET.
+        self.timezone_name = str(self.config.get("timezone") or "America/New_York")
+        self._tzinfo = timezone.utc
+        if ZoneInfo is not None:
+            try:
+                self._tzinfo = ZoneInfo(self.timezone_name)
+            except Exception:
+                logger.warning(f"Invalid claude_monitor.timezone: {self.timezone_name}; falling back to UTC")
+                self.timezone_name = "UTC"
+                self._tzinfo = timezone.utc
         
         # Initialize Claude client
         self._claude: Optional[ClaudeClient] = None
@@ -83,6 +100,7 @@ class ClaudeMonitorService:
             dedup_window_seconds=self.config.get("dedup_window_seconds", 900),
             quiet_start=self.config.get("quiet_hours_start"),
             quiet_end=self.config.get("quiet_hours_end"),
+            timezone_name=self.timezone_name,
             suppress_info_during_quiet=self.config.get("suppress_info_during_quiet", True),
             max_alerts_per_hour=self.config.get("max_alerts_per_hour", 20),
         )
@@ -117,11 +135,31 @@ class ClaudeMonitorService:
         
         # Tracking
         self._last_analysis: Optional[datetime] = None
-        self._last_daily_report: Optional[datetime] = None
-        self._last_weekly_report: Optional[datetime] = None
+        self._last_daily_report: Optional[datetime] = self._parse_utc_ts(self.monitor_state.get_last_daily_report_sent_at())
+        self._last_weekly_report: Optional[datetime] = self._parse_utc_ts(self.monitor_state.get_last_weekly_report_sent_at())
         self._cycle_count = 0
         
         logger.info("Claude Monitor Service initialized")
+
+    def _parse_utc_ts(self, ts: Optional[str]) -> Optional[datetime]:
+        """Parse a stored UTC ISO timestamp into an aware datetime (UTC)."""
+        if not ts:
+            return None
+        try:
+            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return None
+
+    def _local_now(self, now_utc: Optional[datetime] = None) -> datetime:
+        """Return 'now' in the configured monitor timezone."""
+        now_utc = now_utc or datetime.now(timezone.utc)
+        try:
+            return now_utc.astimezone(self._tzinfo)
+        except Exception:
+            return now_utc
     
     def _init_claude_client(self) -> None:
         """Initialize Claude client if available."""
@@ -389,55 +427,72 @@ class ClaudeMonitorService:
             if self._should_send_daily_report(now):
                 await self._send_daily_report()
                 self._last_daily_report = now
+                self.monitor_state.set_last_daily_report_sent_at(get_utc_timestamp())
         
         # Check weekly report
         if self.weekly_report_enabled:
             if self._should_send_weekly_report(now):
                 await self._send_weekly_report()
                 self._last_weekly_report = now
+                self.monitor_state.set_last_weekly_report_sent_at(get_utc_timestamp())
     
     def _should_send_daily_report(self, now: datetime) -> bool:
         """Check if daily report should be sent."""
+        local_now = self._local_now(now)
+
+        # Don't send more than once per local day
         if self._last_daily_report:
-            # Don't send more than once per day
-            if (now - self._last_daily_report) < timedelta(hours=20):
-                return False
-        
-        # Check if it's the right time (approximate)
+            try:
+                if self._local_now(self._last_daily_report).date() == local_now.date():
+                    return False
+            except Exception:
+                pass
+
+        # Check time window (within 15 minutes after configured HH:MM)
         try:
-            hour, minute = map(int, self.daily_report_time.split(":"))
-            if now.hour == hour and now.minute < 15:  # Within first 15 min of hour
-                return True
-        except (ValueError, AttributeError):
-            pass
-        
-        return False
+            hour, minute = map(int, str(self.daily_report_time).split(":"))
+        except Exception:
+            return False
+
+        target = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        delta = (local_now - target).total_seconds()
+        return 0 <= delta < 15 * 60
     
     def _should_send_weekly_report(self, now: datetime) -> bool:
         """Check if weekly report should be sent."""
+        local_now = self._local_now(now)
+
+        # Don't send more than once per local day (prevents duplicates on restarts)
         if self._last_weekly_report:
-            if (now - self._last_weekly_report) < timedelta(days=6):
-                return False
-        
-        # Check day of week
+            try:
+                if self._local_now(self._last_weekly_report).date() == local_now.date():
+                    return False
+            except Exception:
+                pass
+
+        # Check day of week (local)
         days = {
-            "monday": 0, "tuesday": 1, "wednesday": 2,
-            "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6
+            "monday": 0,
+            "tuesday": 1,
+            "wednesday": 2,
+            "thursday": 3,
+            "friday": 4,
+            "saturday": 5,
+            "sunday": 6,
         }
-        target_day = days.get(self.weekly_report_day.lower(), 0)
-        
-        if now.weekday() != target_day:
+        target_day = days.get(str(self.weekly_report_day).lower(), 0)
+        if local_now.weekday() != target_day:
             return False
-        
-        # Check time
+
+        # Check time window (within 15 minutes after configured HH:MM)
         try:
-            hour, minute = map(int, self.weekly_report_time.split(":"))
-            if now.hour == hour and now.minute < 15:
-                return True
-        except (ValueError, AttributeError):
-            pass
-        
-        return False
+            hour, minute = map(int, str(self.weekly_report_time).split(":"))
+        except Exception:
+            return False
+
+        target = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        delta = (local_now - target).total_seconds()
+        return 0 <= delta < 15 * 60
     
     async def _send_daily_report(self) -> None:
         """Generate and send daily report."""

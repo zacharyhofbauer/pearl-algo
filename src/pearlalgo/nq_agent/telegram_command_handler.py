@@ -83,6 +83,7 @@ try:
         ClaudeAPIError,
         ANTHROPIC_AVAILABLE,
         get_claude_client,
+        build_chat_system_prompt,
     )
 except ImportError:
     ANTHROPIC_AVAILABLE = False
@@ -92,6 +93,7 @@ except ImportError:
     ClaudeAPIKeyMissingError = Exception  # type: ignore
     ClaudeAPIError = Exception  # type: ignore
     get_claude_client = lambda: None  # type: ignore
+    build_chat_system_prompt = lambda system_snapshot=None: ""  # type: ignore
 
 
 class TelegramCommandHandler:
@@ -203,6 +205,9 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("start_agent", self._handle_start_agent))
         self.application.add_handler(CommandHandler("stop_agent", self._handle_stop_agent))
         self.application.add_handler(CommandHandler("restart_agent", self._handle_restart_agent))
+        self.application.add_handler(CommandHandler("start_monitor", self._handle_claude_monitor_start))
+        self.application.add_handler(CommandHandler("stop_monitor", self._handle_claude_monitor_stop))
+        self.application.add_handler(CommandHandler("monitor_status", self._handle_claude_status))
         
         # AI/LLM commands (optional, requires [llm] extra)
         self.application.add_handler(CommandHandler("ai_patch", self._handle_ai_patch))
@@ -4473,6 +4478,16 @@ class TelegramCommandHandler:
             escaped_details = escape_subprocess_output(result['details'])
             message += f"\n{escaped_details}"
 
+        # Optional: ensure Claude Monitor is running (daily reports + proactive suggestions)
+        if result.get("success"):
+            try:
+                monitor_result = await self.service_controller.start_claude_monitor(background=True)
+                message += f"\n\n{monitor_result.get('message', '').strip()}"
+                if monitor_result.get("details"):
+                    message += f"\n{escape_subprocess_output(monitor_result['details'])}"
+            except Exception as e:
+                message += f"\n\n⚠️ Claude Monitor start failed: {str(e)[:120]}"
+
         # Add gateway status warning if needed
         gateway_status = self.service_controller.get_gateway_status()
         gateway_running = gateway_status.get("process_running", False)
@@ -4871,7 +4886,18 @@ class TelegramCommandHandler:
         
         if show_monitor:
             # Claude Monitor view
+            try:
+                monitor_running = bool(self.service_controller.get_claude_monitor_status().get("running"))
+            except Exception:
+                monitor_running = False
+
+            monitor_btn_text = "⏹️ Stop Monitor" if monitor_running else "▶️ Start Monitor"
+            monitor_btn_action = "claude_monitor_stop" if monitor_running else "claude_monitor_start"
             keyboard = [
+                [
+                    InlineKeyboardButton(monitor_btn_text, callback_data=monitor_btn_action),
+                    InlineKeyboardButton("🔄 Refresh", callback_data="claude_monitor_hub"),
+                ],
                 [InlineKeyboardButton("📊 Analyze Now", callback_data='claude_analyze_now')],
                 [
                     InlineKeyboardButton("📈 Signals", callback_data='claude_analyze_signals'),
@@ -5139,12 +5165,23 @@ class TelegramCommandHandler:
         
         logger.info(f"📡 Claude Monitor hub requested from {update.effective_chat.id}")
         
-        # Get monitor status
+        # Monitor service status (daily reports + proactive alerts require the service)
+        svc_status = {}
+        try:
+            svc_status = self.service_controller.get_claude_monitor_status()
+        except Exception:
+            svc_status = {}
+        svc_running = bool(svc_status.get("running"))
+        svc_pid = svc_status.get("pid")
+
+        # Analyzer availability (on-demand analysis works even if service is stopped)
         monitor = self._get_claude_monitor()
         
         if not monitor:
             message = (
                 "🔍 *AI Monitor*\n\n"
+                f"{'🟢' if svc_running else '⚪'} Service: `{'running' if svc_running else 'stopped'}`"
+                f"{f' (PID {svc_pid})' if svc_pid else ''}\n\n"
                 "⚠️ Claude Monitor not fully available.\n"
                 "Check that `anthropic` package is installed.\n\n"
                 "_The analysis commands below will work with limited features._"
@@ -5155,14 +5192,66 @@ class TelegramCommandHandler:
             
             message = (
                 "🔍 *AI Monitor*\n\n"
+                f"{'🟢' if svc_running else '⚪'} Service: `{'running' if svc_running else 'stopped'}`"
+                f"{f' (PID {svc_pid})' if svc_pid else ''}\n"
                 f"{claude_ok} Claude API: `{'available' if monitor._claude else 'limited'}`\n"
+                f"🕒 Timezone: `{getattr(monitor, 'timezone_name', 'n/a')}`\n"
                 f"📊 Analyses: `{stats.get('analysis_count', 0)}`\n"
                 f"💡 Suggestions: `{stats.get('active_suggestions', 0)}` active\n\n"
-                "*Analyze your trading agent:*"
+                "*Analyze your trading agent:*\n"
+                "_Tip: Start the service to get daily reports + proactive alerts._"
             )
         
         await self._send_message_or_edit(
             update, context,
+            message,
+            reply_markup=self._get_claude_hub_buttons(show_monitor=True),
+        )
+
+    async def _handle_claude_monitor_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Start the Claude Monitor service (background)."""
+        if not await self._check_authorized(update):
+            return
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            "▶️ Starting *Claude Monitor*...\n\nThis runs in the background and sends daily reports + proactive alerts.",
+            reply_markup=None,
+        )
+
+        result = await self.service_controller.start_claude_monitor(background=True)
+        message = f"{result.get('message', 'Done')}\n"
+        if result.get("details"):
+            message += f"\n{escape_subprocess_output(result['details'])}"
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            message,
+            reply_markup=self._get_claude_hub_buttons(show_monitor=True),
+        )
+
+    async def _handle_claude_monitor_stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Stop the Claude Monitor service."""
+        if not await self._check_authorized(update):
+            return
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            "⏹️ Stopping *Claude Monitor*...",
+            reply_markup=None,
+        )
+
+        result = await self.service_controller.stop_claude_monitor()
+        message = f"{result.get('message', 'Done')}\n"
+        if result.get("details"):
+            message += f"\n{escape_subprocess_output(result['details'])}"
+
+        await self._send_message_or_edit(
+            update,
+            context,
             message,
             reply_markup=self._get_claude_hub_buttons(show_monitor=True),
         )
@@ -5552,6 +5641,99 @@ class TelegramCommandHandler:
             "Tap to select, 👁 to preview.",
             reply_markup=self._get_claude_wizard_files_buttons(combined[:8], selected_files),
         )
+
+    def _build_ai_chat_snapshot(self) -> str:
+        """
+        Build a compact, read-only snapshot of the current agent state for Claude chat.
+
+        This helps Claude answer questions like "how are trades doing?" with concrete context.
+        Keep this short to control token usage.
+        """
+        lines: List[str] = []
+        try:
+            lines.append(f"utc_now: {datetime.now(timezone.utc).isoformat()}")
+        except Exception:
+            pass
+
+        # Processes (source of truth for "is it running?")
+        try:
+            lines.append(f"agent_process_running: {self._is_agent_process_running()}")
+        except Exception:
+            pass
+        try:
+            gw = self.service_controller.get_gateway_status()
+            lines.append(f"gateway_process_running: {bool(gw.get('process_running'))}")
+            lines.append(f"gateway_api_ready: {bool(gw.get('port_listening'))}")
+        except Exception:
+            pass
+
+        # state.json (trading/runtime state)
+        try:
+            state_file = get_state_file(self.state_dir)
+            if state_file.exists():
+                with open(state_file, "r") as f:
+                    state = json.load(f)
+                if isinstance(state, dict):
+                    for key in ("running", "paused", "data_fresh", "latest_price", "latest_bar_timestamp"):
+                        if key in state and state.get(key) is not None:
+                            lines.append(f"state.{key}: {state.get(key)}")
+
+                    active_trades = state.get("active_trades")
+                    if isinstance(active_trades, list):
+                        lines.append(f"active_trades_count: {len(active_trades)}")
+                    elif state.get("active_trades_count") is not None:
+                        lines.append(f"active_trades_count: {state.get('active_trades_count')}")
+        except Exception:
+            pass
+
+        # performance.json (aggregates)
+        try:
+            perf_file = self.state_dir / "performance.json"
+            if perf_file.exists():
+                with open(perf_file, "r") as f:
+                    perf = json.load(f)
+                if isinstance(perf, dict):
+                    wins = perf.get("wins")
+                    losses = perf.get("losses")
+                    if wins is not None or losses is not None:
+                        lines.append(f"performance_7d.wins_losses: {wins}/{losses}")
+                    if perf.get("win_rate") is not None:
+                        lines.append(f"performance_7d.win_rate: {perf.get('win_rate')}")
+                    if perf.get("total_pnl") is not None:
+                        lines.append(f"performance_7d.total_pnl: {perf.get('total_pnl')}")
+        except Exception:
+            pass
+
+        # recent signals (last few)
+        try:
+            from collections import deque
+
+            signals_file = get_signals_file(self.state_dir)
+            if signals_file.exists():
+                tail: "deque[str]" = deque(maxlen=5)
+                with open(signals_file, "r") as f:
+                    for line in f:
+                        if line.strip():
+                            tail.append(line)
+                if tail:
+                    lines.append("recent_signals:")
+                    for raw in list(tail)[-3:]:
+                        try:
+                            sig = json.loads(raw)
+                        except Exception:
+                            continue
+                        sig_type = sig.get("signal_type") or sig.get("type") or "unknown"
+                        direction = str(sig.get("direction") or "").upper()
+                        status = sig.get("status") or sig.get("state") or "unknown"
+                        ts = sig.get("timestamp") or sig.get("generated_at") or sig.get("created_at") or "n/a"
+                        lines.append(f"- {sig_type} {direction} ({status}) @ {ts}")
+        except Exception:
+            pass
+
+        snapshot = "\n".join(lines).strip()
+        if len(snapshot) > 1800:
+            snapshot = snapshot[:1800] + "\n...(truncated)"
+        return snapshot
     
     async def _process_claude_chat(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
         """Process a chat message and get Claude's response."""
@@ -5563,22 +5745,36 @@ class TelegramCommandHandler:
         # Add user message to history
         chat_history.append({"role": "user", "content": text})
         
-        # Keep history bounded (last 20 messages)
-        if len(chat_history) > 20:
-            chat_history = chat_history[-20:]
+        # Keep history bounded (last N messages)
+        if len(chat_history) > 24:
+            chat_history = chat_history[-24:]
         
         try:
             client = get_claude_client()
             if not client:
-                await update.message.reply_text(
-                    "❌ Claude not available. Check API key.",
-                    reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=True),
+                hint = (
+                    "❌ Claude not available.\n\n"
+                    "What to check:\n"
+                    "• Install extras: `pip install -e .[llm]`\n"
+                    "• Set `ANTHROPIC_API_KEY` in `.env` and restart the handler"
                 )
+                await update.message.reply_text(hint, reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=True))
                 return
+
+            chat_controls = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("🤖 Hub", callback_data="claude_hub"),
+                        InlineKeyboardButton("💬 Chat: OFF", callback_data="claude_chat_toggle"),
+                    ],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                ]
+            )
             
             import asyncio
-            # Run in thread to avoid blocking
-            response = await asyncio.to_thread(client.chat, chat_history)
+            # Run in thread to avoid blocking. Include a compact runtime snapshot for better answers.
+            system_prompt = build_chat_system_prompt(self._build_ai_chat_snapshot())
+            response = await asyncio.to_thread(client.chat, chat_history, system_prompt)
             
             # Add assistant response to history
             chat_history.append({"role": "assistant", "content": response})
@@ -5600,19 +5796,31 @@ class TelegramCommandHandler:
                     filename="claude_response.txt",
                     caption="📝 Response was too long, sent as file.",
                 )
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="⬅️ Use the buttons below to return to the hub or disable chat mode.",
+                    reply_markup=chat_controls,
+                )
             else:
-                await update.message.reply_text(response)
+                await update.message.reply_text(response, reply_markup=chat_controls)
                 
         except ClaudeAPIKeyMissingError:
             await update.message.reply_text(
                 "❌ `ANTHROPIC_API_KEY` not set in `.env`.",
                 parse_mode="Markdown",
+                reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=True),
             )
         except ClaudeAPIError as e:
-            await update.message.reply_text(f"❌ Claude error: {str(e)[:200]}")
+            await update.message.reply_text(
+                f"❌ Claude error: {str(e)[:200]}",
+                reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=True),
+            )
         except Exception as e:
             logger.error(f"Error in Claude chat: {e}", exc_info=True)
-            await update.message.reply_text(f"❌ Error: {str(e)[:200]}")
+            await update.message.reply_text(
+                f"❌ Error: {str(e)[:200]}",
+                reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=True),
+            )
     
     async def _handle_claude_file_toggle(
         self,
@@ -6346,23 +6554,22 @@ class TelegramCommandHandler:
         gateway_api_ready: Optional[bool] = None,
     ) -> InlineKeyboardMarkup:
         """
-        Generate main menu inline keyboard buttons (minimal layout).
+        Generate main menu inline keyboard buttons (clean, button-first UX).
 
-        Principles:
-        - Keep /start uncluttered (core actions only)
-        - Put secondary tools under /settings (Help, Config, Claude, etc.)
-
-        Layout:
+        Layout (calm-minimal, but with core tools exposed):
         - Row 1: Agent control + Gateway status
-        - Row 2: Signals + Performance
-        - Row 3: Settings
+        - Row 2: Last signal + Active trades
+        - Row 3: Activity + Data quality
+        - Row 4: Signals + Performance
+        - Row 5: Backtest + Reports
+        - Row 6: Settings (advanced tools: Help/Config/Claude live here)
 
         Gateway indicator tri-state:
         - ✅ running and API ready
         - 🟡 running but API not ready (authenticating/2FA)
         - ❌ stopped
         """
-        keyboard = []
+        keyboard: List[List[InlineKeyboardButton]] = []
         
         # Row 1: Agent control + Gateway
         if gateway_running:
@@ -6377,7 +6584,7 @@ class TelegramCommandHandler:
         if agent_running:
             keyboard.append([
                 InlineKeyboardButton("⏹️ Stop", callback_data='stop_agent'),
-                InlineKeyboardButton("🔄 Restart Agent", callback_data='restart_agent'),
+                InlineKeyboardButton("🔄 Restart", callback_data='restart_agent'),
                 InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
             ])
         else:
@@ -6386,14 +6593,32 @@ class TelegramCommandHandler:
                 InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
             ])
         
-        # Row 2: Monitoring (core)
+        # Row 2: Quick drill-down
         keyboard.append([
-            InlineKeyboardButton("🔔 Signals", callback_data='signals'),
-            InlineKeyboardButton("📈 Performance", callback_data='performance'),
+            InlineKeyboardButton("📊 Last Signal", callback_data="last_signal"),
+            InlineKeyboardButton("🎯 Trades", callback_data="active_trades"),
         ])
 
-        # Row 3: Settings (secondary tools live inside)
-        keyboard.append([InlineKeyboardButton("⚙️ Settings", callback_data='settings')])
+        # Row 3: Health / liveness triage
+        keyboard.append([
+            InlineKeyboardButton("📈 Activity", callback_data="activity"),
+            InlineKeyboardButton("🛡 Data", callback_data="data_quality"),
+        ])
+
+        # Row 4: Monitoring
+        keyboard.append([
+            InlineKeyboardButton("🔔 Signals", callback_data="signals"),
+            InlineKeyboardButton("📈 Performance", callback_data="performance"),
+        ])
+
+        # Row 5: Tools (Backtest restored)
+        keyboard.append([
+            InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
+            InlineKeyboardButton("📂 Reports", callback_data="reports"),
+        ])
+
+        # Row 6: Settings (secondary tools live inside)
+        keyboard.append([InlineKeyboardButton("⚙️ Settings", callback_data="settings")])
         
         return InlineKeyboardMarkup(keyboard)
     
@@ -6963,6 +7188,10 @@ class TelegramCommandHandler:
         # Claude Monitor callbacks
         elif callback_data == 'claude_monitor_hub':
             await self._handle_claude_monitor_hub(update, context)
+        elif callback_data == 'claude_monitor_start':
+            await self._handle_claude_monitor_start(update, context)
+        elif callback_data == 'claude_monitor_stop':
+            await self._handle_claude_monitor_stop(update, context)
         elif callback_data == 'claude_analyze_now':
             await self._handle_analyze_now(update, context)
         elif callback_data == 'claude_analyze_signals':
@@ -7284,44 +7513,47 @@ class TelegramCommandHandler:
         logger.info(f"📡 Received /claude_status command from {update.effective_user.id}")
         
         try:
-            monitor = self._get_claude_monitor()
-            
-            if not monitor:
-                await update.message.reply_text(
-                    "🤖 *Claude Monitor*\n\n"
-                    "Claude monitor is not available.\n"
-                    "Check that `anthropic` package is installed.",
-                    parse_mode="Markdown",
-                )
-                return
-            
-            status = monitor.get_status()
-            stats = status.get("monitor_state", {})
-            
-            # Format status
-            running_emoji = "🟢" if status.get("running") else "⚪"
-            claude_emoji = "✅" if status.get("claude_available") else "❌"
-            telegram_emoji = "✅" if status.get("telegram_configured") else "❌"
-            
+            svc = self.service_controller.get_claude_monitor_status()
+            svc_running = bool(svc.get("running"))
+            pid = svc.get("pid")
+
+            # Claude API availability (key + anthropic package)
+            claude_client_ok = bool(get_claude_client()) if ANTHROPIC_AVAILABLE else False
+
+            # Stats from persistent monitor state (shared with the background service)
+            stats = {}
+            try:
+                from pearlalgo.claude_monitor.monitor_state import MonitorState
+
+                stats = MonitorState(state_dir=self.state_dir).get_stats()
+            except Exception:
+                stats = {}
+
+            running_emoji = "🟢" if svc_running else "⚪"
+            claude_emoji = "✅" if claude_client_ok else "❌"
+            telegram_emoji = "✅" if (self.bot_token and self.chat_id) else "❌"
+
             message = (
                 "🤖 *Claude Monitor Status*\n\n"
-                f"{running_emoji} Running: `{status.get('running', False)}`\n"
-                f"{claude_emoji} Claude API: `{'available' if status.get('claude_available') else 'unavailable'}`\n"
-                f"{telegram_emoji} Telegram: `{'configured' if status.get('telegram_configured') else 'not configured'}`\n\n"
+                f"{running_emoji} Service: `{'running' if svc_running else 'stopped'}`\n"
+                f"{'🧾' if pid else '🧾'} PID: `{pid if pid else 'n/a'}`\n"
+                f"{claude_emoji} Claude API: `{'available' if claude_client_ok else 'unavailable'}`\n"
+                f"{telegram_emoji} Telegram: `{'configured' if (self.bot_token and self.chat_id) else 'not configured'}`\n\n"
                 f"*Stats:*\n"
                 f"• Analyses: `{stats.get('analysis_count', 0)}`\n"
                 f"• Alerts sent: `{stats.get('alert_count', 0)}`\n"
                 f"• Active suggestions: `{stats.get('active_suggestions', 0)}`\n"
-                f"• Applied changes: `{stats.get('applied_count', 0)}`\n"
+                f"• Applied changes: `{stats.get('applied_count', 0)}`\n\n"
+                "Open the Monitor hub for controls and analysis buttons."
             )
-            
-            # Add last analysis time
-            last_analysis = status.get("last_analysis")
-            if last_analysis:
-                message += f"\n_Last analysis: {last_analysis}_"
-            
-            await update.message.reply_text(message, parse_mode="Markdown")
-            
+
+            await self._send_message_or_edit(
+                update,
+                context,
+                message,
+                reply_markup=self._get_claude_hub_buttons(show_monitor=True),
+            )
+
         except Exception as e:
             logger.error(f"Error handling /claude_status: {e}", exc_info=True)
             await update.message.reply_text(f"❌ Error: {str(e)[:100]}")

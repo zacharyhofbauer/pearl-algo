@@ -55,12 +55,17 @@ def set_bot_commands():
         BotCommand('signals', 'Show recent signals'),
         BotCommand('last_signal', 'Show most recent signal with chart'),
         BotCommand('active_trades', 'Show currently open positions'),
+        # Tools
         BotCommand('backtest', 'Run strategy backtest with chart'),
+        BotCommand('reports', 'Browse saved backtest reports'),
         BotCommand('test_signal', 'Generate test signal with chart'),
         BotCommand('performance', 'Show performance metrics'),
         BotCommand('data_quality', 'Check data freshness and quality'),
         BotCommand('config', 'Show key configuration values'),
         BotCommand('health', 'Check agent health status'),
+        BotCommand('chart', 'Generate on-demand price chart'),
+        BotCommand('glossary', 'Explain key terms'),
+        BotCommand('settings', 'Customize Telegram UI preferences'),
         BotCommand('help', 'Show available commands'),
         # AI/LLM (requires [llm] extra)
         BotCommand('ai', 'Open Claude AI hub'),
@@ -68,6 +73,19 @@ def set_bot_commands():
         BotCommand('ai_on', 'Enable Claude chat mode'),
         BotCommand('ai_off', 'Disable Claude chat mode'),
         BotCommand('ai_reset', 'Reset Claude chat history'),
+        # AI Monitor (Claude Monitor)
+        BotCommand('start_monitor', 'Start Claude monitor service'),
+        BotCommand('stop_monitor', 'Stop Claude monitor service'),
+        BotCommand('monitor_status', 'Show monitor service status'),
+        BotCommand('claude_status', 'Show Claude monitor status'),
+        BotCommand('analyze_now', 'Run full AI analysis now'),
+        BotCommand('analyze_signals', 'AI: analyze signal quality'),
+        BotCommand('analyze_system', 'AI: analyze system health'),
+        BotCommand('analyze_market', 'AI: analyze market conditions'),
+        BotCommand('suggest_config', 'AI: suggest config tuning'),
+        BotCommand('suggestions', 'AI: list active suggestions'),
+        BotCommand('apply_suggestion', 'AI: apply a suggestion by id'),
+        BotCommand('claude_reports', 'Show AI report schedule'),
     ]
     
     try:

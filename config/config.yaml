@@ -313,6 +313,7 @@ prop_firm:
 # Requires ANTHROPIC_API_KEY in .env and [llm] extra installed.
 claude_monitor:
   enabled: true                        # Master toggle for Claude monitoring
+  timezone: "America/New_York"         # Timezone for reports/quiet-hours (default: ET)
   
   # Analysis intervals (seconds)
   realtime_monitoring: true            # Enable real-time monitoring (every minute)
