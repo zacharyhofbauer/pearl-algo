@@ -49,6 +49,7 @@ It combines quick start steps, command setup, and command behavior.
    ai_reset - Reset Claude chat history
    claude_status - Show Claude monitor status
    analyze_now - Run full AI analysis now
+   review - Strategy review (AI summary + actions)
    analyze_signals - AI: analyze signal quality
    analyze_system - AI: analyze system health
    analyze_market - AI: analyze market conditions

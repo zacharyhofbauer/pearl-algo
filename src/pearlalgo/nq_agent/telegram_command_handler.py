@@ -36,7 +36,7 @@ except ImportError:
 from pearlalgo.nq_agent.state_manager import NQAgentStateManager
 from pearlalgo.nq_agent.performance_tracker import PerformanceTracker
 from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
-from pearlalgo.utils.paths import get_signals_file, get_state_file, ensure_state_dir
+from pearlalgo.utils.paths import get_signals_file, get_state_file, ensure_state_dir, get_utc_timestamp
 from pearlalgo.utils.service_controller import ServiceController
 from pearlalgo.utils.telegram_alerts import (
     format_signal_status,
@@ -233,6 +233,9 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("suggestions", self._handle_suggestions))
         self.application.add_handler(CommandHandler("apply_suggestion", self._handle_apply_suggestion))
         self.application.add_handler(CommandHandler("claude_reports", self._handle_claude_reports))
+        # Strategy review (one-tap analysis + recommendations)
+        self.application.add_handler(CommandHandler("review", self._handle_strategy_review))
+        self.application.add_handler(CommandHandler("strategy_review", self._handle_strategy_review))
         
         # Claude message handler (for chat mode and wizard text input)
         # Must be added AFTER command handlers, lower priority group
@@ -5334,17 +5337,24 @@ class TelegramCommandHandler:
         """
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
-        # Send progress message
-        progress_msg = await update.message.reply_text(
+        # Send progress message (supports both message and button-trigger flows)
+        progress_text = (
             "🔍 *Analyzing your request...*\n\n"
             "Claude is:\n"
             "1️⃣ Understanding your task\n"
             "2️⃣ Searching for relevant files\n"
             "3️⃣ Reading file contents\n"
             "4️⃣ Generating patch\n\n"
-            "_This may take 15-30 seconds..._",
-            parse_mode="Markdown",
+            "_This may take 15-60 seconds..._"
         )
+        if update.message:
+            progress_msg = await update.message.reply_text(progress_text, parse_mode="Markdown")
+        else:
+            progress_msg = await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=progress_text,
+                parse_mode="Markdown",
+            )
         
         try:
             # Discover all project files
@@ -5363,9 +5373,8 @@ class TelegramCommandHandler:
             import asyncio
             
             # Step 1: Let Claude identify relevant files
-            suggested_files = await asyncio.to_thread(
-                client.suggest_files, task, all_files, limit=8
-            )
+            suggested_files = await asyncio.to_thread(client.suggest_files, task, all_files)
+            suggested_files = (suggested_files or [])[:8]
             
             if not suggested_files:
                 # Fallback to local search
@@ -5415,7 +5424,7 @@ class TelegramCommandHandler:
             # Step 3: Generate patch
             try:
                 diff_output = await asyncio.to_thread(
-                    client.generate_patch, task, file_contents
+                    client.generate_patch, file_contents, task
                 )
             except ClaudeAPIKeyMissingError:
                 await progress_msg.edit_text(
@@ -6560,7 +6569,7 @@ class TelegramCommandHandler:
         - Row 1: Agent control + Gateway status
         - Row 2: Last signal + Active trades
         - Row 3: Activity + Data quality
-        - Row 4: Signals + Performance
+        - Row 4: Signals + Performance + Review
         - Row 5: Backtest + Reports
         - Row 6: Settings (advanced tools: Help/Config/Claude live here)
 
@@ -6609,6 +6618,7 @@ class TelegramCommandHandler:
         keyboard.append([
             InlineKeyboardButton("🔔 Signals", callback_data="signals"),
             InlineKeyboardButton("📈 Performance", callback_data="performance"),
+            InlineKeyboardButton("🧠 Review", callback_data="strategy_review"),
         ])
 
         # Row 5: Tools (Backtest restored)
@@ -7008,6 +7018,12 @@ class TelegramCommandHandler:
             await self._handle_backtest(update, context)
         elif callback_data == 'reports':
             await self._handle_backtest_reports(update, context)
+        elif callback_data == "strategy_review" or callback_data == "strategy_review:refresh":
+            await self._handle_strategy_review(update, context)
+        elif callback_data == "strategy_review:export":
+            await self._handle_strategy_review_export(update, context)
+        elif callback_data == "strategy_review:autofix":
+            await self._handle_strategy_review_autofix(update, context)
         elif callback_data.startswith('reports_page:'):
             try:
                 page = int(callback_data.split(':')[1])
@@ -7977,6 +7993,283 @@ class TelegramCommandHandler:
         except Exception as e:
             logger.error(f"Error handling /apply_suggestion: {e}", exc_info=True)
             await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+
+    # =========================================================================
+    # Strategy Review (one-tap analysis + recommendations + Claude integration)
+    # =========================================================================
+
+    def _format_strategy_review_message(self, analysis: Dict[str, Any], suggestions: List[Dict[str, Any]]) -> str:
+        """Format a compact Strategy Review message for Telegram."""
+        now = get_utc_timestamp()
+        lines: List[str] = [
+            "🧠 *Strategy Review*",
+            f"_{now}_",
+            "",
+        ]
+
+        # Status snapshot (signals/system/market/code)
+        dim_order = ["signals", "system", "market", "code"]
+        status_emoji = {
+            "healthy": "🟢",
+            "favorable": "🟢",
+            "neutral": "⚪",
+            "warning": "🟡",
+            "degraded": "🟡",
+            "critical": "🔴",
+            "error": "🔴",
+            "insufficient_data": "⚪",
+        }
+
+        lines.append("*Status:*")
+        for dim in dim_order:
+            res = analysis.get(dim)
+            if not isinstance(res, dict):
+                continue
+            st = str(res.get("status") or "unknown")
+            emoji = status_emoji.get(st, "⚪")
+            findings = res.get("findings") if isinstance(res.get("findings"), list) else []
+            recs = res.get("recommendations") if isinstance(res.get("recommendations"), list) else []
+            suffix = ""
+            try:
+                if findings:
+                    suffix += f" • {len(findings)} finding(s)"
+                if recs:
+                    suffix += f" • {len(recs)} rec(s)"
+            except Exception:
+                pass
+            lines.append(f"- {emoji} *{dim.title()}*: `{st}`{suffix}")
+
+        # Pull first key insight we can find
+        key_insight = None
+        try:
+            for dim in dim_order:
+                res = analysis.get(dim)
+                if isinstance(res, dict):
+                    summary = res.get("summary", {})
+                    if isinstance(summary, dict) and summary.get("key_insight"):
+                        key_insight = str(summary["key_insight"]).strip()
+                        break
+        except Exception:
+            key_insight = None
+
+        if key_insight:
+            lines += ["", f"💡 _{key_insight}_"]
+
+        # Top recommendations (prefer SuggestionEngine output)
+        lines.append("")
+        lines.append("*Top Recommendations:*")
+
+        if suggestions:
+            top = suggestions[:3]
+            for i, s in enumerate(top, start=1):
+                title = str(s.get("title") or "Suggestion").strip()
+                desc = str(s.get("description") or "").strip()
+                stype = str(s.get("type") or "").strip()
+                priority = str(s.get("priority") or "medium").strip()
+                pemoji = {"high": "🔺", "medium": "🔸", "low": "🔹"}.get(priority, "•")
+                line = f"{i}) {pemoji} *{title}*"
+                if stype:
+                    line += f"  (`{stype}`)"
+                lines.append(line)
+                if desc:
+                    lines.append(f"   - {desc[:160]}{'…' if len(desc) > 160 else ''}")
+                if s.get("config_path") and s.get("new_value") is not None:
+                    lines.append(f"   - `{s['config_path']}` → `{s.get('new_value')}`")
+        else:
+            # Fallback: show recommendations from analysis
+            rec_lines = 0
+            for dim in dim_order:
+                res = analysis.get(dim)
+                if not isinstance(res, dict):
+                    continue
+                recs = res.get("recommendations", [])
+                if not isinstance(recs, list):
+                    continue
+                for rec in recs[:2]:
+                    if not isinstance(rec, dict):
+                        continue
+                    title = str(rec.get("title") or "Recommendation").strip()
+                    rationale = str(rec.get("rationale") or "").strip()
+                    lines.append(f"- *{title}*")
+                    if rationale:
+                        lines.append(f"  _{rationale[:160]}{'…' if len(rationale) > 160 else ''}_")
+                    rec_lines += 1
+                    if rec_lines >= 5:
+                        break
+                if rec_lines >= 5:
+                    break
+            if rec_lines == 0:
+                lines.append("- ✅ No changes recommended right now.")
+
+        lines += [
+            "",
+            "Use the buttons below to backtest, view reports, or generate a patch with Claude.",
+        ]
+
+        msg = "\n".join(lines)
+        # Keep within Telegram comfort zone; detailed export is available via button.
+        if len(msg) > 3800:
+            msg = msg[:3800] + "\n…(truncated)  Tap Export for full details."
+        return msg
+
+    async def _handle_strategy_review(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Run a comprehensive strategy review and show top recommendations with action buttons."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await self._send_message_or_edit(
+            update,
+            context,
+            "🧠 *Strategy Review*\n\n🔄 Running analysis now…\n_This can take ~15–60s._",
+            reply_markup=None,
+        )
+
+        monitor = self._get_claude_monitor()
+        if not monitor:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "🧠 *Strategy Review*\n\n❌ Claude Monitor not available.\n\n"
+                "What to check:\n"
+                "• Install extras: `pip install -e .[llm]`\n"
+                "• Set `ANTHROPIC_API_KEY` in `.env` and restart the handler",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+
+        try:
+            # Force a fresh analysis
+            analysis = await monitor.force_analysis()
+
+            # Generate suggestions from the analysis and persist them (so /suggestions stays in sync)
+            suggestions = monitor.suggestion_engine.generate(analysis)
+            suggestions_dicts = [s.to_dict() for s in suggestions]
+            monitor.monitor_state.record_analysis(analysis=analysis, suggestions=suggestions_dicts)
+
+            # Store for export/autofix
+            if hasattr(context, "user_data"):
+                context.user_data["strategy_review_last_analysis"] = analysis
+                context.user_data["strategy_review_last_suggestions"] = suggestions_dicts
+
+                # Pre-compute an Auto Fix task from the top suggestion (if any)
+                if suggestions_dicts:
+                    top = suggestions_dicts[0]
+                    task = (
+                        f"{top.get('title', 'Improve the trading agent')}\n\n"
+                        f"{top.get('description', '')}\n\n"
+                        f"Rationale: {top.get('rationale', '')}\n\n"
+                        "Please implement a minimal, safe change as a unified diff patch."
+                    ).strip()
+                    context.user_data["strategy_review_autofix_task"] = task
+                else:
+                    context.user_data.pop("strategy_review_autofix_task", None)
+
+            message = self._format_strategy_review_message(analysis, suggestions_dicts)
+
+            # Buttons
+            keyboard: List[List[InlineKeyboardButton]] = [
+                [
+                    InlineKeyboardButton("🔄 Refresh", callback_data="strategy_review:refresh"),
+                    InlineKeyboardButton("📄 Export", callback_data="strategy_review:export"),
+                ],
+            ]
+
+            # Auto Fix (only if we have a task and Claude is available)
+            has_autofix = bool(getattr(context, "user_data", {}).get("strategy_review_autofix_task")) if hasattr(context, "user_data") else False
+            if has_autofix and ANTHROPIC_AVAILABLE:
+                keyboard.append([InlineKeyboardButton("🧩 Auto Fix (Patch)", callback_data="strategy_review:autofix")])
+
+            keyboard += [
+                [
+                    InlineKeyboardButton("🧩 Patch Wizard", callback_data="claude_patch_wizard"),
+                    InlineKeyboardButton("🤖 Claude Hub", callback_data="claude_hub"),
+                ],
+                [
+                    InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
+                    InlineKeyboardButton("📂 Reports", callback_data="reports"),
+                ],
+                [
+                    InlineKeyboardButton("💡 Suggest Config", callback_data="claude_suggest_config"),
+                    InlineKeyboardButton("📋 Suggestions", callback_data="claude_suggestions"),
+                ],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+
+            await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
+
+        except Exception as e:
+            logger.error(f"Error running strategy review: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"🧠 *Strategy Review*\n\n❌ Error: `{str(e)[:200]}`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+
+    async def _handle_strategy_review_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Export the last strategy review (analysis + suggestions) as a file for sharing/offline use."""
+        if not await self._check_authorized(update):
+            return
+
+        analysis = context.user_data.get("strategy_review_last_analysis") if hasattr(context, "user_data") else None
+        suggestions = context.user_data.get("strategy_review_last_suggestions") if hasattr(context, "user_data") else None
+
+        if not isinstance(analysis, dict):
+            await self._send_message_or_edit(
+                update,
+                context,
+                "📄 *Export*\n\nNo recent Strategy Review found.\nTap *Refresh* first.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🧠 Run Review", callback_data="strategy_review")]]),
+            )
+            return
+
+        payload = {
+            "exported_at": get_utc_timestamp(),
+            "analysis": analysis,
+            "suggestions": suggestions or [],
+        }
+
+        import io
+        content = json.dumps(payload, indent=2, default=str)
+        buf = io.BytesIO(content.encode("utf-8"))
+        buf.name = "strategy_review.json"
+
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_document")
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=buf,
+            filename="strategy_review.json",
+            caption="📄 Strategy Review export (share this with ChatGPT/Claude on desktop).",
+        )
+
+    async def _handle_strategy_review_autofix(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Generate an automatic code patch for the top recommendation."""
+        if not await self._check_authorized(update):
+            return
+
+        task = context.user_data.get("strategy_review_autofix_task") if hasattr(context, "user_data") else None
+        if not task:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "🧩 *Auto Fix*\n\nNo Auto Fix task available.\nRun *Strategy Review* first.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🧠 Run Review", callback_data="strategy_review")]]),
+            )
+            return
+
+        if not ANTHROPIC_AVAILABLE:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "🧩 *Auto Fix*\n\n❌ Claude not available.\nInstall with: `pip install -e .[llm]`",
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+            return
+
+        # Reuse the existing auto-patch flow (now supports callback triggers)
+        await self._process_auto_patch(update, context, str(task))
     
     async def _handle_claude_reports(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /claude_reports - Configure daily/weekly reports."""

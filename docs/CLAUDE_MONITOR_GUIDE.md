@@ -156,6 +156,7 @@ You should see:
 | Command | Description |
 |---------|-------------|
 | `/analyze_now` | Force immediate comprehensive analysis |
+| `/review` | One-tap Strategy Review (runs analysis + shows top recommendations + action buttons) |
 | `/analyze_signals` | Deep dive on signal quality |
 | `/analyze_system` | System health report |
 | `/analyze_market` | Market conditions & regime analysis |
