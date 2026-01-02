@@ -80,6 +80,7 @@ def set_bot_commands():
         BotCommand('claude_status', 'Show Claude monitor status'),
         BotCommand('analyze_now', 'Run full AI analysis now'),
         BotCommand('review', 'Strategy review (AI summary + actions)'),
+        BotCommand('strategy_review', 'Strategy review (alias)'),
         BotCommand('analyze_signals', 'AI: analyze signal quality'),
         BotCommand('analyze_system', 'AI: analyze system health'),
         BotCommand('analyze_market', 'AI: analyze market conditions'),

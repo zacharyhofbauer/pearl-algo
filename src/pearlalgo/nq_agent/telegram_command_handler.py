@@ -158,6 +158,50 @@ class TelegramCommandHandler:
         
         # Register handlers
         self._register_handlers()
+
+        # Persistent Claude chat history (survives handler restarts)
+        self._claude_chat_history_file = self.state_dir / "claude_chat_history.json"
+
+    def _load_persistent_claude_chat_history(self) -> List[Dict[str, str]]:
+        """Load Claude chat history from disk (best-effort)."""
+        try:
+            if not self._claude_chat_history_file.exists():
+                return []
+            with open(self._claude_chat_history_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                return []
+            out: List[Dict[str, str]] = []
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                role = item.get("role")
+                content = item.get("content")
+                if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+                    out.append({"role": role, "content": content})
+            return out
+        except Exception as e:
+            logger.debug(f"Could not load Claude chat history: {e}")
+            return []
+
+    def _save_persistent_claude_chat_history(self, history: List[Dict[str, str]]) -> None:
+        """Save Claude chat history to disk (best-effort)."""
+        try:
+            self._claude_chat_history_file.parent.mkdir(parents=True, exist_ok=True)
+            # Keep bounded on disk as well
+            bounded = history[-24:] if len(history) > 24 else history
+            with open(self._claude_chat_history_file, "w", encoding="utf-8") as f:
+                json.dump(bounded, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.debug(f"Could not save Claude chat history: {e}")
+
+    def _clear_persistent_claude_chat_history(self) -> None:
+        """Remove persisted Claude chat history file (best-effort)."""
+        try:
+            if self._claude_chat_history_file.exists():
+                self._claude_chat_history_file.unlink()
+        except Exception as e:
+            logger.debug(f"Could not clear Claude chat history: {e}")
         
     def _register_handlers(self):
         """Register command and callback handlers."""
@@ -5142,6 +5186,8 @@ class TelegramCommandHandler:
             context.user_data.pop("claude_wizard_state", None)
             context.user_data.pop("claude_wizard_task", None)
             context.user_data.pop("claude_wizard_files", None)
+        # Also clear persisted chat history
+        self._clear_persistent_claude_chat_history()
         
         chat_mode = self.prefs.get("ai_chat_mode", False) if self.prefs else False
         
@@ -5748,8 +5794,16 @@ class TelegramCommandHandler:
         """Process a chat message and get Claude's response."""
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
-        # Get chat history
-        chat_history = context.user_data.get("claude_chat_history", []) if hasattr(context, "user_data") else []
+        # Get chat history (persisted across restarts)
+        chat_history: List[Dict[str, str]] = []
+        if hasattr(context, "user_data") and "claude_chat_history" in context.user_data:
+            raw = context.user_data.get("claude_chat_history")
+            if isinstance(raw, list):
+                chat_history = raw
+        else:
+            chat_history = self._load_persistent_claude_chat_history()
+            if hasattr(context, "user_data"):
+                context.user_data["claude_chat_history"] = chat_history
         
         # Add user message to history
         chat_history.append({"role": "user", "content": text})
@@ -5791,6 +5845,7 @@ class TelegramCommandHandler:
             # Save history
             if hasattr(context, "user_data"):
                 context.user_data["claude_chat_history"] = chat_history
+            self._save_persistent_claude_chat_history(chat_history)
             
             # Send response (handle long responses)
             if len(response) > 4000:
@@ -7022,8 +7077,19 @@ class TelegramCommandHandler:
             await self._handle_strategy_review(update, context)
         elif callback_data == "strategy_review:export":
             await self._handle_strategy_review_export(update, context)
+        elif callback_data == "strategy_review:discuss":
+            await self._handle_strategy_review_discuss(update, context)
         elif callback_data == "strategy_review:autofix":
             await self._handle_strategy_review_autofix(update, context)
+        elif callback_data.startswith("strategy_review:lookback:"):
+            try:
+                lb = int(callback_data.split("strategy_review:lookback:", 1)[1])
+            except Exception:
+                lb = 24
+            lb = 24 if lb <= 24 else 168
+            if hasattr(context, "user_data"):
+                context.user_data["strategy_review_lookback_hours"] = lb
+            await self._handle_strategy_review(update, context)
         elif callback_data.startswith('reports_page:'):
             try:
                 page = int(callback_data.split(':')[1])
@@ -7998,12 +8064,13 @@ class TelegramCommandHandler:
     # Strategy Review (one-tap analysis + recommendations + Claude integration)
     # =========================================================================
 
-    def _format_strategy_review_message(self, analysis: Dict[str, Any], suggestions: List[Dict[str, Any]]) -> str:
+    def _format_strategy_review_message(self, analysis: Dict[str, Any], suggestions: List[Dict[str, Any]], lookback_hours: int = 24) -> str:
         """Format a compact Strategy Review message for Telegram."""
         now = get_utc_timestamp()
         lines: List[str] = [
             "🧠 *Strategy Review*",
             f"_{now}_",
+            f"*Lookback:* `{lookback_hours}h`",
             "",
         ]
 
@@ -8140,8 +8207,16 @@ class TelegramCommandHandler:
             return
 
         try:
-            # Force a fresh analysis
-            analysis = await monitor.force_analysis()
+            lookback = 24
+            if hasattr(context, "user_data"):
+                try:
+                    lookback = int(context.user_data.get("strategy_review_lookback_hours", 24) or 24)
+                except Exception:
+                    lookback = 24
+            lookback = 24 if lookback <= 24 else 168
+
+            # Force a fresh analysis (with lookback override)
+            analysis = await monitor.force_analysis(lookback_hours=lookback)
 
             # Generate suggestions from the analysis and persist them (so /suggestions stays in sync)
             suggestions = monitor.suggestion_engine.generate(analysis)
@@ -8156,20 +8231,39 @@ class TelegramCommandHandler:
                 # Pre-compute an Auto Fix task from the top suggestion (if any)
                 if suggestions_dicts:
                     top = suggestions_dicts[0]
+                    title = str(top.get("title", "Improve the trading agent")).strip()
+                    desc = str(top.get("description", "")).strip()
+                    rationale = str(top.get("rationale", "")).strip()
+                    cfg_path = top.get("config_path")
+                    new_val = top.get("new_value")
+
+                    extra = ""
+                    if cfg_path and new_val is not None:
+                        # Make config changes explicit and easy for Claude to patch.
+                        extra = f"\n\nTarget change:\n- Update `config/config.yaml`: set `{cfg_path}` to `{new_val}`"
+
                     task = (
-                        f"{top.get('title', 'Improve the trading agent')}\n\n"
-                        f"{top.get('description', '')}\n\n"
-                        f"Rationale: {top.get('rationale', '')}\n\n"
-                        "Please implement a minimal, safe change as a unified diff patch."
+                        f"{title}\n\n"
+                        f"{desc}\n\n"
+                        f"Rationale: {rationale}"
+                        f"{extra}\n\n"
+                        "Please implement a minimal, safe change as a unified diff patch. "
+                        "Prefer config-only changes when possible."
                     ).strip()
                     context.user_data["strategy_review_autofix_task"] = task
                 else:
                     context.user_data.pop("strategy_review_autofix_task", None)
 
-            message = self._format_strategy_review_message(analysis, suggestions_dicts)
+            message = self._format_strategy_review_message(analysis, suggestions_dicts, lookback_hours=lookback)
 
             # Buttons
+            lb_24 = "⏱ 24h ✓" if lookback == 24 else "⏱ 24h"
+            lb_7d = "🗓 7d ✓" if lookback != 24 else "🗓 7d"
             keyboard: List[List[InlineKeyboardButton]] = [
+                [
+                    InlineKeyboardButton(lb_24, callback_data="strategy_review:lookback:24"),
+                    InlineKeyboardButton(lb_7d, callback_data="strategy_review:lookback:168"),
+                ],
                 [
                     InlineKeyboardButton("🔄 Refresh", callback_data="strategy_review:refresh"),
                     InlineKeyboardButton("📄 Export", callback_data="strategy_review:export"),
@@ -8182,6 +8276,7 @@ class TelegramCommandHandler:
                 keyboard.append([InlineKeyboardButton("🧩 Auto Fix (Patch)", callback_data="strategy_review:autofix")])
 
             keyboard += [
+                [InlineKeyboardButton("💬 Discuss with Claude", callback_data="strategy_review:discuss")],
                 [
                     InlineKeyboardButton("🧩 Patch Wizard", callback_data="claude_patch_wizard"),
                     InlineKeyboardButton("🤖 Claude Hub", callback_data="claude_hub"),
@@ -8270,6 +8365,126 @@ class TelegramCommandHandler:
 
         # Reuse the existing auto-patch flow (now supports callback triggers)
         await self._process_auto_patch(update, context, str(task))
+
+    async def _handle_strategy_review_discuss(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Ask Claude for a clear plan based on the last Strategy Review output."""
+        if not await self._check_authorized(update):
+            return
+
+        analysis = context.user_data.get("strategy_review_last_analysis") if hasattr(context, "user_data") else None
+        suggestions = context.user_data.get("strategy_review_last_suggestions") if hasattr(context, "user_data") else None
+
+        if not isinstance(analysis, dict):
+            await self._send_message_or_edit(
+                update,
+                context,
+                "💬 *Discuss with Claude*\n\nNo recent Strategy Review found.\nTap *Refresh* first.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🧠 Run Review", callback_data="strategy_review")]]),
+            )
+            return
+
+        client = get_claude_client()
+        if not client:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "💬 *Discuss with Claude*\n\n❌ Claude not available.\n\n"
+                "What to check:\n"
+                "• Install extras: `pip install -e .[llm]`\n"
+                "• Set `ANTHROPIC_API_KEY` in `.env` and restart the handler",
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+            return
+
+        # Build a concise prompt
+        lookback = 24
+        if hasattr(context, "user_data"):
+            try:
+                lookback = int(context.user_data.get("strategy_review_lookback_hours", 24) or 24)
+            except Exception:
+                lookback = 24
+        lookback = 24 if lookback <= 24 else 168
+
+        # Include only compact pieces to keep token usage reasonable
+        payload = {
+            "lookback_hours": lookback,
+            "analysis": analysis,
+            "suggestions": suggestions or [],
+        }
+
+        user_text = (
+            "You are my trading strategy assistant.\n"
+            "Given the Strategy Review JSON below, do three things:\n"
+            "1) Explain in plain English what it means today.\n"
+            "2) Give me a 3-step plan for the next 24h (low-risk).\n"
+            "3) Propose 2 backtests/experiments (what to change + what success metric).\n\n"
+            "Strategy Review JSON:\n"
+            f"{json.dumps(payload, indent=2, default=str)[:12000]}"
+        )
+
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+
+        # Use the same persistent history as normal chat so follow-ups continue naturally
+        chat_history: List[Dict[str, str]] = []
+        if hasattr(context, "user_data") and "claude_chat_history" in context.user_data:
+            raw = context.user_data.get("claude_chat_history")
+            if isinstance(raw, list):
+                chat_history = raw
+        else:
+            chat_history = self._load_persistent_claude_chat_history()
+            if hasattr(context, "user_data"):
+                context.user_data["claude_chat_history"] = chat_history
+
+        chat_history.append({"role": "user", "content": user_text})
+        if len(chat_history) > 24:
+            chat_history = chat_history[-24:]
+
+        system_prompt = build_chat_system_prompt(self._build_ai_chat_snapshot())
+
+        import asyncio
+        response = await asyncio.to_thread(client.chat, chat_history, system_prompt)
+        chat_history.append({"role": "assistant", "content": response})
+
+        if hasattr(context, "user_data"):
+            context.user_data["claude_chat_history"] = chat_history
+        self._save_persistent_claude_chat_history(chat_history)
+
+        # Send response as a new message (keep Strategy Review message intact)
+        chat_controls = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("🧠 Review", callback_data="strategy_review"),
+                    InlineKeyboardButton("🤖 Hub", callback_data="claude_hub"),
+                ],
+                [
+                    InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
+                    InlineKeyboardButton("📂 Reports", callback_data="reports"),
+                ],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+        )
+
+        if len(response) > 4000:
+            import io
+            buf = io.BytesIO(response.encode("utf-8"))
+            buf.name = "claude_strategy_review.txt"
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=buf,
+                filename="claude_strategy_review.txt",
+                caption="📝 Claude response was long; sent as file.",
+            )
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="⬅️ Use buttons below to navigate.",
+                reply_markup=chat_controls,
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=response,
+                reply_markup=chat_controls,
+            )
     
     async def _handle_claude_reports(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /claude_reports - Configure daily/weekly reports."""

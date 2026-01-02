@@ -623,12 +623,20 @@ class ClaudeMonitorService:
     
     # Public API for external commands
     
-    async def force_analysis(self) -> Dict[str, Any]:
-        """Force immediate comprehensive analysis."""
+    async def force_analysis(self, lookback_hours: Optional[int] = None) -> Dict[str, Any]:
+        """Force immediate comprehensive analysis.
+
+        Args:
+            lookback_hours: Optional override for how many hours of signals to load for analysis.
+        """
         logger.info("Forcing comprehensive analysis...")
         
         agent_state = self._load_agent_state() or {}
-        signals_data = self._load_recent_signals()
+        try:
+            lb = int(lookback_hours) if lookback_hours is not None else int(self.config.get("signal_analysis_lookback_hours", 24))
+        except Exception:
+            lb = 24
+        signals_data = self._load_recent_signals(lookback_hours=lb)
         performance_data = self._load_performance_data()
         market_data = self._extract_market_data(agent_state)
         
