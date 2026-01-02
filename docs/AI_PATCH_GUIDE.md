@@ -137,7 +137,7 @@ You: "add exponential backoff with jitter to the retry logic"
 Bot: Shows file suggestions:
    ○ src/pearlalgo/utils/retry.py         👁
    ○ src/pearlalgo/utils/telegram_alerts.py 👁
-   ○ src/pearlalgo/data_providers/ibkr.py  👁
+   ○ src/pearlalgo/data_providers/ibkr/ibkr_provider.py  👁
    [🔍 Refine] [❌ Cancel]
 
 You: Tap to select files, then "✅ Generate Patch"
@@ -191,7 +191,7 @@ For power users who know their file paths, the direct command is still available
 
 **Refactoring:**
 ```
-/ai_patch src/pearlalgo/strategies/nq_breakout.py extract the validation logic into a separate method
+/ai_patch src/pearlalgo/strategies/nq_intraday/strategy.py extract the validation logic into a separate method
 ```
 
 ---

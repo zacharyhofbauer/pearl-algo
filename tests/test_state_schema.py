@@ -337,7 +337,7 @@ class TestPrometheusMetrics:
             "error_count": 2,
             "buffer_size": 50,
             "data_fresh": True,
-            "version": "0.2.1",
+            "version": "0.2.2",
             "run_id": "abc123",
         }
         
