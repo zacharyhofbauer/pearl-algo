@@ -11,14 +11,17 @@ import asyncio
 import json
 import os
 import random
+import hashlib
+import shutil
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Dict, Optional, Callable, Awaitable, List
+from typing import Any, Dict, Optional, Callable, Awaitable, List
 
 import pandas as pd
 import numpy as np
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.backtesting.pdf_report import write_backtest_pdf_report
 
 try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
@@ -58,6 +61,8 @@ from pearlalgo.utils.telegram_alerts import (
     LABEL_ACTIVE_TRADES,
     LABEL_SCANS,
     LABEL_BUFFER,
+    LABEL_FUTURES,
+    LABEL_SESSION,
     STATE_RUNNING,
     STATE_STOPPED,
     STATE_PAUSED,
@@ -377,6 +382,7 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("suggest_config", self._handle_suggest_config))
         self.application.add_handler(CommandHandler("suggestions", self._handle_suggestions))
         self.application.add_handler(CommandHandler("apply_suggestion", self._handle_apply_suggestion))
+        self.application.add_handler(CommandHandler("rollback_suggestion", self._handle_rollback_suggestion))
         self.application.add_handler(CommandHandler("claude_reports", self._handle_claude_reports))
         # Strategy review (one-tap analysis + recommendations)
         self.application.add_handler(CommandHandler("review", self._handle_strategy_review))
@@ -964,8 +970,6 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("⚙️ Config", callback_data="config"),
             ],
         ]
-        if ANTHROPIC_AVAILABLE:
-            keyboard.append([InlineKeyboardButton("🤖 Claude", callback_data="claude_hub")])
 
         # Preferences (toggles)
         keyboard += [
@@ -2780,6 +2784,124 @@ class TelegramCommandHandler:
                     # Use price chart as primary if we don't have equity curve
                     if chart_path is None:
                         chart_path = price_chart_path
+
+                    # Auto-save this Telegram /backtest run into /reports so every run is browseable.
+                    saved_report_dir: Optional[Path] = None
+                    saved_report_name: Optional[str] = None
+                    saved_report_key: Optional[str] = None
+                    try:
+                        reports_dir = self._get_reports_dir_for_write()
+                        run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                        rep_start = backtest_data.index[0].strftime("%Y%m%d") if len(backtest_data) > 0 else "unknown"
+                        rep_end = backtest_data.index[-1].strftime("%Y%m%d") if len(backtest_data) > 0 else "unknown"
+                        saved_report_name = f"backtest_{symbol}_{mode}_{rep_start}_{rep_end}_{run_ts}"
+                        saved_report_dir = reports_dir / saved_report_name
+                        saved_report_dir.mkdir(parents=True, exist_ok=True)
+
+                        # Summary JSON (compatible with /reports viewer)
+                        metrics_obj = {
+                            "total_bars": int(result.total_bars or 0),
+                            "total_signals": int(result.total_signals or 0),
+                            "avg_confidence": float(result.avg_confidence or 0.0),
+                            "avg_risk_reward": float(result.avg_risk_reward or 0.0),
+                            "total_trades": int(result.total_trades or 0),
+                            "winning_trades": int(result.winning_trades or 0),
+                            "losing_trades": int(result.losing_trades or 0),
+                            "win_rate": float(result.win_rate or 0.0),
+                            "total_pnl": float(result.total_pnl or 0.0),
+                            "profit_factor": float(result.profit_factor or 0.0),
+                            "max_drawdown": float(result.max_drawdown or 0.0),
+                            "max_drawdown_pct": float(getattr(result, "max_drawdown_pct", 0.0) or 0.0),
+                            "sharpe_ratio": float(result.sharpe_ratio or 0.0),
+                            "avg_win": float(getattr(result, "avg_win", 0.0) or 0.0),
+                            "avg_loss": float(getattr(result, "avg_loss", 0.0) or 0.0),
+                            "avg_hold_time_minutes": float(getattr(result, "avg_hold_time_minutes", 0.0) or 0.0),
+                            "signal_distribution": getattr(result, "signal_distribution", None),
+                        }
+                        summary = {
+                            "symbol": symbol,
+                            "decision_timeframe": mode,
+                            "run_timestamp": run_ts,
+                            "date_range": {
+                                "dataset_start": backtest_data.index[0].isoformat() if len(backtest_data) > 0 else None,
+                                "dataset_end": backtest_data.index[-1].isoformat() if len(backtest_data) > 0 else None,
+                                "requested_start": None,
+                                "requested_end": None,
+                                "actual_start": backtest_data.index[0].isoformat() if len(backtest_data) > 0 else None,
+                                "actual_end": backtest_data.index[-1].isoformat() if len(backtest_data) > 0 else None,
+                                "bars_total": int(len(backtest_data)),
+                                "bars_sliced": int(len(backtest_data)),
+                                "warning": None,
+                            },
+                            "metrics": metrics_obj,
+                            "verification": result.verification.to_dict() if getattr(result, "verification", None) else None,
+                        }
+                        with open(saved_report_dir / "summary.json", "w") as f:
+                            json.dump(summary, f, indent=2)
+
+                        # Signals CSV
+                        try:
+                            if getattr(result, "signals", None):
+                                signals_df = pd.DataFrame(result.signals or [])
+                                for col in signals_df.columns:
+                                    if signals_df[col].apply(lambda x: isinstance(x, dict)).any():
+                                        signals_df[col] = signals_df[col].apply(lambda x: json.dumps(x) if isinstance(x, dict) else x)
+                                signals_df.to_csv(saved_report_dir / "signals.csv", index=False)
+                        except Exception:
+                            pass
+
+                        # Trades CSV
+                        try:
+                            if getattr(result, "trades", None):
+                                pd.DataFrame(result.trades or []).to_csv(saved_report_dir / "trades.csv", index=False)
+                        except Exception:
+                            pass
+
+                        # Skipped signals CSV
+                        try:
+                            if getattr(result, "skipped_signals", None):
+                                pd.DataFrame(result.skipped_signals or []).to_csv(saved_report_dir / "skipped_signals.csv", index=False)
+                        except Exception:
+                            pass
+
+                        # Persist charts into the report folder (so /reports can serve them)
+                        try:
+                            if price_chart_path and price_chart_path.exists():
+                                dest_price = saved_report_dir / "chart_overview.png"
+                                try:
+                                    shutil.move(str(price_chart_path), str(dest_price))
+                                except Exception:
+                                    shutil.copy2(str(price_chart_path), str(dest_price))
+                                if chart_path == price_chart_path:
+                                    chart_path = dest_price
+                                price_chart_path = dest_price
+                        except Exception:
+                            pass
+                        try:
+                            if equity_chart_path and equity_chart_path.exists():
+                                dest_eq = saved_report_dir / "equity_curve.png"
+                                try:
+                                    shutil.move(str(equity_chart_path), str(dest_eq))
+                                except Exception:
+                                    shutil.copy2(str(equity_chart_path), str(dest_eq))
+                                if chart_path == equity_chart_path:
+                                    chart_path = dest_eq
+                                equity_chart_path = dest_eq
+                        except Exception:
+                            pass
+
+                        # Detailed PDF report (multi-page)
+                        try:
+                            write_backtest_pdf_report(saved_report_dir, output_name="report.pdf")
+                        except Exception as e:
+                            logger.warning(f"Could not write PDF report: {e}")
+
+                        saved_report_key = self._report_key(saved_report_name)
+                    except Exception as e:
+                        logger.warning(f"Could not save backtest report: {e}")
+                        saved_report_dir = None
+                        saved_report_name = None
+                        saved_report_key = None
                             
                     # Format results message
                     data_start = backtest_data.index[0].strftime('%Y-%m-%d') if len(backtest_data) > 0 else 'N/A'
@@ -2840,6 +2962,10 @@ class TelegramCommandHandler:
                     except Exception:
                         trade_type_block = ""
 
+                    saved_report_block = ""
+                    if saved_report_name:
+                        saved_report_block = f"\n📂 *Saved to Reports:* `{saved_report_name}`\n"
+
                     message = (
                         f"📊 *Backtest Results ({weeks} Week{'s' if weeks > 1 else ''})*\n\n"
                         f"*Period:* {data_start} to {data_end}\n"
@@ -2854,6 +2980,7 @@ class TelegramCommandHandler:
                         f"*Total P&L:* {total_pnl_display}  |  *Max DD:* {max_dd_display}  |  *Sharpe:* {sharpe_display}\n"
                         f"{trade_type_block}"
                         f"{verification_block}"
+                        f"{saved_report_block}"
                     )
                             
                     # Export artifacts (trade journal + metrics + verification)
@@ -2992,6 +3119,13 @@ class TelegramCommandHandler:
                     if export_paths.get("verification"):
                         export_row2.append(InlineKeyboardButton("🔍 Verification", callback_data="backtest_export:verification"))
                     keyboard.append(export_row2)
+                    if saved_report_key:
+                        keyboard.append(
+                            [
+                                InlineKeyboardButton("📂 View Report", callback_data=f"report_detail_k:{saved_report_key}"),
+                                InlineKeyboardButton("📄 PDF", callback_data=f"report_artifact_k:{saved_report_key}:pdf"),
+                            ]
+                        )
                     keyboard.append([
                         InlineKeyboardButton("🔄 Run Again", callback_data="backtest"),
                         InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
@@ -3019,7 +3153,12 @@ class TelegramCommandHandler:
                                         photo=photo,
                                         caption=f"📈 {chart_type} ({weeks} Week{'s' if weeks > 1 else ''})"
                                     )
-                            chart_path.unlink()
+                            # Keep charts if we saved a report; otherwise clean up temp files.
+                            try:
+                                if not (saved_report_dir and saved_report_dir in chart_path.parents):
+                                    chart_path.unlink()
+                            except Exception:
+                                pass
                             
                             # Also send the price chart if we have a separate file (common when equity curve is primary)
                             if price_chart_path and price_chart_path.exists() and (chart_path is None or price_chart_path != chart_path):
@@ -3031,7 +3170,11 @@ class TelegramCommandHandler:
                                         photo=photo,
                                         caption=f"📊 {chart_type_label} Chart ({weeks} Week{'s' if weeks > 1 else ''}, {chart_tf_label} bars) • entries: green=win red=loss"
                                     )
-                                price_chart_path.unlink()
+                                try:
+                                    if not (saved_report_dir and saved_report_dir in price_chart_path.parents):
+                                        price_chart_path.unlink()
+                                except Exception:
+                                    pass
                         except Exception as e:
                             logger.error(f"Error sending backtest chart: {e}")
                 else:
@@ -3333,8 +3476,9 @@ class TelegramCommandHandler:
                     except Exception:
                         pass
 
+                report_key = self._report_key(rd.name)
                 keyboard.append([
-                    InlineKeyboardButton(label, callback_data=f'report_detail:{rd.name}')
+                    InlineKeyboardButton(label, callback_data=f"report_detail_k:{report_key}")
                 ])
 
             # Pagination buttons
@@ -3465,26 +3609,30 @@ class TelegramCommandHandler:
 
             # Build artifact buttons
             keyboard = []
+            report_key = self._report_key(report_name)
             
             # Check available artifacts
+            chart_row = []
             if (report_dir / "chart_overview.png").exists():
-                keyboard.append([
-                    InlineKeyboardButton("📈 View Chart", callback_data=f'report_artifact:{report_name}:chart'),
-                ])
+                chart_row.append(InlineKeyboardButton("📈 View Chart", callback_data=f"report_artifact_k:{report_key}:chart"))
+            if (report_dir / "report.pdf").exists():
+                chart_row.append(InlineKeyboardButton("📄 PDF Report", callback_data=f"report_artifact_k:{report_key}:pdf"))
+            if chart_row:
+                keyboard.append(chart_row)
             
             artifact_row = []
             if (report_dir / "trades.csv").exists():
-                artifact_row.append(InlineKeyboardButton("📄 Trades", callback_data=f'report_artifact:{report_name}:trades'))
+                artifact_row.append(InlineKeyboardButton("📄 Trades", callback_data=f"report_artifact_k:{report_key}:trades"))
             if (report_dir / "signals.csv").exists():
-                artifact_row.append(InlineKeyboardButton("📄 Signals", callback_data=f'report_artifact:{report_name}:signals'))
+                artifact_row.append(InlineKeyboardButton("📄 Signals", callback_data=f"report_artifact_k:{report_key}:signals"))
             if artifact_row:
                 keyboard.append(artifact_row)
 
             artifact_row2 = []
             if (report_dir / "skipped_signals.csv").exists():
-                artifact_row2.append(InlineKeyboardButton("📄 Skipped", callback_data=f'report_artifact:{report_name}:skipped'))
+                artifact_row2.append(InlineKeyboardButton("📄 Skipped", callback_data=f"report_artifact_k:{report_key}:skipped"))
             if (report_dir / "summary.json").exists():
-                artifact_row2.append(InlineKeyboardButton("📄 Summary", callback_data=f'report_artifact:{report_name}:summary'))
+                artifact_row2.append(InlineKeyboardButton("📄 Summary", callback_data=f"report_artifact_k:{report_key}:summary"))
             if artifact_row2:
                 keyboard.append(artifact_row2)
 
@@ -3529,6 +3677,7 @@ class TelegramCommandHandler:
             # Map artifact type to file
             file_map = {
                 "chart": "chart_overview.png",
+                "pdf": "report.pdf",
                 "trades": "trades.csv",
                 "signals": "signals.csv",
                 "skipped": "skipped_signals.csv",
@@ -3565,10 +3714,14 @@ class TelegramCommandHandler:
                     )
             else:
                 with open(filepath, "rb") as f:
+                    caption = None
+                    if artifact == "pdf":
+                        caption = "📄 Detailed PDF report"
                     await context.bot.send_document(
                         chat_id=update.effective_chat.id,
                         document=f,
                         filename=filepath.name,
+                        caption=caption,
                     )
 
         except Exception as e:
@@ -3577,6 +3730,54 @@ class TelegramCommandHandler:
                 chat_id=update.effective_chat.id,
                 text=f"❌ Error sending artifact: {str(e)}",
             )
+
+    # -------------------------------------------------------------------------
+    # Reports: stable short IDs to satisfy Telegram callback_data length limits
+    # -------------------------------------------------------------------------
+
+    def _report_key(self, report_name: str) -> str:
+        """Stable short key for a report dir name (safe for callback_data)."""
+        try:
+            # 64-bit digest => 16 hex chars; collision risk is negligible for this use.
+            return hashlib.blake2b(report_name.encode("utf-8"), digest_size=8).hexdigest()
+        except Exception:
+            return str(report_name).strip()[:16]
+
+    def _resolve_report_name_by_key(self, report_key: str) -> Optional[str]:
+        """Resolve a report key back to an on-disk report directory name."""
+        try:
+            reports_dir = Path(self.state_dir.parent / "reports")
+            if not reports_dir.exists():
+                reports_dir = Path.cwd() / "reports"
+            if not reports_dir.exists():
+                return None
+
+            for d in reports_dir.iterdir():
+                if not d.is_dir():
+                    continue
+                name = d.name
+                if not name.startswith("backtest_"):
+                    continue
+                if self._report_key(name) == report_key:
+                    return name
+        except Exception:
+            return None
+        return None
+
+    def _get_reports_dir_for_write(self) -> Path:
+        """
+        Return the reports directory where we should write new reports.
+
+        Important UX detail:
+        - If `data/reports` already exists, we use it.
+        - Otherwise we write to `<cwd>/reports` to avoid changing precedence of `/reports`.
+        """
+        primary = Path(self.state_dir.parent / "reports")
+        if primary.exists():
+            return primary
+        fallback = Path.cwd() / "reports"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
     async def _handle_test_signal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /test_signal command - generate a test signal with chart for testing."""
@@ -5750,6 +5951,12 @@ class TelegramCommandHandler:
             await self._process_wizard_search(update, context, text)
             return
         
+        # Check for AI Terminal commands (starts with !)
+        # Terminal commands work even when chat mode is off
+        if text.startswith("!"):
+            await self._process_terminal_command(update, context, text[1:].strip())
+            return
+        
         # Check chat mode (persistent preference)
         chat_mode = self.prefs.get("ai_chat_mode", False) if self.prefs else False
         
@@ -6069,6 +6276,429 @@ class TelegramCommandHandler:
                 f"❌ Error: {str(e)[:200]}",
                 reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=True),
             )
+    
+    # =========================================================================
+    # AI Terminal Mode - Deterministic command interface (!command syntax)
+    # =========================================================================
+    
+    async def _process_terminal_command(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        command_text: str,
+    ) -> None:
+        """
+        Process AI Terminal commands (prefixed with !).
+        
+        Supported commands:
+        - !status - Show agent status
+        - !config <path> [value] - Get/set config values
+        - !apply <suggestion_id> - Apply a suggestion
+        - !rollback <request_id> - Rollback an action
+        - !suggestions - List active suggestions
+        - !audit [n] - Show recent audit log entries
+        - !policy - Show policy status
+        - !help - Show terminal help
+        """
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        parts = command_text.split(maxsplit=2)
+        cmd = parts[0].lower() if parts else ""
+        args = parts[1:] if len(parts) > 1 else []
+        
+        try:
+            if cmd == "help" or not cmd:
+                await self._terminal_help(update)
+            elif cmd == "status":
+                await self._terminal_status(update)
+            elif cmd == "config":
+                await self._terminal_config(update, args)
+            elif cmd == "apply":
+                await self._terminal_apply(update, args)
+            elif cmd == "rollback":
+                await self._terminal_rollback(update, args)
+            elif cmd == "suggestions" or cmd == "sug":
+                await self._terminal_suggestions(update)
+            elif cmd == "audit":
+                await self._terminal_audit(update, args)
+            elif cmd == "policy":
+                await self._terminal_policy(update)
+            else:
+                await update.message.reply_text(
+                    f"❓ Unknown command: `{cmd}`\n\n"
+                    "Type `!help` for available commands.",
+                    parse_mode="Markdown",
+                )
+        except Exception as e:
+            logger.error(f"Terminal command error: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:200]}")
+    
+    async def _terminal_help(self, update: Update) -> None:
+        """Show terminal help."""
+        help_text = """
+🖥️ *AI Terminal Commands*
+
+*Status & Info*
+`!status` - Agent status snapshot
+`!config <path>` - Show config value
+`!policy` - Auto-tune policy status
+`!suggestions` - List active suggestions
+`!audit [n]` - Recent audit entries (default 10)
+
+*Actions*
+`!config <path> <value>` - Update config
+`!apply <suggestion_id>` - Apply suggestion
+`!rollback <request_id>` - Rollback action
+
+*Examples*
+`!config signals.min_confidence`
+`!config signals.min_confidence 0.65`
+`!apply sug_001`
+`!rollback act_20260102_0001`
+
+_Commands are policy-gated for safety._
+"""
+        await update.message.reply_text(help_text.strip(), parse_mode="Markdown")
+    
+    async def _terminal_status(self, update: Update) -> None:
+        """Show agent status via terminal."""
+        state = self._load_state_snapshot()
+        if not state:
+            await update.message.reply_text("⚠️ Agent state unavailable")
+            return
+        
+        execution = state.get("execution", {})
+        mode = execution.get("mode", "paper")
+        armed = "🔴 ARMED" if execution.get("armed") else "⚪ Disarmed"
+        
+        lines = [
+            "📊 *Agent Status*",
+            "",
+            f"*Mode:* `{mode}` {armed}",
+            f"*Running:* {'✅' if state.get('running') else '❌'}",
+            f"*Uptime:* `{state.get('uptime', 'N/A')}`",
+            f"*Connection:* {'🟢' if state.get('connected') else '🔴'}",
+            f"*Errors:* `{state.get('consecutive_errors', 0)}`",
+            "",
+            f"*Last Signal:* `{state.get('last_signal_time', 'N/A')}`",
+            f"*Open Positions:* `{len(state.get('positions', []))}`",
+        ]
+        
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    
+    async def _terminal_config(self, update: Update, args: List[str]) -> None:
+        """Get or set config values via terminal."""
+        if not args:
+            await update.message.reply_text(
+                "Usage: `!config <path>` or `!config <path> <value>`",
+                parse_mode="Markdown",
+            )
+            return
+        
+        config_path = args[0]
+        
+        # Load current config
+        config = self._load_config_yaml()
+        if not config:
+            await update.message.reply_text("❌ Could not load config")
+            return
+        
+        # Navigate to config path
+        path_parts = config_path.split(".")
+        current = config
+        for part in path_parts[:-1]:
+            current = current.get(part, {})
+        
+        current_value = current.get(path_parts[-1]) if path_parts else None
+        
+        if len(args) < 2:
+            # GET mode
+            await update.message.reply_text(
+                f"📝 *Config Value*\n\n"
+                f"*Path:* `{config_path}`\n"
+                f"*Value:* `{current_value}`",
+                parse_mode="Markdown",
+            )
+            return
+        
+        # SET mode
+        new_value_str = " ".join(args[1:])
+        
+        # Parse value type
+        try:
+            if new_value_str.lower() == "true":
+                new_value = True
+            elif new_value_str.lower() == "false":
+                new_value = False
+            elif "." in new_value_str:
+                new_value = float(new_value_str)
+            else:
+                try:
+                    new_value = int(new_value_str)
+                except ValueError:
+                    new_value = new_value_str
+        except ValueError:
+            new_value = new_value_str
+        
+        # Use monitor's apply_suggestion mechanism with policy checks
+        monitor = self._get_claude_monitor()
+        if not monitor:
+            await update.message.reply_text("❌ Claude monitor not available")
+            return
+        
+        # Check policy first
+        if monitor.action_executor._policy:
+            agent_state = self._load_state_snapshot() or {}
+            decision = monitor.action_executor._policy.check_change(
+                config_path=config_path,
+                old_value=current_value,
+                new_value=new_value,
+                agent_state=agent_state,
+            )
+            
+            if not decision.allowed:
+                await update.message.reply_text(
+                    f"🚫 *Policy Rejected*\n\n"
+                    f"*Path:* `{config_path}`\n"
+                    f"*Reason:* {decision.reason}\n\n"
+                    "_This config path is not allowed for terminal updates._",
+                    parse_mode="Markdown",
+                )
+                return
+            
+            # Use bounded value if policy adjusted it
+            if decision.bounded_value is not None:
+                new_value = decision.bounded_value
+        
+        # Create and execute action request
+        from pearlalgo.claude_monitor.action_executor import ActionRequest, ActionType
+        
+        request = ActionRequest(
+            action_type=ActionType.CONFIG_UPDATE,
+            description=f"Terminal config update: {config_path}",
+            changes={"source": "terminal"},
+            config_path=config_path,
+            old_value=current_value,
+            new_value=new_value,
+        )
+        
+        result = await monitor.action_executor.execute(request)
+        
+        if result.success:
+            await update.message.reply_text(
+                f"✅ *Config Updated*\n\n"
+                f"*Path:* `{config_path}`\n"
+                f"*Old:* `{current_value}`\n"
+                f"*New:* `{new_value}`\n\n"
+                f"*Request ID:* `{result.request_id}`\n"
+                f"*Rollback:* `!rollback {result.request_id}`",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ *Update Failed*\n\n"
+                f"*Path:* `{config_path}`\n"
+                f"*Error:* {result.error or result.message}",
+                parse_mode="Markdown",
+            )
+    
+    async def _terminal_apply(self, update: Update, args: List[str]) -> None:
+        """Apply a suggestion via terminal."""
+        if not args:
+            await update.message.reply_text(
+                "Usage: `!apply <suggestion_id>`\n\n"
+                "Use `!suggestions` to list available suggestions.",
+                parse_mode="Markdown",
+            )
+            return
+        
+        suggestion_id = args[0]
+        monitor = self._get_claude_monitor()
+        
+        if not monitor:
+            await update.message.reply_text("❌ Claude monitor not available")
+            return
+        
+        await update.message.reply_text(f"⏳ Applying `{suggestion_id}`...")
+        
+        result = await monitor.apply_suggestion(suggestion_id)
+        
+        if result.get("success"):
+            suggestion = result.get("suggestion", {})
+            await update.message.reply_text(
+                f"✅ *Applied*\n\n"
+                f"*ID:* `{suggestion_id}`\n"
+                f"*Config:* `{suggestion.get('config_path', 'N/A')}`\n"
+                f"*Value:* `{suggestion.get('new_value')}`\n\n"
+                f"*Request ID:* `{result.get('request_id')}`\n"
+                f"*Rollback:* `!rollback {result.get('request_id')}`",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ *Failed*\n\n"
+                f"*ID:* `{suggestion_id}`\n"
+                f"*Error:* {result.get('error', 'Unknown')}",
+                parse_mode="Markdown",
+            )
+    
+    async def _terminal_rollback(self, update: Update, args: List[str]) -> None:
+        """Rollback an action via terminal."""
+        if not args:
+            await update.message.reply_text(
+                "Usage: `!rollback <request_id>`\n\n"
+                "Request IDs are shown when applying suggestions/configs.",
+                parse_mode="Markdown",
+            )
+            return
+        
+        request_id = args[0]
+        monitor = self._get_claude_monitor()
+        
+        if not monitor:
+            await update.message.reply_text("❌ Claude monitor not available")
+            return
+        
+        await update.message.reply_text(f"⏳ Rolling back `{request_id}`...")
+        
+        result = await monitor.rollback_suggestion(request_id)
+        
+        if result.get("success"):
+            await update.message.reply_text(
+                f"✅ *Rolled Back*\n\n"
+                f"*Request ID:* `{request_id}`\n"
+                f"*Status:* `{result.get('status')}`",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ *Rollback Failed*\n\n"
+                f"*Request ID:* `{request_id}`\n"
+                f"*Error:* {result.get('error', 'Unknown')}",
+                parse_mode="Markdown",
+            )
+    
+    async def _terminal_suggestions(self, update: Update) -> None:
+        """List active suggestions via terminal."""
+        monitor = self._get_claude_monitor()
+        
+        if not monitor:
+            await update.message.reply_text("❌ Claude monitor not available")
+            return
+        
+        suggestions = monitor.get_active_suggestions()
+        
+        if not suggestions:
+            await update.message.reply_text("📋 No active suggestions")
+            return
+        
+        lines = ["📋 *Active Suggestions*", ""]
+        for sug in suggestions[:10]:  # Limit to 10
+            sug_id = sug.get("id", "???")
+            title = sug.get("title", "Untitled")[:40]
+            risk = sug.get("risk_level", "?")
+            config_path = sug.get("config_path", "")
+            
+            emoji = "🟢" if risk == "low" else ("🟡" if risk == "medium" else "🔴")
+            
+            lines.append(f"{emoji} `{sug_id}`")
+            lines.append(f"   {title}")
+            if config_path:
+                lines.append(f"   📝 `{config_path}`")
+            lines.append("")
+        
+        if len(suggestions) > 10:
+            lines.append(f"_...and {len(suggestions) - 10} more_")
+        
+        lines.append("\n`!apply <id>` to apply")
+        
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    
+    async def _terminal_audit(self, update: Update, args: List[str]) -> None:
+        """Show recent audit log entries via terminal."""
+        n = 10
+        if args:
+            try:
+                n = min(int(args[0]), 25)
+            except ValueError:
+                pass
+        
+        audit_file = self.state_dir / "claude_action_audit.jsonl"
+        
+        if not audit_file.exists():
+            await update.message.reply_text("📜 No audit entries yet")
+            return
+        
+        try:
+            with open(audit_file) as f:
+                entries = [json.loads(line) for line in f if line.strip()]
+        except Exception as e:
+            await update.message.reply_text(f"❌ Could not read audit log: {e}")
+            return
+        
+        if not entries:
+            await update.message.reply_text("📜 Audit log is empty")
+            return
+        
+        # Get last N entries
+        recent = entries[-n:]
+        recent.reverse()  # Most recent first
+        
+        lines = [f"📜 *Recent Audit* (last {len(recent)})", ""]
+        
+        for entry in recent:
+            action = entry.get("action", "?")
+            ts = entry.get("timestamp", "")[:16]  # Truncate to min:sec
+            req_id = entry.get("request_id", "")[:20]
+            
+            emoji = {"request": "📤", "result": "📥", "policy_rejected": "🚫", "error": "❌"}.get(action, "•")
+            
+            lines.append(f"{emoji} `{ts}` {action}")
+            if req_id:
+                lines.append(f"   `{req_id}`")
+        
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    
+    async def _terminal_policy(self, update: Update) -> None:
+        """Show policy status via terminal."""
+        monitor = self._get_claude_monitor()
+        
+        if not monitor or not monitor.action_executor._policy:
+            await update.message.reply_text("⚠️ Policy not available")
+            return
+        
+        status = monitor.action_executor._policy.get_status()
+        
+        lines = [
+            "🔒 *Auto-Tune Policy Status*",
+            "",
+            f"*Changes Today:* `{status['changes_today']}/{status['max_per_day']}`",
+            f"*Remaining:* `{status['remaining_today']}`",
+            f"*Block When Armed:* `{status['block_when_armed']}`",
+            f"*Auto-Rollback:* `{status['auto_rollback_enabled']}`",
+            "",
+            "*Allowlist:*",
+        ]
+        
+        for key in status.get("allowlist_keys", [])[:10]:
+            lines.append(f"  • `{key}`")
+        
+        if len(status.get("allowlist_keys", [])) > 10:
+            lines.append(f"  _...and {len(status['allowlist_keys']) - 10} more_")
+        
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    
+    def _load_config_yaml(self) -> Optional[Dict[str, Any]]:
+        """Load config.yaml for terminal config commands."""
+        try:
+            config_path = self.project_root / "config" / "config.yaml"
+            if config_path.exists():
+                import yaml
+                with open(config_path) as f:
+                    return yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"Could not load config.yaml: {e}")
+        return None
     
     async def _handle_claude_file_toggle(
         self,
@@ -6841,8 +7471,9 @@ class TelegramCommandHandler:
                 InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
             ])
         
-        # Row 2: Quick drill-down
+        # Row 2: Quick drill-down (most common "is it working?" actions)
         keyboard.append([
+            InlineKeyboardButton("📟 Status", callback_data="status"),
             InlineKeyboardButton("📊 Last Signal", callback_data="last_signal"),
             InlineKeyboardButton("🎯 Trades", callback_data="active_trades"),
         ])
@@ -6866,8 +7497,14 @@ class TelegramCommandHandler:
             InlineKeyboardButton("📂 Reports", callback_data="reports"),
         ])
 
-        # Row 6: Settings (secondary tools live inside)
-        keyboard.append([InlineKeyboardButton("⚙️ Settings", callback_data="settings")])
+        # Row 6: AI + Settings (keep top-level, avoid menu-in-menu)
+        if ANTHROPIC_AVAILABLE:
+            keyboard.append([
+                InlineKeyboardButton("🤖 AI Hub", callback_data="claude_hub"),
+                InlineKeyboardButton("⚙️ Settings", callback_data="settings"),
+            ])
+        else:
+            keyboard.append([InlineKeyboardButton("⚙️ Settings", callback_data="settings")])
         
         return InlineKeyboardMarkup(keyboard)
     
@@ -7084,6 +7721,29 @@ class TelegramCommandHandler:
                 error_str = str(e).lower()
                 if "parse entities" in error_str or "can't parse" in error_str:
                     raise  # Propagate Markdown errors for fallback handling
+                # Safety: if reply_markup is invalid (e.g., callback_data too long), retry without buttons.
+                if reply_markup is not None and ("button_data_invalid" in error_str or "reply_markup" in error_str):
+                    logger.warning(f"Reply markup rejected by Telegram, retrying without buttons: {e}")
+                    try:
+                        if update.callback_query:
+                            try:
+                                await update.callback_query.edit_message_text(text=text, parse_mode=mode)
+                                return True
+                            except Exception:
+                                await context.bot.send_message(
+                                    chat_id=update.effective_chat.id,
+                                    text=text,
+                                    parse_mode=mode,
+                                )
+                                return True
+                        else:
+                            if update.message:
+                                await update.message.reply_text(text, parse_mode=mode)
+                                return True
+                            await context.bot.send_message(chat_id=update.effective_chat.id, text=text, parse_mode=mode)
+                            return True
+                    except Exception as e2:
+                        logger.error(f"Retry without buttons also failed: {e2}", exc_info=True)
                 logger.error(f"Error sending message: {e}", exc_info=True)
                 return False
             return False
@@ -7261,6 +7921,8 @@ class TelegramCommandHandler:
             await self._render_strategy_review_cached(update, context)
         elif callback_data == "strategy_review" or callback_data == "strategy_review:refresh":
             await self._handle_strategy_review(update, context)
+        elif callback_data == "strategy_review:more":
+            await self._render_strategy_review_more_menu(update, context)
         elif callback_data == "strategy_review:export":
             await self._handle_strategy_review_export(update, context)
         elif callback_data == "strategy_review:config_patch":
@@ -7273,6 +7935,16 @@ class TelegramCommandHandler:
             await self._handle_strategy_review_discuss(update, context)
         elif callback_data == "strategy_review:autofix":
             await self._handle_strategy_review_autofix(update, context)
+        elif callback_data.startswith("strategy_review:variant_weeks:"):
+            try:
+                w = int(callback_data.split("strategy_review:variant_weeks:", 1)[1])
+            except Exception:
+                w = 2
+            if w not in (1, 2, 4):
+                w = 2
+            if hasattr(context, "user_data"):
+                context.user_data["strategy_review_variant_weeks"] = w
+            await self._render_strategy_review_cached(update, context)
         elif callback_data.startswith("strategy_review:lookback:"):
             try:
                 lb = int(callback_data.split("strategy_review:lookback:", 1)[1])
@@ -7288,9 +7960,39 @@ class TelegramCommandHandler:
             except Exception:
                 page = 0
             await self._handle_backtest_reports(update, context, page=page)
+        elif callback_data.startswith("report_detail_k:"):
+            report_key = callback_data.split("report_detail_k:", 1)[1].strip()
+            report_name = self._resolve_report_name_by_key(report_key)
+            if not report_name:
+                await self._send_message_or_edit(
+                    update,
+                    context,
+                    "❌ Report not found (stale button). Tap *Reports* to refresh.",
+                    reply_markup=InlineKeyboardMarkup(
+                        [
+                            [InlineKeyboardButton("📂 Reports", callback_data="reports")],
+                            [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                        ]
+                    ),
+                )
+                return
+            await self._handle_report_detail(update, context, report_name)
         elif callback_data.startswith('report_detail:'):
             report_name = callback_data.split(':', 1)[1]
             await self._handle_report_detail(update, context, report_name)
+        elif callback_data.startswith("report_artifact_k:"):
+            parts = callback_data.split(":")
+            if len(parts) >= 3:
+                report_key = parts[1]
+                artifact = parts[2]
+                report_name = self._resolve_report_name_by_key(report_key)
+                if not report_name:
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="❌ Report not found (stale button). Tap Reports to refresh.",
+                    )
+                    return
+                await self._handle_report_artifact(update, context, report_name, artifact)
         elif callback_data.startswith('report_artifact:'):
             parts = callback_data.split(':')
             if len(parts) >= 3:
@@ -8206,7 +8908,7 @@ class TelegramCommandHandler:
             await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
     
     async def _handle_apply_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /apply_suggestion <id> - Apply a suggestion."""
+        """Handle /apply_suggestion <id> [--dry-run] - Apply a suggestion."""
         if not await self._check_authorized(update):
             return
         
@@ -8220,42 +8922,158 @@ class TelegramCommandHandler:
                 return
             
             # Get suggestion ID from args
-            args = context.args
+            args = context.args or []
             if not args:
                 await update.message.reply_text(
-                    "Usage: `/apply_suggestion <suggestion_id>`\n\n"
+                    "Usage: `/apply_suggestion <suggestion_id>` [--dry-run]\n\n"
+                    "Options:\n"
+                    "• `--dry-run` - Simulate without applying\n\n"
                     "Use `/suggestions` to see available suggestions.",
                     parse_mode="Markdown",
                 )
                 return
             
             suggestion_id = args[0]
+            dry_run = "--dry-run" in args or "-n" in args
             
-            # Get suggestion details
+            # Get suggestion details first
             suggestion = monitor.monitor_state.get_suggestion(suggestion_id)
             
             if not suggestion:
                 await update.message.reply_text(f"❌ Suggestion `{suggestion_id}` not found.")
                 return
             
-            # For now, just mark as applied (actual application handled by action executor)
-            result = monitor.apply_suggestion(suggestion_id)
+            # Show "working" message
+            mode_text = " (DRY RUN)" if dry_run else ""
+            await update.message.reply_text(
+                f"⏳ Applying suggestion `{suggestion_id}`{mode_text}...",
+                parse_mode="Markdown",
+            )
+            
+            # Apply the suggestion via ActionExecutor
+            result = await monitor.apply_suggestion(suggestion_id, dry_run=dry_run)
             
             if result.get("success"):
+                # Build success message with details
+                lines = [
+                    f"✅ *Suggestion Applied*{mode_text}",
+                    "",
+                    f"*ID:* `{suggestion_id}`",
+                    f"*Title:* {suggestion.get('title', 'Suggestion')}",
+                ]
+                
+                # Show config change details
+                config_path = suggestion.get("config_path")
+                if config_path:
+                    lines.append(f"*Config:* `{config_path}`")
+                    old_val = suggestion.get("old_value")
+                    new_val = suggestion.get("new_value")
+                    if old_val is not None:
+                        lines.append(f"*Old Value:* `{old_val}`")
+                    if new_val is not None:
+                        lines.append(f"*New Value:* `{new_val}`")
+                
+                # Action details
+                action_type = result.get("action_type", "unknown")
+                request_id = result.get("request_id", "unknown")
+                lines.extend([
+                    "",
+                    f"*Action:* `{action_type}`",
+                    f"*Request ID:* `{request_id}`",
+                ])
+                
+                # Rollback instructions
+                if result.get("can_rollback") and not dry_run:
+                    lines.extend([
+                        "",
+                        "🔄 *Rollback:* `/rollback_suggestion " + request_id + "`",
+                    ])
+                
+                # Description
+                desc = suggestion.get("description", "")
+                if desc:
+                    lines.extend(["", f"_{desc[:180]}{'...' if len(desc) > 180 else ''}_"])
+                
+                await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+            
+            elif result.get("requires_manual"):
+                # Non-executable suggestion
                 await update.message.reply_text(
-                    f"✅ Suggestion `{suggestion_id}` marked as applied.\n\n"
-                    f"*{suggestion.get('title', 'Suggestion')}*\n"
-                    f"_{suggestion.get('description', '')[:200]}_\n\n"
-                    "Note: Manual application may be required for config/code changes.",
+                    f"⚠️ *Manual Action Required*\n\n"
+                    f"*{suggestion.get('title', 'Suggestion')}*\n\n"
+                    f"This suggestion type (`{suggestion.get('type')}`) cannot be auto-applied.\n\n"
+                    f"*What to do:*\n"
+                    f"_{suggestion.get('description', 'Review and apply manually')[:300]}_",
                     parse_mode="Markdown",
                 )
             else:
+                # Failed
+                error = result.get("error", "Unknown error")
                 await update.message.reply_text(
-                    f"❌ Could not apply suggestion: {result.get('error', 'Unknown error')}"
+                    f"❌ *Apply Failed*\n\n"
+                    f"*Suggestion:* `{suggestion_id}`\n"
+                    f"*Error:* {error[:200]}",
+                    parse_mode="Markdown",
                 )
             
         except Exception as e:
             logger.error(f"Error handling /apply_suggestion: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+
+    async def _handle_rollback_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /rollback_suggestion <request_id> - Rollback a previously applied suggestion."""
+        if not await self._check_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /rollback_suggestion command from {update.effective_user.id}")
+        
+        try:
+            monitor = self._get_claude_monitor()
+            
+            if not monitor:
+                await update.message.reply_text("❌ Claude monitor not available")
+                return
+            
+            # Get request ID from args
+            args = context.args or []
+            if not args:
+                await update.message.reply_text(
+                    "Usage: `/rollback_suggestion <request_id>`\n\n"
+                    "The `request_id` is shown when you apply a suggestion.\n"
+                    "Check the audit log for recent actions.",
+                    parse_mode="Markdown",
+                )
+                return
+            
+            request_id = args[0]
+            
+            await update.message.reply_text(
+                f"⏳ Rolling back `{request_id}`...",
+                parse_mode="Markdown",
+            )
+            
+            # Perform rollback
+            result = await monitor.rollback_suggestion(request_id)
+            
+            if result.get("success"):
+                await update.message.reply_text(
+                    f"✅ *Rollback Successful*\n\n"
+                    f"*Request ID:* `{request_id}`\n"
+                    f"*Status:* `{result.get('status', 'rolled_back')}`\n\n"
+                    f"_{result.get('message', 'Config restored from backup')}_",
+                    parse_mode="Markdown",
+                )
+            else:
+                error = result.get("error", "Unknown error")
+                await update.message.reply_text(
+                    f"❌ *Rollback Failed*\n\n"
+                    f"*Request ID:* `{request_id}`\n"
+                    f"*Error:* {error[:200]}",
+                    parse_mode="Markdown",
+                )
+            
+        except Exception as e:
+            logger.error(f"Error handling /rollback_suggestion: {e}", exc_info=True)
             await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
 
     # =========================================================================
@@ -8368,7 +9186,7 @@ class TelegramCommandHandler:
 
         lines += [
             "",
-            "Use the buttons below to backtest, view reports, or generate a patch with Claude.",
+            "Use *More* for actions (export, discuss, patch, suggestions, backtests).",
         ]
 
         msg = "\n".join(lines)
@@ -8480,7 +9298,7 @@ class TelegramCommandHandler:
 
             message = self._format_strategy_review_message(analysis, suggestions_dicts, lookback_hours=lookback)
 
-            # Buttons
+            # Buttons (keep Review screen compact; advanced actions live under "More")
             lb_24 = "⏱ 24h ✓" if lookback == 24 else "⏱ 24h"
             lb_7d = "🗓 7d ✓" if lookback != 24 else "🗓 7d"
             keyboard: List[List[InlineKeyboardButton]] = [
@@ -8490,36 +9308,9 @@ class TelegramCommandHandler:
                 ],
                 [
                     InlineKeyboardButton("🔄 Refresh", callback_data="strategy_review:refresh"),
-                    InlineKeyboardButton("📄 Export", callback_data="strategy_review:export"),
+                    InlineKeyboardButton("➕ More", callback_data="strategy_review:more"),
                 ],
-            ]
-
-            # Auto Fix (only if we have a task and Claude is available)
-            has_autofix = bool(getattr(context, "user_data", {}).get("strategy_review_autofix_task")) if hasattr(context, "user_data") else False
-            if has_autofix and ANTHROPIC_AVAILABLE:
-                keyboard.append([InlineKeyboardButton("🧩 Auto Fix (Patch)", callback_data="strategy_review:autofix")])
-
-            # Config Patch (safe, config-only; requires a config candidate)
-            has_config_patch = bool(getattr(context, "user_data", {}).get("strategy_review_config_candidate")) if hasattr(context, "user_data") else False
-            if has_config_patch and ANTHROPIC_AVAILABLE:
-                keyboard.append([InlineKeyboardButton("⚙️ Config Patch (Safe)", callback_data="strategy_review:config_patch")])
-                keyboard.append([InlineKeyboardButton("🧪 Backtest Variant", callback_data="strategy_review:variant_backtest")])
-
-            keyboard += [
-                [InlineKeyboardButton("💬 Discuss with Claude", callback_data="strategy_review:discuss")],
-                [
-                    InlineKeyboardButton("🧩 Patch Wizard", callback_data="claude_patch_wizard"),
-                    InlineKeyboardButton("🤖 Claude Hub", callback_data="claude_hub"),
-                ],
-                [
-                    InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
-                    InlineKeyboardButton("📂 Reports", callback_data="reports"),
-                ],
-                [
-                    InlineKeyboardButton("💡 Suggest Config", callback_data="claude_suggest_config"),
-                    InlineKeyboardButton("📋 Suggestions", callback_data="claude_suggestions"),
-                ],
-                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                [InlineKeyboardButton("🏠 Home", callback_data="start")],
             ]
 
             await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -8560,6 +9351,7 @@ class TelegramCommandHandler:
 
         message = self._format_strategy_review_message(analysis, suggestions_dicts or [], lookback_hours=lookback)
 
+        # Buttons (keep Review screen compact; advanced actions live under "More")
         lb_24 = "⏱ 24h ✓" if lookback == 24 else "⏱ 24h"
         lb_7d = "🗓 7d ✓" if lookback != 24 else "🗓 7d"
         keyboard: List[List[InlineKeyboardButton]] = [
@@ -8569,34 +9361,72 @@ class TelegramCommandHandler:
             ],
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data="strategy_review:refresh"),
-                InlineKeyboardButton("📄 Export", callback_data="strategy_review:export"),
+                InlineKeyboardButton("➕ More", callback_data="strategy_review:more"),
             ],
+            [InlineKeyboardButton("🏠 Home", callback_data="start")],
         ]
 
+        await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def _render_strategy_review_more_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the Strategy Review action sheet (advanced actions live here)."""
+        if not await self._check_authorized(update):
+            return
+
         has_autofix = bool(getattr(context, "user_data", {}).get("strategy_review_autofix_task")) if hasattr(context, "user_data") else False
-        if has_autofix and ANTHROPIC_AVAILABLE:
-            keyboard.append([InlineKeyboardButton("🧩 Auto Fix (Patch)", callback_data="strategy_review:autofix")])
+        has_config_candidate = bool(getattr(context, "user_data", {}).get("strategy_review_config_candidate")) if hasattr(context, "user_data") else False
 
-        has_config_patch = bool(getattr(context, "user_data", {}).get("strategy_review_config_candidate")) if hasattr(context, "user_data") else False
-        if has_config_patch and ANTHROPIC_AVAILABLE:
-            keyboard.append([InlineKeyboardButton("⚙️ Config Patch (Safe)", callback_data="strategy_review:config_patch")])
+        sel_weeks = 2
+        if hasattr(context, "user_data"):
+            try:
+                sel_weeks = int(context.user_data.get("strategy_review_variant_weeks", 2) or 2)
+            except Exception:
+                sel_weeks = 2
+        if sel_weeks not in (1, 2, 4):
+            sel_weeks = 2
 
-        keyboard += [
-            [InlineKeyboardButton("💬 Discuss with Claude", callback_data="strategy_review:discuss")],
-            [
-                InlineKeyboardButton("🧩 Patch Wizard", callback_data="claude_patch_wizard"),
-                InlineKeyboardButton("🤖 Claude Hub", callback_data="claude_hub"),
-            ],
-            [
-                InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
-                InlineKeyboardButton("📂 Reports", callback_data="reports"),
-            ],
+        message = (
+            "🧠 *Strategy Review — More*\n\n"
+            "Pick an action. (The main Review screen stays intentionally minimal.)"
+        )
+
+        keyboard: List[List[InlineKeyboardButton]] = []
+
+        keyboard.append([InlineKeyboardButton("📄 Export", callback_data="strategy_review:export")])
+
+        if ANTHROPIC_AVAILABLE:
+            keyboard.append([InlineKeyboardButton("💬 Discuss with Claude", callback_data="strategy_review:discuss")])
+            keyboard.append([InlineKeyboardButton("🧩 Patch Wizard", callback_data="claude_patch_wizard")])
+            if has_autofix:
+                keyboard.append([InlineKeyboardButton("🧩 Auto Fix (Patch)", callback_data="strategy_review:autofix")])
+
+        if has_config_candidate:
+            if ANTHROPIC_AVAILABLE:
+                keyboard.append([InlineKeyboardButton("⚙️ Config Patch (Safe)", callback_data="strategy_review:config_patch")])
+            keyboard.append([InlineKeyboardButton(f"🧪 Backtest Variant ({sel_weeks}w)", callback_data="strategy_review:variant_backtest")])
+            keyboard.append(
+                [
+                    InlineKeyboardButton("1w ✓" if sel_weeks == 1 else "1w", callback_data="strategy_review:variant_weeks:1"),
+                    InlineKeyboardButton("2w ✓" if sel_weeks == 2 else "2w", callback_data="strategy_review:variant_weeks:2"),
+                    InlineKeyboardButton("4w ✓" if sel_weeks == 4 else "4w", callback_data="strategy_review:variant_weeks:4"),
+                ]
+            )
+
+        keyboard.append(
             [
                 InlineKeyboardButton("💡 Suggest Config", callback_data="claude_suggest_config"),
                 InlineKeyboardButton("📋 Suggestions", callback_data="claude_suggestions"),
-            ],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
-        ]
+            ]
+        )
+        keyboard.append(
+            [
+                InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
+                InlineKeyboardButton("📂 Reports", callback_data="reports"),
+            ]
+        )
+
+        keyboard.append([InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")])
+        keyboard.append([InlineKeyboardButton("🏠 Home", callback_data="start")])
 
         await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
 

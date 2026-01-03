@@ -91,6 +91,8 @@ class SystemAnalyzer:
         error_count = agent_state.get("error_count", 0)
         connection_failures = agent_state.get("connection_failures", 0)
         data_fetch_errors = agent_state.get("data_fetch_errors", 0)
+        futures_open = agent_state.get("futures_market_open")
+        session_open = agent_state.get("strategy_session_open")
         
         data_fresh = agent_state.get("data_fresh")
         latest_bar_age = agent_state.get("latest_bar_age_minutes")
@@ -182,8 +184,8 @@ class SystemAnalyzer:
                 "recommendation": "Monitor Gateway health",
             })
         
-        # Check data freshness
-        if data_fresh is False:
+        # Check data freshness (only actionable when futures market is open)
+        if data_fresh is False and futures_open is not False:
             severity = "critical" if (latest_bar_age or 0) > THRESHOLDS["data_stale_minutes_critical"] else "high"
             alerts.append({
                 "level": "warning" if severity == "high" else "critical",

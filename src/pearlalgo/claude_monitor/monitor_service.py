@@ -26,6 +26,13 @@ from pearlalgo.claude_monitor.analysis_engine import AnalysisEngine
 from pearlalgo.claude_monitor.alert_manager import AlertManager, Alert, AlertLevel
 from pearlalgo.claude_monitor.suggestion_engine import SuggestionEngine, Suggestion
 from pearlalgo.claude_monitor.monitor_state import MonitorState
+from pearlalgo.claude_monitor.action_executor import (
+    ActionExecutor,
+    ActionRequest,
+    ActionResult,
+    ActionType,
+    ActionStatus,
+)
 
 # Timezone handling (Python 3.9+)
 try:
@@ -112,6 +119,14 @@ class ClaudeMonitorService:
         
         self.monitor_state = MonitorState(state_dir=state_dir)
         
+        # Action executor for applying suggestions
+        self.action_executor = ActionExecutor(
+            state_dir=self.state_dir,
+            auto_approve=self.config.get("auto_apply_enabled", False),
+            dry_run_default=not self.config.get("auto_apply_enabled", False),
+            max_changes_per_day=self.config.get("max_auto_changes_per_day", 3),
+        )
+        
         # Telegram notifier (for sending alerts)
         self._telegram = None
         self._init_telegram()
@@ -139,7 +154,16 @@ class ClaudeMonitorService:
         self._last_weekly_report: Optional[datetime] = self._parse_utc_ts(self.monitor_state.get_last_weekly_report_sent_at())
         self._cycle_count = 0
         
-        logger.info("Claude Monitor Service initialized")
+        # Auto-apply settings
+        self.auto_apply_enabled = self.config.get("auto_apply_enabled", False)
+        self.max_auto_changes_per_day = self.config.get("max_auto_changes_per_day", 3)
+        self._auto_apply_count_today = 0
+        self._auto_apply_last_reset: Optional[datetime] = None
+        
+        logger.info(
+            f"Claude Monitor Service initialized "
+            f"(auto_apply={self.auto_apply_enabled}, max_auto={self.max_auto_changes_per_day})"
+        )
 
     def _parse_utc_ts(self, ts: Optional[str]) -> Optional[datetime]:
         """Parse a stored UTC ISO timestamp into an aware datetime (UTC)."""
@@ -275,6 +299,10 @@ class ClaudeMonitorService:
                 suggestions=[s.to_dict() for s in suggestions],
             )
             
+            # Auto-apply eligible suggestions if enabled
+            if self.auto_apply_enabled and suggestions:
+                await self._auto_apply_suggestions(suggestions)
+            
             # Check for scheduled reports
             await self._check_scheduled_reports()
             
@@ -286,6 +314,139 @@ class ClaudeMonitorService:
         if self.realtime_monitoring:
             return self.realtime_interval
         return self.frequent_interval
+    
+    async def _auto_apply_suggestions(self, suggestions: List[Suggestion]) -> None:
+        """
+        Automatically apply eligible suggestions.
+        
+        Filters for:
+        - Config changes or parameter tunes (executable types)
+        - Low or medium risk level
+        - Has config_path and new_value
+        
+        Rate-limited by max_auto_changes_per_day.
+        """
+        # Reset daily counter if new day
+        now = datetime.now(timezone.utc)
+        if self._auto_apply_last_reset is None or now.date() != self._auto_apply_last_reset.date():
+            self._auto_apply_count_today = 0
+            self._auto_apply_last_reset = now
+        
+        # Check if we've hit the daily limit
+        if self._auto_apply_count_today >= self.max_auto_changes_per_day:
+            logger.debug(f"Auto-apply: daily limit reached ({self.max_auto_changes_per_day})")
+            return
+        
+        # Filter for eligible suggestions
+        eligible = []
+        for sug in suggestions:
+            sug_dict = sug.to_dict() if hasattr(sug, "to_dict") else sug
+            sug_type = sug_dict.get("type", "")
+            risk = sug_dict.get("risk_level", "medium")
+            config_path = sug_dict.get("config_path")
+            new_value = sug_dict.get("new_value")
+            
+            # Must be a config change type
+            if sug_type not in ("config_change", "parameter_tune"):
+                continue
+            
+            # Must have config_path and new_value
+            if not config_path or new_value is None:
+                continue
+            
+            # Only low or medium risk
+            if risk not in ("low", "medium"):
+                continue
+            
+            eligible.append(sug_dict)
+        
+        if not eligible:
+            return
+        
+        logger.info(f"Auto-apply: {len(eligible)} eligible suggestions found")
+        
+        # Apply up to remaining daily quota
+        remaining = self.max_auto_changes_per_day - self._auto_apply_count_today
+        to_apply = eligible[:remaining]
+        
+        for sug_dict in to_apply:
+            suggestion_id = sug_dict.get("id")
+            if not suggestion_id:
+                # Need to find the suggestion ID from monitor_state
+                # The suggestion was just generated and recorded
+                active = self.monitor_state.get_active_suggestions()
+                for active_sug in active:
+                    if (
+                        active_sug.get("config_path") == sug_dict.get("config_path")
+                        and active_sug.get("new_value") == sug_dict.get("new_value")
+                    ):
+                        suggestion_id = active_sug.get("id")
+                        break
+            
+            if not suggestion_id:
+                logger.warning(f"Auto-apply: could not find suggestion ID for {sug_dict.get('config_path')}")
+                continue
+            
+            try:
+                logger.info(f"Auto-applying suggestion {suggestion_id}: {sug_dict.get('title')}")
+                result = await self.apply_suggestion(suggestion_id, dry_run=False)
+                
+                if result.get("success"):
+                    self._auto_apply_count_today += 1
+                    
+                    # Send Telegram notification
+                    await self._send_auto_apply_notification(sug_dict, result, success=True)
+                    
+                    logger.info(
+                        f"Auto-apply SUCCESS: {suggestion_id} "
+                        f"({sug_dict.get('config_path')} = {sug_dict.get('new_value')})"
+                    )
+                else:
+                    # Send failure notification
+                    await self._send_auto_apply_notification(sug_dict, result, success=False)
+                    
+                    logger.warning(
+                        f"Auto-apply FAILED: {suggestion_id} - {result.get('error', 'unknown')}"
+                    )
+                    
+            except Exception as e:
+                logger.error(f"Auto-apply error for {suggestion_id}: {e}", exc_info=True)
+    
+    async def _send_auto_apply_notification(
+        self,
+        suggestion: Dict[str, Any],
+        result: Dict[str, Any],
+        success: bool,
+    ) -> None:
+        """Send Telegram notification for auto-applied changes."""
+        if not self._telegram:
+            return
+        
+        try:
+            if success:
+                message = (
+                    "🤖 *Auto-Applied Config Change*\n\n"
+                    f"*{suggestion.get('title', 'Config Update')}*\n\n"
+                    f"*Path:* `{suggestion.get('config_path')}`\n"
+                    f"*Old:* `{suggestion.get('old_value')}`\n"
+                    f"*New:* `{suggestion.get('new_value')}`\n\n"
+                    f"*Request ID:* `{result.get('request_id')}`\n"
+                    f"*Rollback:* `/rollback_suggestion {result.get('request_id')}`\n\n"
+                    f"_{suggestion.get('rationale', '')[:150]}_"
+                )
+            else:
+                message = (
+                    "⚠️ *Auto-Apply Failed*\n\n"
+                    f"*{suggestion.get('title', 'Config Update')}*\n\n"
+                    f"*Path:* `{suggestion.get('config_path')}`\n"
+                    f"*Error:* {result.get('error', 'Unknown')[:150]}\n\n"
+                    "The suggestion was not applied."
+                )
+            
+            await self._telegram.send_message(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Could not send auto-apply notification: {e}")
     
     def _load_agent_state(self) -> Optional[Dict[str, Any]]:
         """Load current agent state from state.json."""
@@ -693,21 +854,171 @@ class ClaudeMonitorService:
         """Get active suggestions."""
         return self.monitor_state.get_active_suggestions()
     
-    def apply_suggestion(self, suggestion_id: str) -> Dict[str, Any]:
-        """Apply a suggestion (placeholder for action executor)."""
-        # This will be expanded in the action executor task
+    async def apply_suggestion(
+        self,
+        suggestion_id: str,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Apply a suggestion using the ActionExecutor.
+        
+        Args:
+            suggestion_id: ID of the suggestion to apply
+            dry_run: If True, simulate the change without applying
+            
+        Returns:
+            Dict with success status, result details, and rollback info
+        """
         suggestion = self.monitor_state.get_suggestion(suggestion_id)
         if not suggestion:
             return {"success": False, "error": "Suggestion not found"}
         
-        # For now, just mark as applied
-        self.monitor_state.update_suggestion_status(
-            suggestion_id,
-            "applied",
-            {"applied_by": "manual", "timestamp": get_utc_timestamp()},
+        sug_type = suggestion.get("type", "investigation")
+        config_path = suggestion.get("config_path")
+        old_value = suggestion.get("old_value")
+        new_value = suggestion.get("new_value")
+        patch_task = suggestion.get("patch_task")
+        files = suggestion.get("files")
+        action = suggestion.get("action")
+        
+        # Determine action type
+        if sug_type == "config_change" and config_path:
+            action_type = ActionType.CONFIG_UPDATE
+        elif sug_type == "parameter_tune" and config_path:
+            action_type = ActionType.PARAMETER_TUNE
+        elif sug_type == "code_patch" and files:
+            action_type = ActionType.CODE_PATCH
+        elif sug_type == "service_action" and action:
+            action_type = ActionType.SERVICE_RESTART
+        else:
+            # Non-executable suggestion (investigation, etc.)
+            return {
+                "success": False,
+                "error": f"Suggestion type '{sug_type}' is not automatically executable",
+                "suggestion": suggestion,
+                "requires_manual": True,
+            }
+        
+        # Build action request
+        request = ActionRequest(
+            action_type=action_type,
+            description=suggestion.get("description", "Apply suggestion"),
+            changes={
+                "suggestion_id": suggestion_id,
+                "title": suggestion.get("title"),
+                "rationale": suggestion.get("rationale"),
+            },
+            suggestion_id=suggestion_id,
+            dry_run=dry_run,
+            config_path=config_path,
+            old_value=old_value,
+            new_value=new_value,
+            patch_content=None,  # For code patches, would need to generate
+            target_files=files,
+            service_name=suggestion.get("service_name", "agent"),
+            action=action,
         )
         
-        return {"success": True, "suggestion": suggestion}
+        # Execute the action
+        try:
+            result = await self.action_executor.execute(request)
+        except Exception as e:
+            logger.error(f"Error executing suggestion {suggestion_id}: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "suggestion": suggestion,
+            }
+        
+        # Update suggestion status based on result
+        if result.success:
+            status = "applied" if not dry_run else "dry_run_success"
+            self.monitor_state.update_suggestion_status(
+                suggestion_id,
+                status,
+                {
+                    "applied_by": "action_executor",
+                    "timestamp": get_utc_timestamp(),
+                    "request_id": result.request_id,
+                    "can_rollback": result.can_rollback,
+                    "rollback_data": result.rollback_data,
+                    "dry_run": dry_run,
+                },
+            )
+        else:
+            self.monitor_state.update_suggestion_status(
+                suggestion_id,
+                "failed",
+                {
+                    "error": result.error,
+                    "timestamp": get_utc_timestamp(),
+                    "request_id": result.request_id,
+                },
+            )
+        
+        return {
+            "success": result.success,
+            "message": result.message,
+            "request_id": result.request_id,
+            "action_type": result.action_type.value,
+            "status": result.status.value,
+            "can_rollback": result.can_rollback,
+            "rollback_data": result.rollback_data,
+            "error": result.error,
+            "suggestion": suggestion,
+            "dry_run": dry_run,
+        }
+    
+    def apply_suggestion_sync(
+        self,
+        suggestion_id: str,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Synchronous wrapper for apply_suggestion.
+        
+        Creates an event loop if needed for use from sync code.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            # Already in async context, create a task
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    self.apply_suggestion(suggestion_id, dry_run)
+                )
+                return future.result(timeout=60)
+        except RuntimeError:
+            # No running loop, use asyncio.run directly
+            return asyncio.run(self.apply_suggestion(suggestion_id, dry_run))
+    
+    async def rollback_suggestion(self, request_id: str) -> Dict[str, Any]:
+        """
+        Rollback a previously applied suggestion.
+        
+        Args:
+            request_id: The request_id from the original apply result
+            
+        Returns:
+            Dict with rollback result
+        """
+        try:
+            result = await self.action_executor.rollback(request_id)
+            return {
+                "success": result.success,
+                "message": result.message,
+                "request_id": request_id,
+                "status": result.status.value,
+                "error": result.error,
+            }
+        except Exception as e:
+            logger.error(f"Error rolling back {request_id}: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "request_id": request_id,
+            }
     
     def dismiss_suggestion(self, suggestion_id: str) -> bool:
         """Dismiss a suggestion."""

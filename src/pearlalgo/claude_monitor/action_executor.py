@@ -20,7 +20,19 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import yaml
 
 from pearlalgo.utils.logger import logger
-from pearlalgo.utils.paths import get_utc_timestamp
+from pearlalgo.utils.paths import get_utc_timestamp, get_state_file
+
+# Lazy import to avoid circular dependency
+AutoTunePolicy = None
+
+
+def _get_policy_class():
+    """Lazy import of AutoTunePolicy to avoid circular imports."""
+    global AutoTunePolicy
+    if AutoTunePolicy is None:
+        from pearlalgo.claude_monitor.auto_tune_policy import AutoTunePolicy as _AutoTunePolicy
+        AutoTunePolicy = _AutoTunePolicy
+    return AutoTunePolicy
 
 
 class ActionType(Enum):
@@ -117,6 +129,7 @@ class ActionExecutor:
         auto_approve: bool = False,
         dry_run_default: bool = True,
         max_changes_per_day: int = 5,
+        use_policy: bool = True,
     ):
         """
         Initialize action executor.
@@ -127,12 +140,25 @@ class ActionExecutor:
             auto_approve: Automatically approve low-risk changes
             dry_run_default: Default to dry-run mode
             max_changes_per_day: Maximum changes allowed per day
+            use_policy: Whether to enforce AutoTunePolicy for config changes
         """
         self._project_root = project_root or self._find_project_root()
         self._state_dir = state_dir or (self._project_root / "data" / "nq_agent_state")
         self._auto_approve = auto_approve
         self._dry_run_default = dry_run_default
         self._max_changes_per_day = max_changes_per_day
+        self._use_policy = use_policy
+        
+        # Initialize policy if enabled
+        self._policy = None
+        if use_policy:
+            try:
+                PolicyClass = _get_policy_class()
+                from pearlalgo.claude_monitor.auto_tune_policy import PolicyConfig
+                policy_config = PolicyConfig(max_changes_per_day=max_changes_per_day)
+                self._policy = PolicyClass(config=policy_config, state_dir=self._state_dir)
+            except Exception as e:
+                logger.warning(f"Could not initialize AutoTunePolicy: {e}")
         
         # Audit log
         self._audit_file = self._state_dir / "claude_action_audit.jsonl"
@@ -188,6 +214,17 @@ class ActionExecutor:
         except Exception as e:
             logger.error(f"Could not write audit log: {e}")
     
+    def _load_agent_state(self) -> Dict[str, Any]:
+        """Load current agent state from state.json for policy checks."""
+        try:
+            state_file = get_state_file(self._state_dir)
+            if state_file.exists():
+                with open(state_file) as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.warning(f"Could not load agent state for policy check: {e}")
+        return {}
+    
     async def execute(
         self,
         request: ActionRequest,
@@ -214,6 +251,47 @@ class ActionExecutor:
                 request_id=request.request_id,
                 error="rate_limit_exceeded",
             )
+        
+        # Check policy for config updates (not for dry runs)
+        if (
+            self._policy is not None
+            and request.action_type in (ActionType.CONFIG_UPDATE, ActionType.PARAMETER_TUNE)
+            and request.config_path
+            and not request.dry_run
+        ):
+            agent_state = self._load_agent_state()
+            policy_decision = self._policy.check_change(
+                config_path=request.config_path,
+                old_value=request.old_value,
+                new_value=request.new_value,
+                agent_state=agent_state,
+            )
+            
+            if not policy_decision.allowed:
+                self._audit_log("policy_rejected", {
+                    "request_id": request.request_id,
+                    "config_path": request.config_path,
+                    "reason": policy_decision.reason,
+                    "proposed_value": request.new_value,
+                })
+                return ActionResult(
+                    success=False,
+                    message=f"Policy rejected: {policy_decision.reason}",
+                    action_type=request.action_type,
+                    status=ActionStatus.FAILED,
+                    request_id=request.request_id,
+                    error="policy_rejected",
+                )
+            
+            # Use bounded value if policy adjusted it
+            if policy_decision.bounded_value is not None:
+                original_value = request.new_value
+                request.new_value = policy_decision.bounded_value
+                if policy_decision.warnings:
+                    logger.info(
+                        f"Policy bounded value: {original_value} -> {request.new_value}, "
+                        f"warnings: {policy_decision.warnings}"
+                    )
         
         # Log the request
         self._audit_log("request", {
@@ -338,6 +416,15 @@ class ActionExecutor:
             
             with open(config_path, "w") as f:
                 yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
+            
+            # Record change in policy for rate limiting
+            if self._policy is not None and request.config_path:
+                self._policy.record_change(
+                    config_path=request.config_path,
+                    old_value=old_value,
+                    new_value=request.new_value,
+                    request_id=request.request_id,
+                )
             
             return ActionResult(
                 success=True,

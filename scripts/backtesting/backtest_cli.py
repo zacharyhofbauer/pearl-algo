@@ -682,6 +682,449 @@ def _generate_trades_html(
         f.write(html)
 
 
+def _generate_interactive_html(report: BacktestReport, report_dir: Path, ohlcv_data: pd.DataFrame) -> None:
+    """
+    Generate a TradingView-like interactive HTML chart using TradingView Lightweight Charts.
+
+    This produces a single self-contained HTML artifact intended to be opened on desktop
+    (or any browser). It can be shared via Telegram as a document.
+    """
+    # Prefer the shared implementation used by Telegram so the experience stays consistent.
+    try:
+        from pearlalgo.backtesting.interactive_report import write_interactive_backtest_html
+
+        r = report.result
+        metrics = {
+            "total_trades": int(r.total_trades or 0),
+            "win_rate": float(r.win_rate or 0.0),
+            "profit_factor": float(r.profit_factor or 0.0),
+            "total_pnl": float(r.total_pnl or 0.0),
+            "max_drawdown": float(r.max_drawdown or 0.0),
+            "sharpe_ratio": float(r.sharpe_ratio or 0.0),
+        }
+        write_interactive_backtest_html(
+            report_dir,
+            symbol=report.symbol,
+            decision_timeframe=report.decision_timeframe,
+            ohlcv_data=ohlcv_data,
+            trades=r.trades,
+            signals=r.signals,
+            metrics=metrics,
+            output_name="interactive.html",
+        )
+        return
+    except Exception:
+        return
+    df = ohlcv_data.copy()
+
+    # Ensure DateTimeIndex
+    if not isinstance(df.index, pd.DatetimeIndex):
+        for col in ("timestamp", "time", "datetime", "date"):
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
+                df = df.dropna(subset=[col]).set_index(col)
+                break
+
+    if not isinstance(df.index, pd.DatetimeIndex) or df.empty:
+        return
+
+    df = df.sort_index()
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC")
+
+    def _col(name: str) -> str:
+        if name in df.columns:
+            return name
+        alt = name.capitalize()
+        if alt in df.columns:
+            return alt
+        raise KeyError(name)
+
+    open_c = _col("open")
+    high_c = _col("high")
+    low_c = _col("low")
+    close_c = _col("close")
+    vol_c = "volume" if "volume" in df.columns else ("Volume" if "Volume" in df.columns else None)
+
+    # Safety downsample for huge datasets (keeps HTML manageable)
+    effective_tf = "1m"
+    if len(df) > 200_000:
+        agg = {open_c: "first", high_c: "max", low_c: "min", close_c: "last"}
+        if vol_c:
+            agg[vol_c] = "sum"
+        df = df.resample("5min").agg(agg).dropna()
+        effective_tf = "5m"
+    if len(df) > 300_000:
+        agg = {open_c: "first", high_c: "max", low_c: "min", close_c: "last"}
+        if vol_c:
+            agg[vol_c] = "sum"
+        df = df.resample("15min").agg(agg).dropna()
+        effective_tf = "15m"
+
+    # Convert to Lightweight Charts data format
+    idx = df.index
+    times = (idx.view("int64") // 1_000_000_000).astype("int64")
+    opens = df[open_c].astype("float64").to_numpy()
+    highs = df[high_c].astype("float64").to_numpy()
+    lows = df[low_c].astype("float64").to_numpy()
+    closes = df[close_c].astype("float64").to_numpy()
+    if vol_c:
+        vols = df[vol_c].fillna(0).astype("float64").to_numpy()
+    else:
+        vols = np.zeros(len(df), dtype="float64")
+
+    bars = [
+        {
+            "time": int(t),
+            "open": float(o),
+            "high": float(h),
+            "low": float(l),
+            "close": float(c),
+            "volume": float(v),
+        }
+        for t, o, h, l, c, v in zip(times, opens, highs, lows, closes, vols)
+    ]
+
+    # Helper: map arbitrary timestamp to nearest bar time (required for markers to show)
+    def _nearest_bar_epoch(ts_raw: Any) -> Optional[int]:
+        if not ts_raw:
+            return None
+        try:
+            ts = pd.to_datetime(ts_raw, utc=True, errors="coerce")
+        except Exception:
+            ts = pd.NaT
+        if ts is pd.NaT or ts is None:
+            return None
+        try:
+            loc = idx.get_indexer([ts], method="nearest")[0]
+            if loc < 0:
+                return None
+            return int(idx[loc].timestamp())
+        except Exception:
+            return None
+
+    # Build markers from executed trades (preferred) or raw signals
+    markers = []
+    trades = report.result.trades or []
+    signals = report.result.signals or []
+
+    if trades:
+        for t in trades:
+            direction = (t.get("direction") or "long").lower()
+            pnl = t.get("pnl")
+            entry_epoch = _nearest_bar_epoch(t.get("entry_time") or t.get("timestamp"))
+            exit_epoch = _nearest_bar_epoch(t.get("exit_time"))
+
+            if entry_epoch:
+                is_long = direction == "long"
+                markers.append(
+                    {
+                        "time": entry_epoch,
+                        "position": "belowBar" if is_long else "aboveBar",
+                        "color": "#26a69a" if is_long else "#ef5350",
+                        "shape": "arrowUp" if is_long else "arrowDown",
+                        "text": "E",
+                    }
+                )
+            if exit_epoch:
+                try:
+                    pnl_f = float(pnl) if pnl is not None else None
+                except Exception:
+                    pnl_f = None
+                is_win = (pnl_f or 0.0) >= 0.0
+                markers.append(
+                    {
+                        "time": exit_epoch,
+                        "position": "aboveBar" if direction == "long" else "belowBar",
+                        "color": "#26a69a" if is_win else "#ef5350",
+                        "shape": "circle",
+                        "text": f"X {pnl_f:+.0f}" if pnl_f is not None else "X",
+                    }
+                )
+    else:
+        for s in signals:
+            direction = (s.get("direction") or "long").lower()
+            ts_epoch = _nearest_bar_epoch(s.get("timestamp"))
+            if not ts_epoch:
+                continue
+            is_long = direction == "long"
+            markers.append(
+                {
+                    "time": ts_epoch,
+                    "position": "belowBar" if is_long else "aboveBar",
+                    "color": "#26a69a" if is_long else "#ef5350",
+                    "shape": "arrowUp" if is_long else "arrowDown",
+                    "text": "S",
+                }
+            )
+
+    try:
+        markers = sorted(markers, key=lambda m: int(m.get("time") or 0))
+    except Exception:
+        pass
+
+    # Header summary
+    dr = report.date_range
+    result = report.result
+    summary = {
+        "symbol": report.symbol,
+        "decision_timeframe": report.decision_timeframe,
+        "data_timeframe": effective_tf,
+        "period_start": dr.actual_start.strftime("%Y-%m-%d"),
+        "period_end": dr.actual_end.strftime("%Y-%m-%d"),
+        "total_bars": int(result.total_bars),
+        "total_signals": int(result.total_signals),
+        "total_trades": int(result.total_trades or 0),
+        "win_rate": float(result.win_rate or 0.0),
+        "profit_factor": float(result.profit_factor or 0.0),
+        "total_pnl": float(result.total_pnl or 0.0),
+        "max_drawdown": float(result.max_drawdown or 0.0),
+        "sharpe": float(result.sharpe_ratio or 0.0),
+    }
+
+    # Compact JSON to keep file size down
+    bars_json = json.dumps(bars, separators=(",", ":"))
+    markers_json = json.dumps(markers, separators=(",", ":"))
+    summary_json = json.dumps(summary, separators=(",", ":"))
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interactive Backtest - {report.symbol}</title>
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    :root {{
+      --bg: #0e1013;
+      --panel: #111318;
+      --grid: #1e2127;
+      --text: #d1d4dc;
+      --muted: #787b86;
+      --blue: #2962ff;
+      --green: #26a69a;
+      --red: #ef5350;
+    }}
+    body {{
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }}
+    header {{
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--grid);
+      background: linear-gradient(180deg, rgba(17,19,24,0.95), rgba(17,19,24,0.75));
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+    }}
+    .title {{
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+    }}
+    .title h1 {{
+      font-size: 16px;
+      margin: 0;
+      letter-spacing: 0.2px;
+    }}
+    .pill {{
+      font-size: 12px;
+      color: var(--muted);
+      border: 1px solid var(--grid);
+      padding: 2px 8px;
+      border-radius: 999px;
+    }}
+    .stats {{
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+    }}
+    .stat {{
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }}
+    .stat .k {{
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }}
+    .stat .v {{
+      font-size: 14px;
+      font-weight: 600;
+    }}
+    .v.pos {{ color: var(--green); }}
+    .v.neg {{ color: var(--red); }}
+    main {{
+      padding: 0 12px 16px 12px;
+    }}
+    #chart {{
+      height: 520px;
+      margin-top: 12px;
+      border: 1px solid var(--grid);
+      border-radius: 12px;
+      overflow: hidden;
+      background: transparent;
+    }}
+    .hint {{
+      color: var(--muted);
+      font-size: 12px;
+      margin: 10px 4px 0 4px;
+    }}
+    .files {{
+      margin: 10px 4px 0 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }}
+    .files a {{
+      color: var(--blue);
+      text-decoration: none;
+      margin-right: 10px;
+    }}
+    .files a:hover {{ text-decoration: underline; }}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>{report.symbol} Interactive Backtest</h1>
+      <span class="pill">{report.decision_timeframe} decision</span>
+      <span class="pill">data {effective_tf}</span>
+      <span class="pill">{dr.actual_start.strftime("%Y-%m-%d")} → {dr.actual_end.strftime("%Y-%m-%d")}</span>
+    </div>
+    <div class="stats" id="stats"></div>
+  </header>
+  <main>
+    <div id="chart"></div>
+    <div class="hint">Scroll/drag to pan • Mousewheel to zoom • Markers: E=entry, X=exit (pnl)</div>
+    <div class="files">
+      Files:
+      <a href="index.html">index.html</a>
+      <a href="summary.json">summary.json</a>
+      <a href="signals.csv">signals.csv</a>
+      <a href="trades.csv">trades.csv</a>
+    </div>
+  </main>
+
+  <script>
+    const summary = {summary_json};
+    const bars = {bars_json};
+    const markers = {markers_json};
+
+    function fmtPct(x) {{
+      const v = (x || 0) * 100;
+      return v.toFixed(1) + '%';
+    }}
+    function fmtNum(x, d=2) {{
+      if (x === null || x === undefined) return 'n/a';
+      const v = Number(x);
+      if (!isFinite(v)) return 'n/a';
+      return v.toFixed(d);
+    }}
+    function fmtUsd(x) {{
+      const v = Number(x || 0);
+      const sign = v >= 0 ? '+' : '';
+      return sign + '$' + Math.abs(v).toLocaleString(undefined, {{ maximumFractionDigits: 2, minimumFractionDigits: 2 }});
+    }}
+
+    // Header stats
+    const stats = document.getElementById('stats');
+    const items = [
+      {{ k: 'Trades', v: String(summary.total_trades || 0) }},
+      {{ k: 'Win rate', v: fmtPct(summary.win_rate) }},
+      {{ k: 'Profit factor', v: fmtNum(summary.profit_factor, 2) }},
+      {{ k: 'Total P&L', v: fmtUsd(summary.total_pnl), cls: (summary.total_pnl || 0) >= 0 ? 'pos' : 'neg' }},
+      {{ k: 'Max DD', v: '$' + Math.abs(summary.max_drawdown || 0).toLocaleString(undefined, {{ maximumFractionDigits: 2, minimumFractionDigits: 2 }}) }},
+      {{ k: 'Sharpe', v: fmtNum(summary.sharpe, 2) }},
+    ];
+    stats.innerHTML = items.map(i => `
+      <div class="stat">
+        <div class="k">${{i.k}}</div>
+        <div class="v ${{i.cls || ''}}">${{i.v}}</div>
+      </div>
+    `).join('');
+
+    // Chart
+    const container = document.getElementById('chart');
+    const chart = LightweightCharts.createChart(container, {{
+      width: container.clientWidth,
+      height: container.clientHeight,
+      layout: {{
+        background: {{ type: 'solid', color: 'transparent' }},
+        textColor: '#787b86',
+      }},
+      grid: {{
+        vertLines: {{ color: '#1e2127' }},
+        horzLines: {{ color: '#1e2127' }},
+      }},
+      crosshair: {{
+        mode: LightweightCharts.CrosshairMode.Magnet,
+      }},
+      rightPriceScale: {{
+        borderColor: '#2a2e36',
+      }},
+      timeScale: {{
+        borderColor: '#2a2e36',
+        timeVisible: true,
+        secondsVisible: false,
+      }},
+    }});
+
+    const candle = chart.addCandlestickSeries({{
+      upColor: '#26a69a',
+      downColor: '#ef5350',
+      borderDownColor: '#ef5350',
+      borderUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
+      wickUpColor: '#26a69a',
+    }});
+
+    candle.setData(bars.map(b => ({{
+      time: b.time,
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close,
+    }})));
+
+    const volume = chart.addHistogramSeries({{
+      color: '#26a69a',
+      priceFormat: {{ type: 'volume' }},
+      priceScaleId: '',
+      scaleMargins: {{ top: 0.86, bottom: 0 }},
+    }});
+    volume.setData(bars.map(b => ({{
+      time: b.time,
+      value: b.volume,
+      color: b.close >= b.open ? '#26a69a80' : '#ef535080',
+    }})));
+
+    if (markers && markers.length) {{
+      candle.setMarkers(markers);
+    }}
+
+    chart.timeScale().fitContent();
+
+    // Responsive resize
+    const ro = new ResizeObserver(() => {{
+      chart.applyOptions({{ width: container.clientWidth, height: container.clientHeight }});
+    }});
+    ro.observe(container);
+  </script>
+</body>
+</html>
+"""
+
+    with open(report_dir / "interactive.html", "w") as f:
+        f.write(html)
+
+
 def _generate_index_html(
     report: BacktestReport,
     report_dir: Path,
@@ -856,6 +1299,13 @@ def _generate_index_html(
     if has_trade_gallery:
         trade_gallery_html = '<a href="trades.html" class="gallery-link">View Trade Gallery</a>'
 
+    # PDF report link (generated by robustness/report tooling)
+    pdf_html = ""
+    pdf_file_link = ""
+    if (report_dir / "report.pdf").exists():
+        pdf_html = '<a href="report.pdf" class="gallery-link">Download PDF Report</a>'
+        pdf_file_link = '<a href="report.pdf">report.pdf</a>'
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -965,6 +1415,7 @@ def _generate_index_html(
     <p>Run: {report.run_timestamp}</p>
     {warning_html}
 
+    {pdf_html}
     {trade_gallery_html}
 
     <h2>Performance Metrics</h2>
@@ -977,6 +1428,7 @@ def _generate_index_html(
 
     <h2>Files</h2>
     <div class="files">
+        {pdf_file_link}
         <a href="summary.json">summary.json</a>
         <a href="signals.csv">signals.csv</a>
         <a href="trades.csv">trades.csv</a>
@@ -1318,6 +1770,17 @@ def main() -> int:
                 trades_html = report_dir / "trades.html"
                 if trades_html.exists():
                     print(f"Trade gallery available at: {trades_html}")
+
+            # Generate a detailed PDF report (best-effort)
+            try:
+                from pearlalgo.backtesting.pdf_report import write_backtest_pdf_report
+
+                pdf_path = write_backtest_pdf_report(report_dir, output_name="report.pdf")
+                # Refresh index.html so it includes the PDF link
+                _generate_index_html(report, report_dir, has_trade_gallery=(report_dir / "trades.html").exists())
+                print(f"PDF report saved to: {pdf_path}")
+            except Exception as e:
+                print(f"Warning: Could not generate PDF report: {e}")
 
         return 0
 

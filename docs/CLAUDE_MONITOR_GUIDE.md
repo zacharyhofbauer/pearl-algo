@@ -168,6 +168,7 @@ You should see:
 | `/suggest_config` | Get configuration tuning suggestions |
 | `/suggestions` | List all active suggestions |
 | `/apply_suggestion <id>` | Apply a suggested change |
+| `/rollback_suggestion <request_id>` | Rollback a previously applied change |
 
 ### Examples
 
@@ -269,6 +270,25 @@ claude_monitor:
   max_auto_changes_per_day: 3
 ```
 
+### Auto-Apply Settings (Autonomous Mode)
+
+When `auto_apply_enabled: true`, Claude Monitor can automatically apply low-risk config changes:
+
+```yaml
+claude_monitor:
+  auto_apply_enabled: true             # Enable autonomous changes
+  max_auto_changes_per_day: 3          # Daily limit
+  cooldown_per_key_seconds: 3600       # 1 hour between changes to same key
+  require_connection_healthy: true     # Block if connection issues
+  block_when_armed: false              # Set true to never auto-apply in live
+```
+
+**Policy Enforcement:**
+- Only allowlisted config paths can be auto-modified (see Policy section)
+- Values are bounded (max delta per change)
+- Rate limits enforced (daily + per-key cooldown)
+- Live gating checks agent health before applying
+
 ---
 
 ## Analysis Dimensions
@@ -359,27 +379,159 @@ If an alert is a known issue:
 
 | Type | Description | Auto-apply? |
 |------|-------------|-------------|
-| `config_change` | Modify config.yaml | No (default) |
-| `parameter_tune` | Specific parameter adjustment | No |
+| `config_change` | Modify config.yaml | Yes (if enabled) |
+| `parameter_tune` | Specific parameter adjustment | Yes (if enabled) |
 | `service_action` | Restart agent/gateway | No |
 | `code_patch` | Generate code diff | No |
 | `investigation` | Manual investigation needed | N/A |
 
 ### Approval Workflow
 
+**Manual Mode (default):**
 1. Claude detects issue and generates suggestion
 2. Suggestion added to active list
 3. You review via `/suggestions` or `/suggest_config`
-4. Apply with `/apply_suggestion <id>`
-5. Change is made (or dry-run if configured)
-6. Audit log records the action
+4. Apply with `/apply_suggestion <id>` or `!apply <id>`
+5. Change is made (with backup + audit log)
+6. Rollback available via `/rollback_suggestion <request_id>`
+
+**Autonomous Mode (`auto_apply_enabled: true`):**
+1. Claude detects issue and generates suggestion
+2. Policy checks if change is allowed (allowlist, bounds, rate limit)
+3. If allowed, change is auto-applied
+4. Telegram notification sent with rollback instructions
+5. If error spike detected, auto-rollback triggered
 
 ### Safety Features
 
-- **Dry-run mode**: Test changes before applying
-- **Rate limiting**: Max N changes per day
-- **Automatic backup**: Config backed up before changes
-- **Rollback support**: Revert failed changes
+- **Policy enforcement**: Only allowlisted config paths can be modified
+- **Value bounding**: Max delta prevents drastic changes (e.g., ±0.10 for confidence)
+- **Rate limiting**: Max N changes per day + per-key cooldown
+- **Live gating**: Blocks changes if agent unhealthy or too many errors
+- **Automatic backup**: Config backed up before every change
+- **Rollback support**: Restore previous config anytime
+- **Audit logging**: Every action recorded in `claude_action_audit.jsonl`
+
+---
+
+## Auto-Tune Policy
+
+The Auto-Tune Policy is a safety layer that enforces boundaries on autonomous changes.
+
+### Allowlisted Config Paths
+
+Only these config paths can be auto-modified:
+
+| Path | Type | Range | Max Delta |
+|------|------|-------|-----------|
+| `signals.min_confidence` | float | 0.40-0.90 | ±0.10 |
+| `signals.min_risk_reward` | float | 1.0-3.0 | ±0.30 |
+| `signals.volatility_threshold` | float | 0.0001-0.002 | ±0.0005 |
+| `signals.duplicate_window_seconds` | int | 60-900 | ±120 |
+| `strategy.enabled_signals` | list | - | - |
+| `strategy.disabled_signals` | list | - | - |
+| `strategy.base_contracts` | int | 1-25 | ±5 |
+| `strategy.high_conf_threshold` | float | 0.60-0.95 | ±0.10 |
+| `risk.stop_loss_atr_multiplier` | float | 1.0-3.0 | ±0.30 |
+| `risk.take_profit_risk_reward` | float | 1.0-3.0 | ±0.30 |
+
+### Blocklisted Config Paths (Never Auto-Modified)
+
+- `execution.*` (enabled, armed, mode, max_positions, etc.)
+- `risk.max_risk_per_trade`, `risk.max_drawdown`
+- `telegram.*` (credentials)
+- `claude_monitor.auto_apply_enabled` (prevents self-modification)
+
+### Policy Status
+
+Check policy status via Telegram:
+```
+!policy
+```
+
+Response:
+```
+🔒 Auto-Tune Policy Status
+
+Changes Today: 1/3
+Remaining: 2
+Block When Armed: false
+Auto-Rollback: true
+
+Allowlist:
+  • signals.min_confidence
+  • signals.min_risk_reward
+  ...
+```
+
+---
+
+## Audit Log
+
+All actions (manual and automatic) are recorded in `data/nq_agent_state/claude_action_audit.jsonl`.
+
+### Audit Entry Format
+
+```json
+{
+  "timestamp": "2026-01-02T10:30:00Z",
+  "action": "result",
+  "request_id": "act_20260102103000_0001",
+  "action_type": "config_update",
+  "success": true,
+  "message": "Updated signals.min_confidence: 0.60 → 0.65",
+  "can_rollback": true
+}
+```
+
+### Viewing Audit Log
+
+Via Telegram:
+```
+!audit 10
+```
+
+Or directly:
+```bash
+tail -20 data/nq_agent_state/claude_action_audit.jsonl | jq .
+```
+
+### Audit Actions
+
+| Action | Description |
+|--------|-------------|
+| `request` | Action requested |
+| `result` | Action completed (success or failed) |
+| `policy_rejected` | Policy blocked the change |
+| `error` | Execution error |
+| `rollback` | Action rolled back |
+
+---
+
+## Rollback
+
+### Manual Rollback
+
+To rollback a previously applied change:
+
+Via command:
+```
+/rollback_suggestion act_20260102103000_0001
+```
+
+Via terminal:
+```
+!rollback act_20260102103000_0001
+```
+
+### Auto-Rollback
+
+If `enable_auto_rollback: true` (default), the system will automatically rollback changes if:
+- Consecutive errors spike (10+ errors)
+- Connection failures spike
+- Error count increases significantly after a change
+
+Auto-rollback will also optionally create a `disarm_request.flag` file to stop execution.
 
 ---
 
@@ -467,10 +619,14 @@ Claude needs sufficient data:
 | File | Purpose |
 |------|---------|
 | `src/pearlalgo/claude_monitor/` | Monitor service code |
+| `src/pearlalgo/claude_monitor/auto_tune_policy.py` | Policy enforcement |
+| `src/pearlalgo/claude_monitor/action_executor.py` | Action execution + rollback |
 | `config/config.yaml` | Configuration (claude_monitor section) |
 | `data/nq_agent_state/claude_observations.jsonl` | Analysis history |
 | `data/nq_agent_state/claude_suggestions.json` | Active suggestions |
-| `data/nq_agent_state/claude_applied_changes.jsonl` | Change audit log |
+| `data/nq_agent_state/claude_action_audit.jsonl` | Action audit log |
+| `data/nq_agent_state/auto_tune_policy_state.json` | Policy rate limit state |
+| `data/nq_agent_state/backups/` | Config backups for rollback |
 | `scripts/lifecycle/start_claude_monitor.sh` | Startup script |
 
 ---
@@ -490,7 +646,7 @@ Claude Monitor is designed to be cost-efficient:
 
 ---
 
-*Last Updated: 2025-12-30*
+*Last Updated: 2026-01-02*
 
 
 

@@ -575,3 +575,163 @@ class TestGetTradesForChart:
         result = handler._get_trades_for_chart(chart_data, symbol="MNQ")
         assert len(result) == 0  # Filtered out
 
+
+class TestStrategyReviewVariantWeeks:
+    """Test Strategy Review UX helpers (variant backtest week picker)."""
+
+    @pytest.mark.asyncio
+    async def test_cached_review_renders_variant_week_picker(self, handler_with_mocks):
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+
+        update = MockUpdate(chat_id=123)
+        context = MockContext()
+        context.user_data = {
+            "strategy_review_last_analysis": {"timestamp": datetime.now(timezone.utc).isoformat()},
+            "strategy_review_last_suggestions": [],
+            "strategy_review_config_candidate": {
+                "title": "Tune min confidence",
+                "description": "Test candidate",
+                "rationale": "Test",
+                "type": "config_change",
+                "priority": "medium",
+                "config_path": "signals.min_confidence",
+                "old_value": 0.5,
+                "new_value": 0.55,
+            },
+            "strategy_review_variant_weeks": 4,
+        }
+
+        captured = {}
+
+        async def mock_send(upd, ctx, msg, **kwargs):
+            captured["reply_markup"] = kwargs.get("reply_markup")
+            captured["msg"] = msg
+
+        with patch.object(handler, "_format_strategy_review_message", return_value="ok"):
+            with patch.object(handler, "_send_message_or_edit", side_effect=mock_send):
+                from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+                await TelegramCommandHandler._render_strategy_review_cached(handler, update, context)
+
+        rm = captured.get("reply_markup")
+        assert rm is not None
+        texts = [[b.text for b in row] for row in rm.inline_keyboard]
+        flat = [t for row in texts for t in row]
+
+        assert any("Backtest Variant (4w)" in t for t in flat)
+        assert any(row == ["1w", "2w", "4w ✓"] for row in texts)
+
+    @pytest.mark.asyncio
+    async def test_callback_sets_variant_weeks_and_rerenders(self, handler_with_mocks):
+        handler = handler_with_mocks
+
+        update = MockUpdate(chat_id=123)
+        context = MockContext()
+        context.user_data = {}
+
+        class MockCallbackQuery:
+            def __init__(self, data: str):
+                self.data = data
+                self.answer = AsyncMock()
+                self.edit_message_text = AsyncMock()
+
+        update.callback_query = MockCallbackQuery("strategy_review:variant_weeks:1")
+
+        render_mock = AsyncMock()
+        with patch.object(handler, "_check_authorized", new=AsyncMock(return_value=True)):
+            with patch.object(handler, "_render_strategy_review_cached", new=render_mock):
+                from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+                await TelegramCommandHandler._handle_callback(handler, update, context)
+
+        assert context.user_data.get("strategy_review_variant_weeks") == 1
+        render_mock.assert_awaited_once()
+
+
+class TestReportsCallbackDataSafety:
+    """Ensure report buttons never exceed Telegram callback_data length limits."""
+
+    @pytest.mark.asyncio
+    async def test_reports_list_uses_short_callback_ids(self, handler_with_mocks, temp_state_dir):
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+        handler.state_dir = temp_state_dir
+
+        # Create reports dir in the preferred location (state_dir.parent / "reports")
+        reports_dir = temp_state_dir.parent / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a report dir with a realistic (long-ish) name
+        report_name = "backtest_MNQ_5m_20251215_20251229_20251231_171839"
+        (reports_dir / report_name).mkdir(parents=True, exist_ok=True)
+        with open(reports_dir / report_name / "summary.json", "w") as f:
+            json.dump({"metrics": {"total_pnl": 0, "win_rate": 0}}, f)
+
+        update = MockUpdate(chat_id=123)
+        context = MockContext()
+
+        captured = {}
+
+        async def mock_send(upd, ctx, msg, **kwargs):
+            captured["reply_markup"] = kwargs.get("reply_markup")
+
+        with patch.object(handler, "_send_message_or_edit", side_effect=mock_send):
+            from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+            await TelegramCommandHandler._handle_backtest_reports(handler, update, context, page=0)
+
+        rm = captured.get("reply_markup")
+        assert rm is not None
+        for row in rm.inline_keyboard:
+            for btn in row:
+                if getattr(btn, "callback_data", None):
+                    assert len(btn.callback_data.encode("utf-8")) <= 64
+
+    @pytest.mark.asyncio
+    async def test_report_detail_artifacts_use_short_callback_ids(self, handler_with_mocks, temp_state_dir):
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+        handler.state_dir = temp_state_dir
+
+        reports_dir = temp_state_dir.parent / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        report_name = "backtest_MNQ_5m_20251215_20251229_20251231_171839"
+        report_dir = reports_dir / report_name
+        report_dir.mkdir(parents=True, exist_ok=True)
+
+        # Minimal summary + artifact files
+        with open(report_dir / "summary.json", "w") as f:
+            json.dump(
+                {
+                    "symbol": "MNQ",
+                    "decision_timeframe": "5m",
+                    "date_range": {"actual_start": "2025-12-15T00:00:00Z", "actual_end": "2025-12-29T00:00:00Z"},
+                    "metrics": {"total_trades": 0, "win_rate": 0, "profit_factor": 0, "total_pnl": 0, "max_drawdown": 0, "sharpe_ratio": 0, "total_signals": 0, "avg_confidence": 0, "avg_risk_reward": 0},
+                    "verification": {},
+                },
+                f,
+            )
+        # Create dummy artifacts
+        (report_dir / "chart_overview.png").write_bytes(b"png")
+        (report_dir / "report.pdf").write_bytes(b"%PDF-1.4\n%EOF\n")
+        (report_dir / "trades.csv").write_text("a,b\n")
+        (report_dir / "signals.csv").write_text("a,b\n")
+
+        update = MockUpdate(chat_id=123)
+        context = MockContext()
+
+        captured = {}
+
+        async def mock_send(upd, ctx, msg, **kwargs):
+            captured["reply_markup"] = kwargs.get("reply_markup")
+
+        with patch.object(handler, "_send_message_or_edit", side_effect=mock_send):
+            from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+            await TelegramCommandHandler._handle_report_detail(handler, update, context, report_name)
+
+        rm = captured.get("reply_markup")
+        assert rm is not None
+        for row in rm.inline_keyboard:
+            for btn in row:
+                if getattr(btn, "callback_data", None):
+                    assert len(btn.callback_data.encode("utf-8")) <= 64
+

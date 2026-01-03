@@ -57,6 +57,7 @@ It combines quick start steps, command setup, and command behavior.
    suggest_config - AI: suggest config tuning
    suggestions - AI: list active suggestions
    apply_suggestion - AI: apply a suggestion by id
+   rollback_suggestion - AI: rollback a previous change
    claude_reports - Show AI report schedule
    ai_patch - Generate code patch via Claude (requires setup)
    help - Show available commands
@@ -326,7 +327,7 @@ Claude AI is integrated as a **mobile Cursor-like experience**. Chat with Claude
 
 | Command | Description |
 |---------|-------------|
-| `/ai` | Open Claude Hub (or tap `🤖 Claude` in menu) |
+| `/ai` | Open AI Hub (or tap `🤖 AI Hub` on Home) |
 | `/ai_on` | Enable chat mode (messages go to Claude) |
 | `/ai_off` | Disable chat mode |
 | `/ai_reset` | Clear chat history |
@@ -337,6 +338,11 @@ Claude AI is integrated as a **mobile Cursor-like experience**. Chat with Claude
 - **💬 Chat Mode** - Toggle to chat with Claude about your code
 - **🧩 Patch Wizard** - Task-first flow (describe change → pick files → get diff)
 - **🧼 Reset** - Clear conversation history
+
+**Strategy Review UI (clean + minimal):**
+
+- The Review screen is intentionally compact (lookback + refresh + **More**).
+- Tap **More** to access advanced actions like **Export**, **Discuss**, **Patch Wizard**, **Suggest Config**, **Suggestions**, **Backtest**, and **Reports**.
 
 **Patch Wizard (No Path Typing):**
 
@@ -362,6 +368,88 @@ Examples:
 - Blocked paths: `data/`, `logs/`, `.env`, `ibkr/`, `.venv/`, `.git/`
 - File size limit: 100KB per file
 - Path traversal protection
+
+### 3.13 AI Terminal Mode (Operator Terminal)
+
+The AI Terminal provides a **deterministic command interface** for quick agent control without menus. Commands start with `!` and work even when chat mode is off.
+
+**Terminal Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `!help` | Show all terminal commands |
+| `!status` | Agent status snapshot |
+| `!config <path>` | Show config value |
+| `!config <path> <value>` | Update config value (policy-gated) |
+| `!apply <suggestion_id>` | Apply a suggestion |
+| `!rollback <request_id>` | Rollback a previous change |
+| `!suggestions` | List active suggestions |
+| `!audit [n]` | Show recent audit entries (default 10) |
+| `!policy` | Show auto-tune policy status |
+
+**Examples:**
+
+```
+!status
+```
+Response:
+```
+📊 Agent Status
+
+Mode: paper ⚪ Disarmed
+Running: ✅
+Uptime: 2h 15m
+Connection: 🟢
+Errors: 0
+
+Last Signal: 10:15:00
+Open Positions: 1
+```
+
+```
+!config signals.min_confidence
+```
+Response:
+```
+📝 Config Value
+
+Path: signals.min_confidence
+Value: 0.60
+```
+
+```
+!config signals.min_confidence 0.65
+```
+Response:
+```
+✅ Config Updated
+
+Path: signals.min_confidence
+Old: 0.60
+New: 0.65
+
+Request ID: act_20260102103000_0001
+Rollback: !rollback act_20260102103000_0001
+```
+
+**Policy Enforcement:**
+
+Terminal config updates go through the same Auto-Tune Policy as Claude Monitor:
+- Only allowlisted config paths can be modified
+- Values are bounded (max delta per change)
+- Rate limits enforced
+- Blocked paths return a rejection message
+
+**Quick Reference:**
+
+| Want to... | Terminal Command |
+|------------|-----------------|
+| Check agent health | `!status` |
+| See today's suggestions | `!suggestions` or `!sug` |
+| Apply suggestion #3 | `!apply sug_003` |
+| Undo a change | `!rollback act_xxx` |
+| Tweak confidence | `!config signals.min_confidence 0.65` |
+| Check audit log | `!audit 20` |
 
 ---
 
@@ -703,6 +791,7 @@ The Telegram bot provides professional chart visualization and a fully UI-driven
 - Price action visualization
 - Performance metrics
 - Chart with all signals
+- Detailed PDF report: `/reports` → select report → **📄 PDF Report** (downloads `report.pdf`)
 
 ### 8.4 Menu System and Button Navigation
 
