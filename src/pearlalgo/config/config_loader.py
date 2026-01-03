@@ -33,12 +33,49 @@ data settings, signals, performance tracking, execution (ATS), and learning.
 
 from __future__ import annotations
 
+import contextlib
 import os
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 from pearlalgo.config.config_file import load_config_yaml, log_config_warnings
 from pearlalgo.utils.logger import logger
+
+# Optional per-call override (used for experiments/backtests; never persisted).
+# ContextVar keeps this safe across async tasks. It does NOT affect other processes.
+_SERVICE_CONFIG_OVERRIDE: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "SERVICE_CONFIG_OVERRIDE",
+    default=None,
+)
+
+
+def _deep_merge_dict(dst: Dict[str, Any], src: Mapping[str, Any]) -> Dict[str, Any]:
+    """Recursively merge src into dst (mutates dst)."""
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            _deep_merge_dict(dst[k], v)  # type: ignore[index]
+        else:
+            dst[k] = v
+    return dst
+
+
+@contextlib.contextmanager
+def service_config_override(overrides: Dict[str, Any]):
+    """
+    Temporarily override the service config returned by load_service_config().
+
+    This is intended for safe experiments (e.g., "variant" backtests) without
+    writing to config.yaml or changing the running trading agent.
+    """
+    token = _SERVICE_CONFIG_OVERRIDE.set(overrides or {})
+    try:
+        yield
+    finally:
+        try:
+            _SERVICE_CONFIG_OVERRIDE.reset(token)
+        except Exception:
+            _SERVICE_CONFIG_OVERRIDE.set(None)
 
 
 # Environment override helpers (typed)
@@ -256,6 +293,15 @@ def load_service_config(
     result = {}
     for section, defaults in _SERVICE_DEFAULTS.items():
         result[section] = {**defaults, **config_data.get(section, {})}
+
+    # Apply optional in-process overrides (best-effort).
+    # This allows experiments/backtests to tweak config without editing files.
+    override = _SERVICE_CONFIG_OVERRIDE.get()
+    if override:
+        try:
+            _deep_merge_dict(result, override)
+        except Exception as e:
+            logger.warning(f"Could not apply service config override: {e}")
 
     # Safe environment overrides for controlled rollouts (do not rely on YAML substitution)
     try:

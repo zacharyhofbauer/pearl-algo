@@ -93,7 +93,7 @@ except ImportError:
     ClaudeAPIKeyMissingError = Exception  # type: ignore
     ClaudeAPIError = Exception  # type: ignore
     get_claude_client = lambda: None  # type: ignore
-    build_chat_system_prompt = lambda system_snapshot=None: ""  # type: ignore
+    build_chat_system_prompt = lambda system_snapshot=None, memory_summary=None: ""  # type: ignore
 
 
 class TelegramCommandHandler:
@@ -161,6 +161,8 @@ class TelegramCommandHandler:
 
         # Persistent Claude chat history (survives handler restarts)
         self._claude_chat_history_file = self.state_dir / "claude_chat_history.json"
+        # Rolling "operator memory" summary (keeps Claude consistent without long history)
+        self._claude_memory_summary_file = self.state_dir / "claude_memory_summary.txt"
 
     def _load_persistent_claude_chat_history(self) -> List[Dict[str, str]]:
         """Load Claude chat history from disk (best-effort)."""
@@ -189,7 +191,7 @@ class TelegramCommandHandler:
         try:
             self._claude_chat_history_file.parent.mkdir(parents=True, exist_ok=True)
             # Keep bounded on disk as well
-            bounded = history[-24:] if len(history) > 24 else history
+            bounded = history[-40:] if len(history) > 40 else history
             with open(self._claude_chat_history_file, "w", encoding="utf-8") as f:
                 json.dump(bounded, f, indent=2, ensure_ascii=False)
         except Exception as e:
@@ -202,6 +204,105 @@ class TelegramCommandHandler:
                 self._claude_chat_history_file.unlink()
         except Exception as e:
             logger.debug(f"Could not clear Claude chat history: {e}")
+
+    def _load_claude_memory_summary(self) -> str:
+        """Load the rolling Claude memory summary (best-effort)."""
+        try:
+            if not self._claude_memory_summary_file.exists():
+                return ""
+            text = self._claude_memory_summary_file.read_text(encoding="utf-8", errors="replace").strip()
+            # Keep bounded
+            if len(text) > 2000:
+                text = text[:2000] + "\n...(truncated)"
+            return text
+        except Exception as e:
+            logger.debug(f"Could not load Claude memory summary: {e}")
+            return ""
+
+    def _save_claude_memory_summary(self, summary: str) -> None:
+        """Save the rolling Claude memory summary (best-effort)."""
+        try:
+            self._claude_memory_summary_file.parent.mkdir(parents=True, exist_ok=True)
+            text = str(summary).strip()
+            # Clamp to ~10 lines
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            text = "\n".join(lines[:10])
+            self._claude_memory_summary_file.write_text(text, encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"Could not save Claude memory summary: {e}")
+
+    def _clear_claude_memory_summary(self) -> None:
+        """Clear the rolling Claude memory summary (best-effort)."""
+        try:
+            if self._claude_memory_summary_file.exists():
+                self._claude_memory_summary_file.unlink()
+        except Exception as e:
+            logger.debug(f"Could not clear Claude memory summary: {e}")
+
+    async def _update_claude_memory_summary(
+        self,
+        overflow_messages: List[Dict[str, str]],
+    ) -> None:
+        """
+        Update the rolling Claude memory summary using Claude (best-effort).
+
+        Called when chat history grows too large; we summarize older messages into a durable memory.
+        """
+        if not overflow_messages:
+            return
+
+        client = get_claude_client()
+        if not client:
+            return
+
+        prev = self._load_claude_memory_summary()
+
+        # Format transcript compactly
+        transcript_lines: List[str] = []
+        for m in overflow_messages[:60]:
+            role = m.get("role")
+            content = (m.get("content") or "").strip()
+            if role not in ("user", "assistant") or not content:
+                continue
+            content = content.replace("\n", " ").strip()
+            if len(content) > 240:
+                content = content[:240] + "…"
+            transcript_lines.append(f"{role.upper()}: {content}")
+
+        transcript = "\n".join(transcript_lines).strip()
+        if not transcript:
+            return
+
+        system_prompt = (
+            "You are a summarization engine for an operator 'memory' used by an AI assistant.\n"
+            "Update the memory summary with any durable facts: user goals, preferences, constraints, current focus, and recent decisions.\n"
+            "Rules:\n"
+            "- Output at most 10 lines.\n"
+            "- Each line should start with '- '.\n"
+            "- Do NOT include secrets, keys, tokens, or credentials.\n"
+            "- Be concrete and specific; avoid filler.\n"
+        )
+
+        user_text = (
+            "PREVIOUS MEMORY:\n"
+            f"{prev}\n\n"
+            "NEW TRANSCRIPT (incorporate into memory):\n"
+            f"{transcript}\n\n"
+            "Return the UPDATED MEMORY now."
+        )
+
+        import asyncio
+
+        try:
+            updated = await asyncio.to_thread(
+                client.chat,
+                [{"role": "user", "content": user_text}],
+                system_prompt,
+            )
+            if isinstance(updated, str) and updated.strip():
+                self._save_claude_memory_summary(updated)
+        except Exception as e:
+            logger.debug(f"Could not update memory summary: {e}")
         
     def _register_handlers(self):
         """Register command and callback handlers."""
@@ -4962,6 +5063,7 @@ class TelegramCommandHandler:
             keyboard = [
                 [InlineKeyboardButton(chat_toggle_text, callback_data='claude_chat_toggle')],
                 [InlineKeyboardButton("🧩 Patch Wizard", callback_data='claude_patch_wizard')],
+                [InlineKeyboardButton("🧠 Memory", callback_data='claude_memory')],
                 [InlineKeyboardButton("🔍 AI Monitor", callback_data='claude_monitor_hub')],
                 [InlineKeyboardButton("🧼 Reset Chat", callback_data='claude_reset')],
                 [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
@@ -5188,6 +5290,7 @@ class TelegramCommandHandler:
             context.user_data.pop("claude_wizard_files", None)
         # Also clear persisted chat history
         self._clear_persistent_claude_chat_history()
+        self._clear_claude_memory_summary()
         
         chat_mode = self.prefs.get("ai_chat_mode", False) if self.prefs else False
         
@@ -5197,6 +5300,61 @@ class TelegramCommandHandler:
             "Chat history cleared. Starting fresh.",
             reply_markup=self._get_claude_hub_buttons(chat_mode_enabled=chat_mode),
         )
+
+    async def _handle_claude_memory_view(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show the durable Claude memory summary (operator preferences/goals)."""
+        if not await self._check_authorized(update):
+            return
+
+        summary = self._load_claude_memory_summary()
+        text = summary if summary else "_No memory saved yet._\n\nChat a bit, then refresh to build memory."
+
+        message = "🧠 *Claude Memory*\n\n" + text
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("🔄 Refresh Memory", callback_data="claude_memory_refresh"),
+                    InlineKeyboardButton("🧼 Clear", callback_data="claude_memory_clear"),
+                ],
+                [InlineKeyboardButton("⬅️ Back", callback_data="claude_hub")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+        )
+        await self._send_message_or_edit(update, context, message, reply_markup=keyboard)
+
+    async def _handle_claude_memory_refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Force-refresh the durable memory summary using recent chat history."""
+        if not await self._check_authorized(update):
+            return
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            "🧠 *Claude Memory*\n\n🔄 Refreshing memory…",
+            reply_markup=None,
+        )
+
+        # Use current chat history if available, else load from disk
+        history: List[Dict[str, str]] = []
+        if hasattr(context, "user_data") and isinstance(context.user_data.get("claude_chat_history"), list):
+            history = context.user_data.get("claude_chat_history") or []
+        else:
+            history = self._load_persistent_claude_chat_history()
+
+        # Best-effort summarization (uses Claude)
+        try:
+            await self._update_claude_memory_summary(history)
+        except Exception:
+            pass
+
+        await self._handle_claude_memory_view(update, context)
+
+    async def _handle_claude_memory_clear(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Clear the durable memory summary."""
+        if not await self._check_authorized(update):
+            return
+        self._clear_claude_memory_summary()
+        await self._handle_claude_memory_view(update, context)
     
     async def _handle_claude_chat_toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Toggle Claude chat mode on/off (persistent setting)."""
@@ -5785,6 +5943,20 @@ class TelegramCommandHandler:
         except Exception:
             pass
 
+        # Durable operator memory (helps keep Claude consistent without long chat history)
+        try:
+            mem = self._load_claude_memory_summary()
+            if mem:
+                lines.append("")
+                lines.append("operator_memory:")
+                # Keep it compact; the summary is already line-bounded.
+                for ln in mem.splitlines():
+                    ln = ln.strip()
+                    if ln:
+                        lines.append(ln)
+        except Exception:
+            pass
+
         snapshot = "\n".join(lines).strip()
         if len(snapshot) > 1800:
             snapshot = snapshot[:1800] + "\n...(truncated)"
@@ -5807,10 +5979,18 @@ class TelegramCommandHandler:
         
         # Add user message to history
         chat_history.append({"role": "user", "content": text})
-        
-        # Keep history bounded (last N messages)
-        if len(chat_history) > 24:
-            chat_history = chat_history[-24:]
+
+        # Rolling memory: when history grows large, summarize older messages into durable memory
+        HISTORY_MAX = 40
+        MODEL_CONTEXT = 12
+        if len(chat_history) > HISTORY_MAX:
+            overflow = chat_history[:-MODEL_CONTEXT]
+            chat_history = chat_history[-MODEL_CONTEXT:]
+            # Best-effort: update durable memory; do not fail the chat if this errors
+            try:
+                await self._update_claude_memory_summary(overflow)
+            except Exception:
+                pass
         
         try:
             client = get_claude_client()
@@ -5836,8 +6016,12 @@ class TelegramCommandHandler:
             
             import asyncio
             # Run in thread to avoid blocking. Include a compact runtime snapshot for better answers.
-            system_prompt = build_chat_system_prompt(self._build_ai_chat_snapshot())
-            response = await asyncio.to_thread(client.chat, chat_history, system_prompt)
+            system_prompt = build_chat_system_prompt(
+                system_snapshot=self._build_ai_chat_snapshot(),
+                memory_summary=self._load_claude_memory_summary(),
+            )
+            # Keep the model context small; durable memory carries long-term context.
+            response = await asyncio.to_thread(client.chat, chat_history[-MODEL_CONTEXT:], system_prompt)
             
             # Add assistant response to history
             chat_history.append({"role": "assistant", "content": response})
@@ -7073,10 +7257,18 @@ class TelegramCommandHandler:
             await self._handle_backtest(update, context)
         elif callback_data == 'reports':
             await self._handle_backtest_reports(update, context)
+        elif callback_data == "strategy_review:show":
+            await self._render_strategy_review_cached(update, context)
         elif callback_data == "strategy_review" or callback_data == "strategy_review:refresh":
             await self._handle_strategy_review(update, context)
         elif callback_data == "strategy_review:export":
             await self._handle_strategy_review_export(update, context)
+        elif callback_data == "strategy_review:config_patch":
+            await self._handle_strategy_review_config_patch(update, context)
+        elif callback_data == "strategy_review:config_patch:do":
+            await self._handle_strategy_review_config_patch_do(update, context)
+        elif callback_data == "strategy_review:variant_backtest":
+            await self._handle_strategy_review_variant_backtest(update, context)
         elif callback_data == "strategy_review:discuss":
             await self._handle_strategy_review_discuss(update, context)
         elif callback_data == "strategy_review:autofix":
@@ -7238,6 +7430,12 @@ class TelegramCommandHandler:
         # Claude hub callbacks
         elif callback_data == 'claude_hub':
             await self._handle_ai_hub(update, context)
+        elif callback_data == 'claude_memory':
+            await self._handle_claude_memory_view(update, context)
+        elif callback_data == 'claude_memory_refresh':
+            await self._handle_claude_memory_refresh(update, context)
+        elif callback_data == 'claude_memory_clear':
+            await self._handle_claude_memory_clear(update, context)
         elif callback_data == 'claude_chat_toggle':
             await self._handle_claude_chat_toggle(update, context)
         elif callback_data == 'claude_patch_wizard':
@@ -8254,6 +8452,32 @@ class TelegramCommandHandler:
                 else:
                     context.user_data.pop("strategy_review_autofix_task", None)
 
+                # Identify a safe config-only suggestion (for one-tap config patch)
+                config_candidate = None
+                for s in suggestions_dicts:
+                    try:
+                        stype = str(s.get("type") or "")
+                        cfg_path = s.get("config_path")
+                        new_val = s.get("new_value")
+                        if stype in ("config_change", "parameter_tune") and cfg_path and new_val is not None:
+                            config_candidate = {
+                                "title": s.get("title"),
+                                "description": s.get("description"),
+                                "rationale": s.get("rationale"),
+                                "type": stype,
+                                "priority": s.get("priority"),
+                                "config_path": cfg_path,
+                                "old_value": s.get("old_value"),
+                                "new_value": new_val,
+                            }
+                            break
+                    except Exception:
+                        continue
+                if config_candidate:
+                    context.user_data["strategy_review_config_candidate"] = config_candidate
+                else:
+                    context.user_data.pop("strategy_review_config_candidate", None)
+
             message = self._format_strategy_review_message(analysis, suggestions_dicts, lookback_hours=lookback)
 
             # Buttons
@@ -8274,6 +8498,12 @@ class TelegramCommandHandler:
             has_autofix = bool(getattr(context, "user_data", {}).get("strategy_review_autofix_task")) if hasattr(context, "user_data") else False
             if has_autofix and ANTHROPIC_AVAILABLE:
                 keyboard.append([InlineKeyboardButton("🧩 Auto Fix (Patch)", callback_data="strategy_review:autofix")])
+
+            # Config Patch (safe, config-only; requires a config candidate)
+            has_config_patch = bool(getattr(context, "user_data", {}).get("strategy_review_config_candidate")) if hasattr(context, "user_data") else False
+            if has_config_patch and ANTHROPIC_AVAILABLE:
+                keyboard.append([InlineKeyboardButton("⚙️ Config Patch (Safe)", callback_data="strategy_review:config_patch")])
+                keyboard.append([InlineKeyboardButton("🧪 Backtest Variant", callback_data="strategy_review:variant_backtest")])
 
             keyboard += [
                 [InlineKeyboardButton("💬 Discuss with Claude", callback_data="strategy_review:discuss")],
@@ -8302,6 +8532,610 @@ class TelegramCommandHandler:
                 f"🧠 *Strategy Review*\n\n❌ Error: `{str(e)[:200]}`",
                 reply_markup=self._get_back_to_menu_button(),
             )
+
+    async def _render_strategy_review_cached(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Re-render the Strategy Review using cached analysis (no recompute)."""
+        if not await self._check_authorized(update):
+            return
+
+        analysis = context.user_data.get("strategy_review_last_analysis") if hasattr(context, "user_data") else None
+        suggestions_dicts = context.user_data.get("strategy_review_last_suggestions") if hasattr(context, "user_data") else []
+
+        if not isinstance(analysis, dict):
+            await self._send_message_or_edit(
+                update,
+                context,
+                "🧠 *Strategy Review*\n\nNo cached review found.\nTap *Refresh* to run it now.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Refresh", callback_data="strategy_review:refresh")]]),
+            )
+            return
+
+        lookback = 24
+        if hasattr(context, "user_data"):
+            try:
+                lookback = int(context.user_data.get("strategy_review_lookback_hours", 24) or 24)
+            except Exception:
+                lookback = 24
+        lookback = 24 if lookback <= 24 else 168
+
+        message = self._format_strategy_review_message(analysis, suggestions_dicts or [], lookback_hours=lookback)
+
+        lb_24 = "⏱ 24h ✓" if lookback == 24 else "⏱ 24h"
+        lb_7d = "🗓 7d ✓" if lookback != 24 else "🗓 7d"
+        keyboard: List[List[InlineKeyboardButton]] = [
+            [
+                InlineKeyboardButton(lb_24, callback_data="strategy_review:lookback:24"),
+                InlineKeyboardButton(lb_7d, callback_data="strategy_review:lookback:168"),
+            ],
+            [
+                InlineKeyboardButton("🔄 Refresh", callback_data="strategy_review:refresh"),
+                InlineKeyboardButton("📄 Export", callback_data="strategy_review:export"),
+            ],
+        ]
+
+        has_autofix = bool(getattr(context, "user_data", {}).get("strategy_review_autofix_task")) if hasattr(context, "user_data") else False
+        if has_autofix and ANTHROPIC_AVAILABLE:
+            keyboard.append([InlineKeyboardButton("🧩 Auto Fix (Patch)", callback_data="strategy_review:autofix")])
+
+        has_config_patch = bool(getattr(context, "user_data", {}).get("strategy_review_config_candidate")) if hasattr(context, "user_data") else False
+        if has_config_patch and ANTHROPIC_AVAILABLE:
+            keyboard.append([InlineKeyboardButton("⚙️ Config Patch (Safe)", callback_data="strategy_review:config_patch")])
+
+        keyboard += [
+            [InlineKeyboardButton("💬 Discuss with Claude", callback_data="strategy_review:discuss")],
+            [
+                InlineKeyboardButton("🧩 Patch Wizard", callback_data="claude_patch_wizard"),
+                InlineKeyboardButton("🤖 Claude Hub", callback_data="claude_hub"),
+            ],
+            [
+                InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
+                InlineKeyboardButton("📂 Reports", callback_data="reports"),
+            ],
+            [
+                InlineKeyboardButton("💡 Suggest Config", callback_data="claude_suggest_config"),
+                InlineKeyboardButton("📋 Suggestions", callback_data="claude_suggestions"),
+            ],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+        ]
+
+        await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def _handle_strategy_review_config_patch(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Confirm and explain a safe, config-only patch for the best config candidate."""
+        if not await self._check_authorized(update):
+            return
+
+        cand = context.user_data.get("strategy_review_config_candidate") if hasattr(context, "user_data") else None
+        if not isinstance(cand, dict):
+            await self._send_message_or_edit(
+                update,
+                context,
+                "⚙️ *Config Patch (Safe)*\n\nNo config recommendation found.\nRun *Refresh* first.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Refresh", callback_data="strategy_review:refresh")]]),
+            )
+            return
+
+        cfg_path = cand.get("config_path")
+        new_val = cand.get("new_value")
+        old_val = cand.get("old_value")
+        title = cand.get("title") or "Config change"
+
+        message = (
+            "⚙️ *Config Patch (Safe)*\n\n"
+            "This generates a patch for `config/config.yaml` only.\n\n"
+            f"*Suggestion:* {safe_label(str(title))}\n"
+            f"*Path:* `{cfg_path}`\n"
+            f"*Current:* `{old_val}`\n"
+            f"*New:* `{new_val}`\n\n"
+            "Proceed to generate the patch?"
+        )
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("✅ Generate Patch", callback_data="strategy_review:config_patch:do")],
+                [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+        )
+
+        await self._send_message_or_edit(update, context, message, reply_markup=keyboard)
+
+    async def _handle_strategy_review_config_patch_do(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Generate a config-only patch for the stored config candidate using Claude."""
+        if not await self._check_authorized(update):
+            return
+
+        cand = context.user_data.get("strategy_review_config_candidate") if hasattr(context, "user_data") else None
+        if not isinstance(cand, dict):
+            await self._send_message_or_edit(
+                update,
+                context,
+                "⚙️ *Config Patch (Safe)*\n\nNo config recommendation found.\nRun *Refresh* first.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Refresh", callback_data="strategy_review:refresh")]]),
+            )
+            return
+
+        client = get_claude_client()
+        if not client:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "⚙️ *Config Patch (Safe)*\n\n❌ Claude not available.\n\n"
+                "What to check:\n"
+                "• Install extras: `pip install -e .[llm]`\n"
+                "• Set `ANTHROPIC_API_KEY` in `.env` and restart the handler",
+                reply_markup=self._get_claude_hub_buttons(),
+            )
+            return
+
+        cfg_path = cand.get("config_path")
+        new_val = cand.get("new_value")
+        if not cfg_path or new_val is None:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "⚙️ *Config Patch (Safe)*\n\nInvalid config recommendation (missing path/value).",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")]]),
+            )
+            return
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            "⚙️ *Config Patch (Safe)*\n\n🔄 Generating patch for `config/config.yaml`…",
+            reply_markup=None,
+        )
+
+        # Read config file content
+        project_root = Path(__file__).parent.parent.parent.parent
+        config_path = project_root / "config" / "config.yaml"
+        try:
+            config_text = config_path.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"⚙️ *Config Patch (Safe)*\n\n❌ Could not read `config/config.yaml`: `{str(e)[:200]}`",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")]]),
+            )
+            return
+
+        task = (
+            "Update `config/config.yaml` only.\n"
+            f"Set `{cfg_path}` to `{new_val}`.\n"
+            "Preserve existing formatting/comments as much as possible.\n"
+            "Output ONLY a unified diff patch."
+        )
+
+        import asyncio
+        diff_output = await asyncio.to_thread(client.generate_patch, {"config/config.yaml": config_text}, str(task))
+        if not diff_output or not diff_output.strip():
+            await self._send_message_or_edit(
+                update,
+                context,
+                "⚙️ *Config Patch (Safe)*\n\n⚠️ Claude returned an empty patch.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")]]),
+            )
+            return
+
+        # Safety check: ensure patch touches only config/config.yaml
+        touched = set()
+        for line in diff_output.splitlines():
+            if line.startswith("--- a/"):
+                touched.add(line.replace("--- a/", "", 1).strip())
+            if line.startswith("+++ b/"):
+                touched.add(line.replace("+++ b/", "", 1).strip())
+        touched.discard("/dev/null")
+        if touched and any(p != "config/config.yaml" for p in touched):
+            await self._send_message_or_edit(
+                update,
+                context,
+                "⚙️ *Config Patch (Safe)*\n\n❌ Patch touched unexpected files.\n\n"
+                "For safety, please use *Patch Wizard* instead.",
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [InlineKeyboardButton("🧩 Patch Wizard", callback_data="claude_patch_wizard")],
+                        [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+                    ]
+                ),
+            )
+            return
+
+        # Deliver patch
+        INLINE_LIMIT = 3500
+        back = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+        )
+
+        if len(diff_output) <= INLINE_LIMIT:
+            safe_diff = diff_output.replace("`", "'")
+            msg = (
+                "✅ *Config Patch Generated*\n\n"
+                f"*Path:* `{cfg_path}`\n"
+                f"*New:* `{new_val}`\n\n"
+                f"```diff\n{safe_diff}\n```\n\n"
+                "Apply on your computer with: `git apply config_patch.diff`"
+            )
+            await self._send_message_or_edit(update, context, msg, reply_markup=back)
+        else:
+            import io
+            buf = io.BytesIO(diff_output.encode("utf-8"))
+            buf.name = "config_patch.diff"
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_document")
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=buf,
+                filename="config_patch.diff",
+                caption="✅ Config patch generated. Apply with: `git apply config_patch.diff`",
+                parse_mode="Markdown",
+            )
+            await self._send_message_or_edit(update, context, "✅ *Config patch file sent above.*", reply_markup=back)
+
+    def _coerce_backtest_df(self, historical_data: "pd.DataFrame") -> "pd.DataFrame":
+        """Normalize historical data to a DatetimeIndex OHLCV frame for backtesting."""
+        backtest_data = historical_data.copy()
+
+        # Ensure timestamp is a DateTimeIndex
+        if "timestamp" in backtest_data.columns:
+            backtest_data["timestamp"] = pd.to_datetime(backtest_data["timestamp"])
+            backtest_data = backtest_data.dropna(subset=["timestamp"]).set_index("timestamp")
+        elif not isinstance(backtest_data.index, pd.DatetimeIndex):
+            # Try converting index
+            try:
+                backtest_data.index = pd.to_datetime(backtest_data.index)
+            except Exception:
+                pass
+
+        if not isinstance(backtest_data.index, pd.DatetimeIndex):
+            raise ValueError(f"Could not convert data index to DatetimeIndex. Index type: {type(backtest_data.index)}")
+
+        # Ensure required OHLCV columns exist (prefer lowercase for strategy/backtest stack)
+        column_mapping = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
+        for lower, upper in column_mapping.items():
+            if upper in backtest_data.columns and lower not in backtest_data.columns:
+                backtest_data[lower] = backtest_data[upper]
+            if lower in backtest_data.columns and upper not in backtest_data.columns:
+                backtest_data[upper] = backtest_data[lower]
+
+        return backtest_data.sort_index()
+
+    def _apply_variant_override_to_strategy_config(
+        self,
+        config: Any,
+        config_path: str,
+        new_value: Any,
+    ) -> Any:
+        """
+        Apply a Strategy Review config_path override to an NQIntradayConfig instance (best-effort).
+
+        Returns the mutated config (or a replaced config if needed).
+        """
+        try:
+            path = str(config_path or "").strip()
+        except Exception:
+            path = ""
+        if not path:
+            return config
+
+        # Map YAML-ish paths to NQIntradayConfig fields
+        mapping = {
+            # session.*
+            "session.start_time": "start_time",
+            "session.end_time": "end_time",
+            # risk.*
+            "risk.stop_loss_atr_multiplier": "stop_loss_atr_multiplier",
+            "risk.take_profit_risk_reward": "take_profit_risk_reward",
+            "risk.max_risk_per_trade": "max_risk_per_trade",
+            "risk.max_position_size": "max_position_size",
+            "risk.min_position_size": "min_position_size",
+            "risk.stop_loss_ticks": "stop_loss_ticks",
+            "risk.take_profit_ticks": "take_profit_ticks",
+            # strategy.*
+            "strategy.enable_dynamic_sizing": "enable_dynamic_sizing",
+            "strategy.base_contracts": "base_contracts",
+            "strategy.high_conf_contracts": "high_conf_contracts",
+            "strategy.max_conf_contracts": "max_conf_contracts",
+            "strategy.enabled_signals": "enabled_signals",
+            "strategy.disabled_signals": "disabled_signals",
+        }
+
+        attr = mapping.get(path)
+        if not attr and "." not in path:
+            # allow direct field names like stop_loss_ticks
+            attr = path
+
+        if attr and hasattr(config, attr):
+            try:
+                current = getattr(config, attr)
+                # Coerce type based on current value
+                if isinstance(current, bool):
+                    val = bool(new_value)
+                elif isinstance(current, int):
+                    val = int(new_value)
+                elif isinstance(current, float):
+                    val = float(new_value)
+                elif isinstance(current, list):
+                    val = list(new_value) if isinstance(new_value, (list, tuple)) else [str(new_value)]
+                else:
+                    val = new_value
+                setattr(config, attr, val)
+            except Exception:
+                # Best-effort: ignore if coercion fails
+                pass
+        return config
+
+    async def _handle_strategy_review_variant_backtest(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Run baseline vs variant backtest for the current Strategy Review config candidate."""
+        if not await self._check_authorized(update):
+            return
+
+        cand = context.user_data.get("strategy_review_config_candidate") if hasattr(context, "user_data") else None
+        if not isinstance(cand, dict):
+            await self._send_message_or_edit(
+                update,
+                context,
+                "🧪 *Backtest Variant*\n\nNo config recommendation found.\nRun *Refresh* first.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Refresh", callback_data="strategy_review:refresh")]]),
+            )
+            return
+
+        cfg_path = str(cand.get("config_path") or "")
+        new_val = cand.get("new_value")
+        if not cfg_path or new_val is None:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "🧪 *Backtest Variant*\n\nInvalid config recommendation (missing path/value).",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")]]),
+            )
+            return
+
+        # Backtest settings (reuse /backtest defaults)
+        user_data = context.user_data if hasattr(context, "user_data") else {}
+        try:
+            weeks = int(user_data.get("strategy_review_variant_weeks", 2) or 2)
+        except Exception:
+            weeks = 2
+        if weeks not in (1, 2, 4, 6):
+            weeks = 2
+
+        mode = (user_data.get("backtest_mode") or "5m") if hasattr(context, "user_data") else "5m"
+        if mode not in ("5m", "1m"):
+            mode = "5m"
+
+        try:
+            pos_size = int(user_data.get("backtest_contracts", 5) or 5)
+        except Exception:
+            pos_size = 5
+        if pos_size not in (1, 5, 10):
+            pos_size = 5
+
+        try:
+            slippage_ticks = float(user_data.get("backtest_slippage_ticks", 0.5) or 0.5)
+        except Exception:
+            slippage_ticks = 0.5
+        if slippage_ticks not in (0.5, 1.0):
+            slippage_ticks = 0.5
+
+        try:
+            max_pos = int(user_data.get("backtest_max_positions", 1) or 1)
+        except Exception:
+            max_pos = 1
+        if max_pos not in (1, 2, 3):
+            max_pos = 1
+
+        symbol = user_data.get("backtest_symbol", "MNQ") if hasattr(context, "user_data") else "MNQ"
+        if symbol not in ("MNQ", "NQ"):
+            symbol = "MNQ"
+        tick_value = 2.0 if symbol == "MNQ" else 20.0
+
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        await self._send_message_or_edit(
+            update,
+            context,
+            "🧪 *Backtest Variant*\n\n"
+            f"Change: `{cfg_path}` → `{new_val}`\n"
+            f"Window: `{weeks}w` • Mode: `{mode}` • Contracts: `{pos_size}`\n\n"
+            "🔄 Fetching historical data…",
+            reply_markup=None,
+        )
+
+        # Fetch data (reuse existing fetcher)
+        historical_data = await self._fetch_historical_data_for_backtest(
+            symbol="MNQ" if symbol == "MNQ" else "NQ",
+            weeks=weeks,
+            timeframe="1m",
+        )
+        if historical_data is None or historical_data.empty:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "🧪 *Backtest Variant*\n\n❌ Could not fetch historical data.\n\nTry a shorter window or retry later.",
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [InlineKeyboardButton("🔄 Retry", callback_data="strategy_review:variant_backtest")],
+                        [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+                    ]
+                ),
+            )
+            return
+
+        backtest_data = self._coerce_backtest_df(historical_data)
+
+        from pearlalgo.strategies.nq_intraday.backtest_adapter import run_full_backtest, run_full_backtest_5m_decision
+        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.config.config_loader import service_config_override
+
+        # Baseline config (from file)
+        base_cfg = NQIntradayConfig.from_config_file()
+        var_cfg = NQIntradayConfig.from_config_file()
+
+        # Apply override to strategy config when relevant
+        var_cfg = self._apply_variant_override_to_strategy_config(var_cfg, cfg_path, new_val)
+
+        # Apply override to service config when relevant (signals.*)
+        service_override: Dict[str, Any] = {}
+        if cfg_path.startswith("signals."):
+            key = cfg_path.split("signals.", 1)[1]
+            service_override = {"signals": {key: new_val}}
+
+        # Run baseline
+        await self._send_message_or_edit(
+            update,
+            context,
+            "🧪 *Backtest Variant*\n\n"
+            f"Change: `{cfg_path}` → `{new_val}`\n"
+            f"Window: `{weeks}w` • Mode: `{mode}`\n\n"
+            "1/2 Running *baseline* backtest…",
+            reply_markup=None,
+        )
+
+        if mode == "5m":
+            base_res = run_full_backtest_5m_decision(
+                backtest_data,
+                config=base_cfg,
+                position_size=pos_size,
+                tick_value=tick_value,
+                slippage_ticks=slippage_ticks,
+                max_concurrent_trades=max_pos,
+                return_trades=False,
+                decision_rule="5min",
+                context_rule_1="1h",
+                context_rule_2="4h",
+            )
+        else:
+            base_res = run_full_backtest(
+                backtest_data,
+                config=base_cfg,
+                position_size=pos_size,
+                tick_value=tick_value,
+                slippage_ticks=slippage_ticks,
+                max_concurrent_trades=max_pos,
+                return_trades=False,
+            )
+
+        # Run variant (with override)
+        await self._send_message_or_edit(
+            update,
+            context,
+            "🧪 *Backtest Variant*\n\n"
+            f"Change: `{cfg_path}` → `{new_val}`\n"
+            f"Window: `{weeks}w` • Mode: `{mode}`\n\n"
+            "2/2 Running *variant* backtest…",
+            reply_markup=None,
+        )
+
+        if service_override:
+            with service_config_override(service_override):
+                if mode == "5m":
+                    var_res = run_full_backtest_5m_decision(
+                        backtest_data,
+                        config=var_cfg,
+                        position_size=pos_size,
+                        tick_value=tick_value,
+                        slippage_ticks=slippage_ticks,
+                        max_concurrent_trades=max_pos,
+                        return_trades=False,
+                        decision_rule="5min",
+                        context_rule_1="1h",
+                        context_rule_2="4h",
+                    )
+                else:
+                    var_res = run_full_backtest(
+                        backtest_data,
+                        config=var_cfg,
+                        position_size=pos_size,
+                        tick_value=tick_value,
+                        slippage_ticks=slippage_ticks,
+                        max_concurrent_trades=max_pos,
+                        return_trades=False,
+                    )
+        else:
+            if mode == "5m":
+                var_res = run_full_backtest_5m_decision(
+                    backtest_data,
+                    config=var_cfg,
+                    position_size=pos_size,
+                    tick_value=tick_value,
+                    slippage_ticks=slippage_ticks,
+                    max_concurrent_trades=max_pos,
+                    return_trades=False,
+                    decision_rule="5min",
+                    context_rule_1="1h",
+                    context_rule_2="4h",
+                )
+            else:
+                var_res = run_full_backtest(
+                    backtest_data,
+                    config=var_cfg,
+                    position_size=pos_size,
+                    tick_value=tick_value,
+                    slippage_ticks=slippage_ticks,
+                    max_concurrent_trades=max_pos,
+                    return_trades=False,
+                )
+
+        def _f(x: Any, fmt: str) -> str:
+            try:
+                if x is None:
+                    return "n/a"
+                return format(float(x), fmt)
+            except Exception:
+                return "n/a"
+
+        def _d(a: Any, b: Any) -> str:
+            try:
+                if a is None or b is None:
+                    return ""
+                diff = float(b) - float(a)
+                sign = "+" if diff >= 0 else ""
+                return f" ({sign}{diff:.2f})"
+            except Exception:
+                return ""
+
+        # Compare key metrics
+        msg = (
+            "🧪 *Backtest Variant Results*\n\n"
+            f"Change: `{cfg_path}` → `{new_val}`\n"
+            f"Window: `{weeks}w` • Mode: `{mode}` • Contracts: `{pos_size}` • Max pos: `{max_pos}`\n\n"
+            "*Baseline vs Variant:*\n"
+            f"• Trades: `{base_res.total_trades or 0}` → `{var_res.total_trades or 0}`\n"
+            f"• Win rate: `{_f(base_res.win_rate, '.1%')}` → `{_f(var_res.win_rate, '.1%')}`\n"
+            f"• Total P&L: `{_format_currency(float(base_res.total_pnl or 0.0))}` → `{_format_currency(float(var_res.total_pnl or 0.0))}`{_d(base_res.total_pnl, var_res.total_pnl)}\n"
+            f"• Profit factor: `{_f(base_res.profit_factor, '.2f')}` → `{_f(var_res.profit_factor, '.2f')}`\n"
+            f"• Max DD: `{_format_currency(float(base_res.max_drawdown or 0.0))}` → `{_format_currency(float(var_res.max_drawdown or 0.0))}`\n"
+        )
+
+        # Verdict (simple)
+        verdict = ""
+        try:
+            pnl_diff = float(var_res.total_pnl or 0.0) - float(base_res.total_pnl or 0.0)
+            if pnl_diff > 0:
+                verdict = f"\n🟢 *Verdict:* Variant improved P&L by {_format_currency(pnl_diff)}"
+            elif pnl_diff < 0:
+                verdict = f"\n🔴 *Verdict:* Variant reduced P&L by {_format_currency(pnl_diff)}"
+            else:
+                verdict = "\n⚪ *Verdict:* No P&L change"
+        except Exception:
+            verdict = ""
+
+        msg += verdict
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+                [
+                    InlineKeyboardButton("⚙️ Config Patch (Safe)", callback_data="strategy_review:config_patch"),
+                    InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
+                ],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+        )
+
+        await self._send_message_or_edit(update, context, msg, reply_markup=keyboard)
 
     async def _handle_strategy_review_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Export the last strategy review (analysis + suggestions) as a file for sharing/offline use."""
@@ -8439,7 +9273,10 @@ class TelegramCommandHandler:
         if len(chat_history) > 24:
             chat_history = chat_history[-24:]
 
-        system_prompt = build_chat_system_prompt(self._build_ai_chat_snapshot())
+        system_prompt = build_chat_system_prompt(
+            system_snapshot=self._build_ai_chat_snapshot(),
+            memory_summary=self._load_claude_memory_summary(),
+        )
 
         import asyncio
         response = await asyncio.to_thread(client.chat, chat_history, system_prompt)

@@ -83,14 +83,22 @@ Safety:
 Keep responses reasonably sized for Telegram: use short sections and bullets, but be detailed when the user asks."""
 
 
-def build_chat_system_prompt(system_snapshot: Optional[str] = None) -> str:
+def build_chat_system_prompt(
+    system_snapshot: Optional[str] = None,
+    memory_summary: Optional[str] = None,
+) -> str:
     """
     Build the chat system prompt, optionally appending a compact runtime snapshot.
 
     Args:
+        memory_summary: A short, durable operator memory (goals, decisions, preferences)
         system_snapshot: A short, read-only context block (e.g., agent status, performance, recent signals)
     """
     prompt = CHAT_SYSTEM_PROMPT.strip()
+    if memory_summary:
+        mem = str(memory_summary).strip()
+        if mem:
+            prompt += "\n\nOPERATOR MEMORY (durable, do not overwrite with guesses):\n" + mem
     if system_snapshot:
         snapshot = str(system_snapshot).strip()
         if snapshot:
