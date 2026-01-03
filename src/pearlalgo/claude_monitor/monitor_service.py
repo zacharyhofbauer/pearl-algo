@@ -886,8 +886,15 @@ class ClaudeMonitorService:
             action_type = ActionType.CONFIG_UPDATE
         elif sug_type == "parameter_tune" and config_path:
             action_type = ActionType.PARAMETER_TUNE
-        elif sug_type == "code_patch" and files:
-            action_type = ActionType.CODE_PATCH
+        elif sug_type == "code_patch":
+            # Not safely executable yet: code patches require patch generation and review.
+            # Route users to the Telegram Patch Wizard or /ai_patch flow instead of failing later.
+            return {
+                "success": False,
+                "error": "Code patch suggestions require patch generation + manual review (use Patch Wizard or /ai_patch).",
+                "suggestion": suggestion,
+                "requires_manual": True,
+            }
         elif sug_type == "service_action" and action:
             action_type = ActionType.SERVICE_RESTART
         else:
@@ -931,18 +938,34 @@ class ClaudeMonitorService:
             }
         
         # Update suggestion status based on result
-        if result.success:
-            status = "applied" if not dry_run else "dry_run_success"
+        if dry_run:
+            # IMPORTANT: Dry-run should not "consume" the suggestion.
+            # Keep it pending so the operator can still apply later.
             self.monitor_state.update_suggestion_status(
                 suggestion_id,
-                status,
+                "pending",
+                {
+                    "dry_run": True,
+                    "dry_run_success": bool(result.success),
+                    "timestamp": get_utc_timestamp(),
+                    "request_id": result.request_id,
+                    "action_type": result.action_type.value,
+                    "status": result.status.value,
+                    "message": result.message,
+                    "error": result.error,
+                },
+            )
+        elif result.success:
+            self.monitor_state.update_suggestion_status(
+                suggestion_id,
+                "applied",
                 {
                     "applied_by": "action_executor",
                     "timestamp": get_utc_timestamp(),
                     "request_id": result.request_id,
                     "can_rollback": result.can_rollback,
                     "rollback_data": result.rollback_data,
-                    "dry_run": dry_run,
+                    "dry_run": False,
                 },
             )
         else:

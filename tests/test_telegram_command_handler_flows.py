@@ -580,7 +580,8 @@ class TestStrategyReviewVariantWeeks:
     """Test Strategy Review UX helpers (variant backtest week picker)."""
 
     @pytest.mark.asyncio
-    async def test_cached_review_renders_variant_week_picker(self, handler_with_mocks):
+    async def test_more_menu_renders_variant_week_picker(self, handler_with_mocks):
+        """Test the Strategy Review 'More' menu renders the variant week picker when a config candidate exists."""
         handler = handler_with_mocks
         handler.chat_id = "123"
 
@@ -608,17 +609,18 @@ class TestStrategyReviewVariantWeeks:
             captured["reply_markup"] = kwargs.get("reply_markup")
             captured["msg"] = msg
 
-        with patch.object(handler, "_format_strategy_review_message", return_value="ok"):
-            with patch.object(handler, "_send_message_or_edit", side_effect=mock_send):
-                from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
-                await TelegramCommandHandler._render_strategy_review_cached(handler, update, context)
+        with patch.object(handler, "_send_message_or_edit", side_effect=mock_send):
+            from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+            await TelegramCommandHandler._render_strategy_review_more_menu(handler, update, context)
 
         rm = captured.get("reply_markup")
         assert rm is not None
         texts = [[b.text for b in row] for row in rm.inline_keyboard]
         flat = [t for row in texts for t in row]
 
-        assert any("Backtest Variant (4w)" in t for t in flat)
+        # Verify "Backtest Variant" button exists (with selected weeks)
+        assert any("Backtest Variant" in t for t in flat)
+        # Verify week picker row is present
         assert any(row == ["1w", "2w", "4w ✓"] for row in texts)
 
     @pytest.mark.asyncio

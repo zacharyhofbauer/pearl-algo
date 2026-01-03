@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import math
 import random
 import hashlib
 import shutil
@@ -6688,6 +6689,55 @@ _Commands are policy-gated for safety._
         
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
     
+    def _load_state_snapshot(self) -> Dict:
+        """
+        Load a best-effort state snapshot for terminal/monitor tooling.
+
+        Returns the raw `state.json` dict, plus a few convenience fields expected by
+        some UI helpers (uptime/connected/positions/last_signal_time).
+        """
+        try:
+            state = self.state_manager.load_state()
+            if not isinstance(state, dict) or not state:
+                return {}
+
+            snapshot = dict(state)
+
+            # Uptime (human-ish)
+            try:
+                st = snapshot.get("start_time")
+                if st:
+                    dt = datetime.fromisoformat(str(st).replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    uptime_s = max(0.0, (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds())
+                    h = int(uptime_s // 3600)
+                    m = int((uptime_s % 3600) // 60)
+                    snapshot["uptime"] = f"{h}h {m}m"
+            except Exception:
+                pass
+
+            # Simple connectivity heuristic
+            try:
+                snapshot["connected"] = bool(int(snapshot.get("connection_failures", 0) or 0) == 0)
+            except Exception:
+                snapshot["connected"] = None
+
+            # Last signal time convenience
+            snapshot["last_signal_time"] = snapshot.get("last_signal_generated_at") or snapshot.get("last_signal_sent_at")
+
+            # Positions convenience (optional)
+            execution = snapshot.get("execution", {})
+            if isinstance(execution, dict) and isinstance(execution.get("positions"), list):
+                snapshot["positions"] = execution.get("positions")
+            else:
+                snapshot["positions"] = []
+
+            return snapshot
+        except Exception as e:
+            logger.debug(f"Could not load state snapshot: {e}")
+            return {}
+
     def _load_config_yaml(self) -> Optional[Dict[str, Any]]:
         """Load config.yaml for terminal config commands."""
         try:
@@ -7931,6 +7981,12 @@ _Commands are policy-gated for safety._
             await self._handle_strategy_review_config_patch_do(update, context)
         elif callback_data == "strategy_review:variant_backtest":
             await self._handle_strategy_review_variant_backtest(update, context)
+        elif callback_data == "strategy_review:apply_candidate":
+            await self._handle_strategy_review_apply_candidate(update, context)
+        elif callback_data == "strategy_review:apply_candidate:do":
+            await self._handle_strategy_review_apply_candidate_do(update, context, dry_run=False)
+        elif callback_data == "strategy_review:apply_candidate:dry":
+            await self._handle_strategy_review_apply_candidate_do(update, context, dry_run=True)
         elif callback_data == "strategy_review:discuss":
             await self._handle_strategy_review_discuss(update, context)
         elif callback_data == "strategy_review:autofix":
@@ -8186,6 +8242,8 @@ _Commands are policy-gated for safety._
             await self._handle_suggest_config(update, context)
         elif callback_data == 'claude_suggestions':
             await self._handle_suggestions(update, context)
+        elif callback_data.startswith("sug:"):
+            await self._handle_suggestion_callback(update, context, callback_data)
         else:
             await query.edit_message_text(f"❌ Unknown action: {callback_data}")
     
@@ -8809,10 +8867,15 @@ _Commands are policy-gated for safety._
             monitor = self._get_claude_monitor()
             
             if not monitor:
-                await update.message.reply_text("❌ Claude monitor not available")
+                await self._send_message_or_edit(
+                    update,
+                    context,
+                    "❌ Claude monitor not available",
+                    reply_markup=self._get_claude_hub_buttons(show_monitor=True),
+                )
                 return
             
-            await update.message.reply_text("🔄 Generating configuration suggestions...")
+            await self._send_message_or_edit(update, context, "🔄 Generating configuration suggestions...", reply_markup=None)
             
             # Run analysis to generate suggestions
             analysis = await monitor.force_analysis()
@@ -8858,11 +8921,501 @@ _Commands are policy-gated for safety._
                 
                 message += "\nUse `/apply_suggestion <id>` to apply."
             
-            await update.message.reply_text(message, parse_mode="Markdown")
+            await self._send_message_or_edit(
+                update,
+                context,
+                message,
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [InlineKeyboardButton("📋 Suggestions", callback_data="claude_suggestions")],
+                        [InlineKeyboardButton("⬅️ Claude Hub", callback_data="claude_hub")],
+                        [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                    ]
+                ),
+            )
             
         except Exception as e:
             logger.error(f"Error handling /suggest_config: {e}", exc_info=True)
-            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+            await self._send_message_or_edit(update, context, f"❌ Error: {str(e)[:100]}", reply_markup=self._get_claude_hub_buttons(show_monitor=True))
+
+    # =========================================================================
+    # Suggestions UI (tap-to-approve)
+    # =========================================================================
+
+    async def _render_suggestions_menu(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        banner: Optional[str] = None,
+        reset_page: bool = False,
+    ) -> None:
+        """Render an interactive suggestions list with Apply/Dry-run/Dismiss buttons."""
+        monitor = self._get_claude_monitor()
+        if not monitor:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "❌ Claude monitor not available",
+                reply_markup=self._get_claude_hub_buttons(show_monitor=True),
+            )
+            return
+
+        # Pagination state
+        page = 0
+        if hasattr(context, "user_data"):
+            try:
+                page = int(context.user_data.get("claude_suggestions_page", 0) or 0)
+            except Exception:
+                page = 0
+            if reset_page:
+                page = 0
+            context.user_data["claude_suggestions_page"] = page
+
+        suggestions = monitor.get_active_suggestions() or []
+        if not suggestions:
+            msg = "✅ *No active suggestions.*\n\nEverything looks stable right now."
+            await self._send_message_or_edit(
+                update,
+                context,
+                msg,
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [InlineKeyboardButton("⬅️ Claude Hub", callback_data="claude_hub")],
+                        [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                    ]
+                ),
+            )
+            return
+
+        # Sort: high -> medium -> low, then newest-ish
+        pr_rank = {"high": 0, "medium": 1, "low": 2}
+        suggestions = sorted(
+            suggestions,
+            key=lambda s: (
+                pr_rank.get(str(s.get("priority", "medium")), 1),
+                str(s.get("created_at", "")),
+            ),
+        )
+
+        page_size = 5
+        total = len(suggestions)
+        total_pages = max(1, int(math.ceil(total / page_size)))
+        page = max(0, min(page, total_pages - 1))
+        if hasattr(context, "user_data"):
+            context.user_data["claude_suggestions_page"] = page
+
+        start = page * page_size
+        shown = suggestions[start : start + page_size]
+
+        # Message
+        lines: List[str] = [f"💡 *Active Suggestions ({total})*"]
+        if banner:
+            lines += ["", banner.strip()]
+        lines.append("")
+        if total_pages > 1:
+            lines.append(f"*Page:* `{page + 1}/{total_pages}`")
+            lines.append("")
+
+        for idx, sug in enumerate(shown, start=1):
+            priority = str(sug.get("priority", "medium"))
+            pemoji = {"high": "🔺", "medium": "🔸", "low": "🔹"}.get(priority, "•")
+            title = safe_label(str(sug.get("title", "Suggestion") or "Suggestion"))
+            sid = str(sug.get("id") or "")
+            stype = str(sug.get("type", "unknown") or "unknown")
+            lines.append(f"{idx}) {pemoji} *{title}*")
+            if sid:
+                lines.append(f"   ID: `{sid}`  •  Type: `{stype}`")
+            else:
+                lines.append(f"   Type: `{stype}`")
+
+            cfg_path = sug.get("config_path")
+            old_val = sug.get("old_value")
+            new_val = sug.get("new_value")
+            if cfg_path and new_val is not None:
+                ov = str(old_val).replace("`", "'")
+                nv = str(new_val).replace("`", "'")
+                lines.append(f"   `{cfg_path}`: `{ov}` → `{nv}`")
+
+            desc = str(sug.get("description", "") or "").strip()
+            if desc:
+                desc = safe_label(desc)
+                if len(desc) > 140:
+                    desc = desc[:140] + "…"
+                lines.append(f"   _{desc}_")
+
+            lines.append("")
+
+        msg = "\n".join(lines).strip()
+        if len(msg) > 3800:
+            msg = msg[:3800] + "\n…(truncated)  Tap Refresh for more."
+
+        # Buttons
+        keyboard: List[List[InlineKeyboardButton]] = []
+        for idx, sug in enumerate(shown, start=1):
+            sid = str(sug.get("id") or "").strip()
+            if not sid:
+                continue
+            keyboard.append(
+                [
+                    InlineKeyboardButton(f"✅ Apply {idx}", callback_data=f"sug:apply:{sid}"),
+                    InlineKeyboardButton(f"🧪 Dry {idx}", callback_data=f"sug:dry:{sid}"),
+                    InlineKeyboardButton(f"🗑 Dismiss {idx}", callback_data=f"sug:dismiss:{sid}"),
+                ]
+            )
+
+        if total_pages > 1:
+            keyboard.append(
+                [
+                    InlineKeyboardButton("◀ Prev", callback_data="sug:page:prev"),
+                    InlineKeyboardButton(f"{page + 1}/{total_pages}", callback_data="sug:noop"),
+                    InlineKeyboardButton("Next ▶", callback_data="sug:page:next"),
+                ]
+            )
+
+        keyboard.append(
+            [
+                InlineKeyboardButton("🔄 Refresh", callback_data="sug:page:refresh"),
+                InlineKeyboardButton("⬅️ Claude Hub", callback_data="claude_hub"),
+            ]
+        )
+        keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+
+        await self._send_message_or_edit(update, context, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def _render_suggestion_confirm(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        suggestion_id: str,
+        action: str,
+    ) -> None:
+        """Render a two-step confirmation screen for a suggestion action."""
+        monitor = self._get_claude_monitor()
+        if not monitor:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "❌ Claude monitor not available",
+                reply_markup=self._get_claude_hub_buttons(show_monitor=True),
+            )
+            return
+
+        sug = monitor.monitor_state.get_suggestion(suggestion_id)
+        if not sug:
+            await self._render_suggestions_menu(update, context, banner="⚠️ Suggestion not found (stale button).", reset_page=False)
+            return
+
+        action = str(action or "").lower().strip()
+        action_title = {
+            "apply": "✅ *Confirm Apply*",
+            "dry": "🧪 *Confirm Dry-run*",
+            "dismiss": "🗑 *Confirm Dismiss*",
+        }.get(action, "⚠️ *Confirm*")
+
+        title = safe_label(str(sug.get("title", "Suggestion") or "Suggestion"))
+        stype = str(sug.get("type", "unknown") or "unknown")
+        priority = str(sug.get("priority", "medium") or "medium")
+        cfg_path = sug.get("config_path")
+        old_val = sug.get("old_value")
+        new_val = sug.get("new_value")
+
+        lines: List[str] = [
+            action_title,
+            "",
+            f"*ID:* `{suggestion_id}`",
+            f"*Type:* `{stype}`  •  *Priority:* `{priority}`",
+            "",
+            f"*Suggestion:* {title}",
+        ]
+
+        if cfg_path and new_val is not None:
+            ov = str(old_val).replace("`", "'")
+            nv = str(new_val).replace("`", "'")
+            lines += ["", "*Change:*", f"`{cfg_path}`: `{ov}` → `{nv}`"]
+
+        if action == "apply":
+            lines += ["", "_This will apply the suggestion via the policy-gated executor. You can rollback using the request id._"]
+        elif action == "dry":
+            lines += ["", "_This will simulate the change (no files modified). The suggestion stays pending._"]
+        elif action == "dismiss":
+            lines += ["", "_This will hide the suggestion from the active list._"]
+
+        do_cb = f"sug:do:{action}:{suggestion_id}"
+        keyboard: List[List[InlineKeyboardButton]] = [[InlineKeyboardButton("✅ Confirm", callback_data=do_cb)]]
+
+        # Switch actions (still requires confirmation)
+        if action != "apply":
+            keyboard.append([InlineKeyboardButton("✅ Apply Instead", callback_data=f"sug:apply:{suggestion_id}")])
+        if action != "dry":
+            keyboard.append([InlineKeyboardButton("🧪 Dry-run Instead", callback_data=f"sug:dry:{suggestion_id}")])
+        if action != "dismiss":
+            keyboard.append([InlineKeyboardButton("🗑 Dismiss Instead", callback_data=f"sug:dismiss:{suggestion_id}")])
+
+        keyboard.append(
+            [
+                InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="sug:list"),
+                InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
+            ]
+        )
+
+        await self._send_message_or_edit(update, context, "\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def _execute_suggestion_action(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        suggestion_id: str,
+        action: str,
+    ) -> None:
+        """Execute a confirmed suggestion action."""
+        monitor = self._get_claude_monitor()
+        if not monitor:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "❌ Claude monitor not available",
+                reply_markup=self._get_claude_hub_buttons(show_monitor=True),
+            )
+            return
+
+        action = str(action or "").lower().strip()
+
+        if action == "dismiss":
+            ok = bool(monitor.dismiss_suggestion(suggestion_id))
+            banner = "✅ Dismissed." if ok else "⚠️ Could not dismiss (stale?)."
+            await self._render_suggestions_menu(update, context, banner=banner, reset_page=False)
+            return
+
+        dry_run = action == "dry"
+        await self._send_message_or_edit(
+            update,
+            context,
+            f"⏳ {'Dry-running' if dry_run else 'Applying'} `{suggestion_id}`…",
+            reply_markup=None,
+        )
+
+        result = await monitor.apply_suggestion(suggestion_id, dry_run=dry_run)
+
+        if result.get("success"):
+            request_id = str(result.get("request_id") or "")
+            msg_lines = [
+                ("🧪 *Dry-run Complete*" if dry_run else "✅ *Suggestion Applied*"),
+                "",
+                f"*ID:* `{suggestion_id}`",
+                f"*Action:* `{result.get('action_type', 'unknown')}`",
+            ]
+            if request_id:
+                msg_lines.append(f"*Request ID:* `{request_id}`")
+
+            if result.get("message"):
+                msg_lines.append("")
+                msg_lines.append(f"_{safe_label(str(result.get('message'))[:240])}_")
+
+            if not dry_run and request_id and result.get("can_rollback"):
+                msg_lines += ["", f"🔄 Rollback: `/rollback_suggestion {request_id}`"]
+
+            if dry_run:
+                msg_lines += ["", "_Suggestion remains pending._"]
+
+            kb: List[List[InlineKeyboardButton]] = []
+            if not dry_run and request_id and result.get("can_rollback"):
+                kb.append([InlineKeyboardButton("🔄 Rollback", callback_data=f"sug:rollback:{request_id}")])
+            kb.append([InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="sug:list")])
+            if dry_run:
+                kb.append([InlineKeyboardButton("✅ Apply Now", callback_data=f"sug:apply:{suggestion_id}")])
+            kb.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+
+            await self._send_message_or_edit(update, context, "\n".join(msg_lines), reply_markup=InlineKeyboardMarkup(kb))
+            return
+
+        if result.get("requires_manual"):
+            sug = result.get("suggestion", {}) or {}
+            title = safe_label(str(sug.get("title", "Suggestion") or "Suggestion"))
+            msg = (
+                "⚠️ *Manual Action Required*\n\n"
+                f"*ID:* `{suggestion_id}`\n"
+                f"*Suggestion:* {title}\n\n"
+                f"This suggestion type (`{sug.get('type', 'unknown')}`) cannot be auto-applied.\n\n"
+                "*What to do:*\n"
+                f"_{safe_label(str(sug.get('description', 'Review and apply manually') or '')[:300])}_"
+            )
+            await self._send_message_or_edit(
+                update,
+                context,
+                msg,
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [InlineKeyboardButton("🧩 Patch Wizard", callback_data="claude_patch_wizard")],
+                        [InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="sug:list")],
+                        [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                    ]
+                ),
+            )
+            return
+
+        err = safe_label(str(result.get("error") or "Unknown error")[:240])
+        await self._send_message_or_edit(
+            update,
+            context,
+            f"❌ *Action Failed*\n\n*ID:* `{suggestion_id}`\n*Error:* _{err}_",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="sug:list")],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                ]
+            ),
+        )
+
+    async def _render_rollback_confirm(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        request_id: str,
+    ) -> None:
+        """Render a two-step confirmation screen for rolling back a prior action."""
+        if not request_id:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "🔄 *Rollback*\n\n⚠️ Missing request id (stale button).",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="sug:list")]]),
+            )
+            return
+
+        msg = (
+            "🔄 *Confirm Rollback*\n\n"
+            f"*Request ID:* `{safe_label(request_id)}`\n\n"
+            "This will attempt to restore the previous configuration (or reverse a patch) using the saved backup.\n\n"
+            "Proceed?"
+        )
+        kb = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("✅ Confirm Rollback", callback_data=f"sug:do:rollback:{request_id}")],
+                [
+                    InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="sug:list"),
+                    InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show"),
+                ],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+        )
+        await self._send_message_or_edit(update, context, msg, reply_markup=kb)
+
+    async def _execute_rollback_action(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        request_id: str,
+    ) -> None:
+        """Execute a confirmed rollback."""
+        monitor = self._get_claude_monitor()
+        if not monitor:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "❌ Claude monitor not available",
+                reply_markup=self._get_claude_hub_buttons(show_monitor=True),
+            )
+            return
+
+        request_id = str(request_id or "").strip()
+        if not request_id:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "🔄 *Rollback*\n\n⚠️ Missing request id (stale button).",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="sug:list")]]),
+            )
+            return
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            f"⏳ Rolling back `{request_id}`…",
+            reply_markup=None,
+        )
+
+        result = await monitor.rollback_suggestion(request_id)
+        if result.get("success"):
+            msg = (
+                "✅ *Rollback Successful*\n\n"
+                f"*Request ID:* `{request_id}`\n"
+                f"*Status:* `{result.get('status', 'rolled_back')}`\n\n"
+                f"_{safe_label(str(result.get('message', 'Rolled back'))[:240])}_"
+            )
+        else:
+            err = safe_label(str(result.get("error") or "Unknown error")[:240])
+            msg = (
+                "❌ *Rollback Failed*\n\n"
+                f"*Request ID:* `{request_id}`\n"
+                f"*Error:* _{err}_"
+            )
+
+        kb = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="sug:list")],
+                [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+        )
+        await self._send_message_or_edit(update, context, msg, reply_markup=kb)
+
+    async def _handle_suggestion_callback(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        callback_data: str,
+    ) -> None:
+        """Route sug:* callbacks for the Suggestions tap-to-approve UI."""
+        if callback_data == "sug:noop":
+            return
+
+        if callback_data == "sug:list" or callback_data == "sug:page:refresh":
+            await self._render_suggestions_menu(update, context, reset_page=False)
+            return
+
+        if callback_data.startswith("sug:page:"):
+            action = callback_data.split("sug:page:", 1)[1].strip()
+            if hasattr(context, "user_data"):
+                try:
+                    page = int(context.user_data.get("claude_suggestions_page", 0) or 0)
+                except Exception:
+                    page = 0
+                if action == "next":
+                    page += 1
+                elif action == "prev":
+                    page = max(0, page - 1)
+                context.user_data["claude_suggestions_page"] = page
+            await self._render_suggestions_menu(update, context, reset_page=False)
+            return
+
+        for prefix, act in (("sug:apply:", "apply"), ("sug:dry:", "dry"), ("sug:dismiss:", "dismiss")):
+            if callback_data.startswith(prefix):
+                sid = callback_data.split(prefix, 1)[1].strip()
+                await self._render_suggestion_confirm(update, context, sid, act)
+                return
+
+        if callback_data.startswith("sug:rollback:"):
+            rid = callback_data.split("sug:rollback:", 1)[1].strip()
+            await self._render_rollback_confirm(update, context, rid)
+            return
+
+        if callback_data.startswith("sug:do:"):
+            parts = callback_data.split(":")
+            if len(parts) >= 4:
+                act = parts[2].strip()
+                sid = ":".join(parts[3:]).strip()
+                if act == "rollback":
+                    await self._execute_rollback_action(update, context, sid)
+                else:
+                    await self._execute_suggestion_action(update, context, sid, act)
+                return
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            f"❌ Unknown suggestion action: `{safe_label(callback_data)[:120]}`",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="sug:list")]]),
+        )
     
     async def _handle_suggestions(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /suggestions - List all active suggestions."""
@@ -8872,40 +9425,10 @@ _Commands are policy-gated for safety._
         logger.info(f"📡 Received /suggestions command from {update.effective_user.id}")
         
         try:
-            monitor = self._get_claude_monitor()
-            
-            if not monitor:
-                await update.message.reply_text("❌ Claude monitor not available")
-                return
-            
-            suggestions = monitor.get_active_suggestions()
-            
-            if not suggestions:
-                await update.message.reply_text("✅ No active suggestions.")
-                return
-            
-            message = f"💡 *Active Suggestions ({len(suggestions)})*\n\n"
-            
-            for sug in suggestions[:10]:
-                priority_emoji = {"high": "🔺", "medium": "🔸", "low": "🔹"}.get(
-                    sug.get("priority", "medium"), "•"
-                )
-                
-                message += f"{priority_emoji} *{sug.get('title', 'Suggestion')}*\n"
-                message += f"   ID: `{sug.get('id')}`\n"
-                message += f"   Type: `{sug.get('type', 'unknown')}`\n"
-                if sug.get("description"):
-                    desc = sug["description"][:60] + "..." if len(sug.get("description", "")) > 60 else sug.get("description", "")
-                    message += f"   _{desc}_\n"
-                message += "\n"
-            
-            message += "\nUse `/apply_suggestion <id>` to apply."
-            
-            await update.message.reply_text(message, parse_mode="Markdown")
-            
+            await self._render_suggestions_menu(update, context, reset_page=not bool(update.callback_query))
         except Exception as e:
             logger.error(f"Error handling /suggestions: {e}", exc_info=True)
-            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+            await self._send_message_or_edit(update, context, f"❌ Error: {str(e)[:100]}", reply_markup=self._get_claude_hub_buttons(show_monitor=True))
     
     async def _handle_apply_suggestion(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /apply_suggestion <id> [--dry-run] - Apply a suggestion."""
@@ -8994,7 +9517,19 @@ _Commands are policy-gated for safety._
                 if desc:
                     lines.extend(["", f"_{desc[:180]}{'...' if len(desc) > 180 else ''}_"])
                 
-                await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+                reply_rows: List[List[InlineKeyboardButton]] = []
+                if result.get("can_rollback") and not dry_run and request_id and request_id != "unknown":
+                    reply_rows.append([InlineKeyboardButton("🔄 Rollback", callback_data=f"sug:rollback:{request_id}")])
+                reply_rows += [
+                    [InlineKeyboardButton("📋 Suggestions", callback_data="claude_suggestions")],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                ]
+                await self._send_message_or_edit(
+                    update,
+                    context,
+                    "\n".join(lines),
+                    reply_markup=InlineKeyboardMarkup(reply_rows),
+                )
             
             elif result.get("requires_manual"):
                 # Non-executable suggestion
@@ -9958,14 +10493,195 @@ _Commands are policy-gated for safety._
             [
                 [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
                 [
+                    InlineKeyboardButton("✅ Apply Change", callback_data="strategy_review:apply_candidate"),
                     InlineKeyboardButton("⚙️ Config Patch (Safe)", callback_data="strategy_review:config_patch"),
-                    InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
                 ],
+                [InlineKeyboardButton("📉 Backtest", callback_data="backtest")],
                 [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
             ]
         )
 
         await self._send_message_or_edit(update, context, msg, reply_markup=keyboard)
+
+    async def _handle_strategy_review_apply_candidate(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Confirm applying the current Strategy Review config candidate (tap-to-approve)."""
+        if not await self._check_authorized(update):
+            return
+
+        cand = context.user_data.get("strategy_review_config_candidate") if hasattr(context, "user_data") else None
+        if not isinstance(cand, dict):
+            await self._send_message_or_edit(
+                update,
+                context,
+                "✅ *Apply Change*\n\nNo config recommendation found.\nRun *Refresh* first.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🧠 Run Review", callback_data="strategy_review")]]),
+            )
+            return
+
+        cfg_path = cand.get("config_path")
+        new_val = cand.get("new_value")
+        old_val = cand.get("old_value")
+        title = safe_label(str(cand.get("title") or "Config change"))
+
+        if not cfg_path or new_val is None:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "✅ *Apply Change*\n\nInvalid config recommendation (missing path/value).",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")]]),
+            )
+            return
+
+        msg = (
+            "✅ *Apply Change*\n\n"
+            "This will update `config/config.yaml` via the policy-gated executor.\n\n"
+            f"*Suggestion:* {title}\n"
+            f"*Path:* `{cfg_path}`\n"
+            f"*Current:* `{old_val}`\n"
+            f"*New:* `{new_val}`\n\n"
+            "Proceed?"
+        )
+
+        kb = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("✅ Apply", callback_data="strategy_review:apply_candidate:do"),
+                    InlineKeyboardButton("🧪 Dry-run", callback_data="strategy_review:apply_candidate:dry"),
+                ],
+                [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+        )
+        await self._send_message_or_edit(update, context, msg, reply_markup=kb)
+
+    async def _handle_strategy_review_apply_candidate_do(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        dry_run: bool = False,
+    ) -> None:
+        """Apply (or dry-run) the Strategy Review config candidate."""
+        if not await self._check_authorized(update):
+            return
+
+        cand = context.user_data.get("strategy_review_config_candidate") if hasattr(context, "user_data") else None
+        if not isinstance(cand, dict):
+            await self._send_message_or_edit(
+                update,
+                context,
+                "✅ *Apply Change*\n\nNo config recommendation found.\nRun *Refresh* first.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🧠 Run Review", callback_data="strategy_review")]]),
+            )
+            return
+
+        cfg_path = str(cand.get("config_path") or "").strip()
+        new_val = cand.get("new_value")
+        old_val = cand.get("old_value")
+
+        if not cfg_path or new_val is None:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "✅ *Apply Change*\n\nInvalid config recommendation (missing path/value).",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")]]),
+            )
+            return
+
+        monitor = self._get_claude_monitor()
+        if not monitor:
+            await self._send_message_or_edit(
+                update,
+                context,
+                "✅ *Apply Change*\n\n❌ Claude monitor not available.",
+                reply_markup=self._get_claude_hub_buttons(show_monitor=True),
+            )
+            return
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            f"⏳ {'Dry-running' if dry_run else 'Applying'} `{cfg_path}`…",
+            reply_markup=None,
+        )
+
+        # Optional policy pre-check (even for dry-run) so the preview matches reality.
+        if monitor.action_executor._policy:
+            try:
+                agent_state = self.state_manager.load_state() or {}
+                decision = monitor.action_executor._policy.check_change(
+                    config_path=cfg_path,
+                    old_value=old_val,
+                    new_value=new_val,
+                    agent_state=agent_state,
+                )
+                if not decision.allowed:
+                    await self._send_message_or_edit(
+                        update,
+                        context,
+                        "🚫 *Policy Rejected*\n\n"
+                        f"*Path:* `{cfg_path}`\n"
+                        f"*Reason:* {safe_label(decision.reason)}",
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")]]),
+                    )
+                    return
+                if decision.bounded_value is not None:
+                    new_val = decision.bounded_value
+            except Exception as e:
+                logger.debug(f"Policy pre-check failed (best-effort): {e}")
+
+        from pearlalgo.claude_monitor.action_executor import ActionRequest, ActionType
+
+        request = ActionRequest(
+            action_type=ActionType.CONFIG_UPDATE,
+            description=f"Strategy Review apply: {cfg_path}",
+            changes={"source": "strategy_review"},
+            config_path=cfg_path,
+            old_value=old_val,
+            new_value=new_val,
+            dry_run=dry_run,
+        )
+
+        result = await monitor.action_executor.execute(request)
+
+        if result.success:
+            header = "🧪 *Dry-run Complete*" if dry_run else "✅ *Config Updated*"
+            lines = [
+                header,
+                "",
+                f"*Path:* `{cfg_path}`",
+                f"*New:* `{new_val}`",
+            ]
+            if not dry_run:
+                lines += [
+                    "",
+                    f"*Request ID:* `{result.request_id}`",
+                    f"🔄 Rollback: `/rollback_suggestion {result.request_id}`",
+                ]
+            else:
+                lines.append("")
+                lines.append(f"_{safe_label(str(result.message)[:240])}_")
+
+            rows: List[List[InlineKeyboardButton]] = [
+                [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+            ]
+            if not dry_run:
+                rows.append([InlineKeyboardButton("🔄 Rollback", callback_data=f"sug:rollback:{result.request_id}")])
+            rows += [
+                [InlineKeyboardButton("📋 Suggestions", callback_data="claude_suggestions")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+            kb = InlineKeyboardMarkup(rows)
+            await self._send_message_or_edit(update, context, "\n".join(lines), reply_markup=kb)
+            return
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            "❌ *Apply Failed*\n\n"
+            f"*Path:* `{cfg_path}`\n"
+            f"*Error:* {safe_label(str(result.error or result.message)[:240])}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")]]),
+        )
 
     async def _handle_strategy_review_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Export the last strategy review (analysis + suggestions) as a file for sharing/offline use."""
