@@ -242,12 +242,13 @@ sessions:
 # =============================================================================
 # EXECUTION (ATS - Automated Trading System)
 # =============================================================================
-# Controls automated order placement via IBKR.
+# Controls automated order placement via an execution adapter (default: IBKR).
 # SAFETY: Default is disabled + disarmed. Must explicitly enable and /arm to trade.
 execution:
   enabled: false                    # Master toggle - must be true for any execution
   armed: false                      # Runtime toggle - must be true to place orders (use /arm command)
   mode: "dry_run"                   # "dry_run" (log only), "paper", or "live"
+  adapter: "ibkr"                   # "ibkr" | "tradovate" (tradovate is dry_run-only skeleton for now)
   
   # Risk limits (hard caps)
   max_positions: 1                  # Maximum concurrent positions
@@ -291,20 +292,45 @@ learning:
   # Decay factor for older observations (0 = no decay, 1 = full weight to recent)
   decay_factor: 0.0                 # Disabled for now - all observations equal weight
 
-# Prop Firm Trading Assumptions (MNQ-native)
+# =============================================================================
+# PROP FIRM MODE (rule guardrails)
+# =============================================================================
+# Optional: adds "prop firm guardrails" that can:
+# - Cap/adjust execution position size to firm max contracts
+# - Prevent execution when near/over max loss limit
+# - Enforce a conservative consistency cap (evaluation)
+#
+# NOTE: These guardrails use the agent's tracked (virtual) PnL unless/until a
+# broker equity feed is wired in.
 prop_firm:
-  # MNQ (Micro E-mini NASDAQ-100)
-  mnq_tick_value: 2.0          # $2 per point for MNQ
-  contract_size_multiplier: 1.0  # Native MNQ sizing (no NQ scaling)
+  enabled: false
+  profile: "mff_core_50k_eval"     # MyFundedFutures Core 50K (evaluation)
 
-  # Position sizing range for prop firms (MNQ contracts)
-  min_contracts: 5
-  max_contracts: 15
-  default_contracts: 10
+  # Core 50K parameters
+  account_size: 50000
+  profit_target: 3000
+  max_loss_limit_eod: 2000          # Trailing max loss, locked at EOD
+  daily_loss_limit: null            # Core: none
+  max_contracts_mini: 3             # NQ
+  max_contracts_micro: 30           # MNQ
+  consistency_pct: 0.50             # Max daily profit cap as % of profit_target (safe mode)
+  min_trading_days: 2
+  allow_t1_news_trading: true
 
-  # Risk management assumptions (percent of account)
-  max_risk_per_trade_pct: 1.0  # 1% of account
-  max_drawdown_pct: 10.0       # 10% of account
+  # Trading-day semantics (defaults match common futures boundaries)
+  timezone: "America/New_York"
+  trading_day_start_time: "18:00"   # Futures "trade day" rolls at 6pm ET
+  eod_lock_time: "16:10"            # Matches your flat-by rule; used to lock trailing DD
+
+  # Enforcement toggles
+  enforce_consistency_cap: true
+  enforce_drawdown_risk_cap: true
+  drawdown_safety_buffer: 0.0       # Keep this $ buffer unused (optional)
+
+  # Legacy assumptions (still used for MNQ-native signal PnL math)
+  mnq_tick_value: 2.0               # $2 per point for MNQ
+  nq_tick_value: 20.0               # $20 per point for NQ
+  contract_size_multiplier: 1.0     # Native MNQ sizing (no NQ scaling)
 
 # =============================================================================
 # CLAUDE MONITOR (AI-Powered Monitoring & Assistance)

@@ -1397,6 +1397,45 @@ class TelegramCommandHandler:
                 session_start=session_start,
                 session_end=session_end,
             )
+
+            # Optional: Prop firm guardrails snapshot (kept compact)
+            try:
+                pf = state.get("prop_firm", {}) or {}
+                if isinstance(pf, dict) and pf.get("enabled"):
+                    profile = str(pf.get("profile") or "prop_firm")
+                    equity = pf.get("equity_est")
+                    min_balance = pf.get("min_balance")
+                    remaining = pf.get("remaining_drawdown")
+                    daily_pnl = pf.get("daily_pnl")
+                    daily_cap = pf.get("daily_profit_cap")
+                    days_traded = pf.get("days_traded")
+                    min_days = pf.get("min_trading_days")
+
+                    lines = [f"🏦 *Prop Firm* (`{profile}`)"]
+                    try:
+                        if equity is not None and min_balance is not None and remaining is not None:
+                            lines.append(
+                                f"Equity(est): `${float(equity):,.0f}`  •  Min: `${float(min_balance):,.0f}`  •  Buffer: `${float(remaining):,.0f}`"
+                            )
+                    except Exception:
+                        pass
+                    try:
+                        if daily_cap is not None and daily_pnl is not None:
+                            lines.append(
+                                f"Consistency: `${float(daily_pnl):,.0f}` / `${float(daily_cap):,.0f}`"
+                            )
+                    except Exception:
+                        pass
+                    try:
+                        if days_traded is not None and min_days is not None:
+                            lines.append(f"Days: `{int(days_traded)}/{int(min_days)}`")
+                    except Exception:
+                        pass
+
+                    if len(lines) > 1:
+                        message += "\n\n" + "\n".join(lines)
+            except Exception:
+                pass
             
             # Use consistent main menu buttons
             reply_markup = self._get_main_menu_buttons(

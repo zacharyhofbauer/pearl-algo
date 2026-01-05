@@ -368,6 +368,57 @@ class NQAgentTelegramNotifier:
                 size_risk_parts.append(f"Risk: ${risk_amount:,.0f}")
             message += f"*Size:* {' • '.join(size_risk_parts)}\n"
 
+        # Prop firm guardrails (optional): show only when relevant (blocked/capped/near limits)
+        pf = signal.get("_prop_firm")
+        if isinstance(pf, dict) and pf.get("enabled"):
+            try:
+                allow = bool(pf.get("allow", True))
+                reason = str(pf.get("reason") or "")
+                adjusted_size = pf.get("adjusted_size")
+                remaining_dd = pf.get("remaining_drawdown")
+                daily_pnl = pf.get("daily_pnl")
+                daily_cap = pf.get("daily_profit_cap")
+
+                # Decide whether to display (keep alerts calm-minimal)
+                show_pf = (not allow) or (adjusted_size is not None)
+                try:
+                    if remaining_dd is not None and float(remaining_dd) <= 500:
+                        show_pf = True
+                except Exception:
+                    pass
+                try:
+                    if daily_cap is not None and float(daily_cap) > 0 and daily_pnl is not None:
+                        if float(daily_pnl) >= 0.8 * float(daily_cap):
+                            show_pf = True
+                except Exception:
+                    pass
+
+                if show_pf:
+                    if not allow:
+                        message += f"\n⛔ *Prop Firm:* BLOCKED ({reason})\n"
+                    elif adjusted_size is not None:
+                        message += f"\n⚠️ *Prop Firm:* size capped → `{int(adjusted_size)}` ({reason})\n"
+
+                    # Compact context line(s)
+                    extras = []
+                    try:
+                        if remaining_dd is not None:
+                            extras.append(f"DD buffer: ${float(remaining_dd):,.0f}")
+                    except Exception:
+                        pass
+                    try:
+                        if daily_cap is not None and daily_pnl is not None:
+                            extras.append(
+                                f"Consistency: ${float(daily_pnl):,.0f}/${float(daily_cap):,.0f}"
+                            )
+                    except Exception:
+                        pass
+                    if extras:
+                        message += f"🧾 {' • '.join(extras)}\n"
+            except Exception:
+                # Never let optional prop-firm formatting break the alert
+                pass
+
         # Action cue (immediately after plan - what to do next)
         status = str(signal.get("status") or "generated")
         direction = str(signal.get("direction") or "long")

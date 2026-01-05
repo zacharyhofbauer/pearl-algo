@@ -226,6 +226,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "enabled": False,                   # Master toggle - must be true for any execution
         "armed": False,                     # Runtime toggle - must be true to place orders
         "mode": "dry_run",                  # "dry_run" (log only), "paper", or "live"
+        "adapter": "ibkr",                  # "ibkr" | "tradovate"
         # Risk limits (hard caps)
         "max_positions": 1,                 # Maximum concurrent positions
         "max_orders_per_day": 20,           # Maximum orders per trading day

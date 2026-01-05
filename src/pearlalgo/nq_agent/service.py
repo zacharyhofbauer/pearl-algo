@@ -58,6 +58,17 @@ except ImportError:
     BanditConfig = None  # type: ignore
     BanditDecision = None  # type: ignore
 
+# Prop firm guard imports (optional - enabled via prop_firm.enabled)
+try:
+    from pearlalgo.prop_firm.guard import PropFirmConfig, PropFirmDecision, PropFirmGuard, PropFirmStatus
+    PROP_FIRM_AVAILABLE = True
+except ImportError:
+    PROP_FIRM_AVAILABLE = False
+    PropFirmConfig = None  # type: ignore
+    PropFirmDecision = None  # type: ignore
+    PropFirmGuard = None  # type: ignore
+    PropFirmStatus = None  # type: ignore
+
 
 class NQAgentService:
     """
@@ -126,6 +137,50 @@ class NQAgentService:
             configure_market_hours(holiday_overrides=holidays, early_closes=early_closes)
         except Exception as e:
             logger.warning(f"Could not configure market hours overrides: {e}")
+
+        # ==========================================================================
+        # PROP FIRM GUARD (optional)
+        # ==========================================================================
+        # This is *separate* from strategy risk parameters and is intended to:
+        # - Protect evaluation accounts (max contracts, max loss, consistency)
+        # - Annotate signals (manual workflow) and/or gate ATS execution (auto workflow)
+        self.prop_firm_guard: Optional["PropFirmGuard"] = None
+        self._prop_firm_config: Optional["PropFirmConfig"] = None
+        self._prop_firm_status: Optional["PropFirmStatus"] = None
+
+        prop_firm_settings = service_config.get("prop_firm", {}) or {}
+        if PROP_FIRM_AVAILABLE and isinstance(prop_firm_settings, dict):
+            try:
+                # Build config from service config with session-aware defaults
+                self._prop_firm_config = PropFirmConfig.from_dict(
+                    prop_firm_settings,
+                    session_start_time=str(getattr(self.config, "start_time", "") or ""),
+                    session_end_time=str(getattr(self.config, "end_time", "") or ""),
+                )
+                if self._prop_firm_config.enabled:
+                    self.prop_firm_guard = PropFirmGuard(
+                        self._prop_firm_config,
+                        state_dir=self.state_manager.state_dir,
+                    )
+                    # Seed status for first cycle (best-effort)
+                    try:
+                        self._prop_firm_status = self.prop_firm_guard.compute_status()
+                    except Exception:
+                        self._prop_firm_status = None
+                    logger.info(
+                        f"Prop firm guard enabled: profile={self._prop_firm_config.profile}, "
+                        f"account_size=${self._prop_firm_config.account_size:,.0f}"
+                    )
+                else:
+                    logger.info("Prop firm guard disabled (prop_firm.enabled=false)")
+            except Exception as e:
+                logger.error(f"Failed to initialize prop firm guard: {e}", exc_info=True)
+                self.prop_firm_guard = None
+                self._prop_firm_config = None
+                self._prop_firm_status = None
+        else:
+            if not PROP_FIRM_AVAILABLE:
+                logger.debug("Prop firm guard not available (import failed)")
 
         self.running = False
         self.shutdown_requested = False
@@ -256,13 +311,23 @@ class NQAgentService:
         self.execution_adapter: Optional["ExecutionAdapter"] = None
         self._execution_config: Optional["ExecutionConfig"] = None
         execution_settings = service_config.get("execution", {})
+        execution_adapter_name = str(
+            (execution_settings or {}).get("adapter", "ibkr")
+        ).strip().lower()
         
         if EXECUTION_AVAILABLE and execution_settings.get("enabled", False):
             try:
                 self._execution_config = ExecutionConfig.from_dict(execution_settings)
-                self.execution_adapter = IBKRExecutionAdapter(self._execution_config)
+                if execution_adapter_name in ("ibkr", "", "interactivebrokers"):
+                    self.execution_adapter = IBKRExecutionAdapter(self._execution_config)
+                elif execution_adapter_name in ("tradovate", "tdv"):
+                    from pearlalgo.execution.tradovate.adapter import TradovateExecutionAdapter
+                    self.execution_adapter = TradovateExecutionAdapter(self._execution_config)
+                else:
+                    raise ValueError(f"Unknown execution.adapter: {execution_adapter_name!r}")
                 logger.info(
-                    f"Execution adapter initialized: mode={self._execution_config.mode.value}, "
+                    f"Execution adapter initialized: adapter={execution_adapter_name}, "
+                    f"mode={self._execution_config.mode.value}, "
                     f"armed={self._execution_config.armed}, "
                     f"max_positions={self._execution_config.max_positions}"
                 )
@@ -937,6 +1002,68 @@ class NQAgentService:
                     logger.info(
                         f"Execution blocked by policy (live mode): {policy_decision.reason}"
                     )
+
+            # ==========================================================================
+            # PROP FIRM GUARD: annotate signal + optionally block/cap execution
+            # ==========================================================================
+            # This runs even when execution is disabled so manual traders still get
+            # "would this violate rules?" guidance in the Telegram alert.
+            if self.prop_firm_guard is not None:
+                try:
+                    pf_status = self.prop_firm_guard.compute_status()
+                    self._prop_firm_status = pf_status
+                    pf_decision = self.prop_firm_guard.evaluate_signal(signal, status=pf_status)
+
+                    # Apply size adjustment (affects both Telegram display and execution)
+                    if pf_decision.adjusted_size is not None:
+                        try:
+                            original_size = int(signal.get("position_size") or 1)
+                        except Exception:
+                            original_size = 1
+                        signal["position_size"] = int(pf_decision.adjusted_size)
+                        # Recompute risk amount when possible (keeps message consistent)
+                        try:
+                            entry = float(signal.get("entry_price") or 0.0)
+                            stop = float(signal.get("stop_loss") or 0.0)
+                            tick_value = float(signal.get("tick_value") or 0.0)
+                            if entry > 0 and stop > 0 and tick_value > 0:
+                                risk_per_contract = abs(entry - stop) * tick_value
+                                signal["risk_amount"] = risk_per_contract * int(signal["position_size"])
+                        except Exception:
+                            pass
+
+                        logger.info(
+                            f"Prop firm size cap applied: {original_size} -> {signal['position_size']} "
+                            f"(reason={pf_decision.reason})"
+                        )
+
+                    # Attach compact prop firm context for downstream consumers (Telegram, state)
+                    signal["_prop_firm"] = {
+                        "enabled": True,
+                        "profile": pf_status.profile,
+                        "allow": pf_decision.allow,
+                        "reason": pf_decision.reason,
+                        "adjusted_size": pf_decision.adjusted_size,
+                        "equity_est": pf_status.equity_est,
+                        "min_balance": pf_status.min_balance,
+                        "remaining_drawdown": pf_status.remaining_drawdown,
+                        "available_drawdown": pf_status.available_drawdown,
+                        "daily_pnl": pf_status.daily_pnl,
+                        "daily_profit_cap": pf_status.daily_profit_cap,
+                        "days_traded": pf_status.days_traded,
+                        "min_trading_days": pf_status.min_trading_days,
+                    }
+
+                    # If we were going to execute, allow the prop firm guard to block it.
+                    if should_execute and not pf_decision.allow:
+                        should_execute = False
+                        execution_status = f"prop_firm_block:{pf_decision.reason}"
+                        logger.info(f"Execution blocked by prop firm guard: {pf_decision.reason}")
+                except Exception as pf_e:
+                    signal["_prop_firm"] = {
+                        "enabled": True,
+                        "error": str(pf_e)[:120],
+                    }
             
             if should_execute and self.execution_adapter is not None:
                 try:
@@ -2738,6 +2865,28 @@ class NQAgentService:
                     )
         except Exception:
             pass
+
+        # ==========================================================================
+        # PROP FIRM status (best-effort)
+        # ==========================================================================
+        # Persist prop firm metrics so Telegram UI can show "how close to limits?"
+        # even if execution is disabled (manual trading workflow).
+        state["prop_firm"] = (
+            {"enabled": bool(getattr(self._prop_firm_config, "enabled", False)), "profile": getattr(self._prop_firm_config, "profile", None)}
+            if self._prop_firm_config is not None
+            else {"enabled": False}
+        )
+        if self.prop_firm_guard is not None:
+            try:
+                pf_status = self.prop_firm_guard.compute_status()
+                self._prop_firm_status = pf_status
+                state["prop_firm"] = pf_status.to_dict()
+            except Exception as pf_e:
+                state["prop_firm"] = {
+                    "enabled": True,
+                    "profile": getattr(self._prop_firm_config, "profile", None) if self._prop_firm_config else None,
+                    "error": str(pf_e)[:120],
+                }
 
         # ==========================================================================
         # ATS (Automated Trading System) status - for Telegram commands
