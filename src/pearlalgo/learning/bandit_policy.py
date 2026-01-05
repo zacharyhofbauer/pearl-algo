@@ -88,6 +88,13 @@ class BanditDecision:
     # Thompson sampling result
     sampled_score: float    # Sample from Beta distribution
     expected_win_rate: float  # Mean of Beta distribution
+
+    # Evidence / transparency (observed outcomes for this signal type)
+    # These fields help the operator understand "why" the policy recommends execute/skip.
+    sample_count: int = 0   # Completed outcomes (wins + losses)
+    wins: int = 0
+    losses: int = 0
+    observed_win_rate: float = 0.5
     
     # Size adjustment
     size_multiplier: float = 1.0
@@ -104,6 +111,10 @@ class BanditDecision:
             "signal_type": self.signal_type,
             "sampled_score": self.sampled_score,
             "expected_win_rate": self.expected_win_rate,
+            "sample_count": self.sample_count,
+            "wins": self.wins,
+            "losses": self.losses,
+            "observed_win_rate": self.observed_win_rate,
             "size_multiplier": self.size_multiplier,
             "mode": self.mode,
             "is_explore": self.is_explore,
@@ -187,6 +198,10 @@ class BanditPolicy:
                 signal_type=signal_type,
                 sampled_score=stats.expected_win_rate,
                 expected_win_rate=stats.expected_win_rate,
+                sample_count=stats.sample_count,
+                wins=stats.wins,
+                losses=stats.losses,
+                observed_win_rate=stats.win_rate,
                 size_multiplier=1.0,
                 mode=self.config.mode,
                 is_explore=True,
@@ -202,6 +217,10 @@ class BanditPolicy:
                 signal_type=signal_type,
                 sampled_score=stats.expected_win_rate,
                 expected_win_rate=stats.expected_win_rate,
+                sample_count=stats.sample_count,
+                wins=stats.wins,
+                losses=stats.losses,
+                observed_win_rate=stats.win_rate,
                 size_multiplier=1.0,
                 mode=self.config.mode,
                 is_explore=True,
@@ -231,6 +250,10 @@ class BanditPolicy:
             signal_type=signal_type,
             sampled_score=sampled_score,
             expected_win_rate=expected_win_rate,
+            sample_count=stats.sample_count,
+            wins=stats.wins,
+            losses=stats.losses,
+            observed_win_rate=stats.win_rate,
             size_multiplier=size_multiplier,
             mode=self.config.mode,
             is_explore=False,

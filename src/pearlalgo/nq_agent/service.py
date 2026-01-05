@@ -58,6 +58,22 @@ except ImportError:
     BanditConfig = None  # type: ignore
     BanditDecision = None  # type: ignore
 
+# Contextual learning (optional - used for richer "learn by session/regime" analytics)
+try:
+    from pearlalgo.learning.contextual_bandit import (
+        ContextualBanditPolicy,
+        ContextualBanditConfig,
+        ContextFeatures,
+        ContextualDecision,
+    )
+    CONTEXTUAL_BANDIT_AVAILABLE = True
+except ImportError:
+    CONTEXTUAL_BANDIT_AVAILABLE = False
+    ContextualBanditPolicy = None  # type: ignore
+    ContextualBanditConfig = None  # type: ignore
+    ContextFeatures = None  # type: ignore
+    ContextualDecision = None  # type: ignore
+
 # Prop firm guard imports (optional - enabled via prop_firm.enabled)
 try:
     from pearlalgo.prop_firm.guard import PropFirmConfig, PropFirmDecision, PropFirmGuard, PropFirmStatus
@@ -275,6 +291,7 @@ class NQAgentService:
         # These track why the bot is quiet so `/status` and dashboards can show it.
         self._last_quiet_reason: Optional[str] = None
         self._last_signal_diagnostics: Optional[str] = None
+        self._last_signal_diagnostics_raw: Optional[Dict] = None
 
         # Adaptive cadence configuration (fast-active profile)
         # Dynamically adjusts scan interval based on market/session state.
@@ -355,6 +372,8 @@ class NQAgentService:
         # SAFETY: Default is shadow mode - learns but does NOT affect execution.
         self.bandit_policy: Optional["BanditPolicy"] = None
         self._bandit_config: Optional["BanditConfig"] = None
+        self.contextual_policy: Optional["ContextualBanditPolicy"] = None
+        self._contextual_config: Optional["ContextualBanditConfig"] = None
         learning_settings = service_config.get("learning", {})
         
         if LEARNING_AVAILABLE and learning_settings.get("enabled", True):
@@ -379,6 +398,33 @@ class NQAgentService:
                 logger.debug("Learning layer not available (import failed)")
             else:
                 logger.info("Bandit policy disabled (learning.enabled=false)")
+
+        # Contextual learning (optional): learns signal quality per session/regime/time bucket.
+        # This is safe in manual mode because it only annotates signals + records outcomes.
+        if CONTEXTUAL_BANDIT_AVAILABLE:
+            contextual_settings = learning_settings.get("contextual", {})
+            if not isinstance(contextual_settings, dict):
+                contextual_settings = {}
+            if bool(contextual_settings.get("enabled", False)):
+                try:
+                    self._contextual_config = ContextualBanditConfig.from_dict(contextual_settings)
+                    self.contextual_policy = ContextualBanditPolicy(
+                        config=self._contextual_config,
+                        state_dir=self.state_manager.state_dir,
+                    )
+                    logger.info(
+                        "Contextual policy initialized: mode=%s threshold=%s explore_rate=%s",
+                        getattr(self._contextual_config, "mode", "shadow"),
+                        getattr(self._contextual_config, "decision_threshold", 0.3),
+                        getattr(self._contextual_config, "explore_rate", 0.1),
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to initialize contextual bandit policy: {e}", exc_info=True)
+                    self.contextual_policy = None
+            else:
+                logger.info("Contextual policy disabled (learning.contextual.enabled=false)")
+        else:
+            logger.debug("Contextual bandit not available (import failed)")
 
         logger.info("NQAgentService initialized")
 
@@ -849,6 +895,7 @@ class NQAgentService:
                 # Determine quiet reason if no signals (for observability)
                 quiet_reason = None
                 signal_diagnostics = None
+                signal_diagnostics_raw = None
                 if not signals:
                     quiet_reason = self._get_quiet_reason(market_data, has_data=True, no_signals=True)
                     # Get signal diagnostics for no-signal observability
@@ -858,14 +905,20 @@ class NQAgentService:
                         if diag is not None:
                             # Render as compact string for Telegram (e.g., "Raw: 3 → Valid: 0 | Filtered: 2 conf")
                             signal_diagnostics = diag.format_compact() if hasattr(diag, 'format_compact') else str(diag)
+                            try:
+                                signal_diagnostics_raw = diag.to_dict() if hasattr(diag, "to_dict") else None
+                            except Exception:
+                                signal_diagnostics_raw = None
                 else:
                     # Signals were generated - clear quiet state
                     quiet_reason = "Active"
                     signal_diagnostics = None
+                    signal_diagnostics_raw = None
                 
                 # Persist to instance variables for _save_state() (surfaced in /status)
                 self._last_quiet_reason = quiet_reason
                 self._last_signal_diagnostics = signal_diagnostics
+                self._last_signal_diagnostics_raw = signal_diagnostics_raw
                 
                 await self._check_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
 
@@ -927,6 +980,93 @@ class NQAgentService:
                     except Exception as e:
                         logger.warning(f"Could not send recovery notification: {e}")
 
+    def _build_context_features_for_signal(self, signal: Dict) -> Optional["ContextFeatures"]:
+        """
+        Build lightweight contextual features for contextual learning.
+
+        This is intentionally "best-effort": missing fields fall back to defaults
+        so the agent keeps running even if a signal is sparse.
+        """
+        if not (CONTEXTUAL_BANDIT_AVAILABLE and self.contextual_policy is not None and ContextFeatures is not None):
+            return None
+
+        # Parse timestamp (prefer signal timestamp for determinism)
+        dt_utc = None
+        try:
+            raw_ts = signal.get("timestamp")
+            if raw_ts:
+                dt_utc = parse_utc_timestamp(str(raw_ts))
+        except Exception:
+            dt_utc = None
+        if dt_utc is None:
+            dt_utc = datetime.now(timezone.utc)
+        if dt_utc.tzinfo is None:
+            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+
+        # Convert to ET for time buckets (Asia/London/NY make more sense in ET)
+        et_dt = dt_utc
+        minutes_since_session_open = 0
+        is_first_hour = False
+        is_last_hour = False
+        try:
+            from zoneinfo import ZoneInfo
+            from datetime import time as _time
+
+            et_tz = ZoneInfo("America/New_York")
+            et_dt = dt_utc.astimezone(et_tz)
+
+            start_s = str(getattr(self.config, "start_time", "18:00") or "18:00")
+            end_s = str(getattr(self.config, "end_time", "16:10") or "16:10")
+
+            sh, sm = [int(x) for x in start_s.split(":")[:2]]
+            eh, em = [int(x) for x in end_s.split(":")[:2]]
+            start_minutes = sh * 60 + sm
+            end_minutes = eh * 60 + em
+            now_minutes = et_dt.hour * 60 + et_dt.minute
+            overnight = start_minutes > end_minutes
+
+            if overnight:
+                session_start_date = et_dt.date() if now_minutes >= start_minutes else (et_dt - timedelta(days=1)).date()
+                session_end_date = session_start_date + timedelta(days=1)
+            else:
+                session_start_date = et_dt.date()
+                session_end_date = et_dt.date()
+
+            session_start = datetime.combine(session_start_date, _time(sh, sm), tzinfo=et_tz)
+            session_end = datetime.combine(session_end_date, _time(eh, em), tzinfo=et_tz)
+
+            minutes_since_session_open = int((et_dt - session_start).total_seconds() / 60)
+            minutes_to_end = int((session_end - et_dt).total_seconds() / 60)
+            is_first_hour = 0 <= minutes_since_session_open < 60
+            is_last_hour = 0 <= minutes_to_end < 60
+        except Exception:
+            # Keep safe defaults
+            pass
+
+        # Regime + volatility from signal context (if present)
+        regime = signal.get("regime", {}) or {}
+        regime_name = str(regime.get("regime") or "unknown")
+        vol_label = str(regime.get("volatility") or "normal").lower()
+        if vol_label in ("low", "quiet"):
+            vol_pct = 0.2
+        elif vol_label in ("high", "volatile"):
+            vol_pct = 0.8
+        else:
+            vol_pct = 0.5
+
+        return ContextFeatures(
+            regime=regime_name,
+            volatility_percentile=float(vol_pct),
+            hour_of_day=int(et_dt.hour),
+            minutes_since_session_open=int(minutes_since_session_open),
+            is_first_hour=bool(is_first_hour),
+            is_last_hour=bool(is_last_hour),
+            recent_win_rate=0.5,
+            recent_streak=0,
+            volume_percentile=0.5,
+            trend_strength=0.5,
+        )
+
     async def _process_signal(self, signal: Dict, buffer_data: Optional[pd.DataFrame] = None) -> None:
         """
         Process a trading signal.
@@ -981,9 +1121,37 @@ class NQAgentService:
             # Store policy status in signal
             signal["_policy_status"] = policy_status
             if policy_decision:
+                # Full structured policy payload for transparency (Telegram details, miniapp, exports)
+                try:
+                    signal["_policy"] = policy_decision.to_dict()
+                except Exception:
+                    # Never let optional explainability break signal processing
+                    signal["_policy"] = None
                 signal["_policy_execute"] = policy_decision.execute
                 signal["_policy_score"] = policy_decision.sampled_score
                 signal["_policy_size_multiplier"] = policy_decision.size_multiplier
+
+            # ==========================================================================
+            # CONTEXTUAL POLICY (optional): learn by session/regime/time bucket
+            # ==========================================================================
+            ctx_decision = None
+            if self.contextual_policy is not None:
+                try:
+                    ctx_features = self._build_context_features_for_signal(signal)
+                    if ctx_features is not None:
+                        ctx_decision = self.contextual_policy.decide(signal, ctx_features)
+                        # Persist context + decision on the signal for later audits and outcome learning
+                        try:
+                            signal["_context_features"] = ctx_features.to_dict()
+                        except Exception:
+                            signal["_context_features"] = None
+                        try:
+                            signal["_policy_ctx"] = ctx_decision.to_dict()
+                        except Exception:
+                            signal["_policy_ctx"] = None
+                except Exception as e:
+                    # Never let optional contextual learning break the scan loop
+                    signal["_policy_ctx"] = {"error": str(e)[:120]}
             
             # ==========================================================================
             # EXECUTION: Place bracket order if execution adapter is enabled + armed
@@ -1357,6 +1525,24 @@ class NQAgentService:
                                 )
                             except Exception as policy_err:
                                 logger.debug(f"Could not record policy outcome: {policy_err}")
+
+                        # Record outcome with contextual policy (if available)
+                        if self.contextual_policy is not None and ContextFeatures is not None:
+                            try:
+                                signal_type = str(sig.get("type") or "unknown")
+                                is_win = bool(perf.get("is_win", pnl_value > 0))
+                                raw_ctx = sig.get("_context_features")
+                                if isinstance(raw_ctx, dict):
+                                    ctx = ContextFeatures.from_dict(raw_ctx)
+                                    self.contextual_policy.record_outcome(
+                                        signal_id=sig_id,
+                                        signal_type=signal_type,
+                                        context=ctx,
+                                        is_win=is_win,
+                                        pnl=pnl_value,
+                                    )
+                            except Exception as ctx_err:
+                                logger.debug(f"Could not record contextual policy outcome: {ctx_err}")
                         
                         # Update execution adapter's daily PnL for kill switch threshold
                         # This ensures max_daily_loss limit triggers correctly
@@ -2681,6 +2867,12 @@ class NQAgentService:
                 if self.bandit_policy is not None
                 else {"enabled": False, "mode": "disabled"}
             ),
+            # Contextual learning (optional)
+            "learning_contextual": (
+                self.contextual_policy.get_status()
+                if self.contextual_policy is not None
+                else {"enabled": False, "mode": "disabled"}
+            ),
         }
 
     def _save_state(self) -> None:
@@ -2831,6 +3023,7 @@ class NQAgentService:
             # These are set each cycle and surfaced in /status and dashboards.
             "quiet_reason": self._last_quiet_reason,
             "signal_diagnostics": self._last_signal_diagnostics,
+            "signal_diagnostics_raw": self._last_signal_diagnostics_raw,
             # Operational metadata
             "run_id": run_id,
             "version": version,

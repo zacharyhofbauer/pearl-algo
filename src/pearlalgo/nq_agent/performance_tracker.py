@@ -77,12 +77,19 @@ class PerformanceTracker:
         **Fallback**: If no state_manager is provided, falls back to direct file write for backward
         compatibility. In normal operation, state_manager should always be provided.
         
+        **Test Signals**: Signals marked with `_is_test=True` are NEVER persisted.
+        
         Args:
             signal: Signal dictionary
             
         Returns:
-            Signal ID for tracking
+            Signal ID for tracking (empty string for test signals)
         """
+        # GUARD: Never track test signals
+        if signal.get("_is_test", False):
+            logger.debug(f"Skipping test signal tracking: {signal.get('type', 'unknown')}")
+            return ""
+        
         signal_id = f"{signal.get('type', 'unknown')}_{datetime.now(timezone.utc).timestamp()}"
         signal["signal_id"] = signal_id
 
@@ -284,8 +291,13 @@ class PerformanceTracker:
             except Exception as e:
                 logger.error(f"Error loading signals: {e}")
 
-        # Filter to exited signals only
-        exited_signals = [s for s in signals if s.get("status") == "exited"]
+        # Filter to exited signals only, excluding test signals from P&L calculations
+        exited_signals = [
+            s for s in signals 
+            if s.get("status") == "exited" 
+            and not s.get("signal", {}).get("_is_test", False)
+            and not s.get("_is_test", False)
+        ]
 
         if not exited_signals:
             return {

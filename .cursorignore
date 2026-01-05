@@ -1,0 +1,3 @@
+# Large vendored binaries - exclude from Cursor searches
+ibkr/
+

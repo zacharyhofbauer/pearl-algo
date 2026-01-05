@@ -30,6 +30,8 @@ class SignalDiagnostics:
     # Counts
     raw_signals: int = 0
     validated_signals: int = 0
+    actionable_signals: int = 0  # A-tier (meets standard thresholds)
+    explore_signals: int = 0     # B-tier (looser thresholds, clearly labeled)
     duplicates_filtered: int = 0
     stop_cap_applied: int = 0  # Signals where stop was capped
     
@@ -56,6 +58,8 @@ class SignalDiagnostics:
         return {
             "raw_signals": self.raw_signals,
             "validated_signals": self.validated_signals,
+            "actionable_signals": self.actionable_signals,
+            "explore_signals": self.explore_signals,
             "duplicates_filtered": self.duplicates_filtered,
             "stop_cap_applied": self.stop_cap_applied,
             "rejected_market_hours": self.rejected_market_hours,
@@ -101,7 +105,11 @@ class SignalDiagnostics:
         # Main flow
         parts.append(f"Raw: {self.raw_signals}")
         if self.validated_signals > 0:
-            parts.append(f"→ Valid: {self.validated_signals}")
+            suffix = ""
+            if self.explore_signals > 0 or self.actionable_signals > 0:
+                # Compact A/B breakdown (keeps dashboard readable)
+                suffix = f" (A{self.actionable_signals}/B{self.explore_signals})"
+            parts.append(f"→ Valid: {self.validated_signals}{suffix}")
         
         # Rejections
         rejections = []
@@ -144,7 +152,10 @@ class SignalDiagnostics:
         # Signal flow
         lines.append(f"Scanner: {self.raw_signals} raw signals")
         if self.validated_signals > 0:
-            lines.append(f"Validated: {self.validated_signals} signals")
+            lines.append(
+                f"Validated: {self.validated_signals} signals "
+                f"(A-tier: {self.actionable_signals}, B-tier: {self.explore_signals})"
+            )
         
         # Scanner gate reasons (if no raw signals)
         if self.raw_signals == 0 and self.scanner_gate_reasons:
@@ -201,7 +212,9 @@ class NQSignalGenerator:
         """
         self.config = config or NQIntradayConfig()
         self.scanner = scanner or NQScanner(config=self.config)
-        self.quality_scorer = SignalQualityScorer(min_edge_threshold=0.55)
+        # Quality scorer: Lower threshold (0.45) to allow more signals in quiet regimes
+        # Your 7W/9L ~44% win rate is profitable with proper R:R, so 0.55 was too strict
+        self.quality_scorer = SignalQualityScorer(min_edge_threshold=0.45)
 
         # Load signal configuration
         service_config = load_service_config()
@@ -227,6 +240,23 @@ class NQSignalGenerator:
         # Per-signal-type regime/session filters
         # Format: { "signal_type": { "allowed_regimes": [...], "disallowed_regimes": [...], ... } }
         self._regime_filters: Dict = signal_settings.get("regime_filters", {})
+
+        # Optional: "Opportunity tier" mode for 24h futures (Asia/London/NY).
+        # A-tier = current strict filters; B-tier = looser thresholds but clearly labeled as Explore.
+        explore_settings = signal_settings.get("explore", {})
+        if not isinstance(explore_settings, dict):
+            explore_settings = {}
+        self._explore_enabled = bool(explore_settings.get("enabled", False))
+        self._explore_min_confidence = float(
+            explore_settings.get("min_confidence", max(0.0, float(self._min_confidence) - 0.05))
+        )
+        self._explore_min_risk_reward = float(
+            explore_settings.get("min_risk_reward", max(0.0, float(self._min_risk_reward) - 0.2))
+        )
+        self._explore_include_quality_rejects = bool(explore_settings.get("include_quality_rejects", True))
+        self._explore_bypass_regime_filters = bool(explore_settings.get("bypass_regime_filters", False))
+        self._explore_max_signals_per_hour = int(explore_settings.get("max_signals_per_hour", 0))  # 0 = unlimited
+        self._explore_emitted_times: List[datetime] = []
 
         # Per-cycle diagnostics for observability
         self.last_diagnostics: Optional[SignalDiagnostics] = None
@@ -319,20 +349,44 @@ class NQSignalGenerator:
         )
         diagnostics.order_book_available = order_book_available
 
+        # B-tier ("explore") anti-spam throttle: cap how many explore signals we emit per hour.
+        # This is important for 24/7 futures where looser thresholds can otherwise flood Telegram.
+        def _explore_has_capacity(now_utc: datetime) -> bool:
+            if not self._explore_enabled:
+                return False
+            max_per_hour = int(self._explore_max_signals_per_hour or 0)
+            if max_per_hour <= 0:
+                return True
+            # Keep only emissions within the last hour
+            self._explore_emitted_times = [
+                t for t in self._explore_emitted_times
+                if (now_utc - t).total_seconds() < 3600
+            ]
+            return len(self._explore_emitted_times) < max_per_hour
+
         # Validate and filter signals
         validated_signals = []
         for signal in raw_signals:
+            # Opportunity tier defaults per-signal (A-tier actionable unless promoted to B-tier explore)
+            opportunity_tier = "A"
+            opportunity_reason = ""
+
             # Apply regime/session filter first (config-driven per signal type)
             regime_check = self._check_regime_filter(signal)
             if not regime_check["passed"]:
-                diagnostics.rejected_regime_filter += 1
-                diagnostics.regime_filter_reasons.append(regime_check.get("reason", "unknown"))
-                logger.debug(
-                    "Signal filtered by regime: type=%s, reason=%s",
-                    signal.get("type"),
-                    regime_check.get("reason"),
-                )
-                continue
+                # Optionally bypass regime/session filters in explore mode (B-tier), with explicit labeling.
+                if self._explore_enabled and getattr(self, "_explore_bypass_regime_filters", False):
+                    opportunity_tier = "B"
+                    opportunity_reason = str(regime_check.get("reason", "regime_filter"))
+                else:
+                    diagnostics.rejected_regime_filter += 1
+                    diagnostics.regime_filter_reasons.append(regime_check.get("reason", "unknown"))
+                    logger.debug(
+                        "Signal filtered by regime: type=%s, reason=%s",
+                        signal.get("type"),
+                        regime_check.get("reason"),
+                    )
+                    continue
             
             # Apply order book filter if Level 2 data available
             if order_book_available:
@@ -356,17 +410,99 @@ class NQSignalGenerator:
                     diagnostics.rejected_order_book += 1
                     continue
 
-            # Track validation result with rejection reason
+            # Track validation result with rejection reason.
+            # We primarily emit A-tier (strict), but can optionally promote near-misses into
+            # B-tier ("explore") to surface more 24h opportunities (Asia/London/NY) with transparency.
             validation_result = self._validate_signal_with_reason(signal)
+
             if not validation_result["valid"]:
-                reason = validation_result.get("reason", "unknown")
-                if reason == "confidence":
-                    diagnostics.rejected_confidence += 1
-                elif reason == "risk_reward":
-                    diagnostics.rejected_risk_reward += 1
-                elif reason == "invalid_prices":
-                    diagnostics.rejected_invalid_prices += 1
-                continue
+                reason = str(validation_result.get("reason") or "unknown")
+
+                # Attempt B-tier promotion for near-misses (confidence / R:R only)
+                if self._explore_enabled and reason in ("confidence", "risk_reward"):
+                    # Basic price + R:R validation (never promote invalid price geometry)
+                    try:
+                        conf_val = float(signal.get("confidence", 0.0) or 0.0)
+                    except Exception:
+                        conf_val = 0.0
+                    try:
+                        entry = float(signal.get("entry_price", 0.0) or 0.0)
+                        stop = float(signal.get("stop_loss", 0.0) or 0.0)
+                        target = float(signal.get("take_profit", 0.0) or 0.0)
+                    except Exception:
+                        entry, stop, target = 0.0, 0.0, 0.0
+
+                    direction = str(signal.get("direction", "long") or "long").lower()
+                    valid_prices = False
+                    if entry > 0 and stop > 0 and target > 0:
+                        if direction == "long":
+                            valid_prices = (stop < entry < target)
+                        else:
+                            valid_prices = (target < entry < stop)
+
+                    rr_val = 0.0
+                    if valid_prices:
+                        try:
+                            if direction == "long":
+                                risk = entry - stop
+                                reward = target - entry
+                            else:
+                                risk = stop - entry
+                                reward = entry - target
+                            rr_val = (reward / risk) if risk > 0 else 0.0
+                        except Exception:
+                            rr_val = 0.0
+
+                    passes_explore = (
+                        valid_prices
+                        and conf_val >= float(self._explore_min_confidence)
+                        and rr_val >= float(self._explore_min_risk_reward)
+                    )
+
+                    if passes_explore:
+                        # Throttle explore emissions to avoid flooding Telegram
+                        now_utc = datetime.now(timezone.utc)
+                        if _explore_has_capacity(now_utc):
+                            new_reason = ""
+                            if reason == "confidence":
+                                new_reason = f"conf {conf_val:.2f} < {self._min_confidence:.2f}"
+                            elif reason == "risk_reward":
+                                new_reason = f"R:R {rr_val:.2f} < {self._min_risk_reward:.2f}"
+                            else:
+                                new_reason = reason
+                            if opportunity_tier != "B":
+                                opportunity_tier = "B"
+                            if new_reason:
+                                if opportunity_reason:
+                                    if new_reason not in opportunity_reason:
+                                        opportunity_reason = (opportunity_reason + "; " + new_reason)[:120]
+                                else:
+                                    opportunity_reason = new_reason
+                        else:
+                            # No capacity; treat as rejected for this cycle
+                            if reason == "confidence":
+                                diagnostics.rejected_confidence += 1
+                            elif reason == "risk_reward":
+                                diagnostics.rejected_risk_reward += 1
+                            continue
+                    else:
+                        # Did not meet explore thresholds; count as rejected (A-tier)
+                        if reason == "confidence":
+                            diagnostics.rejected_confidence += 1
+                        elif reason == "risk_reward":
+                            diagnostics.rejected_risk_reward += 1
+                        elif reason == "invalid_prices":
+                            diagnostics.rejected_invalid_prices += 1
+                        continue
+                else:
+                    # No explore promotion path; count as rejected (A-tier)
+                    if reason == "confidence":
+                        diagnostics.rejected_confidence += 1
+                    elif reason == "risk_reward":
+                        diagnostics.rejected_risk_reward += 1
+                    elif reason == "invalid_prices":
+                        diagnostics.rejected_invalid_prices += 1
+                    continue
 
             validated_signal = self._format_signal(signal, market_data)
             
@@ -414,45 +550,55 @@ class NQSignalGenerator:
                 validated_signal.get("confidence", 0.0),
                 validated_signal.get("entry_price", 0.0),
             )
-            # Score signal quality
+            # Score signal quality (always attach for transparency, even when we emit B-tier)
             quality_score = self.quality_scorer.score_signal(validated_signal)
+            validated_signal["quality_score"] = quality_score
 
-            # Only send if meets quality threshold
-            if quality_score.get("should_send", True):
-                # Add quality score to signal
-                validated_signal["quality_score"] = quality_score
-                validated_signals.append(validated_signal)
-                self._recent_signals.append(validated_signal)
+            should_send = bool(quality_score.get("should_send", True))
+            if opportunity_tier == "A" and not should_send:
+                # Optionally promote quality rejections into B-tier explore
+                if self._explore_enabled and self._explore_include_quality_rejects:
+                    now_utc = datetime.now(timezone.utc)
+                    if _explore_has_capacity(now_utc):
+                        new_reason = "quality reject"
+                        try:
+                            qv = quality_score.get("quality_score")
+                            if qv is not None:
+                                new_reason = f"quality reject (score {float(qv):.2f})"
+                        except Exception:
+                            new_reason = "quality reject"
+                        if opportunity_tier != "B":
+                            opportunity_tier = "B"
+                        if new_reason:
+                            if opportunity_reason:
+                                if new_reason not in opportunity_reason:
+                                    opportunity_reason = (opportunity_reason + "; " + new_reason)[:120]
+                            else:
+                                opportunity_reason = new_reason
+                    else:
+                        diagnostics.rejected_quality_scorer += 1
+                        continue
+                else:
+                    diagnostics.rejected_quality_scorer += 1
+                    continue
+
+            # Tag + emit signal (A-tier actionable or B-tier explore)
+            if opportunity_tier == "B":
+                now_utc = datetime.now(timezone.utc)
+                if not _explore_has_capacity(now_utc):
+                    # Throttle reached; drop explore signal silently this cycle
+                    continue
+                validated_signal["_opportunity_tier"] = "B"
+                validated_signal["_opportunity_reason"] = opportunity_reason
+                diagnostics.explore_signals += 1
+                # Commit throttle slot (only when we actually emit)
+                self._explore_emitted_times.append(now_utc)
             else:
-                diagnostics.rejected_quality_scorer += 1
-                # Near-miss diagnostic logging: track signals that fail quality scorer
-                signal_type = validated_signal.get("type", "unknown")
-                signal_confidence = validated_signal.get("confidence", 0.0)
-                historical_wr = quality_score.get("historical_wr", 0.0)
-                meets_threshold = quality_score.get("meets_threshold", False)
-                information_ratio = quality_score.get("information_ratio", 0.0)
-                regime = validated_signal.get("regime", {})
-                volatility = regime.get("volatility", "normal")
-                atr_expansion = regime.get("atr_expansion", False)
+                validated_signal["_opportunity_tier"] = "A"
+                diagnostics.actionable_signals += 1
 
-                logger.info(
-                    "NEAR_MISS: quality_scorer_rejection | type=%s | confidence=%.3f | "
-                    "historical_wr=%.0f%% | meets_threshold=%s | information_ratio=%.3f | "
-                    "volatility=%s | atr_expansion=%s",
-                    signal_type,
-                    signal_confidence,
-                    historical_wr * 100.0,
-                    meets_threshold,
-                    information_ratio,
-                    volatility,
-                    atr_expansion,
-                )
-                logger.debug(
-                    "Signal context: entry=%.2f, regime=%s, indicators=%s",
-                    validated_signal.get("entry_price", 0.0),
-                    regime.get("regime", "unknown"),
-                    validated_signal.get("indicators", {}),
-                )
+            validated_signals.append(validated_signal)
+            self._recent_signals.append(validated_signal)
 
         # Clean up old signals from recent list
         self._cleanup_recent_signals()

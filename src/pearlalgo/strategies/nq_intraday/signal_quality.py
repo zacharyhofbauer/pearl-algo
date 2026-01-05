@@ -176,6 +176,14 @@ class SignalQualityScorer:
                 or (atr_expansion and historical_wr >= 0.50)  # Expansion day: allow if no data (0.5) or better
             )
         )
+        
+        # Low-volatility bypass: in quiet/ranging markets, allow signals with decent confidence
+        # even if historical win rate is below threshold (R:R matters more than WR in ranging)
+        low_vol_bypass = (
+            volatility == "low"
+            and signal_confidence >= 0.50
+            and historical_wr >= 0.40  # Still require some positive edge
+        )
 
         # High confluence bypass: strong confluence can override weak historical data
         confluence_bypass = (
@@ -190,6 +198,7 @@ class SignalQualityScorer:
             or volatility_bypass
             or confluence_bypass
             or cold_start_bypass  # Always allow during cold-start
+            or low_vol_bypass  # Allow signals in quiet/ranging markets
         )
 
         # Diagnostic logging: log quality scorer decisions when signal is rejected
@@ -206,6 +215,7 @@ class SignalQualityScorer:
                 f"volatility_bypass={volatility_bypass}, "
                 f"confluence_bypass={confluence_bypass}, "
                 f"cold_start_bypass={cold_start_bypass}, "
+                f"low_vol_bypass={low_vol_bypass}, "
                 f"total_exits={self._total_exits}"
             )
 

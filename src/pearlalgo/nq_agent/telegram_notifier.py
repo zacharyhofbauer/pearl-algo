@@ -429,14 +429,62 @@ class NQAgentTelegramNotifier:
         # Confidence (single line)
         message += f"\n{conf_emoji} {confidence:.0%} confidence ({conf_tier})\n"
 
+        # Learning / policy (compact, always safe to omit)
+        policy = signal.get("_policy")
+        if isinstance(policy, dict) and policy.get("signal_type"):
+            try:
+                mode = str(policy.get("mode") or "shadow").lower()
+                mode_emoji = "👁️" if mode == "shadow" else "🔥"
+                exec_emoji = "✅" if bool(policy.get("execute")) else "⏭️"
+                sample_count = int(policy.get("sample_count") or 0)
+                obs_wr = policy.get("observed_win_rate")
+                score = policy.get("sampled_score")
+
+                parts = [f"{mode_emoji} {mode}", f"{exec_emoji}"]
+                if obs_wr is not None and sample_count > 0:
+                    parts.append(f"obs {float(obs_wr) * 100:.0f}% (n={sample_count})")
+                elif sample_count > 0:
+                    parts.append(f"n={sample_count}")
+                if score is not None:
+                    parts.append(f"score {float(score):.2f}")
+
+                message += f"🧠 Policy: {' • '.join(parts)}\n"
+            except Exception:
+                pass
+
+        # Opportunity tier (A-tier actionable vs B-tier explore)
+        opp_tier = str(signal.get("_opportunity_tier") or "").strip().upper()
+        if opp_tier in ("A", "B"):
+            try:
+                label = "Actionable" if opp_tier == "A" else "Explore"
+                tier_emoji = "✅" if opp_tier == "A" else "⚗️"
+                extra = ""
+                reason = str(signal.get("_opportunity_reason") or "").strip()
+                if opp_tier == "B" and reason:
+                    # Keep this short to preserve calm-minimal alerts
+                    extra = f" ({reason[:60]}{'…' if len(reason) > 60 else ''})"
+                message += f"{tier_emoji} Tier: `{opp_tier}` ({label}){extra}\n"
+            except Exception:
+                pass
+
         # Context: condensed single line (regime + MTF) only if both informative
         regime = signal.get("regime", {}) or {}
         mtf = signal.get("mtf_analysis", {}) or {}
         context_parts = []
         
+        # Session (Asia/London/NY) - critical for 24h futures operators
+        if regime.get("session"):
+            r_session = str(regime.get("session", "")).replace("_", " ").title()
+            context_parts.append(r_session)
+
         if regime.get("regime"):
             r_regime = str(regime.get("regime", "")).replace("_", " ").title()
             context_parts.append(r_regime)
+
+        # Volatility label when informative
+        vol = str(regime.get("volatility") or "").lower()
+        if vol and vol not in ("unknown", "normal"):
+            context_parts.append(f"{vol.title()} vol")
         
         alignment = mtf.get("alignment")
         if alignment:

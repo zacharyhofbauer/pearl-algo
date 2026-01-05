@@ -113,10 +113,17 @@ class NQAgentStateManager:
             "signal": {...}
         }
         
+        Test signals (marked with _is_test=True) are NEVER persisted.
+        
         Args:
             signal: Signal dictionary (should already have signal_id set)
         """
         try:
+            # GUARD: Never persist test signals
+            if signal.get("_is_test", False):
+                logger.debug(f"Skipping test signal persistence: {signal.get('type', 'unknown')}")
+                return
+            
             # Extract signal_id from signal dict (set by performance_tracker)
             signal_id = signal.get("signal_id", "")
             if not signal_id:

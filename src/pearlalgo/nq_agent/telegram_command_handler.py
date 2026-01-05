@@ -325,70 +325,24 @@ class TelegramCommandHandler:
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_all_updates), group=99)
         
         # Command handlers
-        # Note: We'll add logging directly in each handler
+        # Button-first UX: /start is the only supported slash command.
+        # All other actions are accessible via inline buttons.
         self.application.add_handler(CommandHandler("start", self._handle_start))
-        self.application.add_handler(CommandHandler("help", self._handle_help))
-        self.application.add_handler(CommandHandler("status", self._handle_status))
-        self.application.add_handler(CommandHandler("quick_status", self._handle_quick_status))
-        self.application.add_handler(CommandHandler("pause", self._handle_pause))
-        self.application.add_handler(CommandHandler("resume", self._handle_resume))
-        self.application.add_handler(CommandHandler("signals", self._handle_signals))
-        self.application.add_handler(CommandHandler("last_signal", self._handle_last_signal))
-        self.application.add_handler(CommandHandler("active_trades", self._handle_active_trades))
-        self.application.add_handler(CommandHandler("backtest", self._handle_backtest))
-        self.application.add_handler(CommandHandler("reports", self._handle_backtest_reports))
-        self.application.add_handler(CommandHandler("test_signal", self._handle_test_signal))
-        self.application.add_handler(CommandHandler("performance", self._handle_performance))
-        # Read-only operational helpers
-        self.application.add_handler(CommandHandler("config", self._handle_config))
-        self.application.add_handler(CommandHandler("health", self._handle_health))
-        self.application.add_handler(CommandHandler("data_quality", self._handle_data_quality))
-        self.application.add_handler(CommandHandler("activity", self._handle_activity))
-        self.application.add_handler(CommandHandler("glossary", self._handle_glossary))
-        self.application.add_handler(CommandHandler("explain", self._handle_glossary))  # Alias
-        self.application.add_handler(CommandHandler("chart", self._handle_chart))
-        self.application.add_handler(CommandHandler("settings", self._handle_settings))
-        
-        # Service control commands (start/stop gateway and agent)
-        self.application.add_handler(CommandHandler("start_gateway", self._handle_start_gateway))
-        self.application.add_handler(CommandHandler("stop_gateway", self._handle_stop_gateway))
-        self.application.add_handler(CommandHandler("gateway_status", self._handle_gateway_status))
-        self.application.add_handler(CommandHandler("start_agent", self._handle_start_agent))
-        self.application.add_handler(CommandHandler("stop_agent", self._handle_stop_agent))
-        self.application.add_handler(CommandHandler("restart_agent", self._handle_restart_agent))
-        self.application.add_handler(CommandHandler("start_monitor", self._handle_claude_monitor_start))
-        self.application.add_handler(CommandHandler("stop_monitor", self._handle_claude_monitor_stop))
-        self.application.add_handler(CommandHandler("monitor_status", self._handle_claude_status))
-        
-        # AI/LLM commands (optional, requires [llm] extra)
-        self.application.add_handler(CommandHandler("ai_patch", self._handle_ai_patch))
-        self.application.add_handler(CommandHandler("ai", self._handle_ai_hub))
-        self.application.add_handler(CommandHandler("ai_on", self._handle_ai_on))
-        self.application.add_handler(CommandHandler("ai_off", self._handle_ai_off))
-        self.application.add_handler(CommandHandler("ai_reset", self._handle_ai_reset))
-        
-        # Execution control commands (ATS - Automated Trading System)
-        self.application.add_handler(CommandHandler("arm", self._handle_arm))
-        self.application.add_handler(CommandHandler("disarm", self._handle_disarm))
-        self.application.add_handler(CommandHandler("kill", self._handle_kill))
-        self.application.add_handler(CommandHandler("positions", self._handle_positions))
-        self.application.add_handler(CommandHandler("policy", self._handle_policy))
-        
-        # Claude Monitor commands (AI-powered monitoring and suggestions)
-        self.application.add_handler(CommandHandler("claude_status", self._handle_claude_status))
-        self.application.add_handler(CommandHandler("analyze_now", self._handle_analyze_now))
-        self.application.add_handler(CommandHandler("analyze_signals", self._handle_analyze_signals))
-        self.application.add_handler(CommandHandler("analyze_system", self._handle_analyze_system))
-        self.application.add_handler(CommandHandler("analyze_market", self._handle_analyze_market))
-        self.application.add_handler(CommandHandler("suggest_config", self._handle_suggest_config))
-        self.application.add_handler(CommandHandler("suggestions", self._handle_suggestions))
-        self.application.add_handler(CommandHandler("apply_suggestion", self._handle_apply_suggestion))
-        self.application.add_handler(CommandHandler("rollback_suggestion", self._handle_rollback_suggestion))
-        self.application.add_handler(CommandHandler("claude_reports", self._handle_claude_reports))
-        # Strategy review (one-tap analysis + recommendations)
-        self.application.add_handler(CommandHandler("review", self._handle_strategy_review))
-        self.application.add_handler(CommandHandler("strategy_review", self._handle_strategy_review))
-        
+
+        # Friendly fallback for any other slash command: point users back to /start.
+        async def _unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            try:
+                if update.message and update.message.text and update.message.text.strip().lower().startswith("/start"):
+                    return
+            except Exception:
+                pass
+            try:
+                if update.message:
+                    await update.message.reply_text("ℹ️ This bot is button-driven. Tap /start and use the buttons.")
+            except Exception:
+                pass
+        self.application.add_handler(MessageHandler(filters.COMMAND, _unknown_command), group=90)
+
         # Claude message handler (for chat mode and wizard text input)
         # Must be added AFTER command handlers, lower priority group
         self.application.add_handler(
@@ -1000,9 +954,12 @@ class TelegramCommandHandler:
             ],
             [
                 InlineKeyboardButton("🔄 Reset Defaults", callback_data="settings:reset"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="settings"),
+                InlineKeyboardButton("🧹 Purge Test Data", callback_data="settings:purge_test"),
             ],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            [
+                InlineKeyboardButton("🔄 Refresh", callback_data="settings"),
+                InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
+            ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -1754,8 +1711,11 @@ class TelegramCommandHandler:
             page_signals = filtered[start:end]
             page_signals.reverse()
 
-            message = "🔔 *Signals*\n\n"
+            active_trades_count = sum(1 for s in signals if s.get("status") == "entered")
+
+            message = "🎯 *Signals & Trades*\n\n"
             message += f"*Stored:* {total_count}\n"
+            message += f"*Active Trades:* {active_trades_count}\n"
             message += f"*Page:* {page + 1}/{total_pages}  |  *Showing:* {len(page_signals)}\n\n"
 
             keyboard: List[List[InlineKeyboardButton]] = []
@@ -1785,6 +1745,10 @@ class TelegramCommandHandler:
                     except Exception:
                         conf_val = 0.0
 
+                    # Check if this is a test signal (excluded from P&L)
+                    is_test = signal.get("_is_test", False) or sig_data.get("_is_test", False)
+                    test_marker = "🧪 " if is_test else ""
+
                     # Use shared helpers for consistent formatting
                     is_win = sig_data.get("is_win") if status == "exited" else None
                     status_emoji, _ = format_signal_status(status, is_win)
@@ -1796,7 +1760,7 @@ class TelegramCommandHandler:
                     age_part = f" • {age_str}" if age_str else ""
 
                     # Compact one-liner: status, type, direction, confidence, age
-                    message += f"{i}. {status_emoji} {safe_label(signal_type)} {dir_label} • {conf_val:.0%}{age_part}\n"
+                    message += f"{i}. {test_marker}{status_emoji} {safe_label(signal_type)} {dir_label} • {conf_val:.0%}{age_part}\n"
                     
                     # Second line: entry price + PnL for exited, or just price for others
                     # (signal ID hidden for cleaner list - tap ℹ️{n} for details)
@@ -1804,7 +1768,9 @@ class TelegramCommandHandler:
                         pnl = float(sig_data.get("pnl", 0.0) or 0.0)
                         pnl_emoji, pnl_str = format_pnl(pnl)
                         exit_reason = safe_label(str(sig_data.get("exit_reason", "") or "")[:16])
-                        message += f"   {pnl_emoji} {pnl_str} ({exit_reason}) @ ${entry_price:.2f}\n\n"
+                        # Show (TEST - not in P&L) for test signals
+                        test_note = " _(test)_" if is_test else ""
+                        message += f"   {pnl_emoji} {pnl_str} ({exit_reason}) @ ${entry_price:.2f}{test_note}\n\n"
                     else:
                         message += f"   Entry: ${entry_price:.2f}\n\n"
 
@@ -1821,7 +1787,10 @@ class TelegramCommandHandler:
                     keyboard.append(action_buttons[j : j + 5])
 
             # Navigation
-            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+            keyboard.append([
+                InlineKeyboardButton("🎯 Trades", callback_data="active_trades"),
+                InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
+            ])
 
             reply_markup = InlineKeyboardMarkup(keyboard)
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -3991,6 +3960,8 @@ class TelegramCommandHandler:
                 # Used by chart HUD RR box
                 "tick_value": 2.0,  # MNQ ~$2/point
                 "position_size": 1,
+                # CRITICAL: Mark as test so it's excluded from P&L and performance metrics
+                "_is_test": True,
             }
 
             # Optional: enrich with HUD context (sessions/key levels/etc.)
@@ -4395,6 +4366,53 @@ class TelegramCommandHandler:
             )
             reply_markup = self._get_back_to_menu_button()
             await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
+
+    async def _handle_health_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show a Health submenu with Gateway / Activity / Data / Performance."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        # Gateway badge (tri-state): ✅ running+API ready, 🟡 running but API not ready, ❌ stopped
+        gateway_status = self.service_controller.get_gateway_status()
+        gateway_running = bool(gateway_status.get("process_running", False))
+        gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
+
+        gw_badge = "🔌 ❌"
+        if gateway_running:
+            if gateway_api_ready is True:
+                gw_badge = "🔌 ✅"
+            elif gateway_api_ready is False:
+                gw_badge = "🔌 🟡"
+            else:
+                gw_badge = "🔌 ✅"
+
+        message = """📡 *Health*
+
+Choose what you want to inspect:
+- *Gateway*: IBKR gateway status / API readiness
+- *Activity*: is the bot scanning?
+- *Data*: live vs historical, staleness, gaps
+- *Performance*: last 7d WR / P&L
+"""
+
+        keyboard = [
+            [
+                InlineKeyboardButton(f"{gw_badge} Gateway", callback_data="gateway_status"),
+                InlineKeyboardButton("🛡 Data", callback_data="data_quality"),
+            ],
+            [
+                InlineKeyboardButton("📈 Activity", callback_data="activity"),
+                InlineKeyboardButton("📈 Performance", callback_data="performance"),
+            ],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+        ]
+        await self._send_message_or_edit(
+            update,
+            context,
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
 
     async def _handle_activity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
@@ -7180,6 +7198,71 @@ _Commands are policy-gated for safety._
 
             # Confidence + Status
             message += f"{conf_emoji} *Confidence:* {conf:.0%} ({conf_tier})\n"
+
+            # Opportunity tier (A-tier actionable vs B-tier explore)
+            opp_tier = str(signal.get("_opportunity_tier") or "").strip().upper()
+            if opp_tier in ("A", "B"):
+                try:
+                    label = "Actionable" if opp_tier == "A" else "Explore"
+                    tier_emoji = "✅" if opp_tier == "A" else "⚗️"
+                    extra = ""
+                    reason = str(signal.get("_opportunity_reason") or "").strip()
+                    if opp_tier == "B" and reason:
+                        extra = f" — {reason[:80]}{'…' if len(reason) > 80 else ''}"
+                    message += f"{tier_emoji} *Tier:* `{opp_tier}` ({label}){extra}\n"
+                except Exception:
+                    pass
+
+            # Learning / policy (show even in non-expanded view for transparency)
+            policy = signal.get("_policy")
+            if isinstance(policy, dict) and policy.get("signal_type"):
+                try:
+                    mode = str(policy.get("mode") or "shadow").lower()
+                    mode_emoji = "👁️" if mode == "shadow" else "🔥"
+                    exec_emoji = "✅" if bool(policy.get("execute")) else "⏭️"
+                    sample_count = int(policy.get("sample_count") or 0)
+                    obs_wr = policy.get("observed_win_rate")
+                    score = policy.get("sampled_score")
+                    reason = str(policy.get("reason") or "")
+
+                    parts = [f"{mode_emoji} `{mode}`", exec_emoji]
+                    if obs_wr is not None and sample_count > 0:
+                        parts.append(f"obs `{float(obs_wr) * 100:.0f}%` (n={sample_count})")
+                    elif sample_count > 0:
+                        parts.append(f"n={sample_count}")
+                    if score is not None:
+                        parts.append(f"score `{float(score):.2f}`")
+                    if reason:
+                        parts.append(f"`{reason[:32]}{'…' if len(reason) > 32 else ''}`")
+
+                    message += "🧠 *Policy:* " + " • ".join(parts) + "\n"
+                except Exception:
+                    pass
+
+            # Contextual policy (optional): shows the learned context bucket for this setup
+            ctx_policy = signal.get("_policy_ctx")
+            if isinstance(ctx_policy, dict) and ctx_policy.get("context_key"):
+                try:
+                    ctx_key = str(ctx_policy.get("context_key") or "")
+                    ctx_exec_emoji = "✅" if bool(ctx_policy.get("execute")) else "⏭️"
+                    exp_wr = ctx_policy.get("expected_win_rate")
+                    ctx_n = int(ctx_policy.get("context_sample_count") or 0)
+                    ctx_score = ctx_policy.get("sampled_score")
+                    used_global = bool(ctx_policy.get("used_global_fallback"))
+                    suffix = " (global)" if used_global else ""
+
+                    parts = [ctx_exec_emoji, f"`{ctx_key}`{suffix}"]
+                    if exp_wr is not None:
+                        parts.append(f"exp `{float(exp_wr) * 100:.0f}%`")
+                    if ctx_n > 0:
+                        parts.append(f"n={ctx_n}")
+                    if ctx_score is not None:
+                        parts.append(f"score `{float(ctx_score):.2f}`")
+
+                    message += "🧠 *Ctx Policy:* " + " • ".join(parts) + "\n"
+                except Exception:
+                    pass
+
             message += f"📌 *Status:* {status_label}"
             if age_str:
                 message += f" • {age_str}"
@@ -7538,55 +7621,36 @@ _Commands are policy-gated for safety._
         """
         keyboard: List[List[InlineKeyboardButton]] = []
         
-        # Row 1: Agent control + Gateway
-        if gateway_running:
-            if gateway_api_ready is True:
-                gateway_status_text = "🔌 ✅"
-            elif gateway_api_ready is False:
-                gateway_status_text = "🔌 🟡"
-            else:
-                gateway_status_text = "🔌 ✅"
-        else:
-            gateway_status_text = "🔌 ❌"
+        # Row 1: Agent control (Gateway status lives in 📡 Health)
         if agent_running:
             keyboard.append([
                 InlineKeyboardButton("⏹️ Stop", callback_data='stop_agent'),
                 InlineKeyboardButton("🔄 Restart", callback_data='restart_agent'),
-                InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
             ])
         else:
             keyboard.append([
                 InlineKeyboardButton("▶️ Start", callback_data='start_agent'),
-                InlineKeyboardButton(gateway_status_text, callback_data='gateway_status'),
             ])
-        
-        # Row 2: Quick drill-down (most common "is it working?" actions)
+
+        # Row 2: Primary drill-down (fastest operator actions)
         keyboard.append([
             InlineKeyboardButton("📟 Status", callback_data="status"),
-            InlineKeyboardButton("📊 Last Signal", callback_data="last_signal"),
-            InlineKeyboardButton("🎯 Trades", callback_data="active_trades"),
-        ])
-
-        # Row 3: Health / liveness triage
-        keyboard.append([
-            InlineKeyboardButton("📈 Activity", callback_data="activity"),
-            InlineKeyboardButton("🛡 Data", callback_data="data_quality"),
-        ])
-
-        # Row 4: Monitoring
-        keyboard.append([
-            InlineKeyboardButton("🔔 Signals", callback_data="signals"),
-            InlineKeyboardButton("📈 Performance", callback_data="performance"),
+            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
             InlineKeyboardButton("🧠 Review", callback_data="strategy_review"),
         ])
 
-        # Row 5: Tools (Backtest restored)
+        # Row 3: Health submenu (Activity / Data / Performance)
+        keyboard.append([
+            InlineKeyboardButton("📡 Health", callback_data="health_menu"),
+        ])
+
+        # Row 4: Tools
         keyboard.append([
             InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
             InlineKeyboardButton("📂 Reports", callback_data="reports"),
         ])
 
-        # Row 6: AI + Settings (keep top-level, avoid menu-in-menu)
+        # Row 5: AI + Settings (keep top-level, avoid menu-in-menu)
         if ANTHROPIC_AVAILABLE:
             keyboard.append([
                 InlineKeyboardButton("🤖 AI Hub", callback_data="claude_hub"),
@@ -7926,6 +7990,8 @@ _Commands are policy-gated for safety._
             pass
         elif callback_data == 'config':
             await self._handle_config(update, context)
+        elif callback_data == 'health_menu':
+            await self._handle_health_menu(update, context)
         elif callback_data == 'health':
             await self._handle_health(update, context)
         elif callback_data == 'activity':
@@ -7982,6 +8048,9 @@ _Commands are policy-gated for safety._
             # Reset all settings to defaults
             self.prefs.reset()
             await self._render_settings_menu(update, context)
+        elif callback_data == 'settings:purge_test':
+            # Purge test signals (inline version)
+            await self._handle_purge_test_callback(update, context)
         elif callback_data == 'chart':
             await self._handle_chart(update, context)
         elif callback_data == 'chart_12h':
@@ -7997,7 +8066,8 @@ _Commands are policy-gated for safety._
             await self._handle_chart(update, context)
             context.args = []
         elif callback_data == 'last_signal':
-            await self._handle_last_signal(update, context)
+            # Backwards-compat: older menus had a Last Signal button; route to Signals & Trades.
+            await self._handle_signals(update, context)
         elif callback_data == 'active_trades':
             await self._handle_active_trades(update, context)
         elif callback_data == 'test_signal':
@@ -8525,6 +8595,26 @@ _Commands are policy-gated for safety._
                     f"Score: `{last_decision.get('score', 0):.2f}`\n"
                     f"Reason: `{last_decision.get('reason', 'unknown')[:30]}`"
                 )
+
+            # Optional contextual learning status (learns by session/regime/time bucket)
+            ctx_status = state.get("learning_contextual", {}) or {}
+            if isinstance(ctx_status, dict) and ctx_status.get("enabled"):
+                try:
+                    ctx_mode = str(ctx_status.get("mode", "shadow"))
+                    ctx_decisions = int(ctx_status.get("total_decisions", 0))
+                    ctx_exec_rate = float(ctx_status.get("execute_rate", 0.0)) * 100.0
+                    ctx_contexts = int(ctx_status.get("unique_contexts", 0))
+                    ctx_types = int(ctx_status.get("signal_types_tracked", 0))
+                    ctx_emoji = "👁️" if ctx_mode == "shadow" else "🔥"
+                    message += (
+                        f"\n\n🧠 *Contextual Policy*\n"
+                        f"{ctx_emoji} Mode: `{ctx_mode}`\n"
+                        f"Contexts: `{ctx_contexts}` • Types: `{ctx_types}`\n"
+                        f"Decisions: `{ctx_decisions}` • Execute rate: `{ctx_exec_rate:.0f}%`"
+                    )
+                except Exception:
+                    # Never let optional display break /policy
+                    pass
             
             # Try to load policy state file for detailed signal type stats
             try:
@@ -8561,6 +8651,356 @@ _Commands are policy-gated for safety._
             
         except Exception as e:
             logger.error(f"Error handling /policy: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+
+    async def _handle_diagnostics(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Handle /diagnostics (alias /missed) - Show why signals were filtered/missed.
+        
+        Surfaces near-miss candidates, filter stats, and gate reasons from the most
+        recent scan cycle so operators can see what's happening under the hood.
+        """
+        if not await self._check_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /diagnostics command from {update.effective_user.id}")
+        
+        try:
+            state = self.state_manager.load_state()
+            
+            # Basic header
+            message = "🔬 *Diagnostics / Near-Misses*\n\n"
+            
+            # Quiet reason (why agent is quiet)
+            quiet_reason = state.get("quiet_reason")
+            if quiet_reason:
+                reason_display = {
+                    "StrategySessionClosed": "📴 Session closed",
+                    "FuturesMarketClosed": "🌙 Market closed",
+                    "StaleData": "⏰ Data stale",
+                    "DataGap": "📉 Data gap detected",
+                    "NoData": "📭 Waiting for data",
+                    "NoOpportunity": "👀 Scanning (no setups)",
+                    "Active": "🟢 Active (signals generated)",
+                }.get(quiet_reason, f"ℹ️ {quiet_reason}")
+                message += f"*Status:* {reason_display}\n\n"
+            
+            # Signal diagnostics raw dict (if available)
+            diag_raw = state.get("signal_diagnostics_raw", {})
+            diag_str = state.get("signal_diagnostics")
+            
+            if diag_raw:
+                raw = diag_raw.get("raw_signals", 0)
+                valid = diag_raw.get("validated_signals", 0)
+                message += f"*Signals:* {raw} raw → {valid} validated\n\n"
+                
+                # Filter breakdown
+                filters = []
+                if diag_raw.get("rejected_confidence", 0) > 0:
+                    filters.append(f"❌ Confidence: {diag_raw['rejected_confidence']}")
+                if diag_raw.get("rejected_risk_reward", 0) > 0:
+                    filters.append(f"❌ R:R: {diag_raw['rejected_risk_reward']}")
+                if diag_raw.get("rejected_order_book", 0) > 0:
+                    filters.append(f"❌ Order Book: {diag_raw['rejected_order_book']}")
+                if diag_raw.get("rejected_regime_filter", 0) > 0:
+                    filters.append(f"❌ Regime: {diag_raw['rejected_regime_filter']}")
+                if diag_raw.get("duplicates_filtered", 0) > 0:
+                    filters.append(f"🔁 Duplicates: {diag_raw['duplicates_filtered']}")
+                if diag_raw.get("rejected_quality_scorer", 0) > 0:
+                    filters.append(f"📉 Quality: {diag_raw['rejected_quality_scorer']}")
+                
+                if filters:
+                    message += "*Filters Applied:*\n"
+                    for f in filters:
+                        message += f"  {f}\n"
+                    message += "\n"
+                
+                # Gate reasons (why scanner didn't even produce raw signals)
+                gate_reasons = diag_raw.get("scanner_gate_reasons", [])
+                if gate_reasons:
+                    message += "*Gate Reasons (scanner):*\n"
+                    for gr in gate_reasons[:5]:
+                        message += f"  • `{str(gr)[:80]}`\n"
+                    message += "\n"
+            elif diag_str:
+                message += f"*Last Diagnostics:*\n`{diag_str}`\n\n"
+            else:
+                message += "_No diagnostics available from last cycle._\n\n"
+            
+            # Near-misses (from recent session state if tracked)
+            near_misses = state.get("near_misses", [])
+            if near_misses:
+                message += f"*Near-Misses ({len(near_misses)}):*\n"
+                for nm in near_misses[:5]:
+                    sig_type = nm.get("type", "unknown")
+                    reason = nm.get("reason", "unknown")
+                    gap = nm.get("gap", 0)
+                    message += f"  • `{sig_type}` — {reason} (gap: {gap:.2f})\n"
+                message += "\n"
+            
+            # Opportunity tier breakdown (if available)
+            opp_tier_counts = state.get("opportunity_tier_counts", {})
+            if opp_tier_counts:
+                a_count = opp_tier_counts.get("A", 0)
+                b_count = opp_tier_counts.get("B", 0)
+                message += f"*Opportunity Tiers:*\n"
+                message += f"  ✅ A-tier: {a_count}\n"
+                message += f"  ⚗️ B-tier: {b_count}\n"
+            
+            # Footer tip
+            message += "\n💡 *Tip:* Check `/policy` for win-rates by signal type, `/signals` for recent signals."
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error handling /diagnostics: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+
+    async def _handle_purge_test_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Handle /purge_test - Remove all test signals from signals.jsonl.
+        
+        This removes signals marked with _is_test=true AND signals with
+        unrealistic prices (far from recent market prices).
+        """
+        if not await self._check_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /purge_test command from {update.effective_user.id}")
+        
+        try:
+            signals_file = get_signals_file(self.state_dir)
+            if not signals_file.exists():
+                await update.message.reply_text("📭 No signals file found.")
+                return
+            
+            # Read all signals
+            signals = []
+            purged_count = 0
+            kept_count = 0
+            
+            with open(signals_file, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        signal = record.get("signal", {}) or record
+                        
+                        # Check if test signal
+                        is_test = signal.get("_is_test", False) or record.get("_is_test", False)
+                        
+                        # Also check for unrealistic prices (likely test data)
+                        # MNQ should be roughly $22k-28k range in 2024-2026
+                        # Test signals often have prices like $17k-$19k which are way off
+                        entry_price = float(signal.get("entry_price", 0) or 0)
+                        price_unrealistic = entry_price > 0 and (entry_price < 20000 or entry_price > 32000)
+                        
+                        if is_test or price_unrealistic:
+                            purged_count += 1
+                            logger.info(f"Purging signal: is_test={is_test}, price={entry_price}")
+                        else:
+                            signals.append(record)
+                            kept_count += 1
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+            
+            if purged_count == 0:
+                await update.message.reply_text(
+                    "✅ *No test signals found*\n\n"
+                    f"All {kept_count} signals appear to be real trades.",
+                    parse_mode="Markdown"
+                )
+                return
+            
+            # Write back without test signals
+            with open(signals_file, "w") as f:
+                for record in signals:
+                    f.write(json.dumps(record) + "\n")
+            
+            await update.message.reply_text(
+                f"🧹 *Purged {purged_count} test signal(s)*\n\n"
+                f"• Removed: {purged_count}\n"
+                f"• Kept: {kept_count}\n\n"
+                "P&L calculations will now exclude these signals.",
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error handling /purge_test: {e}", exc_info=True)
+            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+
+    async def _handle_purge_test_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Handle settings:purge_test callback button - Remove test signals via inline button.
+        
+        This is a streamlined version that works with callback queries (button presses).
+        """
+        if not await self._check_authorized(update):
+            return
+        
+        logger.info(f"📡 Purge test signals button pressed by {update.effective_user.id}")
+        
+        try:
+            signals_file = get_signals_file(self.state_dir)
+            if not signals_file.exists():
+                await self._send_message_or_edit(
+                    update, context,
+                    "📭 *No signals file found*\n\nNothing to purge.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("⬅️ Back to Settings", callback_data="settings"),
+                    ]])
+                )
+                return
+            
+            # Read all signals and filter
+            signals = []
+            purged_count = 0
+            kept_count = 0
+            
+            with open(signals_file, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        signal = record.get("signal", {}) or record
+                        
+                        # Check if test signal
+                        is_test = signal.get("_is_test", False) or record.get("_is_test", False)
+                        
+                        # Also check for unrealistic prices (likely test data)
+                        # MNQ should be roughly $22k-28k range in 2024-2026
+                        entry_price = float(signal.get("entry_price", 0) or 0)
+                        price_unrealistic = entry_price > 0 and (entry_price < 20000 or entry_price > 32000)
+                        
+                        if is_test or price_unrealistic:
+                            purged_count += 1
+                            logger.info(f"Purging signal: is_test={is_test}, price={entry_price}")
+                        else:
+                            signals.append(record)
+                            kept_count += 1
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+            
+            if purged_count == 0:
+                await self._send_message_or_edit(
+                    update, context,
+                    f"✅ *No test signals found*\n\n"
+                    f"All {kept_count} signals appear to be real trades.\n\n"
+                    "Nothing was removed.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("⬅️ Back to Settings", callback_data="settings"),
+                    ]])
+                )
+                return
+            
+            # Write back without test signals
+            with open(signals_file, "w") as f:
+                for record in signals:
+                    f.write(json.dumps(record) + "\n")
+            
+            await self._send_message_or_edit(
+                update, context,
+                f"🧹 *Purged {purged_count} test signal(s)*\n\n"
+                f"• Removed: {purged_count}\n"
+                f"• Kept: {kept_count}\n\n"
+                "✅ P&L calculations now exclude test data.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔔 View Signals", callback_data="signals"),
+                    InlineKeyboardButton("⬅️ Settings", callback_data="settings"),
+                ]])
+            )
+            
+        except Exception as e:
+            logger.error(f"Error handling purge_test callback: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ Error: {str(e)[:100]}",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⬅️ Back to Settings", callback_data="settings"),
+                ]])
+            )
+
+    async def _handle_mark_signal_as_test(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Handle /mark_test <signal_id_prefix> - Mark a specific signal as test.
+        
+        Usage: /mark_test sr_bounce_12345
+        """
+        if not await self._check_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /mark_test command from {update.effective_user.id}")
+        
+        try:
+            # Get signal ID from command args
+            args = context.args if hasattr(context, "args") else []
+            if not args:
+                await update.message.reply_text(
+                    "❌ *Usage:* `/mark_test <signal_id_prefix>`\n\n"
+                    "Example: `/mark_test sr_bounce_1234`\n\n"
+                    "Use `/signals` to see signal IDs.",
+                    parse_mode="Markdown"
+                )
+                return
+            
+            signal_prefix = args[0].strip()
+            signals_file = get_signals_file(self.state_dir)
+            
+            if not signals_file.exists():
+                await update.message.reply_text("📭 No signals file found.")
+                return
+            
+            # Read, modify, and write back
+            signals = []
+            marked_count = 0
+            
+            with open(signals_file, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        sig_id = record.get("signal_id", "")
+                        
+                        if sig_id.startswith(signal_prefix):
+                            # Mark as test
+                            record["_is_test"] = True
+                            if "signal" in record and isinstance(record["signal"], dict):
+                                record["signal"]["_is_test"] = True
+                            marked_count += 1
+                            logger.info(f"Marked signal as test: {sig_id}")
+                        
+                        signals.append(record)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+            
+            if marked_count == 0:
+                await update.message.reply_text(
+                    f"❌ No signal found matching `{signal_prefix}`\n\n"
+                    "Use `/signals` to see available signal IDs.",
+                    parse_mode="Markdown"
+                )
+                return
+            
+            # Write back
+            with open(signals_file, "w") as f:
+                for record in signals:
+                    f.write(json.dumps(record) + "\n")
+            
+            await update.message.reply_text(
+                f"✅ *Marked {marked_count} signal(s) as test*\n\n"
+                f"Signal(s) matching `{signal_prefix}` will be excluded from P&L.\n\n"
+                "💡 Use `/purge_test` to permanently remove test signals.",
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error handling /mark_test: {e}", exc_info=True)
             await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
     
     # =========================================================================

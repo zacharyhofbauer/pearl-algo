@@ -412,11 +412,6 @@ pearlalgo-dev-ai-agents/
 │   │   ├── analyzers/          # Domain-specific analyzers (signal, system, market, code)
 │   │   ├── suggestion_engine.py # Configuration suggestions
 │   │   └── alert_manager.py    # Alert deduplication and delivery
-│   ├── miniapp/                # Telegram Mini App (optional web interface)
-│   │   ├── server.py           # FastAPI/Starlette server
-│   │   ├── auth.py             # Telegram WebApp authentication
-│   │   ├── data.py             # Data endpoints
-│   │   └── static/             # Frontend assets (HTML/CSS/JS)
 │   ├── data_providers/         # Data Providers
 │   │   ├── base.py             # Abstract interface
 │   │   ├── factory.py          # Provider factory
@@ -489,7 +484,6 @@ pearlalgo-dev-ai-agents/
 │   ├── TESTING_GUIDE.md        # Unified testing guide (all testing procedures)
 │   ├── GATEWAY.md              # IBKR Gateway setup
 │   ├── CLAUDE_MONITOR_GUIDE.md # Claude AI monitor setup and commands
-│   ├── MINIAPP_GUIDE.md        # Telegram Mini App setup
 │   └── MOCK_DATA_WARNING.md    # Mock data testing notes
 │
 ├── data/                        # Data storage
@@ -529,7 +523,6 @@ These boundaries prevent accidental coupling, keep strategies portable, and make
 | `learning`       | `pearlalgo.learning.*`, `config`, `utils`       | `data_providers`, `strategies`, `execution`, `nq_agent` |
 | `nq_agent`       | Any internal layer (orchestration layer)        | —                            |
 | `claude_monitor` | `claude_monitor`, `config`, `utils`, `nq_agent`, `strategies` | `data_providers`, `execution`, `learning` |
-| `miniapp`        | `miniapp`, `config`, `utils`, `nq_agent`        | `data_providers`, `strategies`, `execution`, `learning` |
 
 #### Rationale
 
@@ -541,7 +534,6 @@ These boundaries prevent accidental coupling, keep strategies portable, and make
 - **`learning`** contains adaptive policy logic (Thompson sampling bandit); independent of strategy and agent orchestration.
 - **`nq_agent`** is the top-level orchestration layer that wires everything together.
 - **`claude_monitor`** is an optional AI-powered monitoring layer; may read from nq_agent state and strategies for analysis.
-- **`miniapp`** is an optional Telegram Mini App web interface; may read from nq_agent state for display.
 
 #### Enforcement
 

@@ -85,7 +85,7 @@ data:
 
 # Signal generation
 signals:
-  duplicate_window_seconds: 300      # 5 minutes
+  duplicate_window_seconds: 180      # 3 minutes (more opportunities; still deduped)
   min_confidence: 0.50               # Minimum signal confidence
   min_risk_reward: 1.2               # R:R filter threshold (signals below this are rejected; tuned from 1.5)
   duplicate_price_threshold_pct: 0.5 # 0.5% price difference for duplicate detection
@@ -97,6 +97,17 @@ signals:
   # Set lower for 24h futures trading (Tokyo/London have lower volume than NY).
   # 100 for 5m → 20 for 1m bars, which passes most live bars (observed: 300-700).
   min_volume: 100
+
+  # Opportunity tiers (A-tier actionable vs B-tier explore)
+  # Goal: trade/scan across Asia + London + NY without silently lowering standards.
+  # B-tier is explicitly labeled in Telegram as "Explore" so you can decide manually.
+  explore:
+    enabled: true
+    min_confidence: 0.45            # Looser confidence floor for more 24h opportunities
+    min_risk_reward: 1.0            # Looser R:R floor for exploration
+    include_quality_rejects: true   # Include quality-scorer near-misses as B-tier
+    bypass_regime_filters: true     # Allow B-tier signals even when regime/session filters would reject (clearly labeled)
+    max_signals_per_hour: 4         # Anti-spam cap for B-tier (0 = unlimited)
   
   # Stop-distance cap (risk control)
   # Caps maximum stop distance in points; scales target to preserve RR ratio.
@@ -291,6 +302,16 @@ learning:
   
   # Decay factor for older observations (0 = no decay, 1 = full weight to recent)
   decay_factor: 0.0                 # Disabled for now - all observations equal weight
+
+  # Contextual learning (optional): learns performance by session/regime/time bucket.
+  # Safe for manual trading: annotates signals + learns from virtual exits.
+  contextual:
+    enabled: true
+    mode: "shadow"
+    explore_rate: 0.1
+    min_samples_per_context: 5
+    decision_threshold: 0.3
+    fallback_to_global: true
 
 # =============================================================================
 # PROP FIRM MODE (rule guardrails)
