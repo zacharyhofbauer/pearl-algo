@@ -236,10 +236,10 @@ class TestDiagnosticsInDashboard:
             signal_diagnostics=None,
         )
         
-        # Should show the Level1Unavailable message
-        assert "historical fallback" in message.lower() or "live quotes" in message.lower()
-        # Should show actionable cue
-        assert "API Acknowledgement" in message or "Market Data" in message
+        # Should show the Level1Unavailable quiet reason message
+        assert "Bars feed active" in message or "no bid/ask" in message.lower()
+        # Should show actionable cue (menu navigation)
+        assert "Menu → Health → Data" in message
 
 
 class TestVolumeGateScaling:

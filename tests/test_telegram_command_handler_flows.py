@@ -580,8 +580,8 @@ class TestStrategyReviewVariantWeeks:
     """Test Strategy Review UX helpers (variant backtest week picker)."""
 
     @pytest.mark.asyncio
-    async def test_more_menu_renders_variant_week_picker(self, handler_with_mocks):
-        """Test the Strategy Review 'More' menu renders the variant week picker when a config candidate exists."""
+    async def test_more_menu_renders_action_buttons(self, handler_with_mocks):
+        """Test the Strategy Review 'More' menu renders action buttons (Backtest, Reports, Export)."""
         handler = handler_with_mocks
         handler.chat_id = "123"
 
@@ -590,17 +590,6 @@ class TestStrategyReviewVariantWeeks:
         context.user_data = {
             "strategy_review_last_analysis": {"timestamp": datetime.now(timezone.utc).isoformat()},
             "strategy_review_last_suggestions": [],
-            "strategy_review_config_candidate": {
-                "title": "Tune min confidence",
-                "description": "Test candidate",
-                "rationale": "Test",
-                "type": "config_change",
-                "priority": "medium",
-                "config_path": "signals.min_confidence",
-                "old_value": 0.5,
-                "new_value": 0.55,
-            },
-            "strategy_review_variant_weeks": 4,
         }
 
         captured = {}
@@ -618,10 +607,10 @@ class TestStrategyReviewVariantWeeks:
         texts = [[b.text for b in row] for row in rm.inline_keyboard]
         flat = [t for row in texts for t in row]
 
-        # Verify "Backtest Variant" button exists (with selected weeks)
-        assert any("Backtest Variant" in t for t in flat)
-        # Verify week picker row is present
-        assert any(row == ["1w", "2w", "4w ✓"] for row in texts)
+        # Verify core action buttons exist (current layout)
+        assert any("Backtest" in t for t in flat)
+        assert any("Reports" in t for t in flat)
+        assert any("Export" in t for t in flat)
 
     @pytest.mark.asyncio
     async def test_callback_sets_variant_weeks_and_rerenders(self, handler_with_mocks):

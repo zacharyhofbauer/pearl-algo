@@ -229,6 +229,29 @@ class TestConfigCache:
         assert isinstance(result, dict)
 
 
+class TestKnownConfigSections:
+    """Tests for the _KNOWN_CONFIG_SECTIONS set used for unknown-key warnings."""
+
+    def test_telegram_ui_is_known_section(self) -> None:
+        """telegram_ui should be recognized as a known config section (no warning)."""
+        from pearlalgo.config.config_file import _KNOWN_CONFIG_SECTIONS
+        assert "telegram_ui" in _KNOWN_CONFIG_SECTIONS
+
+    def test_all_real_config_sections_are_known(self) -> None:
+        """All top-level sections in real config.yaml should be in _KNOWN_CONFIG_SECTIONS."""
+        from pearlalgo.config.config_file import _KNOWN_CONFIG_SECTIONS
+
+        result = load_config_yaml()
+        if not result:
+            pytest.skip("config.yaml not found or empty")
+
+        for section in result.keys():
+            assert section in _KNOWN_CONFIG_SECTIONS, (
+                f"Config section '{section}' is not in _KNOWN_CONFIG_SECTIONS. "
+                "Add it to prevent spurious 'unknown section' warnings."
+            )
+
+
 class TestIntegrationWithRealConfig:
     """Integration tests that verify the actual config/config.yaml loads correctly."""
 

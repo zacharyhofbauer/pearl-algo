@@ -154,6 +154,7 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "scan_interval",
     "session",
     "telegram",
+    "telegram_ui",  # Home Card / dashboard UI formatting options
     "risk",
     "service",
     "circuit_breaker",

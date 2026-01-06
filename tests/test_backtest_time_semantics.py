@@ -85,9 +85,10 @@ class TestRegimeDetectorSessionDeterminism:
         """Session detection should use wall-clock when dt is None (live mode)."""
         detector = RegimeDetector()
         
-        # Call without dt - should not raise and should return a valid session
+        # Call without dt - should not raise and should return a valid session.
+        # All valid session names including overnight (outside RTH)
         session = detector._detect_session(dt=None)
-        assert session in ("opening", "morning_trend", "lunch_lull", "afternoon", "closing")
+        assert session in ("opening", "morning_trend", "lunch_lull", "afternoon", "closing", "overnight")
 
     def test_detect_regime_passes_dt_to_session(self) -> None:
         """detect_regime should pass dt to _detect_session."""

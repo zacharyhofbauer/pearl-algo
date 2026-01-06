@@ -87,8 +87,13 @@ class TestDataLevelField:
         from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
         from tests.mock_data_provider import MockDataProvider
 
-        # Create mock provider that returns None for get_latest_bar
-        mock_provider = MockDataProvider(base_price=17500.0)
+        # Create mock provider that returns None for get_latest_bar.
+        # Disable simulated timeouts so historical fetch succeeds and fallback path is tested.
+        mock_provider = MockDataProvider(
+            base_price=17500.0,
+            simulate_timeouts=False,
+            simulate_connection_issues=False,
+        )
 
         # Create data fetcher
         fetcher = NQAgentDataFetcher(mock_provider)

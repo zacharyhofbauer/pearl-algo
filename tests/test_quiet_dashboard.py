@@ -77,7 +77,7 @@ class TestQuietReasonFormatting:
         assert "⏰ Data stale" in message
 
     def test_stale_data_shows_actionable_cue(self) -> None:
-        """StaleData shows actionable cue to run /data_quality."""
+        """StaleData shows actionable cue directing user to Health menu."""
         message = format_home_card(
             symbol="MNQ",
             time_str="10:30 AM ET",
@@ -88,7 +88,8 @@ class TestQuietReasonFormatting:
             quiet_reason="StaleData",
         )
         assert "⏰ Data stale" in message
-        assert "/data_quality" in message
+        # Actionable cue now directs to menu navigation instead of /data_quality command
+        assert "Menu → Health → Data" in message
 
     def test_signal_diagnostics_shown_when_no_opportunity(self) -> None:
         """Signal diagnostics are shown when agent has no signals."""
@@ -541,7 +542,8 @@ class TestStaleCalloutHelper:
         callout = format_stale_callout(11.0, impact="signals paused")
         assert "11m" in callout
         assert "signals paused" in callout
-        assert "/data_quality" in callout
+        # Actionable cue now uses menu navigation instead of /data_quality command
+        assert "Menu → Health → Data" in callout
 
     def test_stale_callout_hours(self) -> None:
         """Stale callout formats age in hours when over 60m."""

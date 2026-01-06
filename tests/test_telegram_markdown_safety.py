@@ -155,17 +155,17 @@ class TestSessionWindowFormatting:
     def test_format_session_window_missing_start(self):
         """Missing start time should return safe fallback."""
         result = format_session_window(None, "16:00")
-        assert result == "See /config"
+        assert result == "Menu → Settings → Config"
     
     def test_format_session_window_missing_end(self):
         """Missing end time should return safe fallback."""
         result = format_session_window("09:30", None)
-        assert result == "See /config"
+        assert result == "Menu → Settings → Config"
     
     def test_format_session_window_both_missing(self):
         """Both missing should return safe fallback."""
         result = format_session_window(None, None)
-        assert result == "See /config"
+        assert result == "Menu → Settings → Config"
 
 
 class TestNextSessionTimeFormatting:
@@ -186,17 +186,17 @@ class TestNextSessionTimeFormatting:
     def test_format_next_session_time_missing_start(self):
         """Missing start time should return safe fallback."""
         result = format_next_session_time(None, "16:00")
-        assert "See /config" in result
+        assert "Menu → Settings → Config" in result
     
     def test_format_next_session_time_missing_times(self):
         """Missing times should return safe fallback."""
         result = format_next_session_time()
-        assert "See /config" in result
+        assert "Menu → Settings → Config" in result
     
     def test_format_next_session_time_invalid_format(self):
         """Invalid time format should return safe fallback."""
         result = format_next_session_time("invalid", "16:00")
-        assert "See /config" in result
+        assert "Menu → Settings → Config" in result
 
 
 class TestMarkdownSafetyRegression:
