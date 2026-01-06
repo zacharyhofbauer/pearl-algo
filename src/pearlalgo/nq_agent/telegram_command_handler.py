@@ -849,7 +849,7 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🚦 Gates", callback_data="glossary_gates"),
                 InlineKeyboardButton("🎯 Trades", callback_data="glossary_active_trades"),
             ],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            [InlineKeyboardButton("🏠 Menu", callback_data="start")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
@@ -958,7 +958,7 @@ class TelegramCommandHandler:
             ],
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data="settings"),
-                InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
+            InlineKeyboardButton("🏠 Menu", callback_data="start"),
             ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -4465,9 +4465,12 @@ Choose what you want to inspect:
             ],
             [
                 InlineKeyboardButton("📈 Activity", callback_data="activity"),
-                InlineKeyboardButton("📈 Performance", callback_data="performance"),
+                InlineKeyboardButton("🔬 Diagnostics", callback_data="diagnostics"),
             ],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            [
+                InlineKeyboardButton("📈 Performance", callback_data="performance"),
+                InlineKeyboardButton("🏠 Menu", callback_data="start"),
+            ],
         ]
         await self._send_message_or_edit(
             update,
@@ -4719,6 +4722,11 @@ Choose what you want to inspect:
         data_fresh = state.get("data_fresh")
         latest_bar_timestamp = state.get("latest_bar_timestamp")
         latest_bar_age_minutes = state.get("latest_bar_age_minutes")
+        latest_bar = state.get("latest_bar") if isinstance(state, dict) else None
+        if not isinstance(latest_bar, dict):
+            latest_bar = {}
+        data_level = str(latest_bar.get("_data_level") or latest_bar.get("_data_source") or "").strip().lower()
+        has_bid_ask = bool(latest_bar.get("bid") is not None or latest_bar.get("ask") is not None)
 
         # Backward-compatible: if age isn't persisted but timestamp is, compute age.
         if latest_bar_age_minutes is None and latest_bar_timestamp:
@@ -4792,6 +4800,18 @@ Choose what you want to inspect:
         else:
             message += "⚪ *Latest Bar Age:* unknown\n"
 
+        # Feed type (clarify bars vs quotes without calling it an error)
+        if data_level:
+            if data_level == "level1":
+                message += "📡 *Feed:* live quotes (L1)\n"
+            elif data_level == "historical":
+                # Bars can still be fresh; avoid the word "fallback" here.
+                message += "📡 *Feed:* 1m bars (updating)\n"
+                if not has_bid_ask:
+                    message += "   • bid/ask: unavailable (OK for signal scanning)\n"
+            else:
+                message += f"📡 *Feed:* {data_level}\n"
+
         # Use standardized gate terminology
         message += format_gate_status(futures_market_open, strategy_session_open) + "\n"
 
@@ -4849,7 +4869,7 @@ Choose what you want to inspect:
             ],
             [
                 InlineKeyboardButton("🔌 Gateway Status", callback_data="gateway_status"),
-                InlineKeyboardButton("🏠 Main Menu", callback_data="start"),
+                InlineKeyboardButton("🏠 Menu", callback_data="start"),
             ],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -5387,7 +5407,7 @@ Choose what you want to inspect:
                 [InlineKeyboardButton("🧠 Memory", callback_data='claude_memory')],
                 [InlineKeyboardButton("🔍 AI Monitor", callback_data='claude_monitor_hub')],
                 [InlineKeyboardButton("🧼 Reset Chat", callback_data='claude_reset')],
-                [InlineKeyboardButton("🏠 Main Menu", callback_data='start')],
+                [InlineKeyboardButton("🏠 Menu", callback_data='start')],
             ]
         return InlineKeyboardMarkup(keyboard)
     
@@ -6315,6 +6335,66 @@ Choose what you want to inspect:
         if len(snapshot) > 1800:
             snapshot = snapshot[:1800] + "\n...(truncated)"
         return snapshot
+
+    def _format_telegram_plaintext(
+        self,
+        text: str,
+        *,
+        max_lines: int | None = None,
+        max_chars: int = 1600,
+    ) -> str:
+        """
+        Sanitize model output for Telegram.
+
+        Telegram doesn't support GitHub-style markdown headings/bold (e.g. ##, **).
+        This helper removes common markdown artifacts and optionally truncates for mobile.
+        """
+        try:
+            raw = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+        except Exception:
+            raw = str(text)
+
+        cleaned_lines: List[str] = []
+        prev_blank = False
+        in_code_block = False
+
+        for line in raw.split("\n"):
+            ln = line.strip()
+
+            # Drop fenced code blocks entirely for readability
+            if ln.startswith("```"):
+                in_code_block = not in_code_block
+                continue
+            if in_code_block:
+                continue
+
+            # Strip Markdown headings like "## Title"
+            if ln.startswith("#"):
+                ln = ln.lstrip("#").strip()
+
+            # Strip common Markdown emphasis markers
+            ln = ln.replace("**", "")
+
+            if not ln:
+                if not prev_blank:
+                    cleaned_lines.append("")
+                prev_blank = True
+                continue
+
+            prev_blank = False
+            cleaned_lines.append(ln)
+
+        out = "\n".join(cleaned_lines).strip()
+
+        if max_lines is not None and max_lines > 0:
+            lines_out = out.split("\n")
+            if len(lines_out) > max_lines:
+                out = "\n".join(lines_out[:max_lines]).rstrip() + "\n… (tap Export for full)"
+
+        if max_chars and len(out) > max_chars:
+            out = out[: max_chars - 1].rstrip() + "…"
+
+        return out
     
     async def _process_claude_chat(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
         """Process a chat message and get Claude's response."""
@@ -6364,7 +6444,7 @@ Choose what you want to inspect:
                         InlineKeyboardButton("🤖 Hub", callback_data="claude_hub"),
                         InlineKeyboardButton("💬 Chat: OFF", callback_data="claude_chat_toggle"),
                     ],
-                    [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                    [InlineKeyboardButton("🏠 Menu", callback_data="start")],
                 ]
             )
             
@@ -6404,12 +6484,9 @@ Choose what you want to inspect:
                     reply_markup=chat_controls,
                 )
             else:
-                # Format response with Markdown for better readability
-                await update.message.reply_text(
-                    response,
-                    parse_mode="Markdown",
-                    reply_markup=chat_controls,
-                )
+                # Send as plain text (avoid Telegram Markdown parsing errors + GitHub-markdown artifacts).
+                response_clean = self._format_telegram_plaintext(response, max_lines=None, max_chars=3500)
+                await update.message.reply_text(response_clean, reply_markup=chat_controls)
                 
         except ClaudeAPIKeyMissingError:
             await update.message.reply_text(
@@ -7775,8 +7852,8 @@ _Commands are policy-gated for safety._
         
         # Navigation
         keyboard.append([
-            InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
-            InlineKeyboardButton("📊 Agent Status", callback_data='status'),
+            InlineKeyboardButton("🏠 Menu", callback_data='start'),
+            InlineKeyboardButton("📊 Status", callback_data='status'),
         ])
         
         return InlineKeyboardMarkup(keyboard)
@@ -7787,10 +7864,10 @@ _Commands are policy-gated for safety._
         if include_refresh:
             keyboard.append([
                 InlineKeyboardButton("🔄 Refresh", callback_data='status'),
-                InlineKeyboardButton("🏠 Main Menu", callback_data='start'),
+                InlineKeyboardButton("🏠 Menu", callback_data='start'),
             ])
         else:
-            keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='start')])
+            keyboard.append([InlineKeyboardButton("🏠 Menu", callback_data='start')])
         return InlineKeyboardMarkup(keyboard)
     
     def _get_signals_buttons(self, has_signals: bool = True) -> InlineKeyboardMarkup:
@@ -7800,7 +7877,7 @@ _Commands are policy-gated for safety._
             keyboard.append([
                 InlineKeyboardButton("🔄 Refresh", callback_data='signals'),
             ])
-        keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data='start')])
+        keyboard.append([InlineKeyboardButton("🏠 Menu", callback_data='start')])
         return InlineKeyboardMarkup(keyboard)
 
     def _get_confirm_buttons(
@@ -8096,6 +8173,8 @@ _Commands are policy-gated for safety._
             await self._handle_data_quality(update, context)
         elif callback_data == 'data_quality:diagnose':
             await self._handle_data_quality(update, context, diagnose=True)
+        elif callback_data == 'diagnostics':
+            await self._handle_diagnostics(update, context)
         elif callback_data == 'start_agent':
             await self._handle_start_agent(update, context)
         elif callback_data == 'stop_agent':
@@ -8843,14 +8922,19 @@ _Commands are policy-gated for safety._
                 message += f"  ✅ A-tier: {a_count}\n"
                 message += f"  ⚗️ B-tier: {b_count}\n"
             
-            # Footer tip
-            message += "\n💡 *Tip:* Check `/policy` for win-rates by signal type, `/signals` for recent signals."
-            
-            await update.message.reply_text(message, parse_mode="Markdown")
+            # Footer tip (button-first UX; only /start is supported)
+            message += "\n💡 *Tip:* Use 🎯 *Signals & Trades* for recent signals, and AI Hub → *Policy* for win-rates."
+
+            await self._send_message_or_edit(
+                update,
+                context,
+                message,
+                reply_markup=self._get_back_to_menu_button(),
+            )
             
         except Exception as e:
             logger.error(f"Error handling /diagnostics: {e}", exc_info=True)
-            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+            await self._send_message_or_edit(update, context, f"❌ Error: {str(e)[:100]}", reply_markup=self._get_back_to_menu_button())
 
     async def _handle_purge_test_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """
@@ -10420,7 +10504,7 @@ _Commands are policy-gated for safety._
                     InlineKeyboardButton("🔄 Refresh", callback_data="strategy_review:refresh"),
                     InlineKeyboardButton("➕ More", callback_data="strategy_review:more"),
                 ],
-                [InlineKeyboardButton("🏠 Home", callback_data="start")],
+                [InlineKeyboardButton("🏠 Menu", callback_data="start")],
             ]
 
             await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -10473,7 +10557,7 @@ _Commands are policy-gated for safety._
                 InlineKeyboardButton("🔄 Refresh", callback_data="strategy_review:refresh"),
                 InlineKeyboardButton("➕ More", callback_data="strategy_review:more"),
             ],
-            [InlineKeyboardButton("🏠 Home", callback_data="start")],
+            [InlineKeyboardButton("🏠 Menu", callback_data="start")],
         ]
 
         await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -10508,7 +10592,7 @@ Recommended flow:
             keyboard.append([InlineKeyboardButton("💬 Discuss with Claude", callback_data="strategy_review:discuss")])
 
         keyboard.append([InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")])
-        keyboard.append([InlineKeyboardButton("🏠 Home", callback_data="start")])
+        keyboard.append([InlineKeyboardButton("🏠 Menu", callback_data="start")])
 
         await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -11341,12 +11425,17 @@ Recommended flow:
 
         user_text = (
             "You are my trading strategy assistant.\n"
-            "Given the Strategy Review JSON below, do three things:\n"
-            "1) Explain in plain English what it means today.\n"
-            "2) Give me a 3-step plan for the next 24h (low-risk).\n"
-            "3) Propose 2 backtests/experiments (what to change + what success metric).\n\n"
+            "Using the Strategy Review JSON below, write a SHORT, Telegram-friendly update.\n"
+            "Output MUST be plain text (no markdown like ## or **).\n"
+            "Max 10 lines.\n\n"
+            "Format:\n"
+            "Summary: <1-2 sentences>\n"
+            "Next 24h:\n"
+            "- <3 bullets>\n"
+            "Experiments:\n"
+            "- <2 bullets (change + success metric)>\n\n"
             "Strategy Review JSON:\n"
-            f"{json.dumps(payload, indent=2, default=str)[:6000]}"
+            f"{json.dumps(payload, default=str)[:4000]}"
         )
 
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -11390,7 +11479,7 @@ _Wait for the response — or tap below if you'd rather not wait._""",
                             InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
                         ],
                         [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
-                        [InlineKeyboardButton("🏠 Home", callback_data="start")],
+                        [InlineKeyboardButton("🏠 Menu", callback_data="start")],
                     ]
                 ),
             )
@@ -11423,7 +11512,7 @@ _Wait for the response — or tap below if you'd rather not wait._""",
                         ],
                         [InlineKeyboardButton("🔄 Try Again", callback_data="strategy_review:discuss")],
                         [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
-                        [InlineKeyboardButton("🏠 Home", callback_data="start")],
+                        [InlineKeyboardButton("🏠 Menu", callback_data="start")],
                     ]
                 ),
             )
@@ -11441,7 +11530,7 @@ _Wait for the response — or tap below if you'd rather not wait._""",
                             InlineKeyboardButton("🔄 Try Again", callback_data="strategy_review:discuss"),
                         ],
                         [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
-                        [InlineKeyboardButton("🏠 Home", callback_data="start")],
+                        [InlineKeyboardButton("🏠 Menu", callback_data="start")],
                     ]
                 ),
             )
@@ -11459,7 +11548,7 @@ _Wait for the response — or tap below if you'd rather not wait._""",
                             InlineKeyboardButton("🔄 Try Again", callback_data="strategy_review:discuss"),
                         ],
                         [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
-                        [InlineKeyboardButton("🏠 Home", callback_data="start")],
+                        [InlineKeyboardButton("🏠 Menu", callback_data="start")],
                     ]
                 ),
             )
@@ -11482,7 +11571,7 @@ _Wait for the response — or tap below if you'd rather not wait._""",
                     InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
                     InlineKeyboardButton("📂 Reports", callback_data="reports"),
                 ],
-                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                [InlineKeyboardButton("🏠 Menu", callback_data="start")],
             ]
         )
 
@@ -11502,11 +11591,12 @@ _Wait for the response — or tap below if you'd rather not wait._""",
                 reply_markup=chat_controls,
             )
         else:
-            # Format response for better Telegram rendering (markdown)
+            # Keep the response mobile-friendly and free of Markdown artifacts
+            # (Telegram doesn't support GitHub-style markdown like ## / **).
+            response_short = self._format_telegram_plaintext(response, max_lines=10, max_chars=1600)
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=response,
-                parse_mode="Markdown",
+                text=response_short,
                 reply_markup=chat_controls,
             )
     

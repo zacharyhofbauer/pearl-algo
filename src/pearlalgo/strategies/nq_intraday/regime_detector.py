@@ -194,7 +194,7 @@ class RegimeDetector:
                 in backtest mode for deterministic results.
         
         Returns:
-            Session phase: "opening", "morning_trend", "lunch_lull", "afternoon", "closing"
+            Session phase: "opening", "morning_trend", "lunch_lull", "afternoon", "closing", "overnight"
         """
         now = dt if dt is not None else datetime.now(timezone.utc)
 
@@ -235,8 +235,8 @@ class RegimeDetector:
         elif closing_start <= et_time <= closing_end:
             return "closing"
         else:
-            # Outside market hours
-            return "afternoon"  # Default
+            # Outside RTH market hours (overnight futures session)
+            return "overnight"
 
     def _calculate_adx(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
         """

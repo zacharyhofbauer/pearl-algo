@@ -484,12 +484,9 @@ class NQAgentTelegramNotifier:
             message += f"🧭 {' • '.join(context_parts)}\n"
 
         # Signal ID for cross-referencing (compact footer)
-        # Only show "tap Details" when command handler is running (buttons will be attached)
-        if signal_id:
-            if _is_command_handler_running():
-                message += f"\n`{signal_id[:12]}` • tap Details"
-            else:
-                message += f"\n`{signal_id[:12]}`"
+        # Keep this only when the command handler is NOT running (no buttons available).
+        if signal_id and not _is_command_handler_running():
+            message += f"\n`{signal_id[:12]}`"
 
         return message
     
@@ -534,7 +531,8 @@ class NQAgentTelegramNotifier:
                     InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
                 ],
             ])
-            await self.telegram.send_message("⬆️", parse_mode=None, reply_markup=keyboard, dedupe=False)
+            # Keep the follow-up message minimal; buttons provide the actions.
+            await self.telegram.send_message("Menu", parse_mode=None, reply_markup=keyboard, dedupe=False)
         except Exception as e:
             logger.debug(f"Could not send post-chart nav: {e}")
 
@@ -1857,7 +1855,7 @@ class NQAgentTelegramNotifier:
                                 InlineKeyboardButton("🔌 Gateway Status", callback_data="gateway_status"),
                             ])
 
-                    keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+                    keyboard.append([InlineKeyboardButton("🏠 Menu", callback_data="start")])
                     reply_markup = InlineKeyboardMarkup(keyboard)
             except Exception:
                 reply_markup = None

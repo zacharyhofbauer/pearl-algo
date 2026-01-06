@@ -913,7 +913,7 @@ def format_home_card(
             "DataGap": "📉 Data gap detected",
             "NoData": "📭 Waiting for data",
             "NoOpportunity": "👀 Scanning (no setups)",
-            "Level1Unavailable": "📡 Using historical fallback (no live quotes)",
+            "Level1Unavailable": "📡 Bars feed active (no bid/ask)",
             "Active": None,  # Don't show when active
             "Unknown": "❓ Status unknown",
         }.get(quiet_reason, f"ℹ️ {quiet_reason}")
@@ -922,9 +922,9 @@ def format_home_card(
         # Actionable cue for StaleData
         if quiet_reason == "StaleData":
             lines.append(f"{_SUBLINE_PREFIX}💡 Menu → Health → Data")
-        # Actionable cue for Level1Unavailable (missing API acknowledgement)
+        # Actionable cue for Level1Unavailable (feed classification)
         if quiet_reason == "Level1Unavailable":
-            lines.append(f"{_SUBLINE_PREFIX}💡 Check IBKR Market Data API Acknowledgement")
+            lines.append(f"{_SUBLINE_PREFIX}💡 See Menu → Health → Data for feed details")
     
     # CONDITIONAL: Signal diagnostics (when quiet reason is NoOpportunity and we have details)
     # V2 spec: Suppress when data is stale to avoid misleading derived context

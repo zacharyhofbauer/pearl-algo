@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
+from matplotlib.ticker import MaxNLocator
 
 from pearlalgo.utils.logger import logger
 
@@ -257,6 +258,18 @@ class ChartGenerator:
                 'font.size': 10,
             }
         )
+    
+    def _limit_yaxis_ticks(self, ax, max_ticks: int = 8) -> None:
+        """Limit y-axis ticks to prevent overlapping labels.
+        
+        Args:
+            ax: Matplotlib axis object
+            max_ticks: Maximum number of ticks to show (default: 8)
+        """
+        try:
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=max_ticks, prune='both'))
+        except Exception:
+            pass  # If it fails, continue without limiting ticks
     
     def _prepare_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """Prepare data for mplfinance (requires DatetimeIndex)."""
@@ -1390,6 +1403,8 @@ class ChartGenerator:
             try:
                 ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
                 if ax_price is not None:
+                    # Limit y-axis ticks to prevent overlapping labels
+                    self._limit_yaxis_ticks(ax_price, max_ticks=8)
                     self._apply_hud(fig, ax_price, df, signal, direction)
             except Exception:
                 pass
@@ -1529,6 +1544,8 @@ class ChartGenerator:
             try:
                 ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
                 if ax_price is not None:
+                    # Limit y-axis ticks to prevent overlapping labels
+                    self._limit_yaxis_ticks(ax_price, max_ticks=8)
                     self._apply_hud(
                         fig,
                         ax_price,
@@ -1780,6 +1797,8 @@ class ChartGenerator:
             ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
 
             if ax_price is not None:
+                # Limit y-axis ticks to prevent overlapping labels
+                self._limit_yaxis_ticks(ax_price, max_ticks=8)
                 # Hold-period shading (entry_x to exit_x)
                 if show_hold_shading and 0 <= entry_x < len(df) and 0 <= exit_x < len(df):
                     shade_color = SIGNAL_LONG if pnl is not None and float(pnl) > 0 else SIGNAL_SHORT
@@ -2269,8 +2288,28 @@ class ChartGenerator:
                     'update_width_config': dict(candle_linewidth=1.2, candle_width=0.7),
                 })
             
-            # Plot with mplfinance
-            mpf.plot(df, **plot_kwargs)
+            # Plot with mplfinance - need to get axes to limit ticks
+            plot_kwargs['returnfig'] = True
+            plot_kwargs.pop('savefig', None)  # Remove savefig to handle manually
+            fig, axlist = mpf.plot(df, **plot_kwargs)
+            
+            # Limit y-axis ticks to prevent overlapping labels
+            try:
+                ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
+                if ax_price is not None:
+                    self._limit_yaxis_ticks(ax_price, max_ticks=8)
+            except Exception:
+                pass
+            
+            # Save the figure
+            fig.savefig(
+                str(temp_path),
+                dpi=effective_dpi,
+                facecolor=DARK_BG,
+                edgecolor='none',
+                bbox_inches='tight'
+            )
+            plt.close(fig)
             
             logger.debug(f"Generated backtest chart with mplfinance: {temp_path}")
             return temp_path
@@ -2775,6 +2814,8 @@ class ChartGenerator:
             try:
                 ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
                 if ax_price is not None:
+                    # Limit y-axis ticks to prevent overlapping labels
+                    self._limit_yaxis_ticks(ax_price, max_ticks=8)
                     # Sessions shading
                     if show_sessions:
                         self._draw_sessions_overlay(ax_price, hud, idx=df.index if isinstance(df.index, pd.DatetimeIndex) else None)

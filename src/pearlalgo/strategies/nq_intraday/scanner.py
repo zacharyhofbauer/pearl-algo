@@ -394,11 +394,17 @@ class NQScanner:
         current_atr = latest.get("atr", 0)
         current_close = latest["close"]
         atr_pct = current_atr / current_close if current_close > 0 else 0
-        if atr_pct < volatility_threshold:
+        # IMPORTANT: Tokyo/London can be low-vol but still tradable for mean-reversion/scalps.
+        # Treat the configured volatility threshold as a "soft" reference and only hard-gate
+        # when volatility is *extremely* low.
+        extreme_vol_threshold = volatility_threshold * 0.75
+        if atr_pct < extreme_vol_threshold:
             self.last_gate_reasons.append(
-                f"Low volatility: ATR/price={atr_pct:.5f} < {volatility_threshold:.5f} (scaled for {self.config.timeframe})"
+                f"Extreme low volatility: ATR/price={atr_pct:.5f} < {extreme_vol_threshold:.5f} (scaled for {self.config.timeframe})"
             )
-            logger.debug(f"Volatility gate: ATR/price={atr_pct:.5f} < {volatility_threshold:.5f} ({self.config.timeframe})")
+            logger.debug(
+                f"Volatility gate: ATR/price={atr_pct:.5f} < {extreme_vol_threshold:.5f} ({self.config.timeframe})"
+            )
             return signals
 
         # Calculate ATR-based stop loss and take profit
@@ -555,6 +561,13 @@ class NQScanner:
         # Session-based filters
         session = regime.get("session", "afternoon")
 
+        # 24h futures: overnight (Tokyo/London) typically has lower volume/volatility.
+        # Relax *relative* volume-ratio requirements overnight to avoid starving the funnel.
+        is_overnight = str(session).lower() == "overnight"
+        vr_momentum = 1.0 if is_overnight else 1.2
+        vr_meanrev = 0.8 if is_overnight else 1.0
+        vr_breakout = 1.1 if is_overnight else 1.3
+
         # Prop firm style: Avoid lunch lull for scalping (low volume, choppy)
         avoid_lunch = getattr(self.config, 'avoid_lunch_lull', True)
         if avoid_lunch and session == "lunch_lull":
@@ -572,7 +585,7 @@ class NQScanner:
                     prev["sma_fast"] < prev["sma_slow"]
                     and latest["sma_fast"] > latest["sma_slow"]
                     and latest["close"] > latest["sma_fast"]
-                    and latest.get("volume_ratio", 0) > 1.2  # Volume confirmation
+                    and latest.get("volume_ratio", 0) > vr_momentum  # Volume confirmation
                 ):
                     stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
                     confidence = calculate_signal_score("momentum_long", latest, df)
@@ -651,7 +664,7 @@ class NQScanner:
                     prev["sma_fast"] > prev["sma_slow"]
                     and latest["sma_fast"] < latest["sma_slow"]
                     and latest["close"] < latest["sma_fast"]
-                    and latest.get("volume_ratio", 0) > 1.2  # Volume confirmation
+                    and latest.get("volume_ratio", 0) > vr_momentum  # Volume confirmation
                     and latest.get("macd_histogram", 0) < 0  # MACD bearish
                 ):
                     stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
@@ -735,7 +748,7 @@ class NQScanner:
             if (
                 rsi_ok  # Relative RSI movement OR absolute oversold
                 and latest["close"] < latest.get("bb_lower", current_price)
-                and latest.get("volume_ratio", 0) > 1.0
+                and latest.get("volume_ratio", 0) > vr_meanrev
             ):
                 if rsi_momentum_down:
                     logger.debug(f"Mean reversion: RSI momentum down detected (-{rsi_3bars_ago - rsi:.1f} points in 3 bars), using relative movement")
@@ -837,7 +850,7 @@ class NQScanner:
             if (
                 rsi_ok  # Relative RSI movement up OR absolute overbought
                 and latest["close"] > latest.get("bb_upper", current_price)
-                and latest.get("volume_ratio", 0) > 1.0
+                and latest.get("volume_ratio", 0) > vr_meanrev
             ):
                 if rsi_momentum_up:
                     logger.debug(f"Mean reversion short: RSI momentum up detected (+{rsi - rsi_3bars_ago:.1f} points in 3 bars), using relative movement")
@@ -934,7 +947,7 @@ class NQScanner:
                 
                 if (
                     latest["close"] > recent_high
-                    and latest.get("volume_ratio", 0) > 1.3  # Slightly lower threshold (was 1.5)
+                    and latest.get("volume_ratio", 0) > vr_breakout  # Volume confirmation (session-aware)
                     and rsi_ok  # Conditional RSI threshold based on fresh breakout
                     and latest.get("macd_histogram", 0) > 0  # MACD bullish
                 ):
@@ -1057,7 +1070,7 @@ class NQScanner:
                 
                 if (
                     latest["close"] < recent_low
-                    and latest.get("volume_ratio", 0) > 1.3  # Volume confirmation
+                    and latest.get("volume_ratio", 0) > vr_breakout  # Volume confirmation (session-aware)
                     and rsi_ok  # Conditional RSI threshold based on fresh breakdown
                     and latest.get("macd_histogram", 0) < 0  # MACD bearish
                 ):
@@ -1320,6 +1333,10 @@ class NQScanner:
         """
         signals = []
 
+        # Overnight futures (Tokyo/London) often has lower relative volume.
+        session = str(regime.get("session", "") or "").lower()
+        vr_sr = 0.8 if session == "overnight" else 1.0
+
         strongest_support = sr_levels.get("strongest_support")
         strongest_resistance = sr_levels.get("strongest_resistance")
         
@@ -1336,7 +1353,7 @@ class NQScanner:
                 is_bouncing = (
                     latest.get("close") > latest.get("open")  # Up bar
                     and latest.get("low") <= strongest_support * 1.002  # Touched support
-                    and latest.get("volume_ratio", 0) > 1.0  # Volume present
+                    and latest.get("volume_ratio", 0) > vr_sr  # Volume present (session-aware)
                 )
                 
                 if is_bouncing:
@@ -1378,7 +1395,7 @@ class NQScanner:
                 is_rejecting = (
                     latest.get("close") < latest.get("open")  # Down bar
                     and latest.get("high") >= strongest_resistance * 0.998  # Touched resistance
-                    and latest.get("volume_ratio", 0) > 1.0  # Volume present
+                    and latest.get("volume_ratio", 0) > vr_sr  # Volume present (session-aware)
                 )
                 
                 if is_rejecting:
@@ -1432,6 +1449,12 @@ class NQScanner:
         Generates signals when price returns to VWAP after extended move.
         """
         signals = []
+
+        # Overnight futures (Tokyo/London) typically has lower relative volume; relax slightly.
+        session = str(regime.get("session", "") or "").lower()
+        is_overnight = session == "overnight"
+        vr_vwap = 0.8 if is_overnight else 1.0
+        min_conf_vwap = 0.45 if is_overnight else 0.50
         
         vwap = vwap_data.get("vwap", 0)
         if vwap == 0:
@@ -1461,7 +1484,7 @@ class NQScanner:
                     "mean_reversion_long", confidence, regime
                 )
                 
-                if confidence >= 0.50 and latest.get("volume_ratio", 0) > 1.0:
+                if confidence >= min_conf_vwap and latest.get("volume_ratio", 0) > vr_vwap:
                     signals.append({
                         "type": "vwap_reversion_long",
                         "direction": "long",
@@ -1490,7 +1513,7 @@ class NQScanner:
                     "mean_reversion_short", confidence, regime
                 )
                 
-                if confidence >= 0.50 and latest.get("volume_ratio", 0) > 1.0:
+                if confidence >= min_conf_vwap and latest.get("volume_ratio", 0) > vr_vwap:
                     signals.append({
                         "type": "vwap_reversion_short",
                         "direction": "short",

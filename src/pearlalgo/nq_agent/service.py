@@ -2357,12 +2357,10 @@ class NQAgentService:
                         if age_seconds > self.stale_data_threshold_minutes * 60:
                             return "StaleData"
                     
-                    # Check if Level 1 real-time data is unavailable (market open but historical fallback)
-                    # This surfaces the missing API acknowledgement issue in /status
-                    data_level = latest_bar.get("_data_level")
-                    if data_level == "historical" and futures_market_open:
-                        # Data is fresh but coming from historical fallback, not live Level 1
-                        return "Level1Unavailable"
+                    # NOTE: It's common to have fresh 1m bars even when _data_level is "historical"
+                    # (e.g., IBKR historical bars feed updating continuously). This should NOT be used
+                    # as the primary "quiet reason" because it doesn't explain why patterns weren't found.
+                    # Surface feed type in Data Quality instead; keep quiet reason focused on opportunity.
                 
                 # No signals but data is fresh - strategy just didn't find opportunities
                 return "NoOpportunity"
