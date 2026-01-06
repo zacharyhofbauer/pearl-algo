@@ -1094,16 +1094,8 @@ class TelegramCommandHandler:
                 caption = f"📊 *{symbol}* {timeframe} Chart ({lookback_hours:.0f}h)\n"
                 caption += f"🕐 Generated: {end_time.strftime('%H:%M UTC')}"
                 
-                # Build toggle buttons with active indicator
-                def btn_label(hours: int) -> str:
-                    if abs(lookback_hours - hours) < 1:
-                        return f"✓ {hours}h"
-                    return f"{hours}h"
-                
+                # Navigation buttons only (single 12h timeframe, no toggles needed)
                 keyboard = [
-                    [
-                        InlineKeyboardButton(btn_label(12), callback_data="chart_12h"),
-                    ],
                     [
                         InlineKeyboardButton("🏠 Menu", callback_data="start"),
                         InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
@@ -1486,11 +1478,10 @@ class TelegramCommandHandler:
             except Exception:
                 pass
             
-            # Send chart first, then status text (combined notification)
+            # Send chart first, then text (like interval notification)
             await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
             
             # Generate and send chart (12h, 5m candles)
-            chart_sent = False
             try:
                 if self.chart_generator:
                     data_provider = self._get_data_provider()
@@ -1539,58 +1530,35 @@ class TelegramCommandHandler:
                                 )
                                 
                                 if chart_path and chart_path.exists():
-                                    caption = f"📊 *{symbol}* {timeframe} Chart ({lookback_hours:.0f}h)\n"
-                                    caption += f"🕐 Generated: {end_time.strftime('%H:%M UTC')}"
-                                    
-                                    keyboard = [
-                                        [
-                                            InlineKeyboardButton("✓ 12h", callback_data="chart_12h"),
-                                        ],
-                                        [
-                                            InlineKeyboardButton("🔄 Refresh", callback_data="status"),
-                                        ],
-                                    ]
-                                    reply_markup_chart = InlineKeyboardMarkup(keyboard)
+                                    caption = f"📊 *{symbol}* {timeframe} ({lookback_hours:.0f}h) • {end_time.strftime('%H:%M UTC')}"
                                     
                                     await context.bot.send_photo(
                                         chat_id=update.effective_chat.id,
                                         photo=open(chart_path, "rb"),
                                         caption=caption,
                                         parse_mode="Markdown",
-                                        reply_markup=reply_markup_chart,
                                     )
                                     
                                     try:
                                         chart_path.unlink()
                                     except Exception:
                                         pass
-                                    
-                                    chart_sent = True
             except Exception as e:
                 logger.debug(f"Could not send chart with status: {e}")
             
-            # Use consistent main menu buttons
+            # Send text status (always new message, immediately after chart)
             reply_markup = self._get_main_menu_buttons(
                 agent_running=running,
                 gateway_running=gateway_running,
                 gateway_api_ready=gateway_api_ready,
             )
             
-            # Add refresh button if chart was sent
-            if chart_sent:
-                # Replace menu buttons with refresh option
-                keyboard = [
-                    [
-                        InlineKeyboardButton("🔄 Refresh", callback_data="status"),
-                    ],
-                    [
-                        InlineKeyboardButton("🏠 Menu", callback_data="start"),
-                        InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
-                    ],
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=message,
+                parse_mode="Markdown",
+                reply_markup=reply_markup,
+            )
             
         except Exception as e:
             logger.error(f"Error handling status command: {e}", exc_info=True)

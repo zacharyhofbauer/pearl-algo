@@ -571,37 +571,25 @@ class NQAgentTelegramNotifier:
             else:
                 caption = f"📊 *{symbol}* ({timeframe})"
             
-            # Build chart timeframe toggle buttons when command handler is running
+            # Build navigation buttons directly on chart (no separate nav message)
             reply_markup = None
             if _is_command_handler_running():
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     
-                    # Determine which button to highlight based on current_hours
-                    # Default to 12h if not specified
-                    active_hours = current_hours or 12
-                    
-                    def btn_label(hours: int) -> str:
-                        """Add indicator if this is the active timeframe."""
-                        if abs(active_hours - hours) < 1:
-                            return f"✓ {hours}h"
-                        return f"{hours}h"
-                    
+                    # Single row with Menu and Signals navigation
                     keyboard = [
                         [
-                            InlineKeyboardButton(btn_label(12), callback_data="chart_12h"),
+                            InlineKeyboardButton("🏠 Menu", callback_data="start"),
+                            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
                 except Exception as e:
-                    logger.debug(f"Could not build chart toggle buttons: {e}")
+                    logger.debug(f"Could not build chart nav buttons: {e}")
                     reply_markup = None
             
             success = await self._send_photo(chart_path, caption=caption, reply_markup=reply_markup)
-
-            # UX: Follow up with navigation buttons below the chart image
-            if success:
-                await self._send_post_chart_nav()
             
             if success:
                 logger.debug(f"Dashboard chart sent to Telegram: {chart_path}")
@@ -2023,53 +2011,43 @@ class NQAgentTelegramNotifier:
 
         try:
             shutdown_reason = summary.get('shutdown_reason', 'Normal shutdown')
-            message = f"🛑 *NQ {LABEL_AGENT} Stopped*\n"
             
-            # Show shutdown reason (escaped for markdown safety)
-            if shutdown_reason and shutdown_reason != "Normal shutdown":
-                reason_emoji = "⚠️" if "Error" in shutdown_reason or "interrupt" in shutdown_reason.lower() else "ℹ️"
-                message += f"{reason_emoji} *Reason:* {safe_label(str(shutdown_reason))}\n"
-            message += "\n"
-
-            # Session summary (mobile-friendly, using standardized terminology)
+            # Header
+            message = f"🛑 *{LABEL_AGENT} Stopped*\n\n"
+            
+            # Session summary (compact, mobile-friendly)
             uptime_h = summary.get('uptime_hours', 0)
             uptime_m = summary.get('uptime_minutes', 0)
             scans = summary.get('cycle_count', 0)
             signals = summary.get('signal_count', 0)
             errors = summary.get('error_count', 0)
 
-            message += f"*Session Summary:*\n"
-            message += f"⏱️ Uptime: {uptime_h:.0f}h {uptime_m:.0f}m\n"
-            message += f"🔄 {scans:,} {LABEL_SCANS}\n"
-            message += f"🔔 {signals} signals\n"
-            message += f"⚠️ {errors} errors\n"
+            message += f"⏱ *Uptime:* {uptime_h:.0f}h {uptime_m:.0f}m\n"
+            message += f"🔄 *Scans:* {scans:,}\n"
+            message += f"🔔 *Signals:* {signals}\n"
+            if errors > 0:
+                message += f"⚠️ *Errors:* {errors}\n"
 
             # Performance if available
-            if summary.get('signal_count', 0) > 0:
-                wins = summary.get('wins', 0)
-                losses = summary.get('losses', 0)
-                total_pnl = summary.get('total_pnl', 0)
+            wins = summary.get('wins', 0)
+            losses = summary.get('losses', 0)
+            total_pnl = summary.get('total_pnl')
 
-                if wins > 0 or losses > 0:
-                    message += f"\n*Performance:*\n"
-                    message += f"✅ {wins}W  ❌ {losses}L\n"
+            if wins > 0 or losses > 0:
+                win_rate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0
+                message += f"\n📊 *Performance:* {wins}W / {losses}L ({win_rate:.0f}%)\n"
 
-                if total_pnl is not None:
-                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                    message += f"{pnl_emoji} *P&L:* {_format_currency(total_pnl)}\n"
+            if total_pnl is not None:
+                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                message += f"{pnl_emoji} *P&L:* {_format_currency(total_pnl)}\n"
 
-            # Next steps based on shutdown reason
-            message += "\n*Next steps:*\n"
-            if shutdown_reason and ("error" in shutdown_reason.lower() or "circuit" in shutdown_reason.lower()):
-                message += "• Review logs for error details\n"
-                message += f"• Check {LABEL_GATEWAY} status\n"
-                message += f"• Restart when ready: /start_agent\n"
-            elif shutdown_reason and "interrupt" in shutdown_reason.lower():
-                message += f"• {LABEL_AGENT} stopped by user\n"
-                message += f"• Restart when ready: /start_agent\n"
-            else:
-                message += "• Normal shutdown complete\n"
-                message += "• Restart: /start_agent\n"
+            # Shutdown reason (if not normal)
+            if shutdown_reason and shutdown_reason not in ("Normal shutdown", "Final cleanup"):
+                reason_emoji = "⚠️" if "error" in shutdown_reason.lower() or "circuit" in shutdown_reason.lower() else "ℹ️"
+                message += f"\n{reason_emoji} *Reason:* {safe_label(str(shutdown_reason))}\n"
+
+            # Restart hint
+            message += f"\n💡 Restart: /start\\_agent"
 
             await self.telegram.send_message(message)
             return True
