@@ -51,7 +51,7 @@ service:
   dashboard_chart_enabled: true           # Enable dashboard chart notifications
   dashboard_chart_interval: 3600          # 1 hour (matches status_update_interval)
   dashboard_chart_timeframe: "5m"         # 5-minute candles for clean, readable chart
-  dashboard_chart_lookback_hours: 8       # 8 hours of price action (96 candles at 5m)
+  dashboard_chart_lookback_hours: 12       # 12 hours of price action (144 candles at 5m)
   
   # Performance optimization: skip heavy analysis when bar hasn't advanced.
   # High leverage for 5m bars + 30s scan interval (5 of 6 cycles are repeats).

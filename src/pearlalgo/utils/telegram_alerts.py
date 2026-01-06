@@ -1401,6 +1401,7 @@ class TelegramPrefs:
         "snooze_noncritical_alerts": False, # Temporarily suppress non-critical data alerts
         "snooze_until": None,               # ISO timestamp when snooze expires (if snoozed)
         "ai_chat_mode": False,              # Claude AI chat mode (messages go to Claude)
+        "interval_notifications": True,     # Enable hourly interval notifications (chart + status)
     }
     
     # Human-readable labels for settings UI
@@ -1410,6 +1411,7 @@ class TelegramPrefs:
         "auto_chart_on_signal": "Auto-Chart on Signal",
         "snooze_noncritical_alerts": "Snooze Non-Critical Alerts",
         "ai_chat_mode": "Claude Chat Mode",
+        "interval_notifications": "Interval Notifications",
     }
     
     # Descriptions for settings UI
@@ -1419,6 +1421,7 @@ class TelegramPrefs:
         "auto_chart_on_signal": "Automatically generate and send chart with each signal alert",
         "snooze_noncritical_alerts": "Temporarily suppress non-critical data quality alerts (1 hour)",
         "ai_chat_mode": "Send plain messages to Claude AI (mobile Cursor mode)",
+        "interval_notifications": "Hourly chart + status notifications (toggle off to disable)",
     }
     
     def __init__(self, state_dir=None):

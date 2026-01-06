@@ -1623,6 +1623,16 @@ class NQAgentService:
             quiet_reason: Why the agent is quiet (e.g., "StrategySessionClosed")
             signal_diagnostics: SignalDiagnostics from the signal generator
         """
+        # Check if interval notifications are enabled (user preference)
+        try:
+            from pearlalgo.utils.telegram_alerts import TelegramPrefs
+            prefs = TelegramPrefs(state_dir=self.state_manager.state_dir)
+            if not prefs.get("interval_notifications", True):
+                return  # Notifications disabled
+        except Exception:
+            # If we can't load prefs, default to enabled
+            pass
+
         now = datetime.now(timezone.utc)
 
         # Check if it's time for a dashboard chart (every 60m by default)

@@ -590,8 +590,6 @@ class NQAgentTelegramNotifier:
                     keyboard = [
                         [
                             InlineKeyboardButton(btn_label(12), callback_data="chart_12h"),
-                            InlineKeyboardButton(btn_label(16), callback_data="chart_16h"),
-                            InlineKeyboardButton(btn_label(24), callback_data="chart_24h"),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)

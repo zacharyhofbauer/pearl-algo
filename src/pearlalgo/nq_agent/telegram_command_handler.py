@@ -894,6 +894,10 @@ class TelegramCommandHandler:
         message += f"{toggle_icon('auto_chart_on_signal')} *Auto-Chart on Signal*\n"
         message += "   Automatically send chart with each signal alert\n\n"
         
+        # Interval notifications
+        message += f"{toggle_icon('interval_notifications')} *Interval Notifications*\n"
+        message += "   Hourly chart + status notifications\n\n"
+        
         # Snooze non-critical alerts
         snooze_active = self.prefs.snooze_noncritical_alerts
         snooze_icon = "🔕" if snooze_active else "🔔"
@@ -944,6 +948,12 @@ class TelegramCommandHandler:
                 InlineKeyboardButton(
                     f"{toggle_icon('auto_chart_on_signal')} Auto-Chart",
                     callback_data="settings:toggle:auto_chart_on_signal"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    f"{toggle_icon('interval_notifications')} Interval Notifications",
+                    callback_data="settings:toggle:interval_notifications"
                 ),
             ],
             [
@@ -1093,8 +1103,6 @@ class TelegramCommandHandler:
                 keyboard = [
                     [
                         InlineKeyboardButton(btn_label(12), callback_data="chart_12h"),
-                        InlineKeyboardButton(btn_label(16), callback_data="chart_16h"),
-                        InlineKeyboardButton(btn_label(24), callback_data="chart_24h"),
                     ],
                     [
                         InlineKeyboardButton("🏠 Menu", callback_data="start"),
@@ -1478,12 +1486,109 @@ class TelegramCommandHandler:
             except Exception:
                 pass
             
+            # Send chart first, then status text (combined notification)
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
+            
+            # Generate and send chart (12h, 5m candles)
+            chart_sent = False
+            try:
+                if self.chart_generator:
+                    data_provider = self._get_data_provider()
+                    if data_provider:
+                        lookback_hours = 12.0
+                        symbol = "MNQ"
+                        timeframe = "5m"
+                        end_time = datetime.now(timezone.utc)
+                        start_time = end_time - timedelta(hours=lookback_hours)
+                        
+                        loop = asyncio.get_running_loop()
+                        bars = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                None,
+                                lambda: data_provider.fetch_historical(
+                                    symbol=symbol,
+                                    start=start_time,
+                                    end=end_time,
+                                    timeframe=timeframe,
+                                ),
+                            ),
+                            timeout=30.0,
+                        )
+                        
+                        if bars is not None and not (isinstance(bars, pd.DataFrame) and bars.empty):
+                            if isinstance(bars, list):
+                                df = pd.DataFrame(bars)
+                            else:
+                                df = bars
+                            
+                            if not df.empty:
+                                tf_minutes = 5
+                                lookback_bars = int(round((lookback_hours * 60.0) / float(tf_minutes)))
+                                chart_data = df.tail(min(int(lookback_bars), len(df))).copy()
+                                range_label = f"{int(round(lookback_hours))}h"
+                                trades = self._get_trades_for_chart(chart_data, symbol=symbol)
+                                
+                                chart_path = self.chart_generator.generate_dashboard_chart(
+                                    chart_data,
+                                    symbol=symbol,
+                                    timeframe=timeframe,
+                                    lookback_bars=len(chart_data),
+                                    range_label=range_label,
+                                    show_pressure=True,
+                                    trades=trades,
+                                )
+                                
+                                if chart_path and chart_path.exists():
+                                    caption = f"📊 *{symbol}* {timeframe} Chart ({lookback_hours:.0f}h)\n"
+                                    caption += f"🕐 Generated: {end_time.strftime('%H:%M UTC')}"
+                                    
+                                    keyboard = [
+                                        [
+                                            InlineKeyboardButton("✓ 12h", callback_data="chart_12h"),
+                                        ],
+                                        [
+                                            InlineKeyboardButton("🔄 Refresh", callback_data="status"),
+                                        ],
+                                    ]
+                                    reply_markup_chart = InlineKeyboardMarkup(keyboard)
+                                    
+                                    await context.bot.send_photo(
+                                        chat_id=update.effective_chat.id,
+                                        photo=open(chart_path, "rb"),
+                                        caption=caption,
+                                        parse_mode="Markdown",
+                                        reply_markup=reply_markup_chart,
+                                    )
+                                    
+                                    try:
+                                        chart_path.unlink()
+                                    except Exception:
+                                        pass
+                                    
+                                    chart_sent = True
+            except Exception as e:
+                logger.debug(f"Could not send chart with status: {e}")
+            
             # Use consistent main menu buttons
             reply_markup = self._get_main_menu_buttons(
                 agent_running=running,
                 gateway_running=gateway_running,
                 gateway_api_ready=gateway_api_ready,
             )
+            
+            # Add refresh button if chart was sent
+            if chart_sent:
+                # Replace menu buttons with refresh option
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🔄 Refresh", callback_data="status"),
+                    ],
+                    [
+                        InlineKeyboardButton("🏠 Menu", callback_data="start"),
+                        InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
+                    ],
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
             
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             
@@ -8252,14 +8357,6 @@ _Commands are policy-gated for safety._
             await self._handle_chart(update, context)
         elif callback_data == 'chart_12h':
             context.args = ['12']
-            await self._handle_chart(update, context)
-            context.args = []
-        elif callback_data == 'chart_16h':
-            context.args = ['16']
-            await self._handle_chart(update, context)
-            context.args = []
-        elif callback_data == 'chart_24h':
-            context.args = ['24']
             await self._handle_chart(update, context)
             context.args = []
         elif callback_data == 'last_signal':
