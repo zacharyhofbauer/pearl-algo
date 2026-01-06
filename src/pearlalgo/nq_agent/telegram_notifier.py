@@ -178,33 +178,21 @@ class NQAgentTelegramNotifier:
             # Format compact signal alert (decision-first layout)
             message = self._format_compact_signal(signal)
             
-            # Build optional deep-link buttons when command handler is running
+            # Build inline buttons (consistent layout)
             reply_markup = None
             if _is_command_handler_running():
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     signal_id = str(signal.get("signal_id", "") or "")
                     keyboard = []
-                    show_nav = self.prefs.dashboard_buttons if self.prefs else False
                     if signal_id:
                         keyboard.append([
                             InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
-                            InlineKeyboardButton("🔔 Signals", callback_data="signals"),
+                            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
                         ])
                     else:
-                        keyboard.append([InlineKeyboardButton("🔔 Signals", callback_data="signals")])
-                    # Optional quick-nav row (reduces scrolling by making latest alert navigable)
-                    # Reuses the existing "Dashboard Buttons" preference (default off).
-                    if show_nav:
-                        keyboard.append(
-                            [
-                                InlineKeyboardButton("🏠 Menu", callback_data="start"),
-                                InlineKeyboardButton("📈 Performance", callback_data="performance"),
-                                InlineKeyboardButton("🎯 Trades", callback_data="active_trades"),
-                            ]
-                        )
-                    else:
-                        keyboard.append([InlineKeyboardButton("📊 Status", callback_data="status")])
+                        keyboard.append([InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals")])
+                    # Post-chart nav (Menu + Signals) is sent after chart images, so skip redundant buttons here
                     reply_markup = InlineKeyboardMarkup(keyboard)
                 except Exception as e:
                     logger.debug(f"Could not build signal buttons: {e}")
@@ -227,6 +215,7 @@ class NQAgentTelegramNotifier:
             if chart_path and chart_path.exists():
                 try:
                     await self._send_photo(chart_path)
+                    await self._send_post_chart_nav()
                     # Clean up temp file
                     try:
                         chart_path.unlink()
@@ -528,6 +517,27 @@ class NQAgentTelegramNotifier:
             logger.warning(f"Error sending photo: {e}")
             return False
 
+    async def _send_post_chart_nav(self) -> None:
+        """
+        Send a follow-up navigation message after a chart image.
+        
+        Provides Menu + Signals & Trades buttons so the user can navigate
+        from below the chart without scrolling up.
+        """
+        if not _is_command_handler_running() or not self.telegram:
+            return
+        try:
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🏠 Menu", callback_data="start"),
+                    InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
+                ],
+            ])
+            await self.telegram.send_message("⬆️", parse_mode=None, reply_markup=keyboard, dedupe=False)
+        except Exception as e:
+            logger.debug(f"Could not send post-chart nav: {e}")
+
     async def send_dashboard_chart(
         self,
         chart_path: Path,
@@ -592,6 +602,10 @@ class NQAgentTelegramNotifier:
                     reply_markup = None
             
             success = await self._send_photo(chart_path, caption=caption, reply_markup=reply_markup)
+
+            # UX: Follow up with navigation buttons below the chart image
+            if success:
+                await self._send_post_chart_nav()
             
             if success:
                 logger.debug(f"Dashboard chart sent to Telegram: {chart_path}")
@@ -894,18 +908,18 @@ class NQAgentTelegramNotifier:
                 if risk > 0:
                     risk_reward = reward / risk
             
-            # Entry notification (calm-minimal: action-first, compact)
-            message = f"🎯 *{symbol} {dir_emoji} {dir_label} ENTRY*\n\n"
-            message += f"*Entry:* ${entry_price:.2f}"
+            # Entry notification (compact, no redundant "Position ACTIVE" line)
+            message = f"✅ *{symbol} {dir_emoji} {dir_label} ENTRY*\n\n"
+            message += f"Entry: ${entry_price:.2f}"
             if risk_reward > 0:
-                message += f"  •  R:R {risk_reward:.1f}:1"
+                message += f" • R:R {risk_reward:.1f}:1"
             message += "\n"
             if stop_loss:
                 stop_dist = abs(entry_price - stop_loss)
-                message += f"*Stop:* ${stop_loss:.2f} ({stop_dist:.1f} pts)\n"
+                message += f"Stop: ${stop_loss:.2f} ({stop_dist:.1f} pts)\n"
             if take_profit:
                 tp_dist = abs(take_profit - entry_price)
-                message += f"*TP:* ${take_profit:.2f} ({tp_dist:.1f} pts)\n"
+                message += f"TP: ${take_profit:.2f} ({tp_dist:.1f} pts)\n"
             
             # Size + Risk (compact single line, only if available)
             position_size = signal.get("position_size")
@@ -916,38 +930,20 @@ class NQAgentTelegramNotifier:
                     size_risk_parts.append(f"{position_size} MNQ")
                 if risk_amount:
                     size_risk_parts.append(f"Risk: ${risk_amount:,.0f}")
-                message += f"*Size:* {' • '.join(size_risk_parts)}\n"
+                message += f"Size: {' • '.join(size_risk_parts)}"
             
-            # Action cue (immediate)
-            message += f"\n✅ *Position ACTIVE* - Monitor stop/TP\n"
-            
-            # Compact footer - only show "tap Details" when command handler is running
-            handler_running = _is_command_handler_running()
-            if handler_running:
-                message += f"\n`{signal_id[:12]}` • tap Details"
-            else:
-                message += f"\n`{signal_id[:12]}`"
-            
-            # Build optional deep-link buttons
+            # Build inline buttons (no chart, so include nav here)
             reply_markup = None
+            handler_running = _is_command_handler_running()
             if handler_running:
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                    show_nav = self.prefs.dashboard_buttons if self.prefs else False
                     keyboard = [
                         [
                             InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
-                            InlineKeyboardButton("📊 Active", callback_data="active_trades"),
+                            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
                         ],
                     ]
-                    if show_nav:
-                        keyboard.append(
-                            [
-                                InlineKeyboardButton("🏠 Menu", callback_data="start"),
-                                InlineKeyboardButton("📈 Performance", callback_data="performance"),
-                                InlineKeyboardButton("🔔 Signals", callback_data="signals"),
-                            ]
-                        )
                     reply_markup = InlineKeyboardMarkup(keyboard)
                 except Exception:
                     reply_markup = None
@@ -956,23 +952,9 @@ class NQAgentTelegramNotifier:
             # Entry notifications are high-signal; never dedupe.
             success = await self.telegram.send_message(message, reply_markup=reply_markup, dedupe=False)
             
-            # Generate and send chart if available
-            chart_path = None
-            if self.chart_generator and buffer_data is not None and not buffer_data.empty:
-                try:
-                    chart_path = self.chart_generator.generate_entry_chart(signal, buffer_data, symbol)
-                except Exception as e:
-                    logger.warning(f"Could not generate entry chart: {e}")
-            
-            if chart_path and chart_path.exists():
-                try:
-                    await self._send_photo(chart_path)
-                    try:
-                        chart_path.unlink()
-                    except Exception:
-                        pass
-                except Exception as e:
-                    logger.warning(f"Could not send entry chart: {e}")
+            # NOTE: Chart is intentionally skipped here to avoid duplicates.
+            # The signal notification already sends a chart (when auto_chart is enabled).
+            # Keeping entry notification text-only reduces Telegram clutter.
             
             return success
         except Exception as e:
@@ -1026,26 +1008,26 @@ class NQAgentTelegramNotifier:
             }
             exit_reason_display = exit_reason_map.get(exit_reason.lower(), exit_reason.title())
             
-            # Exit notification (calm-minimal: P&L first, compact)
+            # Exit notification (compact, P&L first)
             message = f"{status_emoji} *{symbol} {dir_emoji} {dir_label} EXIT*\n\n"
             
-            # P&L first (most important)
-            message += f"{pnl_emoji} *{pnl_str}*"
+            # P&L + duration
+            message += f"{pnl_emoji} {pnl_str}"
             if hold_duration_minutes is not None:
                 hold_hours = int(hold_duration_minutes // 60)
                 hold_mins = int(hold_duration_minutes % 60)
                 if hold_hours > 0:
-                    message += f"  •  {hold_hours}h {hold_mins}m"
+                    message += f" • {hold_hours}h {hold_mins}m"
                 else:
-                    message += f"  •  {hold_mins}m"
+                    message += f" • {hold_mins}m"
             message += "\n"
             
-            # Price summary (compact)
+            # Price movement
             price_change = exit_price - entry_price if entry_price else 0
             pct_change = (price_change / entry_price * 100) if entry_price > 0 else 0
             message += f"${entry_price:.2f} → ${exit_price:.2f} ({price_change:+.1f} / {pct_change:+.1f}%)\n"
             
-            # Exit reason (single line, compact)
+            # Exit reason
             exit_icons = {
                 "stop_loss": "🛑",
                 "take_profit": "🎯",
@@ -1054,37 +1036,21 @@ class NQAgentTelegramNotifier:
                 "trailing_stop": "📉",
             }
             reason_icon = exit_icons.get(exit_reason.lower(), "ℹ️")
-            message += f"{reason_icon} {exit_reason_display}\n"
+            message += f"{reason_icon} {exit_reason_display}"
             
-            # Compact footer - only show "tap Details" when command handler is running
             handler_running = _is_command_handler_running()
-            if handler_running:
-                message += f"\n`{signal_id[:12]}` • tap Details"
-            else:
-                message += f"\n`{signal_id[:12]}`"
             
-            # Build optional deep-link buttons
+            # Build inline buttons (consistent with entry notification)
             reply_markup = None
             if handler_running:
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                    show_nav = self.prefs.dashboard_buttons if self.prefs else False
                     keyboard = [
                         [
                             InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
-                            InlineKeyboardButton("📈 Performance", callback_data="performance"),
+                            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
                         ],
                     ]
-                    if show_nav:
-                        keyboard.append(
-                            [
-                                InlineKeyboardButton("🏠 Menu", callback_data="start"),
-                                InlineKeyboardButton("🎯 Trades", callback_data="active_trades"),
-                                InlineKeyboardButton("🔔 Signals", callback_data="signals"),
-                            ]
-                        )
-                    else:
-                        keyboard.append([InlineKeyboardButton("🔔 Signals", callback_data="signals")])
                     reply_markup = InlineKeyboardMarkup(keyboard)
                 except Exception:
                     reply_markup = None
@@ -1106,6 +1072,7 @@ class NQAgentTelegramNotifier:
             if chart_path and chart_path.exists():
                 try:
                     await self._send_photo(chart_path)
+                    await self._send_post_chart_nav()
                     try:
                         chart_path.unlink()
                     except Exception:
@@ -1727,8 +1694,7 @@ class NQAgentTelegramNotifier:
                     keyboard = [
                         [
                             InlineKeyboardButton("🏠 Menu", callback_data="start"),
-                            InlineKeyboardButton("📈 Activity", callback_data="activity"),
-                            InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
+                            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)

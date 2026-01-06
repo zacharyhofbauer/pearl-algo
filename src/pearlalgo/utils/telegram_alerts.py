@@ -363,7 +363,7 @@ def format_next_session_time(
     """
     # Safe fallback when session times aren't provided
     if not session_start:
-        return "See /config for session window"
+        return "Menu → Settings → Config"
     
     try:
         from datetime import datetime, timezone, timedelta
@@ -378,7 +378,7 @@ def format_next_session_time(
             start_hour = int(start_parts[0])
             start_minute = int(start_parts[1]) if len(start_parts) > 1 else 0
         except (ValueError, IndexError):
-            return "See /config for session window"
+            return "Menu → Settings → Config"
         
         # Parse session end time if provided (for cross-midnight detection)
         end_hour = None
@@ -437,7 +437,7 @@ def format_next_session_time(
         else:
             return f"Opens {day_name} at {time_str}"
     except Exception:
-        return "See /config for session window"
+        return "Menu → Settings → Config"
 
 
 def format_session_window(
@@ -455,13 +455,13 @@ def format_session_window(
         Formatted string like "18:00–16:10 ET" or safe fallback.
     """
     if not session_start or not session_end:
-        return "See /config"
+        return "Menu → Settings → Config"
     
     try:
         # Format times for display (keep HH:MM format, add ET)
         return f"{session_start}–{session_end} ET"
     except Exception:
-        return "See /config"
+        return "Menu → Settings → Config"
 
 
 def format_signal_action_cue(
@@ -664,10 +664,10 @@ def format_stale_callout(
 
     Returns:
         Formatted staleness callout like:
-        ⏰ Data stale (11m) • signals paused • /data_quality
+        ⏰ Data stale (11m) • signals paused • Menu → Health → Data
     """
     age_str = f"{data_age_minutes:.0f}m" if data_age_minutes < 60 else f"{data_age_minutes / 60:.1f}h"
-    return f"⏰ Data stale ({age_str}) • {impact} • /data_quality"
+    return f"⏰ Data stale ({age_str}) • {impact} • Menu → Health → Data"
 
 
 def format_performance_line(
@@ -899,7 +899,7 @@ def format_home_card(
             lines.append(f"{_SUBLINE_PREFIX}📅 {next_session}")
         else:
             # Safe fallback when session config not available
-            lines.append(f"{_SUBLINE_PREFIX}ℹ️ Signals suppressed{_BULLET_SEP}See /config for session window")
+            lines.append(f"{_SUBLINE_PREFIX}ℹ️ Signals suppressed{_BULLET_SEP}Menu → Settings → Config")
     elif futures_market_open is False and strategy_session_open is not False:
         lines.append(f"{_SUBLINE_PREFIX}ℹ️ Data may be delayed (market closed)")
     
@@ -921,7 +921,7 @@ def format_home_card(
             lines.append(f"{_SUBLINE_PREFIX}{reason_display}")
         # Actionable cue for StaleData
         if quiet_reason == "StaleData":
-            lines.append(f"{_SUBLINE_PREFIX}💡 Run /data_quality for details")
+            lines.append(f"{_SUBLINE_PREFIX}💡 Menu → Health → Data")
         # Actionable cue for Level1Unavailable (missing API acknowledgement)
         if quiet_reason == "Level1Unavailable":
             lines.append(f"{_SUBLINE_PREFIX}💡 Check IBKR Market Data API Acknowledgement")

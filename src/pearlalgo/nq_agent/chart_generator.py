@@ -298,6 +298,43 @@ class ChartGenerator:
         
         return df
     
+    def _infer_timeframe_from_data(self, df: pd.DataFrame) -> str:
+        """Infer timeframe label from DataFrame index frequency."""
+        if not isinstance(df.index, pd.DatetimeIndex) or len(df) < 2:
+            return "1m"  # Default fallback
+        
+        # Try pandas frequency inference first
+        try:
+            freq = pd.infer_freq(df.index)
+            if freq in ("T", "min", "1T", "1min"):
+                return "1m"
+            elif freq in ("5T", "5min"):
+                return "5m"
+            elif freq in ("15T", "15min"):
+                return "15m"
+            elif freq in ("H", "60T", "60min"):
+                return "1h"
+        except Exception:
+            pass
+        
+        # Fallback: compute median interval between bars
+        try:
+            deltas = df.index.to_series().diff().dropna()
+            if len(deltas) > 0:
+                median_sec = deltas.median().total_seconds()
+                if median_sec <= 90:
+                    return "1m"
+                elif median_sec <= 330:
+                    return "5m"
+                elif median_sec <= 960:
+                    return "15m"
+                else:
+                    return "1h"
+        except Exception:
+            pass
+        
+        return "1m"  # Default
+    
     def _add_indicators(self, data: pd.DataFrame) -> List:
         """Create list of indicators for mplfinance."""
         indicators = []
@@ -1288,7 +1325,7 @@ class ChartGenerator:
             signal_type = signal.get("type", "unknown").replace("_", " ").title()
             is_test = signal.get("reason", "").lower().startswith("test")
             title_prefix = "[TEST] " if is_test else ""
-            tf_label = timeframe or self.config.timeframe
+            tf_label = self._infer_timeframe_from_data(df)
             title = f"{title_prefix}{symbol} {direction.upper()} {signal_type} - Entry Chart ({tf_label})"
             
             # Save to temp file
@@ -1430,7 +1467,7 @@ class ChartGenerator:
             # Create title
             signal_type = signal.get("type", "unknown").replace("_", " ").title()
             result = "WIN" if pnl > 0 else "LOSS"
-            tf_label = timeframe or self.config.timeframe
+            tf_label = self._infer_timeframe_from_data(df)
             title = f"{symbol} {direction.upper()} {signal_type} - Exit ({result}) ({tf_label})"
             
             # Save to temp file

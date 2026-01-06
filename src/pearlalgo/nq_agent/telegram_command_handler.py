@@ -1096,7 +1096,10 @@ class TelegramCommandHandler:
                         InlineKeyboardButton(btn_label(16), callback_data="chart_16h"),
                         InlineKeyboardButton(btn_label(24), callback_data="chart_24h"),
                     ],
-                    [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                    [
+                        InlineKeyboardButton("🏠 Menu", callback_data="start"),
+                        InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
+                    ],
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 
@@ -1354,6 +1357,65 @@ class TelegramCommandHandler:
                 session_start=session_start,
                 session_end=session_end,
             )
+
+            # Trade Monitor: show active trades with unrealized P&L
+            if active_trades_count > 0:
+                try:
+                    active_trades = []
+                    signals_file = get_signals_file(self.state_dir)
+                    if signals_file.exists():
+                        with open(signals_file) as f:
+                            for line in f:
+                                try:
+                                    sig = json.loads(line.strip())
+                                    if sig.get("status") == "entered":
+                                        active_trades.append(sig)
+                                except Exception:
+                                    continue
+                    
+                    if active_trades:
+                        # Get current price for unrealized P&L calculation
+                        current_price = latest_price  # Already fetched above
+                        
+                        message += f"\n\n📈 *Trade Monitor*\n"
+                        
+                        for trade_data in active_trades:
+                            signal = trade_data.get("signal", {})
+                            direction = (signal.get("direction", "long") or "long").upper()
+                            dir_emoji = "🟢" if direction == "LONG" else "🔴"
+                            entry_price = float(signal.get("entry_price", 0) or 0)
+                            stop_loss = float(signal.get("stop_loss", 0) or 0)
+                            take_profit = float(signal.get("take_profit", 0) or 0)
+                            tick_value = float(signal.get("tick_value", 2.0) or 2.0)
+                            position_size = float(signal.get("position_size", 1.0) or 1.0)
+                            
+                            message += f"{dir_emoji} {direction} @ ${entry_price:.2f}"
+                            
+                            # Show unrealized P&L if we have current price
+                            if current_price is not None and entry_price > 0:
+                                if direction == "LONG":
+                                    pnl_pts = current_price - entry_price
+                                else:
+                                    pnl_pts = entry_price - current_price
+                                unrealized_pnl = pnl_pts * tick_value * position_size
+                                pnl_emoji = "🟢" if unrealized_pnl >= 0 else "🔴"
+                                if unrealized_pnl >= 0:
+                                    pnl_str = f"+${unrealized_pnl:.2f}"
+                                else:
+                                    pnl_str = f"-${abs(unrealized_pnl):.2f}"
+                                message += f" → {pnl_emoji} {pnl_str}\n"
+                                
+                                # Show distance to stop/TP
+                                if stop_loss > 0:
+                                    dist_to_stop = abs(current_price - stop_loss)
+                                    message += f"   Stop: ${stop_loss:.2f} ({dist_to_stop:.1f} pts)\n"
+                                if take_profit > 0:
+                                    dist_to_tp = abs(take_profit - current_price)
+                                    message += f"   TP: ${take_profit:.2f} ({dist_to_tp:.1f} pts)\n"
+                            else:
+                                message += "\n"
+                except Exception as e:
+                    logger.debug(f"Could not build trade monitor: {e}")
 
             # Optional: Prop firm guardrails snapshot (kept compact)
             try:
@@ -6182,6 +6244,33 @@ Choose what you want to inspect:
         except Exception:
             pass
 
+        # ML/Bandit Policy status (for Claude to monitor learning)
+        try:
+            state_file = get_state_file(self.state_dir)
+            if state_file.exists():
+                with open(state_file, "r") as f:
+                    state = json.load(f)
+                if isinstance(state, dict):
+                    learning = state.get("learning", {})
+                    if learning.get("enabled"):
+                        lines.append("ml.learning_enabled: true")
+                        lines.append(f"ml.mode: {learning.get('mode', 'shadow')}")
+                        
+                        # Bandit policy stats
+                        bandit = state.get("bandit_policy", {})
+                        if isinstance(bandit, dict):
+                            signal_types = bandit.get("signal_types", {})
+                            if signal_types:
+                                lines.append("ml.bandit_policy:")
+                                for sig_type, stats in signal_types.items():
+                                    wins = stats.get("wins", 0)
+                                    losses = stats.get("losses", 0)
+                                    total = wins + losses
+                                    wr = (wins / total * 100) if total > 0 else 0
+                                    lines.append(f"  {sig_type}: {wins}W/{losses}L ({wr:.0f}% WR, n={total})")
+        except Exception:
+            pass
+
         # recent signals (last few)
         try:
             from collections import deque
@@ -6315,7 +6404,12 @@ Choose what you want to inspect:
                     reply_markup=chat_controls,
                 )
             else:
-                await update.message.reply_text(response, reply_markup=chat_controls)
+                # Format response with Markdown for better readability
+                await update.message.reply_text(
+                    response,
+                    parse_mode="Markdown",
+                    reply_markup=chat_controls,
+                )
                 
         except ClaudeAPIKeyMissingError:
             await update.message.reply_text(
@@ -7635,14 +7729,16 @@ _Commands are policy-gated for safety._
         # Row 2: Primary drill-down (fastest operator actions)
         keyboard.append([
             InlineKeyboardButton("📟 Status", callback_data="status"),
-            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
+            InlineKeyboardButton("📡 Health", callback_data="health_menu"),
             InlineKeyboardButton("🧠 Review", callback_data="strategy_review"),
         ])
 
-        # Row 3: Health submenu (Activity / Data / Performance)
+
+        # Row 3: Signals & Trades (primary workflow)
         keyboard.append([
-            InlineKeyboardButton("📡 Health", callback_data="health_menu"),
+            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
         ])
+
 
         # Row 4: Tools
         keyboard.append([
@@ -10383,61 +10479,33 @@ _Commands are policy-gated for safety._
         await self._send_message_or_edit(update, context, message, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def _render_strategy_review_more_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Show the Strategy Review action sheet (advanced actions live here)."""
+        """Show a minimal, action-oriented Strategy Review menu (button-first UX)."""
         if not await self._check_authorized(update):
             return
 
-        has_autofix = bool(getattr(context, "user_data", {}).get("strategy_review_autofix_task")) if hasattr(context, "user_data") else False
-        has_config_candidate = bool(getattr(context, "user_data", {}).get("strategy_review_config_candidate")) if hasattr(context, "user_data") else False
+        claude_ok = bool(get_claude_client()) if ANTHROPIC_AVAILABLE else False
 
-        sel_weeks = 2
-        if hasattr(context, "user_data"):
-            try:
-                sel_weeks = int(context.user_data.get("strategy_review_variant_weeks", 2) or 2)
-            except Exception:
-                sel_weeks = 2
-        if sel_weeks not in (1, 2, 4):
-            sel_weeks = 2
+        message = """🧠 *Strategy Review — Next Steps*
 
-        message = (
-            "🧠 *Strategy Review — More*\n\n"
-            "Pick an action. (The main Review screen stays intentionally minimal.)"
-        )
+Recommended flow:
+1) 📉 *Backtest* (validate a change)
+2) 📂 *Reports* (see results / breakdown)
+3) 📄 *Export* (save/share)
+"""
+        if claude_ok:
+            message += "\n💬 Claude can take ~1–2 minutes. If it times out, try later."
+        else:
+            message += "\n💬 Claude is currently unavailable (or disabled)."
 
-        keyboard: List[List[InlineKeyboardButton]] = []
-
-        keyboard.append([InlineKeyboardButton("📄 Export", callback_data="strategy_review:export")])
-
-        if ANTHROPIC_AVAILABLE:
-            keyboard.append([InlineKeyboardButton("💬 Discuss with Claude", callback_data="strategy_review:discuss")])
-            keyboard.append([InlineKeyboardButton("🧩 Patch Wizard", callback_data="claude_patch_wizard")])
-            if has_autofix:
-                keyboard.append([InlineKeyboardButton("🧩 Auto Fix (Patch)", callback_data="strategy_review:autofix")])
-
-        if has_config_candidate:
-            if ANTHROPIC_AVAILABLE:
-                keyboard.append([InlineKeyboardButton("⚙️ Config Patch (Safe)", callback_data="strategy_review:config_patch")])
-            keyboard.append([InlineKeyboardButton(f"🧪 Backtest Variant ({sel_weeks}w)", callback_data="strategy_review:variant_backtest")])
-            keyboard.append(
-                [
-                    InlineKeyboardButton("1w ✓" if sel_weeks == 1 else "1w", callback_data="strategy_review:variant_weeks:1"),
-                    InlineKeyboardButton("2w ✓" if sel_weeks == 2 else "2w", callback_data="strategy_review:variant_weeks:2"),
-                    InlineKeyboardButton("4w ✓" if sel_weeks == 4 else "4w", callback_data="strategy_review:variant_weeks:4"),
-                ]
-            )
-
-        keyboard.append(
-            [
-                InlineKeyboardButton("💡 Suggest Config", callback_data="claude_suggest_config"),
-                InlineKeyboardButton("📋 Suggestions", callback_data="claude_suggestions"),
-            ]
-        )
-        keyboard.append(
+        keyboard: List[List[InlineKeyboardButton]] = [
             [
                 InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
                 InlineKeyboardButton("📂 Reports", callback_data="reports"),
-            ]
-        )
+            ],
+            [InlineKeyboardButton("📄 Export", callback_data="strategy_review:export")],
+        ]
+        if claude_ok:
+            keyboard.append([InlineKeyboardButton("💬 Discuss with Claude", callback_data="strategy_review:discuss")])
 
         keyboard.append([InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")])
         keyboard.append([InlineKeyboardButton("🏠 Home", callback_data="start")])
@@ -11278,7 +11346,7 @@ _Commands are policy-gated for safety._
             "2) Give me a 3-step plan for the next 24h (low-risk).\n"
             "3) Propose 2 backtests/experiments (what to change + what success metric).\n\n"
             "Strategy Review JSON:\n"
-            f"{json.dumps(payload, indent=2, default=str)[:12000]}"
+            f"{json.dumps(payload, indent=2, default=str)[:6000]}"
         )
 
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -11304,7 +11372,99 @@ _Commands are policy-gated for safety._
         )
 
         import asyncio
-        response = await asyncio.to_thread(client.chat, chat_history, system_prompt)
+
+        # UX: show an immediate progress message so it never feels like the button "did nothing".
+        try:
+            await self._send_message_or_edit(
+                update,
+                context,
+                """💬 *Discuss with Claude*
+
+⏳ Asking Claude… (can take up to ~2 minutes)
+
+_Wait for the response — or tap below if you'd rather not wait._""",
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton("📄 Export", callback_data="strategy_review:export"),
+                            InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
+                        ],
+                        [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+                        [InlineKeyboardButton("🏠 Home", callback_data="start")],
+                    ]
+                ),
+            )
+        except Exception:
+            # Best-effort only; do not block Claude call
+            pass
+
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(client.chat, chat_history, system_prompt),
+                timeout=140.0,
+            )
+        except asyncio.TimeoutError:
+            await self._send_message_or_edit(
+                update,
+                context,
+                """💬 *Discuss with Claude*
+
+⏱️ Claude timed out (~2 min limit).
+
+*What to do instead:*
+• Use 📄 *Export* to save/share this review
+• Try 📉 *Backtest* or 📂 *Reports* for quick insights
+• Or try again later when load is lower""",
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton("📄 Export", callback_data="strategy_review:export"),
+                            InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
+                        ],
+                        [InlineKeyboardButton("🔄 Try Again", callback_data="strategy_review:discuss")],
+                        [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+                        [InlineKeyboardButton("🏠 Home", callback_data="start")],
+                    ]
+                ),
+            )
+            return
+        except ClaudeAPIError as e:
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"💬 *Discuss with Claude*\n\n❌ Claude error: `{str(e)[:120]}`\n\n"
+                "*Alternatives:* use 📄 *Export* or try again later.",
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton("📄 Export", callback_data="strategy_review:export"),
+                            InlineKeyboardButton("🔄 Try Again", callback_data="strategy_review:discuss"),
+                        ],
+                        [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+                        [InlineKeyboardButton("🏠 Home", callback_data="start")],
+                    ]
+                ),
+            )
+            return
+        except Exception as e:
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"💬 *Discuss with Claude*\n\n❌ Unexpected error: `{str(e)[:120]}`\n\n"
+                "Use 📄 *Export* instead or try again later.",
+                reply_markup=InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton("📄 Export", callback_data="strategy_review:export"),
+                            InlineKeyboardButton("🔄 Try Again", callback_data="strategy_review:discuss"),
+                        ],
+                        [InlineKeyboardButton("⬅️ Back to Review", callback_data="strategy_review:show")],
+                        [InlineKeyboardButton("🏠 Home", callback_data="start")],
+                    ]
+                ),
+            )
+            return
+
         chat_history.append({"role": "assistant", "content": response})
 
         if hasattr(context, "user_data"):
@@ -11315,8 +11475,8 @@ _Commands are policy-gated for safety._
         chat_controls = InlineKeyboardMarkup(
             [
                 [
+                    InlineKeyboardButton("💬 Chat with Claude", callback_data="claude_hub"),
                     InlineKeyboardButton("🧠 Review", callback_data="strategy_review"),
-                    InlineKeyboardButton("🤖 Hub", callback_data="claude_hub"),
                 ],
                 [
                     InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
@@ -11342,9 +11502,11 @@ _Commands are policy-gated for safety._
                 reply_markup=chat_controls,
             )
         else:
+            # Format response for better Telegram rendering (markdown)
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=response,
+                parse_mode="Markdown",
                 reply_markup=chat_controls,
             )
     
