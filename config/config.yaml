@@ -123,6 +123,14 @@ signals:
   # 25 pts = $250 risk @ 5 MNQ contracts, $500 @ 10 contracts
   max_stop_points: 25.0              # Maximum stop distance in points (0 = disabled)
   
+  # Adaptive volatility filter (LANE B - strategy threshold change)
+  # Requires ATR expansion during low-vol consolidation to reduce false breakouts.
+  # When ATR is below median_atr_threshold, requires expansion_requirement before entry.
+  adaptive_volatility_filter:
+    enabled: true                     # Enabled: reduces false breakouts during low-vol consolidation
+    expansion_requirement: 2.0        # Require 2x ATR expansion during low-vol
+    median_atr_threshold: 0.0003      # Threshold below which expansion is required
+  
   # Per-signal-type regime/session filters
   # Signals are rejected if current regime/session is NOT in the allowed list.
   # Empty list = no filter (all regimes/sessions allowed).
@@ -175,6 +183,15 @@ strategy:
   use_scalp_presets: false
   scalp_target_points: 20.0   # For $200 with 5 contracts
   scalp_stop_points: 12.0
+  
+  # Session-based position scaling (LANE B - risk parameter change)
+  # Reduces position size during quiet sessions (Tokyo, London) to manage risk.
+  # Full size during NY session when liquidity and volatility are highest.
+  session_position_scaling:
+    enabled: true                     # Enabled: 50% size during Tokyo/London, full size NY
+    london_multiplier: 0.5            # 50% size during London session
+    tokyo_multiplier: 0.5             # 50% size during Tokyo session
+    ny_multiplier: 1.0                # Full size during NY session
 
 # Strategy variants for A/B testing
 # Use: python scripts/backtesting/run_variants.py --data-path <file>

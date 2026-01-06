@@ -682,37 +682,14 @@ class TelegramCommandHandler:
         return authorized
     
     async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command."""
+        """Handle /start command - shows status screen directly."""
         logger.info(f"Received /start command from chat {update.effective_chat.id}")
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
         
-        # Check if agent is running
-        agent_running = self._is_agent_process_running()
-        gateway_status = self.service_controller.get_gateway_status()
-        gateway_running = gateway_status.get("process_running", False)
-        gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
-        
-        message = (
-            "🤖 *MNQ Trading Bot*\n\n"
-            f"{'🟢' if agent_running else '⬜'} *Agent:* {STATE_RUNNING if agent_running else STATE_STOPPED}\n"
-            f"{'🟢' if gateway_running else '⬜'} *Gateway:* {STATE_RUNNING if gateway_running else STATE_STOPPED}\n\n"
-            "💡 `/start` = this menu (to start the agent, use ▶️ Start button below)\n\n"
-            "*Quick Start:*\n"
-            f"1. Check {LABEL_GATEWAY} status\n"
-            f"2. Start {LABEL_AGENT} when ready\n"
-            "3. Monitor via Status & Signals\n\n"
-            "⚙️ Tap *Settings* to customize your Telegram UI."
-        )
-        
-        reply_markup = self._get_main_menu_buttons(
-            agent_running=agent_running,
-            gateway_running=gateway_running,
-            gateway_api_ready=gateway_api_ready,
-        )
-        logger.info(f"Sending /start menu with {len(reply_markup.inline_keyboard)} button rows to chat {update.effective_chat.id}")
-        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+        # Show status screen directly (no welcome message)
+        await self._handle_status(update, context)
     
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command."""
@@ -1478,6 +1455,43 @@ class TelegramCommandHandler:
             except Exception:
                 pass
             
+            # Add recent exits (last 3 closed trades)
+            try:
+                signals_file = get_signals_file(self.state_dir)
+                if signals_file.exists():
+                    recent_exits = []
+                    with open(signals_file, "r") as f:
+                        for line in f:
+                            try:
+                                rec = json.loads(line.strip())
+                                if rec.get("status") == "exited" and rec.get("pnl") is not None:
+                                    sig = rec.get("signal", {}) or {}
+                                    recent_exits.append({
+                                        "pnl": rec.get("pnl"),
+                                        "direction": sig.get("direction", "long"),
+                                        "type": sig.get("type", "unknown"),
+                                        "exit_reason": rec.get("exit_reason", ""),
+                                    })
+                            except Exception:
+                                continue
+                    
+                    if recent_exits:
+                        # Show last 3 exits
+                        recent_exits = recent_exits[-3:]
+                        message += "\n\n*Recent exits:*"
+                        for t in recent_exits:
+                            pnl_val = float(t.get("pnl") or 0.0)
+                            pnl_emoji, pnl_str = format_pnl(pnl_val)
+                            dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
+                            sig_type = safe_label(str(t.get("type") or "unknown"))
+                            reason = safe_label(str(t.get("exit_reason") or "")).strip()
+                            line = f"\n{pnl_emoji} {pnl_str} • {dir_emoji} {dir_label} • {sig_type}"
+                            if reason:
+                                line += f" • {reason}"
+                            message += line
+            except Exception as e:
+                logger.debug(f"Could not add recent exits to status: {e}")
+            
             # Send chart first, then text (like interval notification)
             await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_photo")
             
@@ -1579,6 +1593,170 @@ class TelegramCommandHandler:
                 gateway_api_ready=gateway_api_ready,
             )
             await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
+    
+    async def _handle_status_refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle status refresh - edit text only, no new chart."""
+        if not await self._check_authorized(update):
+            return
+        
+        try:
+            # Get gateway status
+            gateway_status = self.service_controller.get_gateway_status()
+            gateway_running = gateway_status.get("process_running", False)
+            gateway_api_ready = gateway_status.get("port_listening", False) if gateway_running else False
+            
+            # Load state
+            state_file = get_state_file(self.state_dir)
+            if not state_file.exists():
+                process_running = self._is_agent_process_running()
+                message = format_home_card(
+                    symbol="MNQ",
+                    time_str=self._get_current_time_str(),
+                    agent_running=process_running,
+                    gateway_running=gateway_running,
+                    futures_market_open=None,
+                    strategy_session_open=None,
+                )
+                message += "\n\n⚠️ *No state file found*"
+                reply_markup = self._get_main_menu_buttons(
+                    agent_running=process_running,
+                    gateway_running=gateway_running,
+                    gateway_api_ready=gateway_api_ready,
+                )
+                await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+                return
+            
+            with open(state_file) as f:
+                state = json.load(f)
+            
+            # Build status (same as _handle_status but simplified)
+            process_running = self._is_agent_process_running()
+            running = process_running and state.get("running", False)
+            paused = state.get("paused", False)
+            pause_reason = state.get("pause_reason") or None
+            
+            cycles_total = int(state.get("cycle_count", 0) or 0)
+            cycles_session = state.get("cycle_count_session")
+            try:
+                cycles_session = int(cycles_session) if cycles_session is not None else None
+            except Exception:
+                cycles_session = None
+            
+            signals_generated = int(state.get("signal_count", 0) or 0)
+            signals_sent = int(state.get("signals_sent", 0) or 0)
+            errors = int(state.get("error_count", 0) or 0)
+            buffer_size = int(state.get("buffer_size", 0) or 0)
+            buffer_target = state.get("buffer_size_target")
+            signal_send_failures = int(state.get("signals_send_failures", 0) or 0)
+            
+            # Activity pulse
+            last_cycle_seconds = None
+            try:
+                last_cycle_ts = state.get("last_successful_cycle")
+                if last_cycle_ts:
+                    from pearlalgo.utils.paths import parse_utc_timestamp
+                    last_cycle_dt = parse_utc_timestamp(str(last_cycle_ts))
+                    if last_cycle_dt:
+                        if last_cycle_dt.tzinfo is None:
+                            last_cycle_dt = last_cycle_dt.replace(tzinfo=timezone.utc)
+                        last_cycle_seconds = (datetime.now(timezone.utc) - last_cycle_dt).total_seconds()
+            except Exception:
+                pass
+            
+            # Gates and price
+            futures_market_open = state.get("futures_market_open")
+            strategy_session_open = state.get("strategy_session_open")
+            latest_price = self._extract_latest_price(state)
+            
+            # Performance
+            perf = None
+            try:
+                perf = self.performance_tracker.get_performance_metrics(days=7)
+            except Exception:
+                pass
+            
+            # Buy/sell pressure
+            buy_sell_pressure = state.get("buy_sell_pressure")
+            
+            # Session times
+            config_block = state.get("config", {})
+            session_start = config_block.get("start_time") if isinstance(config_block, dict) else None
+            session_end = config_block.get("end_time") if isinstance(config_block, dict) else None
+            
+            # Format home card
+            message = format_home_card(
+                symbol="MNQ",
+                time_str=self._get_current_time_str(),
+                agent_running=running,
+                gateway_running=gateway_running,
+                futures_market_open=futures_market_open,
+                strategy_session_open=strategy_session_open,
+                paused=paused,
+                pause_reason=pause_reason,
+                cycles_session=cycles_session,
+                cycles_total=cycles_total,
+                signals_generated=signals_generated,
+                signals_sent=signals_sent,
+                errors=errors,
+                buffer_size=buffer_size,
+                buffer_target=buffer_target,
+                latest_price=latest_price,
+                performance=perf,
+                signal_send_failures=signal_send_failures,
+                buy_sell_pressure=buy_sell_pressure,
+                last_cycle_seconds=last_cycle_seconds,
+                session_start=session_start,
+                session_end=session_end,
+            )
+            
+            # Add recent exits (last 3 closed trades)
+            try:
+                signals_file = get_signals_file(self.state_dir)
+                if signals_file.exists():
+                    recent_exits = []
+                    with open(signals_file, "r") as f:
+                        for line in f:
+                            try:
+                                rec = json.loads(line.strip())
+                                if rec.get("status") == "exited" and rec.get("pnl") is not None:
+                                    sig = rec.get("signal", {}) or {}
+                                    recent_exits.append({
+                                        "pnl": rec.get("pnl"),
+                                        "direction": sig.get("direction", "long"),
+                                        "type": sig.get("type", "unknown"),
+                                        "exit_reason": rec.get("exit_reason", ""),
+                                    })
+                            except Exception:
+                                continue
+                    
+                    if recent_exits:
+                        recent_exits = recent_exits[-3:]
+                        message += "\n\n*Recent exits:*"
+                        for t in recent_exits:
+                            pnl_val = float(t.get("pnl") or 0.0)
+                            pnl_emoji, pnl_str = format_pnl(pnl_val)
+                            dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
+                            sig_type = safe_label(str(t.get("type") or "unknown"))
+                            reason = safe_label(str(t.get("exit_reason") or "")).strip()
+                            line = f"\n{pnl_emoji} {pnl_str} • {dir_emoji} {dir_label} • {sig_type}"
+                            if reason:
+                                line += f" • {reason}"
+                            message += line
+            except Exception:
+                pass
+            
+            reply_markup = self._get_main_menu_buttons(
+                agent_running=running,
+                gateway_running=gateway_running,
+                gateway_api_ready=gateway_api_ready,
+            )
+            
+            # Edit message in place
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+            
+        except Exception as e:
+            logger.error(f"Error handling status refresh: {e}", exc_info=True)
+            await self._send_message_or_edit(update, context, f"❌ Refresh failed: {str(e)[:100]}")
     
     def _get_current_time_str(self) -> str:
         """Get current time formatted for display (ET timezone)."""
@@ -7901,6 +8079,7 @@ _Commands are policy-gated for safety._
         # Row 2: Primary drill-down (fastest operator actions)
         keyboard.append([
             InlineKeyboardButton("📟 Status", callback_data="status"),
+            InlineKeyboardButton("🔄", callback_data="status_refresh"),  # Quick refresh (text only)
             InlineKeyboardButton("📡 Health", callback_data="health_menu"),
             InlineKeyboardButton("🧠 Review", callback_data="strategy_review"),
         ])
@@ -8212,6 +8391,8 @@ _Commands are policy-gated for safety._
         
         if callback_data == 'status':
             await self._handle_status(update, context)
+        elif callback_data == 'status_refresh':
+            await self._handle_status_refresh(update, context)
         elif callback_data == 'performance':
             await self._handle_performance(update, context)
         elif callback_data.startswith("performance_export:"):

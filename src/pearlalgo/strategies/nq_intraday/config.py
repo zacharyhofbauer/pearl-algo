@@ -137,6 +137,25 @@ class NQIntradayConfig:
     hud_rsi_period: int = 14
 
     # ==========================================================================
+    # ADAPTIVE VOLATILITY FILTER
+    # Requires ATR expansion during low-volatility consolidation.
+    # Reduces false breakout signals when market is ranging in tight range.
+    # ==========================================================================
+    adaptive_volatility_filter_enabled: bool = False
+    adaptive_volatility_expansion_requirement: float = 2.0   # Require 2x ATR expansion
+    adaptive_volatility_median_threshold: float = 0.0003     # Threshold below which expansion required
+
+    # ==========================================================================
+    # SESSION-BASED POSITION SCALING
+    # Reduces position size during quiet sessions (Tokyo, London).
+    # Full size during NY session when liquidity is highest.
+    # ==========================================================================
+    session_position_scaling_enabled: bool = False
+    session_london_multiplier: float = 0.5   # 50% size during London
+    session_tokyo_multiplier: float = 0.5    # 50% size during Tokyo
+    session_ny_multiplier: float = 1.0       # Full size during NY
+
+    # ==========================================================================
     # EXPERIMENTAL: Bayesian Quality Gate (non-default)
     # Uses Beta-Binomial posterior for uncertainty-aware signal filtering.
     # Enable with: bayesian_gate_enabled: true in config.yaml
@@ -348,6 +367,26 @@ class NQIntradayConfig:
                 config.ml_filter_calibration_mode = bool(ml_cfg["calibration_mode"])
             if "calibration_scaling" in ml_cfg:
                 config.ml_filter_calibration_scaling = float(ml_cfg["calibration_scaling"])
+
+            # Load adaptive volatility filter settings
+            avf_cfg = signals_cfg.get("adaptive_volatility_filter", {}) or {}
+            if "enabled" in avf_cfg:
+                config.adaptive_volatility_filter_enabled = bool(avf_cfg["enabled"])
+            if "expansion_requirement" in avf_cfg:
+                config.adaptive_volatility_expansion_requirement = float(avf_cfg["expansion_requirement"])
+            if "median_atr_threshold" in avf_cfg:
+                config.adaptive_volatility_median_threshold = float(avf_cfg["median_atr_threshold"])
+
+            # Load session-based position scaling settings
+            sps_cfg = strategy_cfg.get("session_position_scaling", {}) or {}
+            if "enabled" in sps_cfg:
+                config.session_position_scaling_enabled = bool(sps_cfg["enabled"])
+            if "london_multiplier" in sps_cfg:
+                config.session_london_multiplier = float(sps_cfg["london_multiplier"])
+            if "tokyo_multiplier" in sps_cfg:
+                config.session_tokyo_multiplier = float(sps_cfg["tokyo_multiplier"])
+            if "ny_multiplier" in sps_cfg:
+                config.session_ny_multiplier = float(sps_cfg["ny_multiplier"])
 
         except Exception as e:  # pragma: no cover - defensive logging
             import logging

@@ -407,6 +407,30 @@ class NQScanner:
             )
             return signals
 
+        # Adaptive volatility expansion filter (LANE B feature)
+        # During low-vol consolidation, require ATR expansion before entry.
+        # This reduces false breakout signals when market is ranging in tight range.
+        if getattr(self.config, "adaptive_volatility_filter_enabled", False):
+            median_threshold = getattr(self.config, "adaptive_volatility_median_threshold", 0.0003)
+            expansion_req = getattr(self.config, "adaptive_volatility_expansion_requirement", 2.0)
+            
+            if atr_pct < median_threshold:
+                # Low-vol environment detected - check for ATR expansion
+                # Compare current ATR to ATR from 5 bars ago
+                if len(df) >= 5 and "atr" in df.columns:
+                    atr_5_bars_ago = float(df["atr"].iloc[-5])
+                    expansion_ratio = current_atr / atr_5_bars_ago if atr_5_bars_ago > 0 else 1.0
+                    
+                    if expansion_ratio < expansion_req:
+                        self.last_gate_reasons.append(
+                            f"Low-vol consolidation: ATR expansion {expansion_ratio:.2f}x < {expansion_req:.1f}x required"
+                        )
+                        logger.debug(
+                            f"Adaptive volatility gate: expansion {expansion_ratio:.2f}x < {expansion_req:.1f}x, "
+                            f"atr_pct={atr_pct:.5f} < median={median_threshold:.5f}"
+                        )
+                        return signals
+
         # Calculate ATR-based stop loss and take profit
         current_price = float(latest["close"])
         atr = float(latest.get("atr", 0))

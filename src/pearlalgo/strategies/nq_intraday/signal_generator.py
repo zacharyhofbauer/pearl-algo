@@ -34,6 +34,7 @@ class SignalDiagnostics:
     explore_signals: int = 0     # B-tier (looser thresholds, clearly labeled)
     duplicates_filtered: int = 0
     stop_cap_applied: int = 0  # Signals where stop was capped
+    session_scaling_applied: int = 0  # Signals with session-based position scaling
     
     # Rejection reasons
     rejected_market_hours: bool = False  # Filtered by market hours gate
@@ -62,6 +63,7 @@ class SignalDiagnostics:
             "explore_signals": self.explore_signals,
             "duplicates_filtered": self.duplicates_filtered,
             "stop_cap_applied": self.stop_cap_applied,
+            "session_scaling_applied": self.session_scaling_applied,
             "rejected_market_hours": self.rejected_market_hours,
             "rejected_confidence": self.rejected_confidence,
             "rejected_risk_reward": self.rejected_risk_reward,
@@ -135,6 +137,10 @@ class SignalDiagnostics:
         if self.stop_cap_applied > 0:
             parts.append(f"| {self.stop_cap_applied} stop-capped")
         
+        # Note session scaling applications
+        if self.session_scaling_applied > 0:
+            parts.append(f"| {self.session_scaling_applied} session-scaled")
+        
         return " ".join(parts)
     
     def format_detailed(self) -> str:
@@ -189,6 +195,10 @@ class SignalDiagnostics:
         # Note stop cap applications
         if self.stop_cap_applied > 0:
             lines.append(f"Stop-capped: {self.stop_cap_applied} signals")
+        
+        # Note session scaling applications
+        if self.session_scaling_applied > 0:
+            lines.append(f"Session-scaled: {self.session_scaling_applied} signals")
         
         return "\n".join(lines) if lines else "No diagnostic data"
 
@@ -509,6 +519,10 @@ class NQSignalGenerator:
             # Track stop-cap applications
             if validated_signal.get("_stop_cap_applied", False):
                 diagnostics.stop_cap_applied += 1
+            
+            # Track session scaling applications
+            if validated_signal.get("_session_scaling_applied", False):
+                diagnostics.session_scaling_applied += 1
 
             # Apply order book confidence adjustment if available
             if order_book_available:
@@ -922,6 +936,46 @@ class NQSignalGenerator:
             # MNQ: $2 per point. tick_value is MNQ-native in config.
             tick_value = getattr(self.config, "tick_value", 2.0)
             position_size = getattr(self.config, "max_position_size", 10)
+
+            # Apply session-based position scaling (LANE B feature)
+            # Reduces position size during quiet sessions (Tokyo, London) to manage risk.
+            session_scaling_applied = False
+            if getattr(self.config, "session_position_scaling_enabled", False):
+                regime = signal.get("regime", {}) or {}
+                current_session = regime.get("session", "").lower()
+                
+                if "tokyo" in current_session or "asia" in current_session:
+                    multiplier = getattr(self.config, "session_tokyo_multiplier", 0.5)
+                    original_size = position_size
+                    position_size = max(1, int(position_size * multiplier))
+                    session_scaling_applied = True
+                    logger.debug(
+                        f"Session position scaling (Tokyo): {original_size} -> {position_size} contracts "
+                        f"(multiplier={multiplier})"
+                    )
+                elif "london" in current_session or "europe" in current_session:
+                    multiplier = getattr(self.config, "session_london_multiplier", 0.5)
+                    original_size = position_size
+                    position_size = max(1, int(position_size * multiplier))
+                    session_scaling_applied = True
+                    logger.debug(
+                        f"Session position scaling (London): {original_size} -> {position_size} contracts "
+                        f"(multiplier={multiplier})"
+                    )
+                else:
+                    # NY session or unknown - use full size (with configurable multiplier)
+                    multiplier = getattr(self.config, "session_ny_multiplier", 1.0)
+                    if multiplier != 1.0:
+                        original_size = position_size
+                        position_size = max(1, int(position_size * multiplier))
+                        session_scaling_applied = True
+                        logger.debug(
+                            f"Session position scaling (NY): {original_size} -> {position_size} contracts "
+                            f"(multiplier={multiplier})"
+                        )
+            
+            # Mark if session scaling was applied (for diagnostics tracking)
+            formatted["_session_scaling_applied"] = session_scaling_applied
 
             if signal["direction"] == "long":
                 risk_points = abs(entry_price - stop_loss)
