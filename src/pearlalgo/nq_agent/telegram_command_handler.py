@@ -1319,8 +1319,24 @@ class TelegramCommandHandler:
             
             # Get session times from config for config-driven messaging
             config_block = state.get("config", {})
-            session_start = config_block.get("start_time") if isinstance(config_block, dict) else None
-            session_end = config_block.get("end_time") if isinstance(config_block, dict) else None
+            if isinstance(config_block, dict):
+                session_start = config_block.get("start_time") or config_block.get("session_start_time")
+                session_end = config_block.get("end_time") or config_block.get("session_end_time")
+            else:
+                session_start = None
+                session_end = None
+
+            # Telegram UI formatting options (optional)
+            telegram_ui = state.get("telegram_ui", {})
+            if not isinstance(telegram_ui, dict):
+                telegram_ui = {}
+            compact_metrics_enabled = bool(telegram_ui.get("compact_metrics_enabled", True))
+            show_progress_bars = bool(telegram_ui.get("show_progress_bars", False))
+            show_volume_metrics = bool(telegram_ui.get("show_volume_metrics", True))
+            try:
+                compact_metric_width = int(telegram_ui.get("compact_metric_width", 10) or 10)
+            except Exception:
+                compact_metric_width = 10
             
             # Build Home Card message with enhanced confidence/clarity cues (calm-minimal)
             message = format_home_card(
@@ -1347,6 +1363,7 @@ class TelegramCommandHandler:
                 state_stale_threshold=state_stale_threshold,
                 signal_send_failures=signal_send_failures,
                 buy_sell_pressure=state.get("buy_sell_pressure"),
+                buy_sell_pressure_raw=state.get("buy_sell_pressure_raw"),
                 # Calm-minimal: activity pulse + active trades
                 last_cycle_seconds=last_cycle_seconds,
                 active_trades_count=active_trades_count,
@@ -1356,6 +1373,11 @@ class TelegramCommandHandler:
                 # v7 fields for config-driven session messaging
                 session_start=session_start,
                 session_end=session_end,
+                # Config-driven telegram UI formatting
+                compact_metrics_enabled=compact_metrics_enabled,
+                show_progress_bars=show_progress_bars,
+                show_volume_metrics=show_volume_metrics,
+                compact_metric_width=compact_metric_width,
             )
 
             # Trade Monitor: show active trades with unrealized P&L

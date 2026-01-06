@@ -157,6 +157,13 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "connection_failure_alert_interval": 600,  # 10 minutes
         "data_quality_alert_interval": 300,        # 5 minutes
     },
+    # Telegram UI (Home Card / dashboards): compact, mobile-friendly telemetry
+    "telegram_ui": {
+        "compact_metrics_enabled": True,
+        "show_progress_bars": False,
+        "show_volume_metrics": True,
+        "compact_metric_width": 10,
+    },
     "circuit_breaker": {
         "max_consecutive_errors": 10,
         "max_connection_failures": 10,

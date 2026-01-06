@@ -4,9 +4,11 @@ Telegram Alerts - Send notifications for trades and major events.
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.sparkline import generate_progress_bar
 
 try:
     from telegram import Bot
@@ -616,6 +618,13 @@ def format_activity_line(
     buffer_size: int,
     buffer_target: int | None = None,
     signal_send_failures: int = 0,
+    volume_ratio: float | None = None,
+    pressure_badge: str | None = None,
+    delta_pct: float | None = None,
+    compact_metrics_enabled: bool = True,
+    show_progress_bars: bool = False,
+    show_volume_metrics: bool = True,
+    compact_metric_width: int = 10,
 ) -> str:
     """
     Format activity summary line for Home Card using standardized terminology.
@@ -637,21 +646,204 @@ def format_activity_line(
     else:
         signals_part = f"{signals_generated} gen / {signals_sent} sent"
 
-    # Buffer: uses standardized label
+    # Buffer: default is numeric only (the ████ bar is usually redundant)
     if buffer_target is not None:
-        buffer_part = f"{buffer_size}/{buffer_target} {LABEL_BUFFER}"
+        buffer_part_numeric = f"{int(buffer_size)}/{int(buffer_target)} {LABEL_BUFFER}"
     else:
-        buffer_part = f"{buffer_size} {LABEL_BUFFER}"
+        buffer_part_numeric = f"{int(buffer_size)} {LABEL_BUFFER}"
+
+    if compact_metrics_enabled and show_progress_bars:
+        buffer_part = format_compact_ratio(
+            buffer_size,
+            buffer_target,
+            LABEL_BUFFER,
+            show_bar=True,
+            width=int(compact_metric_width or 10),
+        )
+    else:
+        buffer_part = buffer_part_numeric
+
+    # Optional: compact volume cues (keep short for mobile)
+    extra_parts: list[str] = []
+    if compact_metrics_enabled and show_volume_metrics:
+        if volume_ratio is not None:
+            s = format_compact_metric(volume_ratio, 1.0, "vol", unit="x")
+            if s:
+                extra_parts.append(s)
+        if delta_pct is not None:
+            try:
+                dp = float(delta_pct)
+                # Hide tiny deltas to reduce noise
+                if math.isfinite(dp) and abs(dp) >= 1.0:
+                    s = format_compact_metric(dp, 1.0, "Δ", unit="%")
+                    if s:
+                        extra_parts.append(s)
+            except Exception:
+                pass
+        if pressure_badge:
+            badge = str(pressure_badge).strip()
+            if badge:
+                extra_parts.append(badge)
 
     # Errors
-    errors_part = f"{errors} {LABEL_ERRORS}"
+    errors_part = f"{int(errors)} {LABEL_ERRORS}"
 
-    return f"📊 {scans_part} • {signals_part} • {buffer_part} • {errors_part}"
+    parts: list[str] = [f"📊 {scans_part}", signals_part, buffer_part]
+    if extra_parts:
+        parts.extend(extra_parts)
+    parts.append(errors_part)
+    return " • ".join(parts)
+
+
+def _format_pressure_badge(bias: str | None, strength: str | None) -> str | None:
+    """Ultra-compact pressure badge for the activity line (mobile-friendly)."""
+    b = (bias or "").strip().lower()
+    s = (strength or "").strip().lower()
+
+    if b == "buyers":
+        emoji = "🟢"
+        label = "BUYERS"
+        arrow_up = True
+    elif b == "sellers":
+        emoji = "🔴"
+        label = "SELLERS"
+        arrow_up = False
+    elif b == "mixed":
+        emoji = "⚪"
+        label = "MIXED"
+        arrow_up = True
+    else:
+        return None
+
+    arrows = ""
+    if s == "light":
+        arrows = "▲" if arrow_up else "▼"
+    elif s == "moderate":
+        arrows = "▲▲" if arrow_up else "▼▼"
+    elif s == "strong":
+        arrows = "▲▲▲" if arrow_up else "▼▼▼"
+
+    return f"{emoji} {label}{' ' + arrows if arrows else ''}"
+
+
+def format_compact_status(
+    value: float | None,
+    thresholds: tuple[float, float] = (0.8, 0.5),
+    *,
+    higher_is_better: bool = True,
+) -> str:
+    """
+    Return a simple traffic-light emoji for a value.
+
+    thresholds = (good, warn) in normalized units (0..1) by default.
+    """
+    if value is None:
+        return "⚪"
+    try:
+        v = float(value)
+    except Exception:
+        return "⚪"
+    if not math.isfinite(v):
+        return "⚪"
+
+    good, warn = thresholds
+    if higher_is_better:
+        if v >= good:
+            return "🟢"
+        if v >= warn:
+            return "🟡"
+        return "🔴"
+    # Lower is better (invert comparisons)
+    if v <= good:
+        return "🟢"
+    if v <= warn:
+        return "🟡"
+    return "🔴"
+
+
+def format_compact_ratio(
+    current: int | float,
+    target: int | float | None,
+    label: str,
+    show_bar: bool = True,
+    *,
+    width: int = 10,
+    thresholds: tuple[float, float] = (0.8, 0.5),
+) -> str:
+    """
+    Compact ratio like:
+      '🟢 [██████░░░░] 80/100 bars'
+    """
+    try:
+        cur = float(current)
+    except Exception:
+        cur = 0.0
+
+    if target is None:
+        return f"{int(cur)} {label}"
+    try:
+        tgt = float(target)
+    except Exception:
+        tgt = 0.0
+    if tgt <= 0:
+        return f"{int(cur)} {label}"
+
+    ratio = cur / tgt if tgt > 0 else 0.0
+    ratio = max(0.0, min(1.0, ratio))
+    emoji = format_compact_status(ratio, thresholds)
+    if not show_bar:
+        return f"{emoji} {int(cur)}/{int(tgt)} {label}"
+
+    bar = generate_progress_bar(int(cur), int(tgt), width=int(width))
+    return f"{emoji} [{bar}] {int(cur)}/{int(tgt)} {label}"
+
+
+def format_compact_metric(
+    value: float | None,
+    baseline: float | None,
+    label: str,
+    unit: str = "",
+) -> str | None:
+    """
+    Compact metric formats used in activity lines:
+      - Multiplier: '1.3x vol'
+      - Percent: '+15% Δ'
+    """
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(v):
+        return None
+
+    u = (unit or "").strip()
+    lbl = (label or "").strip()
+
+    if u == "x":
+        # Treat v as already a ratio when baseline is None/1.0.
+        if baseline is not None:
+            try:
+                b = float(baseline)
+            except Exception:
+                b = 1.0
+            if b not in (0.0,) and math.isfinite(b) and b != 1.0:
+                v = v / b
+        return f"{v:.1f}x {lbl}".strip()
+
+    if u == "%":
+        return f"{v:+.0f}% {lbl}".strip()
+
+    # Fallback: raw value with optional unit
+    return f"{v:.2f}{u} {lbl}".strip()
 
 
 def format_stale_callout(
     data_age_minutes: float,
     impact: str = "signals paused",
+    *,
+    threshold_minutes: float | None = None,
 ) -> str:
     """
     Format a staleness callout with age, impact, and next action.
@@ -667,7 +859,124 @@ def format_stale_callout(
         ⏰ Data stale (11m) • signals paused • Menu → Health → Data
     """
     age_str = f"{data_age_minutes:.0f}m" if data_age_minutes < 60 else f"{data_age_minutes / 60:.1f}h"
+    if threshold_minutes is not None:
+        try:
+            thr = float(threshold_minutes)
+        except Exception:
+            thr = 0.0
+        if thr > 0:
+            thr_str = f"{thr:.0f}m" if thr < 60 else f"{thr / 60:.1f}h"
+            return f"⏰ Data stale ({age_str}/{thr_str}) • {impact} • Menu → Health → Data"
     return f"⏰ Data stale ({age_str}) • {impact} • Menu → Health → Data"
+
+
+def _format_data_quality_line(
+    *,
+    data_level: str | None,
+    data_age_minutes: float | None,
+    data_stale_threshold_minutes: float,
+    buffer_size: int,
+    buffer_target: int | None,
+    show_when_healthy: bool = False,
+    compact_metrics_enabled: bool = True,
+    show_progress_bars: bool = False,
+    bar_width: int = 10,
+) -> str | None:
+    """
+    Compact data quality line (source + freshness + rough quality score).
+
+    Designed to be shown only when something is degraded unless show_when_healthy=True.
+    """
+    lvl = (data_level or "").strip().lower()
+
+    # Source
+    if lvl in ("historical", "historical_fallback"):
+        src = "📜 Hist"
+        src_penalty = 40
+    elif lvl == "error":
+        src = "❌ Err"
+        src_penalty = 70
+    elif lvl == "unknown":
+        src = "❓ ?"
+        src_penalty = 25
+    elif lvl == "level2":
+        src = "📊 L2"
+        src_penalty = 0
+    else:
+        # Treat missing/level1 as the healthy baseline.
+        src = "📡 L1"
+        src_penalty = 0
+
+    # Freshness
+    try:
+        age = float(data_age_minutes) if data_age_minutes is not None else None
+    except Exception:
+        age = None
+    try:
+        thr = float(data_stale_threshold_minutes)
+    except Exception:
+        thr = 0.0
+
+    freshness_penalty = 0.0
+    freshness_emoji = "⚪"
+    age_str = "?"
+    thr_str = "?"
+    if age is not None and math.isfinite(age) and age >= 0:
+        age_str = f"{age:.0f}m" if age < 60 else f"{age / 60:.1f}h"
+    if thr > 0 and math.isfinite(thr):
+        thr_str = f"{thr:.0f}m" if thr < 60 else f"{thr / 60:.1f}h"
+    if age is None or not (age is not None and math.isfinite(age)):
+        freshness_penalty = 15.0
+        freshness_emoji = "⚪"
+    elif thr > 0:
+        if age <= thr:
+            freshness_emoji = "🟢"
+            # Slight caution when near the threshold
+            if age >= thr * 0.8:
+                freshness_emoji = "🟡"
+        else:
+            freshness_emoji = "🔴"
+            # Degrade up to 35 points based on how far past the threshold we are.
+            freshness_penalty = min(35.0, ((age - thr) / thr) * 35.0)
+    else:
+        # No threshold configured; treat as unknown-ish.
+        freshness_penalty = 10.0
+        freshness_emoji = "⚪"
+
+    # Buffer contribution (rolling fill)
+    buffer_penalty = 0.0
+    buf_ratio = None
+    if buffer_target is not None:
+        try:
+            bt = float(buffer_target)
+        except Exception:
+            bt = 0.0
+        if bt > 0:
+            try:
+                buf_ratio = float(buffer_size) / bt
+            except Exception:
+                buf_ratio = 0.0
+            buf_ratio = max(0.0, min(1.0, buf_ratio))
+            buffer_penalty = (1.0 - buf_ratio) * 25.0
+
+    quality = 100.0 - float(src_penalty) - float(freshness_penalty) - float(buffer_penalty)
+    quality = max(0.0, min(100.0, quality))
+    q_int = int(round(quality))
+    if compact_metrics_enabled and show_progress_bars:
+        w = max(5, min(20, int(bar_width or 10)))
+        q_bar = generate_progress_bar(q_int, 100, width=w)
+        quality_part = f"[{q_bar}] {q_int}%"
+    else:
+        quality_part = f"{q_int}%"
+
+    is_data_stale = (age is not None and thr > 0 and age > thr)
+    is_source_degraded = lvl not in ("", "level1", "level2")
+    is_buffer_low = buf_ratio is not None and buf_ratio < 0.8
+    should_show = show_when_healthy or is_data_stale or is_source_degraded or is_buffer_low
+    if not should_show:
+        return None
+
+    return f"📡 *Data:* {src}{_BULLET_SEP}{freshness_emoji} {age_str}/{thr_str}{_BULLET_SEP}{quality_part}"
 
 
 def format_performance_line(
@@ -675,6 +984,10 @@ def format_performance_line(
     losses: int,
     win_rate: float,
     total_pnl: float,
+    *,
+    compact_metrics_enabled: bool = True,
+    show_progress_bars: bool = False,
+    bar_width: int = 10,
 ) -> str:
     """
     Format 7-day performance summary for Home Card.
@@ -682,7 +995,21 @@ def format_performance_line(
     Returns compact line like: 📈 5W/2L • 71% WR • 🟢 +$350.00
     """
     pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-    return f"📈 {wins}W/{losses}L • {win_rate:.0f}% WR • {pnl_emoji} {_format_currency(total_pnl)}"
+
+    # Win-rate progress bar (keep compact for mobile)
+    try:
+        wr = float(win_rate)
+    except Exception:
+        wr = 0.0
+    wr = max(0.0, min(100.0, wr))
+    if compact_metrics_enabled and show_progress_bars:
+        w = max(5, min(20, int(bar_width or 10)))
+        wr_bar = generate_progress_bar(int(round(wr)), 100, width=w)
+        wr_part = f"[{wr_bar}] {wr:.0f}% WR"
+    else:
+        wr_part = f"{wr:.0f}% WR"
+
+    return f"📈 {int(wins)}W/{int(losses)}L • {wr_part} • {pnl_emoji} {_format_currency(total_pnl)}"
 
 
 def format_home_card(
@@ -720,6 +1047,7 @@ def format_home_card(
     signal_diagnostics: str | None = None,  # Compact summary like "Raw: 3 → Valid: 0 | Filtered: 2 conf, 1 R:R"
     # Buy/Sell pressure (volume-based proxy)
     buy_sell_pressure: str | None = None,  # e.g. "🟢 Pressure: BUYERS ▲▲ (Δ +18%, Vol 1.3x, 2h)"
+    buy_sell_pressure_raw: dict | None = None,  # e.g. {"bias":"buyers","strength":"moderate","score_pct":18,"volume_ratio":1.3}
     # Active trades (v5 calm-minimal)
     active_trades_count: int = 0,  # Number of currently active positions
     active_trades_unrealized_pnl: float | None = None,  # Total unrealized PnL across active trades (USD)
@@ -732,6 +1060,11 @@ def format_home_card(
     # Session window config (v7 - config-driven session messaging)
     session_start: str | None = None,  # Session start time in HH:MM format (e.g., "18:00")
     session_end: str | None = None,  # Session end time in HH:MM format (e.g., "16:10")
+    # Telegram UI formatting (config-driven)
+    compact_metrics_enabled: bool = True,
+    show_progress_bars: bool = False,
+    show_volume_metrics: bool = True,
+    compact_metric_width: int = 10,
 ) -> str:
     """
     Build unified Home Card message for status/dashboard (balanced verbosity).
@@ -828,20 +1161,39 @@ def format_home_card(
         if sparkline:
             lines.append(f"`{sparkline}`")
 
-    # Data level indicator (v9 - IBKR data quality visibility)
-    # Show data source when not level1 to alert operators of degraded state
-    data_level_normalized = (data_level or "").lower()
-    if data_level_normalized and data_level_normalized != "level1":
-        if data_level_normalized in ("historical", "historical_fallback"):
-            lines.append(f"📜 *Data:* Historical fallback")
-        elif data_level_normalized == "error":
-            lines.append(f"❌ *Data:* Fetch error")
-        elif data_level_normalized == "unknown":
-            lines.append(f"❓ *Data:* Unknown source")
-    elif data_level_normalized == "level1":
-        # Only show Level 1 indicator when agent is running and data is fresh
-        # Skip for calm/minimal display when healthy
-        pass
+    # Compute staleness flags early (used by data line + later conditional sections)
+    is_state_stale = (
+        state_age_seconds is not None
+        and state_age_seconds > state_stale_threshold
+    )
+    is_data_stale = (
+        data_age_minutes is not None
+        and data_age_minutes > data_stale_threshold_minutes
+    )
+
+    # Data quality line (source + freshness + rough quality score)
+    if compact_metrics_enabled:
+        data_quality_line = _format_data_quality_line(
+            data_level=data_level,
+            data_age_minutes=data_age_minutes,
+            data_stale_threshold_minutes=data_stale_threshold_minutes,
+            buffer_size=buffer_size,
+            buffer_target=buffer_target,
+            compact_metrics_enabled=compact_metrics_enabled,
+            show_progress_bars=show_progress_bars,
+            bar_width=int(compact_metric_width or 10),
+        )
+        if data_quality_line:
+            lines.append(data_quality_line)
+    else:
+        # Legacy, minimal indicator: show degraded data source only.
+        lvl = (data_level or "").strip().lower()
+        if lvl in ("historical", "historical_fallback"):
+            lines.append("📜 *Data:* Historical fallback")
+        elif lvl == "error":
+            lines.append("❌ *Data:* Fetch error")
+        elif lvl == "unknown":
+            lines.append("❓ *Data:* Unknown source")
 
     lines.append("")  # Blank line separator
 
@@ -867,20 +1219,16 @@ def format_home_card(
         pulse_emoji, pulse_text = format_activity_pulse(last_cycle_seconds, is_paused=paused)
         lines.append(f"{pulse_emoji} {pulse_text}")
 
-    # Compute staleness flags
-    is_state_stale = (
-        state_age_seconds is not None
-        and state_age_seconds > state_stale_threshold
-    )
-    is_data_stale = (
-        data_age_minutes is not None
-        and data_age_minutes > data_stale_threshold_minutes
-    )
-
     # CONDITIONAL: Data staleness callout (v2 spec: age + impact + action)
     # This takes precedence over state staleness for clarity
     if is_data_stale and data_age_minutes is not None:
-        lines.append(format_stale_callout(data_age_minutes, impact="signals paused"))
+        lines.append(
+            format_stale_callout(
+                data_age_minutes,
+                impact="signals paused",
+                threshold_minutes=data_stale_threshold_minutes,
+            )
+        )
     elif is_state_stale:
         # Fallback to state staleness if no data age info
         age_mins = state_age_seconds / 60.0 if state_age_seconds else 0
@@ -941,6 +1289,23 @@ def format_home_card(
     lines.append("")  # Blank line separator
 
     # Activity line (v2 spec: includes signal_send_failures in the labeled format)
+    vol_ratio = None
+    delta_pct = None
+    pressure_badge = None
+    if (
+        compact_metrics_enabled
+        and show_volume_metrics
+        and agent_running
+        and not paused
+        and not is_data_stale
+        and isinstance(buy_sell_pressure_raw, dict)
+    ):
+        vol_ratio = buy_sell_pressure_raw.get("volume_ratio")
+        delta_pct = buy_sell_pressure_raw.get("score_pct")
+        pressure_badge = _format_pressure_badge(
+            buy_sell_pressure_raw.get("bias"),
+            buy_sell_pressure_raw.get("strength"),
+        )
     lines.append(format_activity_line(
         cycles_session=cycles_session,
         cycles_total=cycles_total,
@@ -950,6 +1315,13 @@ def format_home_card(
         buffer_size=buffer_size,
         buffer_target=buffer_target,
         signal_send_failures=signal_send_failures,
+        volume_ratio=vol_ratio,
+        delta_pct=delta_pct,
+        pressure_badge=pressure_badge,
+        compact_metrics_enabled=compact_metrics_enabled,
+        show_progress_bars=show_progress_bars,
+        show_volume_metrics=show_volume_metrics,
+        compact_metric_width=int(compact_metric_width or 10),
     ))
 
     # CONDITIONAL: Active trades (only when > 0, calm-minimal)
@@ -984,7 +1356,17 @@ def format_home_card(
             total_pnl = performance.get("total_pnl", 0.0)
             lines.append("")  # Blank line
             lines.append(f"*7d Performance:*")
-            lines.append(format_performance_line(wins, losses, win_rate, total_pnl))
+            lines.append(
+                format_performance_line(
+                    wins,
+                    losses,
+                    win_rate,
+                    total_pnl,
+                    compact_metrics_enabled=compact_metrics_enabled,
+                    show_progress_bars=show_progress_bars,
+                    bar_width=int(compact_metric_width or 10),
+                )
+            )
             # Add trend comparison if previous_pnl is available
             if previous_pnl is not None:
                 trend_str = format_performance_trend(total_pnl, previous_pnl)

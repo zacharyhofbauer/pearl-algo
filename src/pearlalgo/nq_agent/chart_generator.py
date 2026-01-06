@@ -271,6 +271,52 @@ class ChartGenerator:
         except Exception:
             pass  # If it fails, continue without limiting ticks
     
+    def _add_price_labels_to_xaxis(self, ax, df: pd.DataFrame) -> None:
+        """Add price numbers to the x-axis (bottom of chart).
+        
+        Args:
+            ax: Matplotlib axis object
+            df: DataFrame with price data
+        """
+        try:
+            # Get current y-axis tick positions (these are the price levels)
+            y_ticks = ax.get_yticks()
+            
+            # Get axis limits
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            
+            # Filter y_ticks to only include those within the visible range
+            visible_ticks = [tick for tick in y_ticks if ylim[0] <= tick <= ylim[1]]
+            
+            # Add price labels at the bottom of the chart (x-axis area)
+            # Distribute them evenly along the x-axis
+            num_labels = min(len(visible_ticks), 8)  # Limit to avoid clutter
+            if num_labels > 0:
+                # Select evenly spaced price levels
+                selected_indices = np.linspace(0, len(visible_ticks) - 1, num_labels, dtype=int)
+                selected_prices = [visible_ticks[i] for i in selected_indices]
+                
+                # Position labels evenly along x-axis
+                x_positions = np.linspace(xlim[0], xlim[1], num_labels)
+                
+                # Add price labels at the bottom
+                for x_pos, price in zip(x_positions, selected_prices):
+                    ax.text(
+                        x_pos,
+                        ylim[0],
+                        f"${price:.2f}",
+                        horizontalalignment='center',
+                        verticalalignment='top',
+                        color=TEXT_SECONDARY,
+                        fontsize=8,
+                        alpha=0.75,
+                        transform=ax.transData
+                    )
+        except Exception as e:
+            logger.debug(f"Could not add price labels to x-axis: {e}")
+            pass  # If it fails, continue without price labels on x-axis
+    
     def _prepare_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """Prepare data for mplfinance (requires DatetimeIndex)."""
         df = data.copy()
@@ -1405,6 +1451,8 @@ class ChartGenerator:
                 if ax_price is not None:
                     # Limit y-axis ticks to prevent overlapping labels
                     self._limit_yaxis_ticks(ax_price, max_ticks=8)
+                    # Add price numbers to x-axis (bottom of chart)
+                    self._add_price_labels_to_xaxis(ax_price, df)
                     self._apply_hud(fig, ax_price, df, signal, direction)
             except Exception:
                 pass
@@ -1546,6 +1594,8 @@ class ChartGenerator:
                 if ax_price is not None:
                     # Limit y-axis ticks to prevent overlapping labels
                     self._limit_yaxis_ticks(ax_price, max_ticks=8)
+                    # Add price numbers to x-axis (bottom of chart)
+                    self._add_price_labels_to_xaxis(ax_price, df)
                     self._apply_hud(
                         fig,
                         ax_price,
@@ -1799,6 +1849,8 @@ class ChartGenerator:
             if ax_price is not None:
                 # Limit y-axis ticks to prevent overlapping labels
                 self._limit_yaxis_ticks(ax_price, max_ticks=8)
+                # Add price numbers to x-axis (bottom of chart)
+                self._add_price_labels_to_xaxis(ax_price, df)
                 # Hold-period shading (entry_x to exit_x)
                 if show_hold_shading and 0 <= entry_x < len(df) and 0 <= exit_x < len(df):
                     shade_color = SIGNAL_LONG if pnl is not None and float(pnl) > 0 else SIGNAL_SHORT
@@ -2298,6 +2350,8 @@ class ChartGenerator:
                 ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
                 if ax_price is not None:
                     self._limit_yaxis_ticks(ax_price, max_ticks=8)
+                    # Add price numbers to x-axis (bottom of chart)
+                    self._add_price_labels_to_xaxis(ax_price, backtest_data)
             except Exception:
                 pass
             
@@ -2816,6 +2870,8 @@ class ChartGenerator:
                 if ax_price is not None:
                     # Limit y-axis ticks to prevent overlapping labels
                     self._limit_yaxis_ticks(ax_price, max_ticks=8)
+                    # Add price numbers to x-axis (bottom of chart)
+                    self._add_price_labels_to_xaxis(ax_price, df)
                     # Sessions shading
                     if show_sessions:
                         self._draw_sessions_overlay(ax_price, hud, idx=df.index if isinstance(df.index, pd.DatetimeIndex) else None)

@@ -26,9 +26,7 @@ class TestDataLevelDashboard:
         )
 
         # Level 1 should not add extra noise when healthy
-        assert "Historical fallback" not in message
-        assert "Fetch error" not in message
-        assert "Unknown source" not in message
+        assert "📡 *Data:*" not in message
 
     def test_historical_data_shows_fallback_indicator(self):
         """Historical data level should show fallback indicator."""
@@ -45,8 +43,8 @@ class TestDataLevelDashboard:
             data_level="historical",
         )
 
-        assert "📜" in message
-        assert "Historical fallback" in message
+        assert "📡 *Data:*" in message
+        assert "📜 Hist" in message
 
     def test_historical_fallback_shows_indicator(self):
         """historical_fallback level should also show indicator."""
@@ -63,8 +61,8 @@ class TestDataLevelDashboard:
             data_level="historical_fallback",
         )
 
-        assert "📜" in message
-        assert "Historical fallback" in message
+        assert "📡 *Data:*" in message
+        assert "📜 Hist" in message
 
     def test_error_level_shows_error_indicator(self):
         """Error data level should show error indicator."""
@@ -81,8 +79,8 @@ class TestDataLevelDashboard:
             data_level="error",
         )
 
-        assert "❌" in message
-        assert "Fetch error" in message
+        assert "📡 *Data:*" in message
+        assert "❌ Err" in message
 
     def test_unknown_level_shows_unknown_indicator(self):
         """Unknown data level should show unknown indicator."""
@@ -99,8 +97,8 @@ class TestDataLevelDashboard:
             data_level="unknown",
         )
 
-        assert "❓" in message
-        assert "Unknown source" in message
+        assert "📡 *Data:*" in message
+        assert "❓ ?" in message
 
     def test_no_data_level_no_indicator(self):
         """When data_level is None, no indicator should be shown."""
@@ -117,10 +115,8 @@ class TestDataLevelDashboard:
             data_level=None,
         )
 
-        # Should not have any data level indicators
-        assert "Historical fallback" not in message
-        assert "Fetch error" not in message
-        assert "Unknown source" not in message
+        # Should not show data line when healthy/unknown
+        assert "📡 *Data:*" not in message
 
     def test_data_level_case_insensitive(self):
         """Data level comparison should be case-insensitive."""
@@ -138,7 +134,7 @@ class TestDataLevelDashboard:
             data_level="HISTORICAL",
         )
 
-        assert "Historical fallback" in message_upper
+        assert "📜 Hist" in message_upper
 
         # Test mixed case
         message_mixed = format_home_card(
@@ -153,7 +149,7 @@ class TestDataLevelDashboard:
         )
 
         # Level1 (any case) should not show extra indicator
-        assert "Historical fallback" not in message_mixed
+        assert "📡 *Data:*" not in message_mixed
 
 
 

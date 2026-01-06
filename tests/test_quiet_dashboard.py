@@ -394,7 +394,7 @@ class TestV2StalenessCallout:
         assert "⏰ Data stale" in message
         assert "15m" in message
         assert "signals paused" in message
-        assert "/data_quality" in message
+        assert "Menu → Health → Data" in message
 
     def test_data_fresh_no_callout(self) -> None:
         """No staleness callout when data is fresh."""

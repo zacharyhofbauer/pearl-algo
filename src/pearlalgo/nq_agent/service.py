@@ -145,6 +145,32 @@ class NQAgentService:
         service_settings = service_config.get("service", {})
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
         data_settings = service_config.get("data", {})
+        telegram_ui_settings = service_config.get("telegram_ui", {}) or {}
+
+        # Telegram UI formatting (Home Card / dashboards)
+        try:
+            self._telegram_ui_compact_metrics_enabled = bool(
+                telegram_ui_settings.get("compact_metrics_enabled", True)
+            )
+        except Exception:
+            self._telegram_ui_compact_metrics_enabled = True
+        try:
+            self._telegram_ui_show_progress_bars = bool(
+                telegram_ui_settings.get("show_progress_bars", False)
+            )
+        except Exception:
+            self._telegram_ui_show_progress_bars = False
+        try:
+            self._telegram_ui_show_volume_metrics = bool(
+                telegram_ui_settings.get("show_volume_metrics", True)
+            )
+        except Exception:
+            self._telegram_ui_show_volume_metrics = True
+        try:
+            w = int(telegram_ui_settings.get("compact_metric_width", 10) or 10)
+        except Exception:
+            w = 10
+        self._telegram_ui_compact_metric_width = max(5, min(20, w))
 
         # Configure optional market-hours overrides (disabled by default).
         # Keeps the declared boundary intact: config drives utils, never the reverse.
@@ -2846,6 +2872,12 @@ class NQAgentService:
                 "adaptive_cadence_enabled": self._adaptive_cadence_enabled,
                 "scan_interval_effective": self._effective_interval,
             },
+            "telegram_ui": {
+                "compact_metrics_enabled": getattr(self, "_telegram_ui_compact_metrics_enabled", True),
+                "show_progress_bars": getattr(self, "_telegram_ui_show_progress_bars", False),
+                "show_volume_metrics": getattr(self, "_telegram_ui_show_volume_metrics", True),
+                "compact_metric_width": getattr(self, "_telegram_ui_compact_metric_width", 10),
+            },
             # Cadence metrics for observability
             "cadence_mode": "adaptive" if self._adaptive_cadence_enabled else self.cadence_mode,
             "cadence_metrics": (
@@ -3006,6 +3038,12 @@ class NQAgentService:
                 "scan_interval_market_closed": self._scan_interval_market_closed,
                 "scan_interval_paused": self._scan_interval_paused,
                 "scan_interval_effective": self._effective_interval,
+            },
+            "telegram_ui": {
+                "compact_metrics_enabled": getattr(self, "_telegram_ui_compact_metrics_enabled", True),
+                "show_progress_bars": getattr(self, "_telegram_ui_show_progress_bars", False),
+                "show_volume_metrics": getattr(self, "_telegram_ui_show_volume_metrics", True),
+                "compact_metric_width": getattr(self, "_telegram_ui_compact_metric_width", 10),
             },
             # Cadence metrics for observability
             "cadence_mode": "adaptive" if self._adaptive_cadence_enabled else self.cadence_mode,

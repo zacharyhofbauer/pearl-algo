@@ -1597,8 +1597,24 @@ class NQAgentTelegramNotifier:
             
             # Get session times from config for config-driven messaging
             config_block = status.get("config", {})
-            session_start = config_block.get("start_time") if isinstance(config_block, dict) else None
-            session_end = config_block.get("end_time") if isinstance(config_block, dict) else None
+            if isinstance(config_block, dict):
+                session_start = config_block.get("start_time") or config_block.get("session_start_time")
+                session_end = config_block.get("end_time") or config_block.get("session_end_time")
+            else:
+                session_start = None
+                session_end = None
+
+            # Telegram UI formatting options (optional)
+            telegram_ui = status.get("telegram_ui", {})
+            if not isinstance(telegram_ui, dict):
+                telegram_ui = {}
+            compact_metrics_enabled = bool(telegram_ui.get("compact_metrics_enabled", True))
+            show_progress_bars = bool(telegram_ui.get("show_progress_bars", False))
+            show_volume_metrics = bool(telegram_ui.get("show_volume_metrics", True))
+            try:
+                compact_metric_width = int(telegram_ui.get("compact_metric_width", 10) or 10)
+            except Exception:
+                compact_metric_width = 10
             
             # Extract data level from latest_bar for IBKR data quality visibility
             data_level = None
@@ -1633,6 +1649,7 @@ class NQAgentTelegramNotifier:
                 quiet_reason=quiet_reason,
                 signal_diagnostics=signal_diagnostics,
                 buy_sell_pressure=buy_sell_pressure,
+                buy_sell_pressure_raw=status.get("buy_sell_pressure_raw"),
                 # v5 fields: active trades + unrealized PnL (push dashboards)
                 active_trades_count=int(status.get("active_trades_count", 0) or 0),
                 active_trades_unrealized_pnl=status.get("active_trades_unrealized_pnl"),
@@ -1647,6 +1664,11 @@ class NQAgentTelegramNotifier:
                 session_end=session_end,
                 # v9 field: IBKR data level indicator
                 data_level=data_level,
+                # Config-driven telegram UI formatting
+                compact_metrics_enabled=compact_metrics_enabled,
+                show_progress_bars=show_progress_bars,
+                show_volume_metrics=show_volume_metrics,
+                compact_metric_width=compact_metric_width,
             )
 
             # Optional: recent exits (compact transparency for push dashboards).

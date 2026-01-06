@@ -25,6 +25,13 @@ telegram:
   bot_token: "${TELEGRAM_BOT_TOKEN}"
   chat_id: "${TELEGRAM_CHAT_ID}"
 
+# Telegram Home Card / Dashboard UI (compact, mobile-first)
+telegram_ui:
+  compact_metrics_enabled: true   # Master toggle for compact metric formatting
+  show_progress_bars: false       # Show unicode progress bars for ratios (buffer, WR, quality)
+  show_volume_metrics: true       # Include vol ratio / Δ / pressure badge in activity line
+  compact_metric_width: 10        # Progress bar width (recommend 8-12)
+
 # Risk Management (Prop Firm Style)
 risk:
   max_risk_per_trade: 0.01  # 1% max risk per trade (prop firm conservative)
