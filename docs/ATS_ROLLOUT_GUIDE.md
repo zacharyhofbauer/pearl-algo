@@ -296,7 +296,7 @@ If issues occur:
 | `src/pearlalgo/execution/` | Execution adapter layer |
 | `src/pearlalgo/learning/` | Bandit policy layer |
 | `config/config.yaml` | Configuration (execution + learning blocks) |
-| `state/policy_state.json` | Persisted policy statistics |
+| `data/nq_agent_state/policy_state.json` | Persisted policy statistics |
 | `tests/test_bandit_policy.py` | Bandit policy tests |
 | `tests/test_execution_adapter.py` | Execution adapter tests |
 

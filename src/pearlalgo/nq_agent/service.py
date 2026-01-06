@@ -1625,22 +1625,30 @@ class NQAgentService:
         """
         now = datetime.now(timezone.utc)
 
-        # Check if it's time for a text dashboard update (every 15m by default)
-        if (
-            self.last_status_update is None
-            or (now - self.last_status_update).total_seconds() >= self.status_update_interval
-        ):
-            await self._send_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
-            self.last_status_update = now
-
         # Check if it's time for a dashboard chart (every 60m by default)
         # Respect dashboard_chart_enabled config (can be disabled to reduce noise)
-        if self.dashboard_chart_enabled and (
+        chart_due = self.dashboard_chart_enabled and (
             self.last_dashboard_chart_sent is None
             or (now - self.last_dashboard_chart_sent).total_seconds() >= self.dashboard_chart_interval
-        ):
+        )
+
+        # Check if it's time for a text dashboard update (every 15m by default)
+        text_due = (
+            self.last_status_update is None
+            or (now - self.last_status_update).total_seconds() >= self.status_update_interval
+        )
+
+        # When chart is due, send BOTH together (chart first, then text) as a combined notification
+        if chart_due:
             await self._send_dashboard_chart()
             self.last_dashboard_chart_sent = now
+            # Always send text immediately after chart so they appear together
+            await self._send_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
+            self.last_status_update = now
+        elif text_due:
+            # Text-only update (between chart intervals)
+            await self._send_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
+            self.last_status_update = now
 
     async def _send_dashboard_chart(self) -> None:
         """
