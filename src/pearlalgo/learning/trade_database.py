@@ -915,6 +915,57 @@ class TradeDatabase:
             "avg_hold_minutes": avg_hold_f,
         }
 
+    def get_recent_trades_by_exit(
+        self,
+        *,
+        limit: int = 200,
+        from_exit_time: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recent trades ordered by exit_time (newest first).
+
+        This is used for:
+        - drift detection (based on realized outcomes)
+        - ML lift measurement (pass vs would-block groups)
+        """
+        query = """
+            SELECT signal_id, signal_type, direction, pnl, is_win, exit_time, features_json
+            FROM trades
+            WHERE 1=1
+        """
+        params: List[Any] = []
+        if from_exit_time:
+            query += " AND exit_time >= ?"
+            params.append(str(from_exit_time))
+        query += " ORDER BY exit_time DESC LIMIT ?"
+        params.append(int(limit))
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            try:
+                features = json.loads(r["features_json"] or "{}")
+            except Exception:
+                features = {}
+            if not isinstance(features, dict):
+                features = {}
+            out.append(
+                {
+                    "signal_id": str(r["signal_id"]),
+                    "signal_type": str(r["signal_type"]),
+                    "direction": str(r["direction"]),
+                    "pnl": float(r["pnl"] or 0.0),
+                    "is_win": bool(r["is_win"]),
+                    "exit_time": str(r["exit_time"]),
+                    "features": features,
+                }
+            )
+        return out
+
 
 
 

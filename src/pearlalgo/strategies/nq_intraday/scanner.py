@@ -409,6 +409,15 @@ class NQScanner:
         
         # Add ATR expansion to regime dict for signal context
         regime["atr_expansion"] = atr_expansion
+
+        # Persist last regime snapshot for service-level observability / drift guard.
+        # This avoids re-running regime detection outside the scanner.
+        try:
+            self.last_regime = dict(regime) if isinstance(regime, dict) else None
+            self.last_regime_timestamp = bar_dt.isoformat() if bar_dt is not None else None
+        except Exception:
+            self.last_regime = None
+            self.last_regime_timestamp = None
         
         logger.info(f"Regime: {regime_type}, Volatility: {volatility}, Confidence: {regime_confidence:.2f}, ATR Expansion: {atr_expansion}")
         

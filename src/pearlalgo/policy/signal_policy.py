@@ -41,7 +41,13 @@ class SignalPolicy:
         self._min_rr = float(self._signals_cfg.get("min_risk_reward", 1.5) or 1.5)
         self._regime_filters = self._signals_cfg.get("regime_filters", {}) or {}
 
-    def evaluate(self, signal: Dict[str, Any]) -> SignalPolicyDecision:
+    def evaluate(
+        self,
+        signal: Dict[str, Any],
+        *,
+        min_confidence: Optional[float] = None,
+        min_risk_reward: Optional[float] = None,
+    ) -> SignalPolicyDecision:
         """
         Evaluate a candidate signal against policy.
 
@@ -58,25 +64,35 @@ class SignalPolicy:
             return SignalPolicyDecision(False, "invalid_signal")
 
         signal_type = str(signal.get("type") or "unknown")
+        # Allow callers (e.g., drift guard) to temporarily tighten/relax thresholds without
+        # mutating global config or re-initializing this policy instance.
+        try:
+            eff_min_conf = float(self._min_conf if min_confidence is None else float(min_confidence))
+        except Exception:
+            eff_min_conf = float(self._min_conf)
+        try:
+            eff_min_rr = float(self._min_rr if min_risk_reward is None else float(min_risk_reward))
+        except Exception:
+            eff_min_rr = float(self._min_rr)
         try:
             confidence = float(signal.get("confidence", 0.0) or 0.0)
         except Exception:
             confidence = 0.0
 
-        if confidence < self._min_conf:
+        if confidence < eff_min_conf:
             return SignalPolicyDecision(
                 False,
                 "confidence",
-                {"confidence": confidence, "min_confidence": self._min_conf},
+                {"confidence": confidence, "min_confidence": eff_min_conf},
             )
 
         # Risk/reward geometry check
         rr = self._compute_rr(signal)
-        if rr is not None and rr < self._min_rr:
+        if rr is not None and rr < eff_min_rr:
             return SignalPolicyDecision(
                 False,
                 "risk_reward",
-                {"risk_reward": rr, "min_risk_reward": self._min_rr},
+                {"risk_reward": rr, "min_risk_reward": eff_min_rr},
             )
 
         # Regime/session filter (canonical: signals.regime_filters)

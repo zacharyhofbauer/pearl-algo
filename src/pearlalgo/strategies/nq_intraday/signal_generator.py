@@ -349,12 +349,22 @@ class NQSignalGenerator:
         # ML Signal Filter (v2.0 adaptive risk management)
         self._ml_filter: Optional["MLSignalFilter"] = None
         self._ml_filter_enabled = False
+        self._ml_filter_mode: str = "shadow"  # "shadow" (score-only) or "live" (can block)
+        self._ml_require_lift_to_block: bool = True
         
         ml_filter_settings = service_config.get("ml_filter", {}) or {}
         if ML_FILTER_AVAILABLE and ml_filter_settings.get("enabled", False):
             try:
                 self._ml_filter = get_ml_signal_filter(service_config)
                 self._ml_filter_enabled = True
+                # Mode defaults to shadow for safety (score-only; see MLFilterConfig).
+                try:
+                    self._ml_filter_mode = str(ml_filter_settings.get("mode", "shadow") or "shadow").lower()
+                except Exception:
+                    self._ml_filter_mode = "shadow"
+                if self._ml_filter_mode not in ("shadow", "live"):
+                    self._ml_filter_mode = "shadow"
+                self._ml_require_lift_to_block = bool(ml_filter_settings.get("require_lift_to_block", True))
                 logger.info("ML signal filter enabled")
             except Exception as e:
                 logger.warning(f"Could not initialize ML signal filter: {e}")
@@ -402,6 +412,32 @@ class NQSignalGenerator:
         if df is None or df.empty:
             self.last_diagnostics = diagnostics
             return []
+
+        # Drift guard (risk-off cooldown) adjustments, provided by the service.
+        # This can temporarily tighten thresholds + reduce sizing when conditions degrade.
+        drift_state = market_data.get("drift_guard") if isinstance(market_data, dict) else None
+        drift_adj = {}
+        drift_active = False
+        try:
+            if isinstance(drift_state, dict):
+                drift_active = bool(drift_state.get("active", False))
+                drift_adj = drift_state.get("adjustments", {}) if isinstance(drift_state.get("adjustments", {}), dict) else {}
+        except Exception:
+            drift_active = False
+            drift_adj = {}
+
+        try:
+            eff_min_conf = float(self._min_confidence) + float(drift_adj.get("min_confidence_delta", 0.0) or 0.0)
+        except Exception:
+            eff_min_conf = float(self._min_confidence)
+        try:
+            eff_min_rr = float(self._min_risk_reward) + float(drift_adj.get("min_risk_reward_delta", 0.0) or 0.0)
+        except Exception:
+            eff_min_rr = float(self._min_risk_reward)
+        try:
+            drift_size_mult = float(drift_adj.get("size_multiplier", 1.0) or 1.0)
+        except Exception:
+            drift_size_mult = 1.0
 
         # Check market hours using the *bar timestamp* (critical for backtests).
         # If we don't pass a datetime, the scanner defaults to "now", which makes
@@ -491,7 +527,11 @@ class NQSignalGenerator:
             # Central policy gate (v2.1). This includes min_conf/min_rr + regime/session allow-lists.
             # We still preserve explore-mode behavior for near-misses.
             if self._policy is not None:
-                decision = self._policy.evaluate(signal)
+                decision = self._policy.evaluate(
+                    signal,
+                    min_confidence=eff_min_conf,
+                    min_risk_reward=eff_min_rr,
+                )
                 if not decision.allowed:
                     # Explore-mode bypass for regime/session only (if enabled)
                     if (
@@ -553,7 +593,11 @@ class NQSignalGenerator:
             # Track validation result with rejection reason.
             # We primarily emit A-tier (strict), but can optionally promote near-misses into
             # B-tier ("explore") to surface more 24h opportunities (Asia/London/NY) with transparency.
-            validation_result = self._validate_signal_with_reason(signal)
+            validation_result = self._validate_signal_with_reason(
+                signal,
+                min_confidence=eff_min_conf,
+                min_risk_reward=eff_min_rr,
+            )
 
             if not validation_result["valid"]:
                 reason = str(validation_result.get("reason") or "unknown")
@@ -645,6 +689,18 @@ class NQSignalGenerator:
                     continue
 
             validated_signal = self._format_signal(signal, market_data)
+
+            # Attach drift guard context (compact) for transparency.
+            if isinstance(drift_state, dict):
+                try:
+                    validated_signal["_drift_guard"] = {
+                        "active": bool(drift_state.get("active", False)),
+                        "until": drift_state.get("until"),
+                        "reason": drift_state.get("reason"),
+                        "adjustments": drift_adj,
+                    }
+                except Exception:
+                    pass
             
             # Track stop-cap applications
             if validated_signal.get("_stop_cap_applied", False):
@@ -740,8 +796,25 @@ class NQSignalGenerator:
                     
                     # Attach ML prediction to signal for transparency
                     validated_signal["_ml_prediction"] = ml_prediction.to_dict()
+                    validated_signal["_ml_mode"] = self._ml_filter_mode
+
+                    # Live-blocking is gated two ways:
+                    # 1) Config mode must be "live"
+                    # 2) If require_lift_to_block is enabled, the service must assert ml_blocking_allowed=True
+                    #    after measuring lift on your own outcomes (shadow A/B).
+                    if self._ml_require_lift_to_block:
+                        ml_blocking_allowed = bool(market_data.get("ml_blocking_allowed", False))
+                    else:
+                        ml_blocking_allowed = True
+
+                    ml_blocking_active = (self._ml_filter_mode == "live") and ml_blocking_allowed
+                    validated_signal["_ml_blocking_allowed"] = bool(ml_blocking_allowed)
+                    validated_signal["_ml_blocking_active"] = bool(ml_blocking_active)
+                    validated_signal["_ml_would_block"] = bool(not should_execute)
                     
-                    if not should_execute and opportunity_tier == "A":
+                    # Shadow mode: never block; only annotate.
+                    # Live mode: can block, but only when lift has been proven (if enabled).
+                    if (not should_execute) and opportunity_tier == "A" and ml_blocking_active:
                         # ML filter rejected the signal
                         logger.debug(
                             "Signal filtered by ML: type=%s, win_prob=%.2f < threshold",
@@ -791,6 +864,31 @@ class NQSignalGenerator:
                 except Exception as e:
                     logger.debug(f"Adaptive sizing failed (non-blocking): {e}")
 
+            # Drift guard sizing reduction (cooldown): apply AFTER adaptive sizing so it acts as a final brake.
+            if drift_active and drift_size_mult != 1.0:
+                try:
+                    before = int(validated_signal.get("position_size", 0) or 0)
+                    if before > 0:
+                        after = max(1, int(round(before * drift_size_mult)))
+                        if after != before:
+                            validated_signal["_drift_position_size_before"] = before
+                            validated_signal["_drift_size_multiplier"] = float(drift_size_mult)
+                            validated_signal["position_size"] = after
+                except Exception:
+                    pass
+
+            # Ensure risk_amount reflects any sizing overrides (adaptive sizing / drift guard).
+            try:
+                entry = float(validated_signal.get("entry_price", 0.0) or 0.0)
+                stop = float(validated_signal.get("stop_loss", 0.0) or 0.0)
+                tick_value = float(validated_signal.get("tick_value", getattr(self.config, "tick_value", 2.0)) or 2.0)
+                ps = int(validated_signal.get("position_size", 0) or 0)
+                if entry > 0 and stop > 0 and ps > 0:
+                    risk_points = abs(entry - stop)
+                    validated_signal["risk_amount"] = float(risk_points * tick_value * ps)
+            except Exception:
+                pass
+
             # Tag + emit signal (A-tier actionable or B-tier explore)
             if opportunity_tier == "B":
                 now_utc = datetime.now(timezone.utc)
@@ -834,7 +932,13 @@ class NQSignalGenerator:
 
         return validated_signals
 
-    def _validate_signal(self, signal: Dict) -> bool:
+    def _validate_signal(
+        self,
+        signal: Dict,
+        *,
+        min_confidence: Optional[float] = None,
+        min_risk_reward: Optional[float] = None,
+    ) -> bool:
         """Validate a signal meets criteria.
 
         Args:
@@ -864,9 +968,19 @@ class NQSignalGenerator:
                 signal["confidence"] = effective_confidence
                 signal_confidence = effective_confidence
 
+        # Use caller-provided thresholds if present (e.g., drift guard cooldown)
+        try:
+            eff_min_conf = float(self._min_confidence if min_confidence is None else float(min_confidence))
+        except Exception:
+            eff_min_conf = float(self._min_confidence)
+        try:
+            eff_min_rr = float(self._min_risk_reward if min_risk_reward is None else float(min_risk_reward))
+        except Exception:
+            eff_min_rr = float(self._min_risk_reward)
+
         # Check confidence threshold
         confidence = signal_confidence
-        if confidence < self._min_confidence:
+        if confidence < eff_min_conf:
             # Near-miss diagnostic logging: track signals that fail confidence threshold
             signal_type = signal.get("type", "unknown")
             logger.info(
@@ -874,8 +988,8 @@ class NQSignalGenerator:
                 "threshold=%.3f | gap=%.3f | volatility=%s | atr_expansion=%s",
                 signal_type,
                 confidence,
-                self._min_confidence,
-                self._min_confidence - confidence,
+                eff_min_conf,
+                eff_min_conf - confidence,
                 volatility,
                 atr_expansion,
             )
@@ -939,7 +1053,7 @@ class NQSignalGenerator:
 
             if risk > 0:
                 risk_reward = reward / risk
-                if risk_reward < self._min_risk_reward:
+                if risk_reward < eff_min_rr:
                     # Near-miss diagnostic logging: track signals that fail R:R threshold
                     signal_type = signal.get("type", "unknown")
                     logger.info(
@@ -947,8 +1061,8 @@ class NQSignalGenerator:
                         "threshold=%.2f:1 | gap=%.2f | entry=%.2f | stop=%.2f | target=%.2f",
                         signal_type,
                         risk_reward,
-                        self._min_risk_reward,
-                        self._min_risk_reward - risk_reward,
+                        eff_min_rr,
+                        eff_min_rr - risk_reward,
                         entry_price,
                         stop_loss,
                         take_profit,
@@ -957,7 +1071,13 @@ class NQSignalGenerator:
 
         return True
 
-    def _validate_signal_with_reason(self, signal: Dict) -> Dict:
+    def _validate_signal_with_reason(
+        self,
+        signal: Dict,
+        *,
+        min_confidence: Optional[float] = None,
+        min_risk_reward: Optional[float] = None,
+    ) -> Dict:
         """Validate a signal and return rejection reason.
 
         Args:
@@ -980,8 +1100,18 @@ class NQSignalGenerator:
                 signal["confidence"] = effective_confidence
                 signal_confidence = effective_confidence
 
+        # Use caller-provided thresholds if present (e.g., drift guard cooldown)
+        try:
+            eff_min_conf = float(self._min_confidence if min_confidence is None else float(min_confidence))
+        except Exception:
+            eff_min_conf = float(self._min_confidence)
+        try:
+            eff_min_rr = float(self._min_risk_reward if min_risk_reward is None else float(min_risk_reward))
+        except Exception:
+            eff_min_rr = float(self._min_risk_reward)
+
         # Check confidence threshold
-        if signal_confidence < self._min_confidence:
+        if signal_confidence < eff_min_conf:
             return {"valid": False, "reason": "confidence"}
 
         # Check entry price is valid
@@ -1015,7 +1145,7 @@ class NQSignalGenerator:
 
             if risk > 0:
                 risk_reward = reward / risk
-                if risk_reward < self._min_risk_reward:
+                if risk_reward < eff_min_rr:
                     return {"valid": False, "reason": "risk_reward"}
 
         return {"valid": True, "reason": None}

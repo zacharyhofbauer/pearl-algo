@@ -69,6 +69,18 @@ class MLFilterConfig:
     enabled: bool = True
     model_path: Optional[str] = None
     model_version: str = "v1.0.0"
+
+    # Operation mode
+    # - "shadow": score-only (never blocks signals; logs predictions for lift measurement)
+    # - "live": can block signals (subject to optional lift gating)
+    mode: str = "shadow"
+
+    # Safety: require demonstrated lift before allowing live blocking.
+    # This prevents turning on ML gating before it proves value on your own data.
+    require_lift_to_block: bool = True
+    lift_lookback_trades: int = 200
+    lift_min_trades: int = 50
+    lift_min_winrate_delta: float = 0.05  # Require +5% absolute WR lift (pass vs would-block)
     
     # Prediction thresholds
     min_probability: float = 0.55      # Minimum P(win) to pass filter
@@ -97,6 +109,11 @@ class MLFilterConfig:
             enabled=ml_config.get("enabled", True),
             model_path=ml_config.get("model_path"),
             model_version=ml_config.get("model_version", "v1.0.0"),
+            mode=str(ml_config.get("mode", "shadow") or "shadow").lower(),
+            require_lift_to_block=bool(ml_config.get("require_lift_to_block", True)),
+            lift_lookback_trades=int(ml_config.get("lift_lookback_trades", 200)),
+            lift_min_trades=int(ml_config.get("lift_min_trades", 50)),
+            lift_min_winrate_delta=float(ml_config.get("lift_min_winrate_delta", 0.05)),
             min_probability=ml_config.get("min_probability", 0.55),
             high_probability=ml_config.get("high_probability", 0.70),
             min_training_samples=ml_config.get("min_training_samples", 30),

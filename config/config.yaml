@@ -521,6 +521,13 @@ adaptive_sizing:
 # Filters out signals with low predicted win probability.
 ml_filter:
   enabled: true                      # Master toggle for ML filter
+  # SAFE DEFAULT: score-only (shadow) until we prove lift on your own outcomes.
+  # Set to "live" to allow blocking (still gated by require_lift_to_block by default).
+  mode: "shadow"                     # "shadow" | "live"
+  require_lift_to_block: true        # Only allow blocking once lift is demonstrated
+  lift_lookback_trades: 200          # Trades used to measure lift (pass vs would-block)
+  lift_min_trades: 50                # Minimum graded exits needed before blocking is allowed
+  lift_min_winrate_delta: 0.05       # Require +5% absolute WR lift before blocking activates
   model_path: "models/signal_filter_v1.joblib"  # Path to saved model
   model_version: "v1.0.0"
   
@@ -539,6 +546,25 @@ ml_filter:
   
   # Calibration
   calibrate_probabilities: true
+
+# =============================================================================
+# DRIFT GUARD (Risk-Off Cooldown)
+# =============================================================================
+# Automatically tightens filters + reduces size when:
+# - Recent win-rate drops below a floor (over last N graded exits)
+# - Volatility shocks (high/extreme volatility + ATR expansion)
+drift_guard:
+  enabled: true
+  lookback_trades: 20
+  min_trades: 10
+  win_rate_floor: 0.40
+  volatility_spike_enabled: true
+  volatility_levels: ["high", "extreme"]
+  require_atr_expansion: true
+  cooldown_minutes: 60
+  tighten_min_confidence_delta: 0.05
+  tighten_min_risk_reward_delta: 0.20
+  size_multiplier: 0.50
 
 # =============================================================================
 # PROP FIRM MODE (rule guardrails)

@@ -178,6 +178,7 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "adaptive_stops",
     "adaptive_sizing",
     "ml_filter",
+    "drift_guard",
     # LLM features (signal annotation, risk checks, post-mortems, tuning)
     "llm_signal_annotation",
     "llm_risk_assessment",

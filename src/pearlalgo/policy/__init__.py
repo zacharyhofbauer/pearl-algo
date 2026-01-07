@@ -12,10 +12,14 @@ not re-implement policy logic ad-hoc.
 """
 
 from .signal_policy import SignalPolicy, SignalPolicyDecision
+from .drift_guard import DriftGuard, DriftGuardConfig, DriftGuardState
 
 __all__ = [
     "SignalPolicy",
     "SignalPolicyDecision",
+    "DriftGuard",
+    "DriftGuardConfig",
+    "DriftGuardState",
 ]
 
 

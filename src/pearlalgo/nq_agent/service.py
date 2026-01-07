@@ -10,7 +10,7 @@ import asyncio
 import signal
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import pandas as pd
 import math
@@ -65,6 +65,15 @@ try:
 except ImportError:
     TRADE_DB_AVAILABLE = False
     TradeDatabase = None  # type: ignore
+
+# Drift guard (optional - enabled via drift_guard.enabled)
+try:
+    from pearlalgo.policy.drift_guard import DriftGuard, DriftGuardConfig
+    DRIFT_GUARD_AVAILABLE = True
+except ImportError:
+    DRIFT_GUARD_AVAILABLE = False
+    DriftGuard = None  # type: ignore
+    DriftGuardConfig = None  # type: ignore
 
 # Contextual learning (optional - used for richer "learn by session/regime" analytics)
 try:
@@ -200,6 +209,56 @@ class NQAgentService:
                 logger.warning(f"SQLite storage init failed (continuing without DB): {e}")
                 self._sqlite_enabled = False
                 self._trade_db = None
+
+        # ==========================================================================
+        # DRIFT GUARD (Risk-Off Cooldown)
+        # ==========================================================================
+        # Tightens filters + reduces sizing when performance degrades or volatility shocks.
+        self._drift_guard: Optional["DriftGuard"] = None
+        self._drift_guard_config: Optional["DriftGuardConfig"] = None
+        self._drift_guard_state: Optional[Dict] = None
+        self._drift_guard_last_alert_at: Optional[datetime] = None
+        self._last_regime_snapshot: Optional[Dict] = None
+        if DRIFT_GUARD_AVAILABLE and DriftGuard is not None and DriftGuardConfig is not None:
+            try:
+                self._drift_guard_config = DriftGuardConfig.from_dict(service_config)
+                if self._drift_guard_config.enabled:
+                    self._drift_guard = DriftGuard(
+                        self._drift_guard_config,
+                        state_path=(self.state_manager.state_dir / "drift_guard_state.json"),
+                    )
+                    self._drift_guard_state = self._drift_guard.state.to_dict(self._drift_guard_config)
+                    logger.info(
+                        "Drift guard enabled: cooldown=%sm lookback=%s min_trades=%s floor=%s size_mult=%s",
+                        self._drift_guard_config.cooldown_minutes,
+                        self._drift_guard_config.lookback_trades,
+                        self._drift_guard_config.min_trades,
+                        self._drift_guard_config.win_rate_floor,
+                        self._drift_guard_config.size_multiplier,
+                    )
+                else:
+                    logger.info("Drift guard disabled (drift_guard.enabled=false)")
+            except Exception as e:
+                logger.warning(f"Drift guard init failed (continuing without): {e}")
+                self._drift_guard = None
+                self._drift_guard_config = None
+                self._drift_guard_state = None
+
+        # ==========================================================================
+        # ML LIFT GATING (Shadow A/B → allow blocking only if it shows lift)
+        # ==========================================================================
+        ml_cfg = service_config.get("ml_filter", {}) or {}
+        self._ml_filter_mode = str(ml_cfg.get("mode", "shadow") or "shadow").lower()
+        if self._ml_filter_mode not in ("shadow", "live"):
+            self._ml_filter_mode = "shadow"
+        self._ml_require_lift_to_block = bool(ml_cfg.get("require_lift_to_block", True))
+        self._ml_lift_lookback_trades = int(ml_cfg.get("lift_lookback_trades", 200) or 200)
+        self._ml_lift_min_trades = int(ml_cfg.get("lift_min_trades", 50) or 50)
+        self._ml_lift_min_winrate_delta = float(ml_cfg.get("lift_min_winrate_delta", 0.05) or 0.05)
+        # Default safe: do NOT allow live blocking until we have evaluated lift.
+        self._ml_blocking_allowed: bool = False
+        self._ml_lift_metrics: Dict[str, Any] = {}
+        self._ml_lift_last_eval_at: Optional[datetime] = None
 
         # Telegram UI formatting (Home Card / dashboards)
         try:
@@ -946,6 +1005,16 @@ class NQAgentService:
                                 },
                             )
 
+                # Inject safety/learning state into market_data so downstream signal generation can:
+                # - run ML filter in score-only or lift-gated blocking mode
+                # - apply drift guard cooldown adjustments (tighten filters + reduce size)
+                try:
+                    if isinstance(market_data, dict):
+                        market_data["ml_blocking_allowed"] = bool(getattr(self, "_ml_blocking_allowed", False))
+                        market_data["drift_guard"] = self._drift_guard_state or {"active": False}
+                except Exception:
+                    pass
+
                 # Generate signals (or skip if no new bar)
                 signals = []
                 if skip_analysis:
@@ -1029,6 +1098,16 @@ class NQAgentService:
                     self._update_virtual_trade_exits(market_data)
                 except Exception as e:
                     logger.debug(f"Virtual exit update failed (non-fatal): {e}")
+
+                # Refresh drift guard + ML lift metrics AFTER we grade exits (so decisions use latest outcomes).
+                try:
+                    await self._refresh_drift_guard()
+                except Exception as e:
+                    logger.debug(f"Drift guard refresh failed (non-fatal): {e}")
+                try:
+                    self._refresh_ml_lift()
+                except Exception as e:
+                    logger.debug(f"ML lift refresh failed (non-fatal): {e}")
 
                 # Send periodic dashboard (replaces status + heartbeat)
                 # Determine quiet reason (for observability) and capture diagnostics every cycle (for SQLite rollups).
@@ -3296,6 +3375,20 @@ class NQAgentService:
                 if self.contextual_policy is not None
                 else {"enabled": False, "mode": "disabled"}
             ),
+            # Drift guard (risk-off cooldown)
+            "drift_guard": (self._drift_guard_state or {"active": False}),
+            # ML filter operational status (shadow/live + lift gating)
+            "ml_filter": {
+                "mode": getattr(self, "_ml_filter_mode", "shadow"),
+                "require_lift_to_block": bool(getattr(self, "_ml_require_lift_to_block", True)),
+                "blocking_allowed": bool(getattr(self, "_ml_blocking_allowed", False)),
+                "lift": getattr(self, "_ml_lift_metrics", {}) or {},
+                "last_eval_at": (
+                    self._ml_lift_last_eval_at.isoformat()
+                    if getattr(self, "_ml_lift_last_eval_at", None) is not None
+                    else None
+                ),
+            },
         }
 
     def _persist_cycle_diagnostics(
@@ -3322,6 +3415,202 @@ class NQAgentService:
         except Exception as e:
             # Never allow observability writes to affect runtime.
             logger.debug(f"Could not persist cycle diagnostics to SQLite: {e}")
+
+    def _compute_ml_lift_metrics(self, trades: list) -> Dict[str, Any]:
+        """
+        Compute shadow A/B lift for ML gating:
+        Compare outcomes for trades where ML would PASS vs would BLOCK.
+
+        Expects trade dicts from TradeDatabase.get_recent_trades_by_exit(), including:
+        - is_win (bool)
+        - pnl (float)
+        - features.ml_pass_filter (0/1)
+        - features.ml_fallback_used (0/1)
+        """
+        if not isinstance(trades, list) or not trades:
+            return {"status": "no_trades", "lift_ok": False, "blocking_allowed": False}
+
+        # Filter to trades that have real ML predictions (exclude fallback-only periods).
+        scored = []
+        for t in trades:
+            if not isinstance(t, dict):
+                continue
+            feats = t.get("features", {})
+            if not isinstance(feats, dict):
+                continue
+            if "ml_pass_filter" not in feats:
+                continue
+            # If model wasn't ready, ML filter is in neutral fallback (no gating signal).
+            try:
+                if float(feats.get("ml_fallback_used", 0.0) or 0.0) >= 0.5:
+                    continue
+            except Exception:
+                pass
+            scored.append(t)
+
+        total_scored = len(scored)
+        if total_scored < int(getattr(self, "_ml_lift_min_trades", 50) or 50):
+            return {
+                "status": "insufficient_data",
+                "scored_trades": total_scored,
+                "min_trades": int(getattr(self, "_ml_lift_min_trades", 50) or 50),
+                "lift_ok": False,
+                "blocking_allowed": False,
+            }
+
+        pass_group = []
+        fail_group = []
+        for t in scored:
+            feats = t.get("features", {}) or {}
+            try:
+                pass_flag = float(feats.get("ml_pass_filter", 1.0) or 0.0) >= 0.5
+            except Exception:
+                pass_flag = True
+            if pass_flag:
+                pass_group.append(t)
+            else:
+                fail_group.append(t)
+
+        if not pass_group or not fail_group:
+            return {
+                "status": "no_split",
+                "scored_trades": total_scored,
+                "pass_trades": len(pass_group),
+                "fail_trades": len(fail_group),
+                "lift_ok": False,
+                "blocking_allowed": False,
+                "reason": "Need both pass+fail groups to measure lift",
+            }
+
+        def _wr(xs: list) -> float:
+            wins = 0
+            for t in xs:
+                try:
+                    if bool(t.get("is_win", False)):
+                        wins += 1
+                except Exception:
+                    continue
+            return wins / max(1, len(xs))
+
+        def _avg_pnl(xs: list) -> float:
+            vals = []
+            for t in xs:
+                try:
+                    vals.append(float(t.get("pnl", 0.0) or 0.0))
+                except Exception:
+                    continue
+            return float(sum(vals) / max(1, len(vals))) if vals else 0.0
+
+        wr_pass = _wr(pass_group)
+        wr_fail = _wr(fail_group)
+        lift_wr = wr_pass - wr_fail
+        avg_pnl_pass = _avg_pnl(pass_group)
+        avg_pnl_fail = _avg_pnl(fail_group)
+        lift_pnl = avg_pnl_pass - avg_pnl_fail
+
+        min_delta = float(getattr(self, "_ml_lift_min_winrate_delta", 0.05) or 0.05)
+        lift_ok = bool(lift_wr >= min_delta)
+
+        # Actual blocking permission depends on mode + lift gating config.
+        if bool(getattr(self, "_ml_require_lift_to_block", True)):
+            blocking_allowed = bool((getattr(self, "_ml_filter_mode", "shadow") == "live") and lift_ok)
+        else:
+            blocking_allowed = bool(getattr(self, "_ml_filter_mode", "shadow") == "live")
+
+        return {
+            "status": "ok",
+            "scored_trades": total_scored,
+            "pass_trades": len(pass_group),
+            "fail_trades": len(fail_group),
+            "win_rate_pass": float(wr_pass),
+            "win_rate_fail": float(wr_fail),
+            "lift_win_rate": float(lift_wr),
+            "avg_pnl_pass": float(avg_pnl_pass),
+            "avg_pnl_fail": float(avg_pnl_fail),
+            "lift_avg_pnl": float(lift_pnl),
+            "lift_ok": bool(lift_ok),
+            "lift_min_winrate_delta": float(min_delta),
+            "mode": getattr(self, "_ml_filter_mode", "shadow"),
+            "require_lift_to_block": bool(getattr(self, "_ml_require_lift_to_block", True)),
+            "blocking_allowed": bool(blocking_allowed),
+        }
+
+    def _refresh_ml_lift(self, *, force: bool = False) -> None:
+        """Refresh ML lift metrics + blocking allowance (best-effort)."""
+        try:
+            # Only meaningful when SQLite is enabled
+            if not getattr(self, "_sqlite_enabled", False) or self._trade_db is None:
+                self._ml_lift_metrics = {"status": "sqlite_disabled", "lift_ok": False, "blocking_allowed": False}
+                self._ml_blocking_allowed = False
+                return
+
+            now = datetime.now(timezone.utc)
+            # Rate limit lift evaluation (cheap, but no need every 5s)
+            if (not force) and self._ml_lift_last_eval_at is not None:
+                if (now - self._ml_lift_last_eval_at).total_seconds() < 300:
+                    return
+
+            trades = self._trade_db.get_recent_trades_by_exit(limit=int(self._ml_lift_lookback_trades or 200))
+            metrics = self._compute_ml_lift_metrics(trades)
+            self._ml_lift_metrics = metrics
+            self._ml_blocking_allowed = bool(metrics.get("blocking_allowed", False))
+            self._ml_lift_last_eval_at = now
+        except Exception as e:
+            logger.debug(f"Could not refresh ML lift metrics: {e}")
+
+    async def _refresh_drift_guard(self) -> None:
+        """Update drift guard state and send operator alerts on transitions."""
+        if self._drift_guard is None or self._drift_guard_config is None:
+            return
+
+        now = datetime.now(timezone.utc)
+        recent_trades = []
+        if getattr(self, "_sqlite_enabled", False) and self._trade_db is not None:
+            try:
+                # Pull enough to evaluate lookback and min_trades
+                n = max(int(self._drift_guard_config.lookback_trades), int(self._drift_guard_config.min_trades))
+                recent_trades = self._trade_db.get_recent_trades_by_exit(limit=max(1, n))
+            except Exception:
+                recent_trades = []
+
+        # Current regime snapshot from scanner (best-effort)
+        regime = None
+        try:
+            regime = getattr(self.strategy.scanner, "last_regime", None)
+        except Exception:
+            regime = None
+
+        state, transition = self._drift_guard.update(regime=regime, recent_trades=recent_trades, now=now)
+        self._drift_guard_state = state.to_dict(self._drift_guard_config)
+
+        # Operator alerts (deduped)
+        should_alert = bool(transition.get("triggered") or transition.get("ended"))
+        if not should_alert or not self.telegram_notifier.enabled or self.telegram_notifier.telegram is None:
+            return
+
+        # Hard cooldown to avoid spam (even if state toggles quickly)
+        if self._drift_guard_last_alert_at is not None:
+            if (now - self._drift_guard_last_alert_at).total_seconds() < 300:
+                return
+
+        try:
+            if transition.get("triggered"):
+                adj = state.adjustments(self._drift_guard_config)
+                msg = (
+                    "🛡 Drift Guard: ON\n"
+                    f"- reason: {transition.get('reason', '')}\n"
+                    f"- until (UTC): {state.until}\n"
+                    f"- tighten: +{adj.get('min_confidence_delta', 0):.2f} conf, +{adj.get('min_risk_reward_delta', 0):.2f} R:R\n"
+                    f"- size mult: ×{adj.get('size_multiplier', 1.0):.2f}\n"
+                )
+                await self.telegram_notifier.telegram.send_message(msg, parse_mode=None, dedupe=False)
+                self._drift_guard_last_alert_at = now
+            elif transition.get("ended"):
+                msg = "🛡 Drift Guard: OFF (cooldown ended)"
+                await self.telegram_notifier.telegram.send_message(msg, parse_mode=None, dedupe=False)
+                self._drift_guard_last_alert_at = now
+        except Exception as e:
+            logger.debug(f"Could not send drift guard alert: {e}")
 
     def _save_state(self) -> None:
         """Save current service state."""

@@ -56,12 +56,20 @@ class PerformanceTracker:
             state_dir: Directory for state files (default: ./data/nq_agent_state)
             state_manager: State manager instance for signal persistence (optional)
         """
+        # Track whether caller explicitly provided a state_dir (tests do this).
+        # If explicit, SQLite writes MUST stay inside that directory to avoid polluting
+        # the live agent DB under data/nq_agent_state.
+        self._explicit_state_dir = state_dir is not None
+
         self.state_dir = ensure_state_dir(state_dir)
 
         # State manager for signal persistence (delegation)
         self.state_manager = state_manager
         self.signals_file = get_signals_file(self.state_dir)
         self.performance_file = get_performance_file(self.state_dir)
+
+        # Load configuration early (needed for SQLite + performance settings)
+        service_config = load_service_config(validate=False) or {}
 
         # Optional SQLite dual-write (platform memory). Keep performance.json for backward compatibility.
         self._sqlite_enabled = False
@@ -71,13 +79,19 @@ class PerformanceTracker:
                 storage_cfg = service_config.get("storage", {}) or {}
                 self._sqlite_enabled = bool(storage_cfg.get("sqlite_enabled", False))
                 if self._sqlite_enabled:
-                    db_path_raw = storage_cfg.get("db_path") or str(self.state_dir / "trades.db")
-                    self._trade_db = TradeDatabase(Path(str(db_path_raw)))
+                    # IMPORTANT:
+                    # - In production (no explicit state_dir), honor config.db_path if provided.
+                    # - In tests (explicit state_dir), ALWAYS use state_dir/trades.db regardless of config.
+                    if self._explicit_state_dir:
+                        db_path = self.state_dir / "trades.db"
+                    else:
+                        db_path_raw = storage_cfg.get("db_path") or str(self.state_dir / "trades.db")
+                        db_path = Path(str(db_path_raw))
+                    self._trade_db = TradeDatabase(db_path)
             except Exception as e:
                 logger.debug(f"SQLite storage not enabled/available: {e}")
 
         # Load performance configuration
-        service_config = load_service_config()
         data_settings = service_config.get("data", {})
         performance_settings = service_config.get("performance", {})
         # Use data.performance_history_limit if available, fallback to performance.max_records for backward compatibility
@@ -305,6 +319,34 @@ class PerformanceTracker:
                                 continue
                 except Exception:
                     features = {}
+
+                # Attach ML prediction fields (for shadow A/B lift measurement).
+                # These are stored on the signal as `_ml_prediction` by NQSignalGenerator.
+                try:
+                    ml_pred = signal.get("_ml_prediction")
+                    if isinstance(ml_pred, dict):
+                        try:
+                            features["ml_win_probability"] = float(ml_pred.get("win_probability", 0.0) or 0.0)
+                        except Exception:
+                            pass
+                        try:
+                            features["ml_pass_filter"] = 1.0 if bool(ml_pred.get("pass_filter", True)) else 0.0
+                        except Exception:
+                            pass
+                        try:
+                            features["ml_fallback_used"] = 1.0 if bool(ml_pred.get("fallback_used", False)) else 0.0
+                        except Exception:
+                            pass
+                        # Confidence level bucket (low/medium/high) -> numeric (0/1/2) for easy aggregation.
+                        try:
+                            level = str(ml_pred.get("confidence_level", "") or "").lower()
+                            level_map = {"low": 0.0, "medium": 1.0, "high": 2.0}
+                            if level in level_map:
+                                features["ml_confidence_level"] = float(level_map[level])
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
                 self._trade_db.add_trade(
                     trade_id=str(signal_id),

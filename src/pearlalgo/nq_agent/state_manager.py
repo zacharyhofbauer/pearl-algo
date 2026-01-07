@@ -102,6 +102,11 @@ class NQAgentStateManager:
         Args:
             state_dir: Directory for state files (default: ./data/nq_agent_state)
         """
+        # Track whether the caller explicitly provided a state_dir (tests do this via tmp_path).
+        # If explicit, ALL persistence (including SQLite) must stay inside that directory to
+        # avoid unit tests polluting the live agent state under data/nq_agent_state.
+        self._explicit_state_dir = state_dir is not None
+
         self.state_dir = ensure_state_dir(state_dir)
         self.signals_file = get_signals_file(self.state_dir)
         self.state_file = get_state_file(self.state_dir)
@@ -117,8 +122,16 @@ class NQAgentStateManager:
                 storage_cfg = cfg.get("storage", {}) or {}
                 self._sqlite_enabled = bool(storage_cfg.get("sqlite_enabled", False))
                 if self._sqlite_enabled:
-                    db_path_raw = storage_cfg.get("db_path") or str(self.state_dir / "trades.db")
-                    self._trade_db = TradeDatabase(Path(str(db_path_raw)))
+                    # IMPORTANT:
+                    # - In production (no explicit state_dir), honor config.db_path if provided.
+                    # - In tests (explicit state_dir), ALWAYS use state_dir/trades.db regardless of config,
+                    #   so tests cannot write into data/nq_agent_state/trades.db.
+                    if self._explicit_state_dir:
+                        db_path = self.state_dir / "trades.db"
+                    else:
+                        db_path_raw = storage_cfg.get("db_path") or str(self.state_dir / "trades.db")
+                        db_path = Path(str(db_path_raw))
+                    self._trade_db = TradeDatabase(db_path)
             except Exception as e:
                 logger.debug(f"SQLite storage not enabled/available: {e}")
 

@@ -137,6 +137,10 @@ class TelegramCommandHandler:
         
         self.bot_token = bot_token
         self.chat_id = chat_id
+        # Track whether caller explicitly provided a state_dir (tests do this via tmp_path).
+        # When explicit, any SQLite reads should prefer that directory to avoid coupling tests
+        # to the live agent DB path from config.yaml.
+        self._explicit_state_dir = state_dir is not None
         self.state_dir = ensure_state_dir(state_dir)
         self.state_manager = NQAgentStateManager(state_dir=state_dir)
         self.performance_tracker = PerformanceTracker(
@@ -345,6 +349,7 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("grade", self._handle_grade))
         self.application.add_handler(CommandHandler("performance", self._handle_performance))
         self.application.add_handler(CommandHandler("doctor", self._handle_doctor))
+        self.application.add_handler(CommandHandler("brain", self._handle_brain))
 
         # Friendly fallback for any other slash command: point users back to /start.
         async def _unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1584,8 +1589,45 @@ class TelegramCommandHandler:
                 gateway_api_ready=gateway_api_ready,
             )
             
-            # Use the unified sender so tests and runtime behavior stay consistent.
-            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+            # IMPORTANT UX:
+            # When invoked via callback_query (user tapped a button), editing the existing message
+            # would keep it *above* the newly sent chart photo (because edits don't change ordering),
+            # resulting in chart appearing below the Home Card.
+            #
+            # Fix: for callbacks, remove buttons on the old view and SEND a NEW Home Card message
+            # right after the chart so the chart is always on top of the menu text.
+            if update.callback_query:
+                # Best-effort: disable buttons on the previous view to avoid stale navigation.
+                try:
+                    await update.callback_query.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+                # Send new message (with Markdown fallback)
+                try:
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=message,
+                        reply_markup=reply_markup,
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text=message.replace("*", "").replace("_", "").replace("`", ""),
+                            reply_markup=reply_markup,
+                            parse_mode=None,
+                        )
+                    except Exception:
+                        # Final fallback: keep UX alive even if buttons fail
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text=message.replace("*", "").replace("_", "").replace("`", ""),
+                            parse_mode=None,
+                        )
+            else:
+                # Use the unified sender so tests and runtime behavior stay consistent.
+                await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             
         except Exception as e:
             logger.error(f"Error handling status command: {e}", exc_info=True)
@@ -2451,8 +2493,16 @@ class TelegramCommandHandler:
             if not bool(storage_cfg.get("sqlite_enabled", False)):
                 return None
 
-            db_path_raw = storage_cfg.get("db_path") or str(self.state_dir / "trades.db")
-            self._trade_db = TradeDatabase(Path(str(db_path_raw)))
+            # IMPORTANT:
+            # - In production (no explicit state_dir), honor config.db_path if provided.
+            # - In tests (explicit state_dir), ALWAYS use state_dir/trades.db regardless of config.
+            if getattr(self, "_explicit_state_dir", False):
+                db_path = self.state_dir / "trades.db"
+            else:
+                db_path_raw = storage_cfg.get("db_path") or str(self.state_dir / "trades.db")
+                db_path = Path(str(db_path_raw))
+
+            self._trade_db = TradeDatabase(db_path)
             return self._trade_db
         except Exception as e:
             logger.debug(f"Could not initialize TradeDatabase: {e}")
@@ -5228,6 +5278,7 @@ Choose what you want to inspect:
                 InlineKeyboardButton("🩺 Doctor", callback_data="doctor"),
             ],
             [
+                InlineKeyboardButton("🧠 Brain", callback_data="brain"),
                 InlineKeyboardButton("🏠 Menu", callback_data="start"),
             ],
         ]
@@ -8954,6 +9005,8 @@ _Commands are policy-gated for safety._
             await self._handle_diagnostics(update, context)
         elif callback_data == 'doctor':
             await self._handle_doctor(update, context)
+        elif callback_data == 'brain':
+            await self._handle_brain(update, context)
         elif callback_data == 'start_agent':
             await self._handle_start_agent(update, context)
         elif callback_data == 'stop_agent':
@@ -9706,6 +9759,368 @@ _Commands are policy-gated for safety._
         except Exception as e:
             logger.error(f"Error handling /diagnostics: {e}", exc_info=True)
             await self._send_message_or_edit(update, context, f"❌ Error: {str(e)[:100]}", reply_markup=self._get_back_to_menu_button())
+
+    async def _handle_brain(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Brain: learning/policy rollup (mobile-first).
+
+        This is the operator-facing "is the agent getting smarter?" view.
+        - Bandit policy (global): per-signal-type Thompson sampling stats
+        - Contextual policy: learns by session/regime bucket (if enabled)
+        - ML filter: prediction logging + readiness signals (from SQLite, when available)
+        """
+        if not await self._check_authorized(update):
+            return
+
+        try:
+            now = datetime.now(timezone.utc)
+            cutoff = (now - timedelta(hours=24)).isoformat()
+
+            # Load config (best-effort)
+            try:
+                from pearlalgo.config.config_loader import load_service_config
+
+                cfg = load_service_config(validate=False) or {}
+            except Exception:
+                cfg = {}
+
+            learning_cfg = cfg.get("learning", {}) or {}
+            ml_cfg = cfg.get("ml_filter", {}) or {}
+
+            # SQLite evidence (optional)
+            db = self._get_trade_db()
+            event_counts: Dict[str, int] = {}
+            trade_summary: Dict[str, Any] = {"total": 0, "win_rate": 0.0, "total_pnl": 0.0}
+            if db is not None:
+                try:
+                    event_counts = db.get_signal_event_counts(from_time=cutoff) or {}
+                except Exception:
+                    event_counts = {}
+                try:
+                    trade_summary = db.get_trade_summary(from_exit_time=cutoff) or trade_summary
+                except Exception:
+                    pass
+
+            # -------------------------
+            # Bandit policy (global)
+            # -------------------------
+            bandit_lines: List[str] = []
+            try:
+                from pearlalgo.learning.bandit_policy import BanditPolicy, BanditConfig
+
+                bandit_config = BanditConfig.from_dict(learning_cfg if isinstance(learning_cfg, dict) else {})
+                bandit = BanditPolicy(config=bandit_config, state_dir=self.state_dir)
+                status = bandit.get_status() or {}
+
+                stats_list = list(getattr(bandit.state, "signal_types", {}).values())
+                stats_sorted = sorted(stats_list, key=lambda s: int(getattr(s, "sample_count", 0) or 0), reverse=True)
+
+                # "Brain metrics" (simple, hard to game): knowledge + uncertainty + expected WR
+                total_outcomes = 0
+                weighted_expected_sum = 0.0
+                weighted_denom = 0
+                stdevs: List[float] = []
+                for s in stats_list:
+                    n = int(getattr(s, "sample_count", 0) or 0)
+                    total_outcomes += n
+                    w = max(1, n)
+                    weighted_denom += w
+                    try:
+                        weighted_expected_sum += float(getattr(s, "expected_win_rate", 0.5) or 0.5) * w
+                    except Exception:
+                        weighted_expected_sum += 0.5 * w
+
+                    # Posterior stdev for Beta(alpha, beta)
+                    try:
+                        a = float(getattr(s, "alpha", 0.0) or 0.0)
+                        b = float(getattr(s, "beta", 0.0) or 0.0)
+                        if a > 0 and b > 0:
+                            var = (a * b) / (((a + b) ** 2) * (a + b + 1))
+                            if var >= 0:
+                                stdevs.append(math.sqrt(var))
+                    except Exception:
+                        pass
+
+                avg_expected = (weighted_expected_sum / max(1, weighted_denom)) if weighted_denom else 0.5
+                avg_unc = (sum(stdevs) / len(stdevs)) if stdevs else None
+
+                bandit_lines.append(
+                    f"- mode: `{bandit_config.mode}` | thr: `{bandit_config.decision_threshold}` | explore: `{bandit_config.explore_rate}`"
+                )
+                bandit_lines.append(
+                    f"- decisions: {int(status.get('total_decisions', 0) or 0)} | execute_rate: {float(status.get('execute_rate', 0) or 0):.2f}"
+                )
+                if avg_unc is not None:
+                    bandit_lines.append(
+                        f"- knowledge: {total_outcomes} outcomes | avg exp WR: {avg_expected:.0%} | uncertainty: ±{avg_unc:.0%}"
+                    )
+                else:
+                    bandit_lines.append(
+                        f"- knowledge: {total_outcomes} outcomes | avg exp WR: {avg_expected:.0%}"
+                    )
+
+                top = [s for s in stats_sorted if int(getattr(s, "sample_count", 0) or 0) > 0][:5]
+                if top:
+                    bandit_lines.append("\n*Top signal types (by samples):*")
+                    for s in top:
+                        stype = str(getattr(s, "signal_type", "unknown") or "unknown")
+                        wins = int(getattr(s, "wins", 0) or 0)
+                        losses = int(getattr(s, "losses", 0) or 0)
+                        n = int(getattr(s, "sample_count", 0) or 0)
+                        wr = float(getattr(s, "win_rate", 0.0) or 0.0)
+                        exp = float(getattr(s, "expected_win_rate", 0.5) or 0.5)
+                        bandit_lines.append(f"- `{stype}`: {wins}W/{losses}L (WR {wr:.0%}, exp {exp:.0%}, n={n})")
+            except Exception as e:
+                bandit_lines = [f"- (bandit unavailable: `{str(e)[:120]}`)"]
+
+            # -------------------------
+            # Contextual policy (optional)
+            # -------------------------
+            contextual_lines: List[str] = []
+            try:
+                contextual_cfg = learning_cfg.get("contextual", {}) if isinstance(learning_cfg, dict) else {}
+                if isinstance(contextual_cfg, dict) and bool(contextual_cfg.get("enabled", False)):
+                    from pearlalgo.learning.contextual_bandit import (
+                        ContextualBanditPolicy,
+                        ContextualBanditConfig,
+                    )
+
+                    ctx_config = ContextualBanditConfig.from_dict(contextual_cfg)
+                    ctx_policy = ContextualBanditPolicy(config=ctx_config, state_dir=self.state_dir)
+                    ctx_status = ctx_policy.get_status() or {}
+                    contextual_lines.append(
+                        f"- mode: `{ctx_config.mode}` | thr: `{ctx_config.decision_threshold}` | explore: `{ctx_config.explore_rate}`"
+                    )
+                    contextual_lines.append(
+                        f"- decisions: {int(ctx_status.get('total_decisions', 0) or 0)} | execute_rate: {float(ctx_status.get('execute_rate', 0) or 0):.2f}"
+                    )
+                    contextual_lines.append(f"- contexts tracked: {int(ctx_status.get('unique_contexts', 0) or 0)}")
+            except Exception:
+                pass
+
+            # -------------------------
+            # ML filter metrics (from SQLite signals, when available)
+            # -------------------------
+            ml_lines: List[str] = []
+            ml_enabled = bool(ml_cfg.get("enabled", False)) if isinstance(ml_cfg, dict) else False
+            if not ml_enabled:
+                ml_lines.append("- disabled in config")
+            else:
+                try:
+                    min_prob = float(ml_cfg.get("min_probability", 0.55))
+                except Exception:
+                    min_prob = 0.55
+                model_path = str(ml_cfg.get("model_path") or "")
+                if model_path:
+                    try:
+                        exists = Path(model_path).exists()
+                    except Exception:
+                        exists = False
+                    ml_lines.append(f"- model: `{model_path}` ({'present' if exists else 'missing'})")
+                ml_lines.append(f"- threshold: `{min_prob:.2f}`")
+
+                if db is None:
+                    ml_lines.append("- SQLite disabled → no prediction metrics")
+                else:
+                    try:
+                        gen_events = db.get_signal_events(status="generated", from_time=cutoff, limit=2000)
+                    except Exception:
+                        gen_events = []
+
+                    probs: List[float] = []
+                    fallbacks = 0
+                    for ev in gen_events:
+                        payload = ev.get("payload", {}) or {}
+                        sig = payload.get("signal", {}) if isinstance(payload, dict) else {}
+                        if not isinstance(sig, dict):
+                            continue
+                        ml_pred = sig.get("_ml_prediction")
+                        if not isinstance(ml_pred, dict):
+                            continue
+                        try:
+                            p = float(ml_pred.get("win_probability", 0.0))
+                            probs.append(p)
+                        except Exception:
+                            continue
+                        if bool(ml_pred.get("fallback_used", False)):
+                            fallbacks += 1
+
+                    if probs:
+                        passed = sum(1 for p in probs if p >= min_prob)
+                        ml_lines.append(f"- predictions: {len(probs)} | pass@thr: {passed} ({passed / max(1, len(probs)):.0%})")
+                        try:
+                            avg_p = float(np.mean(probs))
+                            ml_lines.append(f"- avg P(win): {avg_p:.2f} | fallback: {fallbacks} ({fallbacks / max(1, len(probs)):.0%})")
+                        except Exception:
+                            pass
+                    else:
+                        ml_lines.append("- predictions: 0 (no signals logged yet)")
+
+            # -------------------------
+            # ML lift (shadow A/B) from graded exits (trades table)
+            # -------------------------
+            ml_lift_lines: List[str] = []
+            if ml_enabled and db is not None:
+                try:
+                    lookback = int(ml_cfg.get("lift_lookback_trades", 200) or 200) if isinstance(ml_cfg, dict) else 200
+                except Exception:
+                    lookback = 200
+                try:
+                    min_trades = int(ml_cfg.get("lift_min_trades", 50) or 50) if isinstance(ml_cfg, dict) else 50
+                except Exception:
+                    min_trades = 50
+                try:
+                    min_lift = float(ml_cfg.get("lift_min_winrate_delta", 0.05) or 0.05) if isinstance(ml_cfg, dict) else 0.05
+                except Exception:
+                    min_lift = 0.05
+                try:
+                    mode = str(ml_cfg.get("mode", "shadow") or "shadow").lower() if isinstance(ml_cfg, dict) else "shadow"
+                except Exception:
+                    mode = "shadow"
+                require_lift = bool(ml_cfg.get("require_lift_to_block", True)) if isinstance(ml_cfg, dict) else True
+
+                try:
+                    trades = db.get_recent_trades_by_exit(limit=lookback, from_exit_time=cutoff)
+                except Exception:
+                    trades = []
+
+                # Filter to trades with real ML predictions (exclude fallback-only)
+                scored = []
+                for t in trades:
+                    feats = t.get("features", {}) if isinstance(t, dict) else {}
+                    if not isinstance(feats, dict):
+                        continue
+                    if "ml_pass_filter" not in feats:
+                        continue
+                    try:
+                        if float(feats.get("ml_fallback_used", 0.0) or 0.0) >= 0.5:
+                            continue
+                    except Exception:
+                        pass
+                    scored.append(t)
+
+                if len(scored) < min_trades:
+                    ml_lift_lines.append(f"- lift: insufficient data ({len(scored)}/{min_trades} exits)")
+                else:
+                    p_group = []
+                    f_group = []
+                    for t in scored:
+                        feats = t.get("features", {}) or {}
+                        try:
+                            pass_flag = float(feats.get("ml_pass_filter", 1.0) or 0.0) >= 0.5
+                        except Exception:
+                            pass_flag = True
+                        (p_group if pass_flag else f_group).append(t)
+
+                    if not p_group or not f_group:
+                        ml_lift_lines.append(f"- lift: need both pass+fail groups (pass={len(p_group)}, fail={len(f_group)})")
+                    else:
+                        def _wr(xs: List[Dict[str, Any]]) -> float:
+                            wins = 0
+                            for t in xs:
+                                try:
+                                    if bool(t.get("is_win", False)):
+                                        wins += 1
+                                except Exception:
+                                    continue
+                            return wins / max(1, len(xs))
+
+                        wr_pass = _wr(p_group)
+                        wr_fail = _wr(f_group)
+                        lift_wr = wr_pass - wr_fail
+                        lift_ok = bool(lift_wr >= min_lift)
+                        blocking_allowed = (mode == "live") and (lift_ok if require_lift else True)
+
+                        ml_lift_lines.append(
+                            f"- lift (WR): pass {wr_pass:.0%} vs block {wr_fail:.0%} = {lift_wr:+.0%} "
+                            f"(need ≥{min_lift:.0%})"
+                        )
+                        ml_lift_lines.append(
+                            f"- gating: mode `{mode}` | lift_ok `{lift_ok}` | blocking_allowed `{blocking_allowed}`"
+                        )
+
+            # -------------------------
+            # Drift guard (risk-off cooldown)
+            # -------------------------
+            drift_lines: List[str] = []
+            try:
+                dg_path = self.state_dir / "drift_guard_state.json"
+                if dg_path.exists():
+                    raw = json.loads(dg_path.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict):
+                        active = bool(raw.get("active", False))
+                        if active:
+                            drift_lines.append(f"- status: ON (until {raw.get('until')})")
+                            if raw.get("reason"):
+                                drift_lines.append(f"- reason: {str(raw.get('reason'))[:120]}")
+                            adj = raw.get("adjustments", {}) if isinstance(raw.get("adjustments", {}), dict) else {}
+                            if adj:
+                                try:
+                                    drift_lines.append(
+                                        f"- tighten: +{float(adj.get('min_confidence_delta', 0.0) or 0.0):.2f} conf, "
+                                        f"+{float(adj.get('min_risk_reward_delta', 0.0) or 0.0):.2f} R:R | "
+                                        f"size ×{float(adj.get('size_multiplier', 1.0) or 1.0):.2f}"
+                                    )
+                                except Exception:
+                                    pass
+                        else:
+                            drift_lines.append("- status: OFF")
+                else:
+                    drift_lines.append("- status: (no state file yet)")
+            except Exception:
+                drift_lines = []
+
+            # -------------------------
+            # Build message
+            # -------------------------
+            msg = "🧠 *Brain (last 24h)*\n\n"
+
+            # Evidence: keep ultra-compact
+            if db is not None:
+                gen = int(event_counts.get("generated", 0) or 0)
+                exited = int(event_counts.get("exited", 0) or 0)
+                total_trades = int(trade_summary.get("total", 0) or 0)
+                try:
+                    wr = float(trade_summary.get("win_rate", 0.0) or 0.0)
+                except Exception:
+                    wr = 0.0
+                msg += "*Evidence:*\n"
+                msg += f"- signals: {gen} | exits graded: {exited} | trades: {total_trades} | WR: {wr:.0%}\n\n"
+
+            msg += "*Bandit (global):*\n"
+            msg += ("\n".join(bandit_lines) if bandit_lines else "- (no data)\n")
+
+            if contextual_lines:
+                msg += "\n\n*Contextual (session/regime):*\n"
+                msg += "\n".join(contextual_lines)
+
+            if drift_lines:
+                msg += "\n\n*Drift guard:*\n"
+                msg += "\n".join(drift_lines)
+
+            msg += "\n\n*ML filter:*\n"
+            msg += "\n".join(ml_lines) if ml_lines else "- (no data)"
+
+            if ml_lift_lines:
+                msg += "\n\n*ML lift (shadow A/B):*\n"
+                msg += "\n".join(ml_lift_lines)
+
+            msg += "\n\n💡 Tip: Use 🩺 *Doctor* for ops rollups; this view is about learning/policy."
+
+            await self._send_message_or_edit(
+                update,
+                context,
+                msg,
+                reply_markup=self._get_back_to_menu_button(),
+            )
+        except Exception as e:
+            logger.error(f"Error handling /brain: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"❌ Error: {str(e)[:120]}",
+                reply_markup=self._get_back_to_menu_button(),
+            )
 
     async def _handle_doctor(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """
