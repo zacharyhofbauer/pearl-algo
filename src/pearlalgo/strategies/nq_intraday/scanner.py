@@ -122,10 +122,16 @@ class NQScanner:
             except Exception as e:
                 logger.warning(f"Could not initialize market depth analyzer: {e}")
         
+        # Log adaptive volatility filter status
+        avf_enabled = getattr(self.config, "adaptive_volatility_filter_enabled", False)
+        avf_expansion = getattr(self.config, "adaptive_volatility_expansion_requirement", 2.0)
+        
         logger.info(
             f"NQScanner initialized with symbol={self.config.symbol}, timeframe={self.config.timeframe}, "
             f"custom_indicators={[ind.name for ind in self.custom_indicators]}, "
-            f"adaptive_stops={self._adaptive_stops is not None}"
+            f"adaptive_stops={self._adaptive_stops is not None}, "
+            f"adaptive_volatility_filter={'ENABLED' if avf_enabled else 'DISABLED'} "
+            f"(expansion_req={avf_expansion:.1f}x)" if avf_enabled else ""
         )
 
     def _get_timeframe_minutes(self, timeframe: str) -> int:

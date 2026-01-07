@@ -405,8 +405,8 @@ class NQIntradayConfig:
         if "min_risk_reward" in variant_cfg:
             self.take_profit_risk_reward = float(variant_cfg["min_risk_reward"])
         if "min_confidence" in variant_cfg:
-            # This would need to be passed to signal generator
-            pass
+            # Store for signal generator filtering
+            self._min_confidence_override = float(variant_cfg["min_confidence"])
         if "volatility_threshold" in variant_cfg:
             self.volatility_threshold = float(variant_cfg["volatility_threshold"])
         if "target_points" in variant_cfg:
@@ -424,6 +424,14 @@ class NQIntradayConfig:
             self.base_contracts = int(variant_cfg["base_contracts"])
         if "avoid_lunch_lull" in variant_cfg:
             self.avoid_lunch_lull = bool(variant_cfg["avoid_lunch_lull"])
+        
+        # Adaptive volatility filter settings (A/B testing support)
+        if "adaptive_volatility_filter_enabled" in variant_cfg:
+            self.adaptive_volatility_filter_enabled = bool(variant_cfg["adaptive_volatility_filter_enabled"])
+        if "adaptive_volatility_expansion_requirement" in variant_cfg:
+            self.adaptive_volatility_expansion_requirement = float(variant_cfg["adaptive_volatility_expansion_requirement"])
+        if "adaptive_volatility_median_threshold" in variant_cfg:
+            self.adaptive_volatility_median_threshold = float(variant_cfg["adaptive_volatility_median_threshold"])
 
     def is_signal_enabled(self, signal_type: str) -> bool:
         """Check if a signal type is enabled based on configuration.
@@ -496,9 +504,28 @@ class NQIntradayConfig:
     def get_variant_presets(cls) -> dict:
         """Get predefined strategy variant configurations.
         
+        Loads variants from config.yaml's strategy_variants section,
+        with fallback to hardcoded defaults.
+        
         Returns:
             Dict of variant name -> variant config dict
         """
+        # Try to load from config.yaml first
+        config_data = load_config_yaml()
+        if config_data and "strategy_variants" in config_data:
+            variants = config_data["strategy_variants"]
+            # Add default if not present
+            if "default" not in variants:
+                variants["default"] = {
+                    "description": "Balanced default - disabled broken signals",
+                    "enabled_signals": DEFAULT_ENABLED_SIGNALS,
+                    "disabled_signals": DEFAULT_DISABLED_SIGNALS,
+                    "min_risk_reward": 1.2,
+                    "volatility_threshold": 0.0005,
+                }
+            return variants
+        
+        # Fallback to hardcoded defaults
         return {
             "default": {
                 "description": "Balanced default - disabled broken signals",

@@ -298,6 +298,25 @@ class NQSignalGenerator:
             signal_settings.get("duplicate_price_threshold_pct", 0.5) / 100.0
         )
         
+        # Composite quality score filter (NO CAPS - purely quality-driven)
+        quality_score_settings = signal_settings.get("quality_score", {}) or {}
+        self._quality_score_enabled = bool(quality_score_settings.get("enabled", False))
+        self._quality_score_threshold = float(quality_score_settings.get("threshold", 0.85))
+        quality_factors = quality_score_settings.get("factors", {}) or {}
+        self._quality_confidence_weight = float(quality_factors.get("confidence_weight", 0.30))
+        self._quality_risk_reward_weight = float(quality_factors.get("risk_reward_weight", 0.25))
+        self._quality_regime_alignment_weight = float(quality_factors.get("regime_alignment_weight", 0.20))
+        self._quality_volume_profile_weight = float(quality_factors.get("volume_profile_weight", 0.15))
+        self._quality_mtf_alignment_weight = float(quality_factors.get("mtf_alignment_weight", 0.10))
+        
+        # Swing trade detection
+        swing_settings = service_config.get("swing_trading", {}) or {}
+        self._swing_trading_enabled = bool(swing_settings.get("enabled", False))
+        self._swing_min_confidence = float(swing_settings.get("min_confidence", 0.90))
+        self._swing_min_target_points = float(swing_settings.get("min_target_points", 30))
+        self._swing_min_mtf_alignment = float(swing_settings.get("min_mtf_alignment", 0.80))
+        self._swing_min_volume_ratio = float(swing_settings.get("min_volume_ratio", 1.2))
+        
         # Stop-cap configuration (risk control)
         # If > 0, caps stop distance in points and scales target to preserve RR
         self._max_stop_points = signal_settings.get("max_stop_points", 0.0)
@@ -386,13 +405,131 @@ class NQSignalGenerator:
         
         logger.info(
             "NQSignalGenerator initialized (max_stop_points=%.1f, regime_filters=%d types, "
-            "feature_engineer=%s, ml_filter=%s, adaptive_sizing=%s)",
+            "feature_engineer=%s, ml_filter=%s, adaptive_sizing=%s, quality_score=%s, swing_trading=%s)",
             self._max_stop_points,
             len(self._regime_filters),
             "enabled" if self._feature_engineer_enabled else "disabled",
             "enabled" if self._ml_filter_enabled else "disabled",
             "enabled" if self._adaptive_sizing_enabled else "disabled",
+            "enabled" if self._quality_score_enabled else "disabled",
+            "enabled" if self._swing_trading_enabled else "disabled",
         )
+
+    def _calculate_composite_quality_score(self, signal: Dict, market_data: Dict) -> float:
+        """Calculate composite quality score combining multiple factors.
+        
+        Args:
+            signal: Signal dictionary
+            market_data: Market data dictionary with df and context
+            
+        Returns:
+            Composite quality score (0.0 to 1.0)
+        """
+        if not self._quality_score_enabled:
+            return 1.0  # If disabled, don't filter
+        
+        # Factor 1: Confidence (0-1, normalized)
+        confidence = float(signal.get("confidence", 0.0))
+        confidence_score = min(1.0, confidence)  # Already 0-1
+        
+        # Factor 2: Risk:Reward ratio (normalize to 0-1, assume max R:R is 5.0)
+        risk_reward = float(signal.get("risk_reward", 0.0))
+        rr_score = min(1.0, risk_reward / 5.0)  # Normalize: 5.0 R:R = 1.0 score
+        
+        # Factor 3: Regime alignment (0-1)
+        regime = signal.get("regime", {})
+        regime_type = regime.get("type", "unknown") if isinstance(regime, dict) else "unknown"
+        regime_favorability = regime.get("favorability", 0.5) if isinstance(regime, dict) else 0.5
+        # Check if signal type is allowed in current regime
+        signal_type = signal.get("type", "")
+        allowed_regimes = self._regime_filters.get(signal_type, {}).get("allowed_regimes", [])
+        if allowed_regimes and regime_type in allowed_regimes:
+            regime_score = 1.0
+        elif regime_favorability > 0.7:
+            regime_score = 0.8
+        elif regime_favorability > 0.5:
+            regime_score = 0.6
+        else:
+            regime_score = 0.4
+        
+        # Factor 4: Volume profile confirmation (0-1)
+        # Use volume ratio if available, otherwise default to 0.5
+        volume_ratio = float(signal.get("volume_ratio", 1.0))
+        if volume_ratio >= 1.5:
+            volume_score = 1.0
+        elif volume_ratio >= 1.2:
+            volume_score = 0.8
+        elif volume_ratio >= 1.0:
+            volume_score = 0.6
+        else:
+            volume_score = 0.4
+        
+        # Factor 5: Multi-timeframe alignment (0-1)
+        mtf_alignment = float(signal.get("mtf_alignment_score", 0.5))
+        mtf_score = mtf_alignment  # Already 0-1
+        
+        # Weighted composite score
+        composite_score = (
+            confidence_score * self._quality_confidence_weight +
+            rr_score * self._quality_risk_reward_weight +
+            regime_score * self._quality_regime_alignment_weight +
+            volume_score * self._quality_volume_profile_weight +
+            mtf_score * self._quality_mtf_alignment_weight
+        )
+        
+        return composite_score
+
+    def _classify_trade_type(self, signal: Dict, market_data: Dict) -> str:
+        """Classify trade as swing or scalp based on multiple factors.
+        
+        Args:
+            signal: Signal dictionary
+            market_data: Market data dictionary
+            
+        Returns:
+            'swing' or 'scalp'
+        """
+        if not self._swing_trading_enabled:
+            return "scalp"
+        
+        # Check all swing criteria
+        confidence = float(signal.get("confidence", 0.0))
+        if confidence < self._swing_min_confidence:
+            return "scalp"
+        
+        # Calculate target points
+        entry = float(signal.get("entry_price", 0))
+        target = float(signal.get("take_profit", 0))
+        if entry > 0 and target > 0:
+            target_points = abs(target - entry)
+        else:
+            # Estimate from risk:reward
+            stop = float(signal.get("stop_loss", 0))
+            risk_points = abs(entry - stop) if entry > 0 and stop > 0 else 10.0
+            risk_reward = float(signal.get("risk_reward", 1.5))
+            target_points = risk_points * risk_reward
+        
+        if target_points < self._swing_min_target_points:
+            return "scalp"
+        
+        # Check regime (must be trending)
+        regime = signal.get("regime", {})
+        regime_type = regime.get("type", "unknown") if isinstance(regime, dict) else "unknown"
+        if regime_type not in ["trending_bullish", "trending_bearish"]:
+            return "scalp"
+        
+        # Check MTF alignment
+        mtf_alignment = float(signal.get("mtf_alignment_score", 0.0))
+        if mtf_alignment < self._swing_min_mtf_alignment:
+            return "scalp"
+        
+        # Check volume ratio
+        volume_ratio = float(signal.get("volume_ratio", 1.0))
+        if volume_ratio < self._swing_min_volume_ratio:
+            return "scalp"
+        
+        # All criteria met - classify as swing
+        return "swing"
 
     def generate(self, market_data: Dict) -> List[Dict]:
         """Generate trading signals from market data.
@@ -750,6 +887,33 @@ class NQSignalGenerator:
                 validated_signal.get("confidence", 0.0),
                 validated_signal.get("entry_price", 0.0),
             )
+            
+            # Calculate composite quality score (NO CAPS - purely quality-driven)
+            composite_quality_score = self._calculate_composite_quality_score(validated_signal, market_data)
+            validated_signal["composite_quality_score"] = composite_quality_score
+            
+            # Apply composite quality score filter (NO LIMIT on how many pass)
+            if self._quality_score_enabled and composite_quality_score < self._quality_score_threshold:
+                logger.debug(
+                    "Signal filtered by composite quality score: type=%s, score=%.3f < threshold=%.3f",
+                    validated_signal.get("type"),
+                    composite_quality_score,
+                    self._quality_score_threshold,
+                )
+                diagnostics.rejected_quality_scorer += 1
+                continue
+            
+            # Classify trade type (swing vs scalp)
+            trade_type = self._classify_trade_type(validated_signal, market_data)
+            validated_signal["trade_type"] = trade_type
+            if trade_type == "swing":
+                logger.debug(
+                    "Swing trade detected: type=%s, confidence=%.3f, target_points=%.1f",
+                    validated_signal.get("type"),
+                    validated_signal.get("confidence", 0.0),
+                    abs(float(validated_signal.get("take_profit", 0)) - float(validated_signal.get("entry_price", 0))),
+                )
+            
             # Score signal quality (always attach for transparency, even when we emit B-tier)
             quality_score = self.quality_scorer.score_signal(validated_signal)
             validated_signal["quality_score"] = quality_score

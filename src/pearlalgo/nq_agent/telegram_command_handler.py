@@ -1771,6 +1771,31 @@ class TelegramCommandHandler:
             session_start = config_block.get("start_time") if isinstance(config_block, dict) else None
             session_end = config_block.get("end_time") if isinstance(config_block, dict) else None
             
+            # Get challenge tracker performance (if enabled)
+            challenge_status = None
+            perf_challenge = None
+            perf_7d_alltime = None
+            try:
+                # Always get 7-day all-time performance (for comparison)
+                perf_7d_alltime = self.performance_tracker.get_performance_metrics(days=7)
+            except Exception:
+                pass
+            
+            try:
+                # Try challenge tracker (if enabled)
+                challenge_tracker = self._get_challenge_tracker()
+                if challenge_tracker is not None:
+                    perf_challenge = challenge_tracker.get_attempt_performance()
+                    challenge_status = challenge_tracker.get_status_summary()
+                    # Use challenge performance as main perf for home card
+                    perf = perf_challenge
+                else:
+                    # Fallback: use 7d all-time as main perf
+                    perf = perf_7d_alltime
+            except Exception as e:
+                logger.debug(f"Could not get challenge performance for refresh: {e}")
+                perf = perf_7d_alltime
+            
             # Format home card
             message = format_home_card(
                 symbol="MNQ",
@@ -1796,6 +1821,20 @@ class TelegramCommandHandler:
                 session_start=session_start,
                 session_end=session_end,
             )
+            
+            # Add 50k Challenge status (if enabled)
+            if challenge_status:
+                message += f"\n\n{challenge_status}"
+            
+            # Show simplified 7d all-time PnL (below challenge, above recent exits)
+            if perf_7d_alltime and perf_7d_alltime.get("exited_signals", 0) > 0:
+                pnl_7d = perf_7d_alltime.get("total_pnl", 0.0)
+                wins_7d = perf_7d_alltime.get("wins", 0)
+                losses_7d = perf_7d_alltime.get("losses", 0)
+                pnl_emoji_7d = "🟢" if pnl_7d >= 0 else "🔴"
+                pnl_str_7d = f"+${pnl_7d:.2f}" if pnl_7d >= 0 else f"-${abs(pnl_7d):.2f}"
+                wr_7d = (wins_7d / (wins_7d + losses_7d) * 100) if (wins_7d + losses_7d) > 0 else 0.0
+                message += f"\n\n*7d All-Time:* {pnl_emoji_7d} {pnl_str_7d} ({wins_7d}W/{losses_7d}L)"
             
             # Add recent exits (last 3 closed trades)
             try:

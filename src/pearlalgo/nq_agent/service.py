@@ -27,6 +27,7 @@ from pearlalgo.nq_agent.state_manager import NQAgentStateManager
 from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
+from pearlalgo.strategies.nq_intraday.trade_manager import TradeManager
 from pearlalgo.utils.cadence import CadenceMetrics, CadenceScheduler
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
@@ -159,6 +160,10 @@ class NQAgentService:
         self.config = config or NQIntradayConfig()
         self.strategy = NQIntradayStrategy(config=self.config)
         self.data_fetcher = NQAgentDataFetcher(data_provider, config=self.config)
+        
+        # Initialize TradeManager for trailing stops and swing trade management
+        service_config = load_service_config()
+        self.trade_manager = TradeManager(service_config)
         self.state_manager = NQAgentStateManager(state_dir=state_dir)
         self.performance_tracker = PerformanceTracker(
             state_dir=state_dir,
@@ -1170,13 +1175,103 @@ class NQAgentService:
                     for i, signal in enumerate(signals, 1):
                         signal_type = signal.get('type', 'unknown')
                         signal_direction = signal.get('direction', 'unknown')
-                        logger.info(f"  Signal {i}/{len(signals)}: {signal_type} {signal_direction}")
+                        trade_type = signal.get('trade_type', 'scalp')
+                        logger.info(f"  Signal {i}/{len(signals)}: {signal_type} {signal_direction} ({trade_type})")
+                        
+                        # Notify if swing trade detected
+                        if trade_type == "swing":
+                            try:
+                                await self.telegram_notifier.send_message(
+                                    f"📈 Swing Trade Detected: {signal_type} {signal_direction}\n"
+                                    f"Confidence: {signal.get('confidence', 0):.1%}\n"
+                                    f"Target: ${signal.get('take_profit', 0):.2f}"
+                                )
+                            except Exception:
+                                pass  # Non-fatal
+                        
+                        # Add trade to TradeManager for trailing stop management
+                        try:
+                            self.trade_manager.add_trade(signal)
+                        except Exception as e:
+                            logger.debug(f"Failed to add trade to TradeManager (non-fatal): {e}")
+                        
                         # Get buffer data for chart generation
                         buffer_data = market_data.get("df", pd.DataFrame())
                         await self._process_signal(signal, buffer_data=buffer_data)
                 else:
                     logger.debug(f"No signals generated in cycle {self.cycle_count}")
 
+                # Update active trades with trailing stops (NO LIMITS - can handle 100+ trades)
+                try:
+                    # Prepare market data for TradeManager
+                    df = market_data.get("df", pd.DataFrame())
+                    latest_bar = market_data.get("latest_bar", {})
+                    current_price = float(latest_bar.get("close", 0)) if latest_bar else (float(df["close"].iloc[-1]) if not df.empty else 0)
+                    previous_price = float(df["close"].iloc[-2]) if len(df) >= 2 else current_price
+                    
+                    # Get ATR from scanner if available
+                    atr = 10.0  # Default
+                    if hasattr(self.strategy.scanner, "get_atr") and not df.empty:
+                        try:
+                            atr = float(self.strategy.scanner.get_atr(df))
+                        except Exception:
+                            pass
+                    
+                    # Update trades with current market data
+                    trade_market_data = {
+                        "current_price": current_price,
+                        "previous_price": previous_price,
+                        "atr": atr,
+                        "rolling_atr": atr,  # Could calculate rolling ATR if needed
+                        "market_open": market_data.get("market_open", True),
+                    }
+                    
+                    # Track stop updates for notifications
+                    active_trades_before = len(self.trade_manager.get_active_trades())
+                    exit_signals = self.trade_manager.update_trades(trade_market_data)
+                    
+                    # Notify on significant stop updates (breakeven moves, large trailing updates)
+                    for trade in self.trade_manager.get_active_trades():
+                        if trade.breakeven_moved and trade.last_stop_update:
+                            # Check if this is a recent breakeven move (within last cycle)
+                            time_since_update = (datetime.now(timezone.utc) - trade.last_stop_update).total_seconds()
+                            if time_since_update < 120:  # Within 2 minutes
+                                try:
+                                    await self.telegram_notifier.send_message(
+                                        f"🛡️ Stop to Breakeven: {trade.signal_id[:8]}\n"
+                                        f"Entry: ${trade.entry_price:.2f}\n"
+                                        f"Stop: ${trade.stop_loss:.2f}"
+                                    )
+                                except Exception:
+                                    pass  # Non-fatal
+                    
+                    # Process exit signals (could trigger notifications, execution, etc.)
+                    for exit_signal in exit_signals:
+                        signal_id = exit_signal.get("signal_id")
+                        exit_reason = exit_signal.get("exit_reason")
+                        exit_price = exit_signal.get("exit_price")
+                        
+                        logger.info(
+                            "Trade exit detected: signal_id=%s, reason=%s, price=%.2f",
+                            signal_id,
+                            exit_reason,
+                            exit_price,
+                        )
+                        
+                        # Send Telegram notification for trade exit
+                        try:
+                            await self.telegram_notifier.send_message(
+                                f"🔄 Trade Exit: {signal_id[:8]}\n"
+                                f"Reason: {exit_reason}\n"
+                                f"Exit Price: ${exit_price:.2f}"
+                            )
+                        except Exception as e:
+                            logger.debug(f"Failed to send exit notification (non-fatal): {e}")
+                        
+                        # TODO: Update virtual PnL tracking
+                except Exception as e:
+                    logger.debug(f"Trade manager update failed (non-fatal): {e}")
+                
                 # Virtual PnL lifecycle: exit signals when TP/SL is touched (no Telegram spam).
                 # This grades signal quality without auto-trading.
                 try:

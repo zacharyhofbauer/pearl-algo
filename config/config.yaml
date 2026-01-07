@@ -129,14 +129,34 @@ challenge:
   auto_reset_on_fail: true                # Automatically start new attempt on FAIL
 
 # Signal generation
-# EMERGENCY: Raised thresholds due to 31% WR performance (2025-01-06)
+# QUALITY-FOCUSED: Purely quality-driven, NO CAPS (2025-01-07)
+# - Only top 10-15% of signals pass quality filters
+# - Take ALL signals that pass, regardless of count (0, 5, or 100+ per day)
+# - Natural frequency based on market conditions
 signals:
   duplicate_window_seconds: 180      # 3 minutes (more opportunities; still deduped)
-  min_confidence: 0.65               # EMERGENCY: Raised from 0.50 - quality over quantity
-  min_risk_reward: 1.5               # EMERGENCY: Raised from 1.2 - better R:R requirement
+  min_confidence: 0.75               # QUALITY: Raised to 0.75 (top 25% of signals)
+  min_risk_reward: 2.0               # QUALITY: Raised to 2.0 (only best setups)
   duplicate_price_threshold_pct: 0.5 # 0.5% price difference for duplicate detection
   volatility_threshold: 0.00025      # Tuned: reduce low-volatility gating further (Tokyo/London opportunities)
   avoid_lunch_lull: false            # Disabled - was blocking 72 signals
+  
+  # Quality score composite filter (combines multiple factors)
+  # Only top 10-15% of signals pass this filter
+  # NO LIMIT on how many pass - if 50 signals score >0.85, take all 50
+  quality_score:
+    enabled: true                    # Enable composite quality scoring
+    threshold: 0.85                  # Minimum composite quality score (0-1)
+    factors:
+      confidence_weight: 0.30        # Signal confidence (30% of score)
+      risk_reward_weight: 0.25        # Risk:reward ratio (25% of score)
+      regime_alignment_weight: 0.20  # Regime favorability (20% of score)
+      volume_profile_weight: 0.15    # Volume profile confirmation (15% of score)
+      mtf_alignment_weight: 0.10     # Multi-timeframe alignment (10% of score)
+  
+  # Time-of-day quality filter
+  # Prioritize NY session for best liquidity, but allow all sessions
+  prioritize_ny_session: true         # Higher quality bar for overnight sessions
   
   # Volume gate (minimum volume per bar to consider for signals)
   # Referenced to 5m bars, scales for other timeframes (1m = 0.2x, 15m = 3x).
@@ -145,37 +165,40 @@ signals:
   min_volume: 100
 
   # Opportunity tiers (A-tier actionable vs B-tier explore)
-  # EMERGENCY: Disabled B-tier until performance recovers
+  # DISABLED: Focus on quality A-tier only
   explore:
-    enabled: false                  # EMERGENCY: Disabled - focus on quality A-tier only
-    min_confidence: 0.60            # If re-enabled: stricter than before
-    min_risk_reward: 1.3            # If re-enabled: stricter than before
+    enabled: false                  # Disabled - focus on quality A-tier only
+    min_confidence: 0.75            # If re-enabled: match main quality threshold
+    min_risk_reward: 2.0            # If re-enabled: match main quality threshold
     include_quality_rejects: false  # Disabled - no near-misses
     bypass_regime_filters: false    # Disabled - enforce all filters
-    max_signals_per_hour: 2         # If re-enabled: stricter cap
+    # NOTE: max_signals_per_hour removed - NO CAPS
   
   # Stop-distance cap (risk control)
-  # EMERGENCY: Tightened - recent losses had stops too wide (-$750, -$607, -$540)
+  # Keep at 20 pts - working well in A/B tests
   # 20 pts = $120 risk @ 3 MNQ contracts (base_contracts during emergency)
-  max_stop_points: 20.0              # EMERGENCY: Reduced from 25.0
+  max_stop_points: 20.0              # Reduced from 25.0
   
   # Adaptive volatility filter (LANE B - strategy threshold change)
-  # EMERGENCY: Stricter to avoid false breakouts in current choppy conditions
+  # DISABLED: A/B testing showed this filter HURTS 1m timeframe performance
+  # - Was blocking 7,900+ signals (90%+ rejection rate)
+  # - Disabling improved WR from 35% to 44%
+  # - Filter was designed for 5m bars, not 1m
   adaptive_volatility_filter:
-    enabled: true                     # Enabled: reduces false breakouts during low-vol consolidation
-    expansion_requirement: 2.5        # EMERGENCY: Raised from 2.0 - more strict
+    enabled: false                    # DISABLED: Hurting 1m performance (2025-01-07 A/B test)
+    expansion_requirement: 2.0        # If re-enabled: use 2.0 (2.5 was too strict for 1m)
     median_atr_threshold: 0.0003      # Threshold below which expansion is required
   
   # Per-signal-type regime/session filters
   # Signals are rejected if current regime/session is NOT in the allowed list.
-  # EMERGENCY: Stricter regime filters based on performance data
+  # OPTIMIZED: Removed NY-only restriction - overnight sessions were winning
   regime_filters:
     mean_reversion_long:
       allowed_regimes: [ranging, trending_bullish]  # Avoid in trending_bearish
       # WORKING: 47% WR - allow in favorable regimes
     mean_reversion_short:
       allowed_regimes: [ranging, trending_bearish]  # Only in favorable conditions
-      allowed_sessions: [new_york]  # EMERGENCY: NY only for liquidity
+      # OPTIMIZED: Removed NY-only restriction - all sessions allowed
     # sr_bounce_short: DISABLED
     # momentum_short: DISABLED
 
@@ -232,7 +255,52 @@ strategy:
 # Strategy variants for A/B testing
 # Use: python scripts/backtesting/run_variants.py --data-path <file>
 strategy_variants:
+  # =====================================================
+  # OPTIMIZATION VARIANTS (2025-01-07 A/B Test)
+  # Testing adaptive_volatility_filter impact
+  # =====================================================
+  
+  # Current EMERGENCY settings (baseline for comparison)
+  emergency_baseline:
+    description: "Current EMERGENCY settings - strict filters"
+    min_confidence: 0.65
+    min_risk_reward: 1.5
+    max_stop_points: 20
+    adaptive_volatility_filter_enabled: true
+    adaptive_volatility_expansion_requirement: 2.5
+  
+  # Relaxed settings - test if blocking too many good signals
+  relaxed:
+    description: "Relaxed filters - more signals, possibly lower quality"
+    min_confidence: 0.55
+    min_risk_reward: 1.3
+    max_stop_points: 25
+    adaptive_volatility_filter_enabled: true
+    adaptive_volatility_expansion_requirement: 1.5
+  
+  # Moderate settings - balance between quality and frequency
+  moderate:
+    description: "Moderate filters - balanced approach"
+    min_confidence: 0.60
+    min_risk_reward: 1.4
+    max_stop_points: 22
+    adaptive_volatility_filter_enabled: true
+    adaptive_volatility_expansion_requirement: 2.0
+  
+  # No adaptive volatility filter - test if this filter is helping
+  no_avf:
+    description: "Adaptive volatility filter DISABLED - test filter value"
+    min_confidence: 0.60
+    min_risk_reward: 1.4
+    max_stop_points: 22
+    adaptive_volatility_filter_enabled: false
+  
+  # =====================================================
+  # LEGACY VARIANTS (original presets)
+  # =====================================================
+  
   aggressive_scalp:
+    description: "Aggressive scalping - winners only, tight targets"
     enabled_signals: [sr_bounce, mean_reversion]
     disabled_signals: [momentum_long, engulfing, breakout]
     min_risk_reward: 1.0
@@ -241,12 +309,14 @@ strategy_variants:
     base_contracts: 10
   
   conservative:
+    description: "Conservative - high confidence only"
     enabled_signals: [sr_bounce, mean_reversion_long, momentum_short]
     disabled_signals: [momentum_long, engulfing, breakout]
     min_risk_reward: 1.5
     min_confidence: 0.75
   
   high_volume:
+    description: "High volume scalping - 25 contracts on best setups"
     enabled_signals: [sr_bounce, mean_reversion]
     disabled_signals: [momentum_long, engulfing]
     base_contracts: 15
@@ -515,6 +585,36 @@ adaptive_stops:
     
   # Performance-based adjustment (wider stops for low-WR signals)
   performance_adjustment: true
+
+# =============================================================================
+# SWING TRADING (Bigger Opportunities)
+# =============================================================================
+# Automatically detect and hold bigger opportunities longer.
+# NO LIMIT on swing trades per day - take all quality swing setups.
+swing_trading:
+  enabled: true                      # Master toggle for swing trade detection
+  min_confidence: 0.90               # High confidence required for swing classification
+  min_target_points: 30              # Large target (30+ points vs 15-20 for scalps)
+  min_mtf_alignment: 0.80            # Strong multi-timeframe alignment required
+  min_volume_ratio: 1.2              # Volume spike or above-average volume
+  max_hold_hours: 8                  # Until end of day for futures (16:10 ET)
+  position_size_multiplier: 1.5      # Can use larger size for swing trades
+  # NO limit on swing trades per day - all quality swings are taken
+
+# =============================================================================
+# TRAILING STOP LOSS (Profit Protection)
+# =============================================================================
+# Advanced stop loss management: breakeven protection + dynamic trailing.
+trailing_stop:
+  enabled: true                      # Master toggle for trailing stops
+  breakeven_immediate: true          # Move to BE immediately when any profit is made
+  trail_method: "dynamic"            # dynamic | atr_multiplier | percentage
+  early_profit_trail_atr: 0.5        # 0-1x ATR profit: trail by 0.5x ATR (tight)
+  medium_profit_trail_atr: 1.0       # 1-2x ATR profit: trail by 1.0x ATR (moderate)
+  large_profit_trail_atr: 1.5       # 2x+ ATR profit: trail by 1.5x ATR (loose, let it run)
+  update_frequency_bars: 1           # Update every bar (1m)
+  never_widen: true                  # Only move stop in favorable direction (never widen)
+  min_profit_before_be: 2.0          # Minimum profit (points) before moving to breakeven
 
 # =============================================================================
 # ADAPTIVE POSITION SIZING (v2.0 Risk Management)
