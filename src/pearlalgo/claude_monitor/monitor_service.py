@@ -101,6 +101,7 @@ class ClaudeMonitorService:
         self.analysis_engine = AnalysisEngine(
             claude_client=self._claude,
             code_analysis_interval_hours=self.config.get("code_analysis_interval_hours", 1),
+            code_analysis_enabled=self.config.get("code_analysis_enabled", True),
         )
         
         self.alert_manager = AlertManager(
@@ -110,6 +111,8 @@ class ClaudeMonitorService:
             timezone_name=self.timezone_name,
             suppress_info_during_quiet=self.config.get("suppress_info_during_quiet", True),
             max_alerts_per_hour=self.config.get("max_alerts_per_hour", 20),
+            allowed_levels=self.config.get("alert_levels"),
+            allowed_categories=self.config.get("alert_categories"),
         )
         
         self.suggestion_engine = SuggestionEngine(
@@ -467,15 +470,93 @@ class ClaudeMonitorService:
         signals = []
         cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         
+        def _normalize_signal_record(record: Dict[str, Any]) -> Dict[str, Any]:
+            """
+            Normalize signals.jsonl records so analyzers can rely on consistent top-level keys.
+            
+            The NQ agent writes records with a nested `signal` payload:
+              { "signal": { "type": ..., "direction": ..., "confidence": ..., "entry_price": ... }, ... }
+            
+            Older monitor/analyzers expected these fields at the top level. We flatten the most
+            important ones (without deleting the nested payload).
+            """
+            if not isinstance(record, dict):
+                return {}
+            
+            sig: Dict[str, Any] = dict(record)
+            nested = sig.get("signal")
+            if isinstance(nested, dict):
+                # Type/name
+                if sig.get("signal_type") is None:
+                    sig["signal_type"] = nested.get("type") or nested.get("signal_type")
+                if sig.get("type") is None:
+                    sig["type"] = sig.get("signal_type") or nested.get("type")
+                
+                # Core fields
+                if sig.get("direction") is None:
+                    sig["direction"] = nested.get("direction")
+                if sig.get("confidence") is None:
+                    sig["confidence"] = nested.get("confidence")
+                
+                # Prices
+                for k in ("entry_price", "stop_loss", "take_profit"):
+                    if sig.get(k) is None and nested.get(k) is not None:
+                        sig[k] = nested.get(k)
+                
+                # Outcome/result (derive from is_win if needed)
+                if sig.get("outcome") is None and sig.get("result") is None:
+                    is_win = sig.get("is_win")
+                    if is_win is True:
+                        sig["outcome"] = "win"
+                    elif is_win is False:
+                        sig["outcome"] = "loss"
+                
+                # R:R ratio (some code uses risk_reward_ratio, others use rr)
+                rr = sig.get("risk_reward_ratio") or sig.get("rr") or nested.get("risk_reward_ratio") or nested.get("rr")
+                if rr is None:
+                    try:
+                        entry = float(sig.get("entry_price") or 0.0)
+                        stop = float(sig.get("stop_loss") or 0.0)
+                        tp = float(sig.get("take_profit") or 0.0)
+                        risk = abs(entry - stop)
+                        reward = abs(tp - entry)
+                        if risk > 0:
+                            rr = reward / risk
+                    except Exception:
+                        rr = None
+                if rr is not None:
+                    sig.setdefault("risk_reward_ratio", rr)
+                    sig.setdefault("rr", rr)
+                
+                # Timestamp fallback
+                if sig.get("timestamp") is None and nested.get("timestamp") is not None:
+                    sig["timestamp"] = nested.get("timestamp")
+            
+            # If we still don't have a type but do have a signal_id, derive a best-effort label.
+            if sig.get("signal_type") is None and isinstance(sig.get("signal_id"), str):
+                sid = sig["signal_id"]
+                # e.g. breakout_long_1767804950.04636 -> breakout_long
+                base = sid.rsplit("_", 1)[0] if "_" in sid else sid
+                sig["signal_type"] = base
+                sig.setdefault("type", base)
+            
+            return sig
+        
         try:
             signals_file = get_signals_file(self.state_dir)
             if signals_file.exists():
                 with open(signals_file, "r") as f:
                     for line in f:
                         if line.strip():
-                            signal = json.loads(line)
+                            raw = json.loads(line)
+                            signal = _normalize_signal_record(raw)
                             # Filter by timestamp if available
-                            ts = signal.get("timestamp") or signal.get("generated_at")
+                            ts = (
+                                signal.get("timestamp")
+                                or signal.get("generated_at")
+                                or (signal.get("signal") or {}).get("timestamp")
+                                or (signal.get("signal") or {}).get("generated_at")
+                            )
                             if ts:
                                 try:
                                     signal_time = datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -594,7 +675,8 @@ class ClaudeMonitorService:
             return
         
         try:
-            message = alert.format_telegram()
+            include_meta = bool(self.config.get("include_alert_metadata", True))
+            message = alert.format_telegram(include_metadata=include_meta)
             await self._telegram.send_message(message, parse_mode="Markdown")
             logger.info(f"Alert sent: {alert.title}")
         except Exception as e:
@@ -1123,11 +1205,17 @@ class ClaudeMonitorService:
 async def main() -> None:
     """Main entry point for running monitor service."""
     import os
-    from pearlalgo.config.config_loader import load_service_config
+    from pearlalgo.config.config_file import load_config_yaml, log_config_warnings
     
     # Load configuration
-    config = load_service_config()
-    claude_config = config.get("claude_monitor", {})
+    config = load_config_yaml()
+    if config:
+        # Best-effort warnings (unknown sections / type mismatches) — never raises.
+        try:
+            log_config_warnings(config)
+        except Exception:
+            pass
+    claude_config = (config or {}).get("claude_monitor", {}) or {}
     
     # Get Telegram credentials from environment
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")

@@ -33,6 +33,7 @@ class AnalysisEngine:
         self,
         claude_client: Optional["ClaudeClient"] = None,
         code_analysis_interval_hours: int = 1,
+        code_analysis_enabled: bool = True,
     ):
         """
         Initialize analysis engine.
@@ -44,6 +45,7 @@ class AnalysisEngine:
         self._claude = claude_client
         self._code_analysis_interval = timedelta(hours=code_analysis_interval_hours)
         self._last_code_analysis: Optional[datetime] = None
+        self._code_analysis_enabled = bool(code_analysis_enabled)
         
         # Import analyzers (lazy to avoid circular imports)
         self._signal_analyzer = None
@@ -191,6 +193,8 @@ class AnalysisEngine:
     
     def _should_run_code_analysis(self) -> bool:
         """Check if code analysis should run."""
+        if not self._code_analysis_enabled:
+            return False
         if self._last_code_analysis is None:
             return True
         

@@ -373,6 +373,24 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "conservative_mode": True,
     },
     # ==========================================================================
+    # DRIFT GUARD (Risk-Off Cooldown)
+    # ==========================================================================
+    # IMPORTANT: This section must be present here so drift_guard settings in
+    # config/config.yaml actually affect the running agent.
+    "drift_guard": {
+        "enabled": True,
+        "lookback_trades": 20,
+        "min_trades": 10,
+        "win_rate_floor": 0.40,
+        "volatility_spike_enabled": True,
+        "volatility_levels": ["high", "extreme"],
+        "require_atr_expansion": True,
+        "cooldown_minutes": 60,
+        "tighten_min_confidence_delta": 0.05,
+        "tighten_min_risk_reward_delta": 0.20,
+        "size_multiplier": 0.50,
+    },
+    # ==========================================================================
     # 50K CHALLENGE TRACKER (Pass/Fail Rules)
     # ==========================================================================
     "challenge": {

@@ -67,7 +67,9 @@ class Alert:
     @property
     def fingerprint(self) -> str:
         """Generate a fingerprint for deduplication."""
-        content = f"{self.level.value}:{self.category}:{self.title}"
+        # Intentionally exclude alert level so WARNING->CRITICAL upgrades don't bypass dedup.
+        # Category+title is stable and prevents spam when severity fluctuates.
+        content = f"{self.category}:{self.title}"
         return hashlib.md5(content.encode()).hexdigest()[:12]
     
     def to_dict(self) -> Dict[str, Any]:
@@ -85,7 +87,7 @@ class Alert:
             "fingerprint": self.fingerprint,
         }
     
-    def format_telegram(self) -> str:
+    def format_telegram(self, include_metadata: bool = True) -> str:
         """Format alert for Telegram message."""
         header = f"{self.level.emoji} *{self.title}*"
         
@@ -99,8 +101,9 @@ class Alert:
             lines.append("⚠️ _Escalated from previous warning_")
             lines.append("")
         
-        lines.append(f"📁 Category: {self.category}")
-        lines.append(f"🔍 Source: {self.source}")
+        if include_metadata:
+            lines.append(f"📁 Category: {self.category}")
+            lines.append(f"🔍 Source: {self.source}")
         
         if self.suggestion_id:
             lines.append("")
@@ -130,6 +133,8 @@ class AlertManager:
         suppress_info_during_quiet: bool = True,
         max_alerts_per_hour: int = 20,
         escalation_threshold: int = 3,  # Warnings before escalation
+        allowed_levels: Optional[List[str]] = None,
+        allowed_categories: Optional[List[str]] = None,
     ):
         """
         Initialize alert manager.
@@ -157,10 +162,23 @@ class AlertManager:
         self.suppress_info_during_quiet = suppress_info_during_quiet
         self.max_alerts_per_hour = max_alerts_per_hour
         self.escalation_threshold = escalation_threshold
+        self.allowed_levels: Optional[Set[str]] = None
+        self.allowed_categories: Optional[Set[str]] = None
+        try:
+            if isinstance(allowed_levels, list) and allowed_levels:
+                self.allowed_levels = {str(x).lower() for x in allowed_levels if x is not None}
+        except Exception:
+            self.allowed_levels = None
+        try:
+            if isinstance(allowed_categories, list) and allowed_categories:
+                self.allowed_categories = {str(x).lower() for x in allowed_categories if x is not None}
+        except Exception:
+            self.allowed_categories = None
         
         # State tracking
         self._recent_alerts: Dict[str, datetime] = {}  # fingerprint -> last sent
-        self._warning_counts: Dict[str, int] = {}       # fingerprint -> count
+        self._recent_levels: Dict[str, str] = {}        # fingerprint -> last sent level
+        self._warning_counts: Dict[str, int] = {}       # deprecated (kept for backward compat)
         self._hourly_count = 0
         self._hourly_reset: Optional[datetime] = None
         
@@ -276,8 +294,18 @@ class AlertManager:
             fp: ts for fp, ts in self._recent_alerts.items()
             if ts > cutoff
         }
+        # Keep recent level map in sync with dedup map.
+        self._recent_levels = {fp: lvl for fp, lvl in self._recent_levels.items() if fp in self._recent_alerts}
         
         for alert in alerts:
+            # Category/level allowlists (if configured)
+            if self.allowed_categories is not None:
+                if str(alert.category or "").lower() not in self.allowed_categories:
+                    continue
+            if self.allowed_levels is not None:
+                if str(alert.level.value).lower() not in self.allowed_levels:
+                    continue
+
             # Check suppression
             if alert.fingerprint in self._suppressed:
                 logger.debug(f"Alert suppressed: {alert.title}")
@@ -291,15 +319,16 @@ class AlertManager:
             
             # Check deduplication
             if alert.fingerprint in self._recent_alerts:
-                # Check for escalation
-                if alert.level == AlertLevel.WARNING:
-                    self._warning_counts[alert.fingerprint] = \
-                        self._warning_counts.get(alert.fingerprint, 0) + 1
-                    
-                    if self._warning_counts[alert.fingerprint] >= self.escalation_threshold:
-                        alert.level = AlertLevel.CRITICAL
+                # Allow a one-time severity upgrade within the dedup window (e.g. WARNING -> CRITICAL),
+                # but otherwise suppress repeats to avoid spam.
+                last_level_val = self._recent_levels.get(alert.fingerprint)
+                if last_level_val:
+                    try:
+                        last_level = AlertLevel(last_level_val)
+                    except Exception:
+                        last_level = None
+                    if last_level and alert.level.priority > last_level.priority:
                         alert.escalated = True
-                        self._warning_counts[alert.fingerprint] = 0
                     else:
                         logger.debug(f"Alert deduplicated: {alert.title}")
                         continue
@@ -317,6 +346,7 @@ class AlertManager:
             # Alert passes all filters
             filtered.append(alert)
             self._recent_alerts[alert.fingerprint] = now
+            self._recent_levels[alert.fingerprint] = alert.level.value
             self._hourly_count += 1
         
         # Sort by priority (most urgent first)
@@ -373,7 +403,9 @@ class AlertManager:
             "max_per_hour": self.max_alerts_per_hour,
             "active_dedup_entries": len(self._recent_alerts),
             "suppressed_count": len(self._suppressed),
-            "warning_counts": dict(self._warning_counts),
+            "warning_counts": dict(self._warning_counts),  # deprecated
+            "allowed_levels": sorted(self.allowed_levels) if self.allowed_levels else None,
+            "allowed_categories": sorted(self.allowed_categories) if self.allowed_categories else None,
             "timezone": self.timezone_name,
         }
     

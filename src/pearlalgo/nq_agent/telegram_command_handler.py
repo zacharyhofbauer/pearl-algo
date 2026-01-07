@@ -746,6 +746,46 @@ class TelegramCommandHandler:
             gateway_api_ready=gateway_api_ready,
         )
         await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+
+    async def _handle_menu_more(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show advanced tools menu (keeps /start calm-minimal)."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        message = (
+            "🧰 *Advanced Tools*\n\n"
+            "Core live trading stays in *Status / Signals / Performance*.\n"
+            "Use these when you need deeper diagnostics or research.\n"
+        )
+
+        keyboard: List[List[InlineKeyboardButton]] = [
+            [
+                InlineKeyboardButton("📡 Health", callback_data="health_menu"),
+                InlineKeyboardButton("📊 Data", callback_data="data_quality"),
+            ],
+            [
+                InlineKeyboardButton("📈 Activity", callback_data="activity"),
+                InlineKeyboardButton("🧠 Review", callback_data="strategy_review"),
+            ],
+            [
+                InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
+                InlineKeyboardButton("📂 Reports", callback_data="reports"),
+            ],
+            [
+                InlineKeyboardButton("⚙️ Config", callback_data="config"),
+                InlineKeyboardButton("❓ Help", callback_data="help"),
+            ],
+        ]
+
+        # Claude / AI Hub (optional dependency)
+        if ANTHROPIC_AVAILABLE:
+            keyboard.append([InlineKeyboardButton("🤖 AI Hub", callback_data="claude_hub")])
+
+        keyboard.append([InlineKeyboardButton("🏠 Back", callback_data="start")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
     
     async def _handle_glossary(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
@@ -8726,24 +8766,19 @@ _Commands are policy-gated for safety._
         gateway_api_ready: Optional[bool] = None,
     ) -> InlineKeyboardMarkup:
         """
-        Generate main menu inline keyboard buttons (clean, button-first UX).
+        Generate main menu inline keyboard buttons (calm-minimal, operator-first).
 
-        Layout (calm-minimal, but with core tools exposed):
-        - Row 1: Agent control + Gateway status
-        - Row 2: Last signal + Active trades
-        - Row 3: Activity + Data quality
-        - Row 4: Signals + Performance + Review
-        - Row 5: Backtest + Reports
-        - Row 6: Settings (advanced tools: Help/Config/Claude live here)
+        Goal: keep the UI fast and low-noise during live trading.
+        Advanced tools remain available via commands (e.g. /help, /backtest, /reports).
 
-        Gateway indicator tri-state:
-        - ✅ running and API ready
-        - 🟡 running but API not ready (authenticating/2FA)
-        - ❌ stopped
+        Layout (minimal):
+        - Row 1: Agent control
+        - Row 2: Status (with refresh) + Signals
+        - Row 3: Performance + Settings
         """
         keyboard: List[List[InlineKeyboardButton]] = []
         
-        # Row 1: Agent control (Gateway status lives in 📡 Health)
+        # Row 1: Agent control
         if agent_running:
             keyboard.append([
                 InlineKeyboardButton("⏹️ Stop", callback_data='stop_agent'),
@@ -8754,37 +8789,20 @@ _Commands are policy-gated for safety._
                 InlineKeyboardButton("▶️ Start", callback_data='start_agent'),
             ])
 
-        # Row 2: Primary drill-down (fastest operator actions)
+        # Row 2: Status + refresh + Signals
         keyboard.append([
             InlineKeyboardButton("📟 Status", callback_data="status"),
             InlineKeyboardButton("🔄", callback_data="status_refresh"),  # Quick refresh (text only)
-            InlineKeyboardButton("📡 Health", callback_data="health_menu"),
-            InlineKeyboardButton("🧠 Review", callback_data="strategy_review"),
+            InlineKeyboardButton("🎯 Signals", callback_data="signals"),
         ])
 
-
-        # Row 3: Signals & Trades (primary workflow)
+        # Row 3: Performance + Settings
         keyboard.append([
-            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
             InlineKeyboardButton("📊 Performance", callback_data="performance"),
+            InlineKeyboardButton("⚙️ Settings", callback_data="settings"),
+            InlineKeyboardButton("⋯ More", callback_data="menu_more"),
         ])
 
-
-        # Row 4: Tools
-        keyboard.append([
-            InlineKeyboardButton("📉 Backtest", callback_data="backtest"),
-            InlineKeyboardButton("📂 Reports", callback_data="reports"),
-        ])
-
-        # Row 5: AI + Settings (keep top-level, avoid menu-in-menu)
-        if ANTHROPIC_AVAILABLE:
-            keyboard.append([
-                InlineKeyboardButton("🤖 AI Hub", callback_data="claude_hub"),
-                InlineKeyboardButton("⚙️ Settings", callback_data="settings"),
-            ])
-        else:
-            keyboard.append([InlineKeyboardButton("⚙️ Settings", callback_data="settings")])
-        
         return InlineKeyboardMarkup(keyboard)
     
     def _get_gateway_buttons(self, gateway_running: bool = False) -> InlineKeyboardMarkup:
@@ -9163,6 +9181,8 @@ _Commands are policy-gated for safety._
             message = self._format_confirm_message("restart_agent")
             reply_markup = self._get_confirm_buttons("restart_agent", cancel_callback="data_quality")
             await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+        elif callback_data == "menu_more":
+            await self._handle_menu_more(update, context)
         elif callback_data == 'start' or callback_data == 'main_menu':
             # Main menu - always return to start
             await self._handle_start(update, context)

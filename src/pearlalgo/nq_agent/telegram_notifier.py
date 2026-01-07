@@ -178,9 +178,10 @@ class NQAgentTelegramNotifier:
             # Format compact signal alert (decision-first layout)
             message = self._format_compact_signal(signal)
             
-            # Build inline buttons (consistent layout)
+            # Optional inline buttons (calm-minimal by default; opt-in via prefs.dashboard_buttons)
             reply_markup = None
-            if _is_command_handler_running():
+            show_buttons = self.prefs.dashboard_buttons if self.prefs else False
+            if show_buttons and _is_command_handler_running():
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     signal_id = str(signal.get("signal_id", "") or "")
@@ -188,11 +189,7 @@ class NQAgentTelegramNotifier:
                     if signal_id:
                         keyboard.append([
                             InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
-                            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
                         ])
-                    else:
-                        keyboard.append([InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals")])
-                    # Post-chart nav (Menu + Signals) is sent after chart images, so skip redundant buttons here
                     reply_markup = InlineKeyboardMarkup(keyboard)
                 except Exception as e:
                     logger.debug(f"Could not build signal buttons: {e}")
@@ -215,7 +212,6 @@ class NQAgentTelegramNotifier:
             if chart_path and chart_path.exists():
                 try:
                     await self._send_photo(chart_path)
-                    await self._send_post_chart_nav()
                     # Clean up temp file
                     try:
                         chart_path.unlink()
@@ -648,15 +644,15 @@ class NQAgentTelegramNotifier:
             
             # Build navigation buttons directly on chart (no separate nav message)
             reply_markup = None
-            if _is_command_handler_running():
+            show_buttons = self.prefs.dashboard_buttons if self.prefs else False
+            if show_buttons and _is_command_handler_running():
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     
-                    # Single row with Menu and Signals navigation
+                    # Single row with Menu navigation (keep dashboards calm-minimal)
                     keyboard = [
                         [
                             InlineKeyboardButton("🏠 Menu", callback_data="start"),
-                            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -993,14 +989,13 @@ class NQAgentTelegramNotifier:
             
             # Build inline buttons (no chart, so include nav here)
             reply_markup = None
-            handler_running = _is_command_handler_running()
-            if handler_running:
+            show_buttons = self.prefs.dashboard_buttons if self.prefs else False
+            if show_buttons and _is_command_handler_running():
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     keyboard = [
                         [
                             InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
-                            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1101,13 +1096,13 @@ class NQAgentTelegramNotifier:
             
             # Build inline buttons (consistent with entry notification)
             reply_markup = None
-            if handler_running:
+            show_buttons = self.prefs.dashboard_buttons if self.prefs else False
+            if show_buttons and handler_running:
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     keyboard = [
                         [
                             InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
-                            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1131,7 +1126,6 @@ class NQAgentTelegramNotifier:
             if chart_path and chart_path.exists():
                 try:
                     await self._send_photo(chart_path)
-                    await self._send_post_chart_nav()
                     try:
                         chart_path.unlink()
                     except Exception:

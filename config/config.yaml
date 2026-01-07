@@ -199,7 +199,10 @@ signals:
     momentum_long:
       allowed_regimes: [ranging, trending_bullish, trending_bearish]  # All regimes
     momentum_short:
-      allowed_regimes: [ranging, trending_bearish, trending_bullish]  # All regimes
+      # OPTIMIZATION (2026-01-07): momentum_short is strong ONLY in bearish trend during afternoon;
+      # block lunch/closing/overnight chop and avoid counter-trend regimes.
+      allowed_regimes: [trending_bearish]
+      allowed_sessions: [afternoon]
     breakout_long:
       allowed_regimes: [ranging, trending_bullish, trending_bearish]  # All regimes
     breakout_short:
@@ -212,14 +215,8 @@ signals:
 strategy:
   # Signal types to enable - LOOSENED MORE: include breakout/momentum so we don't miss big trend moves (2026-01-07)
   enabled_signals:
-    # NOTE: Some scanners gate on base types (e.g. `sr_bounce`), so include the base name here.
-    - sr_bounce
-    - mean_reversion_long
-    - mean_reversion_short
-    - momentum_long
+    # SHORT-BIAS (2026-01-07): only run the current winner while longs are failing.
     - momentum_short
-    - breakout_long
-    - breakout_short
   
   # Signal types to disable (takes precedence over enabled_signals)
   disabled_signals:
@@ -240,7 +237,7 @@ strategy:
   # Winning signal types (get max contracts when high confidence)
   # EMERGENCY: Only mean_reversion_long is winning (47% WR)
   winning_signal_types:
-    - mean_reversion_long    # Only proven winner
+    - momentum_short
   
   # Scalp presets (optional - override ATR-based stops/targets)
   use_scalp_presets: false
@@ -749,7 +746,8 @@ claude_monitor:
   realtime_monitoring: true            # Enable real-time monitoring (every minute)
   realtime_interval_seconds: 60        # Real-time check interval
   frequent_interval_seconds: 900       # Frequent analysis interval (15 minutes)
-  code_analysis_interval_hours: 1      # How often to run code analysis
+  code_analysis_interval_hours: 24     # How often to run code analysis (when enabled)
+  code_analysis_enabled: false         # Disable noisy code-quality alerts in Telegram by default
   
   # Daily reports
   daily_report_enabled: true           # Send daily performance report
@@ -764,9 +762,13 @@ claude_monitor:
   alert_levels:                        # Which alert levels to send
     - critical
     - warning
-    - info
-  dedup_window_seconds: 900            # Deduplication window (15 minutes)
-  max_alerts_per_hour: 20              # Rate limit for alerts
+  alert_categories:                    # Which alert categories to send
+    - signals
+    - market
+    - system
+  include_alert_metadata: false        # Hide Category/Source footer lines to keep messages concise
+  dedup_window_seconds: 1800           # Deduplication window (30 minutes)
+  max_alerts_per_hour: 12              # Rate limit for alerts
   
   # Quiet hours (suppress non-critical alerts)
   quiet_hours_start: "22:00"           # Start of quiet hours (ET)

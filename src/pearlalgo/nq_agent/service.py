@@ -3864,6 +3864,13 @@ class NQAgentService:
             return
 
         now = datetime.now(timezone.utc)
+        # Snapshot previous active state so we don't spam operators when the guard extends
+        # its cooldown window every cycle.
+        prev_active = False
+        try:
+            prev_active = bool((self._drift_guard_state or {}).get("active", False))
+        except Exception:
+            prev_active = False
         recent_trades = []
         if getattr(self, "_sqlite_enabled", False) and self._trade_db is not None:
             try:
@@ -3883,9 +3890,11 @@ class NQAgentService:
         state, transition = self._drift_guard.update(regime=regime, recent_trades=recent_trades, now=now)
         self._drift_guard_state = state.to_dict(self._drift_guard_config)
 
-        # Operator alerts (deduped)
-        should_alert = bool(transition.get("triggered") or transition.get("ended"))
-        if not should_alert or not self.telegram_notifier.enabled or self.telegram_notifier.telegram is None:
+        # Operator alerts (deduped):
+        # Only alert when the guard *enters* cooldown (OFF -> ON) or *ends*.
+        send_on = bool(transition.get("triggered") and not prev_active)
+        send_off = bool(transition.get("ended"))
+        if (not send_on and not send_off) or not self.telegram_notifier.enabled or self.telegram_notifier.telegram is None:
             return
 
         # Hard cooldown to avoid spam (even if state toggles quickly)
@@ -3894,7 +3903,7 @@ class NQAgentService:
                 return
 
         try:
-            if transition.get("triggered"):
+            if send_on:
                 adj = state.adjustments(self._drift_guard_config)
                 msg = (
                     "🛡 Drift Guard: ON\n"
@@ -3905,7 +3914,7 @@ class NQAgentService:
                 )
                 await self.telegram_notifier.telegram.send_message(msg, parse_mode=None, dedupe=False)
                 self._drift_guard_last_alert_at = now
-            elif transition.get("ended"):
+            elif send_off:
                 msg = "🛡 Drift Guard: OFF (cooldown ended)"
                 await self.telegram_notifier.telegram.send_message(msg, parse_mode=None, dedupe=False)
                 self._drift_guard_last_alert_at = now
