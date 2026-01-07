@@ -160,6 +160,7 @@ class FeatureEngineer:
         signal: Optional[Dict] = None,
         recent_outcomes: Optional[List[Dict]] = None,
         higher_tf_data: Optional[pd.DataFrame] = None,
+        custom_features: Optional[Dict[str, float]] = None,
     ) -> FeatureVector:
         """
         Compute all features from market data.
@@ -169,6 +170,7 @@ class FeatureEngineer:
             signal: Current signal dictionary (optional, for signal-specific features)
             recent_outcomes: List of recent trade outcomes (for sequential features)
             higher_tf_data: Higher timeframe data (for cross-TF features)
+            custom_features: Custom indicator features (from supply/demand, power channel, etc.)
             
         Returns:
             FeatureVector with all computed features
@@ -211,6 +213,16 @@ class FeatureEngineer:
             fv.cross_timeframe = self._compute_cross_timeframe_features(df, higher_tf_data)
             fv.features.update(fv.cross_timeframe)
         
+        # Merge custom indicator features (supply/demand zones, power channel, divergences)
+        # These features are pre-computed by the scanner and passed through the signal
+        if custom_features:
+            custom_normalized = self._merge_custom_features(custom_features)
+            fv.features.update(custom_normalized)
+        # Also check if signal contains custom_features (from scanner)
+        elif signal and signal.get("custom_features"):
+            custom_normalized = self._merge_custom_features(signal["custom_features"])
+            fv.features.update(custom_normalized)
+        
         # Normalize features
         if self.config.normalize_features:
             fv.features = self._normalize_features(fv.features)
@@ -221,6 +233,48 @@ class FeatureEngineer:
         
         logger.debug(f"Computed {fv.num_features} features")
         return fv
+    
+    def _merge_custom_features(self, custom_features: Dict[str, float]) -> Dict[str, float]:
+        """
+        Merge custom indicator features into the feature vector.
+        
+        Custom features from indicators (supply/demand zones, power channel, divergences)
+        are already normalized to 0-1 by the indicator classes. This method validates
+        and clips them to ensure consistency.
+        
+        Args:
+            custom_features: Dictionary of custom feature names to values
+            
+        Returns:
+            Dictionary of validated/clipped custom features
+        """
+        merged = {}
+        
+        for name, value in custom_features.items():
+            # Skip invalid values
+            if value is None or (isinstance(value, float) and not np.isfinite(value)):
+                merged[name] = 0.0
+                continue
+            
+            try:
+                val = float(value)
+            except (ValueError, TypeError):
+                val = 0.0
+            
+            # Ensure finite value
+            if not np.isfinite(val):
+                val = 0.0
+            
+            # Clip to reasonable range (most custom features are 0-1)
+            # Some distance features can be slightly negative or >1
+            val = max(min(val, 2.0), -1.0)
+            
+            merged[name] = val
+        
+        if merged:
+            logger.debug(f"Merged {len(merged)} custom indicator features")
+        
+        return merged
     
     def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Normalize column names to standard OHLCV."""

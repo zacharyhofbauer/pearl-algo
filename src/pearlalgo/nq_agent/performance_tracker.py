@@ -353,6 +353,26 @@ class PerformanceTracker:
                 metrics["total_pnl"] / metrics["count"] if metrics["count"] > 0 else 0.0
             )
 
+        # Build recent exits list (most recent first)
+        # Sort by exit_time descending
+        sorted_exits = sorted(
+            exited_signals,
+            key=lambda x: x.get("exit_time", x.get("timestamp", "")),
+            reverse=True,
+        )
+        recent_exits = []
+        for s in sorted_exits[:10]:  # Keep last 10 for display
+            sig = s.get("signal", {}) or {}
+            recent_exits.append({
+                "signal_id": s.get("signal_id"),
+                "type": sig.get("type", "unknown"),
+                "direction": sig.get("direction", "unknown"),
+                "pnl": s.get("pnl", 0),
+                "is_win": s.get("is_win", False),
+                "exit_reason": s.get("exit_reason", "unknown"),
+                "exit_time": s.get("exit_time"),
+            })
+
         return {
             "total_signals": len(signals),
             "exited_signals": len(exited_signals),
@@ -363,6 +383,7 @@ class PerformanceTracker:
             "avg_pnl": total_pnl / len(exited_signals) if exited_signals else 0.0,
             "avg_hold_minutes": avg_hold,
             "by_signal_type": by_type,
+            "recent_exits": recent_exits,
         }
 
     def _get_signal_record(self, signal_id: str) -> Optional[Dict]:

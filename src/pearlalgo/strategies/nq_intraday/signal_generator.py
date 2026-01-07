@@ -19,6 +19,41 @@ from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner
 from pearlalgo.strategies.nq_intraday.signal_quality import SignalQualityScorer
 
+# Feature engineering for ML integration (optional)
+try:
+    from pearlalgo.learning.feature_engineer import FeatureEngineer, FeatureConfig
+    FEATURE_ENGINEER_AVAILABLE = True
+except ImportError:
+    FEATURE_ENGINEER_AVAILABLE = False
+    FeatureEngineer = None  # type: ignore
+    FeatureConfig = None  # type: ignore
+
+# ML signal filter (optional - v2.0 adaptive risk management)
+try:
+    from pearlalgo.learning.ml_signal_filter import (
+        MLSignalFilter,
+        MLFilterConfig,
+        get_ml_signal_filter,
+    )
+    ML_FILTER_AVAILABLE = True
+except ImportError:
+    ML_FILTER_AVAILABLE = False
+    MLSignalFilter = None  # type: ignore
+    MLFilterConfig = None  # type: ignore
+    get_ml_signal_filter = None  # type: ignore
+
+# Adaptive position sizing (optional - v2.0 adaptive risk management)
+try:
+    from pearlalgo.strategies.nq_intraday.adaptive_sizing import (
+        AdaptivePositionSizer,
+        get_adaptive_position_sizer,
+    )
+    ADAPTIVE_SIZING_AVAILABLE = True
+except ImportError:
+    ADAPTIVE_SIZING_AVAILABLE = False
+    AdaptivePositionSizer = None  # type: ignore
+    get_adaptive_position_sizer = None  # type: ignore
+
 
 @dataclass
 class SignalDiagnostics:
@@ -44,6 +79,8 @@ class SignalDiagnostics:
     rejected_order_book: int = 0  # Filtered by order book imbalance
     rejected_invalid_prices: int = 0  # Invalid entry/stop/target prices
     rejected_regime_filter: int = 0  # Filtered by regime/session filter
+    rejected_ml_filter: int = 0  # Filtered by ML signal filter (v2.0)
+    adaptive_sizing_applied: int = 0  # Signals with adaptive sizing (v2.0)
     
     # Scanner gate reasons (from NQScanner.get_gate_reasons())
     scanner_gate_reasons: List[str] = field(default_factory=list)
@@ -71,6 +108,8 @@ class SignalDiagnostics:
             "rejected_order_book": self.rejected_order_book,
             "rejected_invalid_prices": self.rejected_invalid_prices,
             "rejected_regime_filter": self.rejected_regime_filter,
+            "rejected_ml_filter": self.rejected_ml_filter,
+            "adaptive_sizing_applied": self.adaptive_sizing_applied,
             "scanner_gate_reasons": self.scanner_gate_reasons,
             "regime_filter_reasons": self.regime_filter_reasons,
             "market_hours_checked": self.market_hours_checked,
@@ -221,13 +260,17 @@ class NQSignalGenerator:
             scanner: Scanner instance (optional, creates new if not provided)
         """
         self.config = config or NQIntradayConfig()
-        self.scanner = scanner or NQScanner(config=self.config)
+
+        # Load signal configuration early so the scanner can initialize adaptive modules
+        # (adaptive stops, market depth, etc.) with the canonical config source.
+        service_config = load_service_config()
+
+        self.scanner = scanner or NQScanner(config=self.config, service_config=service_config)
         # Quality scorer: Lower threshold (0.45) to allow more signals in quiet regimes
         # Your 7W/9L ~44% win rate is profitable with proper R:R, so 0.55 was too strict
         self.quality_scorer = SignalQualityScorer(min_edge_threshold=0.45)
 
         # Load signal configuration
-        service_config = load_service_config()
         signal_settings = service_config.get("signals", {})
 
         # Track recent signals to avoid duplicates
@@ -271,10 +314,58 @@ class NQSignalGenerator:
         # Per-cycle diagnostics for observability
         self.last_diagnostics: Optional[SignalDiagnostics] = None
 
+        # Feature engineer for ML integration (optional)
+        self._feature_engineer: Optional["FeatureEngineer"] = None
+        self._feature_engineer_enabled = False
+        
+        learning_settings = service_config.get("learning", {}) or {}
+        if FEATURE_ENGINEER_AVAILABLE and learning_settings.get("feature_engineer_enabled", False):
+            try:
+                feature_config_dict = learning_settings.get("features", {}) or {}
+                feature_config = FeatureConfig.from_dict(feature_config_dict)
+                self._feature_engineer = FeatureEngineer(config=feature_config)
+                self._feature_engineer_enabled = True
+                logger.info("Feature engineer enabled for ML signal features")
+            except Exception as e:
+                logger.warning(f"Could not initialize feature engineer: {e}")
+                self._feature_engineer = None
+
+        # ML Signal Filter (v2.0 adaptive risk management)
+        self._ml_filter: Optional["MLSignalFilter"] = None
+        self._ml_filter_enabled = False
+        
+        ml_filter_settings = service_config.get("ml_filter", {}) or {}
+        if ML_FILTER_AVAILABLE and ml_filter_settings.get("enabled", False):
+            try:
+                self._ml_filter = get_ml_signal_filter(service_config)
+                self._ml_filter_enabled = True
+                logger.info("ML signal filter enabled")
+            except Exception as e:
+                logger.warning(f"Could not initialize ML signal filter: {e}")
+                self._ml_filter = None
+        
+        # Adaptive Position Sizer (v2.0 adaptive risk management)
+        self._adaptive_sizer: Optional["AdaptivePositionSizer"] = None
+        self._adaptive_sizing_enabled = False
+        
+        adaptive_sizing_settings = service_config.get("adaptive_sizing", {}) or {}
+        if ADAPTIVE_SIZING_AVAILABLE and adaptive_sizing_settings.get("enabled", False):
+            try:
+                self._adaptive_sizer = get_adaptive_position_sizer(service_config)
+                self._adaptive_sizing_enabled = True
+                logger.info("Adaptive position sizer enabled")
+            except Exception as e:
+                logger.warning(f"Could not initialize adaptive sizer: {e}")
+                self._adaptive_sizer = None
+        
         logger.info(
-            "NQSignalGenerator initialized (max_stop_points=%.1f, regime_filters=%d types)",
+            "NQSignalGenerator initialized (max_stop_points=%.1f, regime_filters=%d types, "
+            "feature_engineer=%s, ml_filter=%s, adaptive_sizing=%s)",
             self._max_stop_points,
             len(self._regime_filters),
+            "enabled" if self._feature_engineer_enabled else "disabled",
+            "enabled" if self._ml_filter_enabled else "disabled",
+            "enabled" if self._adaptive_sizing_enabled else "disabled",
         )
 
     def generate(self, market_data: Dict) -> List[Dict]:
@@ -596,6 +687,71 @@ class NQSignalGenerator:
                     diagnostics.rejected_quality_scorer += 1
                     continue
 
+            # v2.0: Apply ML signal filter if enabled
+            if self._ml_filter_enabled and self._ml_filter is not None:
+                try:
+                    # Build context for ML filter
+                    ml_context = {
+                        "regime": validated_signal.get("regime", {}),
+                        "df": df,
+                    }
+                    should_execute, ml_prediction = self._ml_filter.should_execute(
+                        validated_signal, ml_context
+                    )
+                    
+                    # Attach ML prediction to signal for transparency
+                    validated_signal["_ml_prediction"] = ml_prediction.to_dict()
+                    
+                    if not should_execute and opportunity_tier == "A":
+                        # ML filter rejected the signal
+                        logger.debug(
+                            "Signal filtered by ML: type=%s, win_prob=%.2f < threshold",
+                            validated_signal.get("type"),
+                            ml_prediction.win_probability,
+                        )
+                        diagnostics.rejected_ml_filter += 1
+                        continue
+                    
+                    logger.debug(
+                        "ML prediction: type=%s, win_prob=%.2f, pass=%s",
+                        validated_signal.get("type"),
+                        ml_prediction.win_probability,
+                        should_execute,
+                    )
+                except Exception as e:
+                    logger.debug(f"ML filter failed (non-blocking): {e}")
+            
+            # v2.0: Apply adaptive position sizing if enabled
+            if self._adaptive_sizing_enabled and self._adaptive_sizer is not None:
+                try:
+                    # Calculate stop distance for sizing
+                    entry = float(validated_signal.get("entry_price", 0))
+                    stop = float(validated_signal.get("stop_loss", 0))
+                    stop_distance = abs(entry - stop) if entry > 0 and stop > 0 else 10.0
+                    
+                    sizing_context = {
+                        "regime": validated_signal.get("regime", {}),
+                    }
+                    size_result = self._adaptive_sizer.calculate_position_size(
+                        validated_signal, sizing_context, stop_distance
+                    )
+                    
+                    # Attach sizing result to signal
+                    validated_signal["position_size"] = size_result.contracts
+                    validated_signal["_adaptive_sizing"] = size_result.to_dict()
+                    diagnostics.adaptive_sizing_applied += 1
+                    
+                    logger.debug(
+                        "Adaptive sizing: type=%s, contracts=%d (kelly=%.1f, factors: conf=%.2f, regime=%.2f)",
+                        validated_signal.get("type"),
+                        size_result.contracts,
+                        size_result.kelly_optimal,
+                        size_result.confidence_factor,
+                        size_result.regime_factor,
+                    )
+                except Exception as e:
+                    logger.debug(f"Adaptive sizing failed (non-blocking): {e}")
+
             # Tag + emit signal (A-tier actionable or B-tier explore)
             if opportunity_tier == "B":
                 now_utc = datetime.now(timezone.utc)
@@ -616,6 +772,13 @@ class NQSignalGenerator:
 
         # Clean up old signals from recent list
         self._cleanup_recent_signals()
+        
+        # Compute ML features for validated signals (optional)
+        if self._feature_engineer_enabled and self._feature_engineer and validated_signals:
+            try:
+                self._compute_ml_features(validated_signals, market_data)
+            except Exception as e:
+                logger.debug(f"Feature computation failed (non-blocking): {e}")
 
         # Finalize diagnostics
         diagnostics.validated_signals = len(validated_signals)
@@ -1064,6 +1227,15 @@ class NQSignalGenerator:
                 "macd_histogram": float(latest.get("macd_histogram", 0.0)) if "macd_histogram" in latest else None,
             }
 
+        # Preserve custom indicator features for the learning system
+        # These features are computed by custom indicators (supply/demand, power channel, divergences)
+        if signal.get("custom_features"):
+            formatted["custom_features"] = signal["custom_features"]
+        
+        # Preserve indicator metadata (from custom indicator signals)
+        if signal.get("indicator_metadata"):
+            formatted["indicator_metadata"] = signal["indicator_metadata"]
+
         return formatted
 
     def _is_duplicate(self, signal: Dict) -> bool:
@@ -1115,3 +1287,50 @@ class NQSignalGenerator:
             ).total_seconds()
             < self._signal_window_seconds
         ]
+    
+    def _compute_ml_features(self, signals: List[Dict], market_data: Dict) -> None:
+        """
+        Compute ML features for validated signals.
+        
+        Features are computed from market data and attached to each signal
+        for use by the learning system (contextual bandit, ensemble scorer).
+        
+        Args:
+            signals: List of validated signal dictionaries
+            market_data: Market data context with 'df', 'df_5m', etc.
+        """
+        if not self._feature_engineer or not signals:
+            return
+        
+        df = market_data.get("df")
+        if df is None or df.empty:
+            return
+        
+        # Get higher timeframe data for cross-TF features
+        higher_tf_data = market_data.get("df_5m")
+        
+        # Get recent outcomes for sequential features (from performance tracker if available)
+        recent_outcomes: List[Dict] = []
+        # Note: recent_outcomes would need to be passed in from service.py
+        # For now, we'll leave it empty - the learning loop can populate this
+        
+        for signal in signals:
+            try:
+                # Compute features
+                feature_vector = self._feature_engineer.compute_features(
+                    df=df,
+                    signal=signal,
+                    recent_outcomes=recent_outcomes,
+                    higher_tf_data=higher_tf_data,
+                    custom_features=signal.get("custom_features"),
+                )
+                
+                # Attach features to signal
+                if feature_vector and feature_vector.features:
+                    signal["_ml_features"] = feature_vector.to_dict()
+                    logger.debug(
+                        f"Computed {feature_vector.num_features} ML features for signal {signal.get('type')}"
+                    )
+                    
+            except Exception as e:
+                logger.debug(f"Failed to compute features for signal: {e}")

@@ -112,10 +112,21 @@
   ```
   /status             # Full status with inline buttons
   /signals            # Recent signals
-  /performance        # 7-day performance
+  /performance        # 7-day performance (tap buttons to export CSV/JSON)
+  /performance 24h    # Performance with custom lookback (24h, 7d, 30d)
+  /signal <id>        # Detailed view of a specific signal by ID prefix
   /config             # Configuration values
   /health             # Health check
   /settings           # UI preferences (dashboard buttons, auto-chart, etc.)
+  ```
+
+- **Reporting & Exports:** 📊
+  ```
+  /performance        # Shows 7d summary + export buttons:
+                      #   • Signals JSONL - all signals with metadata
+                      #   • Exited CSV - completed trades with P&L
+                      #   • Metrics JSON - aggregated performance data
+  /grade <id> win|loss [pnl] [note]  # Manual feedback for learning
   ```
 
 - **AI Code Generation** (requires setup, see below):
@@ -204,11 +215,15 @@
   - **Monitoring:**
     - `/status` – Agent Status card with inline buttons (includes Start/Stop controls)
     - `/signals` – Recent signals list
-    - `/performance` – 7‑day performance summary
+    - `/signal <id>` – Detailed view of specific signal (entry/SL/TP/exit/P&L)
+    - `/performance` – 7‑day performance summary with export buttons
+    - `/performance <lookback>` – Custom lookback: `24h`, `7d`, `30d`
     - `/config` – Show key configuration values
     - `/health` – Basic health check
     - `/settings` – UI preferences (dashboard buttons, auto-chart, snooze alerts)
     - `/help` – Command help
+  - **Feedback & Learning:**
+    - `/grade <signal_id> win|loss [pnl] [note]` – Record manual outcome for learning
 
 ---
 

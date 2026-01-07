@@ -35,6 +35,34 @@ from pearlalgo.strategies.nq_intraday.order_flow import OrderFlowApproximator
 from pearlalgo.utils.vwap import VWAPCalculator
 from pearlalgo.strategies.nq_intraday.hud_context import build_hud_context
 
+# Custom indicators for enhanced signal generation
+from pearlalgo.strategies.nq_intraday.indicators import get_enabled_indicators, IndicatorBase
+
+# Adaptive stops and market depth (v2.0 risk management)
+try:
+    from pearlalgo.strategies.nq_intraday.adaptive_stops import (
+        AdaptiveStopCalculator,
+        get_adaptive_stop_calculator,
+        StopTakeProfit,
+    )
+    ADAPTIVE_STOPS_AVAILABLE = True
+except ImportError:
+    ADAPTIVE_STOPS_AVAILABLE = False
+    AdaptiveStopCalculator = None  # type: ignore
+    get_adaptive_stop_calculator = None  # type: ignore
+    StopTakeProfit = None  # type: ignore
+
+try:
+    from pearlalgo.strategies.nq_intraday.market_depth import (
+        MarketDepthAnalyzer,
+        get_market_depth_analyzer,
+    )
+    MARKET_DEPTH_AVAILABLE = True
+except ImportError:
+    MARKET_DEPTH_AVAILABLE = False
+    MarketDepthAnalyzer = None  # type: ignore
+    get_market_depth_analyzer = None  # type: ignore
+
 
 class NQScanner:
     """
@@ -51,12 +79,13 @@ class NQScanner:
         "1m": 1, "2m": 2, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30, "1h": 60,
     }
 
-    def __init__(self, config: Optional[NQIntradayConfig] = None):
+    def __init__(self, config: Optional[NQIntradayConfig] = None, service_config: Optional[Dict] = None):
         """
         Initialize scanner.
         
         Args:
             config: Configuration instance (optional)
+            service_config: Full service configuration for adaptive stops (optional)
         """
         self.config = config or NQIntradayConfig()
         self.regime_detector = RegimeDetector()
@@ -65,10 +94,39 @@ class NQScanner:
         self.volume_profile = VolumeProfile()
         self.order_flow = OrderFlowApproximator(lookback_periods=self.config.lookback_periods)
         
+        # Initialize custom indicators from config
+        # These provide additional features for the learning system and optional rule-based signals
+        indicators_config = getattr(config, "indicators", None) or {}
+        self.custom_indicators: List[IndicatorBase] = get_enabled_indicators(
+            {"indicators": indicators_config} if indicators_config else None
+        )
+        
         # Track gate reasons from most recent scan (for diagnostics)
         self.last_gate_reasons: List[str] = []
         
-        logger.info(f"NQScanner initialized with symbol={self.config.symbol}, timeframe={self.config.timeframe}")
+        # Initialize adaptive stop calculator (v2.0 risk management)
+        self._adaptive_stops: Optional[AdaptiveStopCalculator] = None
+        self._market_depth: Optional[MarketDepthAnalyzer] = None
+        
+        if ADAPTIVE_STOPS_AVAILABLE and get_adaptive_stop_calculator is not None:
+            try:
+                self._adaptive_stops = get_adaptive_stop_calculator(service_config)
+                logger.info("Adaptive stop calculator initialized")
+            except Exception as e:
+                logger.warning(f"Could not initialize adaptive stops: {e}")
+        
+        if MARKET_DEPTH_AVAILABLE and get_market_depth_analyzer is not None:
+            try:
+                self._market_depth = get_market_depth_analyzer()
+                logger.info("Market depth analyzer initialized")
+            except Exception as e:
+                logger.warning(f"Could not initialize market depth analyzer: {e}")
+        
+        logger.info(
+            f"NQScanner initialized with symbol={self.config.symbol}, timeframe={self.config.timeframe}, "
+            f"custom_indicators={[ind.name for ind in self.custom_indicators]}, "
+            f"adaptive_stops={self._adaptive_stops is not None}"
+        )
 
     def _get_timeframe_minutes(self, timeframe: str) -> int:
         """Get minutes for a timeframe string (e.g. '1m' -> 1, '5m' -> 5)."""
@@ -289,6 +347,19 @@ class NQScanner:
         if df.empty or len(df) < self.config.lookback_periods:
             return signals
 
+        # Calculate custom indicators (supply/demand zones, power channel, divergences)
+        # These add columns to df and provide features for the learning system
+        custom_features: Dict[str, float] = {}
+        for indicator in self.custom_indicators:
+            try:
+                df = indicator.calculate(df)
+                # Extract features from the latest bar for the learning system
+                if len(df) > 0:
+                    features = indicator.as_features(df.iloc[-1], df)
+                    custom_features.update(features)
+            except Exception as e:
+                logger.warning(f"Failed to calculate indicator {indicator.name}: {e}")
+
         # Extract bar timestamp for deterministic session detection in backtests.
         # Use latest_bar.timestamp if available (backtest passes is_backtest=True),
         # otherwise fall back to df index or None (uses wall-clock).
@@ -435,19 +506,50 @@ class NQScanner:
         current_price = float(latest["close"])
         atr = float(latest.get("atr", 0))
 
-        def calculate_stop_take(direction: str, entry: float, atr_val: float) -> tuple[float, float]:
-            """Calculate stop loss and take profit using ATR or scalp presets.
+        def calculate_stop_take(
+            direction: str,
+            entry: float,
+            atr_val: float,
+            signal_type: str = "unknown",
+        ) -> tuple[float, float]:
+            """Calculate stop loss and take profit using adaptive or legacy methods.
             
-            If use_scalp_presets is enabled in config, uses fixed point values
-            optimized for $200+ scalp targets:
-            | Contracts | Target Pts | Stop Pts | R:R  | Target $ |
-            |-----------|-----------|----------|------|----------|
-            | 5         | 25        | 15       | 1.67 | $250     |
-            | 10        | 15        | 10       | 1.50 | $300     |
-            | 15        | 12        | 8        | 1.50 | $360     |
-            | 25        | 10        | 6        | 1.67 | $500     |
+            v2.0: Uses AdaptiveStopCalculator for context-aware stops.
+            Falls back to legacy ATR/scalp presets if adaptive stops unavailable.
+            
+            Args:
+                direction: "long" or "short"
+                entry: Entry price
+                atr_val: ATR value
+                signal_type: Signal type for adaptive stops
+                
+            Returns:
+                Tuple of (stop_loss, take_profit)
             """
-            # Check for scalp presets (fixed point values for consistent targets)
+            # v2.0: Try adaptive stops first
+            if self._adaptive_stops is not None:
+                try:
+                    context = {
+                        "regime": regime,
+                        "df": df,
+                    }
+                    result = self._adaptive_stops.calculate_stop_take_profit(
+                        signal_type=signal_type,
+                        direction=direction,
+                        entry_price=entry,
+                        atr=atr_val,
+                        context=context,
+                        df=df,
+                    )
+                    logger.debug(
+                        f"Adaptive stops: SL=${result.stop_loss:.2f}, TP=${result.take_profit:.2f}, "
+                        f"mult={result.final_multiplier:.2f}, R:R={result.risk_reward_ratio:.2f}"
+                    )
+                    return result.stop_loss, result.take_profit
+                except Exception as e:
+                    logger.warning(f"Adaptive stops failed, using legacy: {e}")
+            
+            # Legacy fallback: scalp presets or ATR-based
             use_scalp = getattr(self.config, "use_scalp_presets", False)
             if use_scalp:
                 scalp_target = getattr(self.config, "scalp_target_points", 20.0)
@@ -611,7 +713,7 @@ class NQScanner:
                     and latest["close"] > latest["sma_fast"]
                     and latest.get("volume_ratio", 0) > vr_momentum  # Volume confirmation
                 ):
-                    stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
+                    stop_loss, take_profit = calculate_stop_take("long", current_price, atr, "momentum_long")
                     confidence = calculate_signal_score("momentum_long", latest, df)
 
                     # Adjust confidence based on regime
@@ -691,7 +793,7 @@ class NQScanner:
                     and latest.get("volume_ratio", 0) > vr_momentum  # Volume confirmation
                     and latest.get("macd_histogram", 0) < 0  # MACD bearish
                 ):
-                    stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+                    stop_loss, take_profit = calculate_stop_take("short", current_price, atr, "momentum_short")
                     confidence = calculate_signal_score("momentum_short", latest, df)
 
                     # Adjust confidence based on regime
@@ -777,7 +879,7 @@ class NQScanner:
                 if rsi_momentum_down:
                     logger.debug(f"Mean reversion: RSI momentum down detected (-{rsi_3bars_ago - rsi:.1f} points in 3 bars), using relative movement")
                 # Use lower BB as entry reference, but stop below it
-                stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
+                stop_loss, take_profit = calculate_stop_take("long", current_price, atr, "mean_reversion_long")
                 # Adjust stop to be below lower BB
                 if stop_loss > latest.get("bb_lower", stop_loss):
                     stop_loss = float(latest.get("bb_lower", stop_loss)) - (atr * 0.5)
@@ -879,7 +981,7 @@ class NQScanner:
                 if rsi_momentum_up:
                     logger.debug(f"Mean reversion short: RSI momentum up detected (+{rsi - rsi_3bars_ago:.1f} points in 3 bars), using relative movement")
                 
-                stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+                stop_loss, take_profit = calculate_stop_take("short", current_price, atr, "mean_reversion_short")
                 # Adjust stop to be above upper BB
                 if stop_loss < latest.get("bb_upper", stop_loss):
                     stop_loss = float(latest.get("bb_upper", stop_loss)) + (atr * 0.5)
@@ -975,7 +1077,7 @@ class NQScanner:
                     and rsi_ok  # Conditional RSI threshold based on fresh breakout
                     and latest.get("macd_histogram", 0) > 0  # MACD bullish
                 ):
-                    stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
+                    stop_loss, take_profit = calculate_stop_take("long", current_price, atr, "breakout_long")
                     # Stop loss below recent high
                     stop_loss = min(stop_loss, float(recent_high) - (atr * 0.5))
                     confidence = calculate_signal_score("breakout_long", latest, df)
@@ -1098,7 +1200,7 @@ class NQScanner:
                     and rsi_ok  # Conditional RSI threshold based on fresh breakdown
                     and latest.get("macd_histogram", 0) < 0  # MACD bearish
                 ):
-                    stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+                    stop_loss, take_profit = calculate_stop_take("short", current_price, atr, "breakout_short")
                     # Stop loss above recent low
                     stop_loss = max(stop_loss, float(recent_low) + (atr * 0.5))
                     confidence = calculate_signal_score("breakout_short", latest, df)
@@ -1217,6 +1319,20 @@ class NQScanner:
                 calculate_stop_take, calculate_signal_score
             )
             signals.extend(engulfing_signals)
+
+        # Custom indicator signals (supply/demand zones, power channel, divergences)
+        # These are additional signal types that can be enabled/disabled via config
+        custom_indicator_signals = self._scan_custom_indicators(
+            df, latest, current_price, atr, regime,
+            mtf_analysis, vwap_data, volume_profile_data, order_flow_data,
+            calculate_stop_take, calculate_signal_score, custom_features
+        )
+        signals.extend(custom_indicator_signals)
+
+        # Attach custom features to all signals for learning system
+        for sig in signals:
+            if custom_features:
+                sig["custom_features"] = custom_features
 
         # Attach a compact HUD context to every signal for TradingView-style chart rendering.
         # Keep this computed once per scan cycle (not per signal) for performance.
@@ -1381,7 +1497,7 @@ class NQScanner:
                 )
                 
                 if is_bouncing:
-                    stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
+                    stop_loss, take_profit = calculate_stop_take("long", current_price, atr, "sr_bounce_long")
                     # Place stop below support
                     stop_loss = min(stop_loss, strongest_support - (atr * 0.5))
                     
@@ -1423,7 +1539,7 @@ class NQScanner:
                 )
                 
                 if is_rejecting:
-                    stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+                    stop_loss, take_profit = calculate_stop_take("short", current_price, atr, "sr_bounce_short")
                     # Place stop above resistance
                     stop_loss = max(stop_loss, strongest_resistance + (atr * 0.5))
                     
@@ -1500,7 +1616,7 @@ class NQScanner:
             prev_distance = ((prev_close - vwap) / vwap * 100) if vwap > 0 else 0
             if prev_distance < -0.3 and current_price > prev_close:  # Was further below, now rising
                 # VWAP long reversion
-                stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
+                stop_loss, take_profit = calculate_stop_take("long", current_price, atr, "vwap_reversion")
                 confidence = calculate_signal_score("vwap_reversion_long", latest, df)
                 
                 # Adjust for regime
@@ -1529,7 +1645,7 @@ class NQScanner:
             prev_distance = ((prev_close - vwap) / vwap * 100) if vwap > 0 else 0
             if prev_distance > 0.3 and current_price < prev_close:  # Was further above, now falling
                 # VWAP short reversion
-                stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+                stop_loss, take_profit = calculate_stop_take("short", current_price, atr, "vwap_reversion")
                 confidence = calculate_signal_score("vwap_reversion_short", latest, df)
                 
                 # Adjust for regime
@@ -1594,7 +1710,7 @@ class NQScanner:
         )
         
         if bullish_engulf:
-            stop_loss, take_profit = calculate_stop_take("long", current_price, atr)
+            stop_loss, take_profit = calculate_stop_take("long", current_price, atr, "engulfing_long")
             stop_loss = min(stop_loss, latest.get("low") - (atr * 0.25))  # Stop below engulfing low
             
             confidence = calculate_signal_score("engulfing_long", latest, df)
@@ -1633,7 +1749,7 @@ class NQScanner:
         )
         
         if bearish_engulf:
-            stop_loss, take_profit = calculate_stop_take("short", current_price, atr)
+            stop_loss, take_profit = calculate_stop_take("short", current_price, atr, "engulfing_short")
             stop_loss = max(stop_loss, latest.get("high") + (atr * 0.25))  # Stop above engulfing high
             
             confidence = calculate_signal_score("engulfing_short", latest, df)
@@ -1661,4 +1777,167 @@ class NQScanner:
                     "order_flow": order_flow_data,
                 })
 
+        return signals
+
+    def _scan_custom_indicators(
+        self,
+        df: pd.DataFrame,
+        latest: pd.Series,
+        current_price: float,
+        atr: float,
+        regime: Dict,
+        mtf_analysis: Dict,
+        vwap_data: Dict,
+        volume_profile_data: Dict,
+        order_flow_data: Dict,
+        calculate_stop_take: Callable,
+        calculate_signal_score: Callable,
+        custom_features: Dict[str, float],
+    ) -> List[Dict]:
+        """
+        Scan for signals from custom indicators (supply/demand, power channel, divergences).
+        
+        Each indicator can generate its own signals based on its internal logic.
+        These signals are then filtered and adjusted like regular signals.
+        
+        Args:
+            df: DataFrame with OHLCV and indicator data
+            latest: Latest bar data
+            current_price: Current price
+            atr: Current ATR value
+            regime: Market regime data
+            mtf_analysis: Multi-timeframe analysis data
+            vwap_data: VWAP data
+            volume_profile_data: Volume profile data
+            order_flow_data: Order flow data
+            calculate_stop_take: Function to calculate stop loss and take profit
+            calculate_signal_score: Function to calculate signal quality score
+            custom_features: Extracted features from custom indicators
+            
+        Returns:
+            List of signal dictionaries from custom indicators
+        """
+        signals = []
+        
+        # Check if custom indicator signals are enabled in config
+        indicators_config = getattr(self.config, "indicators", None) or {}
+        generate_signals = indicators_config.get("as_signals", True)
+        
+        if not generate_signals:
+            return signals
+        
+        # Iterate through each custom indicator and generate signals
+        for indicator in self.custom_indicators:
+            try:
+                # Check if this specific indicator's signals are enabled
+                indicator_enabled = self.config.is_signal_enabled(indicator.name)
+                if not indicator_enabled:
+                    continue
+                
+                # Generate signal from indicator
+                ind_signal = indicator.generate_signal(latest, df, atr)
+                
+                if ind_signal is None:
+                    continue
+                
+                # Convert IndicatorSignal to dictionary
+                signal_dict = ind_signal.to_dict()
+                
+                # Apply regime-based confidence adjustment
+                # Map indicator signal types to base signal types for regime adjustment
+                base_type_map = {
+                    "sd_zone_bounce_long": "mean_reversion_long",
+                    "sd_zone_bounce_short": "mean_reversion_short",
+                    "pc_breakout_long": "breakout_long",
+                    "pc_breakout_short": "breakout_short",
+                    "pc_pullback_long": "mean_reversion_long",
+                    "pc_pullback_short": "mean_reversion_short",
+                    "smd_bullish_divergence": "mean_reversion_long",
+                    "smd_bearish_divergence": "mean_reversion_short",
+                }
+                base_type = base_type_map.get(signal_dict["type"], "momentum_long")
+                
+                confidence = self.regime_detector.adjust_confidence_by_regime(
+                    base_type, signal_dict["confidence"], regime
+                )
+                
+                # Check MTF alignment
+                is_aligned, mtf_adjustment = self.mtf_analyzer.check_signal_alignment(
+                    signal_dict["direction"], mtf_analysis
+                )
+                
+                # For custom indicators, use moderate MTF threshold (they have their own confirmation)
+                mtf_threshold = -0.20
+                if not is_aligned and mtf_adjustment < mtf_threshold:
+                    logger.debug(
+                        f"Custom indicator signal {signal_dict['type']} rejected due to MTF conflict"
+                    )
+                    continue
+                
+                confidence = max(0.0, min(1.0, confidence + mtf_adjustment * 0.7))
+                
+                # Adjust confidence based on VWAP position
+                confidence = self.vwap_calculator.adjust_confidence_by_vwap(
+                    signal_dict["direction"], confidence, vwap_data
+                )
+                
+                # Adjust confidence based on volume profile proximity
+                proximity = self.volume_profile.get_proximity_to_key_levels(
+                    current_price, volume_profile_data
+                )
+                confidence = self.volume_profile.adjust_confidence_by_proximity(
+                    confidence, proximity
+                )
+                
+                # Check order flow alignment
+                is_flow_aligned, flow_adjustment = self.order_flow.check_signal_alignment(
+                    signal_dict["direction"], order_flow_data
+                )
+                
+                # Custom indicators are often counter-trend, so be more lenient on order flow
+                if not is_flow_aligned and flow_adjustment < -0.15:
+                    logger.debug(
+                        f"Custom indicator signal {signal_dict['type']} rejected due to order flow conflict"
+                    )
+                    continue
+                
+                confidence = max(0.0, min(1.0, confidence + flow_adjustment * 0.5))
+                
+                # Minimum confidence threshold for custom indicator signals
+                if confidence < 0.45:
+                    logger.debug(
+                        f"Custom indicator signal {signal_dict['type']} rejected: "
+                        f"confidence {confidence:.3f} < 0.45"
+                    )
+                    continue
+                
+                # Build complete signal dictionary
+                complete_signal = {
+                    "type": signal_dict["type"],
+                    "direction": signal_dict["direction"],
+                    "confidence": confidence,
+                    "entry_price": signal_dict["entry_price"],
+                    "stop_loss": signal_dict["stop_loss"],
+                    "take_profit": signal_dict["take_profit"],
+                    "reason": signal_dict["reason"],
+                    "regime": regime,
+                    "mtf_analysis": mtf_analysis,
+                    "vwap_data": vwap_data,
+                    "volume_profile": volume_profile_data,
+                    "order_flow": order_flow_data,
+                    "indicator_metadata": signal_dict.get("indicator_metadata", {}),
+                    "custom_features": custom_features,
+                }
+                
+                signals.append(complete_signal)
+                logger.info(
+                    f"Custom indicator signal: {signal_dict['type']} | "
+                    f"direction={signal_dict['direction']} | confidence={confidence:.3f} | "
+                    f"entry={signal_dict['entry_price']:.2f}"
+                )
+                
+            except Exception as e:
+                logger.warning(f"Error generating signal from indicator {indicator.name}: {e}")
+                continue
+        
         return signals

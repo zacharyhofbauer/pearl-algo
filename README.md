@@ -28,7 +28,9 @@ cp env.example .env
 
 ## Documentation
 
+- **[START_HERE.md](docs/START_HERE.md)** - 1-page map: what runs, where to configure, how to extend
 - **[PROJECT_SUMMARY.md](docs/PROJECT_SUMMARY.md)** - Complete system reference (single source of truth)
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Platform architecture + boundaries
 - **[NQ_AGENT_GUIDE.md](docs/NQ_AGENT_GUIDE.md)** - Operational guide (how to run and operate)
 - **[TELEGRAM_GUIDE.md](docs/TELEGRAM_GUIDE.md)** - Telegram integration and remote control
 - **[AI_PATCH_GUIDE.md](docs/AI_PATCH_GUIDE.md)** - Generate code patches via Telegram + Claude

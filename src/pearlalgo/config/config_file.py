@@ -164,6 +164,8 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "virtual_pnl",
     "hud",
     "sessions",
+    # Strategy-level extensions
+    "indicators",
     "prop_firm",
     "strategy",
     "strategy_variants",
@@ -171,6 +173,16 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     # ATS execution + learning layers (kept separate from strategy logic)
     "execution",
     "learning",
+    # Adaptive risk management (stops/sizing/ML filter)
+    "adaptive_stops",
+    "adaptive_sizing",
+    "ml_filter",
+    # LLM features (signal annotation, risk checks, post-mortems, tuning)
+    "llm_signal_annotation",
+    "llm_risk_assessment",
+    "llm_trade_postmortem",
+    "llm_pattern_recognition",
+    "llm_adaptive_tuning",
     # Claude AI monitor
     "claude_monitor",
 })

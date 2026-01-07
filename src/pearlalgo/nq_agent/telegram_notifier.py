@@ -456,6 +456,81 @@ class NQAgentTelegramNotifier:
             except Exception:
                 pass
 
+        # LLM Analysis (AI-generated signal explanation)
+        llm_annotation = signal.get("_llm_annotation")
+        if isinstance(llm_annotation, dict) and llm_annotation.get("explanation"):
+            try:
+                summary_emoji = str(llm_annotation.get("summary_emoji") or "🤖")
+                explanation = str(llm_annotation.get("explanation") or "")
+                confidence_note = str(llm_annotation.get("confidence_note") or "")
+                key_factors = llm_annotation.get("key_factors", [])
+                risks = llm_annotation.get("risks", [])
+                
+                # Keep LLM section concise for calm-minimal alerts
+                if explanation:
+                    # Truncate if too long
+                    if len(explanation) > 150:
+                        explanation = explanation[:147] + "..."
+                    message += f"\n{summary_emoji} *AI Analysis:* {explanation}\n"
+                    
+                    # Key factors (compact, max 2)
+                    if key_factors and isinstance(key_factors, list):
+                        factors = key_factors[:2]
+                        if factors:
+                            factors_str = " | ".join(str(f)[:40] for f in factors)
+                            message += f"✅ {factors_str}\n"
+                    
+                    # Risks (compact, max 1)
+                    if risks and isinstance(risks, list) and risks[0]:
+                        risk_str = str(risks[0])[:50]
+                        message += f"⚠️ {risk_str}\n"
+                    
+                    # Confidence note (if different from existing confidence tier)
+                    if confidence_note and confidence_note.lower() not in ("medium confidence",):
+                        message += f"📊 {confidence_note}\n"
+            except Exception:
+                # Never let optional LLM formatting break the alert
+                pass
+
+        # LLM Risk Assessment (fast pre-trade risk label; optional)
+        llm_risk = signal.get("_llm_risk_assessment")
+        if isinstance(llm_risk, dict):
+            try:
+                risk_level = str(llm_risk.get("risk_level") or "").lower()
+                proceed = bool(llm_risk.get("proceed", True))
+                primary = llm_risk.get("primary_concern")
+                size_adj = llm_risk.get("size_adjustment")
+
+                if risk_level in ("medium", "high", "critical") or proceed is False:
+                    emoji_map = {
+                        "low": "🟢",
+                        "medium": "🟡",
+                        "high": "🟠",
+                        "critical": "🔴",
+                    }
+                    emoji = emoji_map.get(risk_level, "⚪")
+                    header = f"{emoji} *Risk:* {risk_level.upper() if risk_level else 'UNKNOWN'}"
+                    if proceed is False:
+                        header += " ⛔"
+                    message += f"\n{header}\n"
+
+                    if primary:
+                        msg = str(primary)
+                        if len(msg) > 80:
+                            msg = msg[:77] + "..."
+                        message += f"⚠️ {msg}\n"
+
+                    try:
+                        if size_adj is not None:
+                            adj = float(size_adj)
+                            if abs(adj - 1.0) >= 0.05:
+                                pct = (adj - 1.0) * 100
+                                message += f"📏 Size adj: {pct:+.0f}%\n"
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
         # Context: condensed single line (regime + MTF) only if both informative
         regime = signal.get("regime", {}) or {}
         mtf = signal.get("mtf_analysis", {}) or {}
@@ -2012,42 +2087,44 @@ class NQAgentTelegramNotifier:
         try:
             shutdown_reason = summary.get('shutdown_reason', 'Normal shutdown')
             
-            # Header
-            message = f"🛑 *{LABEL_AGENT} Stopped*\n\n"
+            # Header with reason (if abnormal)
+            message = f"🛑 *Agent Stopped*\n"
+            if shutdown_reason and shutdown_reason not in ("Normal shutdown", "Final cleanup"):
+                reason_emoji = "⚠️" if "error" in shutdown_reason.lower() or "circuit" in shutdown_reason.lower() else "ℹ️"
+                message += f"{reason_emoji} {safe_label(str(shutdown_reason))}\n"
             
-            # Session summary (compact, mobile-friendly)
+            # Session stats (compact single-line style)
             uptime_h = summary.get('uptime_hours', 0)
             uptime_m = summary.get('uptime_minutes', 0)
             scans = summary.get('cycle_count', 0)
             signals = summary.get('signal_count', 0)
             errors = summary.get('error_count', 0)
 
-            message += f"⏱ *Uptime:* {uptime_h:.0f}h {uptime_m:.0f}m\n"
-            message += f"🔄 *Scans:* {scans:,}\n"
-            message += f"🔔 *Signals:* {signals}\n"
+            message += f"\n⏱ {uptime_h:.0f}h {uptime_m:.0f}m"
+            message += f" • 🔄 {scans:,} scans"
+            message += f" • 🔔 {signals} signals"
             if errors > 0:
-                message += f"⚠️ *Errors:* {errors}\n"
+                message += f" • ⚠️ {errors} errors"
+            message += "\n"
 
-            # Performance if available
+            # Performance if available (compact)
             wins = summary.get('wins', 0)
             losses = summary.get('losses', 0)
             total_pnl = summary.get('total_pnl')
 
             if wins > 0 or losses > 0:
                 win_rate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0
-                message += f"\n📊 *Performance:* {wins}W / {losses}L ({win_rate:.0f}%)\n"
-
-            if total_pnl is not None:
+                pnl_str = ""
+                if total_pnl is not None:
+                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                    pnl_str = f" • {pnl_emoji} {_format_currency(total_pnl)}"
+                message += f"\n✅ {wins}W ❌ {losses}L ({win_rate:.0f}%){pnl_str}\n"
+            elif total_pnl is not None:
                 pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                message += f"{pnl_emoji} *P&L:* {_format_currency(total_pnl)}\n"
-
-            # Shutdown reason (if not normal)
-            if shutdown_reason and shutdown_reason not in ("Normal shutdown", "Final cleanup"):
-                reason_emoji = "⚠️" if "error" in shutdown_reason.lower() or "circuit" in shutdown_reason.lower() else "ℹ️"
-                message += f"\n{reason_emoji} *Reason:* {safe_label(str(shutdown_reason))}\n"
+                message += f"\n{pnl_emoji} *P&L:* {_format_currency(total_pnl)}\n"
 
             # Restart hint
-            message += f"\n💡 Restart: /start\\_agent"
+            message += f"\n💡 /start\\_agent"
 
             await self.telegram.send_message(message)
             return True

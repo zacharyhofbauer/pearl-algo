@@ -7,11 +7,14 @@ Monitors:
 - Session-specific performance (Tokyo/London/NY)
 - Optimal parameters per regime
 - Holiday/low-volume pattern recognition
+- Real-time regime transition detection
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -22,54 +25,226 @@ if TYPE_CHECKING:
     from pearlalgo.utils.claude_client import ClaudeClient
 
 
+# ============================================================================
+# Regime Transition Detection
+# ============================================================================
+
+REGIME_TRANSITION_SYSTEM_PROMPT = """You are a real-time regime transition detector for an NQ/MNQ futures trading system.
+
+Detect SIGNIFICANT regime changes that warrant strategy adjustment:
+1. Trending → Ranging (or vice versa)
+2. Volatility expansion/contraction
+3. Volume regime changes
+4. Session transitions with impact
+
+RULES:
+- Only alert on SIGNIFICANT transitions (not normal fluctuations)
+- Be fast and concise (this runs frequently)
+- Quantify the change when possible
+- Suggest specific strategy adjustments
+
+Output ONLY valid JSON:
+{
+  "transition_detected": true|false,
+  "transition_type": "regime_shift|volatility_change|volume_regime|session_impact|null",
+  "from_state": "Previous state description",
+  "to_state": "New state description",
+  "confidence": 0.0-1.0,
+  "magnitude": "minor|moderate|major",
+  "suggested_adjustments": ["adjustment1", "adjustment2"],
+  "alert_message": "Brief message for Telegram or null if no transition",
+  "strategy_impact": "What signals/setups are affected"
+}"""
+
+REGIME_TRANSITION_USER_TEMPLATE = """Check for regime transition:
+
+Current State:
+- Regime: {current_regime}
+- Volatility: {current_volatility}
+- Session: {current_session}
+- Trend Strength: {trend_strength:.2f}
+
+Previous State (30 min ago):
+- Regime: {prev_regime}
+- Volatility: {prev_volatility}
+- Trend Strength: {prev_trend_strength:.2f}
+
+Recent Price Action:
+- ATR Change: {atr_change:+.1%}
+- Volume Change: {volume_change:+.1%}
+- Range vs Average: {range_vs_avg:.1f}x
+
+Key Levels:
+- Price vs VWAP: {price_vs_vwap:+.2f} pts
+- Distance to High: {dist_to_high:.2f} pts
+- Distance to Low: {dist_to_low:.2f} pts
+
+Check for significant regime transition as JSON:"""
+
+
+@dataclass
+class RegimeTransition:
+    """Detected regime transition."""
+    transition_detected: bool = False
+    transition_type: Optional[str] = None  # regime_shift, volatility_change, volume_regime, session_impact
+    from_state: str = ""
+    to_state: str = ""
+    confidence: float = 0.0
+    magnitude: str = "minor"  # minor, moderate, major
+    suggested_adjustments: List[str] = field(default_factory=list)
+    alert_message: Optional[str] = None
+    strategy_impact: str = ""
+    
+    # Metadata
+    timestamp: str = ""
+    latency_ms: int = 0
+    error: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "transition_detected": self.transition_detected,
+            "transition_type": self.transition_type,
+            "from_state": self.from_state,
+            "to_state": self.to_state,
+            "confidence": self.confidence,
+            "magnitude": self.magnitude,
+            "suggested_adjustments": self.suggested_adjustments,
+            "alert_message": self.alert_message,
+            "strategy_impact": self.strategy_impact,
+            "timestamp": self.timestamp,
+            "latency_ms": self.latency_ms,
+            "error": self.error,
+        }
+    
+    def format_telegram(self) -> str:
+        """Format for Telegram alert (only if transition detected)."""
+        if not self.transition_detected or not self.alert_message:
+            return ""
+        
+        magnitude_emoji = {
+            "minor": "🔵",
+            "moderate": "🟡",
+            "major": "🔴",
+        }.get(self.magnitude, "⚪")
+        
+        lines = [f"{magnitude_emoji} *Regime Transition Detected*"]
+        lines.append(f"\n{self.alert_message}")
+        
+        if self.from_state and self.to_state:
+            lines.append(f"\n_{self.from_state}_ → _{self.to_state}_")
+        
+        if self.suggested_adjustments:
+            lines.append(f"\n*Suggested Adjustments:*")
+            for adj in self.suggested_adjustments[:3]:
+                lines.append(f"  • {adj}")
+        
+        if self.strategy_impact:
+            lines.append(f"\n*Impact:* {self.strategy_impact}")
+        
+        return "\n".join(lines)
+    
+    @classmethod
+    def no_transition(cls) -> "RegimeTransition":
+        """Create result with no transition detected."""
+        return cls(
+            transition_detected=False,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+    
+    @classmethod
+    def from_error(cls, error: str) -> "RegimeTransition":
+        """Create result from error."""
+        return cls(
+            transition_detected=False,
+            error=error,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+
+
 # Market analysis prompt for Claude
-MARKET_ANALYSIS_PROMPT = """You are a market analyst reviewing current conditions for an MNQ futures trading system.
+MARKET_ANALYSIS_PROMPT = """You are a market analyst reviewing current MNQ futures conditions. Be DETAILED and ACTIONABLE.
 
-Analyze the market data and provide insights on:
-1. Current market regime (trending_bullish, trending_bearish, ranging, choppy)
-2. Volatility conditions (high, normal, low)
-3. Session context (which session is active, typical behavior)
-4. Trading opportunities (favorable or unfavorable conditions)
-5. Parameter suggestions based on current regime
+## Analysis Requirements
+1. **Market regime** - trending/ranging/choppy with WHY (structure, momentum, volume)
+2. **Volatility assessment** - ATR as % of price, compare to 20-day average
+3. **Session context** - Tokyo/London/NY with typical vs current behavior
+4. **Buy/sell pressure** - order flow imbalance and directional bias
+5. **Range analysis** - current range vs average, compression/expansion
 
-Return JSON with this structure:
+## Key Context for MNQ
+- MNQ trades 23/5, most volume during NY session (9:30am-4pm ET)
+- Tokyo = lower vol ranging, London = breakout potential, NY = momentum
+- ATR ~30-50pts normal, <20pts compressed, >60pts volatile
+- Session position scaling: 50% Tokyo/London, 100% NY (when enabled)
+
+## Output Requirements
+Be specific about:
+- **WHY** conditions are what they are (support/resistance, volume, time of day)
+- **WHAT** parameter changes suit current conditions
+- **WHERE** to find relevant config (`config/config.yaml` sections)
+- **HOW LONG** to wait before reassessing
+
+Return JSON:
 {
     "status": "favorable|neutral|unfavorable",
     "regime": {
-        "type": "trending_bullish|trending_bearish|ranging|choppy",
+        "type": "trending_bullish|trending_bearish|ranging|choppy|compressed",
         "confidence": 0.0-1.0,
-        "description": "Brief description"
+        "description": "2-3 sentences explaining WHY this regime, what evidence",
+        "range_pts": "current trading range in points",
+        "range_vs_avg": "compressed|normal|expanded"
     },
     "volatility": {
-        "level": "high|normal|low",
-        "atr": null,
-        "description": "Brief description"
+        "level": "high|normal|low|compressed",
+        "atr_pts": "ATR in points",
+        "atr_pct": "ATR as % of price",
+        "vs_20d_avg": "above|at|below average",
+        "description": "What this means for trading"
     },
     "session": {
         "active": "tokyo|london|new_york|overnight",
-        "typical_behavior": "Description of typical session behavior"
+        "time_remaining": "hours until next session",
+        "current_behavior": "How this session is behaving vs typical",
+        "next_catalyst": "What to watch for (e.g., 'US open in 2h may increase vol')"
+    },
+    "buy_sell_pressure": {
+        "bias": "buyer|seller|neutral",
+        "strength": "weak|moderate|strong",
+        "description": "Order flow analysis"
     },
     "findings": [
         {
-            "type": "regime_shift|volatility_change|session_anomaly|opportunity",
+            "type": "regime_shift|volatility_change|session_anomaly|opportunity|risk",
             "severity": "info|medium|high",
             "title": "Brief title",
-            "description": "Detailed description"
+            "description": "2-3 sentences with WHY and WHAT it means",
+            "evidence": "Specific data points supporting this"
         }
     ],
     "recommendations": [
         {
             "priority": "high|medium|low",
             "title": "Recommendation title",
-            "description": "What to adjust",
-            "config_path": "path.to.config",
-            "rationale": "Why this helps in current regime"
+            "description": "Specific action to take",
+            "config_path": "signals.adaptive_volatility_filter.enabled",
+            "current_value": "current setting",
+            "suggested_value": "new setting",
+            "rationale": "WHY this helps in current conditions",
+            "duration": "How long to keep this setting"
         }
     ],
+    "next_24h": {
+        "outlook": "bullish|bearish|neutral|uncertain",
+        "key_levels": "Important S/R levels to watch",
+        "catalysts": "Economic events, session opens to watch",
+        "recommended_stance": "aggressive|normal|defensive"
+    },
     "summary": {
-        "key_insight": "One sentence summary",
+        "key_insight": "2-3 sentence summary with specific action to take NOW",
         "trading_bias": "long|short|neutral",
-        "risk_adjustment": "increase|normal|decrease"
+        "risk_adjustment": "increase|normal|decrease",
+        "wait_for": "What catalyst/condition before re-engaging (if defensive)"
     }
 }"""
 
@@ -444,8 +619,259 @@ class MarketAnalyzer:
             "summary": ai_analysis.get("summary", {"key_insight": "Analysis completed"}),
             "ai_enhanced": True,
         }
-
-
-
-
+    
+    # ========================================================================
+    # Regime Transition Detection
+    # ========================================================================
+    
+    def detect_regime_transition(
+        self,
+        current_data: Dict[str, Any],
+        previous_data: Optional[Dict[str, Any]] = None,
+        indicators: Optional[Dict[str, Any]] = None,
+    ) -> RegimeTransition:
+        """
+        Detect significant regime transitions.
+        
+        This method checks for meaningful state changes that warrant
+        strategy adjustments, such as:
+        - Trending → Ranging (or vice versa)
+        - Volatility expansion/contraction
+        - Volume regime changes
+        - Session transitions with impact
+        
+        Args:
+            current_data: Current market state
+            previous_data: Previous market state (30 min ago typically)
+            indicators: Current indicator values
+            
+        Returns:
+            RegimeTransition with detection results
+        """
+        if not self._claude:
+            # Fallback to rule-based detection
+            return self._detect_transition_rules(current_data, previous_data, indicators)
+        
+        start_time = datetime.now(timezone.utc)
+        
+        try:
+            user_prompt = self._build_transition_prompt(current_data, previous_data, indicators)
+            
+            response = self._claude.chat(
+                messages=[{"role": "user", "content": user_prompt}],
+                system_prompt=REGIME_TRANSITION_SYSTEM_PROMPT,
+                max_tokens=300,  # Keep response short
+            )
+            
+            result = self._parse_transition_response(response)
+            result.latency_ms = int(
+                (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+            )
+            result.timestamp = datetime.now(timezone.utc).isoformat()
+            
+            # Track in regime history
+            if result.transition_detected:
+                self._regime_history.append({
+                    "timestamp": result.timestamp,
+                    "type": result.transition_type,
+                    "from": result.from_state,
+                    "to": result.to_state,
+                })
+                # Keep history bounded
+                if len(self._regime_history) > 100:
+                    self._regime_history = self._regime_history[-100:]
+                
+                logger.info(
+                    f"Regime transition detected: {result.from_state} → {result.to_state} "
+                    f"({result.magnitude})"
+                )
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Regime transition detection failed: {e}")
+            return RegimeTransition.from_error(str(e))
+    
+    async def detect_regime_transition_async(
+        self,
+        current_data: Dict[str, Any],
+        previous_data: Optional[Dict[str, Any]] = None,
+        indicators: Optional[Dict[str, Any]] = None,
+        timeout_seconds: float = 5.0,
+    ) -> RegimeTransition:
+        """
+        Detect regime transitions asynchronously with timeout.
+        
+        Args:
+            current_data: Current market state
+            previous_data: Previous state for comparison
+            indicators: Current indicator values
+            timeout_seconds: Maximum time for detection
+            
+        Returns:
+            RegimeTransition result
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    self.detect_regime_transition,
+                    current_data,
+                    previous_data,
+                    indicators,
+                ),
+                timeout=timeout_seconds,
+            )
+            return result
+        except asyncio.TimeoutError:
+            return RegimeTransition.no_transition()
+        except Exception as e:
+            return RegimeTransition.from_error(str(e))
+    
+    def _detect_transition_rules(
+        self,
+        current_data: Dict[str, Any],
+        previous_data: Optional[Dict[str, Any]],
+        indicators: Optional[Dict[str, Any]],
+    ) -> RegimeTransition:
+        """Rule-based fallback for transition detection (no LLM)."""
+        if not previous_data:
+            return RegimeTransition.no_transition()
+        
+        current_regime = current_data.get("regime", {}).get("regime", "unknown")
+        prev_regime = previous_data.get("regime", {}).get("regime", "unknown")
+        current_vol = current_data.get("regime", {}).get("volatility", "normal")
+        prev_vol = previous_data.get("regime", {}).get("volatility", "normal")
+        
+        # Check for regime change
+        if current_regime != prev_regime and current_regime != "unknown" and prev_regime != "unknown":
+            return RegimeTransition(
+                transition_detected=True,
+                transition_type="regime_shift",
+                from_state=prev_regime.replace("_", " ").title(),
+                to_state=current_regime.replace("_", " ").title(),
+                confidence=0.7,
+                magnitude="moderate",
+                suggested_adjustments=[
+                    f"Review {current_regime} strategy settings",
+                    "Consider signal type adjustments",
+                ],
+                alert_message=f"Market regime changed from {prev_regime} to {current_regime}",
+                strategy_impact="Signal type performance may change",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+        
+        # Check for volatility change
+        vol_map = {"low": 1, "normal": 2, "high": 3}
+        current_vol_num = vol_map.get(current_vol, 2)
+        prev_vol_num = vol_map.get(prev_vol, 2)
+        
+        if abs(current_vol_num - prev_vol_num) >= 2:  # Significant change
+            direction = "expanding" if current_vol_num > prev_vol_num else "contracting"
+            return RegimeTransition(
+                transition_detected=True,
+                transition_type="volatility_change",
+                from_state=f"{prev_vol} volatility",
+                to_state=f"{current_vol} volatility",
+                confidence=0.6,
+                magnitude="moderate" if abs(current_vol_num - prev_vol_num) == 2 else "minor",
+                suggested_adjustments=[
+                    "Adjust stop loss distances",
+                    "Review position sizing",
+                ],
+                alert_message=f"Volatility {direction}: {prev_vol} → {current_vol}",
+                strategy_impact="Stop and target distances may need adjustment",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+        
+        return RegimeTransition.no_transition()
+    
+    def _build_transition_prompt(
+        self,
+        current_data: Dict[str, Any],
+        previous_data: Optional[Dict[str, Any]],
+        indicators: Optional[Dict[str, Any]],
+    ) -> str:
+        """Build prompt for transition detection."""
+        # Current state
+        current_regime = current_data.get("regime", {})
+        regime_type = current_regime.get("regime", "unknown")
+        volatility = current_regime.get("volatility", "normal")
+        session = current_regime.get("session", self._get_current_session())
+        trend_strength = current_regime.get("trend_strength", 0.5)
+        
+        # Previous state
+        if previous_data:
+            prev_regime = previous_data.get("regime", {})
+            prev_regime_type = prev_regime.get("regime", "unknown")
+            prev_volatility = prev_regime.get("volatility", "normal")
+            prev_trend = prev_regime.get("trend_strength", 0.5)
+        else:
+            prev_regime_type = regime_type
+            prev_volatility = volatility
+            prev_trend = trend_strength
+        
+        # Indicator changes
+        ind = indicators or {}
+        atr = ind.get("atr", 30)
+        prev_atr = previous_data.get("indicators", {}).get("atr", atr) if previous_data else atr
+        atr_change = (atr - prev_atr) / prev_atr if prev_atr > 0 else 0
+        
+        volume = ind.get("volume", 1000)
+        prev_volume = previous_data.get("indicators", {}).get("volume", volume) if previous_data else volume
+        volume_change = (volume - prev_volume) / prev_volume if prev_volume > 0 else 0
+        
+        # Price levels
+        price = current_data.get("latest_bar", {}).get("close", 0)
+        vwap = ind.get("vwap", price)
+        high = ind.get("recent_high", price + 10)
+        low = ind.get("recent_low", price - 10)
+        avg_range = ind.get("avg_range", high - low)
+        current_range = high - low
+        range_vs_avg = current_range / avg_range if avg_range > 0 else 1.0
+        
+        return REGIME_TRANSITION_USER_TEMPLATE.format(
+            current_regime=regime_type,
+            current_volatility=volatility,
+            current_session=session,
+            trend_strength=trend_strength,
+            prev_regime=prev_regime_type,
+            prev_volatility=prev_volatility,
+            prev_trend_strength=prev_trend,
+            atr_change=atr_change,
+            volume_change=volume_change,
+            range_vs_avg=range_vs_avg,
+            price_vs_vwap=price - vwap if price and vwap else 0,
+            dist_to_high=high - price if high and price else 0,
+            dist_to_low=price - low if price and low else 0,
+        )
+    
+    def _parse_transition_response(self, response: str) -> RegimeTransition:
+        """Parse Claude's response for transition detection."""
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                lines = response.split("\n")
+                response = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+            
+            data = json.loads(response)
+            
+            return RegimeTransition(
+                transition_detected=bool(data.get("transition_detected", False)),
+                transition_type=data.get("transition_type"),
+                from_state=str(data.get("from_state", "")),
+                to_state=str(data.get("to_state", "")),
+                confidence=float(data.get("confidence", 0.5)),
+                magnitude=str(data.get("magnitude", "minor")),
+                suggested_adjustments=data.get("suggested_adjustments", [])[:5],
+                alert_message=data.get("alert_message"),
+                strategy_impact=str(data.get("strategy_impact", "")),
+            )
+        except json.JSONDecodeError:
+            return RegimeTransition.no_transition()
+    
+    def get_regime_history(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent regime transition history."""
+        return self._regime_history[-limit:]
 

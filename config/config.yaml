@@ -93,10 +93,11 @@ data:
   mtf_refresh_seconds_15m: 900     # TTL for 15m MTF cache (15 minutes)
 
 # Signal generation
+# EMERGENCY: Raised thresholds due to 31% WR performance (2025-01-06)
 signals:
   duplicate_window_seconds: 180      # 3 minutes (more opportunities; still deduped)
-  min_confidence: 0.50               # Minimum signal confidence
-  min_risk_reward: 1.2               # R:R filter threshold (signals below this are rejected; tuned from 1.5)
+  min_confidence: 0.65               # EMERGENCY: Raised from 0.50 - quality over quantity
+  min_risk_reward: 1.5               # EMERGENCY: Raised from 1.2 - better R:R requirement
   duplicate_price_threshold_pct: 0.5 # 0.5% price difference for duplicate detection
   volatility_threshold: 0.00025      # Tuned: reduce low-volatility gating further (Tokyo/London opportunities)
   avoid_lunch_lull: false            # Disabled - was blocking 72 signals
@@ -108,76 +109,75 @@ signals:
   min_volume: 100
 
   # Opportunity tiers (A-tier actionable vs B-tier explore)
-  # Goal: trade/scan across Asia + London + NY without silently lowering standards.
-  # B-tier is explicitly labeled in Telegram as "Explore" so you can decide manually.
+  # EMERGENCY: Disabled B-tier until performance recovers
   explore:
-    enabled: true
-    min_confidence: 0.45            # Looser confidence floor for more 24h opportunities
-    min_risk_reward: 1.0            # Looser R:R floor for exploration
-    include_quality_rejects: true   # Include quality-scorer near-misses as B-tier
-    bypass_regime_filters: true     # Allow B-tier signals even when regime/session filters would reject (clearly labeled)
-    max_signals_per_hour: 4         # Anti-spam cap for B-tier (0 = unlimited)
+    enabled: false                  # EMERGENCY: Disabled - focus on quality A-tier only
+    min_confidence: 0.60            # If re-enabled: stricter than before
+    min_risk_reward: 1.3            # If re-enabled: stricter than before
+    include_quality_rejects: false  # Disabled - no near-misses
+    bypass_regime_filters: false    # Disabled - enforce all filters
+    max_signals_per_hour: 2         # If re-enabled: stricter cap
   
   # Stop-distance cap (risk control)
-  # Caps maximum stop distance in points; scales target to preserve RR ratio.
-  # 25 pts = $250 risk @ 5 MNQ contracts, $500 @ 10 contracts
-  max_stop_points: 25.0              # Maximum stop distance in points (0 = disabled)
+  # EMERGENCY: Tightened - recent losses had stops too wide (-$750, -$607, -$540)
+  # 20 pts = $120 risk @ 3 MNQ contracts (base_contracts during emergency)
+  max_stop_points: 20.0              # EMERGENCY: Reduced from 25.0
   
   # Adaptive volatility filter (LANE B - strategy threshold change)
-  # Requires ATR expansion during low-vol consolidation to reduce false breakouts.
-  # When ATR is below median_atr_threshold, requires expansion_requirement before entry.
+  # EMERGENCY: Stricter to avoid false breakouts in current choppy conditions
   adaptive_volatility_filter:
     enabled: true                     # Enabled: reduces false breakouts during low-vol consolidation
-    expansion_requirement: 2.0        # Require 2x ATR expansion during low-vol
+    expansion_requirement: 2.5        # EMERGENCY: Raised from 2.0 - more strict
     median_atr_threshold: 0.0003      # Threshold below which expansion is required
   
   # Per-signal-type regime/session filters
   # Signals are rejected if current regime/session is NOT in the allowed list.
-  # Empty list = no filter (all regimes/sessions allowed).
+  # EMERGENCY: Stricter regime filters based on performance data
   regime_filters:
     mean_reversion_long:
-      allowed_regimes: [ranging]
-      # Allow mean reversion even in high volatility (was too restrictive in backtests)
+      allowed_regimes: [ranging, trending_bullish]  # Avoid in trending_bearish
+      # WORKING: 47% WR - allow in favorable regimes
     mean_reversion_short:
-      allowed_regimes: [ranging]
-      # Allow mean reversion even in high volatility (was too restrictive in backtests)
-    sr_bounce_short:
-      # Allow counter-trend SR shorts even during trending_bullish (operator-approved)
-    momentum_short:
-      allowed_regimes: [trending_bearish]
+      allowed_regimes: [ranging, trending_bearish]  # Only in favorable conditions
+      allowed_sessions: [new_york]  # EMERGENCY: NY only for liquidity
+    # sr_bounce_short: DISABLED
+    # momentum_short: DISABLED
 
 # Strategy configuration (signal types, position sizing, A/B testing)
+# EMERGENCY: Only mean_reversion working - disable all broken signals (2025-01-06)
 strategy:
-  # Signal types to enable (based on backtest analysis)
-  # Winners: sr_bounce (3 wins), mean_reversion_long (2 wins), momentum_short (1 win)
+  # Signal types to enable - EMERGENCY: Only mean_reversion working!
+  # Data: mean_reversion_long 47% WR (+$1,983), mean_reversion_short 33% WR
   enabled_signals:
-    - sr_bounce
-    - mean_reversion_long
-    - mean_reversion_short
-    - momentum_short
-    - breakout_long
-    - breakout_short
-    - vwap_reversion
+    - mean_reversion_long   # ONLY WORKING: 47% WR, +$1,983
+    - mean_reversion_short  # Keep but stricter filtering
   
-  # Signal types to disable (0 wins in backtest)
+  # Signal types to disable - EMERGENCY DISABLED (0% or poor WR)
   disabled_signals:
-    - momentum_long      # 0/5 wins - broken
-    - engulfing_short    # 0/3 wins - broken
-    - engulfing_long     # Untested - disabled for safety
+    - sr_bounce            # Generic sr_bounce
+    - sr_bounce_short      # 0% WR (0/8) = -$2,314 BROKEN
+    - sr_bounce_long       # 33% WR (2/6) = -$543 POOR
+    - momentum_short       # 0% WR (0/2) = -$482 BROKEN
+    - momentum_long        # Already disabled - broken
+    - breakout_long        # Disabled - unproven
+    - breakout_short       # Disabled - unproven
+    - vwap_reversion       # Disabled - unproven
+    - engulfing_short      # Already disabled - broken
+    - engulfing_long       # Already disabled - untested
   
   # Dynamic position sizing for $200+ scalp targets
+  # EMERGENCY: Reduced sizes 40% during recovery period (2025-01-06)
   enable_dynamic_sizing: true
-  base_contracts: 5          # Base position size
-  high_conf_contracts: 15    # For confidence > 0.8
-  max_conf_contracts: 25     # For confidence > 0.9 + winning signal type
+  base_contracts: 3          # EMERGENCY: Reduced from 5 (40% reduction)
+  high_conf_contracts: 8     # EMERGENCY: Reduced from 15
+  max_conf_contracts: 12     # EMERGENCY: Reduced from 25
   high_conf_threshold: 0.80
   max_conf_threshold: 0.90
   
   # Winning signal types (get max contracts when high confidence)
+  # EMERGENCY: Only mean_reversion_long is winning (47% WR)
   winning_signal_types:
-    - sr_bounce
-    - mean_reversion_long
-    - momentum_short
+    - mean_reversion_long    # Only proven winner
   
   # Scalp presets (optional - override ATR-based stops/targets)
   use_scalp_presets: false
@@ -277,6 +277,99 @@ sessions:
     color: "#089981"
 
 # =============================================================================
+# CUSTOM INDICATORS (Supply/Demand, Power Channel, Divergences)
+# =============================================================================
+# Ported from PineScript. Provide both rule-based signals and ML features.
+indicators:
+  enabled:
+    - supply_demand_zones
+    - power_channel
+    - smart_money_divergence
+  
+  as_signals: true        # Generate rule-based signals from indicators
+  as_features: true       # Extract numeric features for learning system
+  
+  # Per-indicator configuration (optional)
+  supply_demand_zones:
+    lookback: 50          # Bars to analyze for zone detection
+    min_zone_size_atr: 0.5
+    max_zones: 5
+    zone_threshold_pct: 0.3
+  
+  power_channel:
+    length: 130           # Lookback for channel calculation
+    atr_mult: 2.0         # ATR multiplier for channel width
+  
+  smart_money_divergence:
+    lookback: 14
+    pivot_lookback: 5
+    rsi_period: 14
+
+# =============================================================================
+# LLM SIGNAL ANNOTATION (AI-Powered Signal Analysis)
+# =============================================================================
+# Uses Claude to analyze signals and generate human-readable explanations.
+# Non-blocking with timeout - failures don't affect signal processing.
+llm_signal_annotation:
+  enabled: true                    # Master toggle for AI signal analysis
+  model: "claude-sonnet-4-20250514"  # Claude model to use
+  timeout_seconds: 5              # Max time to wait for annotation (keep signals fast)
+  batch_mode: false               # Process signals individually (batching not yet implemented)
+
+# =============================================================================
+# LLM TRADE POST-MORTEM (AI-Powered Trade Analysis)
+# =============================================================================
+# Analyzes completed trades to identify lessons and improvements.
+# EMERGENCY: Enabled Telegram + bigger loss threshold for faster feedback
+llm_trade_postmortem:
+  enabled: true                    # Master toggle for trade post-mortem analysis
+  model: "claude-sonnet-4-20250514"  # Claude model to use
+  timeout_seconds: 10             # Longer timeout (not time-critical)
+  min_pnl_threshold: 100          # EMERGENCY: Raised - analyze bigger losses ($100+)
+  send_to_telegram: true          # EMERGENCY: Send to Telegram for immediate review
+  batch_analysis_count: 5         # EMERGENCY: Reduced from 10 for faster feedback
+
+# =============================================================================
+# LLM PATTERN RECOGNITION (AI-Powered Pattern Detection)
+# =============================================================================
+# Identifies recurring patterns across trades for optimization insights.
+# EMERGENCY: Faster batch analysis for quicker insights
+llm_pattern_recognition:
+  enabled: true                    # Master toggle for pattern recognition
+  model: "claude-sonnet-4-20250514"  # Claude model to use
+  timeout_seconds: 30             # Longer timeout (batch analysis)
+  batch_size: 5                   # EMERGENCY: Reduced from 10 - faster feedback
+  lookback_trades: 50             # Consider last 50 trades
+  min_pattern_confidence: 0.6     # EMERGENCY: Lowered from 0.7 - catch more patterns
+  send_to_telegram: true          # Valuable insights worth sending
+
+# =============================================================================
+# LLM RISK ASSESSMENT (Real-Time Pre-Trade Risk Check)
+# =============================================================================
+# Quick risk check before signal execution. Must be FAST (<3s).
+# EMERGENCY: Enabled due to critical performance issues (31% WR, -$2,118 P&L)
+llm_risk_assessment:
+  enabled: true                    # ENABLED - emergency intervention
+  model: "claude-sonnet-4-20250514"  # Claude model to use
+  timeout_seconds: 3              # Must be fast - never delay signals
+  block_on_critical: false        # Warning only - don't block trades
+  consider_recent_trades: 20      # Last 20 trades for context
+
+# =============================================================================
+# LLM ADAPTIVE TUNING (AI-Powered Config Optimization)
+# =============================================================================
+# Suggests config changes based on performance analysis.
+# EMERGENCY: More frequent analysis for faster optimization
+llm_adaptive_tuning:
+  enabled: true                    # Master toggle for adaptive tuning
+  model: "claude-sonnet-4-20250514"  # Claude model to use
+  timeout_seconds: 60             # Longer timeout (comprehensive analysis)
+  analysis_interval_hours: 12     # EMERGENCY: Twice daily (was 24h)
+  auto_apply: false               # Require manual approval
+  min_sample_size: 20             # EMERGENCY: Reduced from 30 for faster feedback
+  conservative_mode: true         # Small incremental changes only
+
+# =============================================================================
 # EXECUTION (ATS - Automated Trading System)
 # =============================================================================
 # Controls automated order placement via an execution adapter (default: IBKR).
@@ -303,7 +396,7 @@ execution:
   ibkr_port: "${IBKR_PORT}"
 
 # =============================================================================
-# LEARNING (Adaptive Bandit Policy)
+# LEARNING (Adaptive Bandit Policy + Feature Engineering)
 # =============================================================================
 # Adjusts execution decisions based on observed signal type performance.
 # Uses Thompson sampling (Beta-Bernoulli) per signal type.
@@ -311,6 +404,22 @@ execution:
 learning:
   enabled: true                     # Master toggle for adaptive policy
   mode: "shadow"                    # "shadow" (observe only) or "live" (affects execution)
+  
+  # Feature engineering for ML integration
+  feature_engineer_enabled: true    # Compute 50+ ML features from market data
+  features:
+    short_window: 5
+    medium_window: 20
+    long_window: 50
+    compute_price_action: true
+    compute_volume_profile: true
+    compute_microstructure: true
+    compute_time_features: true
+    compute_sequential: true
+    compute_cross_timeframe: true
+    normalize_features: true
+    clip_outliers: true
+    outlier_std: 3.0
   
   # Bandit configuration
   min_samples_per_type: 10          # Minimum samples before policy has opinion
@@ -333,11 +442,93 @@ learning:
   # Safe for manual trading: annotates signals + learns from virtual exits.
   contextual:
     enabled: true
-    mode: "shadow"
+    mode: "live"  # CHANGED: Enable live contextual learning
     explore_rate: 0.1
     min_samples_per_context: 5
     decision_threshold: 0.3
     fallback_to_global: true
+
+# =============================================================================
+# ADAPTIVE STOPS (v2.0 Risk Management)
+# =============================================================================
+# Context-aware stop loss and take profit calculation.
+# Adapts to regime, session, volatility, and signal type performance.
+adaptive_stops:
+  enabled: true                      # Master toggle for adaptive stops
+  use_structure_stops: true          # Use swing highs/lows for stop placement
+  use_level2_zones: true             # Use market depth analysis (approximated from L1)
+  min_stop_points: 5.0               # Minimum stop distance in points
+  
+  # Regime-based multipliers (ATR multiplier adjustments)
+  regime_multipliers:
+    ranging: 1.0
+    trending_bullish: 1.2
+    trending_bearish: 1.2
+    
+  # Session-based multipliers (reduce stops during low-vol sessions)
+  session_multipliers:
+    tokyo: 0.8
+    london: 0.9
+    new_york: 1.0
+    
+  # Volatility-based multipliers
+  volatility_multipliers:
+    low: 0.9
+    normal: 1.0
+    high: 1.3
+    
+  # Performance-based adjustment (wider stops for low-WR signals)
+  performance_adjustment: true
+
+# =============================================================================
+# ADAPTIVE POSITION SIZING (v2.0 Risk Management)
+# =============================================================================
+# Kelly Criterion + context-aware position sizing.
+# Replaces simple confidence-based sizing with mathematically optimal sizing.
+adaptive_sizing:
+  enabled: true                      # Master toggle for adaptive sizing
+  method: "kelly_criterion"          # "kelly_criterion", "fixed", or "hybrid"
+  kelly_fraction: 0.25               # Conservative Kelly (1/4 Kelly)
+  min_contracts: 1
+  max_contracts: 15                  # Reduced from 25 during recovery
+  
+  # Feature toggles
+  confidence_scaling: true           # Scale size based on signal confidence
+  regime_scaling: true               # Scale size based on regime favorability
+  session_scaling: true              # Reduce size during Tokyo/London
+  streak_adjustment: true            # Reduce size on losing streaks
+  
+  # Streak settings
+  losing_streak_threshold: 3         # Start reducing after 3 consecutive losses
+  max_losing_streak_reduction: 0.5   # Reduce to 50% after losing streak
+  winning_streak_threshold: 3        # Start boosting after 3 wins
+  winning_streak_boost: 1.2          # Boost to 120% during win streak
+
+# =============================================================================
+# ML SIGNAL FILTER (v2.0 Risk Management)
+# =============================================================================
+# XGBoost/LightGBM classifier to predict trade success probability.
+# Filters out signals with low predicted win probability.
+ml_filter:
+  enabled: true                      # Master toggle for ML filter
+  model_path: "models/signal_filter_v1.joblib"  # Path to saved model
+  model_version: "v1.0.0"
+  
+  # Prediction thresholds
+  min_probability: 0.55              # Minimum P(win) to pass filter
+  high_probability: 0.70             # High confidence threshold
+  
+  # Training settings
+  min_training_samples: 30           # Minimum samples to train model
+  retrain_interval_days: 7           # Days between automatic retraining
+  
+  # Model hyperparameters
+  n_estimators: 100
+  max_depth: 6
+  learning_rate: 0.1
+  
+  # Calibration
+  calibrate_probabilities: true
 
 # =============================================================================
 # PROP FIRM MODE (rule guardrails)

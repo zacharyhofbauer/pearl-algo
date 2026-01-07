@@ -85,6 +85,34 @@ except ImportError:
     PropFirmGuard = None  # type: ignore
     PropFirmStatus = None  # type: ignore
 
+# LLM Signal Annotator (optional - enabled via llm_signal_annotation.enabled)
+try:
+    from pearlalgo.nq_agent.signal_annotator import (
+        LLMSignalAnnotator,
+        SignalAnnotation,
+        get_signal_annotator,
+    )
+    LLM_ANNOTATOR_AVAILABLE = True
+except ImportError:
+    LLM_ANNOTATOR_AVAILABLE = False
+    LLMSignalAnnotator = None  # type: ignore
+    SignalAnnotation = None  # type: ignore
+    get_signal_annotator = lambda config: None  # type: ignore
+
+# LLM Risk Assessor (optional - enabled via llm_risk_assessment.enabled)
+try:
+    from pearlalgo.nq_agent.risk_assessor import (
+        RealTimeRiskAssessor,
+        RiskAssessment,
+        get_risk_assessor,
+    )
+    LLM_RISK_ASSESSOR_AVAILABLE = True
+except ImportError:
+    LLM_RISK_ASSESSOR_AVAILABLE = False
+    RealTimeRiskAssessor = None  # type: ignore
+    RiskAssessment = None  # type: ignore
+    get_risk_assessor = lambda config: None  # type: ignore
+
 
 class NQAgentService:
     """
@@ -223,6 +251,65 @@ class NQAgentService:
         else:
             if not PROP_FIRM_AVAILABLE:
                 logger.debug("Prop firm guard not available (import failed)")
+
+        # ==========================================================================
+        # LLM SIGNAL ANNOTATOR (optional)
+        # ==========================================================================
+        # Provides AI-powered analysis/explanation of signals for Telegram messages.
+        # Non-blocking with timeout - failures don't affect signal processing.
+        self.signal_annotator: Optional["LLMSignalAnnotator"] = None
+        
+        llm_annotation_settings = service_config.get("llm_signal_annotation", {}) or {}
+        if LLM_ANNOTATOR_AVAILABLE and isinstance(llm_annotation_settings, dict):
+            try:
+                if llm_annotation_settings.get("enabled", False):
+                    self.signal_annotator = get_signal_annotator(service_config)
+                    if self.signal_annotator and self.signal_annotator.is_available:
+                        logger.info(
+                            f"LLM signal annotator enabled: model={self.signal_annotator.model}, "
+                            f"timeout={self.signal_annotator.timeout_seconds}s"
+                        )
+                    else:
+                        logger.info("LLM signal annotator enabled but unavailable (API key missing?)")
+                        self.signal_annotator = None
+                else:
+                    logger.info("LLM signal annotator disabled (llm_signal_annotation.enabled=false)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize LLM signal annotator: {e}")
+                self.signal_annotator = None
+        else:
+            if not LLM_ANNOTATOR_AVAILABLE:
+                logger.debug("LLM signal annotator not available (import failed)")
+
+        # ==========================================================================
+        # LLM RISK ASSESSOR (optional)
+        # ==========================================================================
+        # Provides a fast, best-effort pre-trade risk check.
+        # This does NOT block signals by default; it adds context to Telegram.
+        self.risk_assessor: Optional["RealTimeRiskAssessor"] = None
+
+        llm_risk_settings = service_config.get("llm_risk_assessment", {}) or {}
+        if LLM_RISK_ASSESSOR_AVAILABLE and isinstance(llm_risk_settings, dict):
+            try:
+                if llm_risk_settings.get("enabled", False):
+                    self.risk_assessor = get_risk_assessor(service_config)
+                    if self.risk_assessor and self.risk_assessor.is_available:
+                        logger.info(
+                            f"LLM risk assessor enabled: model={self.risk_assessor.model}, "
+                            f"timeout={self.risk_assessor.timeout_seconds}s, "
+                            f"block_on_critical={self.risk_assessor.block_on_critical}"
+                        )
+                    else:
+                        logger.info("LLM risk assessor enabled but unavailable (API key missing?)")
+                        self.risk_assessor = None
+                else:
+                    logger.info("LLM risk assessor disabled (llm_risk_assessment.enabled=false)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize LLM risk assessor: {e}")
+                self.risk_assessor = None
+        else:
+            if not LLM_RISK_ASSESSOR_AVAILABLE:
+                logger.debug("LLM risk assessor not available (import failed)")
 
         self.running = False
         self.shutdown_requested = False
@@ -1308,6 +1395,116 @@ class NQAgentService:
             if execution_result:
                 signal["_execution_order_id"] = execution_result.parent_order_id
 
+            # ==========================================================================
+            # LLM ANNOTATION: AI-powered signal analysis (non-blocking, best-effort)
+            # ==========================================================================
+            # Adds human-readable explanation to the signal before Telegram delivery.
+            # Failures are graceful - annotation is optional enhancement only.
+            if self.signal_annotator is not None and self.signal_annotator.is_available:
+                try:
+                    # Get performance metrics for context
+                    perf_metrics = None
+                    try:
+                        perf = self.performance_tracker.get_performance_metrics()
+                        if perf:
+                            perf_metrics = {
+                                "win_rate": perf.get("win_rate", 0.5),
+                                "total_trades": perf.get("total_trades", 0),
+                            }
+                    except Exception:
+                        pass
+                    
+                    # Annotate signal asynchronously with timeout
+                    annotation = await self.signal_annotator.annotate_signal_async(
+                        signal=signal,
+                        market_context=None,  # Could add more context here
+                        performance_metrics=perf_metrics,
+                    )
+                    
+                    if annotation and not annotation.error:
+                        signal["_llm_annotation"] = annotation.to_dict()
+                        logger.debug(
+                            f"LLM annotation added: {annotation.confidence_note} "
+                            f"(latency={annotation.latency_ms}ms)"
+                        )
+                    elif annotation and annotation.error:
+                        logger.debug(f"LLM annotation skipped: {annotation.error}")
+                except Exception as ann_e:
+                    # Never let annotation failures affect signal processing
+                    logger.debug(f"LLM annotation failed (non-blocking): {ann_e}")
+
+            # ==========================================================================
+            # LLM RISK ASSESSMENT: fast pre-trade risk check (non-blocking, best-effort)
+            # ==========================================================================
+            # Adds a compact risk label to the signal before Telegram delivery.
+            # Failures are graceful; timeout defaults to "proceed".
+            if self.risk_assessor is not None and self.risk_assessor.is_available:
+                try:
+                    consider_n = int(getattr(self.risk_assessor, "consider_recent_trades", 20) or 20)
+
+                    # Build a small recent-trades cache for the assessor (best-effort).
+                    recent_records: List[Dict] = []
+                    try:
+                        recent_records = self.state_manager.get_recent_signals(limit=max(200, consider_n * 10))
+                    except Exception:
+                        recent_records = []
+
+                    exited: List[Dict[str, Any]] = []
+                    for rec in recent_records:
+                        if not isinstance(rec, dict):
+                            continue
+                        if rec.get("_is_test", False):
+                            continue
+                        if rec.get("status") != "exited":
+                            continue
+                        sig = rec.get("signal", {}) or {}
+                        exited.append(
+                            {
+                                "type": sig.get("type", rec.get("type", "unknown")),
+                                "is_win": bool(rec.get("is_win", False)),
+                                "confidence": sig.get("confidence"),
+                                "pnl_points": rec.get("pnl"),
+                                "exit_reason": rec.get("exit_reason"),
+                                "exit_time": rec.get("exit_time"),
+                            }
+                        )
+
+                    if exited:
+                        self.risk_assessor.update_recent_trades(exited[-consider_n:])
+
+                    # Current exposure summary (best-effort)
+                    exposure = "none"
+                    try:
+                        open_positions = []
+                        for rec in self.state_manager.get_recent_signals(limit=200):
+                            if isinstance(rec, dict) and rec.get("status") == "entered":
+                                open_positions.append(rec)
+                        if open_positions:
+                            exposure = f"{len(open_positions)} active"
+                    except Exception:
+                        pass
+
+                    assessment = await self.risk_assessor.assess_signal_async(
+                        signal=signal,
+                        market_state={"regime": signal.get("regime", {})},
+                        current_exposure=exposure,
+                    )
+
+                    # Attach only when meaningful to avoid bloating persisted signals.
+                    if assessment and not assessment.error:
+                        if (
+                            assessment.risk_level in ("medium", "high", "critical")
+                            or (assessment.primary_concern is not None)
+                            or (abs(float(assessment.size_adjustment or 1.0) - 1.0) >= 0.05)
+                        ):
+                            signal["_llm_risk_assessment"] = assessment.to_dict()
+                            logger.debug(
+                                f"LLM risk assessment: {assessment.risk_level} "
+                                f"(proceed={assessment.proceed}, latency={assessment.latency_ms}ms)"
+                            )
+                except Exception as risk_e:
+                    logger.debug(f"LLM risk assessment failed (non-blocking): {risk_e}")
+
             # Send to Telegram (await async call) with buffer data for chart generation
             signal_type = signal.get('type', 'unknown')
             signal_direction = signal.get('direction', 'unknown')
@@ -1567,6 +1764,25 @@ class NQAgentService:
                                         is_win=is_win,
                                         pnl=pnl_value,
                                     )
+                                    
+                                    # Log learning metrics (what the brain learned)
+                                    try:
+                                        context_key = ctx.to_dict().get("context_key", "unknown")
+                                        # Get expected win rate for this signal type in this context
+                                        expected_wr = self.contextual_policy.get_expected_win_rate(
+                                            signal_type, ctx
+                                        )
+                                        logger.info(
+                                            f"🧠 Learning: {signal_type} in {context_key} -> "
+                                            f"{'WIN' if is_win else 'LOSS'} (${pnl_value:+.0f}) | "
+                                            f"Expected WR: {expected_wr:.0%}"
+                                        )
+                                    except Exception:
+                                        # Log basic learning info if detailed metrics unavailable
+                                        logger.info(
+                                            f"🧠 Learning: {signal_type} -> "
+                                            f"{'WIN' if is_win else 'LOSS'} (${pnl_value:+.0f})"
+                                        )
                             except Exception as ctx_err:
                                 logger.debug(f"Could not record contextual policy outcome: {ctx_err}")
                         
@@ -2330,6 +2546,30 @@ class NQAgentService:
         else:
             return self._scan_interval_idle
 
+    def _compute_quiet_period_minutes(self) -> Optional[float]:
+        """
+        Compute how long since the last signal was generated.
+        
+        Returns:
+            Minutes since last signal, or None if no signals generated yet.
+        """
+        if not self.last_signal_generated_at:
+            return None
+        try:
+            # Parse the ISO timestamp
+            if isinstance(self.last_signal_generated_at, str):
+                last_signal_dt = datetime.fromisoformat(self.last_signal_generated_at.replace("Z", "+00:00"))
+            else:
+                last_signal_dt = self.last_signal_generated_at
+            
+            if last_signal_dt.tzinfo is None:
+                last_signal_dt = last_signal_dt.replace(tzinfo=timezone.utc)
+            
+            delta = datetime.now(timezone.utc) - last_signal_dt
+            return round(delta.total_seconds() / 60.0, 2)
+        except Exception:
+            return None
+
     def _get_quiet_reason(
         self,
         market_data: Optional[Dict] = None,
@@ -2754,9 +2994,116 @@ class NQAgentService:
                         )
                     except Exception:
                         pass
+            
+            # ==========================================================================
+            # Process grade request (manual feedback for learning)
+            # ==========================================================================
+            grade_file = state_dir / "grade_request.json"
+            if grade_file.exists():
+                await self._process_grade_request(grade_file)
                         
         except Exception as e:
             logger.error(f"Error checking execution control flags: {e}", exc_info=True)
+
+    async def _process_grade_request(self, grade_file: Path) -> None:
+        """Process a grade request from Telegram /grade command.
+        
+        The grade request contains:
+        - signal_id: The signal to grade
+        - signal_type: The type of signal (for learning)
+        - is_win: Whether it was a win
+        - pnl: Optional P&L value
+        - force: Whether to apply even if signal already exited
+        """
+        try:
+            with open(grade_file, "r") as f:
+                grade_req = json.load(f)
+            
+            signal_id = grade_req.get("signal_id", "")
+            signal_type = grade_req.get("signal_type", "unknown")
+            is_win = grade_req.get("is_win", False)
+            pnl = grade_req.get("pnl")
+            force = grade_req.get("force", False)
+            
+            logger.info(f"Processing grade request: {signal_id} -> {'win' if is_win else 'loss'} (force={force})")
+            
+            # Check if signal already has an exit recorded
+            signals_file = self.state_manager.signals_file
+            already_exited = False
+            if signals_file.exists():
+                with open(signals_file, "r") as f:
+                    for line in f:
+                        try:
+                            record = json.loads(line.strip())
+                            if record.get("signal_id") == signal_id:
+                                already_exited = record.get("status") == "exited"
+                                break
+                        except json.JSONDecodeError:
+                            continue
+            
+            # Apply to learning if: not already exited, or force is True
+            applied = False
+            if self.bandit_policy is not None:
+                if not already_exited or force:
+                    self.bandit_policy.record_outcome(
+                        signal_id=signal_id,
+                        signal_type=signal_type,
+                        is_win=is_win,
+                        pnl=pnl or 0.0,
+                    )
+                    applied = True
+                    logger.info(f"Grade applied to learning: {signal_type} {'win' if is_win else 'loss'}")
+                else:
+                    logger.info(f"Grade skipped (already exited, force=False): {signal_id}")
+            
+            # Update feedback.jsonl to mark as applied
+            feedback_file = self.state_manager.state_dir / "feedback.jsonl"
+            if feedback_file.exists():
+                try:
+                    # Read all feedback, update the matching one
+                    updated_lines = []
+                    with open(feedback_file, "r") as f:
+                        for line in f:
+                            try:
+                                rec = json.loads(line.strip())
+                                if rec.get("signal_id") == signal_id and not rec.get("applied_to_learning"):
+                                    rec["applied_to_learning"] = applied
+                                    rec["applied_at"] = datetime.now(timezone.utc).isoformat()
+                                updated_lines.append(json.dumps(rec))
+                            except json.JSONDecodeError:
+                                updated_lines.append(line.strip())
+                    with open(feedback_file, "w") as f:
+                        f.write("\n".join(updated_lines) + "\n")
+                except Exception as e:
+                    logger.warning(f"Could not update feedback file: {e}")
+            
+            # Notify via Telegram
+            try:
+                if applied:
+                    await self.telegram_notifier.telegram.send_message(
+                        f"✅ *Grade Applied*\n\n"
+                        f"Signal: `{signal_id[:25]}...`\n"
+                        f"Type: `{signal_type}`\n"
+                        f"Outcome: {'Win' if is_win else 'Loss'}\n"
+                        f"Applied to learning policy.",
+                        parse_mode="Markdown",
+                    )
+                else:
+                    await self.telegram_notifier.telegram.send_message(
+                        f"ℹ️ *Grade Logged*\n\n"
+                        f"Signal: `{signal_id[:25]}...`\n"
+                        f"Already exited - feedback logged but not applied.\n"
+                        f"_Use `force` to override._",
+                        parse_mode="Markdown",
+                    )
+            except Exception:
+                pass
+            
+        except Exception as e:
+            logger.error(f"Error processing grade request: {e}", exc_info=True)
+        finally:
+            # Always clean up the request file
+            grade_file.unlink(missing_ok=True)
 
     def get_status(self) -> Dict:
         """Get current service status."""
@@ -3078,6 +3425,9 @@ class NQAgentService:
             "quiet_reason": self._last_quiet_reason,
             "signal_diagnostics": self._last_signal_diagnostics,
             "signal_diagnostics_raw": self._last_signal_diagnostics_raw,
+            # Quiet period duration: how long since last signal was generated
+            # Useful for monitoring signal generation health
+            "quiet_period_minutes": self._compute_quiet_period_minutes(),
             # Operational metadata
             "run_id": run_id,
             "version": version,

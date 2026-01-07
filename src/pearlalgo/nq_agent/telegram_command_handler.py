@@ -328,6 +328,11 @@ class TelegramCommandHandler:
         # Button-first UX: /start is the only supported slash command.
         # All other actions are accessible via inline buttons.
         self.application.add_handler(CommandHandler("start", self._handle_start))
+        
+        # Commands that require arguments (can't be done via buttons alone)
+        self.application.add_handler(CommandHandler("signal", self._handle_signal_detail))
+        self.application.add_handler(CommandHandler("grade", self._handle_grade))
+        self.application.add_handler(CommandHandler("performance", self._handle_performance))
 
         # Friendly fallback for any other slash command: point users back to /start.
         async def _unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1567,12 +1572,8 @@ class TelegramCommandHandler:
                 gateway_api_ready=gateway_api_ready,
             )
             
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=message,
-                parse_mode="Markdown",
-                reply_markup=reply_markup,
-            )
+            # Use the unified sender so tests and runtime behavior stay consistent.
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             
         except Exception as e:
             logger.error(f"Error handling status command: {e}", exc_info=True)
@@ -4429,7 +4430,14 @@ class TelegramCommandHandler:
             )
     
     async def _handle_performance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /performance command."""
+        """Handle /performance command with optional lookback argument.
+        
+        Usage:
+        - /performance        -> 7 days (default)
+        - /performance 24h    -> 24 hours
+        - /performance 7d     -> 7 days
+        - /performance 30d    -> 30 days
+        """
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
@@ -4437,10 +4445,42 @@ class TelegramCommandHandler:
         # Send typing indicator
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
+        # Parse lookback argument from command text
+        lookback_days = 7  # default
+        lookback_label = "7-day"
+        
+        # Get the raw message text (could be from /performance or callback)
+        raw_text = ""
+        if update.message and update.message.text:
+            raw_text = update.message.text.strip()
+        elif update.callback_query and update.callback_query.data:
+            # Check for callback data like "performance:7d"
+            cb_data = update.callback_query.data
+            if cb_data.startswith("performance:"):
+                raw_text = f"/performance {cb_data.split(':', 1)[1]}"
+        
+        # Parse lookback from text
+        if raw_text:
+            parts = raw_text.split()
+            if len(parts) > 1:
+                lookback_arg = parts[1].lower().strip()
+                if lookback_arg in ("24h", "1d"):
+                    lookback_days = 1
+                    lookback_label = "24-hour"
+                elif lookback_arg in ("7d", "week"):
+                    lookback_days = 7
+                    lookback_label = "7-day"
+                elif lookback_arg in ("30d", "month"):
+                    lookback_days = 30
+                    lookback_label = "30-day"
+                elif lookback_arg in ("14d", "2w"):
+                    lookback_days = 14
+                    lookback_label = "14-day"
+        
         try:
-            performance = self.performance_tracker.get_performance_metrics(days=7)
+            performance = self.performance_tracker.get_performance_metrics(days=lookback_days)
             
-            message = "📈 *Performance (7-day)*\n\n"
+            message = f"📈 *Performance ({lookback_label})*\n\n"
             
             total_signals = performance.get("total_signals", 0)
             exited_signals = performance.get("exited_signals", 0)
@@ -4479,13 +4519,26 @@ class TelegramCommandHandler:
                 for count, sig_type, wr, pnl in items[:6]:
                     message += f"- `{sig_type}`: {count} • {wr*100:.0f}% • ${pnl:,.2f}\n"
 
+            # Recent exits preview (show last 3)
+            recent_exits = performance.get("recent_exits", []) or []
+            if recent_exits:
+                message += "\n📋 *Recent Exits*\n"
+                for exit_info in recent_exits[:3]:
+                    sig_type = exit_info.get("type", "?")[:12]
+                    pnl = exit_info.get("pnl", 0)
+                    is_win = exit_info.get("is_win", pnl > 0)
+                    icon = "✅" if is_win else "❌"
+                    message += f"{icon} `{sig_type}`: ${pnl:+.2f}\n"
+                if len(recent_exits) > 3:
+                    message += f"_...and {len(recent_exits) - 3} more_\n"
+
             # Prepare export artifacts (signals + metrics)
             export_paths: Dict[str, str] = {}
             try:
                 exports_dir = self.state_dir / "exports"
                 exports_dir.mkdir(parents=True, exist_ok=True)
                 ts_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                base_name = f"performance_7d_{ts_tag}"
+                base_name = f"performance_{lookback_days}d_{ts_tag}"
 
                 # Metrics JSON
                 metrics_path = exports_dir / f"{base_name}_metrics.json"
@@ -4493,10 +4546,10 @@ class TelegramCommandHandler:
                     json.dump(performance, f, indent=2)
                 export_paths["metrics"] = str(metrics_path)
 
-                # Export last 7d signals (JSONL) + exited signals CSV
+                # Export signals within lookback period (JSONL) + exited signals CSV
                 signals_file = get_signals_file(self.state_dir)
                 if signals_file.exists():
-                    cutoff = datetime.now(timezone.utc).timestamp() - (7 * 24 * 60 * 60)
+                    cutoff = datetime.now(timezone.utc).timestamp() - (lookback_days * 24 * 60 * 60)
                     kept = []
                     with open(signals_file, "r") as f:
                         for line in f:
@@ -4585,6 +4638,19 @@ class TelegramCommandHandler:
                     InlineKeyboardButton("🔄 Refresh", callback_data="performance"),
                 ]
             )
+            
+            # Lookback toggle buttons
+            lookback_row = []
+            for days, label in [(1, "24h"), (7, "7d"), (14, "14d"), (30, "30d")]:
+                marker = "•" if lookback_days == days else ""
+                lookback_row.append(
+                    InlineKeyboardButton(
+                        f"{marker}{label}",
+                        callback_data=f"performance:{label}",
+                    )
+                )
+            keyboard.append(lookback_row)
+            
             keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -4602,6 +4668,387 @@ class TelegramCommandHandler:
             )
             reply_markup = self._get_back_to_menu_button()
             await self._send_message_or_edit(update, context, error_msg, reply_markup=reply_markup)
+
+    async def _handle_signal_detail(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /signal <id_prefix> command - show detailed view of a specific signal.
+        
+        Usage:
+        - /signal sr_bounce_1767     -> Shows signal matching this prefix
+        - /signal mean_rev           -> Partial match works
+        """
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        # Parse signal ID prefix from command
+        raw_text = ""
+        if update.message and update.message.text:
+            raw_text = update.message.text.strip()
+        
+        parts = raw_text.split(maxsplit=1)
+        if len(parts) < 2:
+            await self._send_message_or_edit(
+                update, context,
+                "❌ *Usage:* `/signal <signal_id_prefix>`\n\n"
+                "Example: `/signal sr_bounce_1767`\n\n"
+                "Use `/signals` to see available signal IDs.",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        signal_prefix = parts[1].strip()
+        
+        # Send typing indicator
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        try:
+            # Search for signal by prefix
+            signals_file = get_signals_file(self.state_dir)
+            if not signals_file.exists():
+                await self._send_message_or_edit(
+                    update, context,
+                    "📭 *No signals file found*\n\nNo signals have been generated yet.",
+                    reply_markup=self._get_back_to_menu_button(),
+                )
+                return
+            
+            matched_signal = None
+            with open(signals_file, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        sig_id = record.get("signal_id", "")
+                        if sig_id.startswith(signal_prefix) or signal_prefix in sig_id:
+                            matched_signal = record
+                            # Don't break - keep last match (most recent)
+                    except json.JSONDecodeError:
+                        continue
+            
+            if not matched_signal:
+                await self._send_message_or_edit(
+                    update, context,
+                    f"❌ No signal found matching `{signal_prefix}`\n\n"
+                    "Use `/signals` to see available signal IDs.",
+                    reply_markup=self._get_back_to_menu_button(),
+                )
+                return
+            
+            # Format detailed signal view
+            sig = matched_signal.get("signal", {}) or {}
+            sig_id = matched_signal.get("signal_id", "unknown")
+            status = matched_signal.get("status", "unknown")
+            timestamp = matched_signal.get("timestamp", "")
+            
+            # Basic info
+            sig_type = sig.get("type", "unknown")
+            direction = sig.get("direction", "unknown")
+            confidence = sig.get("confidence", 0)
+            
+            # Prices
+            entry_price = sig.get("entry_price", 0)
+            stop_loss = sig.get("stop_loss", 0)
+            take_profit = sig.get("take_profit", 0)
+            
+            # Regime/context
+            regime = sig.get("regime", {}) or {}
+            regime_type = regime.get("regime", "unknown")
+            volatility = regime.get("volatility", "unknown")
+            session = regime.get("session", "unknown")
+            
+            # Exit info (if exited)
+            exit_price = matched_signal.get("exit_price")
+            exit_reason = matched_signal.get("exit_reason")
+            pnl = matched_signal.get("pnl")
+            is_win = matched_signal.get("is_win")
+            
+            # Build message
+            status_emoji = {"generated": "📋", "entered": "📈", "exited": "✅" if is_win else "❌", "expired": "⏰"}.get(status, "❓")
+            dir_emoji = "🟢" if direction == "long" else "🔴"
+            
+            message = f"🔍 *Signal Detail*\n\n"
+            message += f"*ID:* `{sig_id[:30]}...`\n"
+            message += f"*Status:* {status_emoji} {status}\n"
+            message += f"*Type:* `{sig_type}`\n"
+            message += f"*Direction:* {dir_emoji} {direction}\n"
+            message += f"*Confidence:* {confidence:.0%}\n"
+            message += f"*Time:* {timestamp[:19] if timestamp else 'N/A'}\n\n"
+            
+            message += f"*Entry:* ${entry_price:,.2f}\n"
+            message += f"*Stop Loss:* ${stop_loss:,.2f}\n"
+            message += f"*Take Profit:* ${take_profit:,.2f}\n\n"
+            
+            message += f"*Regime:* {regime_type}\n"
+            message += f"*Volatility:* {volatility}\n"
+            message += f"*Session:* {session}\n"
+            
+            if status == "exited" and exit_price is not None:
+                message += f"\n*Exit Price:* ${exit_price:,.2f}\n"
+                message += f"*Exit Reason:* {exit_reason}\n"
+                message += f"*P&L:* ${pnl:+,.2f}\n"
+                message += f"*Result:* {'✅ Win' if is_win else '❌ Loss'}\n"
+            
+            # Reason
+            reason = sig.get("reason", "")
+            if reason:
+                message += f"\n*Reason:* {reason[:100]}{'...' if len(reason) > 100 else ''}\n"
+            
+            # Buttons
+            keyboard = [
+                [
+                    InlineKeyboardButton("📄 Export JSON", callback_data=f"signal_export:{sig_id[:40]}"),
+                    InlineKeyboardButton("🔄 Refresh", callback_data=f"signal_detail:{sig_id[:40]}"),
+                ],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
+            
+        except Exception as e:
+            logger.error(f"Error handling signal detail: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ *Error getting signal detail*\n\n`{str(e)[:100]}`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+
+    async def _handle_signal_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE, sig_id_prefix: str):
+        """Export a signal as a JSON file attachment."""
+        if not await self._check_authorized(update):
+            return
+        
+        try:
+            # Find the signal
+            signals_file = get_signals_file(self.state_dir)
+            if not signals_file.exists():
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="📭 No signals file found.",
+                )
+                return
+            
+            matched_signal = None
+            with open(signals_file, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        sig_id = record.get("signal_id", "")
+                        if sig_id.startswith(sig_id_prefix) or sig_id_prefix in sig_id:
+                            matched_signal = record
+                    except json.JSONDecodeError:
+                        continue
+            
+            if not matched_signal:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"❌ No signal found matching `{sig_id_prefix}`",
+                    parse_mode="Markdown",
+                )
+                return
+            
+            # Write to temp file and send
+            sig_id = matched_signal.get("signal_id", "signal")
+            export_path = self.state_dir / "exports" / f"{sig_id[:40]}.json"
+            export_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(export_path, "w") as f:
+                json.dump(matched_signal, f, indent=2)
+            
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=open(export_path, "rb"),
+                filename=f"{sig_id[:40]}.json",
+                caption=f"📄 Signal export: `{sig_id[:30]}...`",
+                parse_mode="Markdown",
+            )
+            
+        except Exception as e:
+            logger.error(f"Error exporting signal: {e}", exc_info=True)
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"❌ Export failed: {str(e)[:100]}",
+            )
+
+    async def _handle_grade(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /grade command - record manual outcome feedback for learning.
+        
+        Usage:
+        - /grade <signal_id_prefix> win|loss [pnl] [note...]
+        
+        Examples:
+        - /grade sr_bounce_1767 win 150 Great entry
+        - /grade mean_rev_456 loss -75 Stopped out on news
+        - /grade momentum_short win
+        - /grade sr_bounce_1767 win force  # Force apply even if already exited
+        """
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+        
+        # Parse command arguments
+        raw_text = ""
+        if update.message and update.message.text:
+            raw_text = update.message.text.strip()
+        
+        parts = raw_text.split()
+        if len(parts) < 3:
+            await self._send_message_or_edit(
+                update, context,
+                "❌ *Usage:* `/grade <signal_id> win|loss [pnl] [note...]`\n\n"
+                "*Examples:*\n"
+                "`/grade sr_bounce_1767 win 150 Great entry`\n"
+                "`/grade mean_rev_456 loss -75 Stopped out`\n"
+                "`/grade momentum_short win`\n\n"
+                "Use `/signals` to see signal IDs.",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        signal_prefix = parts[1].strip()
+        outcome = parts[2].lower().strip()
+        
+        if outcome not in ("win", "loss"):
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ Invalid outcome: `{outcome}`\n\nMust be `win` or `loss`.",
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            return
+        
+        is_win = outcome == "win"
+        
+        # Parse optional pnl and note
+        pnl = None
+        note = ""
+        force = False
+        remaining = parts[3:] if len(parts) > 3 else []
+        
+        for i, part in enumerate(remaining):
+            if part.lower() == "force":
+                force = True
+            elif pnl is None:
+                try:
+                    pnl = float(part)
+                except ValueError:
+                    # Not a number, treat as start of note
+                    note = " ".join(remaining[i:])
+                    break
+            else:
+                note = " ".join(remaining[i:])
+                break
+        
+        # Send typing indicator
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        try:
+            # Find the signal
+            signals_file = get_signals_file(self.state_dir)
+            if not signals_file.exists():
+                await self._send_message_or_edit(
+                    update, context,
+                    "📭 *No signals file found*",
+                    reply_markup=self._get_back_to_menu_button(),
+                )
+                return
+            
+            matched_signal = None
+            with open(signals_file, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        sig_id = record.get("signal_id", "")
+                        if sig_id.startswith(signal_prefix) or signal_prefix in sig_id:
+                            matched_signal = record
+                    except json.JSONDecodeError:
+                        continue
+            
+            if not matched_signal:
+                await self._send_message_or_edit(
+                    update, context,
+                    f"❌ No signal found matching `{signal_prefix}`",
+                    reply_markup=self._get_back_to_menu_button(),
+                )
+                return
+            
+            sig_id = matched_signal.get("signal_id", "unknown")
+            sig = matched_signal.get("signal", {}) or {}
+            sig_type = sig.get("type", "unknown")
+            status = matched_signal.get("status", "unknown")
+            
+            # Check if already exited
+            already_exited = status == "exited"
+            
+            # Write feedback to feedback.jsonl
+            feedback_file = self.state_dir / "feedback.jsonl"
+            feedback_record = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "signal_id": sig_id,
+                "signal_type": sig_type,
+                "outcome": outcome,
+                "is_win": is_win,
+                "pnl": pnl,
+                "note": note,
+                "force": force,
+                "already_exited": already_exited,
+                "applied_to_learning": False,  # Will be updated by service
+            }
+            
+            with open(feedback_file, "a") as f:
+                f.write(json.dumps(feedback_record) + "\n")
+            
+            # Write grade request flag for service to pick up
+            grade_request_file = self.state_dir / "grade_request.json"
+            grade_request = {
+                "signal_id": sig_id,
+                "signal_type": sig_type,
+                "is_win": is_win,
+                "pnl": pnl,
+                "force": force,
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+            }
+            with open(grade_request_file, "w") as f:
+                json.dump(grade_request, f)
+            
+            # Build response message
+            outcome_emoji = "✅" if is_win else "❌"
+            message = f"{outcome_emoji} *Feedback Recorded*\n\n"
+            message += f"*Signal:* `{sig_id[:25]}...`\n"
+            message += f"*Type:* `{sig_type}`\n"
+            message += f"*Outcome:* {outcome}\n"
+            if pnl is not None:
+                message += f"*P&L:* ${pnl:+,.2f}\n"
+            if note:
+                message += f"*Note:* {note[:80]}\n"
+            
+            if already_exited and not force:
+                message += "\n⚠️ *Note:* Signal already has virtual exit.\n"
+                message += "Feedback logged but not double-counted for learning.\n"
+                message += "_Use `/grade ... force` to override._"
+            else:
+                message += "\n✅ Will be applied to learning on next cycle."
+            
+            await self._send_message_or_edit(
+                update, context,
+                message,
+                reply_markup=self._get_back_to_menu_button(),
+            )
+            
+        except Exception as e:
+            logger.error(f"Error handling grade command: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update, context,
+                f"❌ *Error recording feedback*\n\n`{str(e)[:100]}`",
+                reply_markup=self._get_back_to_menu_button(),
+            )
 
     async def _handle_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /config command (read-only view of key config)."""
@@ -8088,6 +8535,7 @@ _Commands are policy-gated for safety._
         # Row 3: Signals & Trades (primary workflow)
         keyboard.append([
             InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
+            InlineKeyboardButton("📊 Performance", callback_data="performance"),
         ])
 
 
@@ -8395,11 +8843,25 @@ _Commands are policy-gated for safety._
             await self._handle_status_refresh(update, context)
         elif callback_data == 'performance':
             await self._handle_performance(update, context)
+        elif callback_data.startswith("performance:"):
+            # Lookback selection like "performance:7d"
+            await self._handle_performance(update, context)
         elif callback_data.startswith("performance_export:"):
             kind = callback_data.split("performance_export:", 1)[1].strip()
             await self._handle_performance_export(update, context, kind)
         elif callback_data == 'signals':
             await self._handle_signals(update, context)
+        elif callback_data.startswith("signal_detail:"):
+            # Signal detail view by ID prefix
+            sig_id_prefix = callback_data.split("signal_detail:", 1)[1].strip()
+            # Fake the message text for the handler
+            if update.callback_query:
+                update.callback_query.message.text = f"/signal {sig_id_prefix}"
+            await self._handle_signal_detail(update, context)
+        elif callback_data.startswith("signal_export:"):
+            # Export signal as JSON file
+            sig_id_prefix = callback_data.split("signal_export:", 1)[1].strip()
+            await self._handle_signal_export(update, context, sig_id_prefix)
         elif callback_data.startswith("signals:page:"):
             action = callback_data.split("signals:page:", 1)[1].strip()
             if hasattr(context, "user_data"):

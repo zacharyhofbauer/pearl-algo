@@ -32,8 +32,10 @@ It combines quick start steps, command setup, and command behavior.
    status - Get current agent status
    activity - Is the bot doing anything?
    signals - Show recent signals
+   signal - Show details for a specific signal by ID prefix
    last_signal - Show most recent signal with chart
    active_trades - Show currently open positions
+   grade - Record manual outcome feedback for learning
    backtest - Run strategy backtest with chart
    reports - Browse saved backtest reports
    performance - Show performance metrics
@@ -210,12 +212,63 @@ Answers the question "Is the bot doing anything?" with:
 
 ### 3.5 `/performance`
 
-- Shows **7‑day performance metrics**:
+- Shows **7‑day performance metrics** by default:
   - Total signals and exited signals
   - Win / loss counts
   - Win rate percentage
   - Total P&L and average P&L
+  - Breakdown by signal type
 - Uses the same performance metrics as the periodic Telegram summaries.
+
+**Lookback Options:**
+- `/performance` – Default 7-day lookback
+- `/performance 24h` – Last 24 hours
+- `/performance 7d` – Last 7 days (explicit)
+- `/performance 30d` – Last 30 days
+
+**Export Buttons:**
+When you run `/performance`, you'll see export buttons:
+- **📄 Signals JSONL** – All signals with full metadata (regime, MTF, VWAP, etc.)
+- **📄 Exited CSV** – Completed trades with columns: timestamp, signal_id, type, direction, confidence, entry_price, stop_loss, take_profit, exit_price, exit_reason, pnl, is_win, hold_minutes
+- **📊 Metrics JSON** – Aggregated performance data
+
+> **Tip:** Export the CSV and share it to get detailed analysis of your signal outcomes.
+
+### 3.5.1 `/signal <id_prefix>`
+
+Shows detailed information for a specific signal:
+- Entry price, stop loss, take profit
+- Confidence score and signal type
+- Regime, session, and market context
+- Exit details and P&L (if exited)
+
+**Usage:**
+```
+/signal sr_bounce_1767     # Shows signal matching this prefix
+/signal mean_rev           # Partial match works
+```
+
+You can also get a JSON file attachment with the full signal data for sharing.
+
+### 3.5.2 `/grade` - Manual Feedback for Learning
+
+Record your own trade outcomes to help the learning system:
+
+```
+/grade <signal_id_prefix> win|loss [pnl] [note]
+```
+
+**Examples:**
+```
+/grade sr_bounce_1767 win 150 Great entry, held to target
+/grade mean_rev_456 loss -75 Stopped out on news spike
+/grade momentum_short win    # P&L optional
+```
+
+**Notes:**
+- Feedback is recorded to `data/nq_agent_state/feedback.jsonl`
+- If the signal already has a virtual exit, feedback is logged but not double-counted
+- Use `/grade ... force` to override and apply to learning anyway
 
 ### 3.6 `/config` and `/health`
 

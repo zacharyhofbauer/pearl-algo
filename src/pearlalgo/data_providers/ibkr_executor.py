@@ -326,17 +326,20 @@ class GetLatestBarTask(Task):
             except Exception as md_type_e:
                 logger.warning(f"   ⚠️  Could not set market data type (may already be set): {md_type_e}")
             
-            # Request Level 1 market data
-            # Try snapshot first to get initial price, then switch to streaming if needed
-            # Parameters: contract, genericTickList="", snapshot=True/False, regulatorySnapshot=False
-            _log_trace(f"   Attempting snapshot request first to get initial price...")
-            _log_trace(f"   Calling ib.reqMktData(contract, '', True, False) [snapshot=True]...")
+            # Request Level 1 market data (streaming, then cancel after first valid tick).
+            #
+            # IMPORTANT: For CME futures (e.g., MNQ), snapshot=True can be unreliable in some
+            # environments and may stay NaN indefinitely. Streaming (snapshot=False) is more
+            # reliable, and we immediately cancel once we have a valid price.
+            #
+            # Parameters: contract, genericTickList="", snapshot=False, regulatorySnapshot=False
+            _log_trace(f"   Requesting streaming market data to get first tick...")
+            _log_trace(f"   Calling ib.reqMktData(contract, '', False, False) [snapshot=False]...")
             _log_trace(f"   - genericTickList: '' (empty = default ticks)")
-            _log_trace(f"   - snapshot: True (one-time snapshot to get initial price)")
+            _log_trace(f"   - snapshot: False (streaming; will cancel after first valid price)")
             _log_trace(f"   - regulatorySnapshot: False")
             
-            # Try snapshot first (one-time request, might work better for initial price)
-            ticker = ib.reqMktData(contract, "", True, False)
+            ticker = ib.reqMktData(contract, "", False, False)
             ticker_req_id = ticker.reqId if hasattr(ticker, 'reqId') else None
             _log_trace(f"   ✅ reqMktData() call completed, ticker object created")
             _log_trace(f"   Ticker object type: {type(ticker)}")
@@ -350,26 +353,27 @@ class GetLatestBarTask(Task):
                         executor._market_data_errors.pop(ticker_req_id, None)
             
             # Wait for data/errors using event-based approach
-            _log_trace(f"   Waiting for market data to arrive (snapshot request, should be faster)...")
-            max_wait = 15.0  # Increased wait time for snapshot requests
+            _log_trace(f"   Waiting for market data to arrive (streaming first tick)...")
+            max_wait = 8.0  # Streaming should return quickly; keep this tight to avoid blocking
             check_interval = 0.5  # Check every 0.5 seconds
             waited = 0.0
             
-            # For snapshot requests, we need to wait for the snapshot to complete
-            # Use ib.waitForUpdate() to properly wait for ticker events
-            # This is more reliable than time.sleep() polling
+            # Wait for market data updates.
+            # NOTE: ib_insync uses waitOnUpdate()/sleep() (there is no waitForUpdate()).
             while waited < max_wait:
+                got_update = False
                 try:
-                    # Wait for update with timeout (raises exception on timeout, which is expected)
-                    ib.waitForUpdate(timeout=check_interval)
-                    waited += check_interval
-                    _log_trace(f"   [{waited:.1f}s] Event received, checking ticker state...")
+                    got_update = bool(ib.waitOnUpdate(timeout=check_interval))
                 except Exception:
-                    # Timeout exception is expected when no update arrives - continue checking
-                    waited += check_interval
+                    got_update = False
+
+                waited += check_interval
+                if got_update:
+                    _log_trace(f"   [{waited:.1f}s] Event received, checking ticker state...")
+                else:
                     # Only log every 2 seconds to reduce spam
                     if int(waited * 2) % 4 == 0:
-                        _log_trace(f"   [{waited:.1f}s] Waiting for snapshot data...")
+                        _log_trace(f"   [{waited:.1f}s] Waiting for market data...")
                 
                 # Check ticker attributes
                 if ticker:
@@ -385,7 +389,7 @@ class GetLatestBarTask(Task):
                     bid_str = "NaN" if (bid_val is not None and math.isnan(float(bid_val))) else str(bid_val) if bid_val is not None else "N/A"
                     ask_str = "NaN" if (ask_val is not None and math.isnan(float(ask_val))) else str(ask_val) if ask_val is not None else "N/A"
                     
-                    logger.info(
+                    _log_trace(
                         f"   Ticker state:\n"
                         f"   - last: {last_str}\n"
                         f"   - close: {close_str}\n"
@@ -403,12 +407,19 @@ class GetLatestBarTask(Task):
                         has_nan = True
                     
                     if has_nan:
-                        logger.warning(f"   ⚠️  Ticker contains NaN values - this indicates no market data available")
+                        # During streaming startup it's normal to see NaNs briefly before the first tick.
+                        # Only escalate to WARNING if it persists for a couple seconds.
+                        if waited >= 2.0:
+                            logger.warning(
+                                "   ⚠️  Ticker contains NaN values - this indicates no market data available"
+                            )
+                        else:
+                            _log_trace("   (waiting) Ticker values still NaN before first tick")
                         if not is_market_open:
                             _log_trace(f"   Market is CLOSED ({market_status}) - NaN values are expected during market closure")
                         else:
                             # Only log this warning every 2 seconds to reduce spam
-                            if int(waited * 2) % 4 == 0:  # Every 2 seconds
+                            if waited >= 2.0 and int(waited * 2) % 4 == 0:  # Every 2 seconds after initial grace
                                 logger.warning(
                                     f"   Market is OPEN but ticker has NaN after {waited:.1f}s - may indicate:\n"
                                     f"   - Missing 'Market Data API Acknowledgement' in Client Portal (MOST LIKELY)\n"
@@ -573,7 +584,7 @@ class GetLatestBarTask(Task):
                     last_val = ticker.last if hasattr(ticker, 'last') else None
                     close_val = ticker.close if hasattr(ticker, 'close') else None
                     logger.error(
-                        f"   ❌ Snapshot request returned NaN/None after {waited:.1f}s:\n"
+                        f"   ❌ Market data request returned NaN/None after {waited:.1f}s:\n"
                         f"   - last: {last_val} ({'NaN' if last_val is not None and math.isnan(float(last_val)) else 'None' if last_val is None else 'valid'})\n"
                         f"   - close: {close_val} ({'NaN' if close_val is not None and math.isnan(float(close_val)) else 'None' if close_val is None else 'valid'})\n"
                         f"   - marketDataType: {ticker.marketDataType if hasattr(ticker, 'marketDataType') else 'N/A'} (1=LIVE)\n"
