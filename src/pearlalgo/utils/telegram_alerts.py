@@ -1347,7 +1347,9 @@ def format_home_card(
         lines.append(f"🔔 Last signal: {last_signal_age}")
 
     # Performance (if available and has trades)
-    if performance:
+    # Skip "7d Performance" section if challenge is active (7d all-time shown separately before challenge)
+    is_challenge_mode = performance and performance.get("attempt_id") is not None
+    if performance and not is_challenge_mode:
         exited = performance.get("exited_signals", 0)
         if exited > 0:
             wins = performance.get("wins", 0)

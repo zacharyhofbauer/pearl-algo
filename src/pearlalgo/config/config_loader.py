@@ -372,6 +372,17 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "min_sample_size": 30,
         "conservative_mode": True,
     },
+    # ==========================================================================
+    # 50K CHALLENGE TRACKER (Pass/Fail Rules)
+    # ==========================================================================
+    "challenge": {
+        "enabled": False,
+        "start_balance": 50000.0,
+        "max_drawdown": 2000.0,
+        "profit_target": 3000.0,
+        "auto_reset_on_pass": True,
+        "auto_reset_on_fail": True,
+    },
 }
 
 

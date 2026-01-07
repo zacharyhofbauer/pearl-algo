@@ -1287,25 +1287,29 @@ class TelegramCommandHandler:
             # Compute adaptive state staleness threshold based on configured save cadence
             state_stale_threshold = self._compute_state_stale_threshold(state)
             
-            # Get performance (challenge attempt if enabled, else 7-day all-time)
+            # Get performance: both challenge attempt (if enabled) AND 7-day all-time
             perf = None
             challenge_status = None
+            perf_7d_alltime = None  # Always fetch 7d for comparison
             try:
-                # Try challenge tracker first (if enabled)
+                # Always get 7-day all-time performance (for comparison)
+                perf_7d_alltime = self.performance_tracker.get_performance_metrics(days=7)
+            except Exception:
+                pass
+            
+            try:
+                # Try challenge tracker (if enabled)
                 challenge_tracker = self._get_challenge_tracker()
                 if challenge_tracker is not None:
                     perf = challenge_tracker.get_attempt_performance()
                     challenge_status = challenge_tracker.get_status_summary()
                 else:
-                    # Fallback to all-time performance
-                    perf = self.performance_tracker.get_performance_metrics(days=7)
+                    # Fallback: use 7d all-time as main perf
+                    perf = perf_7d_alltime
             except Exception as e:
                 logger.debug(f"Could not get performance for /status: {e}")
                 # Fallback
-                try:
-                    perf = self.performance_tracker.get_performance_metrics(days=7)
-                except Exception:
-                    pass
+                perf = perf_7d_alltime
             
             # Get last signal age
             last_signal_age = None
@@ -1454,6 +1458,15 @@ class TelegramCommandHandler:
                 except Exception as e:
                     logger.debug(f"Could not build trade monitor: {e}")
 
+            # Show simplified 7d all-time PnL (if available) before challenge status
+            if perf_7d_alltime and perf_7d_alltime.get("exited_signals", 0) > 0:
+                pnl_7d = perf_7d_alltime.get("total_pnl", 0.0)
+                wins_7d = perf_7d_alltime.get("wins", 0)
+                losses_7d = perf_7d_alltime.get("losses", 0)
+                pnl_emoji_7d = "🟢" if pnl_7d >= 0 else "🔴"
+                pnl_str_7d = f"+${pnl_7d:,.2f}" if pnl_7d >= 0 else f"-${abs(pnl_7d):,.2f}"
+                message += f"\n\n*7d All-Time:* {pnl_emoji_7d} {pnl_str_7d} ({wins_7d}W/{losses_7d}L)"
+            
             # Optional: 50k Challenge status (shows attempt-specific PnL + progress)
             if challenge_status:
                 message += f"\n\n{challenge_status}"
