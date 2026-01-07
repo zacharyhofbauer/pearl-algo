@@ -114,6 +114,20 @@ storage:
   async_queue_max_size: 1000              # Max queued writes (older observability writes drop if full)
   async_queue_priority_trades: true       # Always keep trade exits (drop cycle_diagnostics first)
 
+# =============================================================================
+# 50K CHALLENGE TRACKER (Pass/Fail Rules)
+# =============================================================================
+# Tracks account attempts with pass/fail thresholds.
+# - PnL shown in Telegram = current attempt only (not all-time)
+# - Historical trades are NEVER deleted (just tracked separately per attempt)
+challenge:
+  enabled: true
+  start_balance: 50000.0                  # Starting balance for each attempt
+  max_drawdown: 2000.0                    # Hit -$2,000 = FAIL (auto-reset)
+  profit_target: 3000.0                   # Hit +$3,000 = PASS (auto-reset)
+  auto_reset_on_pass: true                # Automatically start new attempt on PASS
+  auto_reset_on_fail: true                # Automatically start new attempt on FAIL
+
 # Signal generation
 # EMERGENCY: Raised thresholds due to 31% WR performance (2025-01-06)
 signals:

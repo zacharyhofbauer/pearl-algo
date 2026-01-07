@@ -245,6 +245,41 @@ class NQAgentService:
                 logger.debug(f"Could not inject async queue into state/performance trackers: {e}")
 
         # ==========================================================================
+        # 50K CHALLENGE TRACKER (Pass/Fail Rules)
+        # ==========================================================================
+        # Tracks account attempts with pass/fail thresholds.
+        # PnL shown in Telegram = current attempt only (not all-time).
+        self._challenge_tracker: Optional["ChallengeTracker"] = None
+        self._challenge_enabled = False
+        try:
+            from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker, ChallengeConfig
+            
+            challenge_cfg = service_config.get("challenge", {}) or {}
+            self._challenge_enabled = bool(challenge_cfg.get("enabled", False))
+            if self._challenge_enabled:
+                cfg = ChallengeConfig(
+                    enabled=True,
+                    start_balance=float(challenge_cfg.get("start_balance", 50_000.0)),
+                    max_drawdown=float(challenge_cfg.get("max_drawdown", 2_000.0)),
+                    profit_target=float(challenge_cfg.get("profit_target", 3_000.0)),
+                    auto_reset_on_pass=bool(challenge_cfg.get("auto_reset_on_pass", True)),
+                    auto_reset_on_fail=bool(challenge_cfg.get("auto_reset_on_fail", True)),
+                )
+                self._challenge_tracker = ChallengeTracker(
+                    config=cfg,
+                    state_dir=self.state_manager.state_dir,
+                    trade_db=self._trade_db,
+                )
+                logger.info(
+                    f"50k Challenge enabled: balance=${cfg.start_balance:,.0f}, "
+                    f"target=+${cfg.profit_target:,.0f}, max_dd=-${cfg.max_drawdown:,.0f}"
+                )
+        except Exception as e:
+            logger.warning(f"Challenge tracker init failed (continuing without): {e}")
+            self._challenge_tracker = None
+            self._challenge_enabled = False
+
+        # ==========================================================================
         # DRIFT GUARD (Risk-Off Cooldown)
         # ==========================================================================
         # Tightens filters + reduces sizing when performance degrades or volatility shocks.
@@ -1882,6 +1917,7 @@ class NQAgentService:
                     exited_this_cycle.add(sig_id)
                     if perf:
                         pnl_value = float(perf.get('pnl', 0.0))
+                        is_win = bool(perf.get("is_win", pnl_value > 0))
                         logger.info(
                             "Virtual exit: %s | %s | exit=%s | pnl=%s",
                             sig_id[:16],
@@ -1889,6 +1925,44 @@ class NQAgentService:
                             f"{float(exit_price):.2f}",
                             f"{pnl_value:.2f}",
                         )
+                        
+                        # Record trade with 50k challenge tracker (pass/fail rules)
+                        if self._challenge_tracker is not None:
+                            try:
+                                challenge_result = self._challenge_tracker.record_trade(
+                                    pnl=pnl_value,
+                                    is_win=is_win,
+                                )
+                                if challenge_result.get("triggered"):
+                                    outcome = challenge_result.get("outcome", "")
+                                    attempt = challenge_result.get("attempt", {})
+                                    attempt_pnl = attempt.get("pnl", 0.0)
+                                    attempt_id = attempt.get("attempt_id", 0)
+                                    logger.info(
+                                        f"🏆 Challenge attempt #{attempt_id} ended: {outcome.upper()} | "
+                                        f"Final PnL: ${attempt_pnl:.2f}"
+                                    )
+                                    # Send Telegram alert for pass/fail
+                                    if self.telegram_notifier.enabled:
+                                        try:
+                                            emoji = "🎉" if outcome == "pass" else "❌"
+                                            msg = (
+                                                f"{emoji} *50k Challenge: {outcome.upper()}*\n\n"
+                                                f"Attempt #{attempt_id} ended\n"
+                                                f"Final PnL: `${attempt_pnl:,.2f}`\n"
+                                                f"Trades: {attempt.get('trades', 0)} | "
+                                                f"WR: {attempt.get('win_rate', 0):.0f}%\n\n"
+                                                f"_New attempt starting..._"
+                                            )
+                                            asyncio.create_task(
+                                                self.telegram_notifier.telegram.send_message(
+                                                    msg, parse_mode="Markdown", dedupe=False
+                                                )
+                                            )
+                                        except Exception as tg_err:
+                                            logger.debug(f"Could not send challenge alert: {tg_err}")
+                            except Exception as challenge_err:
+                                logger.debug(f"Could not record challenge trade: {challenge_err}")
                         
                         # Record outcome with bandit policy for learning
                         if self.bandit_policy is not None:

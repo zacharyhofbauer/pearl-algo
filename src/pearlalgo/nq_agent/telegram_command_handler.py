@@ -174,6 +174,9 @@ class TelegramCommandHandler:
         # SQLite trade database (lazy initialization)
         self._trade_db = None
         
+        # 50k Challenge tracker (lazy initialization)
+        self._challenge_tracker = None
+        
         # Build application
         self.application = Application.builder().token(bot_token).build()
         
@@ -1284,12 +1287,25 @@ class TelegramCommandHandler:
             # Compute adaptive state staleness threshold based on configured save cadence
             state_stale_threshold = self._compute_state_stale_threshold(state)
             
-            # Get 7-day performance
+            # Get performance (challenge attempt if enabled, else 7-day all-time)
             perf = None
+            challenge_status = None
             try:
-                perf = self.performance_tracker.get_performance_metrics(days=7)
+                # Try challenge tracker first (if enabled)
+                challenge_tracker = self._get_challenge_tracker()
+                if challenge_tracker is not None:
+                    perf = challenge_tracker.get_attempt_performance()
+                    challenge_status = challenge_tracker.get_status_summary()
+                else:
+                    # Fallback to all-time performance
+                    perf = self.performance_tracker.get_performance_metrics(days=7)
             except Exception as e:
                 logger.debug(f"Could not get performance for /status: {e}")
+                # Fallback
+                try:
+                    perf = self.performance_tracker.get_performance_metrics(days=7)
+                except Exception:
+                    pass
             
             # Get last signal age
             last_signal_age = None
@@ -1437,6 +1453,10 @@ class TelegramCommandHandler:
                                 message += "\n"
                 except Exception as e:
                     logger.debug(f"Could not build trade monitor: {e}")
+
+            # Optional: 50k Challenge status (shows attempt-specific PnL + progress)
+            if challenge_status:
+                message += f"\n\n{challenge_status}"
 
             # Optional: Prop firm guardrails snapshot (kept compact)
             try:
@@ -2506,6 +2526,41 @@ class TelegramCommandHandler:
             return self._trade_db
         except Exception as e:
             logger.debug(f"Could not initialize TradeDatabase: {e}")
+            return None
+
+    def _get_challenge_tracker(self) -> Optional["ChallengeTracker"]:
+        """Get or create the 50k Challenge Tracker (if enabled)."""
+        existing = getattr(self, "_challenge_tracker", None)
+        if existing is not None:
+            return existing
+
+        try:
+            from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker, ChallengeConfig
+            from pearlalgo.config.config_loader import load_service_config
+
+            cfg = load_service_config(validate=False) or {}
+            challenge_cfg = cfg.get("challenge", {}) or {}
+            if not bool(challenge_cfg.get("enabled", False)):
+                return None
+
+            config = ChallengeConfig(
+                enabled=True,
+                start_balance=float(challenge_cfg.get("start_balance", 50_000.0)),
+                max_drawdown=float(challenge_cfg.get("max_drawdown", 2_000.0)),
+                profit_target=float(challenge_cfg.get("profit_target", 3_000.0)),
+                auto_reset_on_pass=bool(challenge_cfg.get("auto_reset_on_pass", True)),
+                auto_reset_on_fail=bool(challenge_cfg.get("auto_reset_on_fail", True)),
+            )
+
+            # Use consistent state_dir (test-aware)
+            self._challenge_tracker = ChallengeTracker(
+                config=config,
+                state_dir=self.state_dir,
+                trade_db=self._get_trade_db(),
+            )
+            return self._challenge_tracker
+        except Exception as e:
+            logger.debug(f"Could not initialize ChallengeTracker: {e}")
             return None
     
     async def _fetch_historical_data_for_backtest(

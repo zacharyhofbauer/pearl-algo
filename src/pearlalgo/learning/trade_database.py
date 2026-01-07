@@ -230,6 +230,28 @@ class TradeDatabase:
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_cycle_diag_timestamp ON cycle_diagnostics(timestamp)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_cycle_diag_quiet_reason ON cycle_diagnostics(quiet_reason)")
+
+            # Challenge attempts table (50k challenge records)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS challenge_attempts (
+                    attempt_id INTEGER PRIMARY KEY,
+                    started_at TEXT NOT NULL,
+                    ended_at TEXT,
+                    outcome TEXT NOT NULL,
+                    starting_balance REAL NOT NULL,
+                    ending_balance REAL,
+                    pnl REAL NOT NULL,
+                    trades INTEGER NOT NULL,
+                    wins INTEGER NOT NULL,
+                    losses INTEGER NOT NULL,
+                    max_drawdown_hit REAL,
+                    profit_peak REAL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_challenge_outcome ON challenge_attempts(outcome)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_challenge_started_at ON challenge_attempts(started_at)")
             
             conn.commit()
 
@@ -581,6 +603,159 @@ class TradeDatabase:
             conn.commit()
         
         logger.debug(f"Trade added to database: {trade_id}")
+
+    def add_challenge_attempt(
+        self,
+        attempt_id: int,
+        started_at: str,
+        ended_at: str,
+        outcome: str,
+        starting_balance: float,
+        ending_balance: float,
+        pnl: float,
+        trades: int,
+        wins: int,
+        losses: int,
+        max_drawdown_hit: float = 0.0,
+        profit_peak: float = 0.0,
+    ) -> None:
+        """
+        Record a completed 50k challenge attempt.
+
+        Args:
+            attempt_id: Attempt number (1, 2, 3, ...)
+            started_at: ISO timestamp when attempt started
+            ended_at: ISO timestamp when attempt ended
+            outcome: "pass", "fail", "reset_manual", etc.
+            starting_balance: Starting balance (e.g., 50000)
+            ending_balance: Ending balance
+            pnl: Total P&L for this attempt
+            trades: Number of trades in this attempt
+            wins: Number of winning trades
+            losses: Number of losing trades
+            max_drawdown_hit: Deepest drawdown during attempt
+            profit_peak: Highest profit during attempt
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO challenge_attempts (
+                    attempt_id, started_at, ended_at, outcome,
+                    starting_balance, ending_balance, pnl,
+                    trades, wins, losses,
+                    max_drawdown_hit, profit_peak, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(attempt_id),
+                    str(started_at),
+                    str(ended_at),
+                    str(outcome),
+                    float(starting_balance),
+                    float(ending_balance),
+                    float(pnl),
+                    int(trades),
+                    int(wins),
+                    int(losses),
+                    float(max_drawdown_hit),
+                    float(profit_peak),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            conn.commit()
+        logger.debug(f"Challenge attempt recorded: #{attempt_id} -> {outcome}")
+
+    def get_challenge_attempts(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get challenge attempt history (most recent first)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT attempt_id, started_at, ended_at, outcome,
+                       starting_balance, ending_balance, pnl,
+                       trades, wins, losses,
+                       max_drawdown_hit, profit_peak, created_at
+                FROM challenge_attempts
+                ORDER BY attempt_id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            )
+            rows = cursor.fetchall()
+
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append({
+                "attempt_id": r["attempt_id"],
+                "started_at": r["started_at"],
+                "ended_at": r["ended_at"],
+                "outcome": r["outcome"],
+                "starting_balance": r["starting_balance"],
+                "ending_balance": r["ending_balance"],
+                "pnl": r["pnl"],
+                "trades": r["trades"],
+                "wins": r["wins"],
+                "losses": r["losses"],
+                "win_rate": (r["wins"] / r["trades"] * 100) if r["trades"] > 0 else 0.0,
+                "max_drawdown_hit": r["max_drawdown_hit"],
+                "profit_peak": r["profit_peak"],
+                "created_at": r["created_at"],
+            })
+        return out
+
+    def get_challenge_summary(self) -> Dict[str, Any]:
+        """Get summary statistics across all challenge attempts."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) as total_attempts,
+                    SUM(CASE WHEN outcome = 'pass' THEN 1 ELSE 0 END) as passes,
+                    SUM(CASE WHEN outcome = 'fail' THEN 1 ELSE 0 END) as fails,
+                    SUM(trades) as total_trades,
+                    SUM(wins) as total_wins,
+                    SUM(losses) as total_losses,
+                    SUM(pnl) as total_pnl,
+                    AVG(pnl) as avg_pnl_per_attempt,
+                    MIN(pnl) as worst_attempt_pnl,
+                    MAX(pnl) as best_attempt_pnl
+                FROM challenge_attempts
+                """
+            )
+            row = cursor.fetchone()
+
+        if row is None or row["total_attempts"] == 0:
+            return {
+                "total_attempts": 0,
+                "passes": 0,
+                "fails": 0,
+                "pass_rate": 0.0,
+                "total_trades": 0,
+                "total_wins": 0,
+                "total_losses": 0,
+                "total_pnl": 0.0,
+                "avg_pnl_per_attempt": 0.0,
+                "worst_attempt_pnl": 0.0,
+                "best_attempt_pnl": 0.0,
+            }
+
+        total = row["total_attempts"]
+        passes = row["passes"] or 0
+        return {
+            "total_attempts": total,
+            "passes": passes,
+            "fails": row["fails"] or 0,
+            "pass_rate": (passes / total * 100) if total > 0 else 0.0,
+            "total_trades": row["total_trades"] or 0,
+            "total_wins": row["total_wins"] or 0,
+            "total_losses": row["total_losses"] or 0,
+            "total_pnl": row["total_pnl"] or 0.0,
+            "avg_pnl_per_attempt": row["avg_pnl_per_attempt"] or 0.0,
+            "worst_attempt_pnl": row["worst_attempt_pnl"] or 0.0,
+            "best_attempt_pnl": row["best_attempt_pnl"] or 0.0,
+        }
     
     def add_regime_snapshot(
         self,

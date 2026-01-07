@@ -187,6 +187,8 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "llm_adaptive_tuning",
     # Claude AI monitor
     "claude_monitor",
+    # 50k challenge tracker
+    "challenge",
 })
 
 # Config keys expected to be specific types after env substitution
