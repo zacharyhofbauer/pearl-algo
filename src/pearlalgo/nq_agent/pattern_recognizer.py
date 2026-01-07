@@ -693,3 +693,4 @@ def get_pattern_recognizer(config: Optional[Dict] = None) -> Optional[PatternRec
         send_to_telegram=pr_config.get("send_to_telegram", True),
     )
 
+

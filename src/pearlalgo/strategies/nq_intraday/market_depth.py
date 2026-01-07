@@ -564,3 +564,4 @@ def get_market_depth_analyzer(config: Optional[Dict] = None) -> MarketDepthAnaly
         zone_width_atr_mult=config.get("zone_width_atr_mult", 0.3),
     )
 
+

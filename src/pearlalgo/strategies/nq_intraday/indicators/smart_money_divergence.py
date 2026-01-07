@@ -365,3 +365,4 @@ class SmartMoneyDivergence(IndicatorBase):
         """Get signal types this indicator generates."""
         return ["smd_bullish_divergence", "smd_bearish_divergence"]
 
+

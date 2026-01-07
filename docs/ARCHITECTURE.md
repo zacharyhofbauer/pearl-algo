@@ -43,3 +43,4 @@ To keep scaling clean, we want **one canonical place** for each concern:
 - **New broker**: add an execution adapter (IBKR/Tradovate/…)
 - **New ML model**: add a learner that plugs into the policy layer (never directly into the agent loop)
 
+

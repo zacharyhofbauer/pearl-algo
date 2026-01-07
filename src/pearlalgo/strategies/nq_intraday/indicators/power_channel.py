@@ -311,3 +311,4 @@ class PowerChannel(IndicatorBase):
             "pc_pullback_short",
         ]
 
+

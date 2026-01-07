@@ -289,3 +289,4 @@ class AsyncSQLiteQueue:
             worker_running=self._running and (self._worker_thread is not None) and self._worker_thread.is_alive(),
         )
 
+

@@ -509,3 +509,4 @@ def get_risk_assessor(config: Optional[Dict] = None) -> Optional[RealTimeRiskAss
         consider_recent_trades=ra_config.get("consider_recent_trades", 20),
     )
 
+

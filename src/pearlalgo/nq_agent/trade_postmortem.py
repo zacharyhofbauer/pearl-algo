@@ -670,3 +670,4 @@ def get_postmortem_analyzer(config: Optional[Dict] = None) -> Optional[TradePost
         tick_value=tick_value,
     )
 
+

@@ -383,3 +383,4 @@ class SupplyDemandZones(IndicatorBase):
         """Get current demand and supply zones."""
         return self._demand_zones, self._supply_zones
 
+
