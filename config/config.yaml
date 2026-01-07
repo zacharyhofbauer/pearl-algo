@@ -59,11 +59,18 @@ service:
   
   # Adaptive cadence: dynamically adjust scan interval based on market/session state.
   # Profile: fast_active (5s active, 30s idle, 300s closed, 60s paused)
+  # VELOCITY MODE: Sub-second scans when ATR expands or volume spikes (catch fast moves)
   adaptive_cadence_enabled: true          # Master toggle for adaptive cadence
   scan_interval_active_seconds: 5         # When strategy_session_open (active trading)
   scan_interval_idle_seconds: 30          # When futures open but strategy session closed
   scan_interval_market_closed_seconds: 300  # When futures market closed (weekends, maintenance)
   scan_interval_paused_seconds: 60        # When service is paused
+  
+  # Velocity mode: ultra-fast scans when market is moving (breakouts, ATR expansion, volume spikes)
+  scan_interval_velocity_seconds: 1.5     # When velocity conditions met (1-2s for fast moves)
+  velocity_mode_enabled: true             # Master toggle for velocity mode
+  velocity_atr_expansion_threshold: 1.20  # ATR increase ratio to trigger velocity (20% = expansion day)
+  velocity_volume_spike_threshold: 2.0    # Volume multiple vs recent avg to trigger velocity (2x = spike)
 
 # Circuit breaker
 circuit_breaker:
@@ -101,6 +108,11 @@ storage:
   sqlite_enabled: true
   # Default path is inside the state directory. If unset, code will use: data/nq_agent_state/trades.db
   db_path: "data/nq_agent_state/trades.db"
+  
+  # Async writes (performance): move SQLite writes to background thread to avoid blocking main loop
+  async_writes_enabled: true              # Enable async/non-blocking SQLite writes
+  async_queue_max_size: 1000              # Max queued writes (older observability writes drop if full)
+  async_queue_priority_trades: true       # Always keep trade exits (drop cycle_diagnostics first)
 
 # Signal generation
 # EMERGENCY: Raised thresholds due to 31% WR performance (2025-01-06)

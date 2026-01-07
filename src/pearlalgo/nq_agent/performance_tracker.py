@@ -74,6 +74,7 @@ class PerformanceTracker:
         # Optional SQLite dual-write (platform memory). Keep performance.json for backward compatibility.
         self._sqlite_enabled = False
         self._trade_db = None
+        self._async_sqlite_queue = None  # Injected from service.py if async writes enabled
         if SQLITE_AVAILABLE:
             try:
                 storage_cfg = service_config.get("storage", {}) or {}
@@ -348,27 +349,56 @@ class PerformanceTracker:
                 except Exception:
                     pass
 
-                self._trade_db.add_trade(
-                    trade_id=str(signal_id),
-                    signal_id=str(signal_id),
-                    signal_type=str(signal.get("type") or signal.get("signal_type") or "unknown"),
-                    direction=str(direction),
-                    entry_price=float(entry_price),
-                    exit_price=float(exit_price),
-                    pnl=float(pnl),
-                    is_win=bool(is_win),
-                    entry_time=str(signal_record.get("entry_time") or signal_record.get("timestamp") or ""),
-                    exit_time=str(exit_time.isoformat()),
-                    stop_loss=float(signal.get("stop_loss") or 0.0) if signal.get("stop_loss") is not None else None,
-                    take_profit=float(signal.get("take_profit") or 0.0) if signal.get("take_profit") is not None else None,
-                    exit_reason=str(exit_reason),
-                    hold_duration_minutes=float(hold_duration) if hold_duration is not None else None,
-                    regime=str(regime_val) if regime_val is not None else None,
-                    context_key=str(signal.get("context_key") or "") or None,
-                    volatility_percentile=None,
-                    volume_percentile=None,
-                    features=features or None,
-                )
+                # Use async queue if available (injected from service.py), else blocking write
+                if self._async_sqlite_queue is not None:
+                    from pearlalgo.storage.async_sqlite_queue import WritePriority
+                    
+                    self._async_sqlite_queue.enqueue(
+                        "add_trade",
+                        priority=WritePriority.HIGH,  # Trade exits are HIGH priority (never drop)
+                        trade_id=str(signal_id),
+                        signal_id=str(signal_id),
+                        signal_type=str(signal.get("type") or signal.get("signal_type") or "unknown"),
+                        direction=str(direction),
+                        entry_price=float(entry_price),
+                        exit_price=float(exit_price),
+                        pnl=float(pnl),
+                        is_win=bool(is_win),
+                        entry_time=str(signal_record.get("entry_time") or signal_record.get("timestamp") or ""),
+                        exit_time=str(exit_time.isoformat()),
+                        stop_loss=float(signal.get("stop_loss") or 0.0) if signal.get("stop_loss") is not None else None,
+                        take_profit=float(signal.get("take_profit") or 0.0) if signal.get("take_profit") is not None else None,
+                        exit_reason=str(exit_reason),
+                        hold_duration_minutes=float(hold_duration) if hold_duration is not None else None,
+                        regime=str(regime_val) if regime_val is not None else None,
+                        context_key=str(signal.get("context_key") or "") or None,
+                        volatility_percentile=None,
+                        volume_percentile=None,
+                        features=features or None,
+                    )
+                else:
+                    # Blocking write (legacy/fallback)
+                    self._trade_db.add_trade(
+                        trade_id=str(signal_id),
+                        signal_id=str(signal_id),
+                        signal_type=str(signal.get("type") or signal.get("signal_type") or "unknown"),
+                        direction=str(direction),
+                        entry_price=float(entry_price),
+                        exit_price=float(exit_price),
+                        pnl=float(pnl),
+                        is_win=bool(is_win),
+                        entry_time=str(signal_record.get("entry_time") or signal_record.get("timestamp") or ""),
+                        exit_time=str(exit_time.isoformat()),
+                        stop_loss=float(signal.get("stop_loss") or 0.0) if signal.get("stop_loss") is not None else None,
+                        take_profit=float(signal.get("take_profit") or 0.0) if signal.get("take_profit") is not None else None,
+                        exit_reason=str(exit_reason),
+                        hold_duration_minutes=float(hold_duration) if hold_duration is not None else None,
+                        regime=str(regime_val) if regime_val is not None else None,
+                        context_key=str(signal.get("context_key") or "") or None,
+                        volatility_percentile=None,
+                        volume_percentile=None,
+                        features=features or None,
+                    )
         except Exception as e:
             logger.debug(f"Could not write trade to SQLite: {e}")
 

@@ -206,15 +206,29 @@ class NQAgentStateManager:
             with open(self.signals_file, "a") as f:
                 f.write(payload + "\n")
 
-            # Dual-write to SQLite (append-only signal event log)
+            # Dual-write to SQLite (append-only signal event log, async if enabled)
             try:
                 if self._sqlite_enabled and self._trade_db is not None:
-                    self._trade_db.add_signal_event(
-                        signal_id=signal_id,
-                        status="generated",
-                        timestamp=str(signal_record.get("timestamp") or get_utc_timestamp()),
-                        payload=signal_record,
-                    )
+                    # Use async queue if available (injected from service.py)
+                    if self._async_sqlite_queue is not None:
+                        from pearlalgo.storage.async_sqlite_queue import WritePriority
+                        
+                        self._async_sqlite_queue.enqueue(
+                            "add_signal_event",
+                            priority=WritePriority.MEDIUM,  # Signal generation is medium priority
+                            signal_id=signal_id,
+                            status="generated",
+                            timestamp=str(signal_record.get("timestamp") or get_utc_timestamp()),
+                            payload=signal_record,
+                        )
+                    else:
+                        # Blocking write (legacy/fallback)
+                        self._trade_db.add_signal_event(
+                            signal_id=signal_id,
+                            status="generated",
+                            timestamp=str(signal_record.get("timestamp") or get_utc_timestamp()),
+                            payload=signal_record,
+                        )
             except Exception as e:
                 logger.debug(f"Could not write signal event to SQLite: {e}")
             

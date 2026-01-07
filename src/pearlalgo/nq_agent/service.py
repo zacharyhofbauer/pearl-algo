@@ -197,6 +197,9 @@ class NQAgentService:
         # ==========================================================================
         self._sqlite_enabled = False
         self._trade_db: Optional["TradeDatabase"] = None
+        self._async_sqlite_queue: Optional["AsyncSQLiteQueue"] = None
+        self._async_writes_enabled = False
+        
         if TRADE_DB_AVAILABLE:
             try:
                 storage_cfg = service_config.get("storage", {}) or {}
@@ -205,10 +208,41 @@ class NQAgentService:
                     db_path_raw = storage_cfg.get("db_path") or str(self.state_manager.state_dir / "trades.db")
                     self._trade_db = TradeDatabase(Path(str(db_path_raw)))
                     logger.info(f"SQLite storage enabled (dual-write): db_path={db_path_raw}")
+                    
+                    # Async writes (performance): non-blocking SQLite writes via background thread
+                    self._async_writes_enabled = bool(storage_cfg.get("async_writes_enabled", False))
+                    if self._async_writes_enabled:
+                        try:
+                            from pearlalgo.storage.async_sqlite_queue import AsyncSQLiteQueue, WritePriority
+                            
+                            max_queue_size = int(storage_cfg.get("async_queue_max_size", 1000) or 1000)
+                            priority_trades = bool(storage_cfg.get("async_queue_priority_trades", True))
+                            self._async_sqlite_queue = AsyncSQLiteQueue(
+                                trade_db=self._trade_db,
+                                max_queue_size=max_queue_size,
+                                priority_trades=priority_trades,
+                            )
+                            self._async_sqlite_queue.start()
+                            logger.info(
+                                f"Async SQLite writes enabled: max_queue={max_queue_size}, priority_trades={priority_trades}"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Async SQLite init failed (using blocking writes): {e}")
+                            self._async_writes_enabled = False
+                            self._async_sqlite_queue = None
             except Exception as e:
                 logger.warning(f"SQLite storage init failed (continuing without DB): {e}")
                 self._sqlite_enabled = False
                 self._trade_db = None
+                self._async_sqlite_queue = None
+        
+        # Inject async queue into state_manager + performance_tracker (if enabled)
+        if self._async_sqlite_queue is not None:
+            try:
+                self.state_manager._async_sqlite_queue = self._async_sqlite_queue
+                self.performance_tracker._async_sqlite_queue = self._async_sqlite_queue
+            except Exception as e:
+                logger.debug(f"Could not inject async queue into state/performance trackers: {e}")
 
         # ==========================================================================
         # DRIFT GUARD (Risk-Off Cooldown)
@@ -491,7 +525,7 @@ class NQAgentService:
         self._last_signal_diagnostics: Optional[str] = None
         self._last_signal_diagnostics_raw: Optional[Dict] = None
 
-        # Adaptive cadence configuration (fast-active profile)
+        # Adaptive cadence configuration (fast-active profile + velocity mode)
         # Dynamically adjusts scan interval based on market/session state.
         self._adaptive_cadence_enabled = bool(service_settings.get("adaptive_cadence_enabled", False))
         self._scan_interval_active = float(service_settings.get("scan_interval_active_seconds", 5))
@@ -500,6 +534,13 @@ class NQAgentService:
         self._scan_interval_paused = float(service_settings.get("scan_interval_paused_seconds", 60))
         self._effective_interval: float = float(self.config.scan_interval)  # Current effective interval
         self._last_effective_interval: float = self._effective_interval  # For detecting changes
+        
+        # Velocity mode: ultra-fast scans during ATR expansion or volume spikes (catch fast moves)
+        self._velocity_mode_enabled = bool(service_settings.get("velocity_mode_enabled", False))
+        self._scan_interval_velocity = float(service_settings.get("scan_interval_velocity_seconds", 1.5))
+        self._velocity_atr_expansion_threshold = float(service_settings.get("velocity_atr_expansion_threshold", 1.20))
+        self._velocity_volume_spike_threshold = float(service_settings.get("velocity_volume_spike_threshold", 2.0))
+        self._velocity_mode_active = False  # Runtime state (updated each cycle)
 
         # Cadence scheduler for fixed-interval timing (start-to-start)
         # "fixed" = start-to-start timing with skip-ahead for missed cycles
@@ -725,6 +766,13 @@ class NQAgentService:
         logger.info(f"Stopping NQ Agent Service... ({shutdown_reason})")
         self.shutdown_requested = True
 
+        # Flush async SQLite queue before shutdown
+        if self._async_sqlite_queue is not None:
+            try:
+                self._async_sqlite_queue.stop(timeout=5.0)
+            except Exception as e:
+                logger.warning(f"Error stopping async SQLite queue: {e}")
+
         # Save final state
         try:
             self._save_state()
@@ -807,21 +855,23 @@ class NQAgentService:
             # Check execution adapter connection health and alert on issues
             await self._check_execution_health()
             
-            # Adaptive cadence: compute effective interval for this cycle
+            # Adaptive cadence: compute effective interval for this cycle (includes velocity mode)
             if self._adaptive_cadence_enabled:
                 self._effective_interval = self._compute_effective_interval()
                 if self._effective_interval != self._last_effective_interval:
-                    logger.info(
-                        f"Adaptive cadence: interval changed {self._last_effective_interval}s → {self._effective_interval}s",
-                        extra={
-                            "old_interval": self._last_effective_interval,
-                            "new_interval": self._effective_interval,
-                            "cycle": self.cycle_count,
-                        },
-                    )
-                    # Update cadence scheduler with new interval
-                    if self.cadence_scheduler:
-                        self.cadence_scheduler.set_interval(self._effective_interval)
+                    # Log interval change (velocity transitions are logged separately in _compute_effective_interval)
+                    if not self._velocity_mode_active:
+                        logger.info(
+                            f"Adaptive cadence: interval changed {self._last_effective_interval}s → {self._effective_interval}s",
+                            extra={
+                                "old_interval": self._last_effective_interval,
+                                "new_interval": self._effective_interval,
+                                "cycle": self.cycle_count,
+                            },
+                        )
+                    # Update cadence scheduler with new interval (velocity mode state already set in _compute_effective_interval)
+                    if self.cadence_scheduler and not self._velocity_mode_active:
+                        self.cadence_scheduler.set_interval(self._effective_interval, velocity_mode=False)
                     self._last_effective_interval = self._effective_interval
 
             # Mark cycle start for cadence tracking (fixed-cadence mode)
@@ -2594,11 +2644,12 @@ class NQAgentService:
         """
         Compute the effective scan interval based on current market/session state.
         
-        Adaptive cadence profile (fast-active):
+        Adaptive cadence profile (fast-active + velocity):
         - paused: scan_interval_paused_seconds (60s default)
         - futures_market_closed: scan_interval_market_closed_seconds (300s default)
         - futures_open, strategy_session_closed: scan_interval_idle_seconds (30s default)
         - strategy_session_open: scan_interval_active_seconds (5s default)
+        - VELOCITY MODE: scan_interval_velocity_seconds (1.5s) when ATR expands or volume spikes
         
         Uses cached latest_bar timestamp when available to reduce wall-clock drift.
         
@@ -2611,6 +2662,7 @@ class NQAgentService:
         
         # Priority 1: paused state
         if self.paused:
+            self._velocity_mode_active = False
             return self._scan_interval_paused
         
         # Priority 2: check futures market
@@ -2622,6 +2674,7 @@ class NQAgentService:
             futures_open = True
         
         if not futures_open:
+            self._velocity_mode_active = False
             return self._scan_interval_market_closed
         
         # Priority 3: check strategy session (prefer cached bar time over wall-clock)
@@ -2648,10 +2701,73 @@ class NQAgentService:
             # If session check fails, assume closed (conservative)
             session_open = False
         
+        # Priority 4: velocity mode (only when session is open + velocity conditions met)
+        # Check ATR expansion and volume spike to trigger ultra-fast scans (1-2s)
+        if session_open and self._velocity_mode_enabled:
+            velocity_reason = self._check_velocity_conditions()
+            if velocity_reason:
+                self._velocity_mode_active = True
+                # Update cadence scheduler with velocity reason for observability
+                if self.cadence_scheduler:
+                    self.cadence_scheduler.set_interval(
+                        self._scan_interval_velocity,
+                        velocity_mode=True,
+                        velocity_reason=velocity_reason
+                    )
+                logger.info(
+                    f"🚀 Velocity mode ACTIVE: {velocity_reason} | interval: {self._scan_interval_velocity}s",
+                    extra={"velocity_reason": velocity_reason, "interval": self._scan_interval_velocity}
+                )
+                return self._scan_interval_velocity
+        
+        # Default: return session-appropriate interval
+        self._velocity_mode_active = False
         if session_open:
             return self._scan_interval_active
         else:
             return self._scan_interval_idle
+    
+    def _check_velocity_conditions(self) -> str:
+        """
+        Check if velocity mode should be active (fast market moves).
+        
+        Velocity triggers:
+        - ATR expansion (20%+ increase in ATR vs 5 bars ago)
+        - Volume spike (2x+ recent average)
+        
+        Returns:
+            Reason string if velocity should be active, empty string otherwise.
+        """
+        try:
+            last_market_data = getattr(self.data_fetcher, "_last_market_data", None) or {}
+            df = last_market_data.get("df")
+            if df is None or df.empty or len(df) < 20:
+                return ""
+            
+            latest = df.iloc[-1]
+            
+            # Check ATR expansion (20%+ increase)
+            if "atr" in df.columns and len(df) >= 6:
+                current_atr = float(latest.get("atr", 0) or 0)
+                atr_5bars_ago = float(df.iloc[-6].get("atr", 0) or 0)
+                if current_atr > 0 and atr_5bars_ago > 0:
+                    atr_ratio = current_atr / atr_5bars_ago
+                    if atr_ratio >= self._velocity_atr_expansion_threshold:
+                        return f"atr_expansion_{atr_ratio:.2f}x"
+            
+            # Check volume spike (2x+ recent average)
+            if "volume" in df.columns and len(df) >= 20:
+                current_volume = float(latest.get("volume", 0) or 0)
+                recent_avg_volume = float(df["volume"].tail(20).mean() or 0)
+                if current_volume > 0 and recent_avg_volume > 0:
+                    volume_ratio = current_volume / recent_avg_volume
+                    if volume_ratio >= self._velocity_volume_spike_threshold:
+                        return f"volume_spike_{volume_ratio:.2f}x"
+            
+            return ""
+        except Exception as e:
+            logger.debug(f"Velocity condition check failed (non-fatal): {e}")
+            return ""
 
     def _compute_quiet_period_minutes(self) -> Optional[float]:
         """
@@ -3398,7 +3514,7 @@ class NQAgentService:
         diagnostics_raw: Optional[Dict],
     ) -> None:
         """
-        Persist per-cycle observability to SQLite (best-effort).
+        Persist per-cycle observability to SQLite (best-effort, non-blocking if async enabled).
 
         This enables 24h rollups (e.g. Telegram /doctor) without parsing log files.
         """
@@ -3406,12 +3522,27 @@ class NQAgentService:
             if not getattr(self, "_sqlite_enabled", False) or self._trade_db is None:
                 return
             ts = get_utc_timestamp()
-            self._trade_db.add_cycle_diagnostics(
-                timestamp=ts,
-                cycle_count=int(getattr(self, "cycle_count", 0) or 0),
-                quiet_reason=str(quiet_reason) if quiet_reason is not None else None,
-                diagnostics=diagnostics_raw or {},
-            )
+            
+            # Async write if enabled (non-blocking)
+            if self._async_writes_enabled and self._async_sqlite_queue is not None:
+                from pearlalgo.storage.async_sqlite_queue import WritePriority
+                
+                self._async_sqlite_queue.enqueue(
+                    "add_cycle_diagnostics",
+                    priority=WritePriority.LOW,  # Cycle diagnostics are lowest priority (drop first if queue full)
+                    timestamp=ts,
+                    cycle_count=int(getattr(self, "cycle_count", 0) or 0),
+                    quiet_reason=str(quiet_reason) if quiet_reason is not None else None,
+                    diagnostics=diagnostics_raw or {},
+                )
+            else:
+                # Blocking write (legacy path)
+                self._trade_db.add_cycle_diagnostics(
+                    timestamp=ts,
+                    cycle_count=int(getattr(self, "cycle_count", 0) or 0),
+                    quiet_reason=str(quiet_reason) if quiet_reason is not None else None,
+                    diagnostics=diagnostics_raw or {},
+                )
         except Exception as e:
             # Never allow observability writes to affect runtime.
             logger.debug(f"Could not persist cycle diagnostics to SQLite: {e}")

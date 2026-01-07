@@ -29,10 +29,16 @@ class CadenceMetrics:
     sleep_scheduled_ms: float = 0.0
     cadence_lag_ms: float = 0.0  # scheduled vs actual start
     
+    # Velocity mode (when enabled)
+    velocity_mode_active: bool = False
+    velocity_reason: str = ""  # "atr_expansion", "volume_spike", or ""
+    current_interval_seconds: float = 0.0
+    
     # Rolling stats (last N cycles)
     duration_p50_ms: float = 0.0
     duration_p95_ms: float = 0.0
     missed_cycles: int = 0  # cycles skipped due to running behind
+    velocity_cycles: int = 0  # cycles run in velocity mode
     
     def to_dict(self) -> dict:
         """Convert to dictionary for state persistence."""
@@ -41,9 +47,13 @@ class CadenceMetrics:
             "cycle_duration_ms": round(self.cycle_duration_ms, 1),
             "sleep_scheduled_ms": round(self.sleep_scheduled_ms, 1),
             "cadence_lag_ms": round(self.cadence_lag_ms, 1),
+            "velocity_mode_active": self.velocity_mode_active,
+            "velocity_reason": self.velocity_reason,
+            "current_interval_seconds": round(self.current_interval_seconds, 2),
             "duration_p50_ms": round(self.duration_p50_ms, 1),
             "duration_p95_ms": round(self.duration_p95_ms, 1),
             "missed_cycles": self.missed_cycles,
+            "velocity_cycles": self.velocity_cycles,
         }
     
     def format_compact(self) -> str:
@@ -58,10 +68,14 @@ class CadenceMetrics:
         if self.missed_cycles > 0:
             missed_str = f" | {self.missed_cycles} skipped"
         
+        velocity_str = ""
+        if self.velocity_mode_active:
+            velocity_str = f" | 🚀 velocity ({self.velocity_reason})"
+        
         return (
-            f"{self.cycle_duration_ms:.0f}ms "
+            f"{self.cycle_duration_ms:.0f}ms @ {self.current_interval_seconds:.1f}s "
             f"(p50: {self.duration_p50_ms:.0f}ms, p95: {self.duration_p95_ms:.0f}ms)"
-            f"{lag_indicator}{missed_str}"
+            f"{lag_indicator}{missed_str}{velocity_str}"
         )
 
 
@@ -90,7 +104,12 @@ class CadenceScheduler:
     _cycle_start_utc: Optional[datetime] = field(default=None, repr=False)
     _duration_history: Deque[float] = field(default_factory=lambda: deque(maxlen=100), repr=False)
     _total_missed_cycles: int = field(default=0, repr=False)
+    _total_velocity_cycles: int = field(default=0, repr=False)
     _last_metrics: CadenceMetrics = field(default_factory=CadenceMetrics, repr=False)
+    
+    # Velocity mode state (for fast-move detection)
+    _velocity_mode_active: bool = field(default=False, repr=False)
+    _velocity_reason: str = field(default="", repr=False)
     
     def __post_init__(self) -> None:
         """Initialize with empty deque if not already set."""
@@ -117,6 +136,13 @@ class CadenceScheduler:
         
         self._last_metrics.cycle_started_at_utc = now_utc.isoformat()
         self._last_metrics.cadence_lag_ms = lag_ms
+        self._last_metrics.velocity_mode_active = self._velocity_mode_active
+        self._last_metrics.velocity_reason = self._velocity_reason
+        self._last_metrics.current_interval_seconds = self.interval_seconds
+        
+        if self._velocity_mode_active:
+            self._total_velocity_cycles += 1
+            self._last_metrics.velocity_cycles = self._total_velocity_cycles
         
         return lag_ms
     
@@ -184,7 +210,7 @@ class CadenceScheduler:
         self._cycle_start_utc = None
         # Keep history and missed count for observability
 
-    def set_interval(self, new_interval_seconds: float) -> None:
+    def set_interval(self, new_interval_seconds: float, velocity_mode: bool = False, velocity_reason: str = "") -> None:
         """
         Change the cadence interval at runtime.
         
@@ -193,15 +219,27 @@ class CadenceScheduler:
         
         Args:
             new_interval_seconds: New interval in seconds (must be > 0)
+            velocity_mode: Whether this is a velocity mode transition
+            velocity_reason: Reason for velocity mode (e.g., "atr_expansion", "volume_spike")
         """
         if new_interval_seconds <= 0:
             raise ValueError(f"Interval must be positive, got {new_interval_seconds}")
         
         if new_interval_seconds != self.interval_seconds:
             self.interval_seconds = new_interval_seconds
+            self._velocity_mode_active = velocity_mode
+            self._velocity_reason = velocity_reason if velocity_mode else ""
             # Reset schedule to prevent catch-up storms from old timing
             self._next_scheduled = None
             # Do NOT reset cycle_start or history - current cycle continues normally
+    
+    def get_velocity_state(self) -> tuple[bool, str]:
+        """Get current velocity mode state.
+        
+        Returns:
+            Tuple of (is_velocity_active, reason)
+        """
+        return (self._velocity_mode_active, self._velocity_reason)
 
 
 def compute_sleep_time_fixed_cadence(
