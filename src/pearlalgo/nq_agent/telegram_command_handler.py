@@ -1301,6 +1301,12 @@ class TelegramCommandHandler:
                 # Try challenge tracker (if enabled)
                 challenge_tracker = self._get_challenge_tracker()
                 if challenge_tracker is not None:
+                    # Ensure we reflect the latest attempt state written by the agent service.
+                    # (The command handler keeps a cached ChallengeTracker instance.)
+                    try:
+                        challenge_tracker.refresh()
+                    except Exception:
+                        pass
                     perf = challenge_tracker.get_attempt_performance()
                     challenge_status = challenge_tracker.get_status_summary()
                 else:
@@ -1357,6 +1363,12 @@ class TelegramCommandHandler:
             except Exception:
                 compact_metric_width = 10
             
+            # Execution status (v10 - make trading state obvious)
+            exec_status = state.get("execution", {}) or {}
+            execution_enabled = exec_status.get("enabled", False)
+            execution_armed = exec_status.get("armed", False)
+            execution_mode = exec_status.get("mode")
+            
             # Build Home Card message with enhanced confidence/clarity cues (calm-minimal)
             message = format_home_card(
                 symbol=state.get("symbol", "MNQ"),
@@ -1397,6 +1409,10 @@ class TelegramCommandHandler:
                 show_progress_bars=show_progress_bars,
                 show_volume_metrics=show_volume_metrics,
                 compact_metric_width=compact_metric_width,
+                # v10: execution status
+                execution_enabled=execution_enabled,
+                execution_armed=execution_armed,
+                execution_mode=execution_mode,
             )
 
             # Trade Monitor: show active trades with unrealized P&L
@@ -1532,7 +1548,8 @@ class TelegramCommandHandler:
                     
                     if recent_exits:
                         # Show last 3 exits
-                        recent_exits = recent_exits[-3:]
+                        # Most recent first (top of list)
+                        recent_exits = list(reversed(recent_exits[-3:]))
                         message += "\n\n*Recent exits:*"
                         for t in recent_exits:
                             pnl_val = float(t.get("pnl") or 0.0)
@@ -1771,6 +1788,12 @@ class TelegramCommandHandler:
             session_start = config_block.get("start_time") if isinstance(config_block, dict) else None
             session_end = config_block.get("end_time") if isinstance(config_block, dict) else None
             
+            # Execution status (v10 - make trading state obvious)
+            exec_status = state.get("execution", {}) or {}
+            execution_enabled = exec_status.get("enabled", False)
+            execution_armed = exec_status.get("armed", False)
+            execution_mode = exec_status.get("mode")
+            
             # Get challenge tracker performance (if enabled)
             challenge_status = None
             perf_challenge = None
@@ -1785,6 +1808,11 @@ class TelegramCommandHandler:
                 # Try challenge tracker (if enabled)
                 challenge_tracker = self._get_challenge_tracker()
                 if challenge_tracker is not None:
+                    # Ensure we reflect the latest attempt state written by the agent service.
+                    try:
+                        challenge_tracker.refresh()
+                    except Exception:
+                        pass
                     perf_challenge = challenge_tracker.get_attempt_performance()
                     challenge_status = challenge_tracker.get_status_summary()
                     # Use challenge performance as main perf for home card
@@ -1820,6 +1848,10 @@ class TelegramCommandHandler:
                 last_cycle_seconds=last_cycle_seconds,
                 session_start=session_start,
                 session_end=session_end,
+                # v10: execution status
+                execution_enabled=execution_enabled,
+                execution_armed=execution_armed,
+                execution_mode=execution_mode,
             )
             
             # Add 50k Challenge status (if enabled)
@@ -1857,7 +1889,8 @@ class TelegramCommandHandler:
                                 continue
                     
                     if recent_exits:
-                        recent_exits = recent_exits[-3:]
+                        # Most recent first (top of list)
+                        recent_exits = list(reversed(recent_exits[-3:]))
                         message += "\n\n*Recent exits:*"
                         for t in recent_exits:
                             pnl_val = float(t.get("pnl") or 0.0)
@@ -6321,6 +6354,7 @@ Choose what you want to inspect:
             keyboard = [
                 [InlineKeyboardButton(chat_toggle_text, callback_data='claude_chat_toggle')],
                 [InlineKeyboardButton("🧩 Patch Wizard", callback_data='claude_patch_wizard')],
+                [InlineKeyboardButton("🧠 Policy", callback_data='claude_policy')],
                 [InlineKeyboardButton("🧠 Memory", callback_data='claude_memory')],
                 [InlineKeyboardButton("🔍 AI Monitor", callback_data='claude_monitor_hub')],
                 [InlineKeyboardButton("🧼 Reset Chat", callback_data='claude_reset')],
@@ -9000,8 +9034,8 @@ _Commands are policy-gated for safety._
         except Exception as e:
             error_str = str(e).lower()
             if "parse entities" in error_str or "can't parse" in error_str:
-                # Markdown parsing error - fallback to plain text
-                logger.warning(f"Markdown parsing error, retrying as plain text: {e}")
+                # Markdown parsing error - fallback to plain text (common with unescaped underscores in filenames)
+                logger.debug(f"Markdown parsing error, retrying as plain text: {e}")
                 try:
                     # Strip Markdown formatting and retry
                     plain_message = message.replace('*', '').replace('_', '').replace('`', '').replace('[', '').replace(']', '')
@@ -9403,6 +9437,8 @@ _Commands are policy-gated for safety._
         # Claude hub callbacks
         elif callback_data == 'claude_hub':
             await self._handle_ai_hub(update, context)
+        elif callback_data == 'claude_policy':
+            await self._handle_policy(update, context)
         elif callback_data == 'claude_memory':
             await self._handle_claude_memory_view(update, context)
         elif callback_data == 'claude_memory_refresh':
@@ -9660,11 +9696,21 @@ _Commands are policy-gated for safety._
             learning_status = state.get("learning", {})
             
             if not learning_status.get("enabled", False):
-                await update.message.reply_text(
+                msg = (
                     "📊 *AI Policy*\n\n"
                     "Adaptive policy is not enabled.\n"
-                    "Set `learning.enabled: true` in `config/config.yaml`.",
-                    parse_mode="Markdown",
+                    "Set `learning.enabled: true` in `config/config.yaml`."
+                )
+                await self._send_message_or_edit(
+                    update,
+                    context,
+                    msg,
+                    reply_markup=InlineKeyboardMarkup(
+                        [
+                            [InlineKeyboardButton("⬅️ Claude Hub", callback_data="claude_hub")],
+                            [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                        ]
+                    ),
                 )
                 return
             
@@ -9753,11 +9799,21 @@ _Commands are policy-gated for safety._
             except Exception as pe:
                 logger.debug(f"Could not load policy state details: {pe}")
             
-            await update.message.reply_text(message, parse_mode="Markdown")
+            reply_markup = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("🔄 Refresh", callback_data="claude_policy"),
+                        InlineKeyboardButton("⬅️ Claude Hub", callback_data="claude_hub"),
+                    ],
+                    [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                ]
+            )
+
+            await self._send_message_or_edit(update, context, message, reply_markup=reply_markup)
             
         except Exception as e:
             logger.error(f"Error handling /policy: {e}", exc_info=True)
-            await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
+            await self._send_message_or_edit(update, context, f"❌ Error: {str(e)[:100]}")
 
     async def _handle_diagnostics(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """

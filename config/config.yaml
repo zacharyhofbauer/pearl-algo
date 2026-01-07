@@ -134,19 +134,18 @@ challenge:
 # - Take ALL signals that pass, regardless of count (0, 5, or 100+ per day)
 # - Natural frequency based on market conditions
 signals:
-  duplicate_window_seconds: 180      # 3 minutes (more opportunities; still deduped)
-  min_confidence: 0.75               # QUALITY: Raised to 0.75 (top 25% of signals)
-  min_risk_reward: 2.0               # QUALITY: Raised to 2.0 (only best setups)
+  duplicate_window_seconds: 120      # 2 minutes (even more opportunities)
+  min_confidence: 0.40               # FULLY LOOSENED: Very low bar to see all signals (2026-01-07)
+  min_risk_reward: 1.0               # FULLY LOOSENED: Accept 1:1 R:R minimum (2026-01-07)
   duplicate_price_threshold_pct: 0.5 # 0.5% price difference for duplicate detection
-  volatility_threshold: 0.00025      # Tuned: reduce low-volatility gating further (Tokyo/London opportunities)
+  volatility_threshold: 0.0001       # FULLY LOOSENED: Nearly disable volatility gate (2026-01-07)
   avoid_lunch_lull: false            # Disabled - was blocking 72 signals
   
   # Quality score composite filter (combines multiple factors)
-  # Only top 10-15% of signals pass this filter
-  # NO LIMIT on how many pass - if 50 signals score >0.85, take all 50
+  # DISABLED: Let all signals through without quality filtering (2026-01-07)
   quality_score:
-    enabled: true                    # Enable composite quality scoring
-    threshold: 0.85                  # Minimum composite quality score (0-1)
+    enabled: false                   # DISABLED: No quality filtering (2026-01-07)
+    threshold: 0.40                  # Very low fallback if re-enabled
     factors:
       confidence_weight: 0.30        # Signal confidence (30% of score)
       risk_reward_weight: 0.25        # Risk:reward ratio (25% of score)
@@ -155,14 +154,14 @@ signals:
       mtf_alignment_weight: 0.10     # Multi-timeframe alignment (10% of score)
   
   # Time-of-day quality filter
-  # Prioritize NY session for best liquidity, but allow all sessions
-  prioritize_ny_session: true         # Higher quality bar for overnight sessions
+  # LOOSENED MORE: Disabled to allow all sessions equally (2026-01-07)
+  prioritize_ny_session: false         # Disabled - treat all sessions equally for more feel
   
   # Volume gate (minimum volume per bar to consider for signals)
+  # FULLY LOOSENED: Almost no volume gate (2026-01-07)
   # Referenced to 5m bars, scales for other timeframes (1m = 0.2x, 15m = 3x).
-  # Set lower for 24h futures trading (Tokyo/London have lower volume than NY).
-  # 100 for 5m → 20 for 1m bars, which passes most live bars (observed: 300-700).
-  min_volume: 100
+  # Set very low to capture all opportunities including overnight sessions.
+  min_volume: 10
 
   # Opportunity tiers (A-tier actionable vs B-tier explore)
   # DISABLED: Focus on quality A-tier only
@@ -190,39 +189,44 @@ signals:
     median_atr_threshold: 0.0003      # Threshold below which expansion is required
   
   # Per-signal-type regime/session filters
-  # Signals are rejected if current regime/session is NOT in the allowed list.
-  # OPTIMIZED: Removed NY-only restriction - overnight sessions were winning
+  # FULLY LOOSENED: Allow all signals in all regimes (2026-01-07)
+  # Let the market decide - no regime restrictions
   regime_filters:
     mean_reversion_long:
-      allowed_regimes: [ranging, trending_bullish]  # Avoid in trending_bearish
-      # WORKING: 47% WR - allow in favorable regimes
+      allowed_regimes: [ranging, trending_bullish, trending_bearish]  # All regimes
     mean_reversion_short:
-      allowed_regimes: [ranging, trending_bearish]  # Only in favorable conditions
-      # OPTIMIZED: Removed NY-only restriction - all sessions allowed
-    # sr_bounce_short: DISABLED
-    # momentum_short: DISABLED
+      allowed_regimes: [ranging, trending_bearish, trending_bullish]  # All regimes
+    momentum_long:
+      allowed_regimes: [ranging, trending_bullish, trending_bearish]  # All regimes
+    momentum_short:
+      allowed_regimes: [ranging, trending_bearish, trending_bullish]  # All regimes
+    breakout_long:
+      allowed_regimes: [ranging, trending_bullish, trending_bearish]  # All regimes
+    breakout_short:
+      allowed_regimes: [ranging, trending_bearish, trending_bullish]  # All regimes
+    sr_bounce:
+      allowed_regimes: [ranging, trending_bullish, trending_bearish]  # All regimes
 
 # Strategy configuration (signal types, position sizing, A/B testing)
 # EMERGENCY: Only mean_reversion working - disable all broken signals (2025-01-06)
 strategy:
-  # Signal types to enable - EMERGENCY: Only mean_reversion working!
-  # Data: mean_reversion_long 47% WR (+$1,983), mean_reversion_short 33% WR
+  # Signal types to enable - LOOSENED MORE: include breakout/momentum so we don't miss big trend moves (2026-01-07)
   enabled_signals:
-    - mean_reversion_long   # ONLY WORKING: 47% WR, +$1,983
-    - mean_reversion_short  # Keep but stricter filtering
+    # NOTE: Some scanners gate on base types (e.g. `sr_bounce`), so include the base name here.
+    - sr_bounce
+    - mean_reversion_long
+    - mean_reversion_short
+    - momentum_long
+    - momentum_short
+    - breakout_long
+    - breakout_short
   
-  # Signal types to disable - EMERGENCY DISABLED (0% or poor WR)
+  # Signal types to disable (takes precedence over enabled_signals)
   disabled_signals:
-    - sr_bounce            # Generic sr_bounce
-    - sr_bounce_short      # 0% WR (0/8) = -$2,314 BROKEN
-    - sr_bounce_long       # 33% WR (2/6) = -$543 POOR
-    - momentum_short       # 0% WR (0/2) = -$482 BROKEN
-    - momentum_long        # Already disabled - broken
-    - breakout_long        # Disabled - unproven
-    - breakout_short       # Disabled - unproven
-    - vwap_reversion       # Disabled - unproven
-    - engulfing_short      # Already disabled - broken
-    - engulfing_long       # Already disabled - untested
+    # Keep these off unless explicitly testing them (they tend to add noise / poor backtest WR).
+    - vwap_reversion
+    - engulfing_short
+    - engulfing_long
   
   # Dynamic position sizing for $200+ scalp targets
   # EMERGENCY: Reduced sizes 40% during recovery period (2025-01-06)
@@ -481,8 +485,8 @@ llm_adaptive_tuning:
 # Controls automated order placement via an execution adapter (default: IBKR).
 # SAFETY: Default is disabled + disarmed. Must explicitly enable and /arm to trade.
 execution:
-  enabled: false                    # Master toggle - must be true for any execution
-  armed: false                      # Runtime toggle - must be true to place orders (use /arm command)
+  enabled: true                     # ENABLED: Dry-run mode active (2026-01-07)
+  armed: true                       # AUTO-ARMED: Will log "would trade" on signals (2026-01-07)
   mode: "dry_run"                   # "dry_run" (log only), "paper", or "live"
   adapter: "ibkr"                   # "ibkr" | "tradovate" (tradovate is dry_run-only skeleton for now)
   
@@ -680,17 +684,17 @@ ml_filter:
 # - Recent win-rate drops below a floor (over last N graded exits)
 # - Volatility shocks (high/extreme volatility + ATR expansion)
 drift_guard:
-  enabled: true
+  enabled: false                     # DISABLED: Let all signals through without risk-off cooldowns (2026-01-07)
   lookback_trades: 20
   min_trades: 10
-  win_rate_floor: 0.40
-  volatility_spike_enabled: true
-  volatility_levels: ["high", "extreme"]
+  win_rate_floor: 0.20               # FULLY LOOSENED (2026-01-07)
+  volatility_spike_enabled: false    # DISABLED (2026-01-07)
+  volatility_levels: ["extreme"]
   require_atr_expansion: true
-  cooldown_minutes: 60
-  tighten_min_confidence_delta: 0.05
-  tighten_min_risk_reward_delta: 0.20
-  size_multiplier: 0.50
+  cooldown_minutes: 10               # FULLY LOOSENED: Short cooldown if re-enabled (2026-01-07)
+  tighten_min_confidence_delta: 0.00 # FULLY LOOSENED: No tightening (2026-01-07)
+  tighten_min_risk_reward_delta: 0.00 # FULLY LOOSENED: No tightening (2026-01-07)
+  size_multiplier: 1.00              # FULLY LOOSENED: Full size always (2026-01-07)
 
 # =============================================================================
 # PROP FIRM MODE (rule guardrails)

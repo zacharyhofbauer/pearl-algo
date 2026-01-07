@@ -123,11 +123,36 @@ class ChallengeTracker:
 
         # Load current attempt (or create first one)
         self.current_attempt = self._load_current_attempt()
+        # Track state file mtime so UIs can refresh from disk without restarting.
+        self._last_state_mtime: Optional[float] = None
+        try:
+            if self.state_file.exists():
+                self._last_state_mtime = float(self.state_file.stat().st_mtime)
+        except Exception:
+            self._last_state_mtime = None
 
         logger.info(
             f"ChallengeTracker initialized: attempt={self.current_attempt.attempt_id}, "
             f"pnl=${self.current_attempt.pnl:.2f}, outcome={self.current_attempt.outcome}"
         )
+
+    def refresh(self) -> None:
+        """
+        Refresh current attempt from disk (best-effort).
+
+        The agent service mutates + persists challenge state. Other processes (e.g., Telegram
+        command handler) may keep a cached ChallengeTracker instance and need to reflect updates
+        without restarting.
+        """
+        try:
+            if not self.state_file.exists():
+                return
+            mtime = float(self.state_file.stat().st_mtime)
+            if self._last_state_mtime is None or mtime > self._last_state_mtime:
+                self.current_attempt = self._load_current_attempt()
+                self._last_state_mtime = mtime
+        except Exception as e:
+            logger.debug(f"Could not refresh challenge state: {e}")
 
     def _load_current_attempt(self) -> ChallengeAttempt:
         """Load current attempt from state file (or create new)."""

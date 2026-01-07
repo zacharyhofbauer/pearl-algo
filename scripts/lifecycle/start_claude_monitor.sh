@@ -22,9 +22,12 @@ if [[ -f ".venv/bin/activate" ]]; then
     source .venv/bin/activate
 fi
 
-# Load .env
+# Load .env (robust against indented comments and values containing spaces)
 if [[ -f ".env" ]]; then
-    export $(grep -v '^#' .env | xargs)
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
 fi
 
 # Check for required environment variables

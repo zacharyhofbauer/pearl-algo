@@ -131,7 +131,7 @@ class NQScanner:
             f"custom_indicators={[ind.name for ind in self.custom_indicators]}, "
             f"adaptive_stops={self._adaptive_stops is not None}, "
             f"adaptive_volatility_filter={'ENABLED' if avf_enabled else 'DISABLED'} "
-            f"(expansion_req={avf_expansion:.1f}x)" if avf_enabled else ""
+            f"(expansion_req={avf_expansion:.1f}x)"
         )
 
     def _get_timeframe_minutes(self, timeframe: str) -> int:
@@ -703,11 +703,11 @@ class NQScanner:
         session = regime.get("session", "afternoon")
 
         # 24h futures: overnight (Tokyo/London) typically has lower volume/volatility.
-        # Relax *relative* volume-ratio requirements overnight to avoid starving the funnel.
+        # COMPLETELY DISABLED (2026-01-07): No volume requirements at all.
         is_overnight = str(session).lower() == "overnight"
-        vr_momentum = 1.0 if is_overnight else 1.2
-        vr_meanrev = 0.8 if is_overnight else 1.0
-        vr_breakout = 1.1 if is_overnight else 1.3
+        vr_momentum = 0.0  # DISABLED: No volume gate
+        vr_meanrev = 0.0   # DISABLED: No volume gate
+        vr_breakout = 0.0  # DISABLED: No volume gate
 
         # Prop firm style: Avoid lunch lull for scalping (low volume, choppy)
         avoid_lunch = getattr(self.config, 'avoid_lunch_lull', True)
@@ -717,15 +717,17 @@ class NQScanner:
             return signals
 
         # Momentum LONG signal (fast MA crosses above slow MA with MACD confirmation)
-        # NOTE: momentum_long has 0/5 win rate in backtest - disabled by default via config
-        # Disable momentum during lunch lull (low volume, choppy)
+        # LOOSENED (2026-01-07): Accept upward momentum without strict MA crossover
         if self.config.enable_momentum and self.config.is_signal_enabled("momentum_long") and session != "lunch_lull":
             if len(df) >= 2:
                 prev = df.iloc[-2]
+                # LOOSENED: Accept if fast MA trending up OR crossed above slow MA
+                ma_bullish = (
+                    (prev["sma_fast"] < prev["sma_slow"] and latest["sma_fast"] > latest["sma_slow"])  # Crossover
+                    or (latest["sma_fast"] > latest["sma_slow"] and latest["close"] > prev["close"])  # Trending up
+                )
                 if (
-                    prev["sma_fast"] < prev["sma_slow"]
-                    and latest["sma_fast"] > latest["sma_slow"]
-                    and latest["close"] > latest["sma_fast"]
+                    ma_bullish
                     and latest.get("volume_ratio", 0) > vr_momentum  # Volume confirmation
                 ):
                     stop_loss, take_profit = calculate_stop_take("long", current_price, atr, "momentum_long")
@@ -797,16 +799,18 @@ class NQScanner:
                         logger.debug("Momentum long signal rejected due to MTF conflict")
 
         # Momentum SHORT signal (fast MA crosses below slow MA with MACD confirmation)
-        # NOTE: momentum_short has positive win rate - keep enabled
+        # LOOSENED (2026-01-07): Accept downward momentum without strict MA crossover
         if self.config.enable_momentum and self.config.is_signal_enabled("momentum_short") and session != "lunch_lull":
             if len(df) >= 2:
                 prev = df.iloc[-2]
+                # LOOSENED: Accept if fast MA trending down OR crossed below slow MA
+                ma_bearish = (
+                    (prev["sma_fast"] > prev["sma_slow"] and latest["sma_fast"] < latest["sma_slow"])  # Crossover
+                    or (latest["sma_fast"] < latest["sma_slow"] and latest["close"] < prev["close"])  # Trending down
+                )
                 if (
-                    prev["sma_fast"] > prev["sma_slow"]
-                    and latest["sma_fast"] < latest["sma_slow"]
-                    and latest["close"] < latest["sma_fast"]
+                    ma_bearish
                     and latest.get("volume_ratio", 0) > vr_momentum  # Volume confirmation
-                    and latest.get("macd_histogram", 0) < 0  # MACD bearish
                 ):
                     stop_loss, take_profit = calculate_stop_take("short", current_price, atr, "momentum_short")
                     confidence = calculate_signal_score("momentum_short", latest, df)
@@ -875,20 +879,19 @@ class NQScanner:
         # NOTE: mean_reversion_long has 2 wins in backtest - keep enabled
         if self.config.enable_mean_reversion and self.config.is_signal_enabled("mean_reversion_long") and session != "opening":
             # Mean reversion: check relative RSI movement OR absolute level
-            # During fast moves, RSI may not reach <35 but can drop rapidly (40→35 in 3 bars)
-            # Relative movement captures momentum shifts during fast pullbacks
+            # LOOSENED (2026-01-07): More permissive thresholds to generate more signals
             rsi = latest.get("rsi", 50)
             rsi_momentum_down = False
             if len(df) >= 3 and "rsi" in df.columns:
                 rsi_3bars_ago = df.iloc[-3].get("rsi", rsi) if len(df) >= 3 else rsi
-                rsi_momentum_down = (rsi_3bars_ago - rsi) > 5  # RSI dropped >5 points in 3 bars
+                rsi_momentum_down = (rsi_3bars_ago - rsi) > 3  # LOOSENED: was >5
             
-            # Accept if RSI momentum down OR absolute oversold
-            rsi_ok = rsi_momentum_down or rsi < 35
+            # Accept if RSI momentum down OR relatively low (loosened from <35 to <45)
+            rsi_ok = rsi_momentum_down or rsi < 45  # LOOSENED: was <35
             
             if (
-                rsi_ok  # Relative RSI movement OR absolute oversold
-                and latest["close"] < latest.get("bb_lower", current_price)
+                rsi_ok  # Relative RSI movement OR relatively low
+                and latest["close"] < latest.get("bb_middle", current_price)  # LOOSENED: was bb_lower
                 and latest.get("volume_ratio", 0) > vr_meanrev
             ):
                 if rsi_momentum_down:
@@ -978,19 +981,19 @@ class NQScanner:
 
         # Mean reversion SHORT signal (RSI overbought with price at upper Bollinger Band)
         if self.config.enable_mean_reversion and self.config.is_signal_enabled("mean_reversion_short") and session != "opening":
-            # Mean reversion SHORT: check relative RSI movement up OR absolute overbought
+            # LOOSENED (2026-01-07): More permissive thresholds
             rsi = latest.get("rsi", 50)
             rsi_momentum_up = False
             if len(df) >= 3 and "rsi" in df.columns:
                 rsi_3bars_ago = df.iloc[-3].get("rsi", rsi) if len(df) >= 3 else rsi
-                rsi_momentum_up = (rsi - rsi_3bars_ago) > 5  # RSI rose >5 points in 3 bars
+                rsi_momentum_up = (rsi - rsi_3bars_ago) > 3  # LOOSENED: was >5
             
-            # Accept if RSI momentum up OR absolute overbought
-            rsi_ok = rsi_momentum_up or rsi > 65
+            # Accept if RSI momentum up OR relatively high (loosened from >65 to >55)
+            rsi_ok = rsi_momentum_up or rsi > 55  # LOOSENED: was >65
             
             if (
-                rsi_ok  # Relative RSI movement up OR absolute overbought
-                and latest["close"] > latest.get("bb_upper", current_price)
+                rsi_ok  # Relative RSI movement up OR relatively high
+                and latest["close"] > latest.get("bb_middle", current_price)  # LOOSENED: was bb_upper
                 and latest.get("volume_ratio", 0) > vr_meanrev
             ):
                 if rsi_momentum_up:
@@ -1068,26 +1071,34 @@ class NQScanner:
                 else:
                     logger.debug("Mean reversion short signal rejected due to strong MTF conflict")
 
-        # Breakout LONG signal (price breaks above recent high with volume)
+        # Breakout LONG signal (price breaks above *prior* recent high with volume)
         if self.config.enable_breakout and self.config.is_signal_enabled("breakout_long"):
-            if len(df) >= 5:
-                recent_high = df["high"].tail(5).max()
-                
+            # IMPORTANT: use the prior window (exclude the current bar), otherwise
+            # recent_high includes the current bar's high and the breakout condition can never be true.
+            if len(df) >= 6:
+                recent_high = df.iloc[:-1]["high"].tail(5).max()
+            elif len(df) >= 2:
+                recent_high = df.iloc[:-1]["high"].max()
+            else:
+                recent_high = None
+
+            # Nothing to compare against (need at least 1 prior bar)
+            if recent_high is not None:
                 # Structure-first gate: check if this is a fresh breakout (within 0.3% of level)
                 # Fresh breakouts are price-action based, not indicator-based, so relax RSI requirement
                 is_fresh_breakout = False
-                if latest["close"] > recent_high:
-                    is_fresh_breakout = abs(current_price - recent_high) / recent_high < 0.003
-                
+                if latest["close"] > float(recent_high):
+                    is_fresh_breakout = abs(current_price - float(recent_high)) / float(recent_high) < 0.003
+
                 # For fresh breakouts, relax RSI requirement (structure breaks happen before indicators confirm)
                 rsi = latest.get("rsi", 50)
                 if is_fresh_breakout:
                     rsi_ok = rsi > 40  # Lower threshold for fresh breakouts
                 else:
                     rsi_ok = rsi > 45  # Original threshold for established breakouts
-                
+
                 if (
-                    latest["close"] > recent_high
+                    latest["close"] > float(recent_high)
                     and latest.get("volume_ratio", 0) > vr_breakout  # Volume confirmation (session-aware)
                     and rsi_ok  # Conditional RSI threshold based on fresh breakout
                     and latest.get("macd_histogram", 0) > 0  # MACD bullish
@@ -1097,10 +1108,12 @@ class NQScanner:
                     stop_loss = min(stop_loss, float(recent_high) - (atr * 0.5))
                     confidence = calculate_signal_score("breakout_long", latest, df)
 
-                    # is_fresh_breakout already calculated above
                     if is_fresh_breakout:
-                        logger.debug(f"Fresh breakout detected (within 0.3% of level {recent_high:.2f}), applying structure-first gate with relaxed RSI threshold")
-                    
+                        logger.debug(
+                            f"Fresh breakout detected (within 0.3% of level {float(recent_high):.2f}), "
+                            "applying structure-first gate with relaxed RSI threshold"
+                        )
+
                     # Adjust confidence based on regime
                     confidence = self.regime_detector.adjust_confidence_by_regime(
                         "breakout_long", confidence, regime
@@ -1125,15 +1138,10 @@ class NQScanner:
                         mtf_adjustment += 0.10
 
                     # Structure-first: allow fresh breakouts even with MTF conflicts
-                    # Fresh breakouts are structure-based, not indicator-based
-                    # During volatility expansion, relax threshold further
                     atr_expansion = regime.get("atr_expansion", False)
                     if is_fresh_breakout:
-                        # For fresh breakouts, allow even if MTF adjustment >= -0.25
                         mtf_threshold = -0.25
-                        logger.debug(f"Fresh breakout detected (within 0.3% of level), applying structure-first gate")
                     elif atr_expansion and volatility == "high":
-                        # During expansion, relax threshold for all breakouts
                         mtf_threshold = -0.25
                     else:
                         mtf_threshold = -0.20
@@ -1161,11 +1169,7 @@ class NQScanner:
                         )
 
                         # Structure-first: for fresh breakouts, relax order flow conflict threshold
-                        if is_fresh_breakout:
-                            # Allow fresh breakouts even if order flow adjustment >= -0.20 (was -0.12)
-                            flow_threshold = -0.20
-                        else:
-                            flow_threshold = -0.12
+                        flow_threshold = -0.20 if is_fresh_breakout else -0.12
 
                         # Reject if order flow strongly conflicts (unless fresh breakout)
                         if is_flow_aligned or flow_adjustment >= flow_threshold:
@@ -1178,7 +1182,7 @@ class NQScanner:
                                 "entry_price": current_price,
                                 "stop_loss": stop_loss,
                                 "take_profit": take_profit,
-                                "reason": f"Price broke above recent high ({recent_high:.2f}) with strong volume and MACD confirmation",
+                                "reason": f"Price broke above recent high ({float(recent_high):.2f}) with strong volume and MACD confirmation",
                                 "regime": regime,  # Include regime context
                                 "mtf_analysis": mtf_analysis,  # Include MTF context
                                 "vwap_data": vwap_data,  # Include VWAP context
@@ -1186,31 +1190,37 @@ class NQScanner:
                                 "order_flow": order_flow_data,  # Include order flow context
                             })
                         else:
-                            # Reject if order flow strongly conflicts
                             logger.debug("Breakout long signal rejected due to order flow conflict")
                     else:
-                        # Reject if strongly conflicting
                         logger.debug("Breakout long signal rejected due to MTF conflict")
 
-        # Breakout SHORT signal (price breaks below recent low with volume)
+        # Breakout SHORT signal (price breaks below *prior* recent low with volume)
         if self.config.enable_breakout and self.config.is_signal_enabled("breakout_short"):
-            if len(df) >= 5:
-                recent_low = df["low"].tail(5).min()
-                
+            # IMPORTANT: use the prior window (exclude the current bar), otherwise
+            # recent_low includes the current bar's low and the breakdown condition can never be true.
+            if len(df) >= 6:
+                recent_low = df.iloc[:-1]["low"].tail(5).min()
+            elif len(df) >= 2:
+                recent_low = df.iloc[:-1]["low"].min()
+            else:
+                recent_low = None
+
+            # Nothing to compare against (need at least 1 prior bar)
+            if recent_low is not None:
                 # Structure-first gate: check if this is a fresh breakdown (within 0.3% of level)
                 is_fresh_breakdown = False
-                if latest["close"] < recent_low:
-                    is_fresh_breakdown = abs(current_price - recent_low) / recent_low < 0.003
-                
+                if latest["close"] < float(recent_low):
+                    is_fresh_breakdown = abs(current_price - float(recent_low)) / float(recent_low) < 0.003
+
                 # For fresh breakdowns, relax RSI requirement
                 rsi = latest.get("rsi", 50)
                 if is_fresh_breakdown:
                     rsi_ok = rsi < 60  # Higher threshold for fresh breakdowns
                 else:
                     rsi_ok = rsi < 55  # Original threshold for established breakdowns
-                
+
                 if (
-                    latest["close"] < recent_low
+                    latest["close"] < float(recent_low)
                     and latest.get("volume_ratio", 0) > vr_breakout  # Volume confirmation (session-aware)
                     and rsi_ok  # Conditional RSI threshold based on fresh breakdown
                     and latest.get("macd_histogram", 0) < 0  # MACD bearish
@@ -1221,8 +1231,11 @@ class NQScanner:
                     confidence = calculate_signal_score("breakout_short", latest, df)
 
                     if is_fresh_breakdown:
-                        logger.debug(f"Fresh breakdown detected (within 0.3% of level {recent_low:.2f}), applying structure-first gate with relaxed RSI threshold")
-                    
+                        logger.debug(
+                            f"Fresh breakdown detected (within 0.3% of level {float(recent_low):.2f}), "
+                            "applying structure-first gate with relaxed RSI threshold"
+                        )
+
                     # Adjust confidence based on regime
                     confidence = self.regime_detector.adjust_confidence_by_regime(
                         "breakout_short", confidence, regime
@@ -1250,7 +1263,6 @@ class NQScanner:
                     atr_expansion = regime.get("atr_expansion", False)
                     if is_fresh_breakdown:
                         mtf_threshold = -0.25
-                        logger.debug(f"Fresh breakdown detected (within 0.3% of level), applying structure-first gate")
                     elif atr_expansion and volatility == "high":
                         mtf_threshold = -0.25
                     else:
@@ -1278,10 +1290,7 @@ class NQScanner:
                         )
 
                         # Structure-first: for fresh breakdowns, relax order flow conflict threshold
-                        if is_fresh_breakdown:
-                            flow_threshold = -0.20
-                        else:
-                            flow_threshold = -0.12
+                        flow_threshold = -0.20 if is_fresh_breakdown else -0.12
 
                         if is_flow_aligned or flow_adjustment >= flow_threshold:
                             confidence = max(0.0, min(1.0, confidence + flow_adjustment))
@@ -1293,7 +1302,7 @@ class NQScanner:
                                 "entry_price": current_price,
                                 "stop_loss": stop_loss,
                                 "take_profit": take_profit,
-                                "reason": f"Price broke below recent low ({recent_low:.2f}) with strong volume and MACD confirmation",
+                                "reason": f"Price broke below recent low ({float(recent_low):.2f}) with strong volume and MACD confirmation",
                                 "regime": regime,
                                 "mtf_analysis": mtf_analysis,
                                 "vwap_data": vwap_data,

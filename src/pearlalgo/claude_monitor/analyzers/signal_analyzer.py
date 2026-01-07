@@ -410,8 +410,14 @@ class SignalAnalyzer:
                 json_str = response.split("```json")[1].split("```")[0]
             elif "```" in response:
                 json_str = response.split("```")[1].split("```")[0]
-            
-            return json.loads(json_str)
+
+            parsed = json.loads(json_str)
+            if isinstance(parsed, dict):
+                return parsed
+
+            # Claude sometimes returns a JSON array; treat that as "no AI enhancement"
+            logger.warning(f"Claude signal analysis returned {type(parsed).__name__}, expected object")
+            return {}
         except json.JSONDecodeError:
             logger.warning("Could not parse Claude response as JSON")
             return {}
@@ -423,6 +429,10 @@ class SignalAnalyzer:
     ) -> Dict[str, Any]:
         """Merge local and AI analysis."""
         if not ai:
+            return local
+
+        if not isinstance(ai, dict):
+            logger.warning(f"AI analysis has unexpected type {type(ai).__name__}; ignoring")
             return local
         
         # Start with local analysis

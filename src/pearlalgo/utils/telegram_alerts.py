@@ -236,6 +236,66 @@ def format_time_ago(timestamp_str: str | None) -> str:
 # Markdown-safe rendering helpers
 # ---------------------------------------------------------------------------
 
+def _escape_markdown_underscores_in_words(text: str) -> str:
+    """
+    Escape underscores that commonly appear in filenames/identifiers (e.g. `foo_bar.py`)
+    while preserving intentional Markdown formatting like `_italic_`.
+    """
+    if not text:
+        return ""
+    import re
+    # Only escape underscores that are *inside* words (i.e., surrounded by word chars).
+    # This avoids breaking intended Markdown like `_italic_` which is usually delimited by whitespace/punctuation.
+    return re.sub(r"(?<=\\w)_(?=\\w)", r"\\_", str(text))
+
+
+def sanitize_telegram_markdown(text: str) -> str:
+    """
+    Sanitize a message intended for Telegram's legacy Markdown parse_mode.
+
+    Primary goal: avoid parse errors from unescaped underscores in filenames/identifiers,
+    while keeping existing `*bold*`, `_italic_`, and `` `code` `` formatting intact.
+
+    Strategy:
+    - Split around backtick code spans and only escape underscores-in-words in non-code segments.
+    """
+    if not text:
+        return ""
+
+    s = str(text)
+    if "_" not in s:
+        return s
+
+    out: list[str] = []
+    in_code = False
+    i = 0
+    n = len(s)
+
+    while i < n:
+        ch = s[i]
+        if ch == "`":
+            # Treat any run of backticks as a single delimiter to better handle ``` blocks.
+            j = i
+            while j < n and s[j] == "`":
+                j += 1
+            out.append(s[i:j])
+            in_code = not in_code
+            i = j
+            continue
+
+        # Copy up to next backtick
+        j = i
+        while j < n and s[j] != "`":
+            j += 1
+        seg = s[i:j]
+        if not in_code:
+            seg = _escape_markdown_underscores_in_words(seg)
+        out.append(seg)
+        i = j
+
+    return "".join(out)
+
+
 def escape_markdown(text: str) -> str:
     """
     Escape characters that have special meaning in Telegram Markdown.
@@ -870,6 +930,37 @@ def format_stale_callout(
     return f"⏰ Data stale ({age_str}) • {impact} • Menu → Health → Data"
 
 
+def _format_execution_status(
+    execution_enabled: bool,
+    execution_armed: bool,
+    execution_mode: str | None,
+) -> str:
+    """
+    Format execution status line for Home Card.
+
+    Makes trading state immediately obvious to operator:
+    - OFF = no orders will be placed even if signals generate
+    - DRY_RUN (ARMED) = "would trade" entries logged but no orders
+    - PAPER (ARMED) = paper trading orders placed
+    - LIVE (ARMED) = real orders placed
+    """
+    if not execution_enabled:
+        return "🚫 *Execution:* OFF"
+
+    mode_str = (execution_mode or "dry_run").lower()
+    mode_display = {
+        "dry_run": "DRY\\_RUN",
+        "paper": "PAPER",
+        "live": "LIVE",
+    }.get(mode_str, mode_str.upper())
+
+    if execution_armed:
+        emoji = "✅" if mode_str == "live" else "🟡" if mode_str == "paper" else "📝"
+        return f"{emoji} *Execution:* {mode_display} (ARMED)"
+    else:
+        return f"⏸️ *Execution:* {mode_display} (DISARMED)"
+
+
 def _format_data_quality_line(
     *,
     data_level: str | None,
@@ -1060,6 +1151,10 @@ def format_home_card(
     # Session window config (v7 - config-driven session messaging)
     session_start: str | None = None,  # Session start time in HH:MM format (e.g., "18:00")
     session_end: str | None = None,  # Session end time in HH:MM format (e.g., "16:10")
+    # Execution status (v10 - make trading state obvious)
+    execution_enabled: bool = False,  # Whether execution adapter is enabled
+    execution_armed: bool = False,  # Whether execution is armed (ready to place orders)
+    execution_mode: str | None = None,  # "dry_run", "paper", or "live"
     # Telegram UI formatting (config-driven)
     compact_metrics_enabled: bool = True,
     show_progress_bars: bool = False,
@@ -1205,6 +1300,11 @@ def format_home_card(
         lines.append(f"{agent_emoji} {LABEL_AGENT}: {agent_text}{_BULLET_SEP}⚪ {LABEL_GATEWAY}: {GATE_UNKNOWN}")
     else:
         lines.append(format_service_status(agent_running, gateway_running, paused))
+
+    # Execution status line (always show - critical for operator awareness)
+    exec_line = _format_execution_status(execution_enabled, execution_armed, execution_mode)
+    if exec_line:
+        lines.append(exec_line)
 
     # CONDITIONAL: Pause reason (if paused)
     if paused and pause_reason:
@@ -1615,19 +1715,24 @@ class TelegramAlerts:
         import hashlib
         import time
 
-        # Enforce Telegram size limit early. This prevents silent non-delivery for oversized messages.
-        original_len = len(message)
-        message = _truncate_telegram_text(message)
-        if len(message) != original_len:
+        # Prepare text variants (Markdown vs plain) and enforce Telegram size limit early.
+        message_raw = message
+        message_markdown = message_raw
+        if parse_mode and str(parse_mode).lower() == "markdown":
+            message_markdown = sanitize_telegram_markdown(message_markdown)
+
+        original_len = len(message_markdown)
+        message_markdown = _truncate_telegram_text(message_markdown)
+        if len(message_markdown) != original_len:
             logger.warning(
-                f"Telegram message truncated (len={original_len} -> {len(message)})"
+                f"Telegram message truncated (len={original_len} -> {len(message_markdown)})"
             )
 
         # Enhanced deduplication: track last message hash and timestamp
         # Prevent sending same or very similar messages within 120 seconds (2 minutes)
         # Normalize message for better duplicate detection (remove variable timestamps/ages)
         import re
-        normalized_message = message
+        normalized_message = message_markdown
         # Normalize variable parts that might differ slightly but are essentially the same message
         # Remove age values in both "X.X minutes old" format and "*Age:* X.X minutes" format
         normalized_message = re.sub(r'\d+\.\d+ minutes old', 'X.X minutes old', normalized_message)
@@ -1658,7 +1763,7 @@ class TelegramAlerts:
             try:
                 await self.bot.send_message(
                     chat_id=self.chat_id,
-                    text=message,
+                    text=message_markdown,
                     parse_mode=parse_mode,
                     reply_markup=reply_markup,
                 )
@@ -1684,16 +1789,20 @@ class TelegramAlerts:
 
                 # Markdown parsing errors - try sending as plain text immediately
                 if "parse entities" in error_msg.lower() or "can't parse" in error_msg.lower():
-                    logger.warning(f"Markdown parsing error, retrying as plain text: {e}")
+                    logger.debug(f"Markdown parsing error, retrying as plain text: {e}")
                     # Try sending as plain text on next attempt
                     if attempt < max_retries - 1:
                         try:
+                            message_plain = _truncate_telegram_text(message_raw)
                             await self.bot.send_message(
                                 chat_id=self.chat_id,
-                                text=message,
+                                text=message_plain,
                                 parse_mode=None,  # Plain text
                                 reply_markup=reply_markup,
                             )
+                            # Treat as sent for dedupe purposes
+                            self._last_message_hash = message_hash
+                            self._last_message_time = current_time
                             self.last_error = None
                             return True
                         except Exception as e2:
@@ -1705,10 +1814,15 @@ class TelegramAlerts:
                         try:
                             await self.bot.send_message(
                                 chat_id=self.chat_id,
-                                text=message.replace('*', '').replace('_', '').replace('`', ''),
+                                text=_truncate_telegram_text(
+                                    message_raw.replace('*', '').replace('_', '').replace('`', '')
+                                ),
                                 parse_mode=None,
                                 reply_markup=reply_markup,
                             )
+                            # Treat as sent for dedupe purposes
+                            self._last_message_hash = message_hash
+                            self._last_message_time = current_time
                             self.last_error = None
                             return True
                         except Exception as plain_error:

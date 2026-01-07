@@ -1725,6 +1725,11 @@ class NQAgentTelegramNotifier:
                 session_end=session_end,
                 # v9 field: IBKR data level indicator
                 data_level=data_level,
+                # v10 fields: execution status (make trading state obvious)
+                # Extract from nested execution dict if present
+                execution_enabled=(status.get("execution") or {}).get("enabled", False),
+                execution_armed=(status.get("execution") or {}).get("armed", False),
+                execution_mode=(status.get("execution") or {}).get("mode"),
                 # Config-driven telegram UI formatting
                 compact_metrics_enabled=compact_metrics_enabled,
                 show_progress_bars=show_progress_bars,

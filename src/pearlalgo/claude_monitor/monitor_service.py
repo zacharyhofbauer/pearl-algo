@@ -491,15 +491,87 @@ class ClaudeMonitorService:
         return signals[-100:]  # Limit to last 100
     
     def _load_performance_data(self) -> Optional[Dict[str, Any]]:
-        """Load performance data from performance.json."""
+        """
+        Load performance data from performance.json.
+
+        Supports two formats:
+        - Summary dict (expected by analyzers/reports): {"win_rate": ..., "total_trades": ..., "total_pnl": ...}
+        - Raw trade list (older format): [{"pnl": ..., "is_win": ...}, ...] -> summarized on load
+        """
         try:
             perf_file = self.state_dir / "performance.json"
-            if perf_file.exists():
-                with open(perf_file, "r") as f:
-                    return json.load(f)
+            if not perf_file.exists():
+                return None
+
+            with open(perf_file, "r") as f:
+                data = json.load(f)
+
+            if isinstance(data, dict):
+                return data
+
+            if isinstance(data, list):
+                return self._summarize_trade_performance(data)
+
+            logger.warning(f"Performance data has unexpected type {type(data).__name__}; ignoring")
+            return None
         except Exception as e:
             logger.error(f"Could not load performance data: {e}")
-        return None
+            return None
+
+    def _summarize_trade_performance(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Convert a list of trade records into a small summary dict."""
+        total_trades = len(trades)
+        wins = 0
+        total_pnl = 0.0
+
+        by_signal_type: Dict[str, Dict[str, Any]] = {}
+
+        for t in trades:
+            if not isinstance(t, dict):
+                continue
+
+            is_win = t.get("is_win")
+            if is_win is True or t.get("outcome") == "win" or t.get("result") == "win":
+                wins += 1
+
+            pnl_raw = t.get("pnl", 0)
+            try:
+                pnl = float(pnl_raw or 0)
+            except (TypeError, ValueError):
+                pnl = 0.0
+            total_pnl += pnl
+
+            sig_type = t.get("signal_type") or t.get("type") or "unknown"
+            m = by_signal_type.setdefault(
+                str(sig_type),
+                {"count": 0, "wins": 0, "losses": 0, "win_rate": None, "total_pnl": 0.0, "avg_pnl": None},
+            )
+            m["count"] += 1
+            if is_win is True or t.get("outcome") == "win" or t.get("result") == "win":
+                m["wins"] += 1
+            elif is_win is False or t.get("outcome") == "loss" or t.get("result") == "loss":
+                m["losses"] += 1
+            m["total_pnl"] += pnl
+
+        losses = total_trades - wins if total_trades else 0
+        win_rate = (wins / total_trades) if total_trades else None
+        avg_pnl = (total_pnl / total_trades) if total_trades else None
+
+        for m in by_signal_type.values():
+            count = int(m.get("count") or 0)
+            w = int(m.get("wins") or 0)
+            m["win_rate"] = (w / count) if count else None
+            m["avg_pnl"] = (float(m.get("total_pnl") or 0.0) / count) if count else None
+
+        return {
+            "total_trades": total_trades,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": win_rate,
+            "total_pnl": total_pnl,
+            "avg_pnl": avg_pnl,
+            "by_signal_type": by_signal_type,
+        }
     
     def _extract_market_data(
         self,
