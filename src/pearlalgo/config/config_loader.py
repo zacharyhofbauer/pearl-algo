@@ -194,6 +194,65 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         # When disabled, step-by-step tracing is at DEBUG level (actionable events stay at INFO/WARN).
         "ibkr_verbose_logging": False,
     },
+    # ==========================================================================
+    # STORAGE (Platform memory)
+    # ==========================================================================
+    # Dual-write state to SQLite for queryable history + ML datasets.
+    # JSON/JSONL files remain for backward compatibility with Telegram/mobile tooling.
+    "storage": {
+        "sqlite_enabled": False,
+        "db_path": "data/nq_agent_state/trades.db",
+        "dual_write_files": True,
+    },
+    # ==========================================================================
+    # ADAPTIVE RISK MANAGEMENT (v2.0)
+    # ==========================================================================
+    "adaptive_stops": {
+        "enabled": False,
+        "use_structure_stops": True,
+        "use_level2_zones": True,  # approximated zones when only L1 is available
+        "min_stop_points": 5.0,
+        "regime_multipliers": {
+            "ranging": 1.0,
+            "trending_bullish": 1.2,
+            "trending_bearish": 1.2,
+        },
+        "session_multipliers": {
+            "tokyo": 0.8,
+            "london": 0.9,
+            "new_york": 1.0,
+        },
+        "volatility_multipliers": {
+            "low": 0.9,
+            "normal": 1.0,
+            "high": 1.3,
+        },
+        "performance_adjustment": True,
+    },
+    "adaptive_sizing": {
+        "enabled": False,
+        "method": "kelly_criterion",
+        "kelly_fraction": 0.25,
+        "min_contracts": 1,
+        "max_contracts": 15,
+        "confidence_scaling": True,
+        "regime_scaling": True,
+        "session_scaling": True,
+        "streak_adjustment": True,
+    },
+    "ml_filter": {
+        "enabled": False,
+        "model_path": None,
+        "model_version": "v1.0.0",
+        "min_probability": 0.55,
+        "high_probability": 0.70,
+        "min_training_samples": 30,
+        "retrain_interval_days": 7,
+        "n_estimators": 100,
+        "max_depth": 6,
+        "learning_rate": 0.1,
+        "calibrate_probabilities": True,
+    },
     "signals": {
         "duplicate_window_seconds": 300,
         "min_confidence": 0.50,

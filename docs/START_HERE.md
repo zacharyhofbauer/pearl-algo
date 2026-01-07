@@ -20,11 +20,24 @@ This repo is a **trading platform** with three hard requirements:
 - **Configuration**: `config/config.yaml`
 - **System reference**: `docs/PROJECT_SUMMARY.md`
 
+### Persistent memory (SQLite)
+
+We **dual-write** signals/trades to SQLite (queryable, durable) while keeping JSON/JSONL
+for compatibility with existing Telegram/mobile views.
+
+- DB: `data/nq_agent_state/trades.db`
+- Config: `storage.sqlite_enabled` in `config/config.yaml`
+
 ### Quick operational checklist
 
 - **Gateway**: `./scripts/gateway/gateway.sh start`
 - **Agent**: `./scripts/lifecycle/start_nq_agent_service.sh`
 - **Status**: `./scripts/lifecycle/check_nq_agent_status.sh`
+
+### Fast validation (mobile + CLI)
+
+- **Telegram**: use *Health → Doctor* or `/doctor` for a 24h rollup (signals, rejects, stops, sizing)
+- **CLI**: `python scripts/monitoring/doctor_cli.py --hours 24`
 
 ### Execution safety model (non-negotiable)
 

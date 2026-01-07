@@ -19,6 +19,13 @@ from pearlalgo.utils.paths import (
     get_utc_timestamp,
 )
 
+try:
+    from pearlalgo.learning.trade_database import TradeDatabase
+    SQLITE_AVAILABLE = True
+except Exception:
+    SQLITE_AVAILABLE = False
+    TradeDatabase = None  # type: ignore
+
 # Import get_utc_timestamp is already in the import above
 
 
@@ -99,6 +106,22 @@ class NQAgentStateManager:
         self.signals_file = get_signals_file(self.state_dir)
         self.state_file = get_state_file(self.state_dir)
 
+        # Optional SQLite dual-write (platform memory). Keep file writes as-is for Telegram/mobile.
+        self._sqlite_enabled = False
+        self._trade_db = None
+        if SQLITE_AVAILABLE:
+            try:
+                from pearlalgo.config.config_loader import load_service_config
+
+                cfg = load_service_config(validate=False) or {}
+                storage_cfg = cfg.get("storage", {}) or {}
+                self._sqlite_enabled = bool(storage_cfg.get("sqlite_enabled", False))
+                if self._sqlite_enabled:
+                    db_path_raw = storage_cfg.get("db_path") or str(self.state_dir / "trades.db")
+                    self._trade_db = TradeDatabase(Path(str(db_path_raw)))
+            except Exception as e:
+                logger.debug(f"SQLite storage not enabled/available: {e}")
+
         logger.info(f"NQAgentStateManager initialized: state_dir={self.state_dir}")
 
     def save_signal(self, signal: Dict) -> None:
@@ -169,6 +192,18 @@ class NQAgentStateManager:
 
             with open(self.signals_file, "a") as f:
                 f.write(payload + "\n")
+
+            # Dual-write to SQLite (append-only signal event log)
+            try:
+                if self._sqlite_enabled and self._trade_db is not None:
+                    self._trade_db.add_signal_event(
+                        signal_id=signal_id,
+                        status="generated",
+                        timestamp=str(signal_record.get("timestamp") or get_utc_timestamp()),
+                        payload=signal_record,
+                    )
+            except Exception as e:
+                logger.debug(f"Could not write signal event to SQLite: {e}")
             
             logger.debug(f"Saved signal {signal_id} to {self.signals_file}")
         except Exception as e:

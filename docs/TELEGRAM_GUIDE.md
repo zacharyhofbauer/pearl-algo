@@ -32,6 +32,7 @@ It combines quick start steps, command setup, and command behavior.
    status - Get current agent status
    activity - Is the bot doing anything?
    signals - Show recent signals
+   doctor - 24h rollup (signals, rejects, stops, sizing)
    signal - Show details for a specific signal by ID prefix
    last_signal - Show most recent signal with chart
    active_trades - Show currently open positions

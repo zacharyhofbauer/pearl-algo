@@ -92,6 +92,16 @@ data:
   mtf_refresh_seconds_5m: 300      # TTL for 5m MTF cache (5 minutes)
   mtf_refresh_seconds_15m: 900     # TTL for 15m MTF cache (15 minutes)
 
+# =============================================================================
+# STORAGE (Platform State / "Never forget any lesson")
+# =============================================================================
+# We keep JSON/JSONL files for backward compatibility with Telegram + existing tooling,
+# but also dual-write into SQLite for queryable history + reproducibility.
+storage:
+  sqlite_enabled: true
+  # Default path is inside the state directory. If unset, code will use: data/nq_agent_state/trades.db
+  db_path: "data/nq_agent_state/trades.db"
+
 # Signal generation
 # EMERGENCY: Raised thresholds due to 31% WR performance (2025-01-06)
 signals:

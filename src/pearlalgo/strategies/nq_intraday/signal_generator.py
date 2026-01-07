@@ -19,6 +19,14 @@ from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner
 from pearlalgo.strategies.nq_intraday.signal_quality import SignalQualityScorer
 
+# Central policy layer (v2.1): single place for allow/deny rules (min_conf, min_rr, regime/session)
+try:
+    from pearlalgo.policy.signal_policy import SignalPolicy
+    POLICY_AVAILABLE = True
+except Exception:
+    POLICY_AVAILABLE = False
+    SignalPolicy = None  # type: ignore
+
 # Feature engineering for ML integration (optional)
 try:
     from pearlalgo.learning.feature_engineer import FeatureEngineer, FeatureConfig
@@ -273,6 +281,14 @@ class NQSignalGenerator:
         # Load signal configuration
         signal_settings = service_config.get("signals", {})
 
+        # Central policy (allow/deny) - keeps signal_generator rules from drifting.
+        self._policy: Optional["SignalPolicy"] = None
+        if POLICY_AVAILABLE and SignalPolicy is not None:
+            try:
+                self._policy = SignalPolicy(service_config)
+            except Exception:
+                self._policy = None
+
         # Track recent signals to avoid duplicates
         self._recent_signals: List[Dict] = []
         self._signal_window_seconds = signal_settings.get("duplicate_window_seconds", 300)
@@ -472,22 +488,45 @@ class NQSignalGenerator:
             opportunity_tier = "A"
             opportunity_reason = ""
 
-            # Apply regime/session filter first (config-driven per signal type)
-            regime_check = self._check_regime_filter(signal)
-            if not regime_check["passed"]:
-                # Optionally bypass regime/session filters in explore mode (B-tier), with explicit labeling.
-                if self._explore_enabled and getattr(self, "_explore_bypass_regime_filters", False):
-                    opportunity_tier = "B"
-                    opportunity_reason = str(regime_check.get("reason", "regime_filter"))
-                else:
-                    diagnostics.rejected_regime_filter += 1
-                    diagnostics.regime_filter_reasons.append(regime_check.get("reason", "unknown"))
-                    logger.debug(
-                        "Signal filtered by regime: type=%s, reason=%s",
-                        signal.get("type"),
-                        regime_check.get("reason"),
-                    )
-                    continue
+            # Central policy gate (v2.1). This includes min_conf/min_rr + regime/session allow-lists.
+            # We still preserve explore-mode behavior for near-misses.
+            if self._policy is not None:
+                decision = self._policy.evaluate(signal)
+                if not decision.allowed:
+                    # Explore-mode bypass for regime/session only (if enabled)
+                    if (
+                        self._explore_enabled
+                        and getattr(self, "_explore_bypass_regime_filters", False)
+                        and decision.reason in ("regime", "regime_forbidden", "session")
+                    ):
+                        opportunity_tier = "B"
+                        opportunity_reason = str(decision.reason)
+                    else:
+                        if decision.reason in ("regime", "regime_forbidden", "session"):
+                            diagnostics.rejected_regime_filter += 1
+                            diagnostics.regime_filter_reasons.append(decision.reason)
+                        elif decision.reason == "confidence":
+                            diagnostics.rejected_confidence += 1
+                        elif decision.reason == "risk_reward":
+                            diagnostics.rejected_risk_reward += 1
+                        continue
+            else:
+                # Legacy regime/session filter path
+                regime_check = self._check_regime_filter(signal)
+                if not regime_check["passed"]:
+                    # Optionally bypass regime/session filters in explore mode (B-tier), with explicit labeling.
+                    if self._explore_enabled and getattr(self, "_explore_bypass_regime_filters", False):
+                        opportunity_tier = "B"
+                        opportunity_reason = str(regime_check.get("reason", "regime_filter"))
+                    else:
+                        diagnostics.rejected_regime_filter += 1
+                        diagnostics.regime_filter_reasons.append(regime_check.get("reason", "unknown"))
+                        logger.debug(
+                            "Signal filtered by regime: type=%s, reason=%s",
+                            signal.get("type"),
+                            regime_check.get("reason"),
+                        )
+                        continue
             
             # Apply order book filter if Level 2 data available
             if order_book_available:

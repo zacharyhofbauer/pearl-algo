@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
 
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner
 from pearlalgo.strategies.nq_intraday.signal_generator import NQSignalGenerator
@@ -30,7 +31,12 @@ class NQIntradayStrategy:
             config: Configuration instance (optional)
         """
         self.config = config or NQIntradayConfig()
-        self.scanner = NQScanner(config=self.config)
+
+        # Use the canonical service config so scanner-level adaptive modules
+        # (adaptive stops, market depth, etc.) are initialized consistently.
+        service_config = load_service_config(validate=False) or {}
+
+        self.scanner = NQScanner(config=self.config, service_config=service_config)
         self.signal_generator = NQSignalGenerator(config=self.config, scanner=self.scanner)
 
         logger.info(f"NQIntradayStrategy initialized: symbol={self.config.symbol}")

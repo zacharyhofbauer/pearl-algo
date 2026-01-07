@@ -24,6 +24,14 @@ import numpy as np
 from pearlalgo.utils.logger import logger
 from pearlalgo.backtesting.pdf_report import write_backtest_pdf_report
 
+# SQLite "forever memory" (optional). Used for /doctor 24h rollups.
+try:
+    from pearlalgo.learning.trade_database import TradeDatabase
+    TRADE_DB_AVAILABLE = True
+except Exception:
+    TRADE_DB_AVAILABLE = False
+    TradeDatabase = None  # type: ignore
+
 try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
     from telegram.ext import (
@@ -158,6 +166,9 @@ class TelegramCommandHandler:
         self._data_provider = None
         self._historical_cache_dir = Path(self.state_dir.parent / "historical")
         self._historical_cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # SQLite trade database (lazy initialization)
+        self._trade_db = None
         
         # Build application
         self.application = Application.builder().token(bot_token).build()
@@ -333,6 +344,7 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("signal", self._handle_signal_detail))
         self.application.add_handler(CommandHandler("grade", self._handle_grade))
         self.application.add_handler(CommandHandler("performance", self._handle_performance))
+        self.application.add_handler(CommandHandler("doctor", self._handle_doctor))
 
         # Friendly fallback for any other slash command: point users back to /start.
         async def _unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2421,6 +2433,30 @@ class TelegramCommandHandler:
                 logger.warning(f"Could not initialize data provider: {e}")
                 return None
         return self._data_provider
+
+    def _get_trade_db(self) -> Optional["TradeDatabase"]:
+        """Get or create the SQLite TradeDatabase (if enabled)."""
+        if not TRADE_DB_AVAILABLE or TradeDatabase is None:
+            return None
+
+        existing = getattr(self, "_trade_db", None)
+        if existing is not None:
+            return existing
+
+        try:
+            from pearlalgo.config.config_loader import load_service_config
+
+            cfg = load_service_config(validate=False) or {}
+            storage_cfg = cfg.get("storage", {}) or {}
+            if not bool(storage_cfg.get("sqlite_enabled", False)):
+                return None
+
+            db_path_raw = storage_cfg.get("db_path") or str(self.state_dir / "trades.db")
+            self._trade_db = TradeDatabase(Path(str(db_path_raw)))
+            return self._trade_db
+        except Exception as e:
+            logger.debug(f"Could not initialize TradeDatabase: {e}")
+            return None
     
     async def _fetch_historical_data_for_backtest(
         self, 
@@ -5189,6 +5225,9 @@ Choose what you want to inspect:
             ],
             [
                 InlineKeyboardButton("📈 Performance", callback_data="performance"),
+                InlineKeyboardButton("🩺 Doctor", callback_data="doctor"),
+            ],
+            [
                 InlineKeyboardButton("🏠 Menu", callback_data="start"),
             ],
         ]
@@ -8913,6 +8952,8 @@ _Commands are policy-gated for safety._
             await self._handle_data_quality(update, context, diagnose=True)
         elif callback_data == 'diagnostics':
             await self._handle_diagnostics(update, context)
+        elif callback_data == 'doctor':
+            await self._handle_doctor(update, context)
         elif callback_data == 'start_agent':
             await self._handle_start_agent(update, context)
         elif callback_data == 'stop_agent':
@@ -9665,6 +9706,195 @@ _Commands are policy-gated for safety._
         except Exception as e:
             logger.error(f"Error handling /diagnostics: {e}", exc_info=True)
             await self._send_message_or_edit(update, context, f"❌ Error: {str(e)[:100]}", reply_markup=self._get_back_to_menu_button())
+
+    async def _handle_doctor(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Doctor: 24h rollup (mobile-first validation).
+
+        Pulls from SQLite (signals/trades/diagnostics) when enabled, with graceful fallback.
+        """
+        if not await self._check_authorized(update):
+            return
+
+        try:
+            now = datetime.now(timezone.utc)
+            cutoff = (now - timedelta(hours=24)).isoformat()
+
+            db = self._get_trade_db()
+            if db is None:
+                msg = (
+                    "🩺 *Doctor (last 24h)*\n\n"
+                    "SQLite storage is *disabled* or unavailable.\n\n"
+                    "*Enable it in* `config/config.yaml`:\n"
+                    "`storage.sqlite_enabled: true`\n"
+                )
+                await self._send_message_or_edit(update, context, msg, reply_markup=self._get_back_to_menu_button())
+                return
+
+            # 1) Signal events (generated/entered/exited/expired)
+            event_counts = db.get_signal_event_counts(from_time=cutoff)
+
+            # 2) Cycle diagnostics (why rejected / why quiet)
+            diag = db.get_cycle_diagnostics_aggregate(from_time=cutoff)
+            quiet_top = db.get_quiet_reason_counts(from_time=cutoff, limit=3)
+
+            # 3) Trades summary (by exit time)
+            trade_summary = db.get_trade_summary(from_exit_time=cutoff)
+
+            # 4) Stop distance + sizing distributions (from generated signals)
+            gen_events = db.get_signal_events(status="generated", from_time=cutoff, limit=1000)
+
+            stop_bins = [
+                ("<5", 0.0, 5.0),
+                ("5-10", 5.0, 10.0),
+                ("10-15", 10.0, 15.0),
+                ("15-20", 15.0, 20.0),
+                ("20-25", 20.0, 25.0),
+                (">25", 25.0, 10_000.0),
+            ]
+            size_bins = [
+                ("1", 1.0, 1.0),
+                ("2-3", 2.0, 3.0),
+                ("4-5", 4.0, 5.0),
+                ("6-8", 6.0, 8.0),
+                ("9-12", 9.0, 12.0),
+                ("13-15", 13.0, 15.0),
+                (">15", 15.0, 10_000.0),
+            ]
+
+            stop_counts = {k: 0 for (k, _, _) in stop_bins}
+            size_counts = {k: 0 for (k, _, _) in size_bins}
+            stop_samples: List[float] = []
+            size_samples: List[float] = []
+
+            for ev in gen_events:
+                payload = ev.get("payload", {}) or {}
+                sig = payload.get("signal", {}) if isinstance(payload, dict) else {}
+                if not isinstance(sig, dict):
+                    continue
+                try:
+                    entry = float(sig.get("entry_price", 0.0) or 0.0)
+                    stop = float(sig.get("stop_loss", 0.0) or 0.0)
+                except Exception:
+                    entry, stop = 0.0, 0.0
+
+                if entry > 0 and stop > 0:
+                    dist = abs(entry - stop)
+                    stop_samples.append(dist)
+                    for label, lo, hi in stop_bins:
+                        if lo <= dist < hi:
+                            stop_counts[label] += 1
+                            break
+
+                try:
+                    size = float(sig.get("position_size", 0.0) or 0.0)
+                except Exception:
+                    size = 0.0
+                if size > 0:
+                    size_samples.append(size)
+                    for label, lo, hi in size_bins:
+                        if label == "1":
+                            if abs(size - 1.0) < 1e-9:
+                                size_counts[label] += 1
+                                break
+                        else:
+                            if lo <= size <= hi:
+                                size_counts[label] += 1
+                                break
+
+            def _fmt_pct(x: float) -> str:
+                try:
+                    return f"{(float(x) * 100):.0f}%"
+                except Exception:
+                    return "0%"
+
+            # Build message (keep it mobile-safe)
+            msg = "🩺 *Doctor (last 24h)*\n\n"
+
+            msg += "*Signals (events):*\n"
+            for k in ("generated", "entered", "exited", "expired"):
+                if k in event_counts:
+                    msg += f"- {k}: {int(event_counts.get(k, 0))}\n"
+            if not event_counts:
+                msg += "- (no events)\n"
+
+            msg += "\n*Trades (exited):*\n"
+            total_trades = int(trade_summary.get("total", 0) or 0)
+            msg += f"- total: {total_trades}\n"
+            if total_trades > 0:
+                msg += f"- WR: {_fmt_pct(trade_summary.get('win_rate', 0.0))}\n"
+                try:
+                    pnl = float(trade_summary.get("total_pnl", 0.0) or 0.0)
+                    pnl_str = f"+${pnl:,.0f}" if pnl >= 0 else f"-${abs(pnl):,.0f}"
+                except Exception:
+                    pnl_str = "$0"
+                msg += f"- P&L: {pnl_str}\n"
+                try:
+                    avg_hold = trade_summary.get("avg_hold_minutes")
+                    if avg_hold is not None:
+                        msg += f"- avg hold: {float(avg_hold):.1f}m\n"
+                except Exception:
+                    pass
+
+            msg += "\n*Rejections (cycle totals):*\n"
+            rej_lines = []
+            for key, label in [
+                ("rejected_market_hours", "market hours"),
+                ("rejected_confidence", "confidence"),
+                ("rejected_risk_reward", "R:R"),
+                ("rejected_regime_filter", "regime/session"),
+                ("rejected_quality_scorer", "quality"),
+                ("rejected_order_book", "order book"),
+                ("rejected_invalid_prices", "invalid prices"),
+                ("rejected_ml_filter", "ML"),
+            ]:
+                try:
+                    v = int(diag.get(key, 0) or 0)
+                except Exception:
+                    v = 0
+                if v > 0:
+                    rej_lines.append(f"- {label}: {v}")
+            msg += "\n".join(rej_lines) + ("\n" if rej_lines else "- (no rejection data)\n")
+
+            if stop_samples:
+                try:
+                    import numpy as np
+                    stop_med = float(np.median(stop_samples))
+                    stop_avg = float(np.mean(stop_samples))
+                    msg += f"\n*Stops (pts):* avg {stop_avg:.1f} • med {stop_med:.1f}\n"
+                except Exception:
+                    msg += "\n*Stops (pts):*\n"
+                msg += "  " + " | ".join([f"{k}:{stop_counts[k]}" for (k, _, _) in stop_bins]) + "\n"
+            else:
+                msg += "\n*Stops (pts):* (no samples)\n"
+
+            if size_samples:
+                try:
+                    import numpy as np
+                    size_med = float(np.median(size_samples))
+                    size_avg = float(np.mean(size_samples))
+                    msg += f"*Size (cts):* avg {size_avg:.1f} • med {size_med:.1f}\n"
+                except Exception:
+                    msg += "*Size (cts):*\n"
+                msg += "  " + " | ".join([f"{k}:{size_counts[k]}" for (k, _, _) in size_bins]) + "\n"
+            else:
+                msg += "*Size (cts):* (no samples)\n"
+
+            if quiet_top:
+                msg += "\n*Quiet reasons (top):*\n"
+                for qr, c in quiet_top.items():
+                    msg += f"- {qr}: {c}\n"
+
+            # Keep within Telegram limit (be conservative)
+            if len(msg) > 3800:
+                msg = msg[:3800] + "\n...(truncated)"
+
+            await self._send_message_or_edit(update, context, msg, reply_markup=self._get_back_to_menu_button())
+        except Exception as e:
+            logger.error(f"Error handling /doctor: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update, context, f"❌ Error: {str(e)[:120]}", reply_markup=self._get_back_to_menu_button()
+            )
 
     async def _handle_purge_test_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """

@@ -55,6 +55,7 @@ def set_bot_commands():
         BotCommand('signals', 'Show recent signals'),
         BotCommand('last_signal', 'Show most recent signal with chart'),
         BotCommand('active_trades', 'Show currently open positions'),
+        BotCommand('doctor', '24h rollup (signals, rejects, stops, sizing)'),
         # Tools
         BotCommand('backtest', 'Run strategy backtest with chart'),
         BotCommand('reports', 'Browse saved backtest reports'),

@@ -22,6 +22,13 @@ from pearlalgo.utils.paths import (
 )
 from pearlalgo.nq_agent.state_manager import _to_json_safe
 
+try:
+    from pearlalgo.learning.trade_database import TradeDatabase
+    SQLITE_AVAILABLE = True
+except Exception:
+    SQLITE_AVAILABLE = False
+    TradeDatabase = None  # type: ignore
+
 if TYPE_CHECKING:
     from pearlalgo.nq_agent.state_manager import NQAgentStateManager
 
@@ -55,6 +62,19 @@ class PerformanceTracker:
         self.state_manager = state_manager
         self.signals_file = get_signals_file(self.state_dir)
         self.performance_file = get_performance_file(self.state_dir)
+
+        # Optional SQLite dual-write (platform memory). Keep performance.json for backward compatibility.
+        self._sqlite_enabled = False
+        self._trade_db = None
+        if SQLITE_AVAILABLE:
+            try:
+                storage_cfg = service_config.get("storage", {}) or {}
+                self._sqlite_enabled = bool(storage_cfg.get("sqlite_enabled", False))
+                if self._sqlite_enabled:
+                    db_path_raw = storage_cfg.get("db_path") or str(self.state_dir / "trades.db")
+                    self._trade_db = TradeDatabase(Path(str(db_path_raw)))
+            except Exception as e:
+                logger.debug(f"SQLite storage not enabled/available: {e}")
 
         # Load performance configuration
         service_config = load_service_config()
@@ -257,6 +277,59 @@ class PerformanceTracker:
         # Save performance record
         self._save_performance(performance)
 
+        # Dual-write completed trade into SQLite for queryable history + ML training datasets
+        try:
+            if self._sqlite_enabled and self._trade_db is not None:
+                # Extract optional context
+                regime_val = None
+                try:
+                    reg = signal.get("regime", {})
+                    if isinstance(reg, dict):
+                        regime_val = reg.get("regime")
+                    elif isinstance(reg, str):
+                        regime_val = reg
+                except Exception:
+                    regime_val = None
+
+                # Extract numeric features if present
+                features = {}
+                try:
+                    raw_features = signal.get("features") or signal.get("ml_features") or signal.get("indicators") or {}
+                    if isinstance(raw_features, dict):
+                        for k, v in raw_features.items():
+                            try:
+                                fv = float(v)
+                                if fv == fv:  # not NaN
+                                    features[str(k)] = fv
+                            except Exception:
+                                continue
+                except Exception:
+                    features = {}
+
+                self._trade_db.add_trade(
+                    trade_id=str(signal_id),
+                    signal_id=str(signal_id),
+                    signal_type=str(signal.get("type") or signal.get("signal_type") or "unknown"),
+                    direction=str(direction),
+                    entry_price=float(entry_price),
+                    exit_price=float(exit_price),
+                    pnl=float(pnl),
+                    is_win=bool(is_win),
+                    entry_time=str(signal_record.get("entry_time") or signal_record.get("timestamp") or ""),
+                    exit_time=str(exit_time.isoformat()),
+                    stop_loss=float(signal.get("stop_loss") or 0.0) if signal.get("stop_loss") is not None else None,
+                    take_profit=float(signal.get("take_profit") or 0.0) if signal.get("take_profit") is not None else None,
+                    exit_reason=str(exit_reason),
+                    hold_duration_minutes=float(hold_duration) if hold_duration is not None else None,
+                    regime=str(regime_val) if regime_val is not None else None,
+                    context_key=str(signal.get("context_key") or "") or None,
+                    volatility_percentile=None,
+                    volume_percentile=None,
+                    features=features or None,
+                )
+        except Exception as e:
+            logger.debug(f"Could not write trade to SQLite: {e}")
+
         return performance
 
     def get_performance_metrics(self, days: Optional[int] = None) -> Dict:
@@ -447,6 +520,24 @@ class PerformanceTracker:
                     f.write(json.dumps(record) + "\n")
         except Exception as e:
             logger.error(f"Error writing signals file: {e}")
+
+        # Dual-write signal event into SQLite (append-only event log)
+        try:
+            if self._sqlite_enabled and self._trade_db is not None:
+                # Find the updated record (for payload snapshot)
+                payload = None
+                for record in records:
+                    if record.get("signal_id") == signal_id:
+                        payload = record
+                        break
+                self._trade_db.add_signal_event(
+                    signal_id=str(signal_id),
+                    status=str(status),
+                    timestamp=str(payload.get("timestamp") if isinstance(payload, dict) else get_utc_timestamp()),
+                    payload=payload if isinstance(payload, dict) else {"signal_id": signal_id, "status": status, **(data or {})},
+                )
+        except Exception as e:
+            logger.debug(f"Could not write signal event to SQLite: {e}")
 
     def _save_performance(self, performance: Dict) -> None:
         """Save performance record."""

@@ -58,6 +58,14 @@ except ImportError:
     BanditConfig = None  # type: ignore
     BanditDecision = None  # type: ignore
 
+# SQLite "forever memory" (optional - enabled via storage.sqlite_enabled)
+try:
+    from pearlalgo.learning.trade_database import TradeDatabase
+    TRADE_DB_AVAILABLE = True
+except ImportError:
+    TRADE_DB_AVAILABLE = False
+    TradeDatabase = None  # type: ignore
+
 # Contextual learning (optional - used for richer "learn by session/regime" analytics)
 try:
     from pearlalgo.learning.contextual_bandit import (
@@ -174,6 +182,24 @@ class NQAgentService:
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
         data_settings = service_config.get("data", {})
         telegram_ui_settings = service_config.get("telegram_ui", {}) or {}
+
+        # ==========================================================================
+        # STORAGE (SQLite dual-write; keeps Telegram/mobile compatibility)
+        # ==========================================================================
+        self._sqlite_enabled = False
+        self._trade_db: Optional["TradeDatabase"] = None
+        if TRADE_DB_AVAILABLE:
+            try:
+                storage_cfg = service_config.get("storage", {}) or {}
+                self._sqlite_enabled = bool(storage_cfg.get("sqlite_enabled", False))
+                if self._sqlite_enabled:
+                    db_path_raw = storage_cfg.get("db_path") or str(self.state_manager.state_dir / "trades.db")
+                    self._trade_db = TradeDatabase(Path(str(db_path_raw)))
+                    logger.info(f"SQLite storage enabled (dual-write): db_path={db_path_raw}")
+            except Exception as e:
+                logger.warning(f"SQLite storage init failed (continuing without DB): {e}")
+                self._sqlite_enabled = False
+                self._trade_db = None
 
         # Telegram UI formatting (Home Card / dashboards)
         try:
@@ -1005,33 +1031,35 @@ class NQAgentService:
                     logger.debug(f"Virtual exit update failed (non-fatal): {e}")
 
                 # Send periodic dashboard (replaces status + heartbeat)
-                # Determine quiet reason if no signals (for observability)
-                quiet_reason = None
+                # Determine quiet reason (for observability) and capture diagnostics every cycle (for SQLite rollups).
+                quiet_reason = "Active" if signals else self._get_quiet_reason(market_data, has_data=True, no_signals=True)
                 signal_diagnostics = None
                 signal_diagnostics_raw = None
-                if not signals:
-                    quiet_reason = self._get_quiet_reason(market_data, has_data=True, no_signals=True)
-                    # Get signal diagnostics for no-signal observability
-                    # Note: NQIntradayStrategy uses `signal_generator` (not `generator`)
-                    if hasattr(self.strategy, 'signal_generator') and hasattr(self.strategy.signal_generator, 'last_diagnostics'):
+
+                # Note: NQIntradayStrategy uses `signal_generator` (not `generator`)
+                try:
+                    if hasattr(self.strategy, "signal_generator") and hasattr(self.strategy.signal_generator, "last_diagnostics"):
                         diag = self.strategy.signal_generator.last_diagnostics
                         if diag is not None:
                             # Render as compact string for Telegram (e.g., "Raw: 3 → Valid: 0 | Filtered: 2 conf")
-                            signal_diagnostics = diag.format_compact() if hasattr(diag, 'format_compact') else str(diag)
+                            signal_diagnostics = diag.format_compact() if hasattr(diag, "format_compact") else str(diag)
                             try:
                                 signal_diagnostics_raw = diag.to_dict() if hasattr(diag, "to_dict") else None
                             except Exception:
                                 signal_diagnostics_raw = None
-                else:
-                    # Signals were generated - clear quiet state
-                    quiet_reason = "Active"
-                    signal_diagnostics = None
-                    signal_diagnostics_raw = None
+                except Exception:
+                    pass
                 
                 # Persist to instance variables for _save_state() (surfaced in /status)
                 self._last_quiet_reason = quiet_reason
                 self._last_signal_diagnostics = signal_diagnostics
                 self._last_signal_diagnostics_raw = signal_diagnostics_raw
+
+                # SQLite observability: persist per-cycle diagnostics for 24h /doctor summaries.
+                self._persist_cycle_diagnostics(
+                    quiet_reason=quiet_reason,
+                    diagnostics_raw=signal_diagnostics_raw,
+                )
                 
                 await self._check_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
 
@@ -3269,6 +3297,31 @@ class NQAgentService:
                 else {"enabled": False, "mode": "disabled"}
             ),
         }
+
+    def _persist_cycle_diagnostics(
+        self,
+        *,
+        quiet_reason: Optional[str],
+        diagnostics_raw: Optional[Dict],
+    ) -> None:
+        """
+        Persist per-cycle observability to SQLite (best-effort).
+
+        This enables 24h rollups (e.g. Telegram /doctor) without parsing log files.
+        """
+        try:
+            if not getattr(self, "_sqlite_enabled", False) or self._trade_db is None:
+                return
+            ts = get_utc_timestamp()
+            self._trade_db.add_cycle_diagnostics(
+                timestamp=ts,
+                cycle_count=int(getattr(self, "cycle_count", 0) or 0),
+                quiet_reason=str(quiet_reason) if quiet_reason is not None else None,
+                diagnostics=diagnostics_raw or {},
+            )
+        except Exception as e:
+            # Never allow observability writes to affect runtime.
+            logger.debug(f"Could not persist cycle diagnostics to SQLite: {e}")
 
     def _save_state(self) -> None:
         """Save current service state."""

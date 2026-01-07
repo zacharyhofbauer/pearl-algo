@@ -183,8 +183,323 @@ class TradeDatabase:
             """)
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_regime_timestamp ON regime_history(timestamp)")
+
+            # Signal events table (append-only) - mirrors signals.jsonl but queryable.
+            # We keep it generic: payload_json stores the full event record.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS signal_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    signal_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    payload_json TEXT
+                )
+            """)
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_signal_events_signal_id ON signal_events(signal_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_signal_events_timestamp ON signal_events(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_signal_events_status ON signal_events(status)")
+
+            # Cycle diagnostics (append-only) - per-scan observability for "why quiet / why rejected".
+            # We store key counters as columns for easy aggregation, plus full JSON payload for debug.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS cycle_diagnostics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    cycle_count INTEGER,
+                    quiet_reason TEXT,
+                    raw_signals INTEGER,
+                    validated_signals INTEGER,
+                    actionable_signals INTEGER,
+                    explore_signals INTEGER,
+                    duplicates_filtered INTEGER,
+                    stop_cap_applied INTEGER,
+                    session_scaling_applied INTEGER,
+                    rejected_market_hours INTEGER,
+                    rejected_confidence INTEGER,
+                    rejected_risk_reward INTEGER,
+                    rejected_quality_scorer INTEGER,
+                    rejected_order_book INTEGER,
+                    rejected_invalid_prices INTEGER,
+                    rejected_regime_filter INTEGER,
+                    rejected_ml_filter INTEGER,
+                    adaptive_sizing_applied INTEGER,
+                    payload_json TEXT
+                )
+            """)
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_cycle_diag_timestamp ON cycle_diagnostics(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_cycle_diag_quiet_reason ON cycle_diagnostics(quiet_reason)")
             
             conn.commit()
+
+    def add_signal_event(
+        self,
+        signal_id: str,
+        status: str,
+        timestamp: str,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Append a signal event (generated/entered/exited/expired/etc).
+
+        This is the SQLite equivalent of appending/updating signals.jsonl.
+
+        Args:
+            signal_id: Signal identifier
+            status: Event status (e.g., generated, entered, exited, expired)
+            timestamp: ISO timestamp string
+            payload: Optional payload dict (stored as JSON)
+        """
+        try:
+            payload_json = json.dumps(payload or {}, ensure_ascii=False)
+        except Exception:
+            payload_json = "{}"
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO signal_events (signal_id, status, timestamp, payload_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (str(signal_id), str(status), str(timestamp), payload_json),
+            )
+            conn.commit()
+
+    def get_recent_signal_events(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """Get most recent signal events (newest first)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT signal_id, status, timestamp, payload_json
+                FROM signal_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            )
+            rows = cursor.fetchall()
+
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            try:
+                payload = json.loads(r["payload_json"] or "{}")
+            except Exception:
+                payload = {}
+            out.append(
+                {
+                    "signal_id": r["signal_id"],
+                    "status": r["status"],
+                    "timestamp": r["timestamp"],
+                    "payload": payload,
+                }
+            )
+        return out
+
+    def get_signal_events(
+        self,
+        *,
+        status: Optional[str] = None,
+        from_time: Optional[str] = None,
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        """Get signal events with optional status/time filtering (newest first)."""
+        query = "SELECT signal_id, status, timestamp, payload_json FROM signal_events WHERE 1=1"
+        params: List[Any] = []
+        if status:
+            query += " AND status = ?"
+            params.append(str(status))
+        if from_time:
+            query += " AND timestamp >= ?"
+            params.append(str(from_time))
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(int(limit))
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            try:
+                payload = json.loads(r["payload_json"] or "{}")
+            except Exception:
+                payload = {}
+            out.append(
+                {
+                    "signal_id": r["signal_id"],
+                    "status": r["status"],
+                    "timestamp": r["timestamp"],
+                    "payload": payload,
+                }
+            )
+        return out
+
+    def add_cycle_diagnostics(
+        self,
+        *,
+        timestamp: str,
+        cycle_count: Optional[int] = None,
+        quiet_reason: Optional[str] = None,
+        diagnostics: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Append per-cycle diagnostics (observability).
+
+        Args:
+            timestamp: ISO timestamp string
+            cycle_count: Optional cycle counter
+            quiet_reason: Optional reason string (Active/NoOpportunity/etc)
+            diagnostics: Optional raw diagnostics dict (from SignalDiagnostics.to_dict())
+        """
+        diag = diagnostics or {}
+        try:
+            payload_json = json.dumps(diag, ensure_ascii=False)
+        except Exception:
+            payload_json = "{}"
+
+        def _int(key: str) -> Optional[int]:
+            try:
+                v = diag.get(key)
+                if v is None:
+                    return None
+                return int(v)
+            except Exception:
+                return None
+
+        def _bool_int(key: str) -> Optional[int]:
+            try:
+                v = diag.get(key)
+                if v is None:
+                    return None
+                return 1 if bool(v) else 0
+            except Exception:
+                return None
+
+        row = {
+            "timestamp": str(timestamp),
+            "cycle_count": int(cycle_count) if cycle_count is not None else None,
+            "quiet_reason": str(quiet_reason) if quiet_reason else None,
+            "raw_signals": _int("raw_signals"),
+            "validated_signals": _int("validated_signals"),
+            "actionable_signals": _int("actionable_signals"),
+            "explore_signals": _int("explore_signals"),
+            "duplicates_filtered": _int("duplicates_filtered"),
+            "stop_cap_applied": _int("stop_cap_applied"),
+            "session_scaling_applied": _int("session_scaling_applied"),
+            "rejected_market_hours": _bool_int("rejected_market_hours"),
+            "rejected_confidence": _int("rejected_confidence"),
+            "rejected_risk_reward": _int("rejected_risk_reward"),
+            "rejected_quality_scorer": _int("rejected_quality_scorer"),
+            "rejected_order_book": _int("rejected_order_book"),
+            "rejected_invalid_prices": _int("rejected_invalid_prices"),
+            "rejected_regime_filter": _int("rejected_regime_filter"),
+            "rejected_ml_filter": _int("rejected_ml_filter"),
+            "adaptive_sizing_applied": _int("adaptive_sizing_applied"),
+            "payload_json": payload_json,
+        }
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO cycle_diagnostics (
+                    timestamp, cycle_count, quiet_reason,
+                    raw_signals, validated_signals, actionable_signals, explore_signals,
+                    duplicates_filtered, stop_cap_applied, session_scaling_applied,
+                    rejected_market_hours, rejected_confidence, rejected_risk_reward, rejected_quality_scorer,
+                    rejected_order_book, rejected_invalid_prices, rejected_regime_filter, rejected_ml_filter,
+                    adaptive_sizing_applied, payload_json
+                ) VALUES (
+                    :timestamp, :cycle_count, :quiet_reason,
+                    :raw_signals, :validated_signals, :actionable_signals, :explore_signals,
+                    :duplicates_filtered, :stop_cap_applied, :session_scaling_applied,
+                    :rejected_market_hours, :rejected_confidence, :rejected_risk_reward, :rejected_quality_scorer,
+                    :rejected_order_book, :rejected_invalid_prices, :rejected_regime_filter, :rejected_ml_filter,
+                    :adaptive_sizing_applied, :payload_json
+                )
+                """,
+                row,
+            )
+            conn.commit()
+
+    def get_signal_event_counts(self, *, from_time: Optional[str] = None) -> Dict[str, int]:
+        """Get counts of signal events by status."""
+        query = "SELECT status, COUNT(*) as count FROM signal_events WHERE 1=1"
+        params: List[Any] = []
+        if from_time:
+            query += " AND timestamp >= ?"
+            params.append(from_time)
+        query += " GROUP BY status"
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+        return {str(r["status"]): int(r["count"]) for r in rows}
+
+    def get_cycle_diagnostics_aggregate(self, *, from_time: Optional[str] = None) -> Dict[str, Any]:
+        """Aggregate per-cycle diagnostics into a single summary dict."""
+        query = """
+            SELECT
+                COUNT(*) as cycles,
+                SUM(COALESCE(raw_signals, 0)) as raw_signals,
+                SUM(COALESCE(validated_signals, 0)) as validated_signals,
+                SUM(COALESCE(actionable_signals, 0)) as actionable_signals,
+                SUM(COALESCE(explore_signals, 0)) as explore_signals,
+                SUM(COALESCE(duplicates_filtered, 0)) as duplicates_filtered,
+                SUM(COALESCE(stop_cap_applied, 0)) as stop_cap_applied,
+                SUM(COALESCE(session_scaling_applied, 0)) as session_scaling_applied,
+                SUM(COALESCE(rejected_market_hours, 0)) as rejected_market_hours,
+                SUM(COALESCE(rejected_confidence, 0)) as rejected_confidence,
+                SUM(COALESCE(rejected_risk_reward, 0)) as rejected_risk_reward,
+                SUM(COALESCE(rejected_quality_scorer, 0)) as rejected_quality_scorer,
+                SUM(COALESCE(rejected_order_book, 0)) as rejected_order_book,
+                SUM(COALESCE(rejected_invalid_prices, 0)) as rejected_invalid_prices,
+                SUM(COALESCE(rejected_regime_filter, 0)) as rejected_regime_filter,
+                SUM(COALESCE(rejected_ml_filter, 0)) as rejected_ml_filter,
+                SUM(COALESCE(adaptive_sizing_applied, 0)) as adaptive_sizing_applied
+            FROM cycle_diagnostics
+            WHERE 1=1
+        """
+        params: List[Any] = []
+        if from_time:
+            query += " AND timestamp >= ?"
+            params.append(from_time)
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+
+        if not row:
+            return {"cycles": 0}
+
+        return {k: row[k] for k in row.keys()}
+
+    def get_quiet_reason_counts(self, *, from_time: Optional[str] = None, limit: int = 10) -> Dict[str, int]:
+        """Count quiet reasons over time window (top N)."""
+        query = """
+            SELECT quiet_reason, COUNT(*) as count
+            FROM cycle_diagnostics
+            WHERE quiet_reason IS NOT NULL AND quiet_reason != ''
+        """
+        params: List[Any] = []
+        if from_time:
+            query += " AND timestamp >= ?"
+            params.append(from_time)
+        query += " GROUP BY quiet_reason ORDER BY count DESC LIMIT ?"
+        params.append(int(limit))
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+        return {str(r["quiet_reason"]): int(r["count"]) for r in rows}
     
     def add_trade(
         self,
@@ -553,6 +868,51 @@ class TradeDatabase:
             "signal_types": signal_types,
             "first_trade": time_range[0],
             "last_trade": time_range[1],
+        }
+
+    def get_trade_summary(self, *, from_exit_time: Optional[str] = None) -> Dict[str, Any]:
+        """Get summary stats for trades over a time window (by exit_time)."""
+        query = """
+            SELECT
+                COUNT(*) as total,
+                SUM(is_win) as wins,
+                SUM(pnl) as total_pnl,
+                AVG(pnl) as avg_pnl,
+                AVG(hold_duration_minutes) as avg_hold
+            FROM trades
+            WHERE 1=1
+        """
+        params: List[Any] = []
+        if from_exit_time:
+            query += " AND exit_time >= ?"
+            params.append(str(from_exit_time))
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+
+        if not row:
+            return {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "total_pnl": 0.0, "avg_pnl": 0.0, "avg_hold": None}
+
+        total = int(row["total"] or 0)
+        wins = int(row["wins"] or 0)
+        total_pnl = float(row["total_pnl"] or 0.0)
+        avg_pnl = float(row["avg_pnl"] or 0.0)
+        avg_hold = row["avg_hold"]
+        try:
+            avg_hold_f = float(avg_hold) if avg_hold is not None else None
+        except Exception:
+            avg_hold_f = None
+
+        return {
+            "total": total,
+            "wins": wins,
+            "losses": total - wins,
+            "win_rate": (wins / total) if total > 0 else 0.0,
+            "total_pnl": total_pnl,
+            "avg_pnl": avg_pnl,
+            "avg_hold_minutes": avg_hold_f,
         }
 
 
