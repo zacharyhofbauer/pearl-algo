@@ -1458,7 +1458,11 @@ class TelegramCommandHandler:
                 except Exception as e:
                     logger.debug(f"Could not build trade monitor: {e}")
 
-            # Show simplified 7d all-time PnL (if available) before challenge status
+            # Optional: 50k Challenge status (shows attempt-specific PnL + progress)
+            if challenge_status:
+                message += f"\n\n{challenge_status}"
+
+            # Show simplified 7d all-time PnL (below challenge, above recent exits)
             if perf_7d_alltime and perf_7d_alltime.get("exited_signals", 0) > 0:
                 pnl_7d = perf_7d_alltime.get("total_pnl", 0.0)
                 wins_7d = perf_7d_alltime.get("wins", 0)
@@ -1466,10 +1470,6 @@ class TelegramCommandHandler:
                 pnl_emoji_7d = "🟢" if pnl_7d >= 0 else "🔴"
                 pnl_str_7d = f"+${pnl_7d:,.2f}" if pnl_7d >= 0 else f"-${abs(pnl_7d):,.2f}"
                 message += f"\n\n*7d All-Time:* {pnl_emoji_7d} {pnl_str_7d} ({wins_7d}W/{losses_7d}L)"
-            
-            # Optional: 50k Challenge status (shows attempt-specific PnL + progress)
-            if challenge_status:
-                message += f"\n\n{challenge_status}"
 
             # Optional: Prop firm guardrails snapshot (kept compact)
             try:
