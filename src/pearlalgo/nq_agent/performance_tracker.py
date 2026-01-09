@@ -345,7 +345,11 @@ class PerformanceTracker:
             "exit_time": exit_time.isoformat(),
         }
 
-        # Update signal status
+        # Determine outcome string for consistent schema
+        outcome = "win" if is_win else "loss"
+
+        # Update signal status with all required fields for downstream consumers
+        # (Claude Monitor, Telegram, quality scorer all rely on consistent schema)
         self._update_signal_status(
             signal_id,
             "exited",
@@ -355,7 +359,10 @@ class PerformanceTracker:
                 "exit_reason": exit_reason,
                 "pnl": pnl,
                 "is_win": is_win,
+                "outcome": outcome,  # Required for quality scorer / win-rate tracking
                 "hold_duration_minutes": hold_duration,
+                # Promote signal_type to top level for easier querying
+                "signal_type": signal.get("type"),
             },
         )
 

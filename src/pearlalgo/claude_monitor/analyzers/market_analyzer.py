@@ -442,7 +442,8 @@ class MarketAnalyzer:
         }
         
         # If Claude available, enhance analysis
-        if self._claude and latest_bar:
+        # If Claude available and not disabled (e.g., billing), enhance with AI analysis
+        if self._claude and self._claude.is_available() and latest_bar:
             try:
                 ai_analysis = await self._claude_analysis(
                     agent_state, market_data, regime_type, volatility_level, current_session

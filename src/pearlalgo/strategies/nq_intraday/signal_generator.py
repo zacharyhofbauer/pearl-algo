@@ -1694,6 +1694,10 @@ class NQSignalGenerator:
             if after != before:
                 validated_signal["_risk_position_size_after"] = after
                 validated_signal["position_size"] = after
+                logger.info(
+                    "Signal type size override: %s %d → %d (mult=%s, cap=%s)",
+                    sig_type, before, after, mult, cap,
+                )
         except Exception:
             return
     

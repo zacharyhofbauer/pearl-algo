@@ -1089,14 +1089,14 @@ class NQScanner:
                 is_fresh_breakout = False
                 if latest["close"] > float(recent_high):
                     is_fresh_breakout = abs(current_price - float(recent_high)) / float(recent_high) < 0.003
-
+                
                 # For fresh breakouts, relax RSI requirement (structure breaks happen before indicators confirm)
                 rsi = latest.get("rsi", 50)
                 if is_fresh_breakout:
                     rsi_ok = rsi > 40  # Lower threshold for fresh breakouts
                 else:
                     rsi_ok = rsi > 45  # Original threshold for established breakouts
-
+                
                 if (
                     latest["close"] > float(recent_high)
                     and latest.get("volume_ratio", 0) > vr_breakout  # Volume confirmation (session-aware)
@@ -1113,7 +1113,7 @@ class NQScanner:
                             f"Fresh breakout detected (within 0.3% of level {float(recent_high):.2f}), "
                             "applying structure-first gate with relaxed RSI threshold"
                         )
-
+                    
                     # Adjust confidence based on regime
                     confidence = self.regime_detector.adjust_confidence_by_regime(
                         "breakout_long", confidence, regime
@@ -1211,14 +1211,14 @@ class NQScanner:
                 is_fresh_breakdown = False
                 if latest["close"] < float(recent_low):
                     is_fresh_breakdown = abs(current_price - float(recent_low)) / float(recent_low) < 0.003
-
+                
                 # For fresh breakdowns, relax RSI requirement
                 rsi = latest.get("rsi", 50)
                 if is_fresh_breakdown:
                     rsi_ok = rsi < 60  # Higher threshold for fresh breakdowns
                 else:
                     rsi_ok = rsi < 55  # Original threshold for established breakdowns
-
+                
                 if (
                     latest["close"] < float(recent_low)
                     and latest.get("volume_ratio", 0) > vr_breakout  # Volume confirmation (session-aware)
@@ -1235,7 +1235,7 @@ class NQScanner:
                             f"Fresh breakdown detected (within 0.3% of level {float(recent_low):.2f}), "
                             "applying structure-first gate with relaxed RSI threshold"
                         )
-
+                    
                     # Adjust confidence based on regime
                     confidence = self.regime_detector.adjust_confidence_by_regime(
                         "breakout_short", confidence, regime

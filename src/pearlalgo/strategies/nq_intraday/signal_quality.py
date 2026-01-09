@@ -504,16 +504,34 @@ class SignalQualityScorer:
                             performance_data["total_exits"] += 1
                             
                             # Extract signal and outcome data
+                            # Prefer top-level signal_type (newer schema), fallback to nested
                             signal = record.get("signal", {})
-                            signal_type = signal.get("type", "unknown")
+                            signal_type = (
+                                record.get("signal_type") 
+                                or signal.get("type") 
+                                or signal.get("signal_type")
+                                or "unknown"
+                            )
                             regime = signal.get("regime", {})
                             regime_type = regime.get("regime", "ranging")
                             volatility = regime.get("volatility", "normal")
                             
-                            # Determine win/loss from exit_reason
-                            exit_reason = record.get("exit_reason", "")
-                            is_win = exit_reason == "take_profit"
+                            # Determine win/loss: prefer explicit is_win, then outcome, then pnl
                             pnl = float(record.get("pnl", 0.0) or 0.0)
+                            is_win_field = record.get("is_win")
+                            outcome_field = record.get("outcome")
+                            
+                            if is_win_field is True:
+                                is_win = True
+                            elif is_win_field is False:
+                                is_win = False
+                            elif outcome_field == "win":
+                                is_win = True
+                            elif outcome_field == "loss":
+                                is_win = False
+                            else:
+                                # Fallback: derive from pnl
+                                is_win = pnl > 0
                             
                             # Update signal type + regime stats
                             key = f"{signal_type}_{regime_type}_{volatility}"

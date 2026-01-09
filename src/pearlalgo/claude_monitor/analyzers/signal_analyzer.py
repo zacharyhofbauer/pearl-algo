@@ -177,8 +177,8 @@ class SignalAnalyzer:
         # Calculate metrics locally first
         local_analysis = self._calculate_metrics(signals, performance)
         
-        # If Claude available, enhance with AI analysis
-        if self._claude:
+        # If Claude available and not disabled (e.g., billing), enhance with AI analysis
+        if self._claude and self._claude.is_available():
             try:
                 ai_analysis = await self._claude_analysis(signals, performance, agent_state, local_analysis)
                 return self._merge_analysis(local_analysis, ai_analysis)
@@ -410,7 +410,7 @@ class SignalAnalyzer:
                 json_str = response.split("```json")[1].split("```")[0]
             elif "```" in response:
                 json_str = response.split("```")[1].split("```")[0]
-
+            
             parsed = json.loads(json_str)
             if isinstance(parsed, dict):
                 return parsed

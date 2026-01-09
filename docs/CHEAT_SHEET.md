@@ -354,4 +354,135 @@ git apply patch.diff
 
 ---
 
+## 9. Quick Health Check (2-Minute Checklist)
+
+Run the health check script for a fast sanity check:
+
+```bash
+./scripts/health_check.sh
+```
+
+**What it verifies:**
+- ✅ NQ Agent running
+- ✅ Telegram Handler running
+- ✅ Claude Monitor running (optional)
+- ✅ IBKR Gateway running
+- ✅ State file present and fresh
+- ✅ Market & Session gates open
+- ✅ Recent signal activity
+
+**Manual checks (if health_check.sh unavailable):**
+
+```bash
+# Check all services running
+pgrep -f "pearlalgo.nq_agent.main" && echo "✅ Agent OK"
+pgrep -f "telegram_command_handler" && echo "✅ Telegram OK"
+pgrep -f "claude_monitor" && echo "⚠️  Monitor (optional)"
+
+# Check state freshness
+stat data/nq_agent_state/state.json | grep Modify
+
+# Check signal diagnostics
+cat data/nq_agent_state/state.json | jq '.signal_diagnostics'
+
+# Check today's signals
+grep "$(date -u +%Y-%m-%d)" data/nq_agent_state/signals.jsonl | wc -l
+```
+
+---
+
+## 10. Restart Commands Quick Reference
+
+| Service | Stop | Start | Restart |
+|---------|------|-------|---------|
+| **NQ Agent** | `./scripts/lifecycle/stop_nq_agent_service.sh` | `./scripts/lifecycle/start_nq_agent_service.sh --background` | Stop + Start |
+| **Telegram** | `pkill -f telegram_command_handler` | `./scripts/telegram/start_command_handler.sh --background` | Kill + Start |
+| **Claude Monitor** | `./scripts/lifecycle/stop_claude_monitor.sh` | `./scripts/lifecycle/start_claude_monitor.sh --background` | Stop + Start |
+| **Gateway** | `./scripts/gateway/gateway.sh stop` | `./scripts/gateway/gateway.sh start` | Stop + Start |
+
+**Common restart scenarios:**
+
+```bash
+# After config.yaml change (full restart)
+./scripts/lifecycle/stop_nq_agent_service.sh
+./scripts/lifecycle/start_nq_agent_service.sh --background
+
+# After code change (full restart all)
+./scripts/lifecycle/stop_nq_agent_service.sh
+./scripts/lifecycle/stop_claude_monitor.sh
+pkill -f telegram_command_handler
+./scripts/lifecycle/start_nq_agent_service.sh --background
+./scripts/lifecycle/start_claude_monitor.sh --background
+./scripts/telegram/start_command_handler.sh --background
+```
+
+---
+
+## 11. Safe Optimization Workflow (No Opportunity Loss)
+
+> **Golden Rule:** Never tighten filters that reduce signal count without backtesting.
+
+### Step 1: Check Current Performance
+
+```bash
+# View 7-day metrics
+cat data/nq_agent_state/signals.jsonl | jq -s '
+  [.[] | select(.status == "exited")] |
+  {total: length, wins: [.[] | select(.is_win == true)] | length, pnl: [.[].pnl] | add}'
+```
+
+Or from Telegram: `/performance 7d`
+
+### Step 2: Identify Improvement Target
+
+- **In-trade adjustments** (safe): trailing stops, breakeven, position sizing
+- **Entry filtering** (risky): min_confidence, min_risk_reward, quality scorer
+
+### Step 3: Test with Backtest Gate
+
+The Claude Monitor backtest gate automatically tests config changes before applying.
+
+For manual testing:
+```bash
+python scripts/backtesting/backtest_cli.py signal \
+  --data-path data/historical/MNQ_1m_2w.parquet \
+  --config-override "signals.min_confidence=0.5"
+```
+
+### Step 4: Apply Change
+
+Edit `config/config.yaml` and restart:
+```bash
+./scripts/lifecycle/stop_nq_agent_service.sh
+./scripts/lifecycle/start_nq_agent_service.sh --background
+```
+
+### Step 5: Verify No Opportunity Loss
+
+Check signal diagnostics after a few cycles:
+```bash
+cat data/nq_agent_state/state.json | jq '.signal_diagnostics_raw'
+```
+
+- `raw_signals` should be similar to before
+- `validated_signals` should be similar (or higher if loosening)
+- `rejected_*` counters show what's filtering
+
+---
+
+## 12. Key Config Paths (config/config.yaml)
+
+| Path | Impact | Safe to Tune? |
+|------|--------|---------------|
+| `signals.min_confidence` | Filters low-confidence signals | ⚠️ Backtest first |
+| `signals.min_risk_reward` | Filters poor R:R signals | ⚠️ Backtest first |
+| `signals.quality_score.enabled` | Quality scorer on/off | ⚠️ Can block all signals |
+| `trailing_stop.enabled` | In-trade stop management | ✅ Safe |
+| `trailing_stop.min_profit_before_be` | Breakeven threshold | ✅ Safe |
+| `risk.signal_type_size_multipliers` | Per-type position sizing | ✅ Safe (keeps signals) |
+| `risk.signal_type_max_contracts` | Per-type contract caps | ✅ Safe (keeps signals) |
+| `drift_guard.enabled` | Auto-throttle on poor performance | ✅ Safe |
+
+---
+
 This cheat sheet is the **primary quick-reference** for PEARLalgo operations. Keep it updated as workflows evolve.
