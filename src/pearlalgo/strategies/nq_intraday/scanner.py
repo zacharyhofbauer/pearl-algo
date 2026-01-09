@@ -1358,6 +1358,25 @@ class NQScanner:
             if custom_features:
                 sig["custom_features"] = custom_features
 
+        # Final config enforcement: filter by the *actual* signal type.
+        #
+        # Some scanner gates use base keys (e.g., "sr_bounce") to decide whether to run a scan,
+        # but the scan may emit more specific types (e.g., "sr_bounce_long"/"sr_bounce_short").
+        # Filtering here ensures `strategy.disabled_signals` is respected for sub-types.
+        try:
+            filtered: List[Dict] = []
+            for sig in signals:
+                sig_type = str(sig.get("type") or "")
+                if not sig_type:
+                    continue
+                if hasattr(self.config, "is_signal_enabled") and not self.config.is_signal_enabled(sig_type):
+                    continue
+                filtered.append(sig)
+            signals = filtered
+        except Exception:
+            # Never fail the scan loop due to config filtering.
+            pass
+
         # Attach a compact HUD context to every signal for TradingView-style chart rendering.
         # Keep this computed once per scan cycle (not per signal) for performance.
         if signals:

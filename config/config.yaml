@@ -16,10 +16,10 @@ telegram_ui:
 risk:
   max_risk_per_trade: 0.01
   max_drawdown: 0.1
-  stop_loss_atr_multiplier: 1.5
-  take_profit_risk_reward: 1.5
+  stop_loss_atr_multiplier: 2.5
+  take_profit_risk_reward: 2.0
   min_position_size: 5
-  max_position_size: 15
+  max_position_size: 50
   signal_type_size_multipliers:
     sr_bounce: 0.25
   signal_type_max_contracts:
@@ -78,14 +78,14 @@ challenge:
   auto_reset_on_fail: true
 signals:
   duplicate_window_seconds: 120
-  min_confidence: 0.4
-  min_risk_reward: 1.0
+  min_confidence: 0.55
+  min_risk_reward: 1.3
   duplicate_price_threshold_pct: 0.5
   volatility_threshold: 0.0001
   avoid_lunch_lull: false
   quality_score:
-    enabled: false
-    threshold: 0.4
+    enabled: true
+    threshold: 0.45
     factors:
       confidence_weight: 0.3
       risk_reward_weight: 0.25
@@ -100,7 +100,7 @@ signals:
     min_risk_reward: 2.0
     include_quality_rejects: false
     bypass_regime_filters: false
-  max_stop_points: 20.0
+  max_stop_points: 35.0
   adaptive_volatility_filter:
     enabled: false
     expansion_requirement: 2.0
@@ -144,30 +144,32 @@ signals:
 strategy:
   enabled_signals:
   - sr_bounce
-  - mean_reversion_long
-  - mean_reversion_short
-  - momentum_long
-  - momentum_short
-  - breakout_long
-  - breakout_short
+  - mean_reversion
+  - momentum
+  - breakout
   disabled_signals:
   - momentum_long
+  - sr_bounce
   enable_dynamic_sizing: true
-  base_contracts: 3
-  high_conf_contracts: 8
-  max_conf_contracts: 12
+  base_contracts: 8
+  high_conf_contracts: 15
+  max_conf_contracts: 50
   high_conf_threshold: 0.8
   max_conf_threshold: 0.9
   winning_signal_types:
   - mean_reversion_long
+  - momentum_short
+  signal_type_size_multipliers:
+    mean_reversion_long: 1.5
+    momentum_short: 1.3
   use_scalp_presets: false
   scalp_target_points: 20.0
   scalp_stop_points: 12.0
   session_position_scaling:
     enabled: true
-    london_multiplier: 0.5
-    tokyo_multiplier: 0.5
-    ny_multiplier: 1.0
+    london_multiplier: 0.8
+    tokyo_multiplier: 0.7
+    ny_multiplier: 1.5
 strategy_variants:
   emergency_baseline:
     description: Current EMERGENCY settings - strict filters
@@ -294,19 +296,19 @@ indicators:
     pivot_lookback: 5
     rsi_period: 14
 llm_signal_annotation:
-  enabled: true
+  enabled: false
   model: claude-sonnet-4-20250514
   timeout_seconds: 5
   batch_mode: false
 llm_trade_postmortem:
-  enabled: true
+  enabled: false
   model: claude-sonnet-4-20250514
   timeout_seconds: 10
-  min_pnl_threshold: 100
+  min_pnl_threshold: 500
   send_to_telegram: true
   batch_analysis_count: 5
 llm_pattern_recognition:
-  enabled: true
+  enabled: false
   model: claude-sonnet-4-20250514
   timeout_seconds: 30
   batch_size: 5
@@ -314,16 +316,16 @@ llm_pattern_recognition:
   min_pattern_confidence: 0.6
   send_to_telegram: true
 llm_risk_assessment:
-  enabled: true
+  enabled: false
   model: claude-sonnet-4-20250514
   timeout_seconds: 3
   block_on_critical: false
   consider_recent_trades: 20
 llm_adaptive_tuning:
-  enabled: true
+  enabled: false
   model: claude-sonnet-4-20250514
   timeout_seconds: 60
-  analysis_interval_hours: 12
+  analysis_interval_hours: 24
   auto_apply: false
   min_sample_size: 20
   conservative_mode: true
@@ -377,38 +379,40 @@ adaptive_stops:
   enabled: true
   use_structure_stops: true
   use_level2_zones: true
-  min_stop_points: 5.0
+  min_stop_points: 8.0
   regime_multipliers:
-    ranging: 1.0
-    trending_bullish: 1.2
-    trending_bearish: 1.2
+    ranging: 1.2
+    trending_bullish: 1.3
+    trending_bearish: 1.3
   session_multipliers:
-    tokyo: 0.8
-    london: 0.9
-    new_york: 1.0
+    tokyo: 1.0
+    london: 1.1
+    new_york: 1.2
   volatility_multipliers:
-    low: 0.9
+    low: 1.0
     normal: 1.0
-    high: 1.3
+    high: 1.5
   performance_adjustment: true
 swing_trading:
   enabled: true
-  min_confidence: 0.9
-  min_target_points: 30
+  min_confidence: 0.75
+  min_target_points: 50
   min_mtf_alignment: 0.8
   min_volume_ratio: 1.2
-  max_hold_hours: 8
-  position_size_multiplier: 1.5
+  max_hold_hours: 24
+  position_size_multiplier: 2.5
 trailing_stop:
   enabled: true
-  breakeven_immediate: true
+  breakeven_immediate: false
   trail_method: dynamic
   early_profit_trail_atr: 0.5
   medium_profit_trail_atr: 1.0
-  large_profit_trail_atr: 1.5
+  large_profit_trail_atr: 2.0
   update_frequency_bars: 1
   never_widen: true
-  min_profit_before_be: 2.0
+  # Delay breakeven so we don't get chopped out at entry after tiny moves.
+  # Units are MNQ/NQ points (see TrailingStopManager in src/pearlalgo/strategies/nq_intraday/trade_manager.py).
+  min_profit_before_be: 12.0
 adaptive_sizing:
   enabled: true
   method: kelly_criterion
@@ -477,10 +481,10 @@ prop_firm:
 claude_monitor:
   enabled: true
   timezone: America/New_York
-  realtime_monitoring: true
+  realtime_monitoring: false
   realtime_interval_seconds: 60
-  frequent_interval_seconds: 900
-  code_analysis_interval_hours: 24
+  frequent_interval_seconds: 3600
+  code_analysis_interval_hours: 48
   code_analysis_enabled: false
   daily_report_enabled: true
   daily_report_time: 09:00
@@ -489,37 +493,27 @@ claude_monitor:
   weekly_report_time: 09:00
   alert_levels:
   - critical
-  - warning
   alert_categories:
   - signals
-  - market
-  - system
   include_alert_metadata: false
-  dedup_window_seconds: 1800
-  max_alerts_per_hour: 12
+  dedup_window_seconds: 3600
+  max_alerts_per_hour: 6
   quiet_hours_start: '22:00'
   quiet_hours_end: 07:00
   suppress_info_during_quiet: true
-  max_suggestions_per_analysis: 5
-  auto_apply_enabled: true
-  max_auto_changes_per_day: 5
-  # Auto-apply safety gate: run a fast signal-only backtest before applying any config tweak.
-  # This prevents silent "opportunity loss" (trade frequency collapse) from threshold tuning.
+  max_suggestions_per_analysis: 3
+  auto_apply_enabled: false
+  max_auto_changes_per_day: 0
   auto_apply_backtest_enabled: true
   auto_apply_backtest_data_path: data/historical/MNQ_1m_2w.parquet
   auto_apply_backtest_lookback_weeks: 1
   auto_apply_backtest_decision: 1m
   auto_apply_backtest_timeout_seconds: 45
-  # Hard cap bars for runtime predictability (prevents long-running backtests in the monitor loop).
   auto_apply_backtest_max_bars: 200
-  # Block auto-apply if total validated signals drop by more than this fraction vs baseline.
-  # Example: 0.05 = allow up to 5% fewer signals. Set to 0.0 to require NO drop.
   auto_apply_backtest_max_signal_drop_pct: 0.05
   auto_apply_backtest_min_baseline_signals: 20
-  # Also block auto-apply if it would zero-out a signal type that had >= N signals in baseline.
   auto_apply_backtest_min_type_baseline_signals: 10
   auto_apply_backtest_fail_on_type_zeroed: true
-  # If backtest gate fails, defer retries for this many minutes (prevents spam/re-running).
   auto_apply_backtest_defer_minutes: 360
   strategy_update_prompts_enabled: true
   strategy_update_prompt_cooldown_seconds: 1800

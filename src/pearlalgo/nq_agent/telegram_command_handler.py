@@ -353,6 +353,7 @@ class TelegramCommandHandler:
         self.application.add_handler(CommandHandler("performance", self._handle_performance))
         self.application.add_handler(CommandHandler("doctor", self._handle_doctor))
         self.application.add_handler(CommandHandler("brain", self._handle_brain))
+        self.application.add_handler(CommandHandler("suggest", self._handle_suggest_simple))
 
         # Friendly fallback for any other slash command: point users back to /start.
         async def _unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6364,7 +6365,7 @@ Choose what you want to inspect:
         chat_toggle_text = "💬 Chat: ON ✓" if chat_mode_enabled else "💬 Chat: OFF"
         
         if show_monitor:
-            # Claude Monitor view
+            # Claude Monitor view - SIMPLIFIED
             try:
                 monitor_running = bool(self.service_controller.get_claude_monitor_status().get("running"))
             except Exception:
@@ -6377,16 +6378,8 @@ Choose what you want to inspect:
                     InlineKeyboardButton(monitor_btn_text, callback_data=monitor_btn_action),
                     InlineKeyboardButton("🔄 Refresh", callback_data="claude_monitor_hub"),
                 ],
-                [InlineKeyboardButton("📊 Analyze Now", callback_data='claude_analyze_now')],
-                [
-                    InlineKeyboardButton("📈 Signals", callback_data='claude_analyze_signals'),
-                    InlineKeyboardButton("🔧 System", callback_data='claude_analyze_system'),
-                ],
-                [
-                    InlineKeyboardButton("📉 Market", callback_data='claude_analyze_market'),
-                    InlineKeyboardButton("💡 Suggest", callback_data='claude_suggest_config'),
-                ],
-                [InlineKeyboardButton("📋 Suggestions", callback_data='claude_suggestions')],
+                [InlineKeyboardButton("💡 Get Suggestions", callback_data='claude_suggest_simple')],
+                [InlineKeyboardButton("📊 Quick Analysis", callback_data='claude_analyze_now')],
                 [InlineKeyboardButton("⬅️ Back to Hub", callback_data='claude_hub')],
             ]
         else:
@@ -9511,8 +9504,19 @@ _Commands are policy-gated for safety._
             await self._handle_analyze_market(update, context)
         elif callback_data == 'claude_suggest_config':
             await self._handle_suggest_config(update, context)
+        elif callback_data == 'claude_suggest_simple':
+            # Use the simplified suggest handler
+            await self._handle_suggest_simple(update, context)
         elif callback_data == 'claude_suggestions':
             await self._handle_suggestions(update, context)
+        elif callback_data.startswith("sug:preview:"):
+            # Preview suggestion details
+            sug_id = callback_data.replace("sug:preview:", "")
+            await self._handle_suggestion_preview(update, context, sug_id)
+        elif callback_data.startswith("sug:apply:"):
+            # Apply suggestion directly from button
+            sug_id = callback_data.replace("sug:apply:", "")
+            await self._handle_suggestion_apply_button(update, context, sug_id)
         elif callback_data.startswith("sug:"):
             await self._handle_suggestion_callback(update, context, callback_data)
         else:
@@ -11073,6 +11077,142 @@ _Commands are policy-gated for safety._
             logger.error(f"Error handling /analyze_market: {e}", exc_info=True)
             await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
     
+    async def _handle_suggest_simple(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        Simplified /suggest command - Shows suggestions with clear WHY/WHEN/WHAT and easy apply buttons.
+        Usage: /suggest [new] - 'new' optionally triggers fresh analysis
+        Works for both command (/suggest) and button clicks (claude_suggest_simple)
+        """
+        if not await self._check_authorized(update):
+            return
+        
+        logger.info(f"📡 Received /suggest command from {update.effective_user.id}")
+        
+        try:
+            monitor = self._get_claude_monitor()
+            
+            if not monitor:
+                await self._send_message_or_edit(
+                    update,
+                    context,
+                    "❌ Claude monitor not available\n\n"
+                    "Start it with: /ai → 🔍 AI Monitor → ▶️ Start Monitor"
+                )
+                return
+            
+            # Check if user wants fresh analysis (only for commands, not button clicks)
+            args = context.args or []
+            generate_new = ("new" in args or "refresh" in args or "analyze" in args) and update.message is not None
+            
+            if generate_new:
+                await self._send_message_or_edit(
+                    update,
+                    context,
+                    "🔄 Running fresh analysis to generate suggestions...",
+                    reply_markup=None,
+                )
+                await monitor.force_analysis()
+            
+            suggestions = monitor.get_active_suggestions()
+            
+            if not suggestions:
+                await self._send_message_or_edit(
+                    update,
+                    context,
+                    "✅ *No Active Suggestions*\n\n"
+                    "There are no suggestions at this time.\n\n"
+                    "Use `/suggest new` to run fresh analysis and generate new suggestions.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🔄 Generate New", callback_data="claude_analyze_now")],
+                        [InlineKeyboardButton("🏠 Main Menu", callback_data="start")],
+                    ]),
+                )
+                return
+            
+            # Format suggestions with WHY/WHEN/WHAT
+            message_parts = ["💡 *Trading Suggestions*\n"]
+            buttons = []
+            
+            for i, sug in enumerate(suggestions[:5], 1):  # Limit to 5 for readability
+                sug_id = sug.get("id", "???")
+                title = sug.get("title", "Untitled")
+                risk_level = sug.get("risk_level", "medium")
+                config_path = sug.get("config_path", "")
+                old_value = sug.get("old_value")
+                new_value = sug.get("new_value")
+                rationale = sug.get("rationale", sug.get("description", ""))
+                created_at = sug.get("created_at", "")
+                
+                # Risk emoji
+                risk_emoji = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(risk_level, "⚪")
+                
+                # Build message
+                message_parts.append(f"\n{risk_emoji} *{i}. {title}*")
+                message_parts.append(f"   `{sug_id}`")
+                
+                # WHAT: What's the change?
+                if config_path and old_value is not None and new_value is not None:
+                    message_parts.append(f"\n   📝 *WHAT:* `{config_path}`")
+                    message_parts.append(f"      `{old_value}` → `{new_value}`")
+                elif config_path:
+                    message_parts.append(f"\n   📝 *WHAT:* `{config_path}`")
+                
+                # WHY: Why should we do this?
+                if rationale:
+                    # Truncate if too long
+                    rationale_short = rationale[:200] + "..." if len(rationale) > 200 else rationale
+                    message_parts.append(f"\n   💭 *WHY:* {rationale_short}")
+                
+                # WHEN: When was this suggested?
+                if created_at:
+                    try:
+                        # Try to format timestamp
+                        from dateutil import parser
+                        dt = parser.parse(created_at)
+                        when_str = dt.strftime("%b %d, %H:%M")
+                        message_parts.append(f"\n   ⏰ *WHEN:* {when_str}")
+                    except:
+                        pass
+                
+                # Action buttons
+                buttons.append([
+                    InlineKeyboardButton(f"✅ Apply #{i}", callback_data=f"sug:apply:{sug_id}"),
+                    InlineKeyboardButton(f"🔍 Preview #{i}", callback_data=f"sug:preview:{sug_id}"),
+                ])
+            
+            if len(suggestions) > 5:
+                message_parts.append(f"\n\n_...and {len(suggestions) - 5} more suggestions_")
+                message_parts.append("Use `/suggestions` to see all.")
+            
+            message_parts.append("\n\n💡 *Quick Actions:*")
+            message_parts.append("• Tap ✅ Apply to apply a suggestion")
+            message_parts.append("• Tap 🔍 Preview to see details")
+            message_parts.append("• Use `/suggest new` for fresh analysis")
+            
+            buttons.append([
+                InlineKeyboardButton("🔄 Generate New", callback_data="claude_analyze_now"),
+                InlineKeyboardButton("📋 All Suggestions", callback_data="claude_suggestions"),
+            ])
+            buttons.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+            
+            await self._send_message_or_edit(
+                update,
+                context,
+                "\n".join(message_parts),
+                reply_markup=InlineKeyboardMarkup(buttons),
+            )
+            
+        except Exception as e:
+            logger.error(f"Error handling /suggest: {e}", exc_info=True)
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"❌ Error: {str(e)[:200]}",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Back", callback_data="claude_hub")],
+                ]),
+            )
+    
     async def _handle_suggest_config(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /suggest_config - Get configuration tuning suggestions."""
         if not await self._check_authorized(update):
@@ -11641,6 +11781,122 @@ _Commands are policy-gated for safety._
             f"❌ Unknown suggestion action: `{safe_label(callback_data)[:120]}`",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="sug:list")]]),
         )
+    
+    async def _handle_suggestion_preview(self, update: Update, context: ContextTypes.DEFAULT_TYPE, suggestion_id: str) -> None:
+        """Preview a single suggestion with full details."""
+        monitor = self._get_claude_monitor()
+        if not monitor:
+            await self._send_message_or_edit(update, context, "❌ Claude monitor not available")
+            return
+        
+        suggestion = monitor.monitor_state.get_suggestion(suggestion_id)
+        if not suggestion:
+            await self._send_message_or_edit(update, context, f"❌ Suggestion `{suggestion_id}` not found")
+            return
+        
+        # Format full details
+        lines = [f"🔍 *{suggestion.get('title', 'Suggestion')}*\n"]
+        lines.append(f"`{suggestion_id}`\n")
+        
+        # WHAT
+        config_path = suggestion.get("config_path")
+        old_value = suggestion.get("old_value")
+        new_value = suggestion.get("new_value")
+        if config_path:
+            lines.append(f"📝 *WHAT:* `{config_path}`")
+            if old_value is not None:
+                lines.append(f"   Current: `{old_value}`")
+            if new_value is not None:
+                lines.append(f"   Suggested: `{new_value}`")
+        
+        # WHY
+        rationale = suggestion.get("rationale") or suggestion.get("description", "")
+        if rationale:
+            lines.append(f"\n💭 *WHY:*\n_{rationale}_")
+        
+        # WHEN
+        created_at = suggestion.get("created_at")
+        if created_at:
+            try:
+                from dateutil import parser
+                dt = parser.parse(created_at)
+                lines.append(f"\n⏰ *WHEN:* {dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            except:
+                lines.append(f"\n⏰ *WHEN:* {created_at}")
+        
+        # Risk level
+        risk_level = suggestion.get("risk_level", "medium")
+        risk_emoji = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(risk_level, "⚪")
+        lines.append(f"\n{risk_emoji} *Risk:* {risk_level.title()}")
+        
+        buttons = [
+            [InlineKeyboardButton("✅ Apply Now", callback_data=f"sug:apply:{suggestion_id}")],
+            [InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="claude_suggest_simple")],
+        ]
+        
+        await self._send_message_or_edit(
+            update,
+            context,
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+    
+    async def _handle_suggestion_apply_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE, suggestion_id: str) -> None:
+        """Apply a suggestion from button click."""
+        monitor = self._get_claude_monitor()
+        if not monitor:
+            await self._send_message_or_edit(update, context, "❌ Claude monitor not available")
+            return
+        
+        suggestion = monitor.monitor_state.get_suggestion(suggestion_id)
+        if not suggestion:
+            await self._send_message_or_edit(update, context, f"❌ Suggestion `{suggestion_id}` not found")
+            return
+        
+        await self._send_message_or_edit(update, context, f"⏳ Applying `{suggestion_id}`...", reply_markup=None)
+        
+        result = await monitor.apply_suggestion(suggestion_id, dry_run=False)
+        
+        if result.get("success"):
+            lines = [
+                "✅ *Suggestion Applied*\n",
+                f"*{suggestion.get('title', 'Suggestion')}*\n",
+            ]
+            
+            config_path = suggestion.get("config_path")
+            if config_path:
+                lines.append(f"*Config:* `{config_path}`")
+                if suggestion.get("old_value") is not None:
+                    lines.append(f"*Changed:* `{suggestion.get('old_value')}` → `{suggestion.get('new_value')}`")
+            
+            request_id = result.get("request_id")
+            if request_id:
+                lines.append(f"\n*Request ID:* `{request_id}`")
+                if result.get("can_rollback"):
+                    lines.append(f"\n🔄 Rollback: `/rollback_suggestion {request_id}`")
+            
+            buttons = []
+            if result.get("can_rollback") and request_id:
+                buttons.append([InlineKeyboardButton("🔄 Rollback", callback_data=f"sug:rollback:{request_id}")])
+            buttons.append([InlineKeyboardButton("📋 More Suggestions", callback_data="claude_suggest_simple")])
+            buttons.append([InlineKeyboardButton("🏠 Main Menu", callback_data="start")])
+            
+            await self._send_message_or_edit(
+                update,
+                context,
+                "\n".join(lines),
+                reply_markup=InlineKeyboardMarkup(buttons),
+            )
+        else:
+            error = result.get("error", "Unknown error")
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"❌ *Apply Failed*\n\n*Error:* {error[:200]}",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Back", callback_data=f"sug:preview:{suggestion_id}")],
+                ]),
+            )
     
     async def _handle_suggestions(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /suggestions - List all active suggestions."""

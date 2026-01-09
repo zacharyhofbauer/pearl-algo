@@ -442,9 +442,24 @@ class NQIntradayConfig:
         Returns:
             True if the signal type should be generated
         """
-        # Disabled list takes precedence
-        if signal_type in self.disabled_signals:
-            return False
+        # Disabled list takes precedence.
+        #
+        # Support prefix matching for "families", e.g.:
+        #   disabled_signals: ["sr_bounce"]
+        # should disable:
+        #   sr_bounce_long, sr_bounce_short, ...
+        #
+        # This keeps semantics consistent with enabled_signals (which already supports prefixes).
+        try:
+            for disabled in self.disabled_signals:
+                if not disabled:
+                    continue
+                if signal_type == disabled or signal_type.startswith(disabled):
+                    return False
+        except Exception:
+            # Fall back to legacy exact-match behavior if config is malformed.
+            if signal_type in self.disabled_signals:
+                return False
         
         # If enabled list is specified, signal must be in it
         if self.enabled_signals:

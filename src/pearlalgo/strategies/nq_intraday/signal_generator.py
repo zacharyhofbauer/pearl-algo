@@ -1446,7 +1446,46 @@ class NQSignalGenerator:
         if entry_price > 0 and stop_loss:
             # MNQ: $2 per point. tick_value is MNQ-native in config.
             tick_value = getattr(self.config, "tick_value", 2.0)
-            position_size = getattr(self.config, "max_position_size", 10)
+            # Position sizing: respect strategy config (dynamic sizing) rather than using the
+            # "max_position_size" cap as the default size.
+            #
+            # This keeps live behavior aligned with backtests (see backtest_adapter.py), and
+            # makes sizing respond to confidence + winning_signal_types.
+            try:
+                confidence = float(signal.get("confidence", 0.0) or 0.0)
+            except Exception:
+                confidence = 0.0
+            signal_type = str(signal.get("type") or "")
+
+            position_size: int
+            try:
+                position_size = int(self.config.get_position_size(confidence, signal_type))
+            except Exception:
+                # Fallbacks (defensive): base_contracts -> min_position_size -> 1
+                try:
+                    position_size = int(getattr(self.config, "base_contracts", 0) or 0)
+                except Exception:
+                    position_size = 0
+                if position_size <= 0:
+                    try:
+                        position_size = int(getattr(self.config, "min_position_size", 0) or 0)
+                    except Exception:
+                        position_size = 0
+                if position_size <= 0:
+                    position_size = 1
+
+            # Enforce configured min/max bounds (if present)
+            try:
+                min_ps = int(getattr(self.config, "min_position_size", 1) or 1)
+            except Exception:
+                min_ps = 1
+            try:
+                max_ps = int(getattr(self.config, "max_position_size", position_size) or position_size)
+            except Exception:
+                max_ps = position_size
+            if max_ps > 0:
+                position_size = min(position_size, max_ps)
+            position_size = max(min_ps, position_size)
 
             # Apply session-based position scaling (LANE B feature)
             # Reduces position size during quiet sessions (Tokyo, London) to manage risk.

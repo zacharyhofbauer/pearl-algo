@@ -102,8 +102,8 @@ class Alert:
             lines.append("")
         
         if include_metadata:
-        lines.append(f"📁 Category: {self.category}")
-        lines.append(f"🔍 Source: {self.source}")
+            lines.append(f"📁 Category: {self.category}")
+            lines.append(f"🔍 Source: {self.source}")
         
         if self.suggestion_id:
             lines.append("")
