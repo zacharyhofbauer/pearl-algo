@@ -469,8 +469,15 @@ class AutoTunePolicy:
     
     def _check_live_gating(self, agent_state: Dict[str, Any]) -> Tuple[bool, str]:
         """Check live gating conditions from agent state."""
-        # Check if execution is armed
         execution = agent_state.get("execution", {})
+
+        # Block auto-tuning when execution mode is live (real money at stake)
+        # Allow when dry_run or paper mode
+        exec_mode = str(execution.get("mode", "")).lower()
+        if exec_mode == "live":
+            return False, "Auto-tuning blocked while execution mode is live (switch to dry_run first)"
+
+        # Check if execution is armed (optional additional check via config)
         if self.config.block_when_armed and execution.get("armed", False):
             return False, "Auto-apply blocked while execution is armed"
         

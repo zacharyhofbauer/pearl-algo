@@ -33,6 +33,8 @@ class Trade:
     breakeven_moved: bool = False
     trailing_active: bool = False
     last_stop_update: Optional[datetime] = None
+    # Used to avoid redundant persistence writes when syncing stop changes to signals.jsonl
+    last_persisted_stop_loss: Optional[float] = None
 
 
 class TrailingStopManager:
@@ -224,16 +226,30 @@ class TradeManager:
         Returns:
             Trade object
         """
+        # Prefer the canonical id used by PerformanceTracker/StateManager ("signal_id")
+        signal_id_raw = signal.get("signal_id") or signal.get("id") or ""
+        signal_id = str(signal_id_raw)
+        if not signal_id:
+            # Shouldn't happen in normal operation, but avoid clobbering active_trades[""] if it does.
+            signal_id = f"{signal.get('type', 'unknown')}_{datetime.now(timezone.utc).timestamp()}"
+            signal["signal_id"] = signal_id
+
+        # Prefer position_size (used across nq_agent) with fallback to legacy 'contracts'
+        contracts_raw = signal.get("position_size")
+        if contracts_raw is None:
+            contracts_raw = signal.get("contracts")
+
         trade = Trade(
-            signal_id=signal.get("id", ""),
+            signal_id=signal_id,
             trade_type=signal.get("trade_type", "scalp"),
             direction=signal.get("direction", "long"),
             entry_price=float(signal.get("entry_price", 0)),
             stop_loss=float(signal.get("stop_loss", 0)),
             take_profit=float(signal.get("take_profit", 0)),
-            contracts=int(signal.get("contracts", 5)),
+            contracts=int(contracts_raw or 5),
             entry_time=datetime.now(timezone.utc),
             current_price=float(signal.get("entry_price", 0)),
+            last_persisted_stop_loss=float(signal.get("stop_loss", 0)) if signal.get("stop_loss") is not None else None,
         )
         
         self.active_trades[trade.signal_id] = trade

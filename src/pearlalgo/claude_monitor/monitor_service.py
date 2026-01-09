@@ -162,6 +162,9 @@ class ClaudeMonitorService:
         self.max_auto_changes_per_day = self.config.get("max_auto_changes_per_day", 3)
         self._auto_apply_count_today = 0
         self._auto_apply_last_reset: Optional[datetime] = None
+        # Dedup/throttle auto-apply failure notifications (prevents Telegram spam loops)
+        self._auto_apply_last_failure: Dict[str, datetime] = {}
+        self._auto_apply_failure_dedup_seconds: int = int(self.config.get("dedup_window_seconds", 1800) or 1800)
         
         logger.info(
             f"Claude Monitor Service initialized "
@@ -274,6 +277,22 @@ class ClaudeMonitorService:
             signals_data = self._load_recent_signals()
             performance_data = self._load_performance_data()
             market_data = self._extract_market_data(agent_state)
+
+            # Detect market change for strategy update prompts (best-effort).
+            # We detect before analysis so we can include "from -> to" context in the prompt,
+            # but we only *send* after suggestions are generated and assigned IDs.
+            transition: Optional[Dict[str, Any]] = None
+            try:
+                prev_regime = self.monitor_state.get_last_regime_seen()
+                curr_regime = market_data.get("regime") if isinstance(market_data.get("regime"), dict) else None
+                transition = self._detect_strategy_update_transition(prev_regime, curr_regime)
+
+                # Persist last seen regime (only when it changes or first-seen)
+                if isinstance(curr_regime, dict) and (not isinstance(prev_regime, dict) or prev_regime != curr_regime):
+                    ts = market_data.get("regime_timestamp") or market_data.get("latest_bar_timestamp")
+                    self.monitor_state.set_last_regime_seen(curr_regime, timestamp=str(ts) if ts else None)
+            except Exception:
+                transition = None
             
             # Run analysis
             analysis = await self.analysis_engine.analyze_all(
@@ -297,10 +316,24 @@ class ClaudeMonitorService:
             suggestions = self.suggestion_engine.generate(analysis)
             
             # Record analysis
+            suggestions_dicts = [s.to_dict() for s in suggestions]
             self.monitor_state.record_analysis(
                 analysis=analysis,
-                suggestions=[s.to_dict() for s in suggestions],
+                suggestions=suggestions_dicts,
             )
+
+            # Strategy update prompt on meaningful market change
+            # In autonomous mode (auto_apply_enabled), skip the interactive proposal
+            # since _auto_apply_suggestions() will apply eligible changes and notify.
+            try:
+                sig = str((transition or {}).get("signature") or "").strip()
+                if transition and sig and self._should_send_strategy_update_prompt(sig):
+                    if not self.auto_apply_enabled:
+                        # Manual mode: show proposal with Apply/Dry-run buttons
+                        await self._send_strategy_update_prompt(transition, suggestions_dicts)
+                    self.monitor_state.set_last_regime_prompt(sig)
+            except Exception as e:
+                logger.debug(f"Could not send strategy update prompt: {e}")
             
             # Auto-apply eligible suggestions if enabled
             if self.auto_apply_enabled and suggestions:
@@ -356,6 +389,11 @@ class ClaudeMonitorService:
             # Must have config_path and new_value
             if not config_path or new_value is None:
                 continue
+
+            # Never auto-apply signal enable/disable list changes (user must explicitly approve).
+            # This protects trade frequency and avoids "disable X" surprises.
+            if config_path in ("strategy.enabled_signals", "strategy.disabled_signals"):
+                continue
             
             # Only low or medium risk
             if risk not in ("low", "medium"):
@@ -393,25 +431,31 @@ class ClaudeMonitorService:
             try:
                 logger.info(f"Auto-applying suggestion {suggestion_id}: {sug_dict.get('title')}")
                 result = await self.apply_suggestion(suggestion_id, dry_run=False)
-                
+
                 if result.get("success"):
                     self._auto_apply_count_today += 1
-                    
-                    # Send Telegram notification
-                    await self._send_auto_apply_notification(sug_dict, result, success=True)
-                    
+
+                    # Auto-restart agent to load new config (only when flat / no open positions)
+                    restart_outcome = await self._try_auto_restart_agent()
+
+                    # Send Telegram notification with restart outcome
+                    await self._send_auto_apply_notification(
+                        sug_dict, result, success=True, restart_outcome=restart_outcome
+                    )
+
                     logger.info(
                         f"Auto-apply SUCCESS: {suggestion_id} "
-                        f"({sug_dict.get('config_path')} = {sug_dict.get('new_value')})"
+                        f"({sug_dict.get('config_path')} = {sug_dict.get('new_value')}), "
+                        f"restart={restart_outcome.get('status', 'n/a')}"
                     )
                 else:
                     # Send failure notification
                     await self._send_auto_apply_notification(sug_dict, result, success=False)
-                    
+
                     logger.warning(
                         f"Auto-apply FAILED: {suggestion_id} - {result.get('error', 'unknown')}"
                     )
-                    
+
             except Exception as e:
                 logger.error(f"Auto-apply error for {suggestion_id}: {e}", exc_info=True)
     
@@ -420,37 +464,152 @@ class ClaudeMonitorService:
         suggestion: Dict[str, Any],
         result: Dict[str, Any],
         success: bool,
+        restart_outcome: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Send Telegram notification for auto-applied changes."""
         if not self._telegram:
             return
-        
+
         try:
+            # Get current regime context for richer notification
+            regime_ctx = ""
+            try:
+                last_regime = self.monitor_state.get_last_regime_seen()
+                if isinstance(last_regime, dict) and last_regime.get("regime"):
+                    r_type = str(last_regime.get("regime", "")).replace("_", " ").title()
+                    r_vol = str(last_regime.get("volatility", "")).title()
+                    regime_ctx = f"🧭 *Regime:* {r_type} | {r_vol} Vol\n"
+            except Exception:
+                pass
+
             if success:
+                # Build restart status line
+                restart_status = ""
+                restart_deferred = False
+                if restart_outcome:
+                    rs = str(restart_outcome.get("status", "")).lower()
+                    if rs == "restarted":
+                        restart_status = "\n✅ *Agent restarted* — new config active"
+                    elif rs == "deferred":
+                        pos = restart_outcome.get("positions", "?")
+                        restart_status = f"\n⏸️ *Restart deferred* — {pos} open position(s)"
+                        restart_deferred = True
+                    elif rs == "error":
+                        restart_status = f"\n⚠️ *Restart failed* — {restart_outcome.get('message', 'unknown')[:60]}"
+                        restart_deferred = True
+
                 message = (
-                    "🤖 *Auto-Applied Config Change*\n\n"
+                    "🤖 *Strategy Auto-Updated*\n\n"
+                    f"{regime_ctx}"
                     f"*{suggestion.get('title', 'Config Update')}*\n\n"
                     f"*Path:* `{suggestion.get('config_path')}`\n"
                     f"*Old:* `{suggestion.get('old_value')}`\n"
-                    f"*New:* `{suggestion.get('new_value')}`\n\n"
+                    f"*New:* `{suggestion.get('new_value')}`"
+                    f"{restart_status}\n\n"
                     f"*Request ID:* `{result.get('request_id')}`\n"
                     f"*Rollback:* `/rollback_suggestion {result.get('request_id')}`\n\n"
                     f"_{suggestion.get('rationale', '')[:150]}_"
                 )
             else:
+                restart_deferred = False
+                # Dedup failures by (config_path + error) to avoid spam when auto-apply is blocked.
+                try:
+                    key = f"{suggestion.get('config_path','')}|{result.get('error','')}"
+                    now = datetime.now(timezone.utc)
+                    last = self._auto_apply_last_failure.get(key)
+                    if last and (now - last).total_seconds() < self._auto_apply_failure_dedup_seconds:
+                        return
+                    self._auto_apply_last_failure[key] = now
+                except Exception:
+                    pass
+
+                err = str(result.get("error", "Unknown") or "Unknown")[:150]
                 message = (
                     "⚠️ *Auto-Apply Failed*\n\n"
                     f"*{suggestion.get('title', 'Config Update')}*\n\n"
                     f"*Path:* `{suggestion.get('config_path')}`\n"
-                    f"*Error:* {result.get('error', 'Unknown')[:150]}\n\n"
+                    f"*Error:* `{err}`\n\n"
                     "The suggestion was not applied."
                 )
-            
-            await self._telegram.send_message(message, parse_mode="Markdown")
-            
+
+            # Include Restart Agent button only when restart was deferred or failed
+            reply_markup = None
+            if success:
+                try:
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    request_id = result.get("request_id", "")
+                    keyboard = []
+                    # Show Restart button only if restart was deferred/failed
+                    if restart_deferred:
+                        keyboard.append([
+                            InlineKeyboardButton("🔁 Restart Agent", callback_data="confirm:restart_agent"),
+                            InlineKeyboardButton("🔄 Rollback", callback_data=f"sug:rollback:{request_id}"),
+                        ])
+                    else:
+                        # Restart succeeded — just show rollback
+                        keyboard.append([
+                            InlineKeyboardButton("🔄 Rollback", callback_data=f"sug:rollback:{request_id}"),
+                        ])
+                    keyboard.append([InlineKeyboardButton("🏠 Menu", callback_data="start")])
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                except Exception:
+                    pass
+
+            await self._telegram.send_message(message, parse_mode="Markdown", reply_markup=reply_markup)
+
         except Exception as e:
             logger.error(f"Could not send auto-apply notification: {e}")
-    
+
+    async def _try_auto_restart_agent(self) -> Dict[str, Any]:
+        """
+        Attempt to auto-restart the agent to load new config.
+
+        Only restarts when there are no open positions (safe to interrupt).
+
+        Returns:
+            Dict with status: "restarted", "deferred", or "error" and optional message.
+        """
+        try:
+            # Reload state to get current positions
+            agent_state = self._load_agent_state()
+            if not agent_state:
+                return {"status": "error", "message": "Could not load agent state"}
+
+            execution = agent_state.get("execution", {})
+            positions = int(execution.get("positions", 0) or 0)
+
+            if positions > 0:
+                logger.info(f"Auto-restart deferred: {positions} open position(s)")
+                return {
+                    "status": "deferred",
+                    "message": f"Open position(s): {positions}",
+                    "positions": positions,
+                }
+
+            # Safe to restart — no open positions
+            logger.info("Auto-restarting agent to load new config (no open positions)")
+
+            # Use the ActionExecutor to trigger service restart
+            request = ActionRequest(
+                action_type=ActionType.SERVICE_RESTART,
+                description="Auto-restart agent after config update",
+                changes={"reason": "auto_apply_config"},
+                service_name="agent",
+                action="restart",
+            )
+            result = await self.action_executor.execute(request)
+
+            if result.success:
+                logger.info(f"Auto-restart SUCCESS: {result.message}")
+                return {"status": "restarted", "message": result.message}
+            else:
+                logger.warning(f"Auto-restart FAILED: {result.error}")
+                return {"status": "error", "message": result.error or "Unknown error"}
+
+        except Exception as e:
+            logger.error(f"Auto-restart error: {e}", exc_info=True)
+            return {"status": "error", "message": str(e)[:100]}
+
     def _load_agent_state(self) -> Optional[Dict[str, Any]]:
         """Load current agent state from state.json."""
         try:
@@ -666,7 +825,207 @@ class ClaudeMonitorService:
             "latest_bar_timestamp": agent_state.get("latest_bar_timestamp"),
             "data_fresh": agent_state.get("data_fresh"),
             "buy_sell_pressure": agent_state.get("buy_sell_pressure"),
+            # Regime snapshot persisted by the agent service (scanner.last_regime)
+            "regime": agent_state.get("regime"),
+            "regime_timestamp": agent_state.get("regime_timestamp"),
         }
+
+    # ========================================================================
+    # Strategy update prompts (market change → operator-confirmed config updates)
+    # ========================================================================
+
+    def _detect_strategy_update_transition(
+        self,
+        prev_regime: Optional[Dict[str, Any]],
+        curr_regime: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect a meaningful market regime transition worth prompting the operator about.
+
+        We keep this rule-based (fast + deterministic) to avoid calling LLMs every cycle.
+        """
+        if not isinstance(curr_regime, dict) or not curr_regime:
+            return None
+
+        try:
+            min_conf = float(self.config.get("strategy_update_min_regime_confidence", 0.55) or 0.55)
+        except Exception:
+            min_conf = 0.55
+
+        curr_conf = float(curr_regime.get("confidence") or 0.0)
+        if curr_conf < min_conf:
+            return None
+
+        # If we have no previous regime, we can't detect a transition yet.
+        if not isinstance(prev_regime, dict) or not prev_regime:
+            return None
+
+        prev_type = str(prev_regime.get("regime") or "unknown")
+        curr_type = str(curr_regime.get("regime") or "unknown")
+        prev_vol = str(prev_regime.get("volatility") or "unknown")
+        curr_vol = str(curr_regime.get("volatility") or "unknown")
+
+        prev_atr_exp = bool(prev_regime.get("atr_expansion", False))
+        curr_atr_exp = bool(curr_regime.get("atr_expansion", False))
+
+        reasons: List[str] = []
+        if prev_type != curr_type and "unknown" not in (prev_type, curr_type):
+            reasons.append(f"regime: {prev_type}→{curr_type}")
+
+        # Treat only *large* volatility jumps as strategy-shifting (low<->high)
+        vol_rank = {"low": 1, "normal": 2, "high": 3}
+        try:
+            if abs(vol_rank.get(curr_vol, 2) - vol_rank.get(prev_vol, 2)) >= 2:
+                reasons.append(f"volatility: {prev_vol}→{curr_vol}")
+        except Exception:
+            pass
+
+        if (not prev_atr_exp) and curr_atr_exp:
+            reasons.append("atr_expansion: false→true")
+
+        if not reasons:
+            return None
+
+        signature = f"{prev_type}:{prev_vol}:{int(prev_atr_exp)}->{curr_type}:{curr_vol}:{int(curr_atr_exp)}"
+        return {
+            "signature": signature,
+            "prev": prev_regime,
+            "curr": curr_regime,
+            "curr_conf": curr_conf,
+            "reasons": reasons,
+        }
+
+    def _should_send_strategy_update_prompt(self, signature: str) -> bool:
+        """Rate-limit/deduplicate strategy update prompts."""
+        try:
+            enabled = bool(self.config.get("strategy_update_prompts_enabled", False))
+        except Exception:
+            enabled = False
+        if not enabled:
+            return False
+
+        last = self.monitor_state.get_last_regime_prompt() or {}
+        last_sig = str(last.get("signature") or "")
+        if last_sig and last_sig == signature:
+            return False
+
+        try:
+            cooldown = int(self.config.get("strategy_update_prompt_cooldown_seconds", 1800) or 1800)
+        except Exception:
+            cooldown = 1800
+
+        ts = str(last.get("timestamp") or "")
+        if ts:
+            try:
+                last_dt = datetime.fromisoformat(ts)
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                if (datetime.now(timezone.utc) - last_dt).total_seconds() < float(cooldown):
+                    return False
+            except Exception:
+                pass
+
+        return True
+
+    async def _send_strategy_update_prompt(
+        self,
+        transition: Dict[str, Any],
+        suggestions: List[Dict[str, Any]],
+    ) -> None:
+        """Send a Telegram prompt with one-tap buttons to review/apply the best suggestion."""
+        if not self._telegram:
+            return
+
+        prev = transition.get("prev") or {}
+        curr = transition.get("curr") or {}
+        reasons = transition.get("reasons") or []
+
+        prev_type = str(prev.get("regime") or "unknown")
+        curr_type = str(curr.get("regime") or "unknown")
+        prev_vol = str(prev.get("volatility") or "unknown")
+        curr_vol = str(curr.get("volatility") or "unknown")
+        session = str(curr.get("session") or "unknown")
+        conf = float(transition.get("curr_conf") or 0.0)
+
+        def _pretty(x: str) -> str:
+            return x.replace("_", " ").title()
+
+        lines: List[str] = [
+            "🧠 *Strategy Update Proposed*",
+            "",
+            f"🔄 *Regime:* {_pretty(prev_type)} → {_pretty(curr_type)}  (conf {conf:.0%})",
+            f"🌡️ *Volatility:* {_pretty(prev_vol)} → {_pretty(curr_vol)}",
+            f"🕒 *Session:* {_pretty(session)}",
+        ]
+        if reasons:
+            lines += ["", "*Why now:* " + ", ".join(str(r) for r in reasons[:3])]
+
+        # Pick top executable suggestion (config/parameter tune) to feature
+        featured = None
+        for s in suggestions or []:
+            st = str(s.get("type") or "")
+            if st in ("config_change", "parameter_tune") and s.get("config_path") and s.get("new_value") is not None:
+                featured = s
+                break
+
+        if featured:
+            title = str(featured.get("title") or "Suggestion").strip()
+            cfg_path = str(featured.get("config_path") or "").strip()
+            old_val = str(featured.get("old_value")).replace("`", "'")
+            new_val = str(featured.get("new_value")).replace("`", "'")
+            desc = str(featured.get("description") or "").strip()
+            rationale = str(featured.get("rationale") or "").strip()
+            sid = str(featured.get("id") or "").strip()
+
+            lines += [
+                "",
+                "*Top suggestion:*",
+                f"🔸 *{title}*",
+                f"`{cfg_path}`: `{old_val}` → `{new_val}`",
+            ]
+            if desc:
+                lines.append(f"_{desc[:180]}{'…' if len(desc) > 180 else ''}_")
+            if rationale:
+                lines.append(f"_Why:_ {rationale[:180]}{'…' if len(rationale) > 180 else ''}")
+
+            msg = "\n".join(lines)
+
+            # Inline buttons (handled by the Telegram command handler service)
+            try:
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+                keyboard = [
+                    [
+                        InlineKeyboardButton("✅ Review & Apply", callback_data=f"sug:apply:{sid}"),
+                        InlineKeyboardButton("🧪 Dry-run", callback_data=f"sug:dry:{sid}"),
+                    ],
+                    [
+                        InlineKeyboardButton("📋 Suggestions", callback_data="claude_suggestions"),
+                        InlineKeyboardButton("🧠 Strategy Review", callback_data="strategy_review"),
+                    ],
+                    [InlineKeyboardButton("🏠 Menu", callback_data="start")],
+                ]
+                await self._telegram.send_message(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+            except Exception:
+                # Fallback: message without buttons
+                await self._telegram.send_message(msg, parse_mode="Markdown")
+        else:
+            # No executable config suggestion found; still nudge the operator to review.
+            lines += ["", "No safe config change was auto-identified. Tap *Strategy Review* or check *Suggestions*."]
+            msg = "\n".join(lines)
+            try:
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🧠 Strategy Review", callback_data="strategy_review"),
+                        InlineKeyboardButton("📋 Suggestions", callback_data="claude_suggestions"),
+                    ],
+                    [InlineKeyboardButton("🏠 Menu", callback_data="start")],
+                ]
+                await self._telegram.send_message(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+            except Exception:
+                await self._telegram.send_message(msg, parse_mode="Markdown")
     
     async def _send_alert(self, alert: Alert) -> None:
         """Send an alert via Telegram."""

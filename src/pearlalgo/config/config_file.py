@@ -170,6 +170,8 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "prop_firm",
     "strategy",
     "strategy_variants",
+    "trailing_stop",
+    "swing_trading",
     "market_hours",
     # ATS execution + learning layers (kept separate from strategy logic)
     "execution",

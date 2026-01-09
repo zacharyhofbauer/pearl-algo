@@ -203,6 +203,75 @@ class PerformanceTracker:
             },
         )
 
+    def update_signal_prices(
+        self,
+        signal_id: str,
+        *,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+        updated_at: Optional[datetime] = None,
+        source: str = "trade_manager",
+    ) -> None:
+        """
+        Update stop-loss / take-profit for an existing signal record.
+
+        This is used by in-trade management (e.g., trailing stops) so the virtual-exit
+        engine (_update_virtual_trade_exits) grades exits using the *latest* stop.
+        """
+        if stop_loss is None and take_profit is None:
+            return
+        if not self.signals_file.exists():
+            return
+        if updated_at is None:
+            updated_at = datetime.now(timezone.utc)
+
+        # Read all records (jsonl), update one, write back.
+        records: List[Dict] = []
+        try:
+            with open(self.signals_file, "r") as f:
+                for line in f:
+                    try:
+                        records.append(json.loads(line.strip()))
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+        except Exception as e:
+            logger.debug(f"Could not read signals file for price update: {e}")
+            return
+
+        updated = False
+        for record in records:
+            if record.get("signal_id") != signal_id:
+                continue
+            sig = record.get("signal", {}) or {}
+            if not isinstance(sig, dict):
+                sig = {}
+            if stop_loss is not None:
+                try:
+                    sig["stop_loss"] = float(stop_loss)
+                    record["stop_loss_updated_at"] = updated_at.isoformat()
+                except Exception:
+                    pass
+            if take_profit is not None:
+                try:
+                    sig["take_profit"] = float(take_profit)
+                    record["take_profit_updated_at"] = updated_at.isoformat()
+                except Exception:
+                    pass
+            record["price_update_source"] = str(source)
+            record["signal"] = sig
+            updated = True
+            break
+
+        if not updated:
+            return
+
+        try:
+            with open(self.signals_file, "w") as f:
+                for record in records:
+                    f.write(json.dumps(record) + "\n")
+        except Exception as e:
+            logger.debug(f"Could not write signals file for price update: {e}")
+
     def track_exit(
         self,
         signal_id: str,
@@ -286,6 +355,7 @@ class PerformanceTracker:
                 "exit_reason": exit_reason,
                 "pnl": pnl,
                 "is_win": is_win,
+                "hold_duration_minutes": hold_duration,
             },
         )
 

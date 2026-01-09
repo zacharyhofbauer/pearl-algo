@@ -322,8 +322,17 @@ class NQSignalGenerator:
         self._max_stop_points = signal_settings.get("max_stop_points", 0.0)
         
         # Target RR ratio from risk config (for stop-cap target scaling)
-        risk_settings = service_config.get("risk", {})
+        risk_settings = service_config.get("risk", {}) or {}
         self._take_profit_risk_reward = risk_settings.get("take_profit_risk_reward", 1.5)
+
+        # Per-signal-type position sizing overrides (do NOT change trade count; min contracts stays >= 1).
+        # Use-case: keep a signal family enabled but cap its size hard.
+        self._signal_type_size_multipliers: Dict[str, float] = (
+            risk_settings.get("signal_type_size_multipliers", {}) or {}
+        )
+        self._signal_type_max_contracts: Dict[str, int] = (
+            risk_settings.get("signal_type_max_contracts", {}) or {}
+        )
         
         # Per-signal-type regime/session filters
         # Format: { "signal_type": { "allowed_regimes": [...], "disallowed_regimes": [...], ... } }
@@ -1040,6 +1049,57 @@ class NQSignalGenerator:
                             validated_signal["position_size"] = after
                 except Exception:
                     pass
+
+            # Per-signal-type sizing overrides (keep signals enabled; scale risk instead of filtering trades).
+            # Applied AFTER adaptive sizing and drift guard so it acts as a final, explicit brake.
+            try:
+                sig_type = str(validated_signal.get("type") or validated_signal.get("signal_type") or "")
+                if sig_type:
+                    # Allow base-key overrides like "sr_bounce" to cover sr_bounce_long/sr_bounce_short.
+                    base_key = sig_type
+                    if sig_type.endswith("_long") or sig_type.endswith("_short"):
+                        base_key = sig_type.rsplit("_", 1)[0]
+
+                    mult = None
+                    if isinstance(self._signal_type_size_multipliers, dict):
+                        mult = self._signal_type_size_multipliers.get(sig_type)
+                        if mult is None:
+                            mult = self._signal_type_size_multipliers.get(base_key)
+                    cap = None
+                    if isinstance(self._signal_type_max_contracts, dict):
+                        cap = self._signal_type_max_contracts.get(sig_type)
+                        if cap is None:
+                            cap = self._signal_type_max_contracts.get(base_key)
+
+                    before = int(validated_signal.get("position_size", 0) or 0)
+                    if before <= 0:
+                        before = 1
+
+                    after = before
+                    if mult is not None:
+                        try:
+                            mult_f = float(mult)
+                            if mult_f > 0:
+                                after = max(1, int(round(before * mult_f)))
+                                validated_signal["_risk_position_size_before"] = before
+                                validated_signal["_risk_size_multiplier"] = float(mult_f)
+                        except Exception:
+                            pass
+
+                    if cap is not None:
+                        try:
+                            cap_i = int(cap)
+                            if cap_i > 0:
+                                after = max(1, min(after, cap_i))
+                                validated_signal["_risk_max_contracts"] = int(cap_i)
+                        except Exception:
+                            pass
+
+                    if after != before:
+                        validated_signal["_risk_position_size_after"] = after
+                        validated_signal["position_size"] = after
+            except Exception:
+                pass
 
             # Ensure risk_amount reflects any sizing overrides (adaptive sizing / drift guard).
             try:

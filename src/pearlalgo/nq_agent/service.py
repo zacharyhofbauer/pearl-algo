@@ -1190,11 +1190,6 @@ class NQAgentService:
                                 pass  # Non-fatal
                         
                         # Add trade to TradeManager for trailing stop management
-                        try:
-                            self.trade_manager.add_trade(signal)
-                        except Exception as e:
-                            logger.debug(f"Failed to add trade to TradeManager (non-fatal): {e}")
-                        
                         # Get buffer data for chart generation
                         buffer_data = market_data.get("df", pd.DataFrame())
                         await self._process_signal(signal, buffer_data=buffer_data)
@@ -1232,6 +1227,27 @@ class NQAgentService:
                     
                     # Notify on significant stop updates (breakeven moves, large trailing updates)
                     for trade in self.trade_manager.get_active_trades():
+                        # Persist stop changes so virtual exit grading uses the latest stop_loss.
+                        # (Virtual exits read stop_loss from the nested `signal` in signals.jsonl.)
+                        try:
+                            if (
+                                getattr(trade, "last_stop_update", None)
+                                and str(getattr(trade, "signal_id", "") or "")
+                                and float(getattr(trade, "stop_loss", 0.0) or 0.0) > 0
+                            ):
+                                current_stop = float(trade.stop_loss)
+                                prev_stop = getattr(trade, "last_persisted_stop_loss", None)
+                                if (prev_stop is None) or (abs(current_stop - float(prev_stop)) > 1e-9):
+                                    self.performance_tracker.update_signal_prices(
+                                        signal_id=str(trade.signal_id),
+                                        stop_loss=current_stop,
+                                        updated_at=trade.last_stop_update,
+                                        source="trailing_stop",
+                                    )
+                                    trade.last_persisted_stop_loss = current_stop
+                        except Exception:
+                            pass
+
                         if trade.breakeven_moved and trade.last_stop_update:
                             # Check if this is a recent breakeven move (within last cycle)
                             time_since_update = (datetime.now(timezone.utc) - trade.last_stop_update).total_seconds()
@@ -1496,6 +1512,14 @@ class NQAgentService:
                     entry_tracked = True
             except Exception as e:
                 logger.debug(f"Could not track virtual entry for {signal_id}: {e}")
+
+            # Add to TradeManager for trailing stop / breakeven management AFTER signal_id exists.
+            try:
+                tm = getattr(self, "trade_manager", None)
+                if entry_tracked and tm is not None:
+                    tm.add_trade(signal)
+            except Exception as e:
+                logger.debug(f"Failed to add trade to TradeManager (non-fatal): {e}")
 
             # ==========================================================================
             # BANDIT POLICY: Evaluate signal type and decide whether to execute
@@ -2010,6 +2034,15 @@ class NQAgentService:
                         exit_time=exit_bar_ts,
                     )
                     exited_this_cycle.add(sig_id)
+
+                    # Keep TradeManager in sync with virtual exits (avoid managing already-exited trades)
+                    try:
+                        tm = getattr(self, "trade_manager", None)
+                        if tm is not None:
+                            tm.remove_trade(sig_id)
+                    except Exception:
+                        pass
+
                     if perf:
                         pnl_value = float(perf.get('pnl', 0.0))
                         is_win = bool(perf.get("is_win", pnl_value > 0))
@@ -4071,6 +4104,10 @@ class NQAgentService:
             # Buy/Sell pressure (volume-based proxy) for /status parity with push dashboard
             "buy_sell_pressure": None,
             "buy_sell_pressure_raw": None,
+            # Market regime snapshot (computed each scan by scanner.regime_detector)
+            # Used by Claude Monitor and operator UI to detect "market changed" events.
+            "regime": None,
+            "regime_timestamp": None,
             # Quiet reason / signal diagnostics observability (why no signals?)
             # These are set each cycle and surfaced in /status and dashboards.
             "quiet_reason": self._last_quiet_reason,
@@ -4089,6 +4126,27 @@ class NQAgentService:
             state["strategy_session_open"] = bool(self.strategy.scanner.is_market_hours())
         except Exception:
             state["strategy_session_open"] = None
+
+        # Persist current regime snapshot from scanner (best-effort)
+        try:
+            reg = getattr(self.strategy.scanner, "last_regime", None)
+            if isinstance(reg, dict):
+                # Ensure JSON serializable (convert numpy scalars, timestamps, etc.)
+                reg_safe: Dict[str, Any] = {}
+                for k, v in reg.items():
+                    if hasattr(v, "isoformat"):
+                        reg_safe[k] = v.isoformat()
+                    elif hasattr(v, "item"):  # numpy scalar
+                        reg_safe[k] = v.item()
+                    else:
+                        reg_safe[k] = v
+                state["regime"] = reg_safe
+            else:
+                state["regime"] = None
+            state["regime_timestamp"] = getattr(self.strategy.scanner, "last_regime_timestamp", None)
+        except Exception:
+            state["regime"] = None
+            state["regime_timestamp"] = None
 
         # Compute and persist buy/sell pressure from last market data (best-effort)
         try:

@@ -11437,6 +11437,14 @@ _Commands are policy-gated for safety._
             kb: List[List[InlineKeyboardButton]] = []
             if not dry_run and request_id and result.get("can_rollback"):
                 kb.append([InlineKeyboardButton("🔄 Rollback", callback_data=f"sug:rollback:{request_id}")])
+
+            # Config changes require an agent restart to take effect (config is loaded on startup).
+            # Keep this explicit and operator-confirmed.
+            action_type = str(result.get("action_type") or "").strip()
+            if (not dry_run) and action_type in ("config_update", "parameter_tune"):
+                msg_lines += ["", "🔁 *Next:* Restart the agent to load the updated config."]
+                kb.append([InlineKeyboardButton("🔁 Restart Agent", callback_data="confirm:restart_agent")])
+
             kb.append([InlineKeyboardButton("⬅️ Back to Suggestions", callback_data="sug:list")])
             if dry_run:
                 kb.append([InlineKeyboardButton("✅ Apply Now", callback_data=f"sug:apply:{suggestion_id}")])

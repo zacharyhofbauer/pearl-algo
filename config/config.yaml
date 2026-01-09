@@ -1,519 +1,350 @@
-# MNQ Trading Agent Configuration
-# Prop firm style trading configuration for Mini NQ (MNQ) futures
-# Optimized for intraday swings and quick scalps
-
-# Trading Symbol
-symbol: "MNQ"  # Mini NQ (1/10th size of NQ, prop-firm friendly)
-
-# Timeframe
-timeframe: "1m"  # 1-minute bars for decision stream (more opportunities), 5m/15m for MTF context
-
-# Scan Interval (seconds) - base interval when adaptive_cadence_enabled is false
-# When adaptive_cadence_enabled: true (default), this is overridden by the active/idle/closed intervals below
-scan_interval: 30  # Base scan interval (overridden by adaptive cadence when enabled)
-
-# Strategy session window (NY time / ET).
-# This controls when the strategy is allowed to generate signals.
-# Your prop-firm rule: positions must be flat by 16:10 ET, so we stop signals at 16:10.
+symbol: MNQ
+timeframe: 1m
+scan_interval: 30
 session:
-  start_time: "18:00"  # Session opens at 6:00 PM ET (Sunday 18:00 aligns with CME ETH reopen)
-  end_time: "16:10"    # Session closes at 4:10 PM ET (before CME 17:00 close)
-
-# Telegram Notifications
+  start_time: '18:00'
+  end_time: '16:10'
 telegram:
   enabled: true
-  bot_token: "${TELEGRAM_BOT_TOKEN}"
-  chat_id: "${TELEGRAM_CHAT_ID}"
-
-# Telegram Home Card / Dashboard UI (compact, mobile-first)
+  bot_token: ${TELEGRAM_BOT_TOKEN}
+  chat_id: ${TELEGRAM_CHAT_ID}
 telegram_ui:
-  compact_metrics_enabled: true   # Master toggle for compact metric formatting
-  show_progress_bars: false       # Show unicode progress bars for ratios (buffer, WR, quality)
-  show_volume_metrics: true       # Include vol ratio / Δ / pressure badge in activity line
-  compact_metric_width: 10        # Progress bar width (recommend 8-12)
-
-# Risk Management (Prop Firm Style)
+  compact_metrics_enabled: true
+  show_progress_bars: false
+  show_volume_metrics: true
+  compact_metric_width: 10
 risk:
-  max_risk_per_trade: 0.01  # 1% max risk per trade (prop firm conservative)
-  max_drawdown: 0.10        # 10% account drawdown limit (prop firm typical)
-  stop_loss_atr_multiplier: 1.5  # Tighter stops for scalping
-  take_profit_risk_reward: 1.5   # Target R:R for TP calculation (filter uses signals.min_risk_reward)
-  min_position_size: 5      # Minimum MNQ contracts per trade
-  max_position_size: 15     # Maximum MNQ contracts per trade
-
-# Service intervals
+  max_risk_per_trade: 0.01
+  max_drawdown: 0.1
+  stop_loss_atr_multiplier: 1.5
+  take_profit_risk_reward: 1.5
+  min_position_size: 5
+  max_position_size: 15
+  signal_type_size_multipliers:
+    sr_bounce: 0.25
+  signal_type_max_contracts:
+    sr_bounce: 2
 service:
-  status_update_interval: 3600  # 1 hour (aligned with chart interval for combined notifications)
-  heartbeat_interval: 86400     # Disabled (1 day) - dashboard replaces heartbeat
-  state_save_interval: 10       # Save state every N cycles
-  connection_failure_alert_interval: 600  # 10 minutes in seconds
-  data_quality_alert_interval: 300        # 5 minutes in seconds
-  dashboard_chart_enabled: true           # Enable dashboard chart notifications
-  dashboard_chart_interval: 3600          # 1 hour (matches status_update_interval)
-  dashboard_chart_timeframe: "5m"         # 5-minute candles for clean, readable chart
-  dashboard_chart_lookback_hours: 12       # 12 hours of price action (144 candles at 5m)
-  
-  # Performance optimization: skip heavy analysis when bar hasn't advanced.
-  # High leverage for 5m bars + 30s scan interval (5 of 6 cycles are repeats).
-  enable_new_bar_gating: true   # Skip strategy.analyze() if df hasn't advanced (default ON)
-  
-  # Adaptive cadence: dynamically adjust scan interval based on market/session state.
-  # Profile: fast_active (5s active, 30s idle, 300s closed, 60s paused)
-  # VELOCITY MODE: Sub-second scans when ATR expands or volume spikes (catch fast moves)
-  adaptive_cadence_enabled: true          # Master toggle for adaptive cadence
-  scan_interval_active_seconds: 5         # When strategy_session_open (active trading)
-  scan_interval_idle_seconds: 30          # When futures open but strategy session closed
-  scan_interval_market_closed_seconds: 300  # When futures market closed (weekends, maintenance)
-  scan_interval_paused_seconds: 60        # When service is paused
-  
-  # Velocity mode: ultra-fast scans when market is moving (breakouts, ATR expansion, volume spikes)
-  scan_interval_velocity_seconds: 1.5     # When velocity conditions met (1-2s for fast moves)
-  velocity_mode_enabled: true             # Master toggle for velocity mode
-  velocity_atr_expansion_threshold: 1.20  # ATR increase ratio to trigger velocity (20% = expansion day)
-  velocity_volume_spike_threshold: 2.0    # Volume multiple vs recent avg to trigger velocity (2x = spike)
-
-# Circuit breaker
+  status_update_interval: 3600
+  heartbeat_interval: 86400
+  state_save_interval: 10
+  connection_failure_alert_interval: 600
+  data_quality_alert_interval: 300
+  dashboard_chart_enabled: true
+  dashboard_chart_interval: 3600
+  dashboard_chart_timeframe: 5m
+  dashboard_chart_lookback_hours: 12
+  enable_new_bar_gating: true
+  adaptive_cadence_enabled: true
+  scan_interval_active_seconds: 5
+  scan_interval_idle_seconds: 30
+  scan_interval_market_closed_seconds: 300
+  scan_interval_paused_seconds: 60
+  scan_interval_velocity_seconds: 1.5
+  velocity_mode_enabled: true
+  velocity_atr_expansion_threshold: 1.2
+  velocity_volume_spike_threshold: 2.0
 circuit_breaker:
   max_consecutive_errors: 10
   max_connection_failures: 10
   max_data_fetch_errors: 5
-
-# Data fetching
 data:
-  buffer_size: 100                 # Main buffer (1m bars)
-  buffer_size_5m: 300              # 5m timeframe buffer (300 bars = 25h for 24h chart display)
-  buffer_size_15m: 100             # 15m timeframe buffer (100 bars = 25h)
-  historical_hours: 2              # Historical data fetch window
-  multitimeframe_5m_hours: 25      # 5m MTF window (25h to support 24h dashboard chart)
-  multitimeframe_15m_hours: 25     # 15m MTF window (25h)
-  performance_history_limit: 1000  # Max performance records
-  stale_data_threshold_minutes: 10 # Alert if data is older than this
-  connection_timeout_minutes: 30   # Consider connection lost after this time without data
-  
-  # Caching options (reduce IBKR request volume)
-  # When enabled, historical data is refreshed on a TTL rather than every scan cycle.
-  # Level 1 real-time data (latest_bar) is still fetched every cycle for freshness.
-  enable_base_cache: true          # Cache base timeframe historical data (reduces IBKR load)
-  base_refresh_seconds: 60         # TTL for base historical cache (seconds)
-  enable_mtf_cache: true           # Cache 5m/15m MTF historical data (reduces IBKR load)
-  mtf_refresh_seconds_5m: 300      # TTL for 5m MTF cache (5 minutes)
-  mtf_refresh_seconds_15m: 900     # TTL for 15m MTF cache (15 minutes)
-
-# =============================================================================
-# STORAGE (Platform State / "Never forget any lesson")
-# =============================================================================
-# We keep JSON/JSONL files for backward compatibility with Telegram + existing tooling,
-# but also dual-write into SQLite for queryable history + reproducibility.
+  buffer_size: 100
+  buffer_size_5m: 300
+  buffer_size_15m: 100
+  historical_hours: 2
+  multitimeframe_5m_hours: 25
+  multitimeframe_15m_hours: 25
+  performance_history_limit: 1000
+  stale_data_threshold_minutes: 10
+  connection_timeout_minutes: 30
+  enable_base_cache: true
+  base_refresh_seconds: 60
+  enable_mtf_cache: true
+  mtf_refresh_seconds_5m: 300
+  mtf_refresh_seconds_15m: 900
 storage:
   sqlite_enabled: true
-  # Default path is inside the state directory. If unset, code will use: data/nq_agent_state/trades.db
-  db_path: "data/nq_agent_state/trades.db"
-  
-  # Async writes (performance): move SQLite writes to background thread to avoid blocking main loop
-  async_writes_enabled: true              # Enable async/non-blocking SQLite writes
-  async_queue_max_size: 1000              # Max queued writes (older observability writes drop if full)
-  async_queue_priority_trades: true       # Always keep trade exits (drop cycle_diagnostics first)
-
-# =============================================================================
-# 50K CHALLENGE TRACKER (Pass/Fail Rules)
-# =============================================================================
-# Tracks account attempts with pass/fail thresholds.
-# - PnL shown in Telegram = current attempt only (not all-time)
-# - Historical trades are NEVER deleted (just tracked separately per attempt)
+  db_path: data/nq_agent_state/trades.db
+  async_writes_enabled: true
+  async_queue_max_size: 1000
+  async_queue_priority_trades: true
 challenge:
   enabled: true
-  start_balance: 50000.0                  # Starting balance for each attempt
-  max_drawdown: 2000.0                    # Hit -$2,000 = FAIL (auto-reset)
-  profit_target: 3000.0                   # Hit +$3,000 = PASS (auto-reset)
-  auto_reset_on_pass: true                # Automatically start new attempt on PASS
-  auto_reset_on_fail: true                # Automatically start new attempt on FAIL
-
-# Signal generation
-# QUALITY-FOCUSED: Purely quality-driven, NO CAPS (2025-01-07)
-# - Only top 10-15% of signals pass quality filters
-# - Take ALL signals that pass, regardless of count (0, 5, or 100+ per day)
-# - Natural frequency based on market conditions
+  start_balance: 50000.0
+  max_drawdown: 2000.0
+  profit_target: 3000.0
+  auto_reset_on_pass: true
+  auto_reset_on_fail: true
 signals:
-  duplicate_window_seconds: 120      # 2 minutes (even more opportunities)
-  min_confidence: 0.40               # FULLY LOOSENED: Very low bar to see all signals (2026-01-07)
-  min_risk_reward: 1.0               # FULLY LOOSENED: Accept 1:1 R:R minimum (2026-01-07)
-  duplicate_price_threshold_pct: 0.5 # 0.5% price difference for duplicate detection
-  volatility_threshold: 0.0001       # FULLY LOOSENED: Nearly disable volatility gate (2026-01-07)
-  avoid_lunch_lull: false            # Disabled - was blocking 72 signals
-  
-  # Quality score composite filter (combines multiple factors)
-  # DISABLED: Let all signals through without quality filtering (2026-01-07)
+  duplicate_window_seconds: 120
+  min_confidence: 0.4
+  min_risk_reward: 1.0
+  duplicate_price_threshold_pct: 0.5
+  volatility_threshold: 0.0001
+  avoid_lunch_lull: false
   quality_score:
-    enabled: false                   # DISABLED: No quality filtering (2026-01-07)
-    threshold: 0.40                  # Very low fallback if re-enabled
+    enabled: false
+    threshold: 0.4
     factors:
-      confidence_weight: 0.30        # Signal confidence (30% of score)
-      risk_reward_weight: 0.25        # Risk:reward ratio (25% of score)
-      regime_alignment_weight: 0.20  # Regime favorability (20% of score)
-      volume_profile_weight: 0.15    # Volume profile confirmation (15% of score)
-      mtf_alignment_weight: 0.10     # Multi-timeframe alignment (10% of score)
-  
-  # Time-of-day quality filter
-  # LOOSENED MORE: Disabled to allow all sessions equally (2026-01-07)
-  prioritize_ny_session: false         # Disabled - treat all sessions equally for more feel
-  
-  # Volume gate (minimum volume per bar to consider for signals)
-  # FULLY LOOSENED: Almost no volume gate (2026-01-07)
-  # Referenced to 5m bars, scales for other timeframes (1m = 0.2x, 15m = 3x).
-  # Set very low to capture all opportunities including overnight sessions.
+      confidence_weight: 0.3
+      risk_reward_weight: 0.25
+      regime_alignment_weight: 0.2
+      volume_profile_weight: 0.15
+      mtf_alignment_weight: 0.1
+  prioritize_ny_session: false
   min_volume: 10
-
-  # Opportunity tiers (A-tier actionable vs B-tier explore)
-  # DISABLED: Focus on quality A-tier only
   explore:
-    enabled: false                  # Disabled - focus on quality A-tier only
-    min_confidence: 0.75            # If re-enabled: match main quality threshold
-    min_risk_reward: 2.0            # If re-enabled: match main quality threshold
-    include_quality_rejects: false  # Disabled - no near-misses
-    bypass_regime_filters: false    # Disabled - enforce all filters
-    # NOTE: max_signals_per_hour removed - NO CAPS
-  
-  # Stop-distance cap (risk control)
-  # Keep at 20 pts - working well in A/B tests
-  # 20 pts = $120 risk @ 3 MNQ contracts (base_contracts during emergency)
-  max_stop_points: 20.0              # Reduced from 25.0
-  
-  # Adaptive volatility filter (LANE B - strategy threshold change)
-  # DISABLED: A/B testing showed this filter HURTS 1m timeframe performance
-  # - Was blocking 7,900+ signals (90%+ rejection rate)
-  # - Disabling improved WR from 35% to 44%
-  # - Filter was designed for 5m bars, not 1m
+    enabled: false
+    min_confidence: 0.75
+    min_risk_reward: 2.0
+    include_quality_rejects: false
+    bypass_regime_filters: false
+  max_stop_points: 20.0
   adaptive_volatility_filter:
-    enabled: false                    # DISABLED: Hurting 1m performance (2025-01-07 A/B test)
-    expansion_requirement: 2.0        # If re-enabled: use 2.0 (2.5 was too strict for 1m)
-    median_atr_threshold: 0.0003      # Threshold below which expansion is required
-  
-  # Per-signal-type regime/session filters
-  # FULLY LOOSENED: Allow all signals in all regimes (2026-01-07)
-  # Let the market decide - no regime restrictions
+    enabled: false
+    expansion_requirement: 2.0
+    median_atr_threshold: 0.0003
   regime_filters:
     mean_reversion_long:
-      allowed_regimes: [ranging, trending_bullish, trending_bearish]  # All regimes
+      allowed_regimes:
+      - ranging
+      - trending_bullish
+      - trending_bearish
     mean_reversion_short:
-      allowed_regimes: [ranging, trending_bearish, trending_bullish]  # All regimes
+      allowed_regimes:
+      - ranging
+      - trending_bearish
+      - trending_bullish
     momentum_long:
-      allowed_regimes: [ranging, trending_bullish, trending_bearish]  # All regimes
+      allowed_regimes:
+      - ranging
+      - trending_bullish
+      - trending_bearish
     momentum_short:
-      # OPTIMIZATION (2026-01-07): momentum_short is strong ONLY in bearish trend during afternoon;
-      # block lunch/closing/overnight chop and avoid counter-trend regimes.
-      allowed_regimes: [trending_bearish]
-      allowed_sessions: [afternoon]
+      allowed_regimes:
+      - ranging
+      - trending_bearish
+      - trending_bullish
     breakout_long:
-      allowed_regimes: [ranging, trending_bullish, trending_bearish]  # All regimes
+      allowed_regimes:
+      - ranging
+      - trending_bullish
+      - trending_bearish
     breakout_short:
-      allowed_regimes: [ranging, trending_bearish, trending_bullish]  # All regimes
+      allowed_regimes:
+      - ranging
+      - trending_bearish
+      - trending_bullish
     sr_bounce:
-      allowed_regimes: [ranging, trending_bullish, trending_bearish]  # All regimes
-
-# Strategy configuration (signal types, position sizing, A/B testing)
-# EMERGENCY: Only mean_reversion working - disable all broken signals (2025-01-06)
+      allowed_regimes:
+      - ranging
+      - trending_bullish
+      - trending_bearish
 strategy:
-  # Signal types to enable - LOOSENED MORE: include breakout/momentum so we don't miss big trend moves (2026-01-07)
   enabled_signals:
-    # SHORT-BIAS (2026-01-07): only run the current winner while longs are failing.
-    - momentum_short
-  
-  # Signal types to disable (takes precedence over enabled_signals)
+  - sr_bounce
+  - mean_reversion_long
+  - mean_reversion_short
+  - momentum_long
+  - momentum_short
+  - breakout_long
+  - breakout_short
   disabled_signals:
-    # Keep these off unless explicitly testing them (they tend to add noise / poor backtest WR).
-    - vwap_reversion
-    - engulfing_short
-    - engulfing_long
-  
-  # Dynamic position sizing for $200+ scalp targets
-  # EMERGENCY: Reduced sizes 40% during recovery period (2025-01-06)
+  - mean_reversion_short
   enable_dynamic_sizing: true
-  base_contracts: 3          # EMERGENCY: Reduced from 5 (40% reduction)
-  high_conf_contracts: 8     # EMERGENCY: Reduced from 15
-  max_conf_contracts: 12     # EMERGENCY: Reduced from 25
-  high_conf_threshold: 0.80
-  max_conf_threshold: 0.90
-  
-  # Winning signal types (get max contracts when high confidence)
-  # EMERGENCY: Only mean_reversion_long is winning (47% WR)
+  base_contracts: 3
+  high_conf_contracts: 8
+  max_conf_contracts: 12
+  high_conf_threshold: 0.8
+  max_conf_threshold: 0.9
   winning_signal_types:
-    - momentum_short
-  
-  # Scalp presets (optional - override ATR-based stops/targets)
+  - mean_reversion_long
   use_scalp_presets: false
-  scalp_target_points: 20.0   # For $200 with 5 contracts
+  scalp_target_points: 20.0
   scalp_stop_points: 12.0
-  
-  # Session-based position scaling (LANE B - risk parameter change)
-  # Reduces position size during quiet sessions (Tokyo, London) to manage risk.
-  # Full size during NY session when liquidity and volatility are highest.
   session_position_scaling:
-    enabled: true                     # Enabled: 50% size during Tokyo/London, full size NY
-    london_multiplier: 0.5            # 50% size during London session
-    tokyo_multiplier: 0.5             # 50% size during Tokyo session
-    ny_multiplier: 1.0                # Full size during NY session
-
-# Strategy variants for A/B testing
-# Use: python scripts/backtesting/run_variants.py --data-path <file>
+    enabled: true
+    london_multiplier: 0.5
+    tokyo_multiplier: 0.5
+    ny_multiplier: 1.0
 strategy_variants:
-  # =====================================================
-  # OPTIMIZATION VARIANTS (2025-01-07 A/B Test)
-  # Testing adaptive_volatility_filter impact
-  # =====================================================
-  
-  # Current EMERGENCY settings (baseline for comparison)
   emergency_baseline:
-    description: "Current EMERGENCY settings - strict filters"
+    description: Current EMERGENCY settings - strict filters
     min_confidence: 0.65
     min_risk_reward: 1.5
     max_stop_points: 20
     adaptive_volatility_filter_enabled: true
     adaptive_volatility_expansion_requirement: 2.5
-  
-  # Relaxed settings - test if blocking too many good signals
   relaxed:
-    description: "Relaxed filters - more signals, possibly lower quality"
+    description: Relaxed filters - more signals, possibly lower quality
     min_confidence: 0.55
     min_risk_reward: 1.3
     max_stop_points: 25
     adaptive_volatility_filter_enabled: true
     adaptive_volatility_expansion_requirement: 1.5
-  
-  # Moderate settings - balance between quality and frequency
   moderate:
-    description: "Moderate filters - balanced approach"
-    min_confidence: 0.60
+    description: Moderate filters - balanced approach
+    min_confidence: 0.6
     min_risk_reward: 1.4
     max_stop_points: 22
     adaptive_volatility_filter_enabled: true
     adaptive_volatility_expansion_requirement: 2.0
-  
-  # No adaptive volatility filter - test if this filter is helping
   no_avf:
-    description: "Adaptive volatility filter DISABLED - test filter value"
-    min_confidence: 0.60
+    description: Adaptive volatility filter DISABLED - test filter value
+    min_confidence: 0.6
     min_risk_reward: 1.4
     max_stop_points: 22
     adaptive_volatility_filter_enabled: false
-  
-  # =====================================================
-  # LEGACY VARIANTS (original presets)
-  # =====================================================
-  
   aggressive_scalp:
-    description: "Aggressive scalping - winners only, tight targets"
-    enabled_signals: [sr_bounce, mean_reversion]
-    disabled_signals: [momentum_long, engulfing, breakout]
+    description: Aggressive scalping - winners only, tight targets
+    enabled_signals:
+    - sr_bounce
+    - mean_reversion
+    disabled_signals:
+    - momentum_long
+    - engulfing
+    - breakout
     min_risk_reward: 1.0
     target_points: 20
     max_stop_points: 15
     base_contracts: 10
-  
   conservative:
-    description: "Conservative - high confidence only"
-    enabled_signals: [sr_bounce, mean_reversion_long, momentum_short]
-    disabled_signals: [momentum_long, engulfing, breakout]
+    description: Conservative - high confidence only
+    enabled_signals:
+    - sr_bounce
+    - mean_reversion_long
+    - momentum_short
+    disabled_signals:
+    - momentum_long
+    - engulfing
+    - breakout
     min_risk_reward: 1.5
     min_confidence: 0.75
-  
   high_volume:
-    description: "High volume scalping - 25 contracts on best setups"
-    enabled_signals: [sr_bounce, mean_reversion]
-    disabled_signals: [momentum_long, engulfing]
+    description: High volume scalping - 25 contracts on best setups
+    enabled_signals:
+    - sr_bounce
+    - mean_reversion
+    disabled_signals:
+    - momentum_long
+    - engulfing
     base_contracts: 15
     high_conf_contracts: 20
     max_conf_contracts: 25
     target_points: 10
     max_stop_points: 8
-
-# Performance tracking
 performance:
   max_records: 1000
   default_lookback_days: 7
-
-# Virtual PnL tracking (signal grading without real IBKR fills)
 virtual_pnl:
-  enabled: true                       # Enable virtual TP/SL tracking for signal quality grading
-  intrabar_tiebreak: "stop_loss"      # When TP and SL both touched in same bar: "stop_loss" (conservative) or "take_profit"
-  notify_entry: true                  # Send Telegram entry notification when a virtual trade is opened
-  notify_exit: true                   # Send Telegram exit notification when TP/SL is touched
-
-# Chart HUD (TradingView-style overlays)
+  enabled: true
+  intrabar_tiebreak: stop_loss
+  notify_entry: true
+  notify_exit: true
 hud:
-  enabled: true                       # Master toggle for all HUD elements
-  show_rr_box: true                   # Risk/reward box (green TP zone, red SL zone)
-  rr_box_forward_bars: 30             # How far forward to extend RR box
-  right_pad_bars: 30                  # Right padding for labels + RR box
-
-  # Sessions (Tokyo/London/NY shading)
+  enabled: true
+  show_rr_box: true
+  rr_box_forward_bars: 30
+  right_pad_bars: 30
   show_sessions: true
   show_session_names: true
-  show_session_oc: true               # Session open/close lines
+  show_session_oc: true
   show_session_tick_range: true
   show_session_average: true
-
-  # Zones and channels
-  show_supply_demand: true            # LuxAlgo-style supply/demand zones
-  show_power_channel: true            # ChartPrime-style power channel
-  show_tbt_targets: true              # Trendline breakout targets
-
-  # Key levels (PDH/PDL/VWAP/POC)
+  show_supply_demand: true
+  show_power_channel: true
+  show_tbt_targets: true
   show_key_levels: true
-  show_right_labels: true             # TradingView-style right-side labels
+  show_right_labels: true
   max_right_labels: 12
-  right_label_merge_ticks: 4          # Merge labels within N ticks
-
-  # RSI panel
+  right_label_merge_ticks: 4
   show_rsi: true
   rsi_period: 14
-
-# Session definitions (for chart HUD shading)
-# Using Key Levels SpacemanBTC Pine defaults (UTC-based sessions)
 sessions:
-  - name: "Tokyo"
-    session: "0000-0900"
-    timezone: "UTC"
-    color: "#2962FF"
-  - name: "London"
-    session: "0800-1600"
-    timezone: "UTC"
-    color: "#FF9800"
-  - name: "New York"
-    session: "1400-2100"
-    timezone: "UTC"
-    color: "#089981"
-
-# =============================================================================
-# CUSTOM INDICATORS (Supply/Demand, Power Channel, Divergences)
-# =============================================================================
-# Ported from PineScript. Provide both rule-based signals and ML features.
+- name: Tokyo
+  session: 0000-0900
+  timezone: UTC
+  color: '#2962FF'
+- name: London
+  session: 0800-1600
+  timezone: UTC
+  color: '#FF9800'
+- name: New York
+  session: 1400-2100
+  timezone: UTC
+  color: '#089981'
 indicators:
   enabled:
-    - supply_demand_zones
-    - power_channel
-    - smart_money_divergence
-  
-  as_signals: true        # Generate rule-based signals from indicators
-  as_features: true       # Extract numeric features for learning system
-  
-  # Per-indicator configuration (optional)
+  - supply_demand_zones
+  - power_channel
+  - smart_money_divergence
+  as_signals: true
+  as_features: true
   supply_demand_zones:
-    lookback: 50          # Bars to analyze for zone detection
+    lookback: 50
     min_zone_size_atr: 0.5
     max_zones: 5
     zone_threshold_pct: 0.3
-  
   power_channel:
-    length: 130           # Lookback for channel calculation
-    atr_mult: 2.0         # ATR multiplier for channel width
-  
+    length: 130
+    atr_mult: 2.0
   smart_money_divergence:
     lookback: 14
     pivot_lookback: 5
     rsi_period: 14
-
-# =============================================================================
-# LLM SIGNAL ANNOTATION (AI-Powered Signal Analysis)
-# =============================================================================
-# Uses Claude to analyze signals and generate human-readable explanations.
-# Non-blocking with timeout - failures don't affect signal processing.
 llm_signal_annotation:
-  enabled: true                    # Master toggle for AI signal analysis
-  model: "claude-sonnet-4-20250514"  # Claude model to use
-  timeout_seconds: 5              # Max time to wait for annotation (keep signals fast)
-  batch_mode: false               # Process signals individually (batching not yet implemented)
-
-# =============================================================================
-# LLM TRADE POST-MORTEM (AI-Powered Trade Analysis)
-# =============================================================================
-# Analyzes completed trades to identify lessons and improvements.
-# EMERGENCY: Enabled Telegram + bigger loss threshold for faster feedback
+  enabled: true
+  model: claude-sonnet-4-20250514
+  timeout_seconds: 5
+  batch_mode: false
 llm_trade_postmortem:
-  enabled: true                    # Master toggle for trade post-mortem analysis
-  model: "claude-sonnet-4-20250514"  # Claude model to use
-  timeout_seconds: 10             # Longer timeout (not time-critical)
-  min_pnl_threshold: 100          # EMERGENCY: Raised - analyze bigger losses ($100+)
-  send_to_telegram: true          # EMERGENCY: Send to Telegram for immediate review
-  batch_analysis_count: 5         # EMERGENCY: Reduced from 10 for faster feedback
-
-# =============================================================================
-# LLM PATTERN RECOGNITION (AI-Powered Pattern Detection)
-# =============================================================================
-# Identifies recurring patterns across trades for optimization insights.
-# EMERGENCY: Faster batch analysis for quicker insights
+  enabled: true
+  model: claude-sonnet-4-20250514
+  timeout_seconds: 10
+  min_pnl_threshold: 100
+  send_to_telegram: true
+  batch_analysis_count: 5
 llm_pattern_recognition:
-  enabled: true                    # Master toggle for pattern recognition
-  model: "claude-sonnet-4-20250514"  # Claude model to use
-  timeout_seconds: 30             # Longer timeout (batch analysis)
-  batch_size: 5                   # EMERGENCY: Reduced from 10 - faster feedback
-  lookback_trades: 50             # Consider last 50 trades
-  min_pattern_confidence: 0.6     # EMERGENCY: Lowered from 0.7 - catch more patterns
-  send_to_telegram: true          # Valuable insights worth sending
-
-# =============================================================================
-# LLM RISK ASSESSMENT (Real-Time Pre-Trade Risk Check)
-# =============================================================================
-# Quick risk check before signal execution. Must be FAST (<3s).
-# EMERGENCY: Enabled due to critical performance issues (31% WR, -$2,118 P&L)
+  enabled: true
+  model: claude-sonnet-4-20250514
+  timeout_seconds: 30
+  batch_size: 5
+  lookback_trades: 50
+  min_pattern_confidence: 0.6
+  send_to_telegram: true
 llm_risk_assessment:
-  enabled: true                    # ENABLED - emergency intervention
-  model: "claude-sonnet-4-20250514"  # Claude model to use
-  timeout_seconds: 3              # Must be fast - never delay signals
-  block_on_critical: false        # Warning only - don't block trades
-  consider_recent_trades: 20      # Last 20 trades for context
-
-# =============================================================================
-# LLM ADAPTIVE TUNING (AI-Powered Config Optimization)
-# =============================================================================
-# Suggests config changes based on performance analysis.
-# EMERGENCY: More frequent analysis for faster optimization
+  enabled: true
+  model: claude-sonnet-4-20250514
+  timeout_seconds: 3
+  block_on_critical: false
+  consider_recent_trades: 20
 llm_adaptive_tuning:
-  enabled: true                    # Master toggle for adaptive tuning
-  model: "claude-sonnet-4-20250514"  # Claude model to use
-  timeout_seconds: 60             # Longer timeout (comprehensive analysis)
-  analysis_interval_hours: 12     # EMERGENCY: Twice daily (was 24h)
-  auto_apply: false               # Require manual approval
-  min_sample_size: 20             # EMERGENCY: Reduced from 30 for faster feedback
-  conservative_mode: true         # Small incremental changes only
-
-# =============================================================================
-# EXECUTION (ATS - Automated Trading System)
-# =============================================================================
-# Controls automated order placement via an execution adapter (default: IBKR).
-# SAFETY: Default is disabled + disarmed. Must explicitly enable and /arm to trade.
+  enabled: true
+  model: claude-sonnet-4-20250514
+  timeout_seconds: 60
+  analysis_interval_hours: 12
+  auto_apply: false
+  min_sample_size: 20
+  conservative_mode: true
 execution:
-  enabled: true                     # ENABLED: Dry-run mode active (2026-01-07)
-  armed: true                       # AUTO-ARMED: Will log "would trade" on signals (2026-01-07)
-  mode: "dry_run"                   # "dry_run" (log only), "paper", or "live"
-  adapter: "ibkr"                   # "ibkr" | "tradovate" (tradovate is dry_run-only skeleton for now)
-  
-  # Risk limits (hard caps)
-  max_positions: 1                  # Maximum concurrent positions
-  max_orders_per_day: 20            # Maximum orders per trading day
-  max_daily_loss: 500.0             # Kill switch: max daily loss in dollars
-  cooldown_seconds: 60              # Minimum seconds between orders for same signal type
-  
-  # Symbol whitelist (empty = all symbols allowed)
+  enabled: true
+  armed: true
+  mode: dry_run
+  adapter: ibkr
+  max_positions: 1
+  max_orders_per_day: 20
+  max_daily_loss: 500.0
+  cooldown_seconds: 60
   symbol_whitelist:
-    - MNQ
-  
-  # IBKR connection (separate client_id from data to avoid conflicts)
-  ibkr_trading_client_id: 20        # Different from IBKR_CLIENT_ID (data)
-  ibkr_host: "${IBKR_HOST}"
-  ibkr_port: "${IBKR_PORT}"
-
-# =============================================================================
-# LEARNING (Adaptive Bandit Policy + Feature Engineering)
-# =============================================================================
-# Adjusts execution decisions based on observed signal type performance.
-# Uses Thompson sampling (Beta-Bernoulli) per signal type.
-# SAFETY: Default is shadow mode - learns but does NOT affect execution.
+  - MNQ
+  ibkr_trading_client_id: 20
+  ibkr_host: ${IBKR_HOST}
+  ibkr_port: ${IBKR_PORT}
 learning:
-  enabled: true                     # Master toggle for adaptive policy
-  mode: "shadow"                    # "shadow" (observe only) or "live" (affects execution)
-  
-  # Feature engineering for ML integration
-  feature_engineer_enabled: true    # Compute 50+ ML features from market data
+  enabled: true
+  mode: shadow
+  feature_engineer_enabled: true
   features:
     short_window: 5
     medium_window: 20
@@ -527,265 +358,154 @@ learning:
     normalize_features: true
     clip_outliers: true
     outlier_std: 3.0
-  
-  # Bandit configuration
-  min_samples_per_type: 10          # Minimum samples before policy has opinion
-  explore_rate: 0.1                 # Random explore rate (epsilon-greedy component)
-  decision_threshold: 0.3           # Skip signal if P(win) < threshold
-  
-  # Position sizing adjustment (when mode=live)
-  max_size_multiplier: 1.5          # Maximum size boost for high-confidence types
-  min_size_multiplier: 0.5          # Minimum size reduction for low-confidence types
-  
-  # Prior distribution (Beta distribution parameters)
-  # Start optimistic: alpha=2, beta=2 gives mean=0.5 with some uncertainty
+  min_samples_per_type: 10
+  explore_rate: 0.1
+  decision_threshold: 0.3
+  max_size_multiplier: 1.5
+  min_size_multiplier: 0.5
   prior_alpha: 2.0
   prior_beta: 2.0
-  
-  # Decay factor for older observations (0 = no decay, 1 = full weight to recent)
-  decay_factor: 0.0                 # Disabled for now - all observations equal weight
-
-  # Contextual learning (optional): learns performance by session/regime/time bucket.
-  # Safe for manual trading: annotates signals + learns from virtual exits.
+  decay_factor: 0.0
   contextual:
     enabled: true
-    mode: "live"  # CHANGED: Enable live contextual learning
+    mode: live
     explore_rate: 0.1
     min_samples_per_context: 5
     decision_threshold: 0.3
     fallback_to_global: true
-
-# =============================================================================
-# ADAPTIVE STOPS (v2.0 Risk Management)
-# =============================================================================
-# Context-aware stop loss and take profit calculation.
-# Adapts to regime, session, volatility, and signal type performance.
 adaptive_stops:
-  enabled: true                      # Master toggle for adaptive stops
-  use_structure_stops: true          # Use swing highs/lows for stop placement
-  use_level2_zones: true             # Use market depth analysis (approximated from L1)
-  min_stop_points: 5.0               # Minimum stop distance in points
-  
-  # Regime-based multipliers (ATR multiplier adjustments)
+  enabled: true
+  use_structure_stops: true
+  use_level2_zones: true
+  min_stop_points: 5.0
   regime_multipliers:
     ranging: 1.0
     trending_bullish: 1.2
     trending_bearish: 1.2
-    
-  # Session-based multipliers (reduce stops during low-vol sessions)
   session_multipliers:
     tokyo: 0.8
     london: 0.9
     new_york: 1.0
-    
-  # Volatility-based multipliers
   volatility_multipliers:
     low: 0.9
     normal: 1.0
     high: 1.3
-    
-  # Performance-based adjustment (wider stops for low-WR signals)
   performance_adjustment: true
-
-# =============================================================================
-# SWING TRADING (Bigger Opportunities)
-# =============================================================================
-# Automatically detect and hold bigger opportunities longer.
-# NO LIMIT on swing trades per day - take all quality swing setups.
 swing_trading:
-  enabled: true                      # Master toggle for swing trade detection
-  min_confidence: 0.90               # High confidence required for swing classification
-  min_target_points: 30              # Large target (30+ points vs 15-20 for scalps)
-  min_mtf_alignment: 0.80            # Strong multi-timeframe alignment required
-  min_volume_ratio: 1.2              # Volume spike or above-average volume
-  max_hold_hours: 8                  # Until end of day for futures (16:10 ET)
-  position_size_multiplier: 1.5      # Can use larger size for swing trades
-  # NO limit on swing trades per day - all quality swings are taken
-
-# =============================================================================
-# TRAILING STOP LOSS (Profit Protection)
-# =============================================================================
-# Advanced stop loss management: breakeven protection + dynamic trailing.
+  enabled: true
+  min_confidence: 0.9
+  min_target_points: 30
+  min_mtf_alignment: 0.8
+  min_volume_ratio: 1.2
+  max_hold_hours: 8
+  position_size_multiplier: 1.5
 trailing_stop:
-  enabled: true                      # Master toggle for trailing stops
-  breakeven_immediate: true          # Move to BE immediately when any profit is made
-  trail_method: "dynamic"            # dynamic | atr_multiplier | percentage
-  early_profit_trail_atr: 0.5        # 0-1x ATR profit: trail by 0.5x ATR (tight)
-  medium_profit_trail_atr: 1.0       # 1-2x ATR profit: trail by 1.0x ATR (moderate)
-  large_profit_trail_atr: 1.5       # 2x+ ATR profit: trail by 1.5x ATR (loose, let it run)
-  update_frequency_bars: 1           # Update every bar (1m)
-  never_widen: true                  # Only move stop in favorable direction (never widen)
-  min_profit_before_be: 2.0          # Minimum profit (points) before moving to breakeven
-
-# =============================================================================
-# ADAPTIVE POSITION SIZING (v2.0 Risk Management)
-# =============================================================================
-# Kelly Criterion + context-aware position sizing.
-# Replaces simple confidence-based sizing with mathematically optimal sizing.
+  enabled: true
+  breakeven_immediate: true
+  trail_method: dynamic
+  early_profit_trail_atr: 0.5
+  medium_profit_trail_atr: 1.0
+  large_profit_trail_atr: 1.5
+  update_frequency_bars: 1
+  never_widen: true
+  min_profit_before_be: 2.0
 adaptive_sizing:
-  enabled: true                      # Master toggle for adaptive sizing
-  method: "kelly_criterion"          # "kelly_criterion", "fixed", or "hybrid"
-  kelly_fraction: 0.25               # Conservative Kelly (1/4 Kelly)
+  enabled: true
+  method: kelly_criterion
+  kelly_fraction: 0.25
   min_contracts: 1
-  max_contracts: 15                  # Reduced from 25 during recovery
-  
-  # Feature toggles
-  confidence_scaling: true           # Scale size based on signal confidence
-  regime_scaling: true               # Scale size based on regime favorability
-  session_scaling: true              # Reduce size during Tokyo/London
-  streak_adjustment: true            # Reduce size on losing streaks
-  
-  # Streak settings
-  losing_streak_threshold: 3         # Start reducing after 3 consecutive losses
-  max_losing_streak_reduction: 0.5   # Reduce to 50% after losing streak
-  winning_streak_threshold: 3        # Start boosting after 3 wins
-  winning_streak_boost: 1.2          # Boost to 120% during win streak
-
-# =============================================================================
-# ML SIGNAL FILTER (v2.0 Risk Management)
-# =============================================================================
-# XGBoost/LightGBM classifier to predict trade success probability.
-# Filters out signals with low predicted win probability.
+  max_contracts: 15
+  confidence_scaling: true
+  regime_scaling: true
+  session_scaling: true
+  streak_adjustment: true
+  losing_streak_threshold: 3
+  max_losing_streak_reduction: 0.5
+  winning_streak_threshold: 3
+  winning_streak_boost: 1.2
 ml_filter:
-  enabled: true                      # Master toggle for ML filter
-  # SAFE DEFAULT: score-only (shadow) until we prove lift on your own outcomes.
-  # Set to "live" to allow blocking (still gated by require_lift_to_block by default).
-  mode: "shadow"                     # "shadow" | "live"
-  require_lift_to_block: true        # Only allow blocking once lift is demonstrated
-  lift_lookback_trades: 200          # Trades used to measure lift (pass vs would-block)
-  lift_min_trades: 50                # Minimum graded exits needed before blocking is allowed
-  lift_min_winrate_delta: 0.05       # Require +5% absolute WR lift before blocking activates
-  model_path: "models/signal_filter_v1.joblib"  # Path to saved model
-  model_version: "v1.0.0"
-  
-  # Prediction thresholds
-  min_probability: 0.55              # Minimum P(win) to pass filter
-  high_probability: 0.70             # High confidence threshold
-  
-  # Training settings
-  min_training_samples: 30           # Minimum samples to train model
-  retrain_interval_days: 7           # Days between automatic retraining
-  
-  # Model hyperparameters
+  enabled: true
+  mode: shadow
+  require_lift_to_block: true
+  lift_lookback_trades: 200
+  lift_min_trades: 50
+  lift_min_winrate_delta: 0.05
+  model_path: models/signal_filter_v1.joblib
+  model_version: v1.0.0
+  min_probability: 0.55
+  high_probability: 0.7
+  min_training_samples: 30
+  retrain_interval_days: 7
   n_estimators: 100
   max_depth: 6
   learning_rate: 0.1
-  
-  # Calibration
   calibrate_probabilities: true
-
-# =============================================================================
-# DRIFT GUARD (Risk-Off Cooldown)
-# =============================================================================
-# Automatically tightens filters + reduces size when:
-# - Recent win-rate drops below a floor (over last N graded exits)
-# - Volatility shocks (high/extreme volatility + ATR expansion)
 drift_guard:
-  enabled: false                     # DISABLED: Let all signals through without risk-off cooldowns (2026-01-07)
+  enabled: false
   lookback_trades: 20
   min_trades: 10
-  win_rate_floor: 0.20               # FULLY LOOSENED (2026-01-07)
-  volatility_spike_enabled: false    # DISABLED (2026-01-07)
-  volatility_levels: ["extreme"]
+  win_rate_floor: 0.2
+  volatility_spike_enabled: false
+  volatility_levels:
+  - extreme
   require_atr_expansion: true
-  cooldown_minutes: 10               # FULLY LOOSENED: Short cooldown if re-enabled (2026-01-07)
-  tighten_min_confidence_delta: 0.00 # FULLY LOOSENED: No tightening (2026-01-07)
-  tighten_min_risk_reward_delta: 0.00 # FULLY LOOSENED: No tightening (2026-01-07)
-  size_multiplier: 1.00              # FULLY LOOSENED: Full size always (2026-01-07)
-
-# =============================================================================
-# PROP FIRM MODE (rule guardrails)
-# =============================================================================
-# Optional: adds "prop firm guardrails" that can:
-# - Cap/adjust execution position size to firm max contracts
-# - Prevent execution when near/over max loss limit
-# - Enforce a conservative consistency cap (evaluation)
-#
-# NOTE: These guardrails use the agent's tracked (virtual) PnL unless/until a
-# broker equity feed is wired in.
+  cooldown_minutes: 10
+  tighten_min_confidence_delta: 0.0
+  tighten_min_risk_reward_delta: 0.0
+  size_multiplier: 1.0
 prop_firm:
   enabled: false
-  profile: "mff_core_50k_eval"     # MyFundedFutures Core 50K (evaluation)
-
-  # Core 50K parameters
+  profile: mff_core_50k_eval
   account_size: 50000
   profit_target: 3000
-  max_loss_limit_eod: 2000          # Trailing max loss, locked at EOD
-  daily_loss_limit: null            # Core: none
-  max_contracts_mini: 3             # NQ
-  max_contracts_micro: 30           # MNQ
-  consistency_pct: 0.50             # Max daily profit cap as % of profit_target (safe mode)
+  max_loss_limit_eod: 2000
+  daily_loss_limit: null
+  max_contracts_mini: 3
+  max_contracts_micro: 30
+  consistency_pct: 0.5
   min_trading_days: 2
   allow_t1_news_trading: true
-
-  # Trading-day semantics (defaults match common futures boundaries)
-  timezone: "America/New_York"
-  trading_day_start_time: "18:00"   # Futures "trade day" rolls at 6pm ET
-  eod_lock_time: "16:10"            # Matches your flat-by rule; used to lock trailing DD
-
-  # Enforcement toggles
+  timezone: America/New_York
+  trading_day_start_time: '18:00'
+  eod_lock_time: '16:10'
   enforce_consistency_cap: true
   enforce_drawdown_risk_cap: true
-  drawdown_safety_buffer: 0.0       # Keep this $ buffer unused (optional)
-
-  # Legacy assumptions (still used for MNQ-native signal PnL math)
-  mnq_tick_value: 2.0               # $2 per point for MNQ
-  nq_tick_value: 20.0               # $20 per point for NQ
-  contract_size_multiplier: 1.0     # Native MNQ sizing (no NQ scaling)
-
-# =============================================================================
-# CLAUDE MONITOR (AI-Powered Monitoring & Assistance)
-# =============================================================================
-# Claude-powered monitoring service for intelligent alerts and suggestions.
-# Requires ANTHROPIC_API_KEY in .env and [llm] extra installed.
+  drawdown_safety_buffer: 0.0
+  mnq_tick_value: 2.0
+  nq_tick_value: 20.0
+  contract_size_multiplier: 1.0
 claude_monitor:
-  enabled: true                        # Master toggle for Claude monitoring
-  timezone: "America/New_York"         # Timezone for reports/quiet-hours (default: ET)
-  
-  # Analysis intervals (seconds)
-  realtime_monitoring: true            # Enable real-time monitoring (every minute)
-  realtime_interval_seconds: 60        # Real-time check interval
-  frequent_interval_seconds: 900       # Frequent analysis interval (15 minutes)
-  code_analysis_interval_hours: 24     # How often to run code analysis (when enabled)
-  code_analysis_enabled: false         # Disable noisy code-quality alerts in Telegram by default
-  
-  # Daily reports
-  daily_report_enabled: true           # Send daily performance report
-  daily_report_time: "09:00"           # Time to send (ET)
-  
-  # Weekly reports
-  weekly_report_enabled: true          # Send weekly strategic report
-  weekly_report_day: "monday"          # Day to send
-  weekly_report_time: "09:00"          # Time to send (ET)
-  
-  # Alert configuration
-  alert_levels:                        # Which alert levels to send
-    - critical
-    - warning
-  alert_categories:                    # Which alert categories to send
-    - signals
-    - market
-    - system
-  include_alert_metadata: false        # Hide Category/Source footer lines to keep messages concise
-  dedup_window_seconds: 1800           # Deduplication window (30 minutes)
-  max_alerts_per_hour: 12              # Rate limit for alerts
-  
-  # Quiet hours (suppress non-critical alerts)
-  quiet_hours_start: "22:00"           # Start of quiet hours (ET)
-  quiet_hours_end: "07:00"             # End of quiet hours (ET)
-  suppress_info_during_quiet: true     # Suppress INFO alerts during quiet hours
-  
-  # Suggestions
-  max_suggestions_per_analysis: 5      # Maximum suggestions per analysis cycle
-  auto_apply_enabled: false            # Require manual approval by default
-  max_auto_changes_per_day: 3          # Maximum auto-applied changes per day
-  
-  # Analysis lookback periods
-  signal_analysis_lookback_hours: 24   # Signal analysis window
-  system_analysis_lookback_hours: 48   # System health window
-  market_analysis_lookback_hours: 168  # Market analysis window (1 week)
-  
-  # Claude API settings (can also be set via env vars)
-  # model: "claude-sonnet-4-20250514"  # Default model
-  # max_tokens: 8000                   # Max response tokens
-  # timeout: 180                       # Request timeout (seconds)
+  enabled: true
+  timezone: America/New_York
+  realtime_monitoring: true
+  realtime_interval_seconds: 60
+  frequent_interval_seconds: 900
+  code_analysis_interval_hours: 24
+  code_analysis_enabled: false
+  daily_report_enabled: true
+  daily_report_time: 09:00
+  weekly_report_enabled: true
+  weekly_report_day: monday
+  weekly_report_time: 09:00
+  alert_levels:
+  - critical
+  - warning
+  alert_categories:
+  - signals
+  - market
+  - system
+  include_alert_metadata: false
+  dedup_window_seconds: 1800
+  max_alerts_per_hour: 12
+  quiet_hours_start: '22:00'
+  quiet_hours_end: 07:00
+  suppress_info_during_quiet: true
+  max_suggestions_per_analysis: 5
+  auto_apply_enabled: true
+  max_auto_changes_per_day: 5
+  strategy_update_prompts_enabled: true
+  strategy_update_prompt_cooldown_seconds: 1800
+  strategy_update_min_regime_confidence: 0.55
+  signal_analysis_lookback_hours: 24
+  system_analysis_lookback_hours: 48
+  market_analysis_lookback_hours: 168

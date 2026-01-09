@@ -51,6 +51,12 @@ class MonitorState:
         self._applied_count = 0
         self._last_daily_report_sent_at: Optional[str] = None
         self._last_weekly_report_sent_at: Optional[str] = None
+
+        # Regime tracking (used for "strategy update on market change" prompts)
+        self._last_regime_seen: Optional[Dict[str, Any]] = None
+        self._last_regime_seen_at: Optional[str] = None
+        self._last_regime_prompt_signature: Optional[str] = None
+        self._last_regime_prompt_at: Optional[str] = None
         
         # Load existing state
         self._load_state()
@@ -67,6 +73,10 @@ class MonitorState:
                     self._applied_count = state.get("applied_count", 0)
                     self._last_daily_report_sent_at = state.get("last_daily_report_sent_at")
                     self._last_weekly_report_sent_at = state.get("last_weekly_report_sent_at")
+                    self._last_regime_seen = state.get("last_regime_seen")
+                    self._last_regime_seen_at = state.get("last_regime_seen_at")
+                    self._last_regime_prompt_signature = state.get("last_regime_prompt_signature")
+                    self._last_regime_prompt_at = state.get("last_regime_prompt_at")
                     logger.debug(f"Loaded monitor state: {self._analysis_count} analyses, {self._applied_count} applied")
             
             if self.suggestions_file.exists():
@@ -87,6 +97,10 @@ class MonitorState:
                 "applied_count": self._applied_count,
                 "last_daily_report_sent_at": self._last_daily_report_sent_at,
                 "last_weekly_report_sent_at": self._last_weekly_report_sent_at,
+                "last_regime_seen": self._last_regime_seen,
+                "last_regime_seen_at": self._last_regime_seen_at,
+                "last_regime_prompt_signature": self._last_regime_prompt_signature,
+                "last_regime_prompt_at": self._last_regime_prompt_at,
                 "last_updated": get_utc_timestamp(),
             }
             with open(self.monitor_state_file, "w") as f:
@@ -111,21 +125,52 @@ class MonitorState:
         """Persist the last weekly report sent timestamp (UTC ISO)."""
         self._last_weekly_report_sent_at = timestamp
         self._save_state()
+
+    # =========================================================================
+    # Regime prompt state (market change → strategy update proposals)
+    # =========================================================================
+
+    def get_last_regime_seen(self) -> Optional[Dict[str, Any]]:
+        """Return the last regime snapshot seen by the monitor (if any)."""
+        return self._last_regime_seen
+
+    def set_last_regime_seen(self, regime: Optional[Dict[str, Any]], timestamp: Optional[str] = None) -> None:
+        """Persist the last regime snapshot seen by the monitor."""
+        self._last_regime_seen = regime
+        self._last_regime_seen_at = timestamp
+        self._save_state()
+
+    def get_last_regime_prompt(self) -> Dict[str, Any]:
+        """Return last regime prompt metadata (signature + timestamp)."""
+        return {
+            "signature": self._last_regime_prompt_signature,
+            "timestamp": self._last_regime_prompt_at,
+        }
+
+    def set_last_regime_prompt(self, signature: str, timestamp: Optional[str] = None) -> None:
+        """Persist that we prompted for a specific regime transition signature."""
+        self._last_regime_prompt_signature = signature
+        self._last_regime_prompt_at = timestamp or get_utc_timestamp()
+        self._save_state()
     
     def record_analysis(
         self,
         analysis: Dict[str, Any],
         suggestions: Optional[List[Dict[str, Any]]] = None,
-    ) -> None:
+    ) -> List[str]:
         """
         Record an analysis result.
         
         Args:
             analysis: Analysis results from all analyzers
             suggestions: Optional list of generated suggestions
+
+        Returns:
+            List of created suggestion IDs (useful for linking Telegram buttons to new suggestions)
         """
         self._analysis_count += 1
         self._last_analysis = analysis
+        created_suggestion_ids: List[str] = []
         
         # Write to observations file (append)
         observation = {
@@ -145,9 +190,20 @@ class MonitorState:
         # Process suggestions
         if suggestions:
             for suggestion in suggestions:
-                self.add_suggestion(suggestion)
+                try:
+                    sid = self.add_suggestion(suggestion)
+                    created_suggestion_ids.append(sid)
+                    # Mutate input dict so callers (monitor service / Telegram UI) can reference IDs
+                    # without re-loading from disk. This is safe because suggestion dicts are ephemeral.
+                    try:
+                        suggestion["id"] = sid
+                    except Exception:
+                        pass
+                except Exception:
+                    continue
         
         self._save_state()
+        return created_suggestion_ids
     
     def _summarize_analysis(self, analysis: Dict[str, Any]) -> Dict[str, str]:
         """Create a brief summary of analysis results."""

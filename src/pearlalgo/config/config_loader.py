@@ -164,6 +164,23 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "show_volume_metrics": True,
         "compact_metric_width": 10,
     },
+    # Risk management (strategy-level sizing / brackets). Kept separate from execution hard-caps.
+    # NOTE: This section MUST be present here so `risk:` in config.yaml actually affects the
+    # running agent (otherwise it is silently ignored by `load_service_config()`).
+    "risk": {
+        "max_risk_per_trade": 0.01,         # 1% (prop-style conservative default)
+        "max_drawdown": 0.10,               # 10% account drawdown limit
+        "stop_loss_atr_multiplier": 1.5,    # baseline ATR stop sizing
+        "take_profit_risk_reward": 1.5,     # baseline TP R:R target
+        "min_position_size": 5,             # MNQ contracts (legacy sizing floor)
+        "max_position_size": 15,            # MNQ contracts (legacy sizing cap)
+        # Per-signal-type sizing overrides (Option A: keep signals enabled; cap risk instead).
+        # Example:
+        #   signal_type_size_multipliers: { sr_bounce: 0.25 }
+        #   signal_type_max_contracts: { sr_bounce: 2 }
+        "signal_type_size_multipliers": {},
+        "signal_type_max_contracts": {},
+    },
     "circuit_breaker": {
         "max_consecutive_errors": 10,
         "max_connection_failures": 10,
@@ -252,6 +269,23 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "max_depth": 6,
         "learning_rate": 0.1,
         "calibrate_probabilities": True,
+    },
+    # ==========================================================================
+    # TRAILING STOP LOSS (Profit Protection)
+    # ==========================================================================
+    # Enables breakeven + dynamic trailing stop management in TradeManager.
+    # NOTE: This section MUST be present here so `trailing_stop:` in config.yaml
+    # actually affects the running agent (otherwise it is silently ignored).
+    "trailing_stop": {
+        "enabled": False,
+        "breakeven_immediate": True,
+        "trail_method": "dynamic",
+        "early_profit_trail_atr": 0.5,
+        "medium_profit_trail_atr": 1.0,
+        "large_profit_trail_atr": 1.5,
+        "update_frequency_bars": 1,
+        "never_widen": True,
+        "min_profit_before_be": 2.0,
     },
     "signals": {
         "duplicate_window_seconds": 300,
