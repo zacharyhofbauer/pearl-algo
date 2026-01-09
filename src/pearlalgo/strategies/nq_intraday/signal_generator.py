@@ -276,7 +276,9 @@ class NQSignalGenerator:
         self.scanner = scanner or NQScanner(config=self.config, service_config=service_config)
         # Quality scorer: Lower threshold (0.45) to allow more signals in quiet regimes
         # Your 7W/9L ~44% win rate is profitable with proper R:R, so 0.55 was too strict
-        self.quality_scorer = SignalQualityScorer(min_edge_threshold=0.45)
+        # Lower threshold (0.20) to bootstrap outcome tracking - historical data is broken (all "unknown")
+        # Once outcome tracking is fixed, can raise back to 0.45
+        self.quality_scorer = SignalQualityScorer(min_edge_threshold=0.20)
 
         # Load signal configuration
         signal_settings = service_config.get("signals", {})
@@ -1052,54 +1054,7 @@ class NQSignalGenerator:
 
             # Per-signal-type sizing overrides (keep signals enabled; scale risk instead of filtering trades).
             # Applied AFTER adaptive sizing and drift guard so it acts as a final, explicit brake.
-            try:
-                sig_type = str(validated_signal.get("type") or validated_signal.get("signal_type") or "")
-                if sig_type:
-                    # Allow base-key overrides like "sr_bounce" to cover sr_bounce_long/sr_bounce_short.
-                    base_key = sig_type
-                    if sig_type.endswith("_long") or sig_type.endswith("_short"):
-                        base_key = sig_type.rsplit("_", 1)[0]
-
-                    mult = None
-                    if isinstance(self._signal_type_size_multipliers, dict):
-                        mult = self._signal_type_size_multipliers.get(sig_type)
-                        if mult is None:
-                            mult = self._signal_type_size_multipliers.get(base_key)
-                    cap = None
-                    if isinstance(self._signal_type_max_contracts, dict):
-                        cap = self._signal_type_max_contracts.get(sig_type)
-                        if cap is None:
-                            cap = self._signal_type_max_contracts.get(base_key)
-
-                    before = int(validated_signal.get("position_size", 0) or 0)
-                    if before <= 0:
-                        before = 1
-
-                    after = before
-                    if mult is not None:
-                        try:
-                            mult_f = float(mult)
-                            if mult_f > 0:
-                                after = max(1, int(round(before * mult_f)))
-                                validated_signal["_risk_position_size_before"] = before
-                                validated_signal["_risk_size_multiplier"] = float(mult_f)
-                        except Exception:
-                            pass
-
-                    if cap is not None:
-                        try:
-                            cap_i = int(cap)
-                            if cap_i > 0:
-                                after = max(1, min(after, cap_i))
-                                validated_signal["_risk_max_contracts"] = int(cap_i)
-                        except Exception:
-                            pass
-
-                    if after != before:
-                        validated_signal["_risk_position_size_after"] = after
-                        validated_signal["position_size"] = after
-            except Exception:
-                pass
+            self._apply_signal_type_sizing_overrides(validated_signal)
 
             # Ensure risk_amount reflects any sizing overrides (adaptive sizing / drift guard).
             try:
@@ -1680,6 +1635,67 @@ class NQSignalGenerator:
             ).total_seconds()
             < self._signal_window_seconds
         ]
+
+    def _apply_signal_type_sizing_overrides(self, validated_signal: Dict) -> None:
+        """
+        Apply per-signal-type position sizing overrides configured in `risk.*`.
+
+        This is used for "Option A" style risk shaping: keep a signal family enabled
+        but cap its size hard so it can't dominate PnL.
+
+        Mutates `validated_signal` in-place.
+        """
+        try:
+            sig_type = str(validated_signal.get("type") or validated_signal.get("signal_type") or "")
+            if not sig_type:
+                return
+
+            # Allow base-key overrides like "sr_bounce" to cover sr_bounce_long/sr_bounce_short.
+            base_key = sig_type
+            if sig_type.endswith("_long") or sig_type.endswith("_short"):
+                base_key = sig_type.rsplit("_", 1)[0]
+
+            mult = None
+            if isinstance(self._signal_type_size_multipliers, dict):
+                mult = self._signal_type_size_multipliers.get(sig_type)
+                if mult is None:
+                    mult = self._signal_type_size_multipliers.get(base_key)
+
+            cap = None
+            if isinstance(self._signal_type_max_contracts, dict):
+                cap = self._signal_type_max_contracts.get(sig_type)
+                if cap is None:
+                    cap = self._signal_type_max_contracts.get(base_key)
+
+            before = int(validated_signal.get("position_size", 0) or 0)
+            if before <= 0:
+                before = 1
+
+            after = before
+            if mult is not None:
+                try:
+                    mult_f = float(mult)
+                    if mult_f > 0:
+                        after = max(1, int(round(before * mult_f)))
+                        validated_signal["_risk_position_size_before"] = before
+                        validated_signal["_risk_size_multiplier"] = float(mult_f)
+                except Exception:
+                    pass
+
+            if cap is not None:
+                try:
+                    cap_i = int(cap)
+                    if cap_i > 0:
+                        after = max(1, min(after, cap_i))
+                        validated_signal["_risk_max_contracts"] = int(cap_i)
+                except Exception:
+                    pass
+
+            if after != before:
+                validated_signal["_risk_position_size_after"] = after
+                validated_signal["position_size"] = after
+        except Exception:
+            return
     
     def _compute_ml_features(self, signals: List[Dict], market_data: Dict) -> None:
         """

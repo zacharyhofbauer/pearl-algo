@@ -162,14 +162,279 @@ class ClaudeMonitorService:
         self.max_auto_changes_per_day = self.config.get("max_auto_changes_per_day", 3)
         self._auto_apply_count_today = 0
         self._auto_apply_last_reset: Optional[datetime] = None
-        # Dedup/throttle auto-apply failure notifications (prevents Telegram spam loops)
-        self._auto_apply_last_failure: Dict[str, datetime] = {}
-        self._auto_apply_failure_dedup_seconds: int = int(self.config.get("dedup_window_seconds", 1800) or 1800)
+
+        # Auto-apply backtest gate (prevents silently removing opportunities)
+        self.auto_apply_backtest_enabled = bool(self.config.get("auto_apply_backtest_enabled", False))
+        self.auto_apply_backtest_data_path = str(self.config.get("auto_apply_backtest_data_path") or "")
+        # Lookback window (cap further by max_bars to keep runtime bounded)
+        self.auto_apply_backtest_lookback_weeks = float(self.config.get("auto_apply_backtest_lookback_weeks", 1) or 1)
+        self.auto_apply_backtest_decision = str(self.config.get("auto_apply_backtest_decision") or "1m")
+        self.auto_apply_backtest_timeout_seconds = float(self.config.get("auto_apply_backtest_timeout_seconds", 120) or 120)
+        self.auto_apply_backtest_max_bars = int(self.config.get("auto_apply_backtest_max_bars", 3000) or 3000)
+        self.auto_apply_backtest_max_signal_drop_pct = float(self.config.get("auto_apply_backtest_max_signal_drop_pct", 0.05) or 0.05)
+        self.auto_apply_backtest_min_baseline_signals = int(self.config.get("auto_apply_backtest_min_baseline_signals", 20) or 20)
+        self.auto_apply_backtest_min_type_baseline_signals = int(self.config.get("auto_apply_backtest_min_type_baseline_signals", 10) or 10)
+        self.auto_apply_backtest_fail_on_type_zeroed = bool(self.config.get("auto_apply_backtest_fail_on_type_zeroed", True))
+        self.auto_apply_backtest_defer_minutes = int(self.config.get("auto_apply_backtest_defer_minutes", 360) or 360)
         
         logger.info(
             f"Claude Monitor Service initialized "
             f"(auto_apply={self.auto_apply_enabled}, max_auto={self.max_auto_changes_per_day})"
         )
+
+    def _config_path_to_override_dict(self, config_path: str, new_value: Any) -> Dict[str, Any]:
+        """Convert dot path (e.g. signals.min_confidence) to a nested override dict."""
+        parts = [p for p in str(config_path or "").split(".") if p]
+        if len(parts) < 2:
+            return {}
+        root = parts[0]
+        cur: Dict[str, Any] = {}
+        cur_root = cur
+        cur_root[root] = {}
+        node = cur_root[root]
+        for p in parts[1:-1]:
+            if not isinstance(node, dict):
+                break
+            node[p] = {}
+            node = node[p]
+        if isinstance(node, dict):
+            node[parts[-1]] = new_value
+        return cur
+
+    def _apply_config_path_to_strategy_config(self, strategy_config: Any, config_path: str, new_value: Any) -> None:
+        """
+        Apply a subset of config.yaml dot-path changes to the NQIntradayConfig object.
+        This is required for keys that are read by strategy config (not service config).
+        """
+        try:
+            parts = [p for p in str(config_path or "").split(".") if p]
+            if len(parts) < 2:
+                return
+            section, key = parts[0], ".".join(parts[1:])
+
+            # Strategy config keys
+            if section == "strategy":
+                # These are direct attributes on NQIntradayConfig
+                attr = parts[-1]
+                if hasattr(strategy_config, attr):
+                    # Preserve types where possible
+                    current = getattr(strategy_config, attr)
+                    if isinstance(current, bool):
+                        setattr(strategy_config, attr, bool(new_value))
+                    elif isinstance(current, int):
+                        setattr(strategy_config, attr, int(new_value))
+                    elif isinstance(current, float):
+                        setattr(strategy_config, attr, float(new_value))
+                    else:
+                        setattr(strategy_config, attr, new_value)
+                return
+
+            # Signals keys that also map into strategy config fields
+            if section == "signals":
+                if key == "volatility_threshold":
+                    setattr(strategy_config, "volatility_threshold", float(new_value))
+                elif key == "min_volume":
+                    setattr(strategy_config, "min_volume", int(new_value))
+                elif key == "min_risk_reward":
+                    # Strategy config uses take_profit_risk_reward as its TP model target
+                    setattr(strategy_config, "take_profit_risk_reward", float(new_value))
+                return
+
+            # Risk keys that map into strategy config fields
+            if section == "risk":
+                if key == "stop_loss_atr_multiplier":
+                    setattr(strategy_config, "stop_loss_atr_multiplier", float(new_value))
+                elif key == "take_profit_risk_reward":
+                    setattr(strategy_config, "take_profit_risk_reward", float(new_value))
+                elif key == "max_risk_per_trade":
+                    setattr(strategy_config, "max_risk_per_trade", float(new_value))
+                elif key == "max_position_size":
+                    setattr(strategy_config, "max_position_size", int(new_value))
+                elif key == "min_position_size":
+                    setattr(strategy_config, "min_position_size", int(new_value))
+                return
+        except Exception:
+            return
+
+    async def _auto_apply_backtest_gate(
+        self,
+        *,
+        suggestion_id: str,
+        config_path: str,
+        old_value: Any,
+        new_value: Any,
+    ) -> Dict[str, Any]:
+        """
+        Run a fast signal-only backtest comparing baseline vs proposed config.
+
+        Returns:
+            Dict with keys: passed(bool), reason(str), baseline_total(int), candidate_total(int), ratio(float)
+        """
+        now = datetime.now(timezone.utc)
+        try:
+            from pearlalgo.config.config_loader import service_config_override
+            from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+            from pearlalgo.strategies.nq_intraday.backtest_adapter import (
+                run_signal_backtest,
+                run_signal_backtest_5m_decision,
+            )
+            import pandas as pd
+        except Exception as e:
+            return {"passed": False, "reason": f"backtest_gate_unavailable: {e}"}
+
+        # Resolve data path
+        project_root = Path(__file__).resolve().parents[3]
+        data_path = self.auto_apply_backtest_data_path.strip()
+        candidate_paths = []
+        if data_path:
+            candidate_paths.append(project_root / data_path)
+        # Fallbacks
+        candidate_paths.extend([
+            project_root / "data" / "historical" / "MNQ_1m_2w.parquet",
+            project_root / "data" / "historical" / "MNQ_1m_1w.parquet",
+        ])
+        resolved = next((p for p in candidate_paths if p.exists()), None)
+        if resolved is None:
+            return {"passed": False, "reason": "backtest_gate_no_data: no historical data file found"}
+
+        decision = self.auto_apply_backtest_decision.strip() or "1m"
+        lookback_weeks = max(0.05, float(self.auto_apply_backtest_lookback_weeks or 1.0))
+
+        # Load data (parquet) and slice recent lookback window
+        df = pd.read_parquet(resolved)
+        if not isinstance(df.index, pd.DatetimeIndex):
+            for col in ("timestamp", "time", "datetime", "date"):
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], utc=True)
+                    df = df.set_index(col)
+                    break
+        if not isinstance(df.index, pd.DatetimeIndex) or df.empty:
+            return {"passed": True, "reason": "backtest_gate_skipped: empty/invalid historical data"}
+        df = df.sort_index()
+        cutoff = df.index[-1] - pd.Timedelta(weeks=lookback_weeks)
+        df = df[df.index >= cutoff]
+        # Hard cap bars for runtime predictability (e.g., 3000 ~ ~2 trading days at 1m)
+        try:
+            max_bars = int(self.auto_apply_backtest_max_bars or 0)
+            if max_bars > 0 and len(df) > max_bars:
+                df = df.tail(max_bars)
+        except Exception:
+            pass
+        if df.empty:
+            return {"passed": False, "reason": "backtest_gate_no_data: no data in lookback window"}
+
+        # Build configs
+        baseline_cfg = NQIntradayConfig.from_config_file()
+        candidate_cfg = NQIntradayConfig.from_config_file()
+        self._apply_config_path_to_strategy_config(candidate_cfg, config_path, new_value)
+
+        # Service-level override (signals/risk) affects signal_generator thresholds
+        overrides = self._config_path_to_override_dict(config_path, new_value)
+
+        def _run_once(cfg: Any, override: Optional[Dict[str, Any]]) -> Any:
+            if override:
+                with service_config_override(override):
+                    if decision == "5m":
+                        return run_signal_backtest_5m_decision(df, config=cfg, return_signals=False)
+                    return run_signal_backtest(df, config=cfg, return_signals=False)
+            if decision == "5m":
+                return run_signal_backtest_5m_decision(df, config=cfg, return_signals=False)
+            return run_signal_backtest(df, config=cfg, return_signals=False)
+
+        async def _run_with_timeout() -> Tuple[Any, Any]:
+            # Run in a worker thread so monitor loop stays responsive.
+            def _thread_run() -> Tuple[Any, Any]:
+                # Backtests can be very chatty; silence logs for this thread context.
+                try:
+                    from pearlalgo.utils.logger import log_silence
+                except Exception:
+                    log_silence = None  # type: ignore
+
+                if log_silence is not None:
+                    with log_silence():
+                        baseline = _run_once(baseline_cfg, override=None)
+                        candidate = _run_once(candidate_cfg, override=overrides if overrides else None)
+                        return baseline, candidate
+                baseline = _run_once(baseline_cfg, override=None)
+                candidate = _run_once(candidate_cfg, override=overrides if overrides else None)
+                return baseline, candidate
+            return await asyncio.wait_for(asyncio.to_thread(_thread_run), timeout=self.auto_apply_backtest_timeout_seconds)
+
+        try:
+            baseline_res, candidate_res = await _run_with_timeout()
+        except Exception as e:
+            # Fail-closed: if we can't backtest, don't auto-apply (prevents silent opportunity loss).
+            return {"passed": False, "reason": f"backtest_gate_error: {type(e).__name__ or 'error'} {e}"}
+
+        baseline_total = int(getattr(baseline_res, "total_signals", 0) or 0)
+        candidate_total = int(getattr(candidate_res, "total_signals", 0) or 0)
+
+        # Compute distributions (best-effort)
+        baseline_dist = getattr(baseline_res, "signal_distribution", None) or {}
+        candidate_dist = getattr(candidate_res, "signal_distribution", None) or {}
+        try:
+            if not baseline_dist and getattr(baseline_res, "verification", None):
+                baseline_dist = getattr(baseline_res.verification, "signal_type_distribution", {}) or {}
+            if not candidate_dist and getattr(candidate_res, "verification", None):
+                candidate_dist = getattr(candidate_res.verification, "signal_type_distribution", {}) or {}
+        except Exception:
+            pass
+
+        # Gate: do not reduce opportunities beyond threshold
+        passed = True
+        reason = "ok"
+        ratio = 1.0
+        if baseline_total >= max(1, self.auto_apply_backtest_min_baseline_signals):
+            ratio = float(candidate_total) / float(baseline_total) if baseline_total > 0 else 1.0
+            min_ratio = max(0.0, 1.0 - float(self.auto_apply_backtest_max_signal_drop_pct))
+            if ratio < min_ratio:
+                passed = False
+                reason = f"signal_drop_exceeds_threshold: ratio={ratio:.3f} < min_ratio={min_ratio:.3f}"
+
+        zeroed: List[str] = []
+        if passed and self.auto_apply_backtest_fail_on_type_zeroed:
+            try:
+                min_type_n = max(1, int(self.auto_apply_backtest_min_type_baseline_signals))
+                for t, n in (baseline_dist or {}).items():
+                    try:
+                        bn = int(n or 0)
+                        if bn >= min_type_n and int((candidate_dist or {}).get(t, 0) or 0) == 0:
+                            zeroed.append(str(t))
+                    except Exception:
+                        continue
+                if zeroed:
+                    passed = False
+                    reason = f"signal_type_zeroed: {', '.join(zeroed[:5])}"
+            except Exception:
+                pass
+
+        gate = {
+            "passed": passed,
+            "reason": reason,
+            "baseline_total_signals": baseline_total,
+            "candidate_total_signals": candidate_total,
+            "signal_ratio": ratio,
+            "max_signal_drop_pct": float(self.auto_apply_backtest_max_signal_drop_pct),
+            "data_path": str(resolved),
+            "lookback_weeks": lookback_weeks,
+            "decision": decision,
+            "config_path": config_path,
+            "old_value": old_value,
+            "new_value": new_value,
+            "checked_at": get_utc_timestamp(),
+        }
+
+        # Persist gate result on the suggestion (so operator can review)
+        try:
+            payload: Dict[str, Any] = {"backtest_gate": gate, "timestamp": get_utc_timestamp()}
+            if not passed:
+                payload["deferred"] = True
+                payload["defer_until_utc"] = (now + timedelta(minutes=max(1, self.auto_apply_backtest_defer_minutes))).isoformat()
+            self.monitor_state.update_suggestion_status(suggestion_id, "pending", payload)
+        except Exception:
+            pass
+
+        return gate
 
     def _parse_utc_ts(self, ts: Optional[str]) -> Optional[datetime]:
         """Parse a stored UTC ISO timestamp into an aware datetime (UTC)."""
@@ -317,9 +582,39 @@ class ClaudeMonitorService:
             
             # Record analysis
             suggestions_dicts = [s.to_dict() for s in suggestions]
+            # Only persist actionable suggestions (keeps the Suggestions UI clean and prevents
+            # unbounded growth from investigation-only items).
+            actionable_types = {"config_change", "parameter_tune", "service_action", "code_patch"}
+            try:
+                from pearlalgo.claude_monitor.auto_tune_policy import DEFAULT_ALLOWLIST
+                allowlisted_paths = set(DEFAULT_ALLOWLIST.keys())
+            except Exception:
+                allowlisted_paths = set()
+
+            # We never want to nag with "disable/enable signals" suggestions in the active list.
+            # Those can reduce trade count and must be an explicit operator decision.
+            skip_config_paths = {"strategy.enabled_signals", "strategy.disabled_signals"}
+
+            suggestions_for_state: List[Dict[str, Any]] = []
+            for d in suggestions_dicts:
+                d = d or {}
+                s_type = str(d.get("type", "")).strip()
+                if s_type not in actionable_types:
+                    continue
+                if s_type in ("config_change", "parameter_tune"):
+                    cp = str(d.get("config_path") or "").strip()
+                    nv = d.get("new_value")
+                    if nv is None:
+                        # Not actionable; do not persist as an "active suggestion" (prevents spam).
+                        continue
+                    if not cp or (allowlisted_paths and cp not in allowlisted_paths):
+                        continue
+                    if cp in skip_config_paths:
+                        continue
+                suggestions_for_state.append(d)
             self.monitor_state.record_analysis(
                 analysis=analysis,
-                suggestions=suggestions_dicts,
+                suggestions=suggestions_for_state,
             )
 
             # Strategy update prompt on meaningful market change
@@ -330,7 +625,7 @@ class ClaudeMonitorService:
                 if transition and sig and self._should_send_strategy_update_prompt(sig):
                     if not self.auto_apply_enabled:
                         # Manual mode: show proposal with Apply/Dry-run buttons
-                        await self._send_strategy_update_prompt(transition, suggestions_dicts)
+                        await self._send_strategy_update_prompt(transition, suggestions_for_state)
                     self.monitor_state.set_last_regime_prompt(sig)
             except Exception as e:
                 logger.debug(f"Could not send strategy update prompt: {e}")
@@ -390,8 +685,8 @@ class ClaudeMonitorService:
             if not config_path or new_value is None:
                 continue
 
-            # Never auto-apply signal enable/disable list changes (user must explicitly approve).
-            # This protects trade frequency and avoids "disable X" surprises.
+            # Never auto-apply changes that disable/enable signal families.
+            # The operator must explicitly opt-in to changes that can reduce trade count.
             if config_path in ("strategy.enabled_signals", "strategy.disabled_signals"):
                 continue
             
@@ -427,9 +722,48 @@ class ClaudeMonitorService:
             if not suggestion_id:
                 logger.warning(f"Auto-apply: could not find suggestion ID for {sug_dict.get('config_path')}")
                 continue
+
+            # If the suggestion was previously deferred (rate limit / cooldown), do not spam retries.
+            try:
+                stored = self.monitor_state.get_suggestion(suggestion_id) or {}
+                stored_status = str(stored.get("status", ""))
+                stored_result = stored.get("result", {}) or {}
+                defer_until = stored_result.get("defer_until_utc")
+                if stored_status == "pending" and stored_result.get("deferred") and defer_until:
+                    try:
+                        until_dt = datetime.fromisoformat(str(defer_until).replace("Z", "+00:00"))
+                        if until_dt.tzinfo is None:
+                            until_dt = until_dt.replace(tzinfo=timezone.utc)
+                        if datetime.now(timezone.utc) < until_dt.astimezone(timezone.utc):
+                            continue
+                    except Exception:
+                        # If we can't parse, err on the side of not spamming retries.
+                        continue
+            except Exception:
+                pass
             
             try:
                 logger.info(f"Auto-applying suggestion {suggestion_id}: {sug_dict.get('title')}")
+
+                # Backtest gate: don't auto-apply if it materially reduces opportunities.
+                if self.auto_apply_backtest_enabled:
+                    try:
+                        gate = await self._auto_apply_backtest_gate(
+                            suggestion_id=suggestion_id,
+                            config_path=str(sug_dict.get("config_path") or ""),
+                            old_value=sug_dict.get("old_value"),
+                            new_value=sug_dict.get("new_value"),
+                        )
+                        if isinstance(gate, dict) and gate.get("passed") is False:
+                            logger.info(
+                                f"Auto-apply skipped by backtest gate: {suggestion_id} "
+                                f"({gate.get('reason')})"
+                            )
+                            continue
+                    except Exception:
+                        # Never block monitor on backtest gate issues.
+                        pass
+
                 result = await self.apply_suggestion(suggestion_id, dry_run=False)
 
                 if result.get("success"):
@@ -450,7 +784,19 @@ class ClaudeMonitorService:
                     )
                 else:
                     # Send failure notification
-                    await self._send_auto_apply_notification(sug_dict, result, success=False)
+                    # Avoid spamming failures for deferrals (daily limit/cooldown); they'll retry later.
+                    try:
+                        stored_after = self.monitor_state.get_suggestion(suggestion_id) or {}
+                        stored_res = stored_after.get("result", {}) or {}
+                        deferred = (
+                            str(stored_after.get("status", "")) == "pending"
+                            and bool(stored_res.get("deferred"))
+                            and bool(stored_res.get("defer_until_utc"))
+                        )
+                    except Exception:
+                        deferred = False
+                    if not deferred:
+                        await self._send_auto_apply_notification(sug_dict, result, success=False)
 
                     logger.warning(
                         f"Auto-apply FAILED: {suggestion_id} - {result.get('error', 'unknown')}"
@@ -512,23 +858,11 @@ class ClaudeMonitorService:
                 )
             else:
                 restart_deferred = False
-                # Dedup failures by (config_path + error) to avoid spam when auto-apply is blocked.
-                try:
-                    key = f"{suggestion.get('config_path','')}|{result.get('error','')}"
-                    now = datetime.now(timezone.utc)
-                    last = self._auto_apply_last_failure.get(key)
-                    if last and (now - last).total_seconds() < self._auto_apply_failure_dedup_seconds:
-                        return
-                    self._auto_apply_last_failure[key] = now
-                except Exception:
-                    pass
-
-                err = str(result.get("error", "Unknown") or "Unknown")[:150]
                 message = (
                     "⚠️ *Auto-Apply Failed*\n\n"
                     f"*{suggestion.get('title', 'Config Update')}*\n\n"
                     f"*Path:* `{suggestion.get('config_path')}`\n"
-                    f"*Error:* `{err}`\n\n"
+                    f"*Error:* `{str(result.get('error', 'Unknown'))[:150]}`\n\n"
                     "The suggestion was not applied."
                 )
 
@@ -1482,15 +1816,54 @@ class ClaudeMonitorService:
                 },
             )
         else:
-            self.monitor_state.update_suggestion_status(
-                suggestion_id,
-                "failed",
-                {
-                    "error": result.error,
-                    "timestamp": get_utc_timestamp(),
-                    "request_id": result.request_id,
-                },
-            )
+            # Some failures are not "real" failures of the suggestion itself (e.g. rate limits,
+            # cooldown windows). Keep the suggestion pending so it can be retried later and so
+            # we avoid generating duplicate suggestions each cycle.
+            status = "failed"
+            payload: Dict[str, Any] = {
+                "error": result.error,
+                "message": result.message,
+                "timestamp": get_utc_timestamp(),
+                "request_id": result.request_id,
+                "deferred": False,
+            }
+
+            try:
+                now = datetime.now(timezone.utc)
+                msg = str(result.message or "")
+                err = str(result.error or "")
+
+                def _tomorrow_utc_midnight(dt: datetime) -> datetime:
+                    d = (dt + timedelta(days=1)).date()
+                    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+
+                # ActionExecutor's top-level rate limit (daily cap)
+                if err == "rate_limit_exceeded":
+                    status = "pending"
+                    payload["deferred"] = True
+                    payload["defer_until_utc"] = _tomorrow_utc_midnight(now).isoformat()
+
+                # Policy rejections: treat cooldown/daily limit as deferred, others as failed.
+                if err == "policy_rejected":
+                    low = msg.lower()
+                    if "daily limit reached" in low:
+                        status = "pending"
+                        payload["deferred"] = True
+                        payload["defer_until_utc"] = _tomorrow_utc_midnight(now).isoformat()
+                    elif "cooldown active" in low:
+                        # Example: "Cooldown active for 'signals.min_confidence' (3599s remaining)"
+                        import re
+
+                        m = re.search(r"\\((\\d+)s remaining\\)", msg)
+                        if m:
+                            seconds = int(m.group(1))
+                            status = "pending"
+                            payload["deferred"] = True
+                            payload["defer_until_utc"] = (now + timedelta(seconds=seconds)).isoformat()
+            except Exception:
+                pass
+
+            self.monitor_state.update_suggestion_status(suggestion_id, status, payload)
         
         return {
             "success": result.success,

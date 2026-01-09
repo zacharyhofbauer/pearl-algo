@@ -242,13 +242,7 @@ class ActionExecutor:
         request.request_id = self._generate_request_id()
         
         # Check rate limit
-        # NOTE: Rate-limit only "change" actions (config/code). Service restarts should NOT
-        # consume the daily change budget (otherwise auto-apply + restart burns quota fast).
-        if (
-            not request.dry_run
-            and request.action_type in (ActionType.CONFIG_UPDATE, ActionType.PARAMETER_TUNE, ActionType.CODE_PATCH)
-            and not self._check_rate_limit()
-        ):
+        if not request.dry_run and not self._check_rate_limit():
             return ActionResult(
                 success=False,
                 message=f"Daily rate limit reached ({self._max_changes_per_day} changes/day)",
@@ -331,12 +325,8 @@ class ActionExecutor:
             # Log result
             self._audit_log("result", result.to_dict())
             
-            # Update daily counter if successful "change" action and not dry-run
-            if (
-                result.success
-                and not request.dry_run
-                and request.action_type in (ActionType.CONFIG_UPDATE, ActionType.PARAMETER_TUNE, ActionType.CODE_PATCH)
-            ):
+            # Update daily counter if successful and not dry-run
+            if result.success and not request.dry_run:
                 self._daily_changes += 1
             
             return result

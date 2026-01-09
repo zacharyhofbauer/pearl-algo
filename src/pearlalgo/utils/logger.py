@@ -17,8 +17,31 @@ logging and stack traces.
 
 from __future__ import annotations
 
+import contextlib
 import logging
+from contextvars import ContextVar
 from typing import Any
+
+
+_LOG_SILENT: ContextVar[bool] = ContextVar("PEARLALGO_LOG_SILENT", default=False)
+
+
+@contextlib.contextmanager
+def log_silence():
+    """
+    Temporarily silence logs emitted through this module's `logger`.
+
+    This is intentionally thread/task-safe via ContextVar and is used to prevent
+    heavy inner loops (e.g., backtests) from spamming service logs.
+    """
+    token = _LOG_SILENT.set(True)
+    try:
+        yield
+    finally:
+        try:
+            _LOG_SILENT.reset(token)
+        except Exception:
+            _LOG_SILENT.set(False)
 
 
 class CompatLogger:
@@ -47,6 +70,8 @@ class CompatLogger:
             **kwargs: May contain 'extra' dict and/or 'exc_info' bool
         """
         # Extract stdlib-style parameters
+        if _LOG_SILENT.get():
+            return
         extra = kwargs.pop("extra", None)
         exc_info = kwargs.pop("exc_info", False)
         
@@ -147,4 +172,4 @@ except ImportError:
     logger = logging.getLogger("pearlalgo")  # type: ignore[assignment]
     HAS_LOGURU = False
 
-__all__ = ["logger", "CompatLogger", "HAS_LOGURU"]
+__all__ = ["logger", "CompatLogger", "HAS_LOGURU", "log_silence"]

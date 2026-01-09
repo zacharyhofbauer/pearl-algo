@@ -179,10 +179,12 @@ class SignalQualityScorer:
         
         # Low-volatility bypass: in quiet/ranging markets, allow signals with decent confidence
         # even if historical win rate is below threshold (R:R matters more than WR in ranging)
+        # NOTE: Removed historical_wr requirement - when historical data is noisy/low sample,
+        # we still want to generate signals to collect better outcome data
         low_vol_bypass = (
             volatility == "low"
             and signal_confidence >= 0.50
-            and historical_wr >= 0.40  # Still require some positive edge
+            # No historical WR floor - trust R:R in quiet markets
         )
 
         # High confluence bypass: strong confluence can override weak historical data

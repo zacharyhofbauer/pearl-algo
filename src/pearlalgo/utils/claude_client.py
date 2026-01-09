@@ -8,6 +8,7 @@ specifically for generating unified diff patches.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from pearlalgo.utils.logger import logger
@@ -194,11 +195,34 @@ class ClaudeClient:
             api_key=self._api_key,
             timeout=self._timeout,
         )
+
+        # Circuit breaker: if the API reports low credits / billing issues,
+        # temporarily disable calls to avoid spamming logs and wasting cycles.
+        self._disabled_until: Optional[datetime] = None
+        self._disabled_reason: Optional[str] = None
         
         logger.info(
             "Claude client initialized",
             extra={"model": self._model, "max_tokens": self._max_tokens, "timeout": self._timeout}
         )
+
+    def _is_disabled(self) -> bool:
+        """Return True if the circuit breaker is currently active."""
+        if self._disabled_until is None:
+            return False
+        return datetime.now(timezone.utc) < self._disabled_until
+
+    def _disable_for(self, seconds: int, reason: str) -> None:
+        """Activate circuit breaker for N seconds (best-effort)."""
+        try:
+            self._disabled_until = datetime.now(timezone.utc) + timedelta(seconds=int(seconds))
+            self._disabled_reason = str(reason)[:200]
+            logger.warning(
+                f"Claude client temporarily disabled for {seconds}s: {self._disabled_reason}",
+                extra={"disabled_until": self._disabled_until.isoformat()},
+            )
+        except Exception:
+            pass
     
     def generate_patch(
         self,
@@ -242,6 +266,12 @@ class ClaudeClient:
         
         user_message = "\n".join(user_message_parts)
         
+        if self._is_disabled():
+            raise ClaudeAPIError(
+                f"Claude temporarily disabled until {self._disabled_until.isoformat() if self._disabled_until else 'unknown'}: "
+                f"{self._disabled_reason or 'billing/availability issue'}"
+            )
+
         logger.info(
             "Requesting patch from Claude",
             extra={"files": list(files.keys()), "task_preview": task[:100]}
@@ -276,6 +306,13 @@ class ClaudeClient:
             raise ClaudeAPIError(f"Rate limit exceeded: {e}") from e
         except anthropic.APIStatusError as e:
             logger.error(f"Claude API status error: {e}")
+            try:
+                msg = str(getattr(e, "message", "") or str(e)).lower()
+                if "credit balance is too low" in msg or "insufficient" in msg and "credit" in msg:
+                    # Disable for 6 hours; operator can fix billing and restart sooner.
+                    self._disable_for(6 * 3600, reason=str(getattr(e, "message", "") or str(e)))
+            except Exception:
+                pass
             raise ClaudeAPIError(f"API error ({e.status_code}): {e.message}") from e
         except Exception as e:
             logger.error(f"Unexpected error calling Claude: {e}")
@@ -283,7 +320,7 @@ class ClaudeClient:
     
     def is_available(self) -> bool:
         """Check if the client is ready to make API calls."""
-        return ANTHROPIC_AVAILABLE and bool(self._api_key)
+        return ANTHROPIC_AVAILABLE and bool(self._api_key) and not self._is_disabled()
     
     def chat(
         self,
@@ -306,6 +343,12 @@ class ClaudeClient:
         """
         system = system_prompt or CHAT_SYSTEM_PROMPT
         
+        if self._is_disabled():
+            raise ClaudeAPIError(
+                f"Claude temporarily disabled until {self._disabled_until.isoformat() if self._disabled_until else 'unknown'}: "
+                f"{self._disabled_reason or 'billing/availability issue'}"
+            )
+
         logger.info(
             "Sending chat to Claude",
             extra={"message_count": len(messages)}
@@ -337,6 +380,12 @@ class ClaudeClient:
             raise ClaudeAPIError(f"Rate limit exceeded: {e}") from e
         except anthropic.APIStatusError as e:
             logger.error(f"Claude API status error: {e}")
+            try:
+                msg = str(getattr(e, "message", "") or str(e)).lower()
+                if "credit balance is too low" in msg or "insufficient" in msg and "credit" in msg:
+                    self._disable_for(6 * 3600, reason=str(getattr(e, "message", "") or str(e)))
+            except Exception:
+                pass
             raise ClaudeAPIError(f"API error ({e.status_code}): {e.message}") from e
         except Exception as e:
             logger.error(f"Unexpected error calling Claude: {e}")

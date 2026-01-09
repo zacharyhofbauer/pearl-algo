@@ -39,6 +39,8 @@ class MonitorState:
         # State files
         self.observations_file = self.state_dir / "claude_observations.jsonl"
         self.suggestions_file = self.state_dir / "claude_suggestions.json"
+        # Archive of non-pending suggestions (failed/dismissed/etc.) to keep suggestions_file small.
+        self.suggestions_history_file = self.state_dir / "claude_suggestions_history.jsonl"
         self.changes_file = self.state_dir / "claude_applied_changes.jsonl"
         self.monitor_state_file = self.state_dir / "claude_monitor_state.json"
         
@@ -83,9 +85,107 @@ class MonitorState:
                 with open(self.suggestions_file, "r") as f:
                     self._active_suggestions = json.load(f)
                     logger.debug(f"Loaded {len(self._active_suggestions)} active suggestions")
+
+                # Prune non-pending suggestions from the active set (they are not shown in the UI).
+                # This prevents unbounded growth and keeps startup fast.
+                try:
+                    if isinstance(self._active_suggestions, dict):
+                        # Only keep allowlisted, actionable suggestions as "active".
+                        # Everything else is archived to history.
+                        try:
+                            from pearlalgo.claude_monitor.auto_tune_policy import DEFAULT_ALLOWLIST
+                            allowlisted_paths = set(DEFAULT_ALLOWLIST.keys())
+                        except Exception:
+                            allowlisted_paths = set()
+                        # Never keep "enable/disable signals" suggestions active by default.
+                        # These can reduce trade count and should be an explicit operator action.
+                        skip_config_paths = {"strategy.enabled_signals", "strategy.disabled_signals"}
+
+                        # Keep one suggestion per config path (latest wins).
+                        latest_by_path: Dict[str, Dict[str, Any]] = {}
+                        latest_by_path_ts: Dict[str, str] = {}
+                        archived = 0
+                        for sid, s in self._active_suggestions.items():
+                            try:
+                                s_status = s.get("status")
+                                s_type = str(s.get("type", "")).strip()
+                                config_path = s.get("config_path")
+
+                                # Keep only allowlisted, actionable pending suggestions active.
+                                if (
+                                    s_status == "pending"
+                                    and s_type in (
+                                    "config_change",
+                                    "parameter_tune",
+                                    "service_action",
+                                    "code_patch",
+                                    )
+                                    and (
+                                        (
+                                            # Config/parameter suggestions MUST target a specific allowlisted config_path.
+                                            (s_type in ("config_change", "parameter_tune") and bool(config_path)
+                                             and str(config_path) not in skip_config_paths
+                                             and (not allowlisted_paths or str(config_path) in allowlisted_paths))
+                                            # Service/code suggestions may not have config_path.
+                                            or (s_type in ("service_action", "code_patch"))
+                                        )
+                                    )
+                                ):
+                                    # Config changes must have a proposed value to be actionable.
+                                    if s_type in ("config_change", "parameter_tune") and s.get("new_value") is None:
+                                        archived += 1
+                                        self._archive_suggestion({**s, "archived_at": get_utc_timestamp()})
+                                        continue
+                                    # Collapse duplicates per config_path (keep latest).
+                                    if config_path:
+                                        key = str(config_path)
+                                        ts = str(s.get("updated_at") or s.get("created_at") or "")
+                                        prev = latest_by_path.get(key)
+                                        prev_ts = latest_by_path_ts.get(key, "")
+                                        if prev is None or ts >= prev_ts:
+                                            if prev is not None:
+                                                archived += 1
+                                                self._archive_suggestion({**prev, "archived_at": get_utc_timestamp()})
+                                            latest_by_path[key] = s
+                                            latest_by_path_ts[key] = ts
+                                        else:
+                                            archived += 1
+                                            self._archive_suggestion({**s, "archived_at": get_utc_timestamp()})
+                                    else:
+                                        # Non-config suggestions: keep as-is under their ID.
+                                        latest_by_path[f"__id__:{sid}"] = s
+                                else:
+                                    archived += 1
+                                    self._archive_suggestion({**s, "archived_at": get_utc_timestamp()})
+                            except Exception:
+                                continue
+                        if archived:
+                            # Rebuild active suggestions dict (pending actionable only)
+                            pending: Dict[str, Dict[str, Any]] = {}
+                            for key, s in latest_by_path.items():
+                                try:
+                                    sid_out = str(s.get("id") or "")
+                                    if sid_out:
+                                        pending[sid_out] = s
+                                except Exception:
+                                    continue
+                            self._active_suggestions = pending
+                            self._save_suggestions()
+                            logger.debug(f"Pruned {archived} non-pending suggestions to history")
+                except Exception:
+                    pass
                     
         except Exception as e:
             logger.warning(f"Could not load monitor state: {e}")
+
+    def _archive_suggestion(self, suggestion: Dict[str, Any]) -> None:
+        """Append a suggestion record to the history log (best-effort)."""
+        try:
+            with open(self.suggestions_history_file, "a") as f:
+                f.write(json.dumps(suggestion) + "\n")
+        except Exception:
+            # History is best-effort; never block monitor.
+            pass
     
     def _save_state(self) -> None:
         """Save current state to disk."""
@@ -242,6 +342,58 @@ class MonitorState:
         Returns:
             Suggestion ID
         """
+        # Deduplicate repeated suggestions so we don't spam the operator with the same
+        # proposal every cycle (common when auto-apply is rate-limited or deferred).
+        try:
+            sug_type = suggestion.get("type")
+            config_path = suggestion.get("config_path")
+            new_value = suggestion.get("new_value")
+            if sug_type in ("config_change", "parameter_tune") and config_path and new_value is not None:
+                # Keep at most ONE pending suggestion per config_path (new_value can change over time).
+                for sid, existing in self._active_suggestions.items():
+                    try:
+                        if existing.get("status") != "pending":
+                            continue
+                        if (
+                            existing.get("type") in ("config_change", "parameter_tune")
+                            and existing.get("config_path") == config_path
+                        ):
+                            # Update in place to reflect the latest proposal.
+                            updated = dict(existing)
+                            # Do not overwrite identity fields.
+                            for k, v in (suggestion or {}).items():
+                                if k in ("id", "created_at", "status"):
+                                    continue
+                                updated[k] = v
+                            # Clear previous evaluation results (deferred/backtest/etc.) when proposal changes.
+                            # This ensures new_value updates can be reconsidered immediately.
+                            updated.pop("result", None)
+                            updated["updated_at"] = get_utc_timestamp()
+                            self._active_suggestions[sid] = updated
+                            self._save_suggestions()
+                            return sid
+                    except Exception:
+                        continue
+
+                for sid, existing in self._active_suggestions.items():
+                    try:
+                        if existing.get("status") != "pending":
+                            continue
+                        if (
+                            existing.get("type") == sug_type
+                            and existing.get("config_path") == config_path
+                            and existing.get("new_value") == new_value
+                        ):
+                            # Touch the record so UIs can surface "recently re-proposed"
+                            existing["updated_at"] = get_utc_timestamp()
+                            self._active_suggestions[sid] = existing
+                            self._save_suggestions()
+                            return sid
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
         self._suggestion_count += 1
         suggestion_id = f"sug_{self._suggestion_count:06d}"
         
@@ -310,8 +462,15 @@ class MonitorState:
             # Remove from active suggestions
             del self._active_suggestions[suggestion_id]
         elif status in ("dismissed", "failed"):
-            # Keep for history but mark as inactive
-            pass
+            # Archive and remove to keep active suggestions bounded.
+            try:
+                self._archive_suggestion({**suggestion, "archived_at": get_utc_timestamp()})
+            except Exception:
+                pass
+            try:
+                del self._active_suggestions[suggestion_id]
+            except Exception:
+                pass
         
         self._save_suggestions()
         self._save_state()

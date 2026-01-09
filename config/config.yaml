@@ -151,7 +151,7 @@ strategy:
   - breakout_long
   - breakout_short
   disabled_signals:
-  - mean_reversion_short
+  - momentum_long
   enable_dynamic_sizing: true
   base_contracts: 3
   high_conf_contracts: 8
@@ -503,6 +503,24 @@ claude_monitor:
   max_suggestions_per_analysis: 5
   auto_apply_enabled: true
   max_auto_changes_per_day: 5
+  # Auto-apply safety gate: run a fast signal-only backtest before applying any config tweak.
+  # This prevents silent "opportunity loss" (trade frequency collapse) from threshold tuning.
+  auto_apply_backtest_enabled: true
+  auto_apply_backtest_data_path: data/historical/MNQ_1m_2w.parquet
+  auto_apply_backtest_lookback_weeks: 1
+  auto_apply_backtest_decision: 1m
+  auto_apply_backtest_timeout_seconds: 45
+  # Hard cap bars for runtime predictability (prevents long-running backtests in the monitor loop).
+  auto_apply_backtest_max_bars: 200
+  # Block auto-apply if total validated signals drop by more than this fraction vs baseline.
+  # Example: 0.05 = allow up to 5% fewer signals. Set to 0.0 to require NO drop.
+  auto_apply_backtest_max_signal_drop_pct: 0.05
+  auto_apply_backtest_min_baseline_signals: 20
+  # Also block auto-apply if it would zero-out a signal type that had >= N signals in baseline.
+  auto_apply_backtest_min_type_baseline_signals: 10
+  auto_apply_backtest_fail_on_type_zeroed: true
+  # If backtest gate fails, defer retries for this many minutes (prevents spam/re-running).
+  auto_apply_backtest_defer_minutes: 360
   strategy_update_prompts_enabled: true
   strategy_update_prompt_cooldown_seconds: 1800
   strategy_update_min_regime_confidence: 0.55
