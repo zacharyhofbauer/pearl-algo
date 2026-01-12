@@ -220,9 +220,124 @@ class ChartGenerator:
         
         self.config = config or ChartConfig()
         self.dpi = 150
+
+        # Optional historical cache for computing higher-timeframe key levels (SpacemanBTC-style)
+        # without requiring long candle windows in the rendered chart.
+        # Cached per symbol for the lifetime of this ChartGenerator instance.
+        self._key_level_history_cache: Dict[str, pd.DataFrame] = {}
+        self._key_level_history_mtime: Dict[str, float] = {}
         
         # Create TradingView dark theme style
         self._create_tradingview_style()
+
+    def _load_key_level_history(self, symbol: str) -> Optional[pd.DataFrame]:
+        """
+        Best-effort load of local historical 1m data (parquet) for key level computation.
+
+        This is intentionally used ONLY at chart render time (not during scanning) to keep the
+        trading loop fast. If files are missing, returns None and callers should fall back to
+        computing levels from the visible chart window only.
+        """
+        sym = str(symbol or "").strip().upper()
+        if not sym:
+            return None
+
+        # Resolve repo root from this file location: src/pearlalgo/nq_agent/chart_generator.py
+        try:
+            repo_root = Path(__file__).resolve().parents[3]
+        except Exception:
+            return None
+
+        hist_dir = repo_root / "data" / "historical"
+        if not hist_dir.exists():
+            return None
+
+        candidates = [
+            hist_dir / f"{sym}_1m_6w.parquet",
+            hist_dir / f"{sym}_1m_4w.parquet",
+            hist_dir / f"{sym}_1m_2w.parquet",
+            hist_dir / f"{sym}_1m_1w.parquet",
+        ]
+
+        path = next((p for p in candidates if p.exists()), None)
+        if path is None:
+            return None
+
+        try:
+            mtime = float(path.stat().st_mtime)
+        except Exception:
+            mtime = 0.0
+
+        cached = self._key_level_history_cache.get(sym)
+        if cached is not None:
+            # Reload if the file changed
+            if float(self._key_level_history_mtime.get(sym, 0.0) or 0.0) == mtime:
+                return cached
+
+        try:
+            h = pd.read_parquet(path)
+        except Exception:
+            return None
+
+        # Normalize expected schema: timestamp + open/high/low/close
+        try:
+            if "timestamp" not in h.columns:
+                return None
+            ts = pd.to_datetime(h["timestamp"], errors="coerce", utc=True)
+            o = pd.to_numeric(h.get("open"), errors="coerce")
+            hi = pd.to_numeric(h.get("high"), errors="coerce")
+            lo = pd.to_numeric(h.get("low"), errors="coerce")
+            c = pd.to_numeric(h.get("close"), errors="coerce")
+
+            out = pd.DataFrame({"open": o, "high": hi, "low": lo, "close": c}, index=pd.DatetimeIndex(ts))
+            out = out.dropna(subset=["open", "high", "low", "close"])
+            out = out[~out.index.isna()].sort_index()
+            out = out[~out.index.duplicated(keep="last")]
+        except Exception:
+            return None
+
+        self._key_level_history_cache[sym] = out
+        self._key_level_history_mtime[sym] = mtime
+        return out
+
+    @staticmethod
+    def _df_to_levels_ohlc(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+        """
+        Convert a chart df (mplfinance formatted) into a UTC-indexed OHLC dataframe
+        with lowercase column names suitable for key-level computations.
+        """
+        if df is None or df.empty:
+            return None
+        if not all(c in df.columns for c in ("Open", "High", "Low", "Close")):
+            return None
+        if not isinstance(df.index, pd.DatetimeIndex):
+            return None
+
+        idx = df.index
+        try:
+            if idx.tz is None:
+                idx = idx.tz_localize(timezone.utc)
+            else:
+                idx = idx.tz_convert(timezone.utc)
+        except Exception:
+            return None
+
+        try:
+            out = pd.DataFrame(
+                {
+                    "open": pd.to_numeric(df["Open"], errors="coerce"),
+                    "high": pd.to_numeric(df["High"], errors="coerce"),
+                    "low": pd.to_numeric(df["Low"], errors="coerce"),
+                    "close": pd.to_numeric(df["Close"], errors="coerce"),
+                },
+                index=idx,
+            )
+            out = out.dropna(subset=["open", "high", "low", "close"])
+            out = out.sort_index()
+            out = out[~out.index.duplicated(keep="last")]
+            return out
+        except Exception:
+            return None
     
     def _create_tradingview_style(self):
         """Create custom mplfinance style matching TradingView dark theme."""
@@ -719,6 +834,90 @@ class ChartGenerator:
             _add(eth_prev.get("high"), "PDH", TEXT_SECONDARY, priority=58, linestyle="--", lw=1.1, alpha=0.45)
             _add(eth_prev.get("low"), "PDL", TEXT_SECONDARY, priority=58, linestyle="--", lw=1.1, alpha=0.45)
             _add(eth_prev.get("mid"), "PDM", TEXT_SECONDARY, priority=52, linestyle=":", lw=1.0, alpha=0.35)
+
+        # SpacemanBTC-style higher-timeframe levels (Weekly/Monthly/Quarterly/Yearly/4H/Monday).
+        # Compute at chart-render time using the candle window + optional local parquet history.
+        try:
+            from pearlalgo.strategies.nq_intraday.hud_context import compute_spaceman_key_levels
+
+            symbol = str(signal.get("symbol") or hud.get("symbol") or "MNQ")
+            hist = self._load_key_level_history(symbol)
+            base = self._df_to_levels_ohlc(df)
+
+            levels_df = None
+            if hist is not None and base is not None:
+                levels_df = pd.concat([hist, base]).sort_index()
+                levels_df = levels_df[~levels_df.index.duplicated(keep="last")]
+            elif base is not None:
+                levels_df = base
+            elif hist is not None:
+                levels_df = hist
+
+            if levels_df is not None and not levels_df.empty:
+                sp = compute_spaceman_key_levels(levels_df)
+            else:
+                sp = None
+
+            if isinstance(sp, dict):
+                # Colors (close to TradingView defaults, but kept subdued via alpha)
+                c_4h = "#ff9800"      # orange
+                c_week = "#fffcbc"    # pale yellow
+                c_month = "#08d48c"   # green
+                c_quarter = "#f44336" # red
+                c_year = "#f44336"    # red
+                c_mon = TEXT_SECONDARY
+
+                intra = sp.get("intra_4h") or {}
+                if isinstance(intra, dict):
+                    cur = intra.get("current") or {}
+                    prev = intra.get("previous") or {}
+                    _add(cur.get("open"), "4H-O", c_4h, priority=44, linestyle="--", lw=1.0, alpha=0.30)
+                    _add(prev.get("high"), "P-4H-H", c_4h, priority=43, linestyle="--", lw=1.0, alpha=0.26)
+                    _add(prev.get("low"), "P-4H-L", c_4h, priority=43, linestyle="--", lw=1.0, alpha=0.26)
+                    _add(prev.get("mid"), "P-4H-M", c_4h, priority=40, linestyle=":", lw=1.0, alpha=0.22)
+
+                monday = sp.get("monday") or {}
+                if isinstance(monday, dict):
+                    _add(monday.get("high"), "MDAY-H", c_mon, priority=53, linestyle="--", lw=1.0, alpha=0.28)
+                    _add(monday.get("low"), "MDAY-L", c_mon, priority=53, linestyle="--", lw=1.0, alpha=0.28)
+                    _add(monday.get("mid"), "MDAY-M", c_mon, priority=48, linestyle=":", lw=1.0, alpha=0.22)
+
+                weekly = sp.get("weekly") or {}
+                if isinstance(weekly, dict):
+                    cur = weekly.get("current") or {}
+                    prev = weekly.get("previous") or {}
+                    _add(cur.get("open"), "WO", c_week, priority=56, linestyle="--", lw=1.1, alpha=0.32)
+                    _add(prev.get("high"), "PWH", c_week, priority=54, linestyle="--", lw=1.0, alpha=0.28)
+                    _add(prev.get("low"), "PWL", c_week, priority=54, linestyle="--", lw=1.0, alpha=0.28)
+                    _add(prev.get("mid"), "PWM", c_week, priority=50, linestyle=":", lw=1.0, alpha=0.22)
+
+                monthly = sp.get("monthly") or {}
+                if isinstance(monthly, dict):
+                    cur = monthly.get("current") or {}
+                    prev = monthly.get("previous") or {}
+                    _add(cur.get("open"), "MO", c_month, priority=49, linestyle="--", lw=1.1, alpha=0.30)
+                    _add(prev.get("high"), "PMH", c_month, priority=47, linestyle="--", lw=1.0, alpha=0.26)
+                    _add(prev.get("low"), "PML", c_month, priority=47, linestyle="--", lw=1.0, alpha=0.26)
+                    _add(prev.get("mid"), "PMM", c_month, priority=43, linestyle=":", lw=1.0, alpha=0.22)
+
+                quarterly = sp.get("quarterly") or {}
+                if isinstance(quarterly, dict):
+                    cur = quarterly.get("current") or {}
+                    prev = quarterly.get("previous") or {}
+                    _add(cur.get("open"), "QO", c_quarter, priority=41, linestyle="--", lw=1.1, alpha=0.28)
+                    _add(prev.get("high"), "PQH", c_quarter, priority=39, linestyle="--", lw=1.0, alpha=0.24)
+                    _add(prev.get("low"), "PQL", c_quarter, priority=39, linestyle="--", lw=1.0, alpha=0.24)
+                    _add(prev.get("mid"), "PQM", c_quarter, priority=35, linestyle=":", lw=1.0, alpha=0.20)
+
+                yearly = sp.get("yearly") or {}
+                if isinstance(yearly, dict):
+                    cur = yearly.get("current") or {}
+                    _add(cur.get("open"), "YO", c_year, priority=34, linestyle="--", lw=1.1, alpha=0.26)
+                    _add(cur.get("high"), "CYH", c_year, priority=33, linestyle="--", lw=1.0, alpha=0.22)
+                    _add(cur.get("low"), "CYL", c_year, priority=33, linestyle="--", lw=1.0, alpha=0.22)
+                    _add(cur.get("mid"), "CYM", c_year, priority=31, linestyle=":", lw=1.0, alpha=0.20)
+        except Exception:
+            pass
 
         return levels, current_price
 

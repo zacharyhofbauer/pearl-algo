@@ -76,6 +76,9 @@ class NQIntradayConfig:
     end_time: str = "16:00"    # Market close (ET)
     # Avoid lunch lull for scalping (11:30-13:00 ET) - now optional
     avoid_lunch_lull: bool = False  # Disabled by default - was blocking 72 signals
+    # Skip overnight session phases (outside RTH) which tend to be lower-liquidity and choppier.
+    # When True, scanner will not emit signals during regime_detector session == "overnight".
+    skip_overnight: bool = False
 
     # Enable/disable features (legacy - use enabled_signals instead)
     enable_momentum: bool = True
@@ -250,6 +253,8 @@ class NQIntradayConfig:
                 config.volatility_threshold = float(signals_cfg["volatility_threshold"])
             if "avoid_lunch_lull" in signals_cfg:
                 config.avoid_lunch_lull = bool(signals_cfg["avoid_lunch_lull"])
+            if "skip_overnight" in signals_cfg:
+                config.skip_overnight = bool(signals_cfg["skip_overnight"])
             if "min_volume" in signals_cfg:
                 config.min_volume = int(signals_cfg["min_volume"])
 
@@ -424,6 +429,12 @@ class NQIntradayConfig:
             self.base_contracts = int(variant_cfg["base_contracts"])
         if "avoid_lunch_lull" in variant_cfg:
             self.avoid_lunch_lull = bool(variant_cfg["avoid_lunch_lull"])
+        if "skip_overnight" in variant_cfg:
+            self.skip_overnight = bool(variant_cfg["skip_overnight"])
+        if "start_time" in variant_cfg:
+            self.start_time = str(variant_cfg["start_time"])
+        if "end_time" in variant_cfg:
+            self.end_time = str(variant_cfg["end_time"])
         
         # Adaptive volatility filter settings (A/B testing support)
         if "adaptive_volatility_filter_enabled" in variant_cfg:

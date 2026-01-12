@@ -82,7 +82,9 @@ signals:
   min_risk_reward: 1.3
   duplicate_price_threshold_pct: 0.5
   volatility_threshold: 0.0001
-  avoid_lunch_lull: false
+  avoid_lunch_lull: false  # Allow trading during lunch lull
+  # Allow trading at all times (24/7) - user requested
+  skip_overnight: false
   quality_score:
     enabled: true
     threshold: 0.45
@@ -143,25 +145,27 @@ signals:
       - trending_bearish
 strategy:
   enabled_signals:
-  - sr_bounce
-  - mean_reversion
-  - momentum
-  - breakout
+  # Recent live/forward performance breakdown shows ONLY momentum_short is profitable.
+  # Everything else (breakouts, mean reversion, SR bounces, momentum_long) is a net drag.
+  - momentum_short
   disabled_signals:
   - momentum_long
+  - breakout
+  - mean_reversion
   - sr_bounce
+  - vwap_reversion
+  - engulfing
   enable_dynamic_sizing: true
-  base_contracts: 8
-  high_conf_contracts: 15
-  max_conf_contracts: 50
+  # Keep sizing conservative until we re-validate on longer history.
+  base_contracts: 3
+  high_conf_contracts: 5
+  max_conf_contracts: 8
   high_conf_threshold: 0.8
   max_conf_threshold: 0.9
   winning_signal_types:
-  - mean_reversion_long
   - momentum_short
   signal_type_size_multipliers:
-    mean_reversion_long: 1.5
-    momentum_short: 1.3
+    momentum_short: 1.0
   use_scalp_presets: false
   scalp_target_points: 20.0
   scalp_stop_points: 12.0
@@ -212,15 +216,18 @@ strategy_variants:
     max_stop_points: 15
     base_contracts: 10
   conservative:
-    description: Conservative - high confidence only
+    description: Conservative - high confidence only (winners only)
     enabled_signals:
     - sr_bounce
     - mean_reversion_long
-    - momentum_short
+    # Removed momentum_short: losing -$6,415 in sweep
     disabled_signals:
     - momentum_long
+    - momentum_short
+    - sr_bounce_short
+    - mean_reversion_short
     - engulfing
-    - breakout
+    - breakout_short
     min_risk_reward: 1.5
     min_confidence: 0.75
   high_volume:
@@ -241,7 +248,9 @@ performance:
   default_lookback_days: 7
 virtual_pnl:
   enabled: true
-  intrabar_tiebreak: stop_loss
+  # Changed to take_profit to avoid recording profitable trades as losses
+  # when both stop and target could be hit in same bar
+  intrabar_tiebreak: take_profit
   notify_entry: true
   notify_exit: true
 hud:
@@ -278,11 +287,12 @@ sessions:
   color: '#089981'
 indicators:
   enabled:
-  - supply_demand_zones
-  - power_channel
+  # supply_demand_zones disabled: losing -$642, 29.2% WR in sweep
+  # power_channel disabled: losing -$144, 0% WR (1 trade lost)
   - smart_money_divergence
-  as_signals: true
-  as_features: true
+  # TBT ChartPrime indicator generated 0 signals - may need tuning or more history
+  as_signals: false  # Disable custom indicators as signals (they're losing or not generating)
+  as_features: true  # Keep as features for ML/learning system
   supply_demand_zones:
     lookback: 50
     min_zone_size_atr: 0.5

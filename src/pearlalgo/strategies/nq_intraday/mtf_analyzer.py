@@ -567,21 +567,37 @@ class MTFAnalyzer:
             aligned_5m = trend_5m in ("bullish", "neutral")
             aligned_15m = trend_15m in ("bullish", "neutral")
 
+            # CRITICAL FIX: Reject longs when BOTH timeframes are bearish (regardless of alignment status)
+            if trend_5m == "bearish" and trend_15m == "bearish":
+                logger.warning(
+                    f"🚫 MTF REJECT: LONG signal blocked - both 5m ({trend_5m}) and 15m ({trend_15m}) are bearish"
+                )
+                return (False, -0.30)  # Reject: both timeframes are bearish
+
             if aligned_5m and aligned_15m:
                 # Fully aligned
                 if alignment == "aligned":
+                    logger.debug(
+                        f"✅ MTF ALIGNED: LONG signal - 5m ({trend_5m}), 15m ({trend_15m}), score={alignment_score:.2f}"
+                    )
                     return (True, +0.20)  # Strong boost
                 else:
+                    logger.debug(
+                        f"✅ MTF PARTIAL: LONG signal - 5m ({trend_5m}), 15m ({trend_15m}), score={alignment_score:.2f}"
+                    )
                     return (True, +0.10)  # Moderate boost
             elif aligned_5m or aligned_15m:
                 # Partial alignment
+                logger.debug(
+                    f"⚠️  MTF MIXED: LONG signal - 5m ({trend_5m}), 15m ({trend_15m})"
+                )
                 return (True, 0.0)  # No adjustment
             else:
-                # Conflicting (both bearish)
-                if alignment == "conflicting":
-                    return (False, -0.30)  # Reject signal
-                else:
-                    return (True, -0.15)  # Allow but reduce confidence
+                # One bearish, one neutral - reduce confidence
+                logger.debug(
+                    f"⚠️  MTF WEAK: LONG signal - 5m ({trend_5m}), 15m ({trend_15m}), reducing confidence"
+                )
+                return (True, -0.15)
 
         # Check alignment for short signals
         elif signal_direction == "short":
@@ -589,21 +605,37 @@ class MTFAnalyzer:
             aligned_5m = trend_5m in ("bearish", "neutral")
             aligned_15m = trend_15m in ("bearish", "neutral")
 
+            # CRITICAL FIX: Reject shorts when BOTH timeframes are bullish (regardless of alignment status)
+            if trend_5m == "bullish" and trend_15m == "bullish":
+                logger.warning(
+                    f"🚫 MTF REJECT: SHORT signal blocked - both 5m ({trend_5m}) and 15m ({trend_15m}) are bullish"
+                )
+                return (False, -0.30)  # Reject: both timeframes are bullish
+
             if aligned_5m and aligned_15m:
                 # Fully aligned
                 if alignment == "aligned":
+                    logger.debug(
+                        f"✅ MTF ALIGNED: SHORT signal - 5m ({trend_5m}), 15m ({trend_15m}), score={alignment_score:.2f}"
+                    )
                     return (True, +0.20)
                 else:
+                    logger.debug(
+                        f"✅ MTF PARTIAL: SHORT signal - 5m ({trend_5m}), 15m ({trend_15m}), score={alignment_score:.2f}"
+                    )
                     return (True, +0.10)
             elif aligned_5m or aligned_15m:
                 # Partial alignment
+                logger.debug(
+                    f"⚠️  MTF MIXED: SHORT signal - 5m ({trend_5m}), 15m ({trend_15m})"
+                )
                 return (True, 0.0)
             else:
-                # Conflicting (both bullish)
-                if alignment == "conflicting":
-                    return (False, -0.30)
-                else:
-                    return (True, -0.15)
+                # One bullish, one neutral - reduce confidence
+                logger.debug(
+                    f"⚠️  MTF WEAK: SHORT signal - 5m ({trend_5m}), 15m ({trend_15m}), reducing confidence"
+                )
+                return (True, -0.15)
 
         # Unknown direction
         return (True, 0.0)

@@ -423,6 +423,15 @@ def run_signal_backtest_5m_decision(
     df_ctx2 = _resample_ohlcv(df_1m, context_rule_2)
 
     strategy = NQIntradayStrategy(config=config)
+    # Performance optimization:
+    # Precompute common rolling indicators ONCE on the full decision dataframe.
+    # Otherwise, the scanner recalculates SMA/EMA/RSI/ATR/MACD/etc for every bar window
+    # (O(N * window_size)), which makes multi-run sweeps (signal-type ranking, walk-forward)
+    # impractically slow.
+    try:
+        df_decision = strategy.scanner.calculate_indicators(df_decision)
+    except Exception:
+        pass
 
     signals: List[Dict] = []
     confidences: List[float] = []
@@ -566,6 +575,11 @@ def run_signal_backtest(
         df_1m = df_1m.sort_index()
 
     strategy = NQIntradayStrategy(config=config)
+    # Same optimization as 5m-decision: precompute common rolling indicators once.
+    try:
+        df_1m = strategy.scanner.calculate_indicators(df_1m)
+    except Exception:
+        pass
     mtf = _build_mtf(df_1m, config)
     df_5m_all = mtf.get("df_5m")
     df_15m_all = mtf.get("df_15m")
@@ -1047,8 +1061,13 @@ class TradeSimulator:
                         self._record_skipped_signal(signal, skip_reason, computed_size)
                         continue
                     
-                    # Use computed size if risk-based, otherwise use provided position_size
-                    effective_size = computed_size if self.use_risk_sizing else position_size
+                    # Position sizing selection:
+                    # - If risk sizing is enabled, use computed size (risk-budget aware).
+                    # - If dynamic sizing is enabled on the strategy config, also use computed size
+                    #   (confidence + signal-type aware), even when risk sizing is off.
+                    # - Otherwise, fall back to the fixed `position_size` argument.
+                    use_dynamic = bool(self.config and getattr(self.config, "enable_dynamic_sizing", False))
+                    effective_size = computed_size if (self.use_risk_sizing or use_dynamic) else position_size
                     
                     self._open_trade(signal, bar, bar_time, effective_size, signal_idx)
                     execution_stats["signals_opened"] += 1

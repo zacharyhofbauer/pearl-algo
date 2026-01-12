@@ -716,6 +716,14 @@ class NQScanner:
             logger.debug("Skipping signals during lunch lull (prop firm style)")
             return signals
 
+        # Optional: Skip overnight (outside RTH) to avoid low-liquidity chop.
+        # This is additive to market-hours gating and is driven by the regime detector's session phase.
+        skip_overnight = bool(getattr(self.config, "skip_overnight", False))
+        if skip_overnight and str(session).lower() == "overnight":
+            self.last_gate_reasons.append("Overnight session (outside RTH) - skipping signals")
+            logger.debug("Skipping signals during overnight session (outside RTH)")
+            return signals
+
         # Momentum LONG signal (fast MA crosses above slow MA with MACD confirmation)
         # LOOSENED (2026-01-07): Accept upward momentum without strict MA crossover
         if self.config.enable_momentum and self.config.is_signal_enabled("momentum_long") and session != "lunch_lull":
@@ -776,6 +784,14 @@ class NQScanner:
 
                         if is_flow_aligned:
                             confidence = max(0.0, min(1.0, confidence + flow_adjustment))
+
+                            # SANITY CHECK: Log signal direction explicitly
+                            logger.info(
+                                f"📊 SIGNAL GENERATED: momentum_long | direction=LONG | "
+                                f"entry={current_price:.2f} | stop={stop_loss:.2f} | target={take_profit:.2f} | "
+                                f"conf={confidence:.2f} | MTF_5m={mtf_analysis.get('5m', {}).get('trend', 'unknown')} | "
+                                f"MTF_15m={mtf_analysis.get('15m', {}).get('trend', 'unknown')}"
+                            )
 
                             signals.append({
                                 "type": "momentum_long",
@@ -855,6 +871,14 @@ class NQScanner:
 
                         if is_flow_aligned:
                             confidence = max(0.0, min(1.0, confidence + flow_adjustment))
+
+                            # SANITY CHECK: Log signal direction explicitly
+                            logger.info(
+                                f"📊 SIGNAL GENERATED: momentum_short | direction=SHORT | "
+                                f"entry={current_price:.2f} | stop={stop_loss:.2f} | target={take_profit:.2f} | "
+                                f"conf={confidence:.2f} | MTF_5m={mtf_analysis.get('5m', {}).get('trend', 'unknown')} | "
+                                f"MTF_15m={mtf_analysis.get('15m', {}).get('trend', 'unknown')}"
+                            )
 
                             signals.append({
                                 "type": "momentum_short",

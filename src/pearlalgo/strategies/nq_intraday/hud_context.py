@@ -425,15 +425,248 @@ def compute_key_levels(
     return {"tz": tz_name, "rth": rth, "eth": eth}
 
 
+def compute_spaceman_key_levels(
+    df: pd.DataFrame,
+    tz_name: str = "America/New_York",
+) -> Dict[str, Any]:
+    """
+    Compute additional "SpacemanBTC Key Levels" style higher-timeframe levels.
+
+    This is inspired by the TradingView script:
+      "Key Levels SpacemanBTC" (community variants)
+
+    Designed for chart/HUD use:
+    - Uses ONLY the passed dataframe (no external provider calls).
+    - Returns partial data when history is insufficient (callers should treat missing values as optional).
+
+    Output schema (all floats, optional):
+      {
+        "tz": "...",
+        "intra_4h": {"current": {"open": ...}, "previous": {"high": ..., "low": ..., "mid": ...}},
+        "weekly":    {"current": {"open": ...}, "previous": {"high": ..., "low": ..., "mid": ...}},
+        "monthly":   {"current": {"open": ...}, "previous": {"high": ..., "low": ..., "mid": ...}},
+        "quarterly": {"current": {"open": ...}, "previous": {"high": ..., "low": ..., "mid": ...}},
+        "yearly":    {"current": {"open": ..., "high": ..., "low": ..., "mid": ...}},
+        "monday":    {"high": ..., "low": ..., "mid": ...},
+      }
+    """
+    ts_utc = _to_utc_ts_series(df)
+    if ts_utc is None or df is None or df.empty:
+        return {"tz": tz_name}
+    if not all(c in df.columns for c in ("open", "high", "low", "close")):
+        return {"tz": tz_name}
+
+    # Normalize series
+    open_ = pd.to_numeric(df["open"], errors="coerce")
+    high = pd.to_numeric(df["high"], errors="coerce")
+    low = pd.to_numeric(df["low"], errors="coerce")
+    close = pd.to_numeric(df["close"], errors="coerce")
+
+    # Build an ordered working frame (needed for "open = first")
+    try:
+        t = pd.to_datetime(ts_utc, errors="coerce")
+    except Exception:
+        return {"tz": tz_name}
+
+    w = pd.DataFrame(
+        {
+            "ts": t,
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+        }
+    ).dropna(subset=["ts"])
+    if w.empty:
+        return {"tz": tz_name}
+
+    # Ensure stable ordering
+    w = w.sort_values("ts").reset_index(drop=True)
+
+    out: Dict[str, Any] = {"tz": tz_name}
+
+    # ------------------------------------------------------------
+    # 4H (Prev 4H H/L/M + current 4H open)
+    # ------------------------------------------------------------
+    try:
+        tmp = w.set_index(pd.DatetimeIndex(w["ts"]))
+        # pandas deprecates uppercase frequency strings (FutureWarning in pandas>=2.2)
+        bars_4h = tmp[["open", "high", "low", "close"]].resample("4h").agg(
+            {"open": "first", "high": "max", "low": "min", "close": "last"}
+        )
+        bars_4h = bars_4h.dropna(subset=["open", "high", "low"])
+        if len(bars_4h) >= 2:
+            cur = bars_4h.iloc[-1]
+            prev = bars_4h.iloc[-2]
+            out["intra_4h"] = {
+                "current": {"open": float(cur["open"])},
+                "previous": {
+                    "high": float(prev["high"]),
+                    "low": float(prev["low"]),
+                    "mid": float((float(prev["high"]) + float(prev["low"])) / 2.0),
+                },
+            }
+    except Exception:
+        pass
+
+    # Local time keys for higher TF grouping (TradingView-like)
+    try:
+        local = w["ts"].dt.tz_convert(tz_name)
+        local_naive = local.dt.tz_localize(None)
+    except Exception:
+        # If tz conversion fails, fall back to naive (assume already local)
+        local_naive = pd.to_datetime(w["ts"], errors="coerce").dt.tz_localize(None)
+
+    # Helper: compute OHLC aggregates per group
+    def _agg_by_key(key: pd.Series) -> pd.DataFrame:
+        tmp2 = w.copy()
+        tmp2["key"] = key.values
+        tmp2 = tmp2.dropna(subset=["key"])
+        if tmp2.empty:
+            return pd.DataFrame()
+        g = tmp2.groupby("key", sort=True)
+        o = g["open"].first()
+        h = g["high"].max()
+        l = g["low"].min()
+        out_df = pd.DataFrame({"open": o, "high": h, "low": l})
+        out_df["mid"] = (out_df["high"] + out_df["low"]) / 2.0
+        return out_df
+
+    # Current "week start" (Monday) key
+    try:
+        day_start = local_naive.dt.floor("D")
+        week_start = day_start - pd.to_timedelta(local_naive.dt.weekday, unit="D")
+    except Exception:
+        week_start = pd.Series([pd.NaT] * len(w))
+
+    # Weekly
+    try:
+        weekly_df = _agg_by_key(week_start)
+        if not weekly_df.empty:
+            cur_key = week_start.iloc[-1]
+            keys = list(weekly_df.index)
+            if cur_key in weekly_df.index:
+                cur_row = weekly_df.loc[cur_key]
+                # Find previous key if available
+                prev_key = None
+                idx = keys.index(cur_key) if cur_key in keys else None
+                if idx is not None and idx - 1 >= 0:
+                    prev_key = keys[idx - 1]
+                out["weekly"] = {"current": {"open": float(cur_row["open"])}}
+                if prev_key is not None:
+                    prev_row = weekly_df.loc[prev_key]
+                    out["weekly"]["previous"] = {
+                        "high": float(prev_row["high"]),
+                        "low": float(prev_row["low"]),
+                        "mid": float(prev_row["mid"]),
+                    }
+    except Exception:
+        pass
+
+    # Monthly
+    try:
+        month_key = local_naive.dt.to_period("M").dt.to_timestamp()
+        monthly_df = _agg_by_key(month_key)
+        if not monthly_df.empty:
+            cur_key = month_key.iloc[-1]
+            keys = list(monthly_df.index)
+            if cur_key in monthly_df.index:
+                cur_row = monthly_df.loc[cur_key]
+                prev_key = None
+                idx = keys.index(cur_key) if cur_key in keys else None
+                if idx is not None and idx - 1 >= 0:
+                    prev_key = keys[idx - 1]
+                out["monthly"] = {"current": {"open": float(cur_row["open"])}}
+                if prev_key is not None:
+                    prev_row = monthly_df.loc[prev_key]
+                    out["monthly"]["previous"] = {
+                        "high": float(prev_row["high"]),
+                        "low": float(prev_row["low"]),
+                        "mid": float(prev_row["mid"]),
+                    }
+    except Exception:
+        pass
+
+    # Quarterly
+    try:
+        q_key = local_naive.dt.to_period("Q").dt.start_time
+        quarterly_df = _agg_by_key(q_key)
+        if not quarterly_df.empty:
+            cur_key = q_key.iloc[-1]
+            keys = list(quarterly_df.index)
+            if cur_key in quarterly_df.index:
+                cur_row = quarterly_df.loc[cur_key]
+                prev_key = None
+                idx = keys.index(cur_key) if cur_key in keys else None
+                if idx is not None and idx - 1 >= 0:
+                    prev_key = keys[idx - 1]
+                out["quarterly"] = {"current": {"open": float(cur_row["open"])}}
+                if prev_key is not None:
+                    prev_row = quarterly_df.loc[prev_key]
+                    out["quarterly"]["previous"] = {
+                        "high": float(prev_row["high"]),
+                        "low": float(prev_row["low"]),
+                        "mid": float(prev_row["mid"]),
+                    }
+    except Exception:
+        pass
+
+    # Yearly (current year open + current high/low/mid)
+    try:
+        y_key = local_naive.dt.to_period("Y").dt.start_time
+        yearly_df = _agg_by_key(y_key)
+        if not yearly_df.empty:
+            cur_key = y_key.iloc[-1]
+            if cur_key in yearly_df.index:
+                cur_row = yearly_df.loc[cur_key]
+                out["yearly"] = {
+                    "current": {
+                        "open": float(cur_row["open"]),
+                        "high": float(cur_row["high"]),
+                        "low": float(cur_row["low"]),
+                        "mid": float(cur_row["mid"]),
+                    }
+                }
+    except Exception:
+        pass
+
+    # Monday range (high/low/mid for Monday of current week)
+    try:
+        cur_week = week_start.iloc[-1]
+        if pd.notna(cur_week):
+            monday_date = pd.Timestamp(cur_week)
+            day_start = local_naive.dt.floor("D")
+            is_monday = (day_start == monday_date)
+            if bool(is_monday.any()):
+                h = float(w.loc[is_monday.values, "high"].max())
+                l = float(w.loc[is_monday.values, "low"].min())
+                if np.isfinite(h) and np.isfinite(l) and h > 0 and l > 0:
+                    out["monday"] = {"high": h, "low": l, "mid": float((h + l) / 2.0)}
+    except Exception:
+        pass
+
+    return out
+
+
 def compute_tbt_trendlines(
     df: pd.DataFrame,
     period: int = 10,
 ) -> Optional[Dict[str, Any]]:
     """
-    Simplified TBT-style trendlines + breakout detection (bounded).
+    TBT-style trendlines + breakout detection (bounded).
 
-    We fit trendlines from the most recent two pivot highs (bearish) and pivot
-    lows (bullish) and check for close cross.
+    This matches the core semantics of the TradingView Pine indicator:
+      "Trendline Breakouts With Targets [ Chartprime ]" (MPL 2.0)
+
+    Key behaviors preserved:
+    - Pivots are confirmed `right = period//2` bars after the pivot bar (Pine `ta.pivothigh/low`).
+    - Trendlines are built from the most recent two confirmed pivots (highs for bearish line, lows for bullish line).
+    - Breakout is detected on close crossing the active trendline.
+    - Short breakout uses a small buffer: `Zband * 0.1`.
+    - Target/stop projection uses `Zband * 20`.
+    - Zband is volatility-adjusted and shifted 20 bars in the original Pine.
+
+    This is used for HUD/chart overlay only (not execution), so it is intentionally bounded.
     """
     if df is None or df.empty:
         return None
@@ -442,85 +675,145 @@ def compute_tbt_trendlines(
     if len(df) < (period * 2):
         return None
 
+    ts_utc = _to_utc_ts_series(df)
+    if ts_utc is None or ts_utc.dropna().empty:
+        return None
+
     p = int(max(2, period))
     right = max(1, p // 2)
     left = p
-    win = left + right + 1
 
     high = pd.to_numeric(df["high"], errors="coerce")
     low = pd.to_numeric(df["low"], errors="coerce")
     close = pd.to_numeric(df["close"], errors="coerce")
 
-    ph = high.rolling(win, center=True, min_periods=win).max()
-    pl = low.rolling(win, center=True, min_periods=win).min()
+    # Zband (Pine volAdj): min(ATR(30)*0.3, close*0.3%)[20] / 2
+    tr = pd.concat([(high - low), (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
+    atr_30 = tr.rolling(30, min_periods=5).mean()
+    base = np.minimum(atr_30 * 0.3, close * 0.003)
+    zband_series = (pd.Series(base, index=df.index)).shift(20) / 2.0
+    zband_series = zband_series.fillna((pd.Series(base, index=df.index)) / 2.0)
+    try:
+        zband = float(zband_series.iloc[-1])
+    except Exception:
+        zband = 0.0
 
-    pivot_high_idx = np.where((high == ph).to_numpy(dtype=bool))[0]
-    pivot_low_idx = np.where((low == pl).to_numpy(dtype=bool))[0]
+    if not np.isfinite(zband) or zband <= 0:
+        return None
 
-    def _last_two(idxs: np.ndarray) -> Optional[Tuple[int, int]]:
-        if idxs is None or len(idxs) < 2:
+    # Pivot detection (Pine-confirmed): output value at detection bar i, where pivot is at i-right.
+    hi_arr = high.to_numpy(dtype=float)
+    lo_arr = low.to_numpy(dtype=float)
+    n = len(df)
+
+    piv_h_events: List[Tuple[int, int, float]] = []  # (detect_idx, pivot_idx, pivot_val)
+    piv_l_events: List[Tuple[int, int, float]] = []
+
+    for i in range(left + right, n):
+        pivot_idx = i - right
+        a = pivot_idx - left
+        b = pivot_idx + right + 1
+        if a < 0 or b > n:
+            continue
+
+        # Pivot high
+        w_hi = hi_arr[a:b]
+        pv_hi = hi_arr[pivot_idx]
+        if np.isfinite(pv_hi):
+            mx = np.nanmax(w_hi)
+            if np.isfinite(mx) and pv_hi == mx and np.sum(w_hi == pv_hi) == 1:
+                piv_h_events.append((i, pivot_idx, float(pv_hi)))
+
+        # Pivot low
+        w_lo = lo_arr[a:b]
+        pv_lo = lo_arr[pivot_idx]
+        if np.isfinite(pv_lo):
+            mn = np.nanmin(w_lo)
+            if np.isfinite(mn) and pv_lo == mn and np.sum(w_lo == pv_lo) == 1:
+                piv_l_events.append((i, pivot_idx, float(pv_lo)))
+
+    def _latest_line(events: List[Tuple[int, int, float]]) -> Optional[Dict[str, Any]]:
+        if len(events) < 2:
             return None
-        return int(idxs[-2]), int(idxs[-1])
+        # Use last two pivots (prev, curr)
+        det_prev, piv_prev, y_prev = events[-2]
+        det_curr, piv_curr, y_curr = events[-1]
 
-    last_two_hi = _last_two(pivot_high_idx)
-    last_two_lo = _last_two(pivot_low_idx)
+        try:
+            t1 = pd.Timestamp(ts_utc.iloc[piv_prev])
+            t2 = pd.Timestamp(ts_utc.iloc[piv_curr])
+        except Exception:
+            return None
+        if pd.isna(t1) or pd.isna(t2):
+            return None
 
-    def _line_at(x1: int, y1: float, x2: int, y2: float, x: int) -> float:
-        if x2 == x1:
-            return float(y2)
-        m = (y2 - y1) / (x2 - x1)
-        return float(y2 + m * (x - x2))
+        dt = (t2 - t1).total_seconds()
+        slope = float((y_curr - y_prev) / dt) if dt != 0 else 0.0
+
+        # Current/previous line values (at last two bars)
+        try:
+            t_last = pd.Timestamp(ts_utc.iloc[-1])
+            t_prev = pd.Timestamp(ts_utc.iloc[-2])
+            y_last = float(y_prev + (t_last - t1).total_seconds() * slope)
+            y_prev_line = float(y_prev + (t_prev - t1).total_seconds() * slope)
+        except Exception:
+            return None
+
+        return {
+            "start_time": t1.isoformat(),
+            "start_price": float(y_prev),
+            "end_time": t2.isoformat(),
+            "end_price": float(y_curr),
+            "slope_per_sec": float(slope),
+            "updated_idx": int(det_curr),
+            "y_last": float(y_last),
+            "y_prev": float(y_prev_line),
+        }
+
+    bearish = _latest_line(piv_h_events)
+    bullish = _latest_line(piv_l_events)
 
     x_last = len(df) - 1
     x_prev = len(df) - 2
 
-    bearish = None
-    bullish = None
-
-    if last_two_hi:
-        a, b = last_two_hi
-        bearish = {
-            "x1": a,
-            "y1": float(high.iloc[a]),
-            "x2": b,
-            "y2": float(high.iloc[b]),
-            "y_last": _line_at(a, float(high.iloc[a]), b, float(high.iloc[b]), x_last),
-            "y_prev": _line_at(a, float(high.iloc[a]), b, float(high.iloc[b]), x_prev),
-        }
-
-    if last_two_lo:
-        a, b = last_two_lo
-        bullish = {
-            "x1": a,
-            "y1": float(low.iloc[a]),
-            "x2": b,
-            "y2": float(low.iloc[b]),
-            "y_last": _line_at(a, float(low.iloc[a]), b, float(low.iloc[b]), x_last),
-            "y_prev": _line_at(a, float(low.iloc[a]), b, float(low.iloc[b]), x_prev),
-        }
-
     long_breakout = False
     short_breakout = False
-    if bearish:
-        long_breakout = bool(close.iloc[x_prev] < bearish["y_prev"] and close.iloc[x_last] > bearish["y_last"])
-    if bullish:
-        short_breakout = bool(close.iloc[x_prev] > bullish["y_prev"] and close.iloc[x_last] < bullish["y_last"])
 
-    # Target sizing (approx) – used only for chart HUD, not strategy execution.
-    tr = pd.concat([(high - low), (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
-    atr_30 = tr.rolling(30, min_periods=5).mean()
-    atr_val = float(atr_30.iloc[-1]) if not atr_30.empty else float(tr.rolling(14, min_periods=2).mean().iloc[-1])
-    last_close = float(close.iloc[-1])
-    zband = min(atr_val * 0.3, last_close * 0.003) / 2.0
+    # Freshness gate: allow for <period bars after last pivot confirmation (Pine StartPrice[Period] != StartPrice)
+    def _fresh(updated_idx: int) -> bool:
+        try:
+            return int((x_last - int(updated_idx))) < p
+        except Exception:
+            return False
+
+    if bearish and float(bearish.get("slope_per_sec", 0.0) or 0.0) <= 0 and _fresh(int(bearish.get("updated_idx", 0) or 0)):
+        try:
+            long_breakout = bool(close.iloc[x_prev] < float(bearish["y_prev"]) and close.iloc[x_last] > float(bearish["y_last"]))
+        except Exception:
+            long_breakout = False
+
+    if bullish and float(bullish.get("slope_per_sec", 0.0) or 0.0) >= 0 and _fresh(int(bullish.get("updated_idx", 0) or 0)):
+        try:
+            buf = zband * 0.1
+            short_breakout = bool(
+                (close.iloc[x_prev] > (float(bullish["y_prev"]) - buf))
+                and (close.iloc[x_last] < (float(bullish["y_last"]) - buf))
+            )
+        except Exception:
+            short_breakout = False
 
     tp = None
     sl = None
-    if long_breakout:
-        tp = float(high.iloc[-1] + (zband * 20.0))
-        sl = float(low.iloc[-1] - (zband * 20.0))
-    elif short_breakout:
-        tp = float(low.iloc[-1] - (zband * 20.0))
-        sl = float(high.iloc[-1] + (zband * 20.0))
+    try:
+        if long_breakout:
+            tp = float(high.iloc[-1] + (zband * 20.0))
+            sl = float(low.iloc[-1] - (zband * 20.0))
+        elif short_breakout:
+            tp = float(low.iloc[-1] - (zband * 20.0))
+            sl = float(high.iloc[-1] + (zband * 20.0))
+    except Exception:
+        tp = None
+        sl = None
 
     return {
         "period": int(period),

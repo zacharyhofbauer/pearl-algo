@@ -14,7 +14,7 @@ Layers and allowed dependencies:
 - utils:          may import utils, stdlib, third-party only
 - config:         may import config, utils
 - data_providers: may import data_providers, config, utils
-- strategies:     may import strategies, config, utils
+- strategies:     may import strategies, config, utils, learning (for optional ML signal filtering)
 - execution:      may import execution, config, utils (ATS execution layer)
 - learning:       may import learning, config, utils (adaptive learning layer)
 - nq_agent:       may import any internal layer (orchestration)
@@ -46,7 +46,7 @@ ALLOWED_IMPORTS: Dict[str, Set[str]] = {
     "utils": {"utils"},  # utils is self-contained
     "config": {"config", "utils"},
     "data_providers": {"data_providers", "config", "utils"},
-    "strategies": {"strategies", "config", "utils"},
+    "strategies": {"strategies", "config", "utils", "learning"},  # learning for optional ML signal filtering
     "execution": {"execution", "config", "utils"},  # ATS execution layer
     "learning": {"learning", "config", "utils"},  # Adaptive learning layer
     "nq_agent": LAYERS,  # orchestration layer can import anything

@@ -22,12 +22,14 @@ from pearlalgo.strategies.nq_intraday.indicators.base import IndicatorBase
 from pearlalgo.strategies.nq_intraday.indicators.supply_demand_zones import SupplyDemandZones
 from pearlalgo.strategies.nq_intraday.indicators.power_channel import PowerChannel
 from pearlalgo.strategies.nq_intraday.indicators.smart_money_divergence import SmartMoneyDivergence
+from pearlalgo.strategies.nq_intraday.indicators.tbt_chartprime import TBTChartPrime
 
 # Registry of available indicators
 INDICATOR_REGISTRY: Dict[str, Type[IndicatorBase]] = {
     "supply_demand_zones": SupplyDemandZones,
     "power_channel": PowerChannel,
     "smart_money_divergence": SmartMoneyDivergence,
+    "tbt_chartprime": TBTChartPrime,
 }
 
 
@@ -84,6 +86,7 @@ __all__ = [
     "SupplyDemandZones",
     "PowerChannel",
     "SmartMoneyDivergence",
+    "TBTChartPrime",
     "INDICATOR_REGISTRY",
     "get_enabled_indicators",
     "get_indicator",

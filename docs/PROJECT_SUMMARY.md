@@ -518,7 +518,7 @@ These boundaries prevent accidental coupling, keep strategies portable, and make
 | `utils`          | `pearlalgo.utils.*`, stdlib, third-party        | `config`, `data_providers`, `strategies`, `nq_agent` |
 | `config`         | `pearlalgo.config.*`, `pearlalgo.utils.*`       | `data_providers`, `strategies`, `nq_agent` |
 | `data_providers` | `pearlalgo.data_providers.*`, `config`, `utils` | `strategies`, `nq_agent`     |
-| `strategies`     | `pearlalgo.strategies.*`, `config`, `utils`     | `data_providers`, `nq_agent` |
+| `strategies`     | `pearlalgo.strategies.*`, `config`, `utils`, `learning` | `data_providers`, `nq_agent` |
 | `execution`      | `pearlalgo.execution.*`, `config`, `utils`      | `data_providers`, `strategies`, `learning`, `nq_agent` |
 | `learning`       | `pearlalgo.learning.*`, `config`, `utils`       | `data_providers`, `strategies`, `execution`, `nq_agent` |
 | `nq_agent`       | Any internal layer (orchestration layer)        | —                            |
@@ -529,7 +529,7 @@ These boundaries prevent accidental coupling, keep strategies portable, and make
 - **`utils`** is the lowest layer: pure helpers with no domain awareness.
 - **`config`** provides settings and loaders; it may use utils for logging but must stay agnostic to higher layers.
 - **`data_providers`** abstract market data sources; they must not know about strategies or the agent orchestration.
-- **`strategies`** contain trading logic; they must remain independent of specific data providers and the orchestrating agent so they can be tested in isolation or reused elsewhere.
+- **`strategies`** contain trading logic; they must remain independent of specific data providers and the orchestrating agent so they can be tested in isolation or reused elsewhere. Strategies may optionally import from `learning` for ML signal filtering (guarded with try/except for graceful degradation).
 - **`execution`** contains ATS execution logic (IBKR bracket orders, safety guards); independent of strategy and agent orchestration.
 - **`learning`** contains adaptive policy logic (Thompson sampling bandit); independent of strategy and agent orchestration.
 - **`nq_agent`** is the top-level orchestration layer that wires everything together.

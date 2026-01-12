@@ -1503,7 +1503,14 @@ class NQAgentService:
             entry_price = 0.0
             try:
                 entry_price = float(signal.get("entry_price") or 0.0)
+                signal_direction = signal.get("direction", "unknown")
                 if entry_price > 0:
+                    # SANITY CHECK: Log direction at entry
+                    logger.info(
+                        f"🔍 VIRTUAL ENTRY: signal_id={signal_id[:16]} | direction={signal_direction.upper()} | "
+                        f"entry={entry_price:.2f} | stop={signal.get('stop_loss', 'N/A')} | "
+                        f"target={signal.get('take_profit', 'N/A')}"
+                    )
                     self.performance_tracker.track_entry(
                         signal_id=signal_id,
                         entry_price=entry_price,
@@ -2026,6 +2033,13 @@ class NQAgentService:
                             exit_bar_ts = exit_bar_ts.replace(tzinfo=timezone.utc)
                     except Exception:
                         pass
+
+                    # SANITY CHECK: Log direction consistency
+                    logger.info(
+                        f"🔍 VIRTUAL EXIT: signal_id={sig_id} | direction={direction.upper()} | "
+                        f"entry={sig.get('entry_price', 'N/A')} | exit={exit_price:.2f} | "
+                        f"reason={exit_reason} | stop={stop:.2f} | target={target:.2f}"
+                    )
 
                     perf = self.performance_tracker.track_exit(
                         signal_id=sig_id,
