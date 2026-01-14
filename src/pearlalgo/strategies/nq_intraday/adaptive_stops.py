@@ -238,6 +238,9 @@ class StopTakeProfit:
     original_stop: Optional[float] = None
     adjustment_reason: str = ""
     
+    # Anti-hunt jitter
+    jitter_applied: float = 0.0  # Points of jitter added to stop
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for logging/serialization."""
         return {
@@ -255,6 +258,7 @@ class StopTakeProfit:
             "stop_adjusted_for_zones": self.stop_adjusted_for_zones,
             "original_stop": self.original_stop,
             "adjustment_reason": self.adjustment_reason,
+            "jitter_applied": self.jitter_applied,
         }
 
 
@@ -278,6 +282,8 @@ class AdaptiveStopCalculator:
         use_market_depth: bool = True,
         max_stop_points: float = 25.0,  # Maximum stop distance in points
         min_stop_points: float = 5.0,   # Minimum stop distance in points
+        anti_hunt_jitter: bool = True,  # Add randomization to avoid predictable stops
+        jitter_range_points: float = 3.0,  # Max jitter range in points (±)
     ):
         """
         Initialize the adaptive stop calculator.
@@ -288,12 +294,16 @@ class AdaptiveStopCalculator:
             use_market_depth: Use market depth for stop adjustment
             max_stop_points: Maximum stop distance from entry
             min_stop_points: Minimum stop distance from entry
+            anti_hunt_jitter: Add randomization to stops to avoid predictable hunting
+            jitter_range_points: Maximum jitter range in points (±)
         """
         self.risk_profiles = risk_profiles or DEFAULT_RISK_PROFILES.copy()
         self.use_structure_stops = use_structure_stops
         self.use_market_depth = use_market_depth
         self.max_stop_points = max_stop_points
         self.min_stop_points = min_stop_points
+        self.anti_hunt_jitter = anti_hunt_jitter
+        self.jitter_range_points = jitter_range_points
         
         # Initialize market depth analyzer if available
         self._depth_analyzer: Optional[MarketDepthAnalyzer] = None
@@ -304,7 +314,8 @@ class AdaptiveStopCalculator:
             f"AdaptiveStopCalculator initialized: "
             f"structure_stops={use_structure_stops}, "
             f"market_depth={use_market_depth and self._depth_analyzer is not None}, "
-            f"max_stop={max_stop_points}pts"
+            f"max_stop={max_stop_points}pts, "
+            f"anti_hunt_jitter={anti_hunt_jitter} (±{jitter_range_points}pts)"
         )
     
     def calculate_stop_take_profit(
@@ -433,6 +444,27 @@ class AdaptiveStopCalculator:
                 final_stop = entry_price + self.max_stop_points
             adjustment_reason = f"Capped to max {self.max_stop_points} pts"
         
+        # Anti-hunt jitter: add small random offset to avoid clustering stops at obvious levels
+        # This makes stops less predictable and harder for market makers to hunt
+        jitter_applied = 0.0
+        if self.anti_hunt_jitter and self.jitter_range_points > 0:
+            # Generate random jitter (always widen the stop, never tighten)
+            # This gives the trade more room while maintaining unpredictability
+            jitter = np.random.uniform(0, self.jitter_range_points)
+            
+            if direction == "long":
+                final_stop = final_stop - jitter  # Widen by moving stop lower
+            else:
+                final_stop = final_stop + jitter  # Widen by moving stop higher
+            
+            jitter_applied = jitter
+            
+            # Log jitter application
+            logger.debug(
+                f"Anti-hunt jitter applied: {jitter:.2f} pts "
+                f"(stop moved from {adjusted_stop:.2f} to {final_stop:.2f})"
+            )
+        
         # Calculate take profit based on risk-reward
         risk = abs(entry_price - final_stop)
         reward = risk * profile.target_risk_reward
@@ -460,6 +492,7 @@ class AdaptiveStopCalculator:
             stop_adjusted_for_zones=stop_adjusted,
             original_stop=raw_stop if stop_adjusted else None,
             adjustment_reason=adjustment_reason,
+            jitter_applied=jitter_applied,
         )
     
     def _get_risk_profile(self, signal_type: str) -> SignalTypeRiskProfile:
@@ -637,5 +670,7 @@ def get_adaptive_stop_calculator(
         use_market_depth=adaptive_config.get("use_level2_zones", True),
         max_stop_points=config.get("signals", {}).get("max_stop_points", 25.0),
         min_stop_points=adaptive_config.get("min_stop_points", 5.0),
+        anti_hunt_jitter=adaptive_config.get("anti_hunt_jitter", True),
+        jitter_range_points=adaptive_config.get("jitter_range_points", 3.0),
     )
 

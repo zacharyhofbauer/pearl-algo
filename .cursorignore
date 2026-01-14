@@ -1,4 +1,5 @@
 # Large vendored binaries - exclude from Cursor searches
-ibkr/
+# Use /ibkr/ to only match the root-level Gateway install, not src/**/ibkr/
+/ibkr/
 
 

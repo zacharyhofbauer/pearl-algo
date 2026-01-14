@@ -288,10 +288,11 @@ Check for gaps in:
 
 3.4 KILL SWITCH VERIFICATION
 Verify kill switch behavior:
-- /kill command cancels all orders AND disarms
-- Kill is fast (under 1 second)
+- /kill command cancels all orders AND explicitly disarms
+- Kill is responsive (max 5 seconds via interruptible sleep, even during market-closed 300s cadence)
 - Kill works even if IBKR connection is degraded
 - Manual backup procedure documented
+- Kill flag is processed in service loop via _check_execution_control_flags()
 
 3.5 LEARNING SAFETY
 Verify adaptive learning safety:
@@ -390,6 +391,7 @@ NQ Agent:
 - src/pearlalgo/nq_agent/service.py
 - src/pearlalgo/strategies/nq_intraday/scanner.py
 - src/pearlalgo/strategies/nq_intraday/signal_generator.py
+- src/pearlalgo/strategies/nq_intraday/adaptive_stops.py
 - src/pearlalgo/nq_agent/state_manager.py
 - data/nq_agent_state/state.json
 

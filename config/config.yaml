@@ -16,7 +16,8 @@ telegram_ui:
 risk:
   max_risk_per_trade: 0.01
   max_drawdown: 0.1
-  stop_loss_atr_multiplier: 2.5
+  # TUNED: Widened from 2.5 to 3.0 to reduce stop hunting / premature exits
+  stop_loss_atr_multiplier: 3.0
   take_profit_risk_reward: 2.0
   min_position_size: 5
   max_position_size: 50
@@ -87,7 +88,8 @@ signals:
   skip_overnight: false
   quality_score:
     enabled: true
-    threshold: 0.45
+    # TUNED: Lowered from 0.45 to 0.35 to let more signals through (was rejecting ~73%)
+    threshold: 0.35
     factors:
       confidence_weight: 0.3
       risk_reward_weight: 0.25
@@ -102,7 +104,8 @@ signals:
     min_risk_reward: 2.0
     include_quality_rejects: false
     bypass_regime_filters: false
-  max_stop_points: 35.0
+  # TUNED: Widened from 35.0 to 45.0 to allow wider stops during high volatility
+  max_stop_points: 45.0
   adaptive_volatility_filter:
     enabled: false
     expansion_requirement: 2.0
@@ -340,8 +343,9 @@ llm_adaptive_tuning:
   min_sample_size: 20
   conservative_mode: true
 execution:
-  enabled: true
-  armed: true
+  # SAFETY: Default is disabled + disarmed. Explicitly enable and /arm to place orders.
+  enabled: false
+  armed: false
   mode: dry_run
   adapter: ibkr
   max_positions: 1
@@ -380,7 +384,8 @@ learning:
   decay_factor: 0.0
   contextual:
     enabled: true
-    mode: live
+    # SAFETY: Default to shadow mode (observe only). Set to "live" to affect execution.
+    mode: shadow
     explore_rate: 0.1
     min_samples_per_context: 5
     decision_threshold: 0.3
@@ -389,7 +394,11 @@ adaptive_stops:
   enabled: true
   use_structure_stops: true
   use_level2_zones: true
-  min_stop_points: 8.0
+  # TUNED: Widened from 8.0 to 12.0 to reduce predictable stop hunting
+  min_stop_points: 12.0
+  # Anti-hunt jitter: adds random offset (0 to +N pts) to stops to make them less predictable
+  anti_hunt_jitter: true
+  jitter_range_points: 3.0  # Random offset up to 3 points (always widens stop, never tightens)
   regime_multipliers:
     ranging: 1.2
     trending_bullish: 1.3
@@ -422,7 +431,8 @@ trailing_stop:
   never_widen: true
   # Delay breakeven so we don't get chopped out at entry after tiny moves.
   # Units are MNQ/NQ points (see TrailingStopManager in src/pearlalgo/strategies/nq_intraday/trade_manager.py).
-  min_profit_before_be: 12.0
+  # TUNED: Widened from 12.0 to 18.0 to let trades breathe before moving to breakeven
+  min_profit_before_be: 18.0
 adaptive_sizing:
   enabled: true
   method: kelly_criterion

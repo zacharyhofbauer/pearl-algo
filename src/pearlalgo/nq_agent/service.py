@@ -936,7 +936,8 @@ class NQAgentService:
                     # Reset cadence scheduler on pause to avoid catch-up storm on resume
                     if self.cadence_scheduler:
                         self.cadence_scheduler.reset()
-                    await asyncio.sleep(self.config.scan_interval)
+                    # SAFETY: Use interruptible sleep so kill commands are processed even when paused
+                    await self._interruptible_sleep(self._scan_interval_paused)
                     continue
 
                 # Fetch latest data with error handling
@@ -1028,7 +1029,8 @@ class NQAgentService:
                         # Backoff: sleep longer than normal cycle, reset cadence scheduler
                         if self.cadence_scheduler:
                             self.cadence_scheduler.reset()
-                        await asyncio.sleep(self.config.scan_interval * 2)
+                        # SAFETY: Use interruptible sleep so kill commands are processed during backoff
+                        await self._interruptible_sleep(self.config.scan_interval * 2)
                     else:
                         await self._sleep_until_next_cycle()
                     continue
@@ -3360,26 +3362,45 @@ class NQAgentService:
             # ==========================================================================
             if kill_file.exists():
                 logger.warning("🚨 KILL flag detected - cancelling all orders and disarming")
+                cancelled_count = 0
+                cancel_errors: list[str] = []
                 try:
-                    # Cancel all orders
+                    # SAFETY: Disarm FIRST to prevent new orders while cancelling
+                    self.execution_adapter.disarm()
+                    logger.warning("Kill switch: execution adapter disarmed")
+                    
+                    # Cancel all open orders
                     results = await self.execution_adapter.cancel_all()
                     cancelled_count = sum(1 for r in results if r.success)
+                    cancel_errors = [r.error_message for r in results if not r.success and r.error_message]
                     logger.warning(f"Kill switch: cancelled {cancelled_count} orders")
-                    
-                    # Notify via Telegram
+                    if cancel_errors:
+                        logger.warning(f"Kill switch: {len(cancel_errors)} cancellation errors: {cancel_errors[:3]}")
+                except Exception as e:
+                    logger.error(f"Error executing kill switch: {e}", exc_info=True)
+                    # Even if cancel_all fails, ensure we're disarmed
                     try:
-                        await self.telegram_notifier.telegram.send_message(
-                            f"🚨 *KILL SWITCH EXECUTED*\n\n"
-                            f"Cancelled: `{cancelled_count}` orders\n"
-                            f"Execution: `DISARMED`",
-                            parse_mode="Markdown",
-                        )
+                        self.execution_adapter.disarm()
                     except Exception:
                         pass
-                except Exception as e:
-                    logger.error(f"Error executing kill switch: {e}")
                 finally:
                     kill_file.unlink(missing_ok=True)
+                    # Also remove any pending disarm flag (kill already disarms)
+                    disarm_file.unlink(missing_ok=True)
+                
+                # Notify via Telegram (outside try/finally to ensure flag is always cleared)
+                try:
+                    error_note = ""
+                    if cancel_errors:
+                        error_note = f"\n⚠️ Errors: {len(cancel_errors)}"
+                    await self.telegram_notifier.telegram.send_message(
+                        f"🚨 *KILL SWITCH EXECUTED*\n\n"
+                        f"Cancelled: `{cancelled_count}` orders\n"
+                        f"Execution: `DISARMED`{error_note}",
+                        parse_mode="Markdown",
+                    )
+                except Exception:
+                    pass
                 return  # Skip arm/disarm after kill
             
             # ==========================================================================

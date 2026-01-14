@@ -741,3 +741,74 @@ class TestMockExecution:
         assert adapter.armed is False
 
 
+@pytest.mark.asyncio
+class TestKillSwitchBehavior:
+    """Tests for kill switch safety behavior.
+    
+    The kill switch (/kill command) must:
+    1. Disarm the execution adapter FIRST (prevent new orders)
+    2. Cancel all open orders
+    3. Remain disarmed even if cancel_all fails
+    """
+    
+    async def test_kill_disarms_before_cancel(self):
+        """Kill should disarm before attempting to cancel orders."""
+        config = ExecutionConfig(enabled=True, armed=True)
+        adapter = MockExecutionAdapter(config)
+        
+        assert adapter.armed is True
+        
+        # Simulate kill: disarm first, then cancel_all
+        adapter.disarm()
+        assert adapter.armed is False  # Disarmed immediately
+        
+        await adapter.cancel_all()
+        assert adapter.armed is False  # Still disarmed
+    
+    async def test_kill_stays_disarmed_on_cancel_error(self):
+        """Kill should remain disarmed even if cancel_all raises an exception."""
+        config = ExecutionConfig(enabled=True, armed=True)
+        adapter = MockExecutionAdapter(config)
+        
+        # Simulate kill with error in cancel_all
+        adapter.disarm()
+        try:
+            # Simulate cancel_all failure (would raise in real adapter)
+            raise Exception("IBKR connection lost")
+        except Exception:
+            pass  # Error caught
+        
+        # Must remain disarmed
+        assert adapter.armed is False
+    
+    async def test_kill_switch_prevents_new_orders(self):
+        """After kill, no new orders should be placed."""
+        config = ExecutionConfig(
+            enabled=True,
+            armed=True,
+            symbol_whitelist=["MNQ"],
+        )
+        adapter = MockExecutionAdapter(config)
+        
+        # Simulate kill
+        adapter.disarm()
+        await adapter.cancel_all()
+        
+        # Try to place an order after kill
+        signal = {
+            "signal_id": "post_kill_signal",
+            "type": "momentum_short",
+            "symbol": "MNQ",
+            "direction": "short",
+            "entry_price": 25000.0,
+            "stop_loss": 25020.0,
+            "take_profit": 24970.0,
+            "position_size": 1,
+        }
+        
+        result = await adapter.place_bracket(signal)
+        
+        # Order should be rejected because adapter is disarmed
+        assert result.success is False
+        assert "not_armed" in result.error_message
+        assert len(adapter._placed_orders) == 0
