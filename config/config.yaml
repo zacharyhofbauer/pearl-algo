@@ -126,8 +126,7 @@ signals:
       allowed_regimes:
       - trending_bullish
       - trending_bearish
-      allowed_sessions:
-      - afternoon
+      # No session restrictions - can trade all day
 strategy:
   enabled_signals:
   - unified_strategy

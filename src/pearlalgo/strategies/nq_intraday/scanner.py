@@ -709,12 +709,6 @@ class NQScanner:
         session = regime.get("session", "afternoon")
         regime_type = regime.get("regime", "unknown")
         
-        # Only trade in afternoon session (best performance from backtests)
-        if session != "afternoon":
-            self.last_gate_reasons.append(f"Session filter: {session} != afternoon")
-            logger.debug(f"Skipping signals during {session} session (only afternoon allowed)")
-            return signals
-        
         # Only trade in trending regimes (trending_bullish for longs, trending_bearish for shorts)
         if regime_type not in ("trending_bullish", "trending_bearish"):
             self.last_gate_reasons.append(f"Regime filter: {regime_type} not trending")
