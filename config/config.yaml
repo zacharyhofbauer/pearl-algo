@@ -122,29 +122,15 @@ signals:
       - ranging
       - trending_bullish
       - trending_bearish
-    momentum_short:
+    unified_strategy:
       allowed_regimes:
-      - ranging
-      - trending_bearish
-      - trending_bullish
-    breakout_long:
-      allowed_regimes:
-      - ranging
       - trending_bullish
       - trending_bearish
-    breakout_short:
-      allowed_regimes:
-      - ranging
-      - trending_bearish
-      - trending_bullish
-    sr_bounce:
-      allowed_regimes:
-      - ranging
-      - trending_bullish
-      - trending_bearish
+      allowed_sessions:
+      - afternoon
 strategy:
   enabled_signals:
-  - momentum_short
+  - unified_strategy
   enable_dynamic_sizing: true
   base_contracts: 3
   high_conf_contracts: 5
@@ -152,9 +138,9 @@ strategy:
   high_conf_threshold: 0.8
   max_conf_threshold: 0.9
   winning_signal_types:
-  - momentum_short
+  - unified_strategy
   signal_type_size_multipliers:
-    momentum_short: 1.0
+    unified_strategy: 1.0
   use_scalp_presets: false
   scalp_target_points: 20.0
   scalp_stop_points: 12.0

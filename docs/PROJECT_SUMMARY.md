@@ -186,9 +186,7 @@ The MNQ Trading Agent is designed to:
   - EMA (Exponential Moving Averages)
   - Bollinger Bands
 - Pattern detection:
-  - Momentum signals
-  - Mean reversion signals
-  - Breakout signals
+  - Unified strategy (EMA crossover + VWAP bias + RSI confirmation + ATR stops)
 
 **Signal Generator** (`signal_generator.py`):
 - Validates scanner results
@@ -691,7 +689,7 @@ In practice:
 
 - **Real-time Analysis**: Adaptive cadence (5s active session, 30s idle, 300s market closed)
 - **Technical Indicators**: RSI, MACD, ATR, EMA, Bollinger Bands, VWAP, Volume Profile
-- **Pattern Detection**: Momentum, mean reversion, breakout signals
+- **Pattern Detection**: Unified strategy (EMA crossover + VWAP bias + RSI confirmation + ATR stops)
 - **Confidence Filtering**: Minimum 50% confidence threshold (prop firm adjusted)
 - **Risk/Reward Validation**: Minimum 1.2:1 R/R ratio (configurable via `signals.min_risk_reward`)
 - **Position Sizing**: 5-15 MNQ contracts per trade (dynamic sizing available)

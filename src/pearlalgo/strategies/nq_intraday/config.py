@@ -13,9 +13,9 @@ from typing import List, Optional
 from pearlalgo.config.config_file import load_config_yaml
 
 
-# Single-strategy default (drawdown-first)
+# Unified strategy (EMA + VWAP + RSI + ATR)
 DEFAULT_ENABLED_SIGNALS = [
-    "momentum_short",
+    "unified_strategy",
 ]
 DEFAULT_DISABLED_SIGNALS: List[str] = []
 
@@ -86,7 +86,7 @@ class NQIntradayConfig:
     
     # Winning signal types (get priority in dynamic sizing)
     winning_signal_types: List[str] = field(default_factory=lambda: [
-        "momentum_short",
+        "unified_strategy",
     ])
 
     # Virtual PnL tracking (signal grading without real IBKR fills)
