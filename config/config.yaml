@@ -16,7 +16,6 @@ telegram_ui:
 risk:
   max_risk_per_trade: 0.01
   max_drawdown: 0.1
-  # TUNED: Widened from 2.5 to 3.0 to reduce stop hunting / premature exits
   stop_loss_atr_multiplier: 3.0
   take_profit_risk_reward: 2.0
   min_position_size: 5
@@ -83,12 +82,10 @@ signals:
   min_risk_reward: 1.3
   duplicate_price_threshold_pct: 0.5
   volatility_threshold: 0.0001
-  avoid_lunch_lull: false  # Allow trading during lunch lull
-  # Allow trading at all times (24/7) - user requested
-  skip_overnight: false
+  avoid_lunch_lull: false
+  skip_overnight: true
   quality_score:
     enabled: true
-    # TUNED: Lowered from 0.45 to 0.35 to let more signals through (was rejecting ~73%)
     threshold: 0.35
     factors:
       confidence_weight: 0.3
@@ -104,7 +101,6 @@ signals:
     min_risk_reward: 2.0
     include_quality_rejects: false
     bypass_regime_filters: false
-  # TUNED: Widened from 35.0 to 45.0 to allow wider stops during high volatility
   max_stop_points: 45.0
   adaptive_volatility_filter:
     enabled: false
@@ -148,18 +144,8 @@ signals:
       - trending_bearish
 strategy:
   enabled_signals:
-  # Recent live/forward performance breakdown shows ONLY momentum_short is profitable.
-  # Everything else (breakouts, mean reversion, SR bounces, momentum_long) is a net drag.
   - momentum_short
-  disabled_signals:
-  - momentum_long
-  - breakout
-  - mean_reversion
-  - sr_bounce
-  - vwap_reversion
-  - engulfing
   enable_dynamic_sizing: true
-  # Keep sizing conservative until we re-validate on longer history.
   base_contracts: 3
   high_conf_contracts: 5
   max_conf_contracts: 8
@@ -177,82 +163,11 @@ strategy:
     london_multiplier: 0.8
     tokyo_multiplier: 0.7
     ny_multiplier: 1.5
-strategy_variants:
-  emergency_baseline:
-    description: Current EMERGENCY settings - strict filters
-    min_confidence: 0.65
-    min_risk_reward: 1.5
-    max_stop_points: 20
-    adaptive_volatility_filter_enabled: true
-    adaptive_volatility_expansion_requirement: 2.5
-  relaxed:
-    description: Relaxed filters - more signals, possibly lower quality
-    min_confidence: 0.55
-    min_risk_reward: 1.3
-    max_stop_points: 25
-    adaptive_volatility_filter_enabled: true
-    adaptive_volatility_expansion_requirement: 1.5
-  moderate:
-    description: Moderate filters - balanced approach
-    min_confidence: 0.6
-    min_risk_reward: 1.4
-    max_stop_points: 22
-    adaptive_volatility_filter_enabled: true
-    adaptive_volatility_expansion_requirement: 2.0
-  no_avf:
-    description: Adaptive volatility filter DISABLED - test filter value
-    min_confidence: 0.6
-    min_risk_reward: 1.4
-    max_stop_points: 22
-    adaptive_volatility_filter_enabled: false
-  aggressive_scalp:
-    description: Aggressive scalping - winners only, tight targets
-    enabled_signals:
-    - sr_bounce
-    - mean_reversion
-    disabled_signals:
-    - momentum_long
-    - engulfing
-    - breakout
-    min_risk_reward: 1.0
-    target_points: 20
-    max_stop_points: 15
-    base_contracts: 10
-  conservative:
-    description: Conservative - high confidence only (winners only)
-    enabled_signals:
-    - sr_bounce
-    - mean_reversion_long
-    # Removed momentum_short: losing -$6,415 in sweep
-    disabled_signals:
-    - momentum_long
-    - momentum_short
-    - sr_bounce_short
-    - mean_reversion_short
-    - engulfing
-    - breakout_short
-    min_risk_reward: 1.5
-    min_confidence: 0.75
-  high_volume:
-    description: High volume scalping - 25 contracts on best setups
-    enabled_signals:
-    - sr_bounce
-    - mean_reversion
-    disabled_signals:
-    - momentum_long
-    - engulfing
-    base_contracts: 15
-    high_conf_contracts: 20
-    max_conf_contracts: 25
-    target_points: 10
-    max_stop_points: 8
 performance:
   max_records: 1000
   default_lookback_days: 7
 virtual_pnl:
   enabled: true
-  # Changed to take_profit to avoid recording profitable trades as losses
-  # when both stop and target could be hit in same bar
   intrabar_tiebreak: take_profit
   notify_entry: true
   notify_exit: true
@@ -290,12 +205,9 @@ sessions:
   color: '#089981'
 indicators:
   enabled:
-  # supply_demand_zones disabled: losing -$642, 29.2% WR in sweep
-  # power_channel disabled: losing -$144, 0% WR (1 trade lost)
   - smart_money_divergence
-  # TBT ChartPrime indicator generated 0 signals - may need tuning or more history
-  as_signals: false  # Disable custom indicators as signals (they're losing or not generating)
-  as_features: true  # Keep as features for ML/learning system
+  as_signals: false
+  as_features: true
   supply_demand_zones:
     lookback: 50
     min_zone_size_atr: 0.5
@@ -343,7 +255,6 @@ llm_adaptive_tuning:
   min_sample_size: 20
   conservative_mode: true
 execution:
-  # SAFETY: Default is disabled + disarmed. Explicitly enable and /arm to place orders.
   enabled: false
   armed: false
   mode: dry_run
@@ -384,7 +295,6 @@ learning:
   decay_factor: 0.0
   contextual:
     enabled: true
-    # SAFETY: Default to shadow mode (observe only). Set to "live" to affect execution.
     mode: shadow
     explore_rate: 0.1
     min_samples_per_context: 5
@@ -394,11 +304,9 @@ adaptive_stops:
   enabled: true
   use_structure_stops: true
   use_level2_zones: true
-  # TUNED: Widened from 8.0 to 12.0 to reduce predictable stop hunting
   min_stop_points: 12.0
-  # Anti-hunt jitter: adds random offset (0 to +N pts) to stops to make them less predictable
   anti_hunt_jitter: true
-  jitter_range_points: 3.0  # Random offset up to 3 points (always widens stop, never tightens)
+  jitter_range_points: 3.0
   regime_multipliers:
     ranging: 1.2
     trending_bullish: 1.3
@@ -429,9 +337,6 @@ trailing_stop:
   large_profit_trail_atr: 2.0
   update_frequency_bars: 1
   never_widen: true
-  # Delay breakeven so we don't get chopped out at entry after tiny moves.
-  # Units are MNQ/NQ points (see TrailingStopManager in src/pearlalgo/strategies/nq_intraday/trade_manager.py).
-  # TUNED: Widened from 12.0 to 18.0 to let trades breathe before moving to breakeven
   min_profit_before_be: 18.0
 adaptive_sizing:
   enabled: true

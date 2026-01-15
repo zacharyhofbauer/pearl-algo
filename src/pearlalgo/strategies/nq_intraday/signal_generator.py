@@ -399,6 +399,12 @@ class NQSignalGenerator:
             except Exception as e:
                 logger.warning(f"Could not initialize ML signal filter: {e}")
                 self._ml_filter = None
+
+        # Paper-mode detection (used for ML gating in paper-only operation).
+        execution_settings = service_config.get("execution", {}) or {}
+        exec_enabled = bool(execution_settings.get("enabled", False))
+        exec_mode = str(execution_settings.get("mode", "") or "").lower()
+        self._paper_mode = (not exec_enabled) or (exec_mode in ("dry_run", "paper", "paper_only"))
         
         # Adaptive Position Sizer (v2.0 adaptive risk management)
         self._adaptive_sizer: Optional["AdaptivePositionSizer"] = None
@@ -416,7 +422,7 @@ class NQSignalGenerator:
         
         logger.info(
             "NQSignalGenerator initialized (max_stop_points=%.1f, regime_filters=%d types, "
-            "feature_engineer=%s, ml_filter=%s, adaptive_sizing=%s, quality_score=%s, swing_trading=%s)",
+            "feature_engineer=%s, ml_filter=%s, adaptive_sizing=%s, quality_score=%s, swing_trading=%s, paper_mode=%s)",
             self._max_stop_points,
             len(self._regime_filters),
             "enabled" if self._feature_engineer_enabled else "disabled",
@@ -424,6 +430,7 @@ class NQSignalGenerator:
             "enabled" if self._adaptive_sizing_enabled else "disabled",
             "enabled" if self._quality_score_enabled else "disabled",
             "enabled" if self._swing_trading_enabled else "disabled",
+            "yes" if self._paper_mode else "no",
         )
 
     def _calculate_composite_quality_score(self, signal: Dict, market_data: Dict) -> float:
@@ -982,19 +989,26 @@ class NQSignalGenerator:
                     else:
                         ml_blocking_allowed = True
 
-                    ml_blocking_active = (self._ml_filter_mode == "live") and ml_blocking_allowed
+                    # Paper-only mode: allow ML to block for drawdown control.
+                    ml_blocking_active = (
+                        (self._ml_filter_mode == "live" and ml_blocking_allowed)
+                        or self._paper_mode
+                    )
                     validated_signal["_ml_blocking_allowed"] = bool(ml_blocking_allowed)
                     validated_signal["_ml_blocking_active"] = bool(ml_blocking_active)
                     validated_signal["_ml_would_block"] = bool(not should_execute)
+                    validated_signal["_ml_paper_mode"] = bool(self._paper_mode)
                     
                     # Shadow mode: never block; only annotate.
                     # Live mode: can block, but only when lift has been proven (if enabled).
+                    # Paper mode: can block immediately (no live orders placed).
                     if (not should_execute) and opportunity_tier == "A" and ml_blocking_active:
                         # ML filter rejected the signal
                         logger.debug(
-                            "Signal filtered by ML: type=%s, win_prob=%.2f < threshold",
+                            "Signal filtered by ML: type=%s, win_prob=%.2f < threshold (paper_mode=%s)",
                             validated_signal.get("type"),
                             ml_prediction.win_probability,
+                            self._paper_mode,
                         )
                         diagnostics.rejected_ml_filter += 1
                         continue

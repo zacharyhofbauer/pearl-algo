@@ -96,58 +96,13 @@
 
 ## 3. Core Commands You Actually Use
 
-### From Telegram (Remote Control) ⭐
+### From Telegram (AI Insights) ⭐
 
-- **Service Control:**
+- **AI Strategy Report:**
   ```
-  /start_gateway      # Start IBKR Gateway
-  /stop_gateway       # Stop IBKR Gateway
-  /gateway_status     # Check Gateway status
-  /start_agent        # Start NQ Agent
-  /stop_agent         # Stop NQ Agent
-  /restart_agent      # Restart Agent (for config changes)
+  /analyze           # Performance summary + strategy recommendation
+  /help              # List available commands
   ```
-
-- **Monitoring:**
-  ```
-  /status             # Full status with inline buttons
-  /signals            # Recent signals
-  /performance        # 7-day performance (tap buttons to export CSV/JSON)
-  /performance 24h    # Performance with custom lookback (24h, 7d, 30d)
-  /signal <id>        # Detailed view of a specific signal by ID prefix
-  /config             # Configuration values
-  /health             # Health check
-  /settings           # UI preferences (dashboard buttons, auto-chart, etc.)
-  ```
-
-- **Reporting & Exports:** 📊
-  ```
-  /performance        # Shows 7d summary + export buttons:
-                      #   • Signals JSONL - all signals with metadata
-                      #   • Exited CSV - completed trades with P&L
-                      #   • Metrics JSON - aggregated performance data
-  /grade <id> win|loss [pnl] [note]  # Manual feedback for learning
-  ```
-
-- **AI Code Generation** (requires setup, see below):
-  ```
-  /ai_patch <file(s)> <task>   # Generate code patch via Claude
-  ```
-  Example: `/ai_patch src/pearlalgo/utils/retry.py add jitter to backoff`
-
-- **Claude Monitor** (AI-powered monitoring, requires setup):
-  ```
-  /claude_status       # Claude monitor health & insights
-  /analyze_now         # Force immediate analysis
-  /analyze_signals     # Signal quality deep dive
-  /analyze_system      # System health report
-  /analyze_market      # Market conditions & regime
-  /suggest_config      # Configuration suggestions
-  /suggestions         # List active suggestions
-  /apply_suggestion    # Apply a suggestion
-  /claude_reports      # Report settings
-  ```
-  See `docs/CLAUDE_MONITOR_GUIDE.md` for full documentation.
 
 ### From Terminal (Traditional)
 

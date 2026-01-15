@@ -1,8 +1,7 @@
 """
 NQ Intraday Strategy Configuration
 
-Configuration settings for MNQ intraday trading strategy.
-Supports strategy variants for A/B testing different configurations.
+Configuration settings for the MNQ intraday strategy.
 """
 
 from __future__ import annotations
@@ -14,24 +13,11 @@ from typing import List, Optional
 from pearlalgo.config.config_file import load_config_yaml
 
 
-# Default signal types based on backtest analysis
-# Winners: sr_bounce, mean_reversion, momentum_short
-# Losers: momentum_long (0/5 wins), engulfing (0/3 wins)
+# Single-strategy default (drawdown-first)
 DEFAULT_ENABLED_SIGNALS = [
-    "sr_bounce",
-    "mean_reversion_long",
-    "mean_reversion_short",
     "momentum_short",
-    "breakout_long",
-    "breakout_short",
-    "vwap_reversion",
 ]
-
-DEFAULT_DISABLED_SIGNALS = [
-    "momentum_long",      # 0/5 wins in backtest - broken
-    "engulfing_short",    # 0/3 wins in backtest - broken
-    "engulfing_long",     # Untested, disable for safety
-]
+DEFAULT_DISABLED_SIGNALS: List[str] = []
 
 
 @dataclass
@@ -42,7 +28,7 @@ class NQIntradayConfig:
     are expressed directly in terms of MNQ contracts ($2/point), matching the
     production docs and `config/config.yaml`.
     
-    Supports strategy variants via enabled_signals/disabled_signals for A/B testing.
+    Optimized for a single live strategy for consistency and drawdown control.
     """
 
     # Symbol
@@ -80,13 +66,7 @@ class NQIntradayConfig:
     # When True, scanner will not emit signals during regime_detector session == "overnight".
     skip_overnight: bool = False
 
-    # Enable/disable features (legacy - use enabled_signals instead)
-    enable_momentum: bool = True
-    enable_mean_reversion: bool = True
-    enable_breakout: bool = True
-
-    # Strategy variant configuration (A/B testing)
-    # Signal types to enable (if empty, uses legacy enable_* flags)
+    # Strategy configuration
     enabled_signals: List[str] = field(default_factory=lambda: DEFAULT_ENABLED_SIGNALS.copy())
     # Signal types to explicitly disable (takes precedence over enabled_signals)
     disabled_signals: List[str] = field(default_factory=lambda: DEFAULT_DISABLED_SIGNALS.copy())
@@ -106,8 +86,6 @@ class NQIntradayConfig:
     
     # Winning signal types (get priority in dynamic sizing)
     winning_signal_types: List[str] = field(default_factory=lambda: [
-        "sr_bounce",
-        "mean_reversion_long",
         "momentum_short",
     ])
 
@@ -298,12 +276,6 @@ class NQIntradayConfig:
             if "use_scalp_presets" in strategy_cfg:
                 config.use_scalp_presets = bool(strategy_cfg["use_scalp_presets"])
 
-            # Load specific variant if requested
-            if variant:
-                variants_cfg = config_data.get("strategy_variants", {}) or {}
-                if variant in variants_cfg:
-                    config._apply_variant(variants_cfg[variant])
-
             # Load HUD settings
             hud_cfg = config_data.get("hud", {}) or {}
             if "enabled" in hud_cfg:
@@ -480,16 +452,8 @@ class NQIntradayConfig:
                     return True
             return False
         
-        # Fall back to legacy enable_* flags
-        if "momentum" in signal_type:
-            return self.enable_momentum
-        if "mean_reversion" in signal_type:
-            return self.enable_mean_reversion
-        if "breakout" in signal_type:
-            return self.enable_breakout
-        
-        # Default: enabled
-        return True
+        # Default: disabled when not explicitly enabled
+        return False
 
     def get_position_size(self, confidence: float, signal_type: str) -> int:
         """Calculate position size based on confidence and signal type.
@@ -528,62 +492,13 @@ class NQIntradayConfig:
 
     @classmethod
     def get_variant_presets(cls) -> dict:
-        """Get predefined strategy variant configurations.
-        
-        Loads variants from config.yaml's strategy_variants section,
-        with fallback to hardcoded defaults.
-        
-        Returns:
-            Dict of variant name -> variant config dict
-        """
-        # Try to load from config.yaml first
-        config_data = load_config_yaml()
-        if config_data and "strategy_variants" in config_data:
-            variants = config_data["strategy_variants"]
-            # Add default if not present
-            if "default" not in variants:
-                variants["default"] = {
-                    "description": "Balanced default - disabled broken signals",
-                    "enabled_signals": DEFAULT_ENABLED_SIGNALS,
-                    "disabled_signals": DEFAULT_DISABLED_SIGNALS,
-                    "min_risk_reward": 1.2,
-                    "volatility_threshold": 0.0005,
-                }
-            return variants
-        
-        # Fallback to hardcoded defaults
+        """Get the single-strategy preset for backtests/tools."""
         return {
-            "default": {
-                "description": "Balanced default - disabled broken signals",
+            "single_strategy": {
+                "description": "Single-strategy default (drawdown-first)",
                 "enabled_signals": DEFAULT_ENABLED_SIGNALS,
                 "disabled_signals": DEFAULT_DISABLED_SIGNALS,
-                "min_risk_reward": 1.2,
-                "volatility_threshold": 0.0005,
-            },
-            "aggressive_scalp": {
-                "description": "Aggressive scalping - winners only, tight targets",
-                "enabled_signals": ["sr_bounce", "mean_reversion"],
-                "disabled_signals": ["momentum_long", "engulfing", "breakout"],
-                "min_risk_reward": 1.0,
-                "target_points": 20,
-                "max_stop_points": 15,
-                "base_contracts": 10,
-            },
-            "conservative": {
-                "description": "Conservative - high confidence only",
-                "enabled_signals": ["sr_bounce", "mean_reversion_long", "momentum_short"],
-                "disabled_signals": ["momentum_long", "engulfing", "breakout"],
-                "min_risk_reward": 1.5,
-                "min_confidence": 0.75,
-            },
-            "high_volume": {
-                "description": "High volume scalping - 25 contracts on best setups",
-                "enabled_signals": ["sr_bounce", "mean_reversion"],
-                "disabled_signals": ["momentum_long", "engulfing"],
-                "base_contracts": 15,
-                "high_conf_contracts": 20,
-                "max_conf_contracts": 25,
-                "target_points": 10,  # Tighter target for larger size
-                "max_stop_points": 8,
+                "min_risk_reward": 1.3,
+                "volatility_threshold": 0.0001,
             },
         }

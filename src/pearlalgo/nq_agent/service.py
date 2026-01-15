@@ -3387,7 +3387,7 @@ class NQAgentService:
                     kill_file.unlink(missing_ok=True)
                     # Also remove any pending disarm flag (kill already disarms)
                     disarm_file.unlink(missing_ok=True)
-                
+                    
                 # Notify via Telegram (outside try/finally to ensure flag is always cleared)
                 try:
                     error_note = ""

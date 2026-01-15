@@ -94,12 +94,14 @@ class NQScanner:
         self.volume_profile = VolumeProfile()
         self.order_flow = OrderFlowApproximator(lookback_periods=self.config.lookback_periods)
         
-        # Initialize custom indicators from config
-        # These provide additional features for the learning system and optional rule-based signals
+        # Initialize custom indicators only when explicitly configured.
         indicators_config = getattr(config, "indicators", None) or {}
-        self.custom_indicators: List[IndicatorBase] = get_enabled_indicators(
-            {"indicators": indicators_config} if indicators_config else None
-        )
+        if indicators_config:
+            self.custom_indicators: List[IndicatorBase] = get_enabled_indicators(
+                {"indicators": indicators_config}
+            )
+        else:
+            self.custom_indicators = []
         
         # Track gate reasons from most recent scan (for diagnostics)
         self.last_gate_reasons: List[str] = []
@@ -726,7 +728,7 @@ class NQScanner:
 
         # Momentum LONG signal (fast MA crosses above slow MA with MACD confirmation)
         # LOOSENED (2026-01-07): Accept upward momentum without strict MA crossover
-        if self.config.enable_momentum and self.config.is_signal_enabled("momentum_long") and session != "lunch_lull":
+        if self.config.is_signal_enabled("momentum_long") and session != "lunch_lull":
             if len(df) >= 2:
                 prev = df.iloc[-2]
                 # LOOSENED: Accept if fast MA trending up OR crossed above slow MA
@@ -816,7 +818,7 @@ class NQScanner:
 
         # Momentum SHORT signal (fast MA crosses below slow MA with MACD confirmation)
         # LOOSENED (2026-01-07): Accept downward momentum without strict MA crossover
-        if self.config.enable_momentum and self.config.is_signal_enabled("momentum_short") and session != "lunch_lull":
+        if self.config.is_signal_enabled("momentum_short") and session != "lunch_lull":
             if len(df) >= 2:
                 prev = df.iloc[-2]
                 # LOOSENED: Accept if fast MA trending down OR crossed below slow MA
@@ -901,7 +903,7 @@ class NQScanner:
 
         # Mean reversion LONG signal (RSI oversold with multiple confirmations)
         # NOTE: mean_reversion_long has 2 wins in backtest - keep enabled
-        if self.config.enable_mean_reversion and self.config.is_signal_enabled("mean_reversion_long") and session != "opening":
+        if self.config.is_signal_enabled("mean_reversion_long") and session != "opening":
             # Mean reversion: check relative RSI movement OR absolute level
             # LOOSENED (2026-01-07): More permissive thresholds to generate more signals
             rsi = latest.get("rsi", 50)
@@ -1004,7 +1006,7 @@ class NQScanner:
                     logger.debug("Mean reversion long signal rejected due to strong MTF conflict")
 
         # Mean reversion SHORT signal (RSI overbought with price at upper Bollinger Band)
-        if self.config.enable_mean_reversion and self.config.is_signal_enabled("mean_reversion_short") and session != "opening":
+        if self.config.is_signal_enabled("mean_reversion_short") and session != "opening":
             # LOOSENED (2026-01-07): More permissive thresholds
             rsi = latest.get("rsi", 50)
             rsi_momentum_up = False
@@ -1096,7 +1098,7 @@ class NQScanner:
                     logger.debug("Mean reversion short signal rejected due to strong MTF conflict")
 
         # Breakout LONG signal (price breaks above *prior* recent high with volume)
-        if self.config.enable_breakout and self.config.is_signal_enabled("breakout_long"):
+        if self.config.is_signal_enabled("breakout_long"):
             # IMPORTANT: use the prior window (exclude the current bar), otherwise
             # recent_high includes the current bar's high and the breakout condition can never be true.
             if len(df) >= 6:
@@ -1219,7 +1221,7 @@ class NQScanner:
                         logger.debug("Breakout long signal rejected due to MTF conflict")
 
         # Breakout SHORT signal (price breaks below *prior* recent low with volume)
-        if self.config.enable_breakout and self.config.is_signal_enabled("breakout_short"):
+        if self.config.is_signal_enabled("breakout_short"):
             # IMPORTANT: use the prior window (exclude the current bar), otherwise
             # recent_low includes the current bar's low and the breakdown condition can never be true.
             if len(df) >= 6:
@@ -1339,7 +1341,7 @@ class NQScanner:
                         logger.debug("Breakout short signal rejected due to MTF conflict")
 
         # VWAP reversion signals (price returning to VWAP)
-        if self.config.enable_mean_reversion and self.config.is_signal_enabled("vwap_reversion") and vwap_data.get("vwap", 0) > 0:
+        if self.config.is_signal_enabled("vwap_reversion") and vwap_data.get("vwap", 0) > 0:
             vwap_signals = self._scan_vwap_reversion(
                 df, latest, current_price, atr, vwap_data, regime,
                 mtf_analysis, volume_profile_data, order_flow_data,

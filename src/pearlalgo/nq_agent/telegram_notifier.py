@@ -175,50 +175,9 @@ class NQAgentTelegramNotifier:
             return False
 
         try:
-            # Format compact signal alert (decision-first layout)
-            message = self._format_compact_signal(signal)
-            
-            # Optional inline buttons (calm-minimal by default; opt-in via prefs.dashboard_buttons)
-            reply_markup = None
-            show_buttons = self.prefs.dashboard_buttons if self.prefs else False
-            if show_buttons and _is_command_handler_running():
-                try:
-                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                    signal_id = str(signal.get("signal_id", "") or "")
-                    keyboard = []
-                    if signal_id:
-                        keyboard.append([
-                            InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
-                        ])
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                except Exception as e:
-                    logger.debug(f"Could not build signal buttons: {e}")
-                    reply_markup = None
-            
-            # Generate and send chart if auto-chart is enabled and chart generator is available
-            chart_path = None
-            auto_chart = self.prefs.auto_chart_on_signal if self.prefs else False
-            if auto_chart and self.chart_generator and buffer_data is not None and not buffer_data.empty:
-                try:
-                    symbol = signal.get("symbol", "MNQ")
-                    chart_path = self.chart_generator.generate_entry_chart(signal, buffer_data, symbol)
-                except Exception as e:
-                    logger.warning(f"Could not generate chart for signal: {e}")
-            
-            # Send message (disable dedupe for signals: prices/confidence differences matter).
-            success = await self.telegram.send_message(message, dedupe=False, reply_markup=reply_markup)
-            
-            # Send chart if generated (only when auto_chart is enabled)
-            if chart_path and chart_path.exists():
-                try:
-                    await self._send_photo(chart_path)
-                    # Clean up temp file
-                    try:
-                        chart_path.unlink()
-                    except Exception:
-                        pass
-                except Exception as e:
-                    logger.warning(f"Could not send chart: {e}")
+            # Always use minimal signal format for the simplified Telegram surface.
+            message = self._format_minimal_signal(signal)
+            success = await self.telegram.send_message(message, dedupe=False)
             
             if success:
                 return True
