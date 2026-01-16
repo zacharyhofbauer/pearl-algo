@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
 
-# Import Claude client (optional dependency)
+# Import OpenAI client (optional dependency; wrapper kept as `claude_client.py` for backward compat)
 try:
     from pearlalgo.utils.claude_client import (
         ClaudeClient,
@@ -183,7 +183,7 @@ class RealTimeRiskAssessor:
     
     Configuration:
     - enabled: Master toggle
-    - model: Claude model to use (recommend faster model like Haiku)
+    - model: Model to use (recommend a faster/cheaper model for low-latency)
     - timeout_seconds: Max time (must be fast, <3s ideal)
     - block_on_critical: Whether to block trades on critical risk
     - consider_recent_trades: How many recent trades to consider
@@ -202,7 +202,7 @@ class RealTimeRiskAssessor:
         
         Args:
             enabled: Whether assessment is enabled
-            model: Claude model to use
+            model: Model to use
             timeout_seconds: Timeout for assessment (keep short!)
             block_on_critical: Whether to block trades on critical risk
             consider_recent_trades: Number of recent trades to analyze
@@ -213,13 +213,13 @@ class RealTimeRiskAssessor:
         self.block_on_critical = block_on_critical
         self.consider_recent_trades = consider_recent_trades
         
-        # Initialize Claude client
+        # Initialize OpenAI client
         self._client: Optional[ClaudeClient] = None
         if enabled and OPENAI_AVAILABLE:
             try:
                 self._client = get_claude_client()
             except Exception as e:
-                logger.warning(f"Failed to initialize Claude client for risk assessment: {e}")
+                logger.warning(f"Failed to initialize OpenAI client for risk assessment: {e}")
         
         # Recent trade cache
         self._recent_trades: List[Dict] = []
@@ -287,7 +287,7 @@ class RealTimeRiskAssessor:
             # Build prompt
             user_prompt = self._build_prompt(signal, market_state, current_exposure)
             
-            # Call Claude (with short max_tokens for speed)
+            # Call OpenAI (with short max_tokens for speed)
             response = self._client.chat(
                 messages=[{"role": "user", "content": user_prompt}],
                 system_prompt=RISK_ASSESSMENT_SYSTEM_PROMPT,
@@ -449,7 +449,7 @@ class RealTimeRiskAssessor:
         )
     
     def _parse_response(self, response: str) -> RiskAssessment:
-        """Parse Claude's JSON response into RiskAssessment."""
+        """Parse the model's JSON response into RiskAssessment."""
         try:
             response = response.strip()
             

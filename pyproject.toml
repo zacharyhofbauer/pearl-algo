@@ -25,6 +25,7 @@ dependencies = [
 dev = ["pytest>=8.3", "pytest-asyncio>=0.21.0", "ruff>=0.6"]
 lint = ["import-linter>=2.0"]
 llm = ["anthropic>=0.40.0"]
+monitor = ["PyQt6>=6.5"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

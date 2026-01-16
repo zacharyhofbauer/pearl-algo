@@ -7,6 +7,9 @@ Main 24/7 service for running NQ intraday strategy.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import shutil
 import signal
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -522,6 +525,21 @@ class NQAgentService:
         self.dashboard_chart_timeframe = str(service_settings.get("dashboard_chart_timeframe", "auto") or "auto")
         self.dashboard_chart_max_bars = int(service_settings.get("dashboard_chart_max_bars", 420) or 420)
         self.dashboard_chart_show_pressure = bool(service_settings.get("dashboard_chart_show_pressure", True))
+        # Pearl Algo Monitor export (local dashboard_latest.png + meta)
+        # NOTE: These keys are optional in config.yaml; defaults are chosen to “feel live” on the Beelink.
+        self.last_dashboard_export_at: Optional[datetime] = None
+        self.dashboard_export_enabled = bool(service_settings.get("dashboard_export_enabled", True))
+        self.dashboard_export_interval = int(service_settings.get("dashboard_export_interval", 300) or 300)
+        self.dashboard_export_timeframe = str(service_settings.get("dashboard_export_timeframe", "5m") or "5m")
+        self.dashboard_export_lookback_hours = float(service_settings.get("dashboard_export_lookback_hours", 12) or 12)
+        self.dashboard_export_max_bars = int(service_settings.get("dashboard_export_max_bars", 600) or 600)
+        self.dashboard_export_dpi = int(service_settings.get("dashboard_export_dpi", 150) or 150)
+        # Accept YAML list [w, h] for figsize
+        _figsize_raw = service_settings.get("dashboard_export_figsize", [20, 7.3])
+        try:
+            self.dashboard_export_figsize = (float(_figsize_raw[0]), float(_figsize_raw[1]))  # type: ignore[index]
+        except Exception:
+            self.dashboard_export_figsize = (20.0, 7.3)
         # Buy/Sell pressure (dashboard observability)
         self.pressure_lookback_bars = int(service_settings.get("pressure_lookback_bars", 24) or 24)
         self.pressure_baseline_bars = int(service_settings.get("pressure_baseline_bars", 120) or 120)
@@ -934,6 +952,14 @@ class NQAgentService:
                             "pause_reason": self.pause_reason,
                         },
                     )
+                    try:
+                        self.state_manager.append_event(
+                            "paused_cycle_skipped",
+                            {"cycle": int(self.cycle_count or 0), "pause_reason": str(self.pause_reason or "")},
+                            level="info",
+                        )
+                    except Exception:
+                        pass
                     # Reset cadence scheduler on pause to avoid catch-up storm on resume
                     if self.cadence_scheduler:
                         self.cadence_scheduler.reset()
@@ -943,6 +969,18 @@ class NQAgentService:
 
                 # Fetch latest data with error handling
                 try:
+                    try:
+                        self.state_manager.append_event(
+                            "scan_started",
+                            {
+                                "cycle": int(self.cycle_count or 0),
+                                "scan_interval_effective": float(getattr(self, "_effective_interval", self.config.scan_interval) or 0),
+                                "symbol": str(self.config.symbol),
+                            },
+                            level="info",
+                        )
+                    except Exception:
+                        pass
                     market_data = await self.data_fetcher.fetch_latest_data()
 
                     # Check if data is empty due to connection issues
@@ -1195,6 +1233,24 @@ class NQAgentService:
                         # Add trade to TradeManager for trailing stop management
                         # Get buffer data for chart generation
                         buffer_data = market_data.get("df", pd.DataFrame())
+                        try:
+                            self.state_manager.append_event(
+                                "signal_generated",
+                                {
+                                    "cycle": int(self.cycle_count or 0),
+                                    "symbol": str(signal.get("symbol") or self.config.symbol),
+                                    "type": str(signal.get("type") or "unknown"),
+                                    "direction": str(signal.get("direction") or "unknown"),
+                                    "trade_type": str(signal.get("trade_type") or ""),
+                                    "confidence": float(signal.get("confidence") or 0.0),
+                                    "entry_price": float(signal.get("entry_price") or 0.0),
+                                    "stop_loss": float(signal.get("stop_loss") or 0.0),
+                                    "take_profit": float(signal.get("take_profit") or 0.0),
+                                },
+                                level="info",
+                            )
+                        except Exception:
+                            pass
                         await self._process_signal(signal, buffer_data=buffer_data)
                 else:
                     logger.debug(f"No signals generated in cycle {self.cycle_count}")
@@ -1340,6 +1396,26 @@ class NQAgentService:
                 )
                 
                 await self._check_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
+                # Export a stable dashboard image for Pearl Algo Monitor (separate cadence from Telegram)
+                await self._check_monitor_export(market_data)
+                try:
+                    self.state_manager.append_event(
+                        "scan_finished",
+                        {
+                            "cycle": int(self.cycle_count or 0),
+                            "signals": int(len(signals) if signals else 0),
+                            "quiet_reason": str(quiet_reason or ""),
+                            "signal_diagnostics": str(signal_diagnostics or "") if signal_diagnostics is not None else None,
+                            "data_fresh": bool(data_fresh),
+                            "strategy_session_open": bool(strategy_session_open),
+                            "futures_market_open": bool(futures_market_open),
+                            "buffer_size": int(self.data_fetcher.get_buffer_size() or 0),
+                            "error_count": int(self.error_count or 0),
+                        },
+                        level="info",
+                    )
+                except Exception:
+                    pass
 
                 # Save state periodically
                 if self.cycle_count % self.state_save_interval == 0:
@@ -1359,6 +1435,14 @@ class NQAgentService:
                     exc_info=True,
                     extra={"cycle": self.cycle_count},
                 )
+                try:
+                    self.state_manager.append_event(
+                        "error",
+                        {"cycle": int(self.cycle_count or 0), "message": str(e)[:500]},
+                        level="error",
+                    )
+                except Exception:
+                    pass
                 self.error_count += 1
                 self.consecutive_errors += 1
 
@@ -1372,6 +1456,19 @@ class NQAgentService:
                             "cycle": self.cycle_count,
                         },
                     )
+                    try:
+                        self.state_manager.append_event(
+                            "circuit_breaker",
+                            {
+                                "cycle": int(self.cycle_count or 0),
+                                "type": "consecutive_errors",
+                                "consecutive_errors": int(self.consecutive_errors or 0),
+                                "max_consecutive_errors": int(self.max_consecutive_errors or 0),
+                            },
+                            level="error",
+                        )
+                    except Exception:
+                        pass
                     await self.telegram_notifier.send_circuit_breaker_alert(
                         "Too many consecutive errors",
                         {
@@ -2512,6 +2609,124 @@ class NQAgentService:
                 
         except Exception as e:
             logger.error(f"Error generating/sending dashboard chart: {e}", exc_info=True)
+
+    async def _check_monitor_export(self, market_data: Optional[Dict] = None) -> None:
+        """
+        Export a stable dashboard image + meta for Pearl Algo Monitor.
+
+        This is intentionally decoupled from Telegram sending cadence:
+        - Telegram dashboard charts can stay hourly (or disabled)
+        - Monitor export can refresh every ~5 minutes to “feel live” on the 2560×720 screen
+        """
+        if not getattr(self, "dashboard_export_enabled", True):
+            return
+
+        now = datetime.now(timezone.utc)
+        last = getattr(self, "last_dashboard_export_at", None)
+        if last is not None:
+            try:
+                if (now - last).total_seconds() < float(getattr(self, "dashboard_export_interval", 300) or 300):
+                    return
+            except Exception:
+                # If time math fails, just try to export.
+                pass
+
+        # Prefer using the already-fetched MTF buffer (no extra IBKR load)
+        df_5m = None
+        try:
+            if market_data and isinstance(market_data.get("df_5m"), pd.DataFrame):
+                df_5m = market_data.get("df_5m")
+        except Exception:
+            df_5m = None
+        if df_5m is None or not isinstance(df_5m, pd.DataFrame) or df_5m.empty:
+            try:
+                last_md = getattr(self.data_fetcher, "_last_market_data", None) or {}
+                if isinstance(last_md.get("df_5m"), pd.DataFrame):
+                    df_5m = last_md.get("df_5m")
+            except Exception:
+                df_5m = None
+        if df_5m is None or not isinstance(df_5m, pd.DataFrame) or df_5m.empty:
+            return
+
+        # Chart generator (reuse Telegram's chart generator if available; fallback to direct init)
+        chart_gen = getattr(self.telegram_notifier, "chart_generator", None)
+        if chart_gen is None:
+            try:
+                from pearlalgo.nq_agent.chart_generator import ChartGenerator
+
+                chart_gen = ChartGenerator()
+            except Exception:
+                return
+
+        tf = str(getattr(self, "dashboard_export_timeframe", "5m") or "5m")
+        mins = timeframe_to_minutes(tf) or 5
+        try:
+            lookback_bars = int((float(getattr(self, "dashboard_export_lookback_hours", 12) or 12) * 60.0) / float(mins))
+        except Exception:
+            lookback_bars = 288
+        max_bars = int(getattr(self, "dashboard_export_max_bars", 600) or 600)
+        lookback_bars = max(50, min(max_bars, lookback_bars))
+        range_label = f"{int(float(getattr(self, 'dashboard_export_lookback_hours', 12) or 12))}h"
+
+        try:
+            chart_path = await asyncio.to_thread(
+                chart_gen.generate_dashboard_chart,
+                data=df_5m,
+                symbol=self.config.symbol,
+                timeframe=tf,
+                lookback_bars=lookback_bars,
+                range_label=range_label,
+                figsize=getattr(self, "dashboard_export_figsize", (20.0, 7.3)),
+                dpi=int(getattr(self, "dashboard_export_dpi", 150) or 150),
+                show_ma=True,
+                ma_periods=[20, 50, 200],
+                show_pressure=bool(getattr(self, "dashboard_chart_show_pressure", True)),
+                trades=self._get_trades_for_chart(df_5m),
+            )
+        except Exception as e:
+            logger.debug(f"Monitor chart generation failed: {e}")
+            return
+
+        if not chart_path or not getattr(chart_path, "exists", lambda: False)():
+            return
+
+        try:
+            exports_dir = getattr(self, "state_dir", None)
+            if exports_dir is None:
+                exports_dir = self.state_manager.state_dir
+            exports_dir = Path(exports_dir) / "exports"
+            exports_dir.mkdir(parents=True, exist_ok=True)
+
+            # Atomically replace dashboard_latest.png
+            dest_png = exports_dir / "dashboard_latest.png"
+            tmp_png = exports_dir / ".dashboard_latest.png.tmp"
+            shutil.copyfile(str(chart_path), str(tmp_png))
+            os.replace(str(tmp_png), str(dest_png))
+
+            # Meta file for staleness badge
+            meta = {
+                "generated_at": now.isoformat(),
+                "symbol": str(self.config.symbol),
+                "timeframe": tf,
+                "range_label": range_label,
+                "lookback_bars": int(lookback_bars),
+            }
+            dest_meta = exports_dir / "dashboard_latest.meta.json"
+            tmp_meta = exports_dir / ".dashboard_latest.meta.json.tmp"
+            with open(tmp_meta, "w") as f:
+                json.dump(meta, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(str(tmp_meta), str(dest_meta))
+
+            self.last_dashboard_export_at = now
+        except Exception as e:
+            logger.debug(f"Could not export monitor dashboard artifacts: {e}")
+        finally:
+            try:
+                chart_path.unlink()
+            except Exception:
+                pass
 
     async def _send_dashboard(
         self,

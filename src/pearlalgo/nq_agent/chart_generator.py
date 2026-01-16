@@ -791,10 +791,11 @@ class ChartGenerator:
         vwap = (hud.get("vwap") or signal.get("vwap_data") or {}) if isinstance(hud, dict) else (signal.get("vwap_data") or {})
         if isinstance(vwap, dict):
             _add(vwap.get("vwap"), "VWAP", VWAP_COLOR, priority=60, linestyle="-", lw=1.2, alpha=0.65)
-            _add(vwap.get("vwap_upper_1"), "VWAP+1", VWAP_COLOR, priority=40, linestyle="--", lw=1.0, alpha=0.35)
-            _add(vwap.get("vwap_lower_1"), "VWAP-1", VWAP_COLOR, priority=40, linestyle="--", lw=1.0, alpha=0.35)
-            _add(vwap.get("vwap_upper_2"), "VWAP+2", VWAP_COLOR, priority=30, linestyle="--", lw=0.9, alpha=0.25)
-            _add(vwap.get("vwap_lower_2"), "VWAP-2", VWAP_COLOR, priority=30, linestyle="--", lw=0.9, alpha=0.25)
+            # Use sigma wording (matches VWAP AA bands + avoids “2x” ambiguity in right labels)
+            _add(vwap.get("vwap_upper_1"), "VWAP +1σ", VWAP_COLOR, priority=40, linestyle="--", lw=1.0, alpha=0.35)
+            _add(vwap.get("vwap_lower_1"), "VWAP -1σ", VWAP_COLOR, priority=40, linestyle="--", lw=1.0, alpha=0.35)
+            _add(vwap.get("vwap_upper_2"), "VWAP +2σ", VWAP_COLOR, priority=30, linestyle="--", lw=0.9, alpha=0.25)
+            _add(vwap.get("vwap_lower_2"), "VWAP -2σ", VWAP_COLOR, priority=30, linestyle="--", lw=0.9, alpha=0.25)
 
         # Volume profile levels (POC/VAH/VAL)
         vp = hud.get("volume_profile") or signal.get("volume_profile") or {}
@@ -1333,7 +1334,7 @@ class ChartGenerator:
     ) -> None:
         """Draw a consistent legend for dashboard charts.
         
-        Fixed order: VWAP, MA20, MA50, MA200 (or configured periods).
+        Fixed order: VWAP, EMA(…) lines (or configured periods).
         Placed in upper-left corner with stable styling.
         """
         try:
@@ -1355,17 +1356,19 @@ class ChartGenerator:
                     color = MA_COLORS[i % len(MA_COLORS)]
                     legend_items.append((
                         Line2D([0], [0], color=color, linewidth=1.2, alpha=0.7),
-                        f"MA{period}"
+                        f"EMA{period}"
                     ))
             
             if not legend_items:
                 return
             
             handles, labels = zip(*legend_items)
+            # Place legend away from the Power readout (which lives upper-left at y≈0.90).
+            # Upper-right is consistently free and avoids collisions on mobile charts.
             ax.legend(
                 handles,
                 labels,
-                loc="upper left",
+                loc="upper right",
                 fontsize=FONT_SIZE_LEGEND,
                 framealpha=ALPHA_LEGEND_BG,
                 facecolor=DARK_BG,
@@ -2608,7 +2611,7 @@ class ChartGenerator:
         Generate a TradingView-style dashboard chart.
 
         Args:
-            data: OHLCV DataFrame (expects 5m bars with timestamp/DatetimeIndex)
+            data: OHLCV DataFrame (expects timestamp/DatetimeIndex; works with any bar timeframe)
             symbol: Symbol name for title
             timeframe: Timeframe label for title (e.g. "5m")
             lookback_bars: Number of bars to display
@@ -2637,7 +2640,7 @@ class ChartGenerator:
                 logger.warning("Cannot generate dashboard chart: data is empty")
                 return None
 
-            # Limit to lookback_bars (default 288 = 24h of 5m)
+            # Limit to lookback_bars (bars, not hours — caller controls based on timeframe)
             chart_data = data.tail(int(lookback_bars)).copy()
             df = self._prepare_data(chart_data)
 
@@ -2671,68 +2674,181 @@ class ChartGenerator:
             # Addplots
             addplot: List = []
 
-            # Moving Averages (to match TradingView-style chart)
+            # Moving averages (EMA-style) + crossover markers (to match TradingView scripts)
             if show_ma:
-                ma_periods_list = ma_periods or [20, 50, 200]  # Common MA periods
+                # Always include the common crossover pair (9/20) for the "EMA Crossover" script.
+                raw_periods = ma_periods or [20, 50, 200]
+                ma_periods_list: List[int] = []
+                for p in [9, 20] + list(raw_periods):
+                    try:
+                        pi = int(p)
+                    except Exception:
+                        continue
+                    if pi <= 0 or pi in ma_periods_list:
+                        continue
+                    ma_periods_list.append(pi)
+
                 for period in ma_periods_list:
                     if period <= len(df):
                         color_idx = ma_periods_list.index(period) % len(MA_COLORS)
                         color = MA_COLORS[color_idx]
-                        ma_series = df["Close"].rolling(period).mean()
+                        ma_series = df["Close"].ewm(span=int(period), adjust=False).mean()
                         addplot.append(
                             mpf.make_addplot(
                                 ma_series,
                                 color=color,
                                 width=1.2,
                                 alpha=0.7,
-                                label=f"MA{period}",
+                                label=f"EMA{period}",
                             )
                         )
 
-            # VWAP
-            if show_vwap:
+                # EMA crossover markers (9/20) — kept visually light to avoid mobile clutter
                 try:
-                    from pearlalgo.utils.vwap import VWAPCalculator
+                    fast, slow = 9, 20
+                    if fast <= len(df) and slow <= len(df):
+                        ema_fast = df["Close"].ewm(span=fast, adjust=False).mean()
+                        ema_slow = df["Close"].ewm(span=slow, adjust=False).mean()
+                        cross_up = (ema_fast > ema_slow) & (ema_fast.shift(1) <= ema_slow.shift(1))
+                        cross_dn = (ema_fast < ema_slow) & (ema_fast.shift(1) >= ema_slow.shift(1))
 
-                    vwap_calc = VWAPCalculator()
-                    vwap_df = df.reset_index().copy()
-                    vwap_df = vwap_df.rename(columns={
-                        "Open": "open",
-                        "High": "high",
-                        "Low": "low",
-                        "Close": "close",
-                    })
-                    if "Volume" in vwap_df.columns:
-                        vwap_df = vwap_df.rename(columns={"Volume": "volume"})
-                    vwap_data = vwap_calc.calculate_vwap(vwap_df)
-                    vwap_val = vwap_data.get("vwap", 0)
-                    if vwap_val and vwap_val > 0:
-                        vwap_series = pd.Series([float(vwap_val)] * len(df), index=df.index)
+                        max_markers = 12
+                        up_idx = np.where(cross_up.fillna(False).to_numpy(dtype=bool))[0]
+                        dn_idx = np.where(cross_dn.fillna(False).to_numpy(dtype=bool))[0]
+                        if len(up_idx) > max_markers:
+                            up_idx = up_idx[-max_markers:]
+                        if len(dn_idx) > max_markers:
+                            dn_idx = dn_idx[-max_markers:]
+
+                        if len(up_idx) > 0:
+                            y_up = pd.Series(np.nan, index=df.index)
+                            y_up.iloc[up_idx] = df["Low"].iloc[up_idx] * 0.999
+                            addplot.append(
+                                mpf.make_addplot(
+                                    y_up,
+                                    type="scatter",
+                                    marker="^",
+                                    markersize=55,
+                                    color="#00bcd4",  # cyan (distinct from trade markers)
+                                    alpha=0.65,
+                                )
+                            )
+                        if len(dn_idx) > 0:
+                            y_dn = pd.Series(np.nan, index=df.index)
+                            y_dn.iloc[dn_idx] = df["High"].iloc[dn_idx] * 1.001
+                            addplot.append(
+                                mpf.make_addplot(
+                                    y_dn,
+                                    type="scatter",
+                                    marker="v",
+                                    markersize=55,
+                                    color="#e91e63",  # pink (distinct from trade markers)
+                                    alpha=0.65,
+                                )
+                            )
+                except Exception:
+                    pass
+
+            # VWAP (anchored) + bands (VWAP AA-style)
+            if show_vwap and ("Volume" in df.columns):
+                try:
+                    idx = df.index
+                    if not isinstance(idx, pd.DatetimeIndex) or len(idx) < 2:
+                        raise ValueError("Dashboard VWAP requires DatetimeIndex")
+
+                    # Compute anchored VWAP series (default: CME ETH session start = 18:00 ET)
+                    idx_utc = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
+                    try:
+                        idx_local = idx_utc.tz_convert("America/New_York")
+                        anchor_min = 18 * 60  # 18:00 ET
+                    except Exception:
+                        idx_local = idx_utc
+                        anchor_min = 0  # midnight UTC fallback
+
+                    mins = idx_local.hour * 60 + idx_local.minute
+                    day = idx_local.floor("D")
+                    session_key = day.where(mins >= anchor_min, day - pd.Timedelta(days=1))
+                    try:
+                        session_key = session_key.tz_localize(None)
+                    except Exception:
+                        pass
+
+                    close = pd.to_numeric(df["Close"], errors="coerce")
+                    high = pd.to_numeric(df["High"], errors="coerce")
+                    low = pd.to_numeric(df["Low"], errors="coerce")
+                    vol = pd.to_numeric(df["Volume"], errors="coerce").fillna(0.0)
+                    typical = (high + low + close) / 3.0
+                    vp = typical * vol
+                    cum_vp = vp.groupby(session_key).cumsum()
+                    cum_vol = vol.groupby(session_key).cumsum()
+                    vwap_series = (cum_vp / cum_vol.replace(0.0, np.nan)).astype(float)
+
+                    if not vwap_series.isna().all():
                         addplot.append(
                             mpf.make_addplot(
                                 vwap_series,
                                 color=VWAP_COLOR,
                                 width=1.8,
-                                alpha=0.75,
+                                alpha=0.80,
                                 label="VWAP",
                             )
                         )
-                        # VWAP bands
-                        for key, alpha in (("vwap_upper_1", 0.35), ("vwap_lower_1", 0.35)):
-                            band = vwap_data.get(key, 0)
-                            if band and float(band) > 0 and float(band) != float(vwap_val):
-                                band_series = pd.Series([float(band)] * len(df), index=df.index)
-                                addplot.append(
-                                    mpf.make_addplot(
-                                        band_series,
-                                        color=VWAP_COLOR,
-                                        width=1.0,
-                                        linestyle="--",
-                                        alpha=alpha,
-                                    )
+
+                        # VWAP AA bands: rolling stdev around VWAP (±1σ, ±2σ)
+                        stdev = close.rolling(window=20, min_periods=5).std()
+                        upper1 = vwap_series + stdev
+                        lower1 = vwap_series - stdev
+                        upper2 = vwap_series + (stdev * 2.0)
+                        lower2 = vwap_series - (stdev * 2.0)
+
+                        for band, a in (
+                            (upper1, ALPHA_VWAP_BAND_1),
+                            (lower1, ALPHA_VWAP_BAND_1),
+                            (upper2, ALPHA_VWAP_BAND_2),
+                            (lower2, ALPHA_VWAP_BAND_2),
+                        ):
+                            if band is None or band.isna().all():
+                                continue
+                            addplot.append(
+                                mpf.make_addplot(
+                                    band,
+                                    color=VWAP_COLOR,
+                                    width=1.0,
+                                    linestyle="--",
+                                    alpha=a,
                                 )
+                            )
+
+                        # Feed into HUD so right labels can include VWAP + bands
+                        try:
+                            last_vwap = float(vwap_series.dropna().iloc[-1])
+                            hud["vwap"] = {
+                                "vwap": last_vwap,
+                                "vwap_upper_1": float(upper1.dropna().iloc[-1]) if not upper1.isna().all() else last_vwap,
+                                "vwap_lower_1": float(lower1.dropna().iloc[-1]) if not lower1.isna().all() else last_vwap,
+                                "vwap_upper_2": float(upper2.dropna().iloc[-1]) if not upper2.isna().all() else last_vwap,
+                                "vwap_lower_2": float(lower2.dropna().iloc[-1]) if not lower2.isna().all() else last_vwap,
+                            }
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.debug(f"Error adding VWAP to dashboard chart: {e}")
+
+            # Volume MA overlay (Vol script)
+            if "Volume" in df.columns:
+                try:
+                    vol_ma = pd.to_numeric(df["Volume"], errors="coerce").rolling(window=20, min_periods=2).mean()
+                    addplot.append(
+                        mpf.make_addplot(
+                            vol_ma,
+                            panel=1,
+                            color="#42a5f5",
+                            width=1.2,
+                            alpha=0.7,
+                        )
+                    )
+                except Exception:
+                    pass
 
             volume_on = "Volume" in df.columns
             # Pressure panel (buy/sell proxy): signed volume histogram (+vol for up candles, -vol for down candles)
@@ -3087,6 +3203,12 @@ class ChartGenerator:
                     # Sessions shading
                     if show_sessions:
                         self._draw_sessions_overlay(ax_price, hud, idx=df.index if isinstance(df.index, pd.DatetimeIndex) else None)
+
+                    # Indicator overlays from your TradingView scripts (LuxAlgo / ChartPrime ports)
+                    # These are z-ordered behind candles and do not affect axis scaling.
+                    self._draw_supply_demand_overlay(ax_price, hud)
+                    self._draw_power_channel_overlay(ax_price, hud)
+                    self._draw_tbt_overlay(ax_price, hud)
 
                     # Key levels (DO/PDH/PDL/PDM, RTH, VWAP, POC) via shared pipeline
                     # Reuses _collect_level_candidates for consistency with entry/exit charts

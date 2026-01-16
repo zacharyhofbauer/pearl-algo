@@ -46,6 +46,19 @@ def get_signals_file(state_dir: Path) -> Path:
     return state_dir / "signals.jsonl"
 
 
+def get_events_file(state_dir: Path) -> Path:
+    """
+    Get path to events file (append-only JSONL).
+
+    Args:
+        state_dir: State directory path
+
+    Returns:
+        Path to events.jsonl file
+    """
+    return state_dir / "events.jsonl"
+
+
 def get_state_file(state_dir: Path) -> Path:
     """
     Get path to state file.

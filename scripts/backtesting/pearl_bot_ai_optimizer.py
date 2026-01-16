@@ -2,7 +2,7 @@
 """
 AI-Powered Pearl Bot Optimizer
 
-Uses Claude to analyze Pearl bot performance and suggest improvements.
+Uses OpenAI (via the internal `ClaudeClient` compatibility wrapper) to analyze Pearl bot performance and suggest improvements.
 Automatically generates code patches and configuration updates.
 """
 
@@ -28,7 +28,7 @@ class PearlBotAIOptimizer:
         try:
             self.claude = ClaudeClient()
         except ClaudeAPIKeyMissingError:
-            logger.warning("Claude API key not found - AI optimization disabled")
+            logger.warning("OpenAI API key not found - AI optimization disabled")
             self.claude = None
 
     def analyze_performance(self, days_back: int = 7) -> Dict[str, Any]:
@@ -84,9 +84,9 @@ class PearlBotAIOptimizer:
         }
 
     def generate_ai_recommendations(self, performance_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Use Claude to generate optimization recommendations."""
+        """Use OpenAI to generate optimization recommendations."""
         if not self.claude:
-            return {"error": "Claude client not available"}
+            return {"error": "OpenAI client not available"}
 
         prompt = f"""
         Analyze this Pearl bot trading performance and provide specific recommendations:

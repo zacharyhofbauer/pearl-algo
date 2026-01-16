@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
 
-# Import Claude client (optional dependency)
+# Import OpenAI client (optional dependency; wrapper kept as `claude_client.py` for backward compat)
 try:
     from pearlalgo.utils.claude_client import (
         ClaudeClient,
@@ -294,7 +294,7 @@ class AdaptiveParameterTuner:
     
     Configuration:
     - enabled: Master toggle
-    - model: Claude model to use
+    - model: Model to use
     - analysis_interval_hours: How often to analyze (default: 24h)
     - auto_apply: Whether to auto-apply suggestions (default: False)
     - min_sample_size: Minimum trades before suggesting changes
@@ -316,7 +316,7 @@ class AdaptiveParameterTuner:
         
         Args:
             enabled: Whether tuning is enabled
-            model: Claude model to use
+            model: Model to use
             timeout_seconds: Timeout for analysis
             analysis_interval_hours: How often to run analysis
             auto_apply: Whether to auto-apply suggestions
@@ -331,13 +331,13 @@ class AdaptiveParameterTuner:
         self.min_sample_size = min_sample_size
         self.conservative_mode = conservative_mode
         
-        # Initialize Claude client
+        # Initialize OpenAI client
         self._client: Optional[ClaudeClient] = None
         if enabled and OPENAI_AVAILABLE:
             try:
                 self._client = get_claude_client()
             except Exception as e:
-                logger.warning(f"Failed to initialize Claude client for adaptive tuning: {e}")
+                logger.warning(f"Failed to initialize OpenAI client for adaptive tuning: {e}")
         
         # Track when last analysis was run
         self._last_analysis: Optional[datetime] = None
@@ -401,7 +401,7 @@ class AdaptiveParameterTuner:
             # Build prompt
             user_prompt = self._build_prompt(trades, current_config, stats)
             
-            # Call Claude
+            # Call OpenAI
             response = self._client.chat(
                 messages=[{"role": "user", "content": user_prompt}],
                 system_prompt=ADAPTIVE_TUNING_SYSTEM_PROMPT,
@@ -646,7 +646,7 @@ class AdaptiveParameterTuner:
         )
     
     def _parse_response(self, response: str) -> TuningReport:
-        """Parse Claude's JSON response into TuningReport."""
+        """Parse the model's JSON response into TuningReport."""
         try:
             response = response.strip()
             

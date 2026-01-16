@@ -429,15 +429,15 @@ class TestAIPatchNotAvailable:
 
 
 # ---------------------------------------------------------------------------
-# Test Claude Hub
+# Test AI Hub (OpenAI-backed)
 # ---------------------------------------------------------------------------
 
 class TestClaudeHub:
-    """Tests for Claude Hub functionality."""
+    """Tests for AI Hub functionality."""
     
     @pytest.mark.asyncio
     async def test_claude_hub_blocks_unauthorized(self):
-        """Unauthorized chat IDs should be blocked from Claude Hub."""
+        """Unauthorized chat IDs should be blocked from the AI Hub."""
         from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
         
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
@@ -471,7 +471,7 @@ class TestClaudeHub:
     
     @pytest.mark.asyncio
     async def test_claude_hub_shows_hub_when_available(self):
-        """Authorized users should see the Claude Hub."""
+        """Authorized users should see the AI Hub."""
         from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
         
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
@@ -505,7 +505,7 @@ class TestClaudeHub:
                     await TelegramCommandHandler._handle_ai_hub(handler, update, context)
         
         assert len(sent_messages) == 1
-        assert "Claude AI Hub" in sent_messages[0]
+        assert "AI Hub" in sent_messages[0]
 
 
 # ---------------------------------------------------------------------------
@@ -603,7 +603,7 @@ class TestChatModeRouting:
     
     @pytest.mark.asyncio
     async def test_message_routes_to_claude_when_chat_mode_on(self):
-        """Plain messages should route to Claude when chat mode is enabled."""
+        """Plain messages should route to the AI assistant when chat mode is enabled."""
         from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
         
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)

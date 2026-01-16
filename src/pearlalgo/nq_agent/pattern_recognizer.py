@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
 
-# Import Claude client (optional dependency)
+# Import OpenAI client (optional dependency; wrapper kept as `claude_client.py` for backward compat)
 try:
     from pearlalgo.utils.claude_client import (
         ClaudeClient,
@@ -277,7 +277,7 @@ class PatternRecognizer:
     
     Configuration:
     - enabled: Master toggle
-    - model: Claude model to use
+    - model: Model to use
     - batch_size: Trades per batch analysis
     - lookback_trades: How many trades to consider
     - min_pattern_confidence: Threshold for reporting patterns
@@ -298,7 +298,7 @@ class PatternRecognizer:
         
         Args:
             enabled: Whether recognition is enabled
-            model: Claude model to use
+            model: Model to use
             timeout_seconds: Timeout for analysis
             batch_size: Trades per batch (triggers analysis)
             lookback_trades: Total trades to consider
@@ -313,13 +313,13 @@ class PatternRecognizer:
         self.min_pattern_confidence = min_pattern_confidence
         self.send_to_telegram = send_to_telegram
         
-        # Initialize Claude client
+        # Initialize OpenAI client
         self._client: Optional[ClaudeClient] = None
         if enabled and OPENAI_AVAILABLE:
             try:
                 self._client = get_claude_client()
             except Exception as e:
-                logger.warning(f"Failed to initialize Claude client for pattern recognition: {e}")
+                logger.warning(f"Failed to initialize OpenAI client for pattern recognition: {e}")
         
         # Trade buffer
         self._trade_buffer: List[Dict] = []
@@ -393,7 +393,7 @@ class PatternRecognizer:
             # Build prompt
             user_prompt = self._build_prompt(trades, stats)
             
-            # Call Claude
+            # Call OpenAI
             response = self._client.chat(
                 messages=[{"role": "user", "content": user_prompt}],
                 system_prompt=PATTERN_RECOGNITION_SYSTEM_PROMPT,
@@ -602,7 +602,7 @@ class PatternRecognizer:
         )
     
     def _parse_response(self, response: str) -> PatternReport:
-        """Parse Claude's JSON response into PatternReport."""
+        """Parse the model's JSON response into PatternReport."""
         try:
             response = response.strip()
             

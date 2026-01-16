@@ -7,14 +7,16 @@ Manages state persistence for the NQ agent service.
 from __future__ import annotations
 
 import json
+import os
 import fcntl
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import (
     ensure_state_dir,
+    get_events_file,
     get_signals_file,
     get_state_file,
     get_utc_timestamp,
@@ -111,6 +113,7 @@ class NQAgentStateManager:
 
         self.state_dir = ensure_state_dir(state_dir)
         self.signals_file = get_signals_file(self.state_dir)
+        self.events_file = get_events_file(self.state_dir)
         self.state_file = get_state_file(self.state_dir)
 
         # Optional SQLite dual-write (platform memory). Keep file writes as-is for Telegram/mobile.
@@ -405,6 +408,62 @@ class NQAgentStateManager:
 
         return signals
 
+    def append_event(
+        self,
+        event_type: str,
+        payload: Optional[Dict[str, Any]] = None,
+        *,
+        level: Optional[str] = None,
+    ) -> None:
+        """
+        Append a structured event to events.jsonl for Pearl Algo Monitor.
+
+        This is intentionally simple and resilient:
+        - append-only JSONL
+        - best-effort file locking
+        - payload is converted to JSON-safe primitives
+        """
+        record = {
+            "timestamp": get_utc_timestamp(),
+            "type": str(event_type or "event"),
+            "level": str(level) if level is not None else None,
+            "payload": _to_json_safe(payload or {}),
+        }
+
+        lock_file = Path(str(self.events_file) + ".lock")
+        try:
+            with open(lock_file, "w") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    with open(self.events_file, "a") as f:
+                        f.write(json.dumps(record) + "\n")
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            # Fallback: unlocked append
+            try:
+                with open(self.events_file, "a") as f:
+                    f.write(json.dumps(record) + "\n")
+            except Exception as e:
+                logger.debug(f"Failed to append event: {e}")
+
+    def get_recent_events(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """Get recent events from events.jsonl (best-effort)."""
+        events: List[Dict[str, Any]] = []
+        if not self.events_file.exists():
+            return events
+        try:
+            with open(self.events_file, "r") as f:
+                lines = f.readlines()
+            for line in lines[-max(1, int(limit)) :]:
+                try:
+                    events.append(json.loads(line.strip()))
+                except json.JSONDecodeError:
+                    continue
+        except Exception as e:
+            logger.debug(f"Error reading events: {e}")
+        return events
+
     def save_state(self, state: Dict) -> None:
         """
         Save service state.
@@ -414,8 +473,12 @@ class NQAgentStateManager:
         """
         try:
             state["last_updated"] = get_utc_timestamp()
-            with open(self.state_file, "w") as f:
+            tmp_path = Path(str(self.state_file) + ".tmp")
+            with open(tmp_path, "w") as f:
                 json.dump(state, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.state_file)
         except Exception as e:
             logger.error(f"Error saving state: {e}")
 

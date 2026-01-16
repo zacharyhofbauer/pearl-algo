@@ -207,19 +207,19 @@ indicators:
     rsi_period: 14
 llm_signal_annotation:
   enabled: false
-  model: claude-sonnet-4-20250514
+  model: gpt-4o
   timeout_seconds: 5
   batch_mode: false
 llm_trade_postmortem:
   enabled: false
-  model: claude-sonnet-4-20250514
+  model: gpt-4o
   timeout_seconds: 10
   min_pnl_threshold: 500
   send_to_telegram: true
   batch_analysis_count: 5
 llm_pattern_recognition:
   enabled: false
-  model: claude-sonnet-4-20250514
+  model: gpt-4o
   timeout_seconds: 30
   batch_size: 5
   lookback_trades: 50
@@ -227,13 +227,13 @@ llm_pattern_recognition:
   send_to_telegram: true
 llm_risk_assessment:
   enabled: false
-  model: claude-sonnet-4-20250514
+  model: gpt-4o
   timeout_seconds: 3
   block_on_critical: false
   consider_recent_trades: 20
 llm_adaptive_tuning:
   enabled: true
-  model: claude-sonnet-4-20250514
+  model: gpt-4o
   timeout_seconds: 60
   analysis_interval_hours: 6
   auto_apply: false
@@ -388,19 +388,6 @@ prop_firm:
   mnq_tick_value: 2.0
   nq_tick_value: 20.0
   contract_size_multiplier: 1.0
-# AI-Powered Pearl Bot Updates
-llm_pearl_bot_updates:
-  enabled: true
-  model: claude-sonnet-4-20250514
-  update_interval_hours: 12
-  min_trades_for_analysis: 20
-  auto_apply_suggestions: false
-  focus_areas:
-    - risk_management
-    - entry_timing
-    - exit_strategies
-    - market_regime_filtering
-  conservative_threshold: 0.7
 
 # PEARL Automated Trading Bots (formerly lux_algo_bots)
 pearl_bots:

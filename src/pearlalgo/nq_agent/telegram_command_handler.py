@@ -718,9 +718,44 @@ class TelegramCommandHandler:
             import pandas as pd
             from pearlalgo.nq_agent.chart_generator import ChartGenerator
             from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
+            from pearlalgo.config.config_loader import load_service_config
+            from pearlalgo.utils.volume_pressure import timeframe_to_minutes
             
             symbol = state.get("symbol") or "MNQ"
-            lookback_hours = 8
+            
+            # Read chart settings from config.yaml (same source as the service chart push)
+            svc_cfg = load_service_config()
+            service_cfg = (svc_cfg.get("service", {}) or {}) if isinstance(svc_cfg, dict) else {}
+            min_lookback_hours = 6.0
+            max_lookback_hours = 24.0
+            lookback_hours = float(service_cfg.get("dashboard_chart_lookback_hours", 8) or 8)
+            if lookback_hours < min_lookback_hours:
+                lookback_hours = min_lookback_hours
+            if lookback_hours > max_lookback_hours:
+                lookback_hours = max_lookback_hours
+
+            chart_tf_pref = str(service_cfg.get("dashboard_chart_timeframe", "auto") or "auto").strip().lower()
+            max_bars = int(service_cfg.get("dashboard_chart_max_bars", 420) or 420)
+            show_pressure = bool(service_cfg.get("dashboard_chart_show_pressure", True))
+
+            def _choose_timeframe(hours: float, max_bars_local: int) -> str:
+                # Keep candle count under max_bars for readability (same candidates as service).
+                candidates = ["5m", "15m", "30m", "1h"]
+                if chart_tf_pref in candidates:
+                    return chart_tf_pref
+                for tf in candidates:
+                    mins = timeframe_to_minutes(tf) or 0
+                    if mins <= 0:
+                        continue
+                    bars = int((hours * 60.0) / float(mins))
+                    if bars <= max_bars_local:
+                        return tf
+                return "1h"
+
+            chosen_tf = _choose_timeframe(lookback_hours, max_bars)
+            tf_mins = float(timeframe_to_minutes(chosen_tf) or 5)
+            bars_target = int((lookback_hours * 60.0) / tf_mins)
+            bars_target = max(20, min(max_bars, bars_target))  # keep sane bounds
             
             # Create provider (executor manages connection automatically)
             provider = IBKRProvider(client_id=99)  # Use different client ID
@@ -744,7 +779,7 @@ class TelegramCommandHandler:
                     symbol,
                     start,
                     end,
-                    "5m"
+                    chosen_tf,
                 )
                 
                 if df is None or df.empty or len(df) < 20:
@@ -760,12 +795,19 @@ class TelegramCommandHandler:
                 # Get recent trades for markers
                 trades = self._get_trades_for_chart(df, symbol)
                 
+                # Label range (best-effort, compact)
+                try:
+                    hrs = float(lookback_hours)
+                    range_label = f"{int(round(hrs))}h" if hrs < 72 else f"{int(round(hrs / 24.0))}d"
+                except Exception:
+                    range_label = None
+
                 chart_path = chart_gen.generate_dashboard_chart(
                     data=df,
                     symbol=symbol,
-                    timeframe="5m",
-                    lookback_bars=min(96, len(df)),  # ~8 hours
-                    range_label="8h",
+                    timeframe=chosen_tf,
+                    lookback_bars=min(int(bars_target), len(df)),
+                    range_label=range_label or "Dashboard",
                     figsize=(14, 6),
                     dpi=120,
                     show_sessions=True,  # Show Tokyo/London/NY session shading
@@ -774,7 +816,7 @@ class TelegramCommandHandler:
                     show_ma=True,  # Show moving averages
                     ma_periods=[20, 50, 200],  # MA20, MA50, MA200
                     show_rsi=True,  # Show RSI panel
-                    show_pressure=True,  # Show buy/sell pressure
+                    show_pressure=show_pressure,  # Show buy/sell pressure (config-driven)
                     trades=trades,  # Overlay trade markers
                 )
                 
@@ -1553,19 +1595,19 @@ class TelegramCommandHandler:
                 await query.edit_message_text(f"❌ AI Analysis Failed: {result['error']}")
                 return
 
-            # Generate AI recommendations if Claude is available
+            # Generate AI recommendations if OpenAI is available (wrapper lives in claude_client.py for backward compat)
             recommendations = {}
             if optimizer.claude:
                 recommendations = optimizer.generate_ai_recommendations(result)
             else:
-                recommendations = {"note": "Claude API key not configured - basic analysis only"}
+                recommendations = {"note": "OpenAI API key not configured - basic analysis only"}
 
             # Format response
             response = "🤖 *Pearl Bot AI Analysis Complete*\n\n"
             response += f"📊 **Performance (7 days):**\n"
             response += f"• Trades: {result['total_trades']}\n"
             response += f"• Win Rate: {result['win_rate']:.1%}\n"
-            response += f"• Total P&L: \${result['total_pnl']:.2f}\n"
+            response += f"• Total P&L: \\${result['total_pnl']:.2f}\n"
             response += f"• Profit Factor: {result['profit_factor']:.2f}\n\n"
 
             if result['bot_performance']:
@@ -1583,7 +1625,7 @@ class TelegramCommandHandler:
                 response += ai_text
             else:
                 response += "💡 *Next Steps:*\n"
-                response += "• Enable Claude API for AI recommendations\n"
+                response += "• Enable OpenAI API for AI recommendations\n"
                 response += "• Review risk management settings\n"
                 response += "• Consider wider stop losses\n"
 
@@ -1995,7 +2037,7 @@ class TelegramCommandHandler:
                 ]
                 await query.edit_message_text(
                     "✅ *AI Chat Mode: ON*\n\n"
-                    "You can now chat with Claude AI.\n"
+                    "You can now chat with the AI assistant (OpenAI).\n"
                     "Send any message to get AI assistance.",
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode="Markdown"
@@ -3590,7 +3632,7 @@ class TelegramCommandHandler:
             return None
 
     def _get_claude_hub_buttons(self):
-        """Buttons for Claude AI Hub (minimal)."""
+        """Buttons for AI Hub (minimal)."""
         try:
             return InlineKeyboardMarkup(
                 [
@@ -3685,7 +3727,7 @@ class TelegramCommandHandler:
             pass
 
         status = "ON" if chat_mode else "OFF"
-        msg = f"🤖 Claude AI Hub\n\nChat Mode: {status}\n\nUse /ai_on or /ai_off, or tap buttons below."
+        msg = f"🤖 AI Hub\n\nChat Mode: {status}\n\nUse /ai_on or /ai_off, or tap buttons below."
         await self._send_message_or_edit(update, context, msg, reply_markup=self._get_claude_hub_buttons())
 
     async def _handle_ai_on(self, update: Any, context: Any) -> None:
@@ -3781,7 +3823,7 @@ class TelegramCommandHandler:
             await self._send_message_or_edit(
                 update,
                 context,
-                "❌ Claude AI Not Available (dependency not installed).\n\nInstall with: pip install -e '.[llm]'",
+                "❌ OpenAI Not Available (dependency not installed).\n\nInstall with: pip install -e '.[llm]'",
             )
             return
 

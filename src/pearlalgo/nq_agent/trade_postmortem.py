@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
 
-# Import Claude client (optional dependency)
+# Import OpenAI client (optional dependency; wrapper kept as `claude_client.py` for backward compat)
 try:
     from pearlalgo.utils.claude_client import (
         ClaudeClient,
@@ -266,7 +266,7 @@ class TradePostMortemAnalyzer:
     
     Configuration:
     - enabled: Master toggle
-    - model: Claude model to use
+    - model: Model to use
     - timeout_seconds: Max time for analysis
     - min_pnl_threshold: Minimum P&L to trigger analysis (avoid noise)
     - send_to_telegram: Whether to send reports via Telegram
@@ -289,7 +289,7 @@ class TradePostMortemAnalyzer:
         
         Args:
             enabled: Whether analysis is enabled
-            model: Claude model to use
+            model: Model to use
             timeout_seconds: Timeout for analysis requests
             min_pnl_threshold: Minimum absolute P&L in dollars to trigger analysis
             send_to_telegram: Whether to send results to Telegram
@@ -306,13 +306,13 @@ class TradePostMortemAnalyzer:
         self.contracts = contracts
         self.tick_value = tick_value
         
-        # Initialize Claude client
+        # Initialize OpenAI client
         self._client: Optional[ClaudeClient] = None
         if enabled and OPENAI_AVAILABLE:
             try:
                 self._client = get_claude_client()
             except Exception as e:
-                logger.warning(f"Failed to initialize Claude client for post-mortems: {e}")
+                logger.warning(f"Failed to initialize OpenAI client for post-mortems: {e}")
         
         # Batch buffer for pattern analysis
         self._pending_trades: List[Dict] = []
@@ -379,7 +379,7 @@ class TradePostMortemAnalyzer:
             # Build prompt
             user_prompt = self._build_prompt(signal, exit_data, market_data)
             
-            # Call Claude
+            # Call OpenAI
             response = self._client.chat(
                 messages=[{"role": "user", "content": user_prompt}],
                 system_prompt=POSTMORTEM_SYSTEM_PROMPT,
@@ -570,7 +570,7 @@ class TradePostMortemAnalyzer:
         )
     
     def _parse_response(self, response: str) -> PostMortemReport:
-        """Parse Claude's JSON response into PostMortemReport."""
+        """Parse the model's JSON response into PostMortemReport."""
         try:
             response = response.strip()
             

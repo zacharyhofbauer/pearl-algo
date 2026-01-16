@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
 
-# Import Claude client (optional dependency)
+# Import OpenAI client (optional dependency; wrapper kept as `claude_client.py` for backward compat)
 try:
     from pearlalgo.utils.claude_client import (
         ClaudeClient,
@@ -173,12 +173,12 @@ class LLMSignalAnnotator:
     """
     LLM-powered signal annotator for trading signals.
     
-    Uses Claude to analyze signals and provide human-readable explanations.
+    Uses OpenAI to analyze signals and provide human-readable explanations.
     All operations are non-blocking and fail gracefully.
     
     Configuration:
     - enabled: Master toggle for annotations
-    - model: Claude model to use (default: claude-sonnet-4-20250514)
+    - model: Model to use (default: gpt-4o)
     - timeout_seconds: Max time to wait for annotation (default: 5s)
     - batch_mode: Whether to batch multiple signals (default: False)
     """
@@ -195,7 +195,7 @@ class LLMSignalAnnotator:
         
         Args:
             enabled: Whether annotation is enabled
-            model: Claude model to use
+            model: Model to use
             timeout_seconds: Timeout for annotation requests
             batch_mode: Whether to batch signals (not yet implemented)
         """
@@ -204,13 +204,13 @@ class LLMSignalAnnotator:
         self.timeout_seconds = timeout_seconds
         self.batch_mode = batch_mode
         
-        # Initialize Claude client (may be None if not configured)
+        # Initialize OpenAI client (may be None if not configured)
         self._client: Optional[ClaudeClient] = None
         if enabled and OPENAI_AVAILABLE:
             try:
                 self._client = get_claude_client()
             except Exception as e:
-                logger.warning(f"Failed to initialize Claude client for annotations: {e}")
+                logger.warning(f"Failed to initialize OpenAI client for annotations: {e}")
         
         # Stats
         self._total_requests = 0
@@ -254,7 +254,7 @@ class LLMSignalAnnotator:
             # Build prompt
             user_prompt = self._build_prompt(signal, market_context, performance_metrics)
             
-            # Call Claude
+            # Call OpenAI
             response = self._client.chat(
                 messages=[{"role": "user", "content": user_prompt}],
                 system_prompt=SIGNAL_ANNOTATION_SYSTEM_PROMPT,
@@ -423,7 +423,7 @@ class LLMSignalAnnotator:
         )
     
     def _parse_response(self, response: str) -> SignalAnnotation:
-        """Parse Claude's JSON response into SignalAnnotation."""
+        """Parse the model's JSON response into SignalAnnotation."""
         try:
             # Try to extract JSON from response
             response = response.strip()
@@ -591,7 +591,7 @@ class EntryTimingOptimizer:
         
         Args:
             enabled: Whether optimization is enabled
-            model: Claude model to use
+            model: Model to use
             timeout_seconds: Timeout (keep short)
         """
         self.enabled = enabled
@@ -603,7 +603,7 @@ class EntryTimingOptimizer:
             try:
                 self._client = get_claude_client()
             except Exception as e:
-                logger.warning(f"Failed to initialize Claude for timing optimizer: {e}")
+                logger.warning(f"Failed to initialize OpenAI client for timing optimizer: {e}")
         
         self._total_suggestions = 0
         
