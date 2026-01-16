@@ -1,0 +1,41 @@
+//@version=5
+indicator("VWAP with Average Analysis", shorttitle="VWAP AA", overlay=true)
+
+// VWAP with Average Analysis bands
+// Generic public domain implementation
+
+// Inputs
+show_vwap = input.bool(true, title="Show VWAP")
+show_bands = input.bool(true, title="Show Bands")
+std_dev = input.float(1.0, title="Standard Deviation", minval=0.1, step=0.1)
+band_count = input.int(2, title="Number of Bands", minval=1, maxval=3)
+
+// Calculate VWAP
+vwap_value = ta.vwap
+
+// Calculate standard deviation
+vwap_std = ta.stdev(close, 20)
+
+// Plot VWAP
+plot(show_vwap ? vwap_value : na, title="VWAP", color=color.blue, linewidth=2)
+
+// Plot bands
+if show_bands
+    for i = 1 to band_count
+        upper_band = vwap_value + (vwap_std * std_dev * i)
+        lower_band = vwap_value - (vwap_std * std_dev * i)
+        plot(upper_band, title="Upper Band " + str.tostring(i), color=color.new(color.blue, 50), linewidth=1)
+        plot(lower_band, title="Lower Band " + str.tostring(i), color=color.new(color.blue, 50), linewidth=1)
+
+// Fill between bands
+if show_bands and band_count >= 1
+    upper1 = vwap_value + (vwap_std * std_dev)
+    lower1 = vwap_value - (vwap_std * std_dev)
+    fill(plot(upper1), plot(lower1), color=color.new(color.blue, 90), title="Band Fill")
+
+// Price position relative to VWAP
+price_above_vwap = close > vwap_value
+price_below_vwap = close < vwap_value
+
+// Background color
+bgcolor(price_above_vwap ? color.new(color.green, 97) : color.new(color.red, 97), title="Price vs VWAP")

@@ -1,0 +1,37 @@
+//@version=5
+indicator("EMA Crossover", shorttitle="EMA Cross", overlay=true)
+
+// Generic EMA Crossover indicator
+// Public domain implementation
+
+// Inputs
+fast_length = input.int(9, title="Fast EMA Length", minval=1)
+slow_length = input.int(21, title="Slow EMA Length", minval=1)
+show_signals = input.bool(true, title="Show Crossover Signals")
+show_labels = input.bool(true, title="Show Labels")
+
+// Calculate EMAs
+fast_ema = ta.ema(close, fast_length)
+slow_ema = ta.ema(close, slow_length)
+
+// Crossover detection
+bullish_cross = ta.crossover(fast_ema, slow_ema)
+bearish_cross = ta.crossunder(fast_ema, slow_ema)
+
+// Plot EMAs
+plot(fast_ema, title="Fast EMA", color=color.blue, linewidth=2)
+plot(slow_ema, title="Slow EMA", color=color.red, linewidth=2)
+
+// Plot signals
+plotshape(show_signals and bullish_cross, title="Bullish Cross", location=location.belowbar, style=shape.triangleup, color=color.green, size=size.small)
+plotshape(show_signals and bearish_cross, title="Bearish Cross", location=location.abovebar, style=shape.triangledown, color=color.red, size=size.small)
+
+// Labels
+if show_labels and bullish_cross
+    label.new(bar_index, low, "BUY", style=label.style_label_up, color=color.green, textcolor=color.white, size=size.small)
+
+if show_labels and bearish_cross
+    label.new(bar_index, high, "SELL", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
+
+// Background color
+bgcolor(fast_ema > slow_ema ? color.new(color.green, 95) : color.new(color.red, 95), title="Trend")
