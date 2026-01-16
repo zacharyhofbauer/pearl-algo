@@ -283,9 +283,13 @@ class NQAgentTelegramNotifier:
         sid = str(signal.get("signal_id") or "")
         sid_short = (sid[:16] + "…") if sid else ""
 
+        # Check if this is a test signal (won't be saved to database/menu)
+        is_test = signal.get("_is_test", False) or str(signal.get("reason", "")).lower().startswith("test")
+        test_prefix = "🧪 [TEST - NOT TRACKED] " if is_test else ""
+
         # Keep this compact and robust to Markdown parsing issues.
         lines = [
-            f"SIGNAL {symbol} {direction} | {sig_type}",
+            f"{test_prefix}SIGNAL {symbol} {direction} | {sig_type}",
             f"entry={entry:.2f} stop={stop:.2f} target={target:.2f} conf={conf:.0%}",
         ]
         reason = str(signal.get("reason") or "").strip()
@@ -340,6 +344,10 @@ class NQAgentTelegramNotifier:
             confidence = 0.0
         signal_id = str(signal.get("signal_id") or "")
 
+        # Check if this is a test signal (won't be saved to database/menu)
+        is_test = signal.get("_is_test", False) or str(signal.get("reason", "")).lower().startswith("test")
+        test_label = "🧪 *[TEST - NOT TRACKED]*\n" if is_test else ""
+
         # Use shared helpers for consistent formatting
         dir_emoji, dir_label = format_signal_direction(signal.get("direction", "long"))
         conf_emoji, conf_tier = format_signal_confidence_tier(confidence)
@@ -357,7 +365,7 @@ class NQAgentTelegramNotifier:
                 rr = reward / risk
 
         # Build calm-minimal message: decision-first, action-cue-early
-        message = f"🎯 *{symbol} {dir_emoji} {dir_label}* | {signal_type}\n\n"
+        message = f"{test_label}🎯 *{symbol} {dir_emoji} {dir_label}* | {signal_type}\n\n"
 
         # Trade Plan (always first, compact)
         if entry_price:
