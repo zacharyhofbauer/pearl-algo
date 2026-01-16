@@ -14,6 +14,7 @@ from typing import Dict, List, Any
 import pandas as pd
 
 from pearlalgo.utils.claude_client import ClaudeClient, ClaudeAPIKeyMissingError
+from pearlalgo.utils.absolute_mode import ABSOLUTE_MODE_PROMPT
 from pearlalgo.utils.logger import logger
 
 
@@ -89,35 +90,37 @@ class PearlBotAIOptimizer:
             return {"error": "OpenAI client not available"}
 
         prompt = f"""
-        Analyze this Pearl bot trading performance and provide specific recommendations:
+Analyze this Pearl bot trading performance and return a plain text report with sections:
+FACTS
+DIAGNOSIS
+ACTIONS
+RISKS
+VALIDATION
 
-        PERFORMANCE DATA:
-        - Period: {performance_data['period_days']} days
-        - Total Trades: {performance_data['total_trades']}
-        - Win Rate: {performance_data['win_rate']:.1%}
-        - Average Win: ${performance_data['avg_win']:.2f}
-        - Average Loss: ${performance_data['avg_loss']:.2f}
-        - Total P&L: ${performance_data['total_pnl']:.2f}
-        - Profit Factor: {performance_data['profit_factor']:.2f}
+Include concrete config paths and file paths in ACTIONS. No questions.
 
-        BOT PERFORMANCE:
-        {json.dumps(performance_data['bot_performance'], indent=2)}
+PERFORMANCE DATA:
+- Period: {performance_data['period_days']} days
+- Total Trades: {performance_data['total_trades']}
+- Win Rate: {performance_data['win_rate']:.1%}
+- Average Win: ${performance_data['avg_win']:.2f}
+- Average Loss: ${performance_data['avg_loss']:.2f}
+- Total P&L: ${performance_data['total_pnl']:.2f}
+- Profit Factor: {performance_data['profit_factor']:.2f}
 
-        RECENT LOSSES:
-        {json.dumps(performance_data['recent_losses'][:3], indent=2)}
+BOT PERFORMANCE:
+{json.dumps(performance_data['bot_performance'], indent=2)}
 
-        Provide specific recommendations for:
-        1. Risk management improvements
-        2. Entry/exit timing adjustments
-        3. Bot-specific optimizations
-        4. Configuration parameter changes
-        5. Code modifications needed
-
-        Focus on actionable changes that could improve the profit factor and win rate.
-        """
+RECENT LOSSES:
+{json.dumps(performance_data['recent_losses'][:3], indent=2)}
+"""
 
         try:
-            response = self.claude.generate_response(prompt, max_tokens=2000)
+            response = self.claude.generate_response(
+                prompt,
+                max_tokens=2000,
+                system_prompt=ABSOLUTE_MODE_PROMPT,
+            )
 
             # Parse recommendations
             recommendations = {

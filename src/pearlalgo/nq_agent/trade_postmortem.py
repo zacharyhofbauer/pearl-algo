@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.absolute_mode import ABSOLUTE_MODE_PROMPT
 
 # Import OpenAI client (optional dependency; wrapper kept as `claude_client.py` for backward compat)
 try:
@@ -45,20 +46,21 @@ ANTHROPIC_AVAILABLE = OPENAI_AVAILABLE
 # Prompt Templates
 # ============================================================================
 
-POSTMORTEM_SYSTEM_PROMPT = """You are a trading post-mortem analyst for an NQ/MNQ futures intraday trading system.
+POSTMORTEM_SYSTEM_PROMPT = (
+    ABSOLUTE_MODE_PROMPT
+    + """\n\nROLE: Trading post-mortem analyst for an NQ/MNQ futures intraday system.
 
-Your role is to analyze COMPLETED trades and provide actionable lessons:
-1. Entry Quality: Was the entry well-timed? Better price available?
-2. Indicator Accuracy: Did the signals/indicators predict correctly?
-3. Risk Management: Was stop/target appropriate?
-4. Lessons: What can be improved for future similar setups?
+Task
+- Explain why the trade won or lost
+- Assess entry quality and indicator accuracy
+- Assess risk management
+- Extract lessons for similar setups
 
-RULES:
-- Be objective and data-driven
-- Focus on actionable improvements, not hindsight bias
-- Consider market context at entry time
-- Keep analysis concise but insightful
-- Never blame randomness - extract learnable patterns
+Rules
+- Objective and data-driven
+- No hindsight bias
+- Consider market context
+- Concise
 
 Output ONLY valid JSON with these fields:
 {
@@ -79,8 +81,9 @@ Output ONLY valid JSON with these fields:
   },
   "lessons": ["lesson1", "lesson2"],
   "similar_setup_advice": "What to do differently next time",
-  "confidence_calibration": "Was confidence score accurate? overconfident|accurate|underconfident"
+  "confidence_calibration": "overconfident|accurate|underconfident"
 }"""
+)
 
 POSTMORTEM_USER_TEMPLATE = """Analyze this completed trade:
 
@@ -203,29 +206,28 @@ class PostMortemReport:
         lines = []
         
         # Header with outcome
-        lines.append(f"📊 *Trade Post-Mortem*")
-        lines.append(f"\n{self.outcome_analysis}")
-        
+        lines.append("TRADE POST-MORTEM")
+        lines.append(f"{self.outcome_analysis}")
+
         # Entry quality
-        stars = "⭐" * self.entry_quality.score + "☆" * (5 - self.entry_quality.score)
-        lines.append(f"\n*Entry:* {stars}")
+        lines.append(f"\nENTRY QUALITY: {self.entry_quality.score}/5")
         if self.entry_quality.comment:
-            lines.append(f"  {self.entry_quality.comment}")
-        
+            lines.append(f"ENTRY NOTE: {self.entry_quality.comment}")
+
         # Risk assessment
-        lines.append(f"\n*Risk Management:*")
-        lines.append(f"  Stop: {self.risk_management.stop_assessment}")
-        lines.append(f"  Target: {self.risk_management.target_assessment}")
-        
+        lines.append("\nRISK MANAGEMENT")
+        lines.append(f"STOP: {self.risk_management.stop_assessment}")
+        lines.append(f"TARGET: {self.risk_management.target_assessment}")
+
         # Lessons
         if self.lessons:
-            lines.append(f"\n*Lessons:*")
+            lines.append("\nLESSONS")
             for lesson in self.lessons[:3]:
-                lines.append(f"  • {lesson}")
-        
+                lines.append(f"- {lesson}")
+
         # Advice for similar setups
         if self.similar_setup_advice:
-            lines.append(f"\n*Next time:* {self.similar_setup_advice}")
+            lines.append(f"\nNEXT TIME: {self.similar_setup_advice}")
         
         return "\n".join(lines)
     
@@ -235,16 +237,10 @@ class PostMortemReport:
             return f"PostMortem Error: {self.error}"
         
         entry_stars = self.entry_quality.score
-        calibration_emoji = {
-            "overconfident": "📈",
-            "accurate": "✅",
-            "underconfident": "📉",
-        }.get(self.confidence_calibration, "❓")
-        
         return (
             f"Entry: {entry_stars}/5 | "
             f"Stop: {self.risk_management.stop_assessment} | "
-            f"Calibration: {calibration_emoji} | "
+            f"Calibration: {self.confidence_calibration} | "
             f"Lessons: {len(self.lessons)}"
         )
     

@@ -478,7 +478,7 @@ class NQAgentTelegramNotifier:
         llm_annotation = signal.get("_llm_annotation")
         if isinstance(llm_annotation, dict) and llm_annotation.get("explanation"):
             try:
-                summary_emoji = str(llm_annotation.get("summary_emoji") or "🤖")
+                summary_level = str(llm_annotation.get("summary_level") or "").strip().lower()
                 explanation = str(llm_annotation.get("explanation") or "")
                 confidence_note = str(llm_annotation.get("confidence_note") or "")
                 key_factors = llm_annotation.get("key_factors", [])
@@ -489,23 +489,25 @@ class NQAgentTelegramNotifier:
                     # Truncate if too long
                     if len(explanation) > 150:
                         explanation = explanation[:147] + "..."
-                    message += f"\n{summary_emoji} *AI Analysis:* {explanation}\n"
+                    summary_label = summary_level.upper() if summary_level else "NEUTRAL"
+                    message += f"\nAI ANALYSIS: {explanation}\n"
+                    message += f"SUMMARY LEVEL: {summary_label}\n"
                     
                     # Key factors (compact, max 2)
                     if key_factors and isinstance(key_factors, list):
                         factors = key_factors[:2]
                         if factors:
                             factors_str = " | ".join(str(f)[:40] for f in factors)
-                            message += f"✅ {factors_str}\n"
+                            message += f"KEY FACTORS: {factors_str}\n"
                     
                     # Risks (compact, max 1)
                     if risks and isinstance(risks, list) and risks[0]:
                         risk_str = str(risks[0])[:50]
-                        message += f"⚠️ {risk_str}\n"
+                        message += f"RISKS: {risk_str}\n"
                     
                     # Confidence note (if different from existing confidence tier)
                     if confidence_note and confidence_note.lower() not in ("medium confidence",):
-                        message += f"📊 {confidence_note}\n"
+                        message += f"CONFIDENCE: {confidence_note}\n"
             except Exception:
                 # Never let optional LLM formatting break the alert
                 pass
@@ -520,30 +522,23 @@ class NQAgentTelegramNotifier:
                 size_adj = llm_risk.get("size_adjustment")
 
                 if risk_level in ("medium", "high", "critical") or proceed is False:
-                    emoji_map = {
-                        "low": "🟢",
-                        "medium": "🟡",
-                        "high": "🟠",
-                        "critical": "🔴",
-                    }
-                    emoji = emoji_map.get(risk_level, "⚪")
-                    header = f"{emoji} *Risk:* {risk_level.upper() if risk_level else 'UNKNOWN'}"
+                    header = f"RISK: {risk_level.upper() if risk_level else 'UNKNOWN'}"
                     if proceed is False:
-                        header += " ⛔"
+                        header += " | PROCEED: NO"
                     message += f"\n{header}\n"
 
                     if primary:
                         msg = str(primary)
                         if len(msg) > 80:
                             msg = msg[:77] + "..."
-                        message += f"⚠️ {msg}\n"
+                        message += f"PRIMARY CONCERN: {msg}\n"
 
                     try:
                         if size_adj is not None:
                             adj = float(size_adj)
                             if abs(adj - 1.0) >= 0.05:
                                 pct = (adj - 1.0) * 100
-                                message += f"📏 Size adj: {pct:+.0f}%\n"
+                                    message += f"SIZE ADJUSTMENT: {pct:+.0f}%\n"
                     except Exception:
                         pass
             except Exception:

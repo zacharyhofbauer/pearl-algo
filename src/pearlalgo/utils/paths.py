@@ -59,19 +59,6 @@ def get_events_file(state_dir: Path) -> Path:
     return state_dir / "events.jsonl"
 
 
-def get_state_file(state_dir: Path) -> Path:
-    """
-    Get path to state file.
-    
-    Args:
-        state_dir: State directory path
-        
-    Returns:
-        Path to state.json file
-    """
-    return state_dir / "state.json"
-
-
 def get_performance_file(state_dir: Path) -> Path:
     """
     Get path to performance file.

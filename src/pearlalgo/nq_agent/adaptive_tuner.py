@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.absolute_mode import ABSOLUTE_MODE_PROMPT
 
 # Import OpenAI client (optional dependency; wrapper kept as `claude_client.py` for backward compat)
 try:
@@ -43,31 +44,29 @@ ANTHROPIC_AVAILABLE = OPENAI_AVAILABLE
 # Prompt Templates
 # ============================================================================
 
-ADAPTIVE_TUNING_SYSTEM_PROMPT = """You are a trading system optimizer for an NQ/MNQ futures intraday trading system.
+ADAPTIVE_TUNING_SYSTEM_PROMPT = (
+    ABSOLUTE_MODE_PROMPT
+    + """\n\nROLE: Trading system optimizer for an NQ/MNQ futures intraday system.
 
-Your role is to analyze performance data and suggest CONFIG CHANGES to improve results:
-1. Confidence thresholds per signal type
-2. Stop loss / take profit distances
-3. Position sizing rules
-4. Session-based adjustments
-5. Signal type enable/disable recommendations
+Task
+- Analyze performance data
+- Propose config changes to improve results
+- Limit changes to small, reversible adjustments
 
-RULES:
-- Be conservative - suggest small incremental changes
-- Quantify expected impact where possible
-- Consider sample size limitations
-- Never suggest changes that break risk limits
-- Each change must be reversible
-- Focus on exploitable, statistically significant patterns
+Rules
+- Quantify expected impact
+- Respect sample size limits
+- Do not break risk limits
+- Focus on statistically significant patterns
 
-Config file structure reference:
-- signals.min_confidence: Overall minimum confidence
-- signals.min_risk_reward: Minimum R:R ratio
-- strategy.enabled_signals: List of enabled signal types
-- strategy.disabled_signals: List of disabled signal types
-- strategy.base_contracts: Base position size
-- risk.stop_loss_atr_multiplier: Stop distance multiplier
-- risk.take_profit_risk_reward: Target R:R for TP
+Config reference
+- signals.min_confidence
+- signals.min_risk_reward
+- strategy.enabled_signals
+- strategy.disabled_signals
+- strategy.base_contracts
+- risk.stop_loss_atr_multiplier
+- risk.take_profit_risk_reward
 
 Output ONLY valid JSON:
 {
@@ -99,13 +98,14 @@ Output ONLY valid JSON:
     "momentum_long": {"action": "disable", "reason": "0% win rate in 10 trades"}
   },
   "session_recommendations": {
-    "tokyo": "Consider reducing position size",
-    "london": "Good performance, no changes",
-    "new_york": "Primary session - maintain focus"
+    "tokyo": "Reduce position size",
+    "london": "Maintain current settings",
+    "new_york": "Primary session"
   },
   "warnings": ["Any concerns about the data or suggestions"],
   "next_review": "When to review again"
 }"""
+)
 
 ADAPTIVE_TUNING_USER_TEMPLATE = """Analyze performance and suggest config optimizations:
 
@@ -220,59 +220,58 @@ class TuningReport:
     def format_telegram(self) -> str:
         """Format report for Telegram message."""
         if self.error:
-            return f"❌ Tuning analysis error: {self.error}"
+            return f"TUNING ANALYSIS ERROR: {self.error}"
         
         lines = []
         
         # Header
-        lines.append(f"🔧 *Adaptive Tuning Report*")
-        lines.append(f"📊 {self.sample_size} trades analyzed")
-        
+        lines.append("ADAPTIVE TUNING REPORT")
+        lines.append(f"TRADES ANALYZED: {self.sample_size}")
+
         # Summary
         if self.analysis_summary:
-            lines.append(f"\n{self.analysis_summary}")
-        
+            lines.append(f"\nSUMMARY: {self.analysis_summary}")
+
         # Current performance
         perf = self.current_performance
         if perf:
             wr = perf.get("win_rate", 0)
             rr = perf.get("avg_rr", 0)
-            lines.append(f"\n*Current:* {wr:.0%} WR, {rr:.1f} R:R")
-        
+            lines.append(f"\nCURRENT: {wr:.0%} WR, {rr:.1f} R:R")
+
         # Top suggestions (max 3)
         high_priority = [s for s in self.suggestions if s.priority == "high"]
         if high_priority:
-            lines.append(f"\n*High Priority Suggestions:*")
+            lines.append("\nHIGH PRIORITY")
             for sug in high_priority[:3]:
-                lines.append(f"  🔴 `{sug.config_path}`")
-                lines.append(f"     {sug.current_value} → {sug.suggested_value}")
-                lines.append(f"     _{sug.rationale}_")
-        
+                lines.append(f"SET {sug.config_path}: {sug.current_value} -> {sug.suggested_value}")
+                lines.append(f"RATIONALE: {sug.rationale}")
+
         medium_priority = [s for s in self.suggestions if s.priority == "medium"]
         if medium_priority:
-            lines.append(f"\n*Medium Priority:*")
+            lines.append("\nMEDIUM PRIORITY")
             for sug in medium_priority[:2]:
-                lines.append(f"  🟡 `{sug.config_path}`: {sug.current_value} → {sug.suggested_value}")
-        
+                lines.append(f"SET {sug.config_path}: {sug.current_value} -> {sug.suggested_value}")
+
         # Signal type recommendations (only actionable)
         disable_signals = [
             (k, v) for k, v in self.signal_type_recommendations.items()
             if v.get("action") == "disable"
         ]
         if disable_signals:
-            lines.append(f"\n*Consider Disabling:*")
+            lines.append("\nDISABLE SIGNALS")
             for sig, rec in disable_signals[:2]:
-                lines.append(f"  ⛔ {sig}: {rec.get('reason', '')}")
-        
+                lines.append(f"DISABLE {sig}: {rec.get('reason', '')}")
+
         # Warnings
         if self.warnings:
-            lines.append(f"\n*⚠️ Warnings:*")
+            lines.append("\nWARNINGS")
             for warning in self.warnings[:2]:
-                lines.append(f"  • {warning}")
-        
+                lines.append(f"- {warning}")
+
         # Next review
         if self.next_review:
-            lines.append(f"\n📅 Next review: {self.next_review}")
+            lines.append(f"\nNEXT REVIEW: {self.next_review}")
         
         return "\n".join(lines)
     

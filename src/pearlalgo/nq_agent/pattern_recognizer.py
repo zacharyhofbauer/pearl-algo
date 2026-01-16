@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.absolute_mode import ABSOLUTE_MODE_PROMPT
 
 # Import OpenAI client (optional dependency; wrapper kept as `claude_client.py` for backward compat)
 try:
@@ -44,21 +45,19 @@ ANTHROPIC_AVAILABLE = OPENAI_AVAILABLE
 # Prompt Templates
 # ============================================================================
 
-PATTERN_RECOGNITION_SYSTEM_PROMPT = """You are a trading pattern analyst for an NQ/MNQ futures intraday trading system.
+PATTERN_RECOGNITION_SYSTEM_PROMPT = (
+    ABSOLUTE_MODE_PROMPT
+    + """\n\nROLE: Trading pattern analyst for an NQ/MNQ futures intraday system.
 
-Your role is to analyze a BATCH of recent trades and identify statistically significant patterns:
-1. Signal Type Performance: Which signal types are working/failing?
-2. Time Patterns: When do trades perform best/worst? (session, time of day)
-3. Regime Patterns: Which regimes favor which setups?
-4. Entry Patterns: Are there systematic entry timing issues?
-5. Indicator Patterns: Which indicator combinations predict success?
-
-RULES:
-- Only report patterns with statistical significance (not random noise)
-- Quantify patterns with numbers (win rates, sample sizes)
+Task
+- Analyze a batch of recent trades
+- Identify statistically significant patterns
 - Provide actionable recommendations
-- Consider sample size limitations
-- Focus on exploitable edges
+
+Rules
+- Report only significant patterns
+- Quantify patterns with numbers
+- Consider sample size limits
 
 Output ONLY valid JSON with this structure:
 {
@@ -99,6 +98,7 @@ Output ONLY valid JSON with this structure:
   ],
   "warnings": ["Any concerning patterns to watch"]
 }"""
+)
 
 PATTERN_RECOGNITION_USER_TEMPLATE = """Analyze these {trade_count} recent trades for patterns:
 
@@ -211,29 +211,29 @@ class PatternReport:
     def format_telegram(self) -> str:
         """Format report for Telegram message."""
         if self.error:
-            return f"❌ Pattern analysis error: {self.error}"
+            return f"PATTERN ANALYSIS ERROR: {self.error}"
         
         lines = []
         
         # Header
-        lines.append(f"📈 *Pattern Analysis* ({self.sample_size} trades)")
-        lines.append(f"\n{self.overall_assessment}")
-        
+        lines.append(f"PATTERN ANALYSIS ({self.sample_size} trades)")
+        lines.append(f"{self.overall_assessment}")
+
         # Win rate summary
-        lines.append(f"\n*Win Rate:* {self.win_rate:.1%}")
-        
+        lines.append(f"\nWIN RATE: {self.win_rate:.1%}")
+
         # Top patterns (max 3)
         high_conf_patterns = [p for p in self.patterns if p.confidence == "high" and p.actionable]
         if high_conf_patterns:
-            lines.append(f"\n*Key Patterns Found:*")
+            lines.append("\nKEY PATTERNS")
             for pattern in high_conf_patterns[:3]:
-                lines.append(f"  • *{pattern.name}*: {pattern.description}")
+                lines.append(f"- {pattern.name}: {pattern.description}")
                 if pattern.recommendation:
-                    lines.append(f"    → {pattern.recommendation}")
-        
+                    lines.append(f"  ACTION: {pattern.recommendation}")
+
         # Signal type breakdown (top 3)
         if self.signal_type_breakdown:
-            lines.append(f"\n*By Signal Type:*")
+            lines.append("\nBY SIGNAL TYPE")
             sorted_types = sorted(
                 self.signal_type_breakdown.items(),
                 key=lambda x: x[1].get("win_rate", 0),
@@ -241,21 +241,19 @@ class PatternReport:
             )
             for sig_type, data in sorted_types[:3]:
                 wr = data.get("win_rate", 0)
-                emoji = "✅" if wr >= 0.5 else "⚠️"
-                lines.append(f"  {emoji} {sig_type}: {wr:.0%} ({data.get('wins', 0)}W/{data.get('losses', 0)}L)")
-        
+                lines.append(f"- {sig_type}: {wr:.0%} ({data.get('wins', 0)}W/{data.get('losses', 0)}L)")
+
         # Top recommendations
         if self.recommendations:
-            lines.append(f"\n*Recommendations:*")
+            lines.append("\nRECOMMENDATIONS")
             for rec in self.recommendations[:2]:
-                priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(rec.priority, "⚪")
-                lines.append(f"  {priority_emoji} {rec.action}")
-        
+                lines.append(f"- {rec.priority.upper()}: {rec.action}")
+
         # Warnings
         if self.warnings:
-            lines.append(f"\n*⚠️ Warnings:*")
+            lines.append("\nWARNINGS")
             for warning in self.warnings[:2]:
-                lines.append(f"  • {warning}")
+                lines.append(f"- {warning}")
         
         return "\n".join(lines)
     

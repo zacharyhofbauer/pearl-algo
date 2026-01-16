@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.absolute_mode import ABSOLUTE_MODE_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -64,27 +65,19 @@ Example output format:
 If multiple files need changes, include all of them in the same diff output."""
 
 
-CHAT_SYSTEM_PROMPT = """You are an AI assistant inside a Telegram bot for the PearlAlgo MNQ Trading Agent.
-
-The user wants to chat naturally (like ChatGPT). Be clear, direct, and helpful. Ask clarifying questions when needed.
-
-You can help with:
-- Understanding and improving strategies, risk, and execution (MNQ/NQ context)
-- Monitoring: interpreting recent trades/signals/performance and spotting issues
-- Debugging the codebase and architecture
-- Proposing new features and improvements
-- Writing concise code-change guidance (include file paths; prefer small diffs)
-
-When discussing monitoring/trades:
-- Prefer concrete, actionable recommendations
-- If you are given a SYSTEM SNAPSHOT, treat it as authoritative context
-- If data is missing, say what you need (e.g., performance.json, signals.jsonl, broker positions)
-
-Safety:
-- Never ask for or reveal secrets (API keys, tokens, credentials)
-- For risky changes (live trading), recommend dry_run/paper validation first
-
-Keep responses reasonably sized for Telegram: use short sections and bullets, but be detailed when the user asks."""
+CHAT_SYSTEM_PROMPT = (
+    ABSOLUTE_MODE_PROMPT
+    + "\n\nROLE: AI assistant for the PearlAlgo MNQ Trading Agent inside Telegram.\n"
+      "Scope\n"
+      "- Trading system analysis, performance diagnosis, and configuration changes\n"
+      "- Monitoring interpretation and fault isolation\n"
+      "- Codebase debugging and minimal change guidance\n"
+      "- Strategy and risk control adjustments for MNQ/NQ\n\n"
+      "Constraints\n"
+      "- Treat SYSTEM SNAPSHOT as authoritative.\n"
+      "- If required data is missing, output MISSING list and stop.\n"
+      "- Never output secrets or request them."
+)
 
 
 def build_chat_system_prompt(
@@ -384,6 +377,61 @@ class ClaudeClient:
             else:
                 logger.error(f"Unexpected error calling OpenAI: {e}")
                 raise ClaudeAPIError(f"Unexpected error: {e}") from e
+
+    def generate_response(
+        self,
+        prompt: str,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """
+        Generate a single response from a user prompt.
+        """
+        system = system_prompt or CHAT_SYSTEM_PROMPT
+        user_message = str(prompt)
+
+        if self._is_disabled():
+            raise ClaudeAPIError(
+                f"OpenAI temporarily disabled until {self._disabled_until.isoformat() if self._disabled_until else 'unknown'}: "
+                f"{self._disabled_reason or 'billing/availability issue'}"
+            )
+
+        logger.info(
+            "Sending single-prompt request to OpenAI",
+            extra={"prompt_preview": user_message[:100]}
+        )
+
+        try:
+            response = self._client.chat.completions.create(
+                model=self._model,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_message},
+                ],
+            )
+
+            if response.choices and len(response.choices) > 0:
+                result = response.choices[0].message.content
+                if result:
+                    logger.info(
+                        "Received single-prompt response from OpenAI",
+                        extra={"response_length": len(result), "finish_reason": response.choices[0].finish_reason}
+                    )
+                    return result
+            raise ClaudeAPIError("Empty response from OpenAI API")
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "rate limit" in error_msg:
+                logger.error(f"OpenAI API rate limit: {e}")
+                raise ClaudeAPIError(f"Rate limit exceeded: {e}") from e
+            if "insufficient_quota" in error_msg or "billing" in error_msg:
+                logger.error(f"OpenAI API billing/quota error: {e}")
+                self._disable_for(6 * 3600, reason=str(e))
+                raise ClaudeAPIError(f"Billing/quota error: {e}") from e
+            logger.error(f"Unexpected error calling OpenAI: {e}")
+            raise ClaudeAPIError(f"Unexpected error: {e}") from e
     
     def suggest_files(
         self,

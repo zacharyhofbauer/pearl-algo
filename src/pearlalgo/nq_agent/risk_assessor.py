@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.absolute_mode import ABSOLUTE_MODE_PROMPT
 
 # Import OpenAI client (optional dependency; wrapper kept as `claude_client.py` for backward compat)
 try:
@@ -43,21 +44,21 @@ ANTHROPIC_AVAILABLE = OPENAI_AVAILABLE
 # Prompt Templates
 # ============================================================================
 
-RISK_ASSESSMENT_SYSTEM_PROMPT = """You are a real-time risk assessor for an NQ/MNQ futures trading system.
+RISK_ASSESSMENT_SYSTEM_PROMPT = (
+    ABSOLUTE_MODE_PROMPT
+    + """\n\nROLE: Real-time risk assessor for an NQ/MNQ futures trading system.
 
-Your role is to provide a FAST risk assessment before trade execution:
-1. Is this signal type performing well recently?
-2. Are we in a losing streak that warrants caution?
-3. Is current market volatility appropriate?
-4. Are there any red flags from recent trades?
-5. Should position size be adjusted?
+Task
+- Assess recent signal performance
+- Identify streak and volatility risks
+- Flag red flags from recent trades
+- Specify size adjustment if needed
 
-RULES:
-- Be VERY concise (this must complete in <3 seconds)
-- Focus on immediate risk factors, not general advice
-- Use data-driven assessment
-- Never block trades, only warn or suggest adjustments
-- Default to "proceed" unless clear red flags
+Rules
+- Very concise
+- Data-driven
+- Do not block trades unless critical
+- Default to proceed unless clear red flags
 
 Output ONLY valid JSON:
 {
@@ -68,6 +69,7 @@ Output ONLY valid JSON:
   "primary_concern": "Main risk factor or null",
   "confidence": 0.8
 }"""
+)
 
 RISK_ASSESSMENT_USER_TEMPLATE = """Assess risk for this trade:
 
@@ -133,22 +135,14 @@ class RiskAssessment:
         if self.error or self.risk_level == "low":
             return ""  # Don't clutter with low-risk assessments
         
-        emoji_map = {
-            "low": "🟢",
-            "medium": "🟡",
-            "high": "🟠",
-            "critical": "🔴",
-        }
-        emoji = emoji_map.get(self.risk_level, "⚪")
-        
-        lines = [f"{emoji} *Risk Assessment:* {self.risk_level.upper()}"]
-        
+        lines = [f"RISK ASSESSMENT: {self.risk_level.upper()}"]
+
         if self.primary_concern:
-            lines.append(f"⚠️ {self.primary_concern}")
-        
+            lines.append(f"PRIMARY CONCERN: {self.primary_concern}")
+
         if self.size_adjustment != 1.0:
             adj_pct = (self.size_adjustment - 1.0) * 100
-            lines.append(f"📊 Size adjustment: {adj_pct:+.0f}%")
+            lines.append(f"SIZE ADJUSTMENT: {adj_pct:+.0f}%")
         
         return "\n".join(lines)
     
