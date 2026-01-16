@@ -47,56 +47,20 @@ echo "-> Starting NQ Agent (background)..."
 ./scripts/lifecycle/start_nq_agent_service.sh --background || true
 
 if [ "$NO_TELEGRAM" = false ]; then
-  echo ""
-  echo "-> Starting Telegram command handler (background)..."
-  ./scripts/telegram/start_command_handler.sh --background || true
+  if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+    echo ""
+    echo "-> Telegram command handler skipped (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set)."
+  else
+    echo ""
+    echo "-> Starting Telegram command handler (background)..."
+    ./scripts/telegram/start_command_handler.sh --background || true
+  fi
 fi
 
 if [ "$NO_MONITOR" = false ]; then
   echo ""
   echo "-> Starting Pearl Algo Monitor (GUI)..."
-  if [ -z "${DISPLAY:-}" ]; then
-    echo "⚠️  DISPLAY is not set; skipping monitor launch (run from desktop session)."
-  else
-    mkdir -p "$PROJECT_DIR/logs"
-    LOG_FILE="$PROJECT_DIR/logs/pearl_algo_monitor.log"
-
-    # Determine Qt platform backend (X11 vs Wayland)
-    QT_PLATFORM=""
-    if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
-      QT_PLATFORM="wayland"
-    else
-      QT_PLATFORM="xcb"
-    fi
-
-    if [ "$QT_PLATFORM" = "xcb" ] && ! dpkg -s libxcb-cursor0 >/dev/null 2>&1; then
-      echo "❌ Missing dependency for X11 (Qt xcb plugin): libxcb-cursor0"
-      echo "   Install with:"
-      echo "     sudo apt-get update && sudo apt-get install -y libxcb-cursor0"
-      echo ""
-      echo "   Then re-run: ./scripts/lifecycle/start_monitor_suite.sh"
-      echo ""
-      echo "   (Or, if you're on Wayland, try launching with QT_QPA_PLATFORM=wayland)"
-      exit 1
-    fi
-
-    # Use venv python if available
-    PYTHON_CMD="python3"
-    if [ -x ".venv/bin/python3" ]; then
-      PYTHON_CMD=".venv/bin/python3"
-    fi
-    nohup env QT_QPA_PLATFORM="$QT_PLATFORM" "$PYTHON_CMD" -m pearlalgo.monitor >>"$LOG_FILE" 2>&1 &
-    MONITOR_PID=$!
-    sleep 0.5 || true
-    if ps -p "$MONITOR_PID" >/dev/null 2>&1; then
-      echo "✅ Monitor launched (PID $MONITOR_PID)"
-      echo "   Qt platform: $QT_PLATFORM"
-      echo "   Logs: $LOG_FILE"
-    else
-      echo "❌ Monitor exited immediately"
-      echo "   Check logs: $LOG_FILE"
-    fi
-  fi
+  ./scripts/monitor/start_monitor.sh --background || true
 fi
 
 echo ""
