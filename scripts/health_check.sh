@@ -22,12 +22,6 @@ else
     echo "  ❌ Telegram Handler: NOT RUNNING"
 fi
 
-if pgrep -f "claude_monitor" > /dev/null; then
-    echo "  ✅ Claude Monitor: RUNNING"
-else
-    echo "  ⚠️  Claude Monitor: NOT RUNNING"
-fi
-
 # 2. IBKR Gateway
 echo ""
 echo "🔌 Gateway:"

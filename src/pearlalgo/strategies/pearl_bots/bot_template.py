@@ -26,6 +26,8 @@ import pandas as pd
 import numpy as np
 
 from pearlalgo.utils.logger import logger
+from .market_regime_detector import MarketRegime, MarketRegimeDetector, market_regime_detector
+from .ml_signal_filter import MLSignalFilter, ml_signal_filter
 
 
 class IndicatorSuite(Protocol):
@@ -65,6 +67,14 @@ class BotConfig:
     min_volume: int = 100
     market_hours_only: bool = True
 
+    # Market regime settings
+    enable_regime_filtering: bool = True
+    allowed_regimes: List[str] = field(default_factory=lambda: ["trending_bull", "trending_bear", "ranging"])
+    regime_risk_multiplier: float = 1.0
+
+    # ML enhancement settings
+    enable_ml_enhancement: bool = True
+
     # Bot-specific parameters (to be extended by subclasses)
     parameters: Dict[str, Any] = field(default_factory=dict)
 
@@ -99,6 +109,11 @@ class TradeSignal:
     execution_price: Optional[float] = None
     exit_price: Optional[float] = None
     pnl: Optional[float] = None
+
+    # Market regime information
+    market_regime: Optional[str] = None
+    regime_confidence: float = 0.0
+    regime_adjusted_confidence: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -156,6 +171,11 @@ class BotPerformance:
     total_trading_days: int = 0
     avg_trades_per_day: float = 0.0
 
+    # Internal tracking for drawdown and ratios
+    _equity_curve: List[float] = field(default_factory=list)
+    _peak_equity: float = 0.0
+    _returns: List[float] = field(default_factory=list)
+
     def update_from_signal(self, signal: TradeSignal) -> None:
         """Update performance metrics from a closed signal."""
         if signal.status != "closed" or signal.pnl is None:
@@ -167,6 +187,15 @@ class BotPerformance:
 
         pnl = signal.pnl
         self.total_pnl += pnl
+
+        # Track equity curve for drawdown calculation
+        self._equity_curve.append(self.total_pnl)
+        self._peak_equity = max(self._peak_equity, self.total_pnl)
+        
+        # Track returns for Sharpe/Sortino calculation
+        if len(self._equity_curve) > 1:
+            return_pct = (pnl / abs(self._equity_curve[-2])) if self._equity_curve[-2] != 0 else 0.0
+            self._returns.append(return_pct)
 
         if pnl > 0:
             self.winning_trades += 1
@@ -199,6 +228,29 @@ class BotPerformance:
         # Risk-reward ratio
         if self.avg_loss > 0:
             self.avg_risk_reward = self.avg_win / self.avg_loss
+
+        # Calculate drawdown
+        if self._equity_curve:
+            current_equity = self._equity_curve[-1]
+            self.current_drawdown = self._peak_equity - current_equity
+            self.max_drawdown = max(self.max_drawdown, self.current_drawdown)
+
+        # Calculate Sharpe and Sortino ratios
+        if len(self._returns) > 1:
+            returns_array = np.array(self._returns)
+            mean_return = np.mean(returns_array)
+            std_return = np.std(returns_array)
+            
+            # Sharpe ratio (annualized, assuming daily returns)
+            if std_return > 0:
+                self.sharpe_ratio = (mean_return / std_return) * np.sqrt(252)
+            
+            # Sortino ratio (only downside deviation)
+            downside_returns = returns_array[returns_array < 0]
+            if len(downside_returns) > 0:
+                downside_std = np.std(downside_returns)
+                if downside_std > 0:
+                    self.sortino_ratio = (mean_return / downside_std) * np.sqrt(252)
 
 
 class PearlBot(ABC):
@@ -256,9 +308,9 @@ class PearlBot(ABC):
 
     def analyze(self, market_data: Dict) -> List[TradeSignal]:
         """
-        Main analysis method - called by the trading system.
+        Main analysis method with market regime awareness.
 
-        Similar to Lux Algo's strategy analysis pipeline.
+        Similar to Lux Algo's strategy analysis pipeline but with regime filtering.
         """
         if not self.is_active:
             return []
@@ -272,6 +324,16 @@ class PearlBot(ABC):
             if not self._passes_market_filters(df):
                 return []
 
+            # Detect market regime if enabled
+            regime_info = None
+            if self.config.enable_regime_filtering:
+                regime_info = self._detect_market_regime(df)
+
+                # Skip trading if current regime not allowed
+                if regime_info and regime_info[0].value not in self.config.allowed_regimes:
+                    logger.debug(f"{self.name}: Skipping signal in {regime_info[0].value} regime")
+                    return []
+
             # Get latest bar data
             latest_bar = market_data.get('latest_bar', {})
 
@@ -283,11 +345,24 @@ class PearlBot(ABC):
             signal = self.generate_signal_logic(df, indicators)
 
             if signal:
-                # Apply risk management
-                signal = self._apply_risk_management(signal, df)
+                # Apply ML enhancement if enabled
+                if self.config.enable_ml_enhancement:
+                    signal = ml_signal_filter.enhance_signal(signal, df)
 
-                # Validate signal
-                if self._validate_signal(signal):
+                # Apply regime-aware risk management
+                signal = self._apply_risk_management(signal, df, regime_info)
+
+                # Validate signal with regime adjustments
+                if self._validate_signal(signal, regime_info):
+                    # Add regime information to signal
+                    if regime_info:
+                        signal.market_regime = regime_info[0].value
+                        signal.regime_confidence = regime_info[2]
+                        # Apply regime confidence adjustment
+                        regime_filters = market_regime_detector.get_regime_filter(regime_info[0])
+                        confidence_boost = regime_filters.get('confidence_boost', 0.0)
+                        signal.regime_adjusted_confidence = min(1.0, signal.confidence + confidence_boost)
+
                     # Track active signals
                     self.active_signals.append(signal)
                     self.signal_history.append(signal)
@@ -325,6 +400,12 @@ class PearlBot(ABC):
                     # Update performance metrics
                     self.performance.update_from_signal(signal)
 
+                    # Update ML model with trade result if enabled
+                    if self.config.enable_ml_enhancement and signal.pnl is not None:
+                        ml_signal_filter.update_from_trade_result(
+                            signal, signal.pnl, execution_price is not None
+                        )
+
                 # Remove from active signals
                 self.active_signals.remove(signal)
                 break
@@ -352,10 +433,28 @@ class PearlBot(ABC):
         # This would integrate with the existing market hours logic
         return True  # Placeholder
 
-    def _apply_risk_management(self, signal: TradeSignal, df: pd.DataFrame) -> TradeSignal:
-        """Apply risk management rules to the signal."""
-        # Calculate position size based on risk per trade
+    def _detect_market_regime(self, df: pd.DataFrame) -> Optional[tuple[MarketRegime, Any, float]]:
+        """Detect current market regime for regime-aware trading."""
+        try:
+            return market_regime_detector.detect_regime(df)
+        except Exception as e:
+            logger.warning(f"Failed to detect market regime: {e}")
+            return None
+
+    def _apply_risk_management(self, signal: TradeSignal, df: pd.DataFrame,
+                              regime_info: Optional[tuple] = None) -> TradeSignal:
+        """Apply regime-aware risk management rules to the signal."""
+        # Base risk amount
         risk_amount = self.config.risk_per_trade
+
+        # Apply regime-based risk adjustment
+        if regime_info:
+            regime, metrics, confidence = regime_info
+            regime_filters = market_regime_detector.get_regime_filter(regime)
+            risk_multiplier = regime_filters.get('risk_multiplier', 1.0)
+            risk_amount *= risk_multiplier * self.config.regime_risk_multiplier
+
+        # Calculate position size based on risk per trade
         stop_distance = abs(signal.entry_price - signal.stop_loss)
 
         if stop_distance > 0:
@@ -369,18 +468,27 @@ class PearlBot(ABC):
 
         return signal
 
-    def _validate_signal(self, signal: TradeSignal) -> bool:
-        """Validate signal against bot configuration."""
+    def _validate_signal(self, signal: TradeSignal, regime_info: Optional[tuple] = None) -> bool:
+        """Validate signal against bot configuration with regime awareness."""
+        # Use regime-adjusted confidence if available
+        effective_confidence = signal.regime_adjusted_confidence if signal.regime_adjusted_confidence > 0 else signal.confidence
+
         # Check confidence threshold
-        if signal.confidence < self.config.min_confidence:
+        if effective_confidence < self.config.min_confidence:
             return False
 
         # Check risk-reward ratio (minimum 1:1)
         if signal.risk_reward_ratio < 1.0:
             return False
 
-        # Check position limits
-        if len(self.active_signals) >= self.config.max_positions:
+        # Check position limits (may be regime-adjusted)
+        max_positions = self.config.max_positions
+        if regime_info:
+            regime, metrics, confidence = regime_info
+            regime_filters = market_regime_detector.get_regime_filter(regime)
+            max_positions = min(max_positions, regime_filters.get('max_positions', max_positions))
+
+        if len(self.active_signals) >= max_positions:
             return False
 
         # Check drawdown limits

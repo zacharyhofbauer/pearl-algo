@@ -2074,18 +2074,9 @@ class NQAgentTelegramNotifier:
             else:
                 message += "• Checking market conditions...\n"
             
-            # Build optional navigation buttons when command handler is running
-            reply_markup = None
+            # Add inline text links that match the message style
             if _is_command_handler_running():
-                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                keyboard = [
-                    [
-                        InlineKeyboardButton("📈 Activity", callback_data="activity"),
-                        InlineKeyboardButton("🏠 Status", callback_data="status"),
-                    ],
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                message += "\n💡 Tap below for quick access"
+                message += "\n💡 Quick access: 📈 /activity • 🏠 /status"
             else:
                 message += "\n💡 Use /status or /activity to monitor"
 

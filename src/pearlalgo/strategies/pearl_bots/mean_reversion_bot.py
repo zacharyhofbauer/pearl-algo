@@ -63,8 +63,8 @@ class MeanReversionIndicators(IndicatorSuite):
         # Bollinger Bands
         df['bb_middle'] = df['close'].rolling(self.bb_period).mean()
         df['bb_std'] = df['close'].rolling(self.bb_period).std()
-        df['bb_upper'] = df['bb_middle'] + (self.bb_std * self.bb_period)
-        df['bb_lower'] = df['bb_middle'] - (self.bb_std * self.bb_period)
+        df['bb_upper'] = df['bb_middle'] + (df['bb_std'] * self.bb_std)
+        df['bb_lower'] = df['bb_middle'] - (df['bb_std'] * self.bb_std)
         df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
 
         # Divergence detection (simplified)
@@ -224,11 +224,13 @@ class MeanReversionBot(PearlBot):
             # Target is middle of Bollinger Bands (mean reversion target)
             take_profit = bb_middle
             # Stop below recent low or BB lower
-            stop_loss = min(bb_lower, current_price * 0.98)  # Max 2% stop
+            # Cap the stop so it is not *more* than ~2% away (closer stop wins).
+            stop_loss = max(bb_lower, current_price * 0.98)
 
         else:  # short
             take_profit = bb_middle
-            stop_loss = max(bb_upper, current_price * 1.02)  # Max 2% stop
+            # Cap the stop so it is not *more* than ~2% away (closer stop wins).
+            stop_loss = min(bb_upper, current_price * 1.02)
 
         # Ensure minimum risk-reward ratio
         risk = abs(entry_price - stop_loss)
@@ -241,8 +243,7 @@ class MeanReversionBot(PearlBot):
         divergence_text = " with bullish divergence" if (direction == "long" and bullish_divergence) else \
                          " with bearish divergence" if (direction == "short" and bearish_divergence) else ""
 
-        reason = (".2f"
-                 f"indicating strong {direction} reversion opportunity{divergence_text}")
+        reason = (f"MR strength {mr_strength:.2f} indicating strong {direction} reversion opportunity{divergence_text}")
 
         return TradeSignal(
             direction=direction,

@@ -387,7 +387,7 @@ class ChallengeTracker:
         # Return most recent first
         return list(reversed(history[-limit:]))
 
-    def get_status_summary(self) -> str:
+    def get_status_summary(self, *, bot_label: Optional[str] = None) -> str:
         """
         Get challenge status as a formatted string for Telegram.
 
@@ -409,8 +409,12 @@ class ChallengeTracker:
             bar = "▓" * bar_filled + "░" * (10 - bar_filled)
             target_str = f"DD Risk: {bar} {p['drawdown_risk_pct']:.0f}%"
 
+        header = "🏆 *50k Challenge*"
+        if bot_label:
+            header += f" ({bot_label})"
+
         return (
-            f"🏆 *50k Challenge* (Attempt #{p['attempt_id']})\n"
+            f"{header}\n"
             f"Balance: `${p['current_balance']:,.2f}` | {pnl_emoji} {pnl_str}\n"
             f"{target_str}\n"
             f"Trades: {p['exited_signals']} | WR: {p['win_rate'] * 100:.0f}%"

@@ -187,8 +187,6 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "llm_trade_postmortem",
     "llm_pattern_recognition",
     "llm_adaptive_tuning",
-    # Claude AI monitor
-    "claude_monitor",
     # 50k challenge tracker
     "challenge",
     # PEARL automated bots (formerly lux_algo_bots)

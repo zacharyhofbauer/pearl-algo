@@ -4141,7 +4141,7 @@ class NQAgentService:
             "buy_sell_pressure": None,
             "buy_sell_pressure_raw": None,
             # Market regime snapshot (computed each scan by scanner.regime_detector)
-            # Used by Claude Monitor and operator UI to detect "market changed" events.
+            # Used by operator UI to detect "market changed" events.
             "regime": None,
             "regime_timestamp": None,
             # Quiet reason / signal diagnostics observability (why no signals?)

@@ -201,8 +201,7 @@ class BreakoutBot(PearlBot):
             take_profit = entry_price - (range_size * 2)
 
         # Create signal with reasoning
-        reason = (".2f"
-                 f"with {'volume confirmed ' if volume_confirmed else ''}breakout. "
+        reason = (f"Pattern strength {pattern_strength:.2f} with {'volume confirmed ' if volume_confirmed else ''}breakout. "
                  f"Momentum acceleration: {momentum_acceleration:.4f}")
 
         return TradeSignal(

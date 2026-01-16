@@ -142,35 +142,85 @@ class TelegramCommandHandler:
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
 
     def _get_main_menu_keyboard(self) -> list:
-        """Get the main menu keyboard layout."""
+        """Get the main menu keyboard layout with dynamic status indicators."""
         # Show quick preview of positions if available
         state = self._read_state()
         has_active = False
+        positions = 0
+        active_trades = 0
+        daily_pnl = 0.0
+        
         if state:
             positions = (state.get("execution", {}).get("positions", 0) or 0)
             active_trades = state.get("active_trades_count", 0) or 0
             has_active = positions > 0 or active_trades > 0
+            daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
 
+        # Build dynamic button labels
+        # Signals button - show count if active
+        signals_label = "⚡ Signals & Trades"
+        if has_active:
+            total_active = positions + active_trades
+            signals_label = f"⚡ Signals • {total_active} Open"
+        
+        # Performance button - show daily P&L
+        performance_label = "💎 Performance"
+        if daily_pnl != 0:
+            pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+            pnl_sign = "+" if daily_pnl >= 0 else ""
+            if abs(daily_pnl) >= 1000:
+                pnl_display = f"{pnl_sign}${abs(daily_pnl)/1000:.1f}k"
+            else:
+                pnl_display = f"{pnl_sign}${abs(daily_pnl):.0f}"
+            performance_label = f"💎 Performance {pnl_emoji}{pnl_display}"
+        
+        # Status button - show contextual info
+        status_label = "🛰️ Status"
+        if has_active:
+            # Show position count when active
+            status_label = f"🛰️ Status • {positions + active_trades} Active"
+        elif state:
+            # Show connection status when no positions
+            connection_status = state.get("connection_status", "unknown")
+            if connection_status == "connected":
+                status_label = "🛰️ Status • Connected"
+            elif connection_status == "disconnected":
+                status_label = "🛰️ Status • Offline"
+        
+        # Bots button - show running status
+        bots_label = "👾 Bots"
+        try:
+            sc = getattr(self, "service_controller", None)
+            if sc is not None:
+                agent_status = sc.get_agent_status() or {}
+                if agent_status.get("running"):
+                    bots_label = "👾 Bots • Running"
+                else:
+                    bots_label = "👾 Bots • Stopped"
+        except Exception:
+            pass
+        
         return [
             # Row 1: Core Trading Functions
             [
-                InlineKeyboardButton("🎯 Signals & Trades", callback_data="menu:signals"),
-                InlineKeyboardButton("📊 Performance", callback_data="menu:performance"),
+                InlineKeyboardButton(signals_label, callback_data="menu:signals"),
+                InlineKeyboardButton(performance_label, callback_data="menu:performance"),
             ],
-            # Row 2: System Management
+            # Row 2: System Monitoring + Refresh
             [
-                InlineKeyboardButton("📡 Status" + (" 🎯" if has_active else ""), callback_data="menu:status"),
-                InlineKeyboardButton("⚙️ System Control", callback_data="menu:system"),
+                InlineKeyboardButton(status_label, callback_data="menu:status"),
+                InlineKeyboardButton("🔄", callback_data="action:refresh_dashboard"),
+                InlineKeyboardButton("🎛️ System Control", callback_data="menu:system"),
             ],
             # Row 3: Advanced Features
             [
-                InlineKeyboardButton("🤖 AI & Analysis", callback_data="menu:analysis"),
-                InlineKeyboardButton("🤖 Bots", callback_data="menu:bots"),
+                InlineKeyboardButton("🔮 AI & Analysis", callback_data="menu:analysis"),
+                InlineKeyboardButton(bots_label, callback_data="menu:bots"),
             ],
             # Row 4: Settings + Help
             [
                 InlineKeyboardButton("⚙️ Settings", callback_data="menu:settings"),
-                InlineKeyboardButton("❓ Help", callback_data="menu:help"),
+                InlineKeyboardButton("💡 Help", callback_data="menu:help"),
             ],
         ]
 
@@ -344,7 +394,7 @@ class TelegramCommandHandler:
         metrics = self._read_latest_metrics()
         selection = self._read_strategy_selection()
 
-        lines = ["AI Strategy Report", f"Generated: {datetime.now(timezone.utc).isoformat()}"]
+        lines = ["AI Bot Report", f"Generated: {datetime.now(timezone.utc).isoformat()}"]
 
         if metrics:
             lines.extend(
@@ -367,16 +417,16 @@ class TelegramCommandHandler:
             if ranked:
                 top = ranked[0]
             lines.append("")
-            lines.append("Strategy recommendation:")
+            lines.append("Bot recommendation:")
             if top:
                 lines.append(f"- Top: {top.get('key')} (score {top.get('score', 0.0):.2f})")
                 lines.append(f"- Trades: {top.get('count', 0)} | WR {top.get('win_rate', 0.0):.1%}")
                 lines.append(f"- Max DD: {top.get('max_drawdown', 0.0):.2f}")
             else:
-                lines.append("- No ranked strategy found in selection report.")
+                lines.append("- No ranked bot found in selection report.")
         else:
             lines.append("")
-            lines.append("No strategy selection report found. Run:")
+            lines.append("No bot selection report found. Run:")
             lines.append("  python3 scripts/backtesting/strategy_selection.py")
 
         await update.message.reply_text("\n".join(lines))
@@ -405,6 +455,46 @@ class TelegramCommandHandler:
             # Return to main menu
             await self._show_main_menu(query)
         else:
+            # Telegram backtesting / strategy review flows
+            if callback_data == "strategy_review:backtest":
+                await self._render_pearl_backtest_menu(update, context)
+                return
+            if callback_data == "strategy_review:reports":
+                await self._handle_backtest_reports(update, context, page=0)
+                return
+            if callback_data.startswith("reports:page:"):
+                try:
+                    page = int(callback_data.split(":")[-1])
+                except Exception:
+                    page = 0
+                await self._handle_backtest_reports(update, context, page=page)
+                return
+            if callback_data.startswith("report:"):
+                try:
+                    report_idx = int(callback_data.split(":")[-1])
+                except Exception:
+                    report_idx = 0
+                await self._handle_report_detail_by_idx(update, context, report_idx)
+                return
+            if callback_data.startswith("artifact:"):
+                # artifact:<report_idx>:<artifact_idx>
+                parts = callback_data.split(":")
+                if len(parts) >= 3:
+                    try:
+                        report_idx = int(parts[1])
+                    except Exception:
+                        report_idx = 0
+                    try:
+                        artifact_idx = int(parts[2])
+                    except Exception:
+                        artifact_idx = 0
+                    await self._handle_report_artifact_by_idx(update, context, report_idx, artifact_idx)
+                    return
+
+            if callback_data.startswith("pb:"):
+                await self._handle_pearl_backtest_callback(update, context, callback_data)
+                return
+
             # Handle other actions (from notifier, etc.)
             await self._handle_action(query, callback_data)
 
@@ -448,85 +538,273 @@ class TelegramCommandHandler:
             await query.edit_message_text(text, reply_markup=reply_markup)
 
     async def _show_status_menu(self, query: CallbackQuery) -> None:
-        """Show status submenu."""
+        """Show status submenu with inline indicators."""
         # Show quick status preview
         state = self._read_state()
         preview = ""
+        positions_label = "🎯 Positions & Trades"
+        gateway_label = "🔌 Gateway"
+        connection_label = "📡 Connection"
+        
         if state:
             positions = (state.get("execution", {}).get("positions", 0) or 0)
             active_trades = state.get("active_trades_count", 0) or 0
             latest_price = state.get("latest_price")
+            connection_status = state.get("connection_status", "unknown")
             
             preview = "\n"
             if latest_price:
                 preview += f"💰 Price: ${latest_price:,.2f}\n"
             preview += f"🎯 Positions: {positions} | Active: {active_trades}\n"
+            
+            # Add inline stats to buttons
+            total_active = positions + active_trades
+            if total_active > 0:
+                positions_label = f"🎯 Positions • {total_active} Active"
+            
+            # Gateway/Connection status
+            if connection_status == "connected":
+                gateway_label = "🔌 Gateway • 🟢 Online"
+                connection_label = "📡 Connection • 🟢 Online"
+            elif connection_status == "disconnected":
+                gateway_label = "🔌 Gateway • 🔴 Offline"
+                connection_label = "📡 Connection • 🔴 Offline"
         
-            keyboard = [
+        keyboard = [
             [InlineKeyboardButton("📊 System Status", callback_data="action:system_status")],
             [
-                InlineKeyboardButton("🎯 Positions & Trades", callback_data="action:active_trades"),
-                InlineKeyboardButton("🔌 Gateway", callback_data="action:gateway_status"),
+                InlineKeyboardButton(positions_label, callback_data="action:active_trades"),
+                InlineKeyboardButton(gateway_label, callback_data="action:gateway_status"),
             ],
             [
-                InlineKeyboardButton("📡 Connection", callback_data="action:connection_status"),
+                InlineKeyboardButton(connection_label, callback_data="action:connection_status"),
                 InlineKeyboardButton("💾 Data Quality", callback_data="action:data_quality"),
             ],
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(f"📊 Status & Monitoring{preview}\nSelect an option:", reply_markup=reply_markup)
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(f"🛰️ Status & Monitoring{preview}\nSelect an option:", reply_markup=reply_markup)
 
     async def _show_signals_menu(self, query: CallbackQuery) -> None:
-        """Show signals & trades submenu."""
-        keyboard = [
-            # Row 1: Current Activity
-            [
-                InlineKeyboardButton("🎯 Recent Signals", callback_data="action:recent_signals"),
-                InlineKeyboardButton("📋 Active Trades", callback_data="action:active_trades"),
-            ],
-            # Row 2: Historical Data
-            [
-                InlineKeyboardButton("📊 Signal History", callback_data="action:signal_history"),
-                InlineKeyboardButton("🔍 Signal Details", callback_data="action:signal_details"),
-            ],
-            # Row 3: Quick Actions
-            [
-                InlineKeyboardButton("🚫 Close All Trades", callback_data="action:close_all_trades"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="menu:signals"),
-            ],
+        """Show signals & trades submenu with rich context and smart suggestions."""
+        try:
+            # Get comprehensive state for context
+            state = self._read_state()
+            active_count = 0
+            daily_signals = 0
+            current_pnl = 0.0
+            
+            if state:
+                positions = (state.get("execution", {}).get("positions", 0) or 0)
+                active_trades = state.get("active_trades_count", 0) or 0
+                active_count = positions + active_trades
+                daily_signals = state.get("daily_signals", 0) or 0
+                current_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
+            
+            # Read recent signals for analysis
+            signals = self._read_recent_signals(limit=10)
+            recent_count = len(signals) if signals else 0
+            
+            # Build rich context message
+            lines = ["⚡ *Signals & Trades*", ""]
+            
+            # Session overview
+            if state:
+                lines.append("*Today's Activity:*")
+                lines.append(f"• Signals Generated: {daily_signals}")
+                lines.append(f"• Currently Open: {active_count}")
+                if current_pnl != 0:
+                    pnl_emoji = "🟢" if current_pnl >= 0 else "🔴"
+                    pnl_sign = "+" if current_pnl >= 0 else ""
+                    lines.append(f"• Today's P&L: {pnl_emoji} {pnl_sign}${abs(current_pnl):.2f}")
+                lines.append("")
+            
+            # Smart suggestions based on state
+            suggestions = []
+            if active_count > 0:
+                suggestions.append("💡 *Tip:* Check active trades to monitor positions")
+            elif recent_count > 0 and active_count == 0:
+                suggestions.append("💡 *Notice:* Recent signals available but no active trades")
+            elif recent_count == 0:
+                suggestions.append("💡 *Status:* Waiting for new signal opportunities")
+            
+            if suggestions:
+                lines.extend(suggestions)
+                lines.append("")
+            
+            lines.append("*Select an option:*")
+            
+            # Build button labels with counts
+            active_label = f"📋 Active Trades • {active_count}" if active_count > 0 else "📋 Active Trades"
+            recent_label = f"🎯 Recent Signals • {recent_count}" if recent_count > 0 else "🎯 Recent Signals"
+            
+            # Conditional buttons based on state
+            keyboard = [
+                # Row 1: Current Activity
+                [
+                    InlineKeyboardButton(recent_label, callback_data="action:recent_signals"),
+                    InlineKeyboardButton(active_label, callback_data="action:active_trades"),
+                ],
+                # Row 2: Historical Data
+                [
+                    InlineKeyboardButton("📊 Signal History", callback_data="action:signal_history"),
+                    InlineKeyboardButton("🔍 Signal Details", callback_data="action:signal_details"),
+                ],
+            ]
+            
+            # Row 3: Contextual Actions
+            if active_count > 0:
+                keyboard.append([
+                    InlineKeyboardButton(f"🚫 Close All ({active_count})", callback_data="action:close_all_trades"),
+                    InlineKeyboardButton("🔄 Refresh", callback_data="menu:signals"),
+                ])
+            else:
+                keyboard.append([
+                    InlineKeyboardButton("🔄 Refresh", callback_data="menu:signals"),
+                ])
+            
             # Row 4: Navigation
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("🎯 Signals & Trades\n\nSelect an option:", reply_markup=reply_markup)
+            keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error in _show_signals_menu: {e}", exc_info=True)
+            # Fallback to simple menu
+            keyboard = [
+                [
+                    InlineKeyboardButton("🎯 Recent Signals", callback_data="action:recent_signals"),
+                    InlineKeyboardButton("📋 Active Trades", callback_data="action:active_trades"),
+                ],
+                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            ]
+            await query.edit_message_text("⚡ Signals & Trades\n\nSelect an option:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def _show_performance_menu(self, query: CallbackQuery) -> None:
-        """Show performance submenu."""
-        keyboard = [
-            # Row 1: Core Metrics
-            [
-                InlineKeyboardButton("📈 Performance Metrics", callback_data="action:performance_metrics"),
-                InlineKeyboardButton("💰 P&L Overview", callback_data="action:pnl_overview"),
-            ],
-            # Row 2: Time-based Reports
-            [
-                InlineKeyboardButton("📊 Daily Summary", callback_data="action:daily_summary"),
-                InlineKeyboardButton("📉 Weekly Summary", callback_data="action:weekly_summary"),
-            ],
-            # Row 3: Actions
-            [
-                InlineKeyboardButton("🔄 Reset Stats", callback_data="action:reset_performance"),
-                InlineKeyboardButton("📋 Export Report", callback_data="action:export_performance"),
-            ],
-            # Row 4: Navigation
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("📊 Performance\n\nSelect an option:", reply_markup=reply_markup)
+        """Show performance submenu with trends, comparisons, and insights."""
+        try:
+            # Get comprehensive performance data
+            state = self._read_state()
+            metrics = self._read_latest_metrics()
+            
+            # Build rich performance overview
+            lines = ["💎 *Performance Dashboard*", ""]
+            
+            # Today's Performance
+            if state:
+                daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
+                daily_trades = state.get("daily_trades", 0) or 0
+                daily_wins = state.get("daily_wins", 0) or 0
+                daily_losses = state.get("daily_losses", 0) or 0
+                
+                lines.append("*Today:*")
+                if daily_pnl != 0:
+                    pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                    pnl_sign = "+" if daily_pnl >= 0 else ""
+                    # Add trend indicator
+                    trend = "↗️" if daily_pnl > 0 else "↘️" if daily_pnl < 0 else "→"
+                    lines.append(f"{pnl_emoji} P&L: {trend} {pnl_sign}${abs(daily_pnl):.2f}")
+                else:
+                    lines.append("• P&L: $0.00")
+                
+                if daily_trades > 0:
+                    win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
+                    wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
+                    lines.append(f"• Trades: {daily_trades} ({daily_wins}W/{daily_losses}L)")
+                    lines.append(f"• Win Rate: {wr_emoji} {win_rate:.0f}%")
+                lines.append("")
+            
+            # Overall Performance (if metrics available)
+            if metrics:
+                total_trades = metrics.get("exited_signals", 0)
+                total_pnl = float(metrics.get("total_pnl", 0.0) or 0.0)
+                win_rate = float(metrics.get("win_rate", 0.0) or 0.0) * 100
+                
+                lines.append("*Overall:*")
+                lines.append(f"• Total Trades: {total_trades}")
+                if total_pnl != 0:
+                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                    pnl_sign = "+" if total_pnl >= 0 else ""
+                    lines.append(f"• Total P&L: {pnl_emoji} {pnl_sign}${abs(total_pnl):.2f}")
+                if total_trades > 0:
+                    wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
+                    lines.append(f"• Win Rate: {wr_emoji} {win_rate:.1f}%")
+                lines.append("")
+            
+            # Smart insights
+            insights = []
+            if state:
+                daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
+                if daily_pnl < 0 and abs(daily_pnl) > 100:
+                    insights.append("⚠️ *Alert:* Significant daily loss - consider reviewing strategy")
+                elif daily_pnl > 200:
+                    insights.append("✨ *Great:* Strong daily performance!")
+            
+            if metrics:
+                win_rate = float(metrics.get("win_rate", 0.0) or 0.0) * 100
+                if win_rate < 40:
+                    insights.append("💡 *Tip:* Win rate below 40% - review signal quality")
+                elif win_rate > 60:
+                    insights.append("🎯 *Excellent:* Win rate above 60%!")
+            
+            if insights:
+                lines.extend(insights)
+                lines.append("")
+            
+            lines.append("*Select a report:*")
+            
+            # Build dynamic button labels
+            daily_pnl_label = "📊 Daily Summary"
+            pnl_overview_label = "💰 P&L Overview"
+            metrics_label = "📈 Performance Metrics"
+            
+            if state:
+                daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
+                if daily_pnl != 0:
+                    pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                    pnl_sign = "+" if daily_pnl >= 0 else ""
+                    daily_pnl_label = f"📊 Daily {pnl_emoji}{pnl_sign}${abs(daily_pnl):.0f}"
+                    pnl_overview_label = f"💰 P&L {pnl_emoji}{pnl_sign}${abs(daily_pnl):.0f}"
+            
+            if metrics:
+                total_trades = metrics.get("exited_signals", 0)
+                metrics_label = f"📈 Metrics • {total_trades} Trades"
+            
+            keyboard = [
+                # Row 1: Core Metrics
+                [
+                    InlineKeyboardButton(metrics_label, callback_data="action:performance_metrics"),
+                    InlineKeyboardButton(pnl_overview_label, callback_data="action:pnl_overview"),
+                ],
+                # Row 2: Time-based Reports
+                [
+                    InlineKeyboardButton(daily_pnl_label, callback_data="action:daily_summary"),
+                    InlineKeyboardButton("📉 Weekly Summary", callback_data="action:weekly_summary"),
+                ],
+                # Row 3: Actions
+                [
+                    InlineKeyboardButton("🔄 Reset Stats", callback_data="action:reset_performance"),
+                    InlineKeyboardButton("📋 Export Report", callback_data="action:export_performance"),
+                ],
+                # Row 4: Navigation
+                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error in _show_performance_menu: {e}", exc_info=True)
+            # Fallback to simple menu
+            keyboard = [
+                [
+                    InlineKeyboardButton("📈 Performance Metrics", callback_data="action:performance_metrics"),
+                    InlineKeyboardButton("💰 P&L Overview", callback_data="action:pnl_overview"),
+                ],
+                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            ]
+            await query.edit_message_text("💎 Performance\n\nSelect an option:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def _show_bots_menu(self, query: CallbackQuery) -> None:
-        """Show single Pearl Bot control menu."""
+        """Show Pearl Bot control menu with comprehensive status and diagnostics."""
         agent_status = {"running": False, "message": "Unknown"}
         gateway_status = {"process_running": False, "port_listening": False}
 
@@ -539,38 +817,248 @@ class TelegramCommandHandler:
             logger.warning(f"Could not load bot status: {e}")
 
         running = bool(agent_status.get("running"))
-        agent_line = "🟢 RUNNING" if running else "🔴 STOPPED"
         gateway_ready = bool(gateway_status.get("process_running")) and bool(gateway_status.get("port_listening"))
-        gateway_line = "🟢 READY" if gateway_ready else "🔴 NOT READY"
+        
+        # Get additional context
+        state = self._read_state()
+        uptime_info = ""
+        connection_info = ""
+        trading_info = ""
+        
+        if state:
+            # Connection status
+            connection_status = state.get("connection_status", "unknown")
+            if connection_status == "connected":
+                connection_info = "🟢 Connected to market data"
+            else:
+                connection_info = "🔴 Not connected to market"
+            
+            # Trading activity
+            positions = (state.get("execution", {}).get("positions", 0) or 0)
+            active_trades = state.get("active_trades_count", 0) or 0
+            daily_signals = state.get("daily_signals", 0) or 0
+            
+            if positions + active_trades > 0:
+                trading_info = f"📊 {positions + active_trades} active position(s), {daily_signals} signals today"
+            elif daily_signals > 0:
+                trading_info = f"📊 {daily_signals} signal(s) generated today"
+            else:
+                trading_info = "📊 No signals today yet"
+        
+        # Build rich status display
+        lines = ["👾 *Pearl Bot Control Center*", ""]
+        
+        # Service Status
+        lines.append("*Service Status:*")
+        agent_emoji = "🟢" if running else "🔴"
+        agent_line = "RUNNING" if running else "STOPPED"
+        lines.append(f"{agent_emoji} Agent: {agent_line}")
+        
+        gateway_emoji = "🟢" if gateway_ready else "🔴"
+        gateway_line = "READY" if gateway_ready else "NOT READY"
+        lines.append(f"{gateway_emoji} Gateway: {gateway_line}")
+        lines.append("")
+        
+        # Diagnostics
+        lines.append("*Diagnostics:*")
+        if connection_info:
+            lines.append(f"• {connection_info}")
+        if trading_info:
+            lines.append(f"• {trading_info}")
+        lines.append("")
+        
+        # Health Check & Recommendations
+        health_status = []
+        recommendations = []
+        
+        if running and gateway_ready and state and state.get("connection_status") == "connected":
+            health_status.append("✅ *System Health:* All systems operational")
+        else:
+            health_status.append("⚠️ *System Health:* Issues detected")
+            
+            if not running:
+                recommendations.append("💡 Start the agent to begin trading")
+            if not gateway_ready:
+                recommendations.append("💡 Check gateway connection")
+            if state and state.get("connection_status") != "connected":
+                recommendations.append("💡 Verify market data connection")
+        
+        if health_status:
+            lines.extend(health_status)
+        
+        if recommendations:
+            lines.append("")
+            lines.extend(recommendations)
+        
+        lines.append("")
+        lines.append("*Control Options:*")
 
-        text = (
-            "🤖 *Pearl Bot*\n\n"
-            f"Agent Service: {agent_line}\n"
-            f"Gateway: {gateway_line}\n\n"
-            "Control the live trading service with the buttons below."
-        )
+        # Dynamic button labels
+        start_label = "🚀 Start Agent" if not running else "🚀 Start Agent (Already Running)"
+        stop_label = "🛑 Stop Agent"
+        restart_label = "🔄 Restart Agent"
+
+        if running:
+            stop_label = "🛑 Stop Agent"
+            restart_label = "🔄 Restart Agent"
 
         keyboard = [
             [
-                InlineKeyboardButton("🚀 Start Pearl Bot", callback_data="action:start_agent"),
-                InlineKeyboardButton("🛑 Stop Pearl Bot", callback_data="action:stop_agent"),
+                InlineKeyboardButton(start_label, callback_data="action:start_agent"),
+                InlineKeyboardButton(stop_label, callback_data="action:stop_agent"),
             ],
             [
-                InlineKeyboardButton("🔄 Restart Pearl Bot", callback_data="action:restart_agent"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="menu:bots"),
+                InlineKeyboardButton(restart_label, callback_data="action:restart_agent"),
+                InlineKeyboardButton("🤖 Pearl Bots", callback_data="menu:pearl_bots"),
             ],
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            [
+                InlineKeyboardButton("🔄 Refresh Status", callback_data="menu:bots"),
+                InlineKeyboardButton("🏠 Back to Menu", callback_data="back"),
+            ],
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _show_pearl_bots_menu(self, query: CallbackQuery) -> None:
+        """Show Pearl automated trading bots submenu with status and controls."""
+        try:
+            # Import pearl bot manager
+            from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+
+            bot_manager = get_pearl_bot_manager()
+            active_bots = bot_manager.get_active_bots()
+            bot_performance = bot_manager.get_bot_performance()
+
+            lines = ["🤖 *PEARL Automated Trading Bots*", ""]
+
+            # Overall status
+            total_bots = len(bot_performance) if isinstance(bot_performance, dict) else 0
+            active_count = len(active_bots)
+
+            lines.append(f"*System Status:* {active_count}/{total_bots} bots active")
+            lines.append("")
+
+            # Individual bot status
+            if isinstance(bot_performance, dict) and bot_performance:
+                lines.append("*Bot Performance:*")
+
+                for bot_name, perf in bot_performance.items():
+                    if isinstance(perf, dict):
+                        # Extract key metrics
+                        total_signals = perf.get('total_signals_history', 0)
+                        win_rate = perf.get('performance', {}).get('win_rate', 0) * 100
+                        total_pnl = perf.get('performance', {}).get('total_pnl', 0)
+                        active_positions = perf.get('active_signals', 0)
+
+                        # Status indicator
+                        is_active = bot_name in active_bots
+                        status_emoji = "🟢" if is_active else "🔴"
+                        status_text = "Active" if is_active else "Inactive"
+
+                        # Format bot info
+                        pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                        pnl_sign = "+" if total_pnl >= 0 else ""
+
+                        lines.append(f"{status_emoji} *{bot_name}*")
+                        lines.append(f"  └─ Status: {status_text}")
+                        lines.append(f"  └─ Signals: {total_signals}, Win Rate: {win_rate:.1f}%")
+                        lines.append(f"  └─ P&L: {pnl_emoji} {pnl_sign}${abs(total_pnl):.2f}")
+                        lines.append(f"  └─ Active Positions: {active_positions}")
+                        lines.append("")
+
+            else:
+                lines.append("❌ *No bots configured*")
+                lines.append("Add pearl_bots configuration to your config.yaml")
+                lines.append("")
+
+            lines.append("*Bot Controls:*")
+
+            # Control buttons
+            keyboard = [
+                [
+                    InlineKeyboardButton("🚀 Start All Bots", callback_data="action:start_all_bots"),
+                    InlineKeyboardButton("🛑 Stop All Bots", callback_data="action:stop_all_bots"),
+                ],
+                [
+                    InlineKeyboardButton("📊 Bot Performance", callback_data="action:show_bot_performance"),
+                    InlineKeyboardButton("🔄 Refresh Status", callback_data="menu:pearl_bots"),
+                ],
+                [InlineKeyboardButton("🏠 Back to Bots", callback_data="menu:bots")],
+            ]
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
+
+        except Exception as e:
+            logger.error(f"Error showing pearl bots menu: {e}", exc_info=True)
+            error_msg = "❌ *Error loading Pearl Bots menu*"
+            keyboard = [[InlineKeyboardButton("🏠 Back to Bots", callback_data="menu:bots")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(error_msg, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _show_analysis_menu(self, query: CallbackQuery) -> None:
-        """Show AI & analysis submenu."""
+        """Show AI & analysis submenu with smart insights and recommendations."""
+        # Get performance data for context
+        state = self._read_state()
+        metrics = self._read_latest_metrics()
+        
+        # Build context-aware analysis menu
+        lines = ["🔮 *AI & Analysis Hub*", ""]
+        
+        # Quick Performance Summary for Context
+        if metrics:
+            total_trades = metrics.get("exited_signals", 0)
+            win_rate = float(metrics.get("win_rate", 0.0) or 0.0) * 100
+            total_pnl = float(metrics.get("total_pnl", 0.0) or 0.0)
+            
+            lines.append("*Performance Snapshot:*")
+            lines.append(f"• Total Trades: {total_trades}")
+            if total_trades > 0:
+                wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
+                lines.append(f"• Win Rate: {wr_emoji} {win_rate:.1f}%")
+                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                lines.append(f"• Total P&L: {pnl_emoji} ${total_pnl:,.2f}")
+            lines.append("")
+        
+        # AI-powered insights
+        insights = []
+        if metrics:
+            total_trades = metrics.get("exited_signals", 0)
+            win_rate = float(metrics.get("win_rate", 0.0) or 0.0) * 100
+            
+            if total_trades < 20:
+                insights.append("💡 *Tip:* Need more trades for reliable analysis (20+ recommended)")
+            elif total_trades >= 50:
+                insights.append("✅ *Good:* Sufficient trade data for analysis")
+            
+            if win_rate < 40:
+                insights.append("🔴 *Alert:* Low win rate - Bot Review recommended")
+            elif win_rate > 60:
+                insights.append("🎯 *Excellent:* High win rate - Bot performing well")
+        
+        if state:
+            daily_trades = state.get("daily_trades", 0) or 0
+            if daily_trades == 0:
+                insights.append("💭 *Notice:* No trades today - check signal generation")
+        
+        if not insights:
+            insights.append("💡 *Ready:* Use analysis tools to optimize performance")
+        
+        lines.extend(insights)
+        lines.append("")
+        lines.append("*Select analysis type:*")
+        
+        # Build dynamic button labels
+        bot_analysis_label = "🔍 Bot Analysis"
+        if metrics:
+            total_trades = metrics.get("exited_signals", 0)
+            bot_analysis_label = f"🔍 Bot Analysis • {total_trades} Trades"
+        
         keyboard = [
-            # Row 1: Strategy Analysis
+            # Row 1: Bot Analysis
             [
-                InlineKeyboardButton("🔍 Strategy Analysis", callback_data="action:strategy_analysis"),
+                InlineKeyboardButton(bot_analysis_label, callback_data="action:strategy_analysis"),
                 InlineKeyboardButton("📊 Trade Analysis", callback_data="action:trade_analysis"),
             ],
             # Row 2: Signal Analysis
@@ -580,22 +1068,107 @@ class TelegramCommandHandler:
             ],
             # Row 3: AI Features
             [
-                InlineKeyboardButton("🤖 AI Strategy Review", callback_data="action:ai_strategy_review"),
+                InlineKeyboardButton("🤖 AI Bot Review", callback_data="action:ai_strategy_review"),
                 InlineKeyboardButton("💡 AI Config Tips", callback_data="action:ai_config_suggestions"),
             ],
-            # Row 4: Navigation
+            # Row 4: Backtesting
+            [
+                InlineKeyboardButton("🧪 Backtest Bots", callback_data="strategy_review:backtest"),
+                InlineKeyboardButton("📑 Backtest Reports", callback_data="strategy_review:reports"),
+            ],
+            # Row 5: Navigation
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("🤖 AI & Analysis\n\nSelect an option:", reply_markup=reply_markup)
+        await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _show_system_menu(self, query: CallbackQuery) -> None:
-        """Show system control submenu."""
+        """Show system control submenu with comprehensive risk warnings and status."""
+        # Get system state for context
+        state = self._read_state()
+        agent_running = False
+        has_positions = False
+        positions_count = 0
+        daily_pnl = 0.0
+        
+        try:
+            sc = getattr(self, "service_controller", None)
+            if sc is not None:
+                agent_status = sc.get_agent_status() or {}
+                agent_running = bool(agent_status.get("running"))
+        except Exception:
+            pass
+        
+        if state:
+            positions = (state.get("execution", {}).get("positions", 0) or 0)
+            active_trades = state.get("active_trades_count", 0) or 0
+            positions_count = positions + active_trades
+            has_positions = positions_count > 0
+            daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
+        
+        # Build comprehensive context
+        lines = ["🎛️ *System Control Panel*", ""]
+        
+        # Current Status
+        lines.append("*System Status:*")
+        agent_emoji = "🟢" if agent_running else "🔴"
+        lines.append(f"{agent_emoji} Agent: {'Running' if agent_running else 'Stopped'}")
+        if has_positions:
+            lines.append(f"⚠️ Active Positions: {positions_count}")
+            if daily_pnl != 0:
+                pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                pnl_sign = "+" if daily_pnl >= 0 else ""
+                lines.append(f"{pnl_emoji} Today's P&L: {pnl_sign}${abs(daily_pnl):.2f}")
+        lines.append("")
+        
+        # Risk Warnings
+        warnings = []
+        if has_positions and positions_count > 0:
+            warnings.append("⚠️ *WARNING:* Stopping agent with open positions is risky")
+            warnings.append("💡 *Tip:* Close positions first or use Emergency Stop")
+        
+        if daily_pnl < -100:
+            warnings.append(f"⚠️ *ALERT:* Daily loss exceeds $100 (${daily_pnl:.2f})")
+        
+        if warnings:
+            lines.extend(warnings)
+            lines.append("")
+        
+        # Time-based suggestions
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        hour = now.hour
+        
+        # Market hours context (futures trade nearly 24/7, but peak hours are important)
+        if 13 <= hour < 21:  # US market hours (UTC)
+            lines.append("🕐 *Market:* US hours - High activity period")
+        elif 0 <= hour < 8:  # Asian session
+            lines.append("🕐 *Market:* Asian session - Lower volatility")
+        else:
+            lines.append("🕐 *Market:* Off-peak hours")
+        
+        lines.append("")
+        lines.append("⚠️ *CAUTION:* These actions affect live trading")
+        lines.append("*Select an action:*")
+        
+        # Build dynamic buttons based on state
+        start_label = "🚀 Start Agent"
+        stop_label = "🛑 Stop Agent"
+        emergency_label = "🚨 Emergency Stop"
+        
+        if not agent_running:
+            start_label = "🚀 Start Agent"
+        else:
+            stop_label = f"🛑 Stop Agent" if not has_positions else f"🛑 Stop ({positions_count} open)"
+        
+        if has_positions:
+            emergency_label = f"🚨 Emergency Stop ({positions_count})"
+        
         keyboard = [
             # Row 1: Trading Agent Control
             [
-                InlineKeyboardButton("🚀 Start Agent", callback_data="action:start_agent"),
-                InlineKeyboardButton("🛑 Stop Agent", callback_data="action:stop_agent"),
+                InlineKeyboardButton(start_label, callback_data="action:start_agent"),
+                InlineKeyboardButton(stop_label, callback_data="action:stop_agent"),
             ],
             # Row 2: Gateway Control
             [
@@ -612,19 +1185,23 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("⚙️ Configuration", callback_data="action:config"),
                 InlineKeyboardButton("📋 Logs", callback_data="action:logs"),
             ],
-            # Row 5: Emergency
-            [
-                InlineKeyboardButton("🚨 Emergency Stop", callback_data="action:emergency_stop"),
-            ],
-            # Row 6: Navigation
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
+        
+        # Row 5: Emergency (only show if positions exist OR agent is running)
+        if has_positions or agent_running:
+            keyboard.append([
+                InlineKeyboardButton(emergency_label, callback_data="action:emergency_stop"),
+            ])
+        
+        # Row 6: Navigation
+        keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("⚙️ System Control\n\n⚠️ Use with caution - these actions affect live trading:", reply_markup=reply_markup)
+        await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
 
 
     async def _show_settings_menu(self, query: CallbackQuery) -> None:
-        """Show settings submenu (Telegram alert preferences)."""
+        """Show settings submenu with detailed descriptions and recommendations."""
         prefs = TelegramPrefs(state_dir=self.state_dir)
         auto_chart = bool(prefs.get("auto_chart_on_signal", False))
         interval_notifications = bool(prefs.get("interval_notifications", True))
@@ -632,25 +1209,49 @@ class TelegramCommandHandler:
         signal_detail_expanded = bool(prefs.get("signal_detail_expanded", False))
 
         def _onoff(v: bool) -> str:
-            return "ON" if v else "OFF"
+            return "🟢 ON" if v else "🔴 OFF"
 
-        text = (
-            "⚙️ Settings\n\n"
-            f"📈 Auto-Chart on Signal: {_onoff(auto_chart)}\n"
-            f"🕐 Interval Notifications: {_onoff(interval_notifications)}\n"
-            f"🔘 Dashboard Buttons: {_onoff(dashboard_buttons)}\n"
-            f"🔍 Expanded Signal Details: {_onoff(signal_detail_expanded)}\n\n"
-            "Tap a button to toggle:"
-        )
+        lines = ["⚙️ *Telegram Settings*", ""]
+        
+        # Current Configuration
+        lines.append("*Current Settings:*")
+        lines.append(f"📈 Auto-Chart: {_onoff(auto_chart)}")
+        lines.append(f"🕐 Interval Notifications: {_onoff(interval_notifications)}")
+        lines.append(f"🔘 Dashboard Buttons: {_onoff(dashboard_buttons)}")
+        lines.append(f"🔍 Signal Details: {_onoff(signal_detail_expanded)}")
+        lines.append("")
+        
+        # Helpful explanations
+        lines.append("*What These Do:*")
+        lines.append("📈 *Auto-Chart:* Send chart image with each signal")
+        lines.append("🕐 *Interval:* Regular status updates every 30min")
+        lines.append("🔘 *Buttons:* Show action buttons in notifications")
+        lines.append("🔍 *Details:* Show full technical details in signals")
+        lines.append("")
+        
+        # Smart recommendations
+        recommendations = []
+        if not auto_chart:
+            recommendations.append("💡 *Tip:* Enable Auto-Chart for visual signal confirmation")
+        if not interval_notifications:
+            recommendations.append("💡 *Notice:* Interval notifications are off - you'll only get signal alerts")
+        if auto_chart and interval_notifications:
+            recommendations.append("✅ *Optimal:* Recommended settings enabled")
+        
+        if recommendations:
+            lines.extend(recommendations)
+            lines.append("")
+        
+        lines.append("*Tap to toggle:*")
 
         keyboard = [
             [
                 InlineKeyboardButton(
-                    f"📈 Auto-Chart: {_onoff(auto_chart)}",
+                    f"📈 Chart: {_onoff(auto_chart)}",
                     callback_data="action:toggle_pref:auto_chart_on_signal",
                 ),
                 InlineKeyboardButton(
-                    f"🕐 Interval: {_onoff(interval_notifications)}",
+                    f"🕐 Updates: {_onoff(interval_notifications)}",
                     callback_data="action:toggle_pref:interval_notifications",
                 ),
             ],
@@ -666,7 +1267,7 @@ class TelegramCommandHandler:
             ],
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
     async def _show_help(self, query: CallbackQuery) -> None:
@@ -679,13 +1280,13 @@ class TelegramCommandHandler:
             "/help - Show this help\n\n"
             "/settings - Alert preferences (charts, notifications)\n\n"
             "*Menu Structure:*\n"
-            "🎯 Signals & Trades - View and manage trading activity\n"
-            "📊 Performance - Performance metrics and reports\n"
-            "📡 Status - System health and connection status\n"
-            "⚙️ System Control - Start/stop services and emergency controls\n"
+            "⚡ Signals & Trades - View and manage trading activity\n"
+            "💎 Performance - Performance metrics and reports\n"
+            "🛰️ Status - System health and connection status\n"
+            "🎛️ System Control - Start/stop services and emergency controls\n"
             "⚙️ Settings - Charts + notification preferences\n"
-            "🤖 AI & Analysis - AI-powered insights and analysis\n"
-            "🤖 Bots - Start/stop the Pearl Bot service\n\n"
+            "🔮 AI & Analysis - AI-powered insights and analysis\n"
+            "👾 Bots - Start/stop the Pearl Bot service\n\n"
             "*Quick Tips:*\n"
             "• Use 'Back to Menu' to return to main menu\n"
             "• Status indicators show active positions/trades\n"
@@ -747,7 +1348,7 @@ class TelegramCommandHandler:
                 # TODO: Implement actual P&L overview
             elif action_type == "strategy_analysis":
                 metrics = self._read_latest_metrics()
-                text = "🔍 Strategy Analysis\n\n"
+                text = "🔍 Bot Analysis\n\n"
                 if metrics:
                     text += f"Trades: {metrics.get('exited_signals', 0)}\n"
                     text += f"Win Rate: {metrics.get('win_rate', 0.0):.1%}\n"
@@ -767,7 +1368,7 @@ class TelegramCommandHandler:
                 await query.edit_message_text("🎯 AI Analysis: Loading...", reply_markup=InlineKeyboardMarkup(keyboard))
             elif action_type == "ai_strategy_review":
                 keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text("🤖 AI Strategy Review: Analyzing...", reply_markup=InlineKeyboardMarkup(keyboard))
+                await query.edit_message_text("🤖 AI Bot Review: Analyzing...", reply_markup=InlineKeyboardMarkup(keyboard))
             elif action_type == "ai_signal_analysis":
                 keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
                 await query.edit_message_text("📋 AI Signal Analysis: Analyzing...", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -801,7 +1402,7 @@ class TelegramCommandHandler:
                         text = f"{text}\n\n{details}"
 
                 keyboard = [
-                    [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
+                    [InlineKeyboardButton("👾 Bots", callback_data="menu:bots")],
                     [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -833,9 +1434,192 @@ class TelegramCommandHandler:
                     "Are you sure?",
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
+            elif action_type == "emergency_stop":
+                # Get detailed impact preview
+                state = self._read_state()
+                positions = 0
+                daily_pnl = 0.0
+                impact_lines = []
+                
+                if state:
+                    positions = state.get("execution", {}).get("positions", 0) or 0
+                    positions += state.get("active_trades_count", 0) or 0
+                    daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
+                    
+                    if positions > 0:
+                        impact_lines.append(f"📊 *Impact Preview:*")
+                        impact_lines.append(f"• Will close {positions} open position(s)")
+                        if daily_pnl != 0:
+                            pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                            pnl_sign = "+" if daily_pnl >= 0 else ""
+                            impact_lines.append(f"• Current P&L: {pnl_emoji} {pnl_sign}${abs(daily_pnl):.2f}")
+                        impact_lines.append("")
+                
+                lines = [
+                    "🚨 *EMERGENCY STOP*",
+                    "",
+                ]
+                
+                if impact_lines:
+                    lines.extend(impact_lines)
+                
+                lines.extend([
+                    "⚠️ *This will:*",
+                    "• Close ALL open positions immediately at market",
+                    "• Stop the trading agent",
+                    "• Cancel all pending orders",
+                    "",
+                    "🔴 *WARNING:* This action cannot be undone",
+                    "💡 *Alternative:* Use 'Close All Trades' to keep agent running",
+                    "",
+                    "*Are you absolutely sure?*",
+                ])
+                
+                keyboard = [
+                    [InlineKeyboardButton("🚨 YES - EMERGENCY STOP", callback_data="confirm:emergency_stop")],
+                    [InlineKeyboardButton("❌ No - Cancel", callback_data="back")],
+                ]
+                await query.edit_message_text(
+                    "\n".join(lines),
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+            elif action_type == "close_all_trades":
+                # Get detailed position info
+                state = self._read_state()
+                positions = 0
+                daily_pnl = 0.0
+                daily_trades = 0
+                
+                if state:
+                    positions = state.get("execution", {}).get("positions", 0) or 0
+                    positions += state.get("active_trades_count", 0) or 0
+                    daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
+                    daily_trades = state.get("daily_trades", 0) or 0
+                
+                lines = ["🚫 *Close All Trades*", ""]
+                
+                if positions == 0:
+                    lines.extend([
+                        "✅ *No open positions*",
+                        "",
+                        "There are currently no trades to close.",
+                    ])
+                    keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                else:
+                    lines.extend([
+                        "📊 *Position Summary:*",
+                        f"• Open Positions: {positions}",
+                        f"• Trades Today: {daily_trades}",
+                    ])
+                    
+                    if daily_pnl != 0:
+                        pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                        pnl_sign = "+" if daily_pnl >= 0 else ""
+                        lines.append(f"• Current P&L: {pnl_emoji} {pnl_sign}${abs(daily_pnl):.2f}")
+                    
+                    lines.extend([
+                        "",
+                        "⚠️ *This will:*",
+                        f"• Close all {positions} position(s) at market price",
+                        "• Agent will continue running",
+                        "• Can still generate new signals",
+                        "",
+                    ])
+                    
+                    # Smart warnings based on P&L
+                    if daily_pnl > 0:
+                        lines.append("💡 *Note:* Closing while in profit - consider trailing stop")
+                    elif daily_pnl < -50:
+                        lines.append("⚠️ *Notice:* Closing with daily loss - review strategy")
+                    
+                    lines.extend(["", "*Confirm to close all positions:*"])
+                    
+                    keyboard = [
+                        [InlineKeyboardButton(f"✅ Yes - Close All ({positions})", callback_data="confirm:close_all_trades")],
+                        [InlineKeyboardButton("❌ Cancel", callback_data="back")],
+                    ]
+                
+                await query.edit_message_text(
+                    "\n".join(lines),
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+            elif action_type == "clear_cache":
+                keyboard = [
+                    [InlineKeyboardButton("✅ Confirm Clear", callback_data="confirm:clear_cache")],
+                    [InlineKeyboardButton("❌ Cancel", callback_data="back")],
+                ]
+                await query.edit_message_text(
+                    "🧹 Clear Cache\n\n"
+                    "This will clear:\n"
+                    "• Temporary data files\n"
+                    "• Cached market data\n"
+                    "• Session state (not trade history)\n\n"
+                    "The agent will reload fresh data on next start.\n\n"
+                    "Are you sure?",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            elif action_type == "reset_performance":
+                keyboard = [
+                    [InlineKeyboardButton("✅ Confirm Reset", callback_data="confirm:reset_performance")],
+                    [InlineKeyboardButton("❌ Cancel", callback_data="back")],
+                ]
+                await query.edit_message_text(
+                    "🔄 Reset Performance Stats\n\n"
+                    "⚠️ This will reset:\n"
+                    "• Daily P&L counters\n"
+                    "• Win/loss statistics\n"
+                    "• Performance metrics\n\n"
+                    "Trade history will be preserved.\n\n"
+                    "Are you sure?",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            elif action_type == "export_performance":
+                await self._handle_export_performance(query)
+            elif action_type == "refresh_dashboard":
+                # Refresh the main dashboard
+                await self._show_main_menu(query)
+            elif action_type == "ai_on":
+                # Enable AI chat mode
+                prefs = TelegramPrefs(state_dir=self.state_dir)
+                prefs.set("chat_mode", True)
+                keyboard = [
+                    [InlineKeyboardButton("🔴 Turn Off", callback_data="action:ai_off")],
+                    [InlineKeyboardButton("🔮 AI Menu", callback_data="menu:analysis")],
+                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                ]
+                await query.edit_message_text(
+                    "✅ *AI Chat Mode: ON*\n\n"
+                    "You can now chat with Claude AI.\n"
+                    "Send any message to get AI assistance.",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+            elif action_type == "ai_off":
+                # Disable AI chat mode
+                prefs = TelegramPrefs(state_dir=self.state_dir)
+                prefs.set("chat_mode", False)
+                keyboard = [
+                    [InlineKeyboardButton("🟢 Turn On", callback_data="action:ai_on")],
+                    [InlineKeyboardButton("🔮 AI Menu", callback_data="menu:analysis")],
+                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                ]
+                await query.edit_message_text(
+                    "🔴 *AI Chat Mode: OFF*\n\n"
+                    "AI chat is now disabled.",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
             else:
                 keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
                 await query.edit_message_text(f"Action not yet implemented: {action_type}", reply_markup=InlineKeyboardMarkup(keyboard))
+        elif action == "activity":
+            # Handle activity callback - show signals menu or activity info
+            await self._show_signals_menu(query)
+        elif action == "status":
+            # Handle status callback - show status menu
+            await self._show_status_menu(query)
         elif action.startswith("toggle_strategy:"):
             strategy_name = action[16:]  # Remove "toggle_strategy:" prefix
             await self._toggle_strategy(query, strategy_name)
@@ -843,7 +1627,7 @@ class TelegramCommandHandler:
             confirm_action = action[8:]  # Remove "confirm:" prefix
             keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            
+
             if confirm_action == "restart_agent":
                 sc = getattr(self, "service_controller", None)
                 if sc is None:
@@ -856,7 +1640,7 @@ class TelegramCommandHandler:
                         text = f"{text}\n\n{details}"
 
                 keyboard = [
-                    [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
+                    [InlineKeyboardButton("👾 Bots", callback_data="menu:bots")],
                     [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -872,7 +1656,7 @@ class TelegramCommandHandler:
                         text = f"{text}\n\n{details}"
 
                 keyboard = [
-                    [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
+                    [InlineKeyboardButton("👾 Bots", callback_data="menu:bots")],
                     [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -905,6 +1689,137 @@ class TelegramCommandHandler:
                         f"❌ Error resetting challenge: {e}\n\nPlease check logs.",
                         reply_markup=reply_markup
                     )
+            elif confirm_action == "emergency_stop":
+                # Emergency stop: close all positions and stop agent
+                try:
+                    sc = getattr(self, "service_controller", None)
+                    messages = ["🚨 *EMERGENCY STOP EXECUTED*\n"]
+                    
+                    # First, try to close all positions via state file signal
+                    state_file = get_state_file(self.state_dir)
+                    if state_file.exists():
+                        try:
+                            state = json.loads(state_file.read_text(encoding="utf-8"))
+                            state["emergency_stop"] = True
+                            state["emergency_stop_time"] = datetime.now(timezone.utc).isoformat()
+                            state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                            messages.append("✅ Emergency stop signal written to state")
+                        except Exception as e:
+                            messages.append(f"⚠️ Could not write emergency state: {e}")
+                    
+                    # Stop the agent
+                    if sc is not None:
+                        result = await sc.stop_agent()
+                        messages.append(f"✅ Agent stopped: {result.get('message', 'OK')}")
+                    else:
+                        messages.append("⚠️ Service controller not available")
+                    
+                    keyboard = [
+                        [InlineKeyboardButton("🤖 Check Bots", callback_data="menu:bots")],
+                        [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    ]
+                    await query.edit_message_text(
+                        "\n".join(messages),
+                        reply_markup=InlineKeyboardMarkup(keyboard),
+                        parse_mode="Markdown"
+                    )
+                    logger.warning("EMERGENCY STOP executed via Telegram")
+                except Exception as e:
+                    logger.error(f"Emergency stop error: {e}", exc_info=True)
+                    await query.edit_message_text(
+                        f"❌ Emergency stop error: {e}",
+                        reply_markup=reply_markup
+                    )
+            elif confirm_action == "close_all_trades":
+                try:
+                    # Signal to close all trades via state file
+                    state_file = get_state_file(self.state_dir)
+                    if state_file.exists():
+                        state = json.loads(state_file.read_text(encoding="utf-8"))
+                        state["close_all_requested"] = True
+                        state["close_all_requested_time"] = datetime.now(timezone.utc).isoformat()
+                        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                        
+                        keyboard = [
+                            [InlineKeyboardButton("📡 Check Status", callback_data="menu:status")],
+                            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                        ]
+                        await query.edit_message_text(
+                            "✅ Close All Trades Request Sent\n\n"
+                            "The agent will close all positions at next opportunity.\n"
+                            "Check status to confirm positions are closed.",
+                            reply_markup=InlineKeyboardMarkup(keyboard)
+                        )
+                        logger.info("Close all trades requested via Telegram")
+                    else:
+                        await query.edit_message_text(
+                            "❌ State file not found.\n\nIs the agent running?",
+                            reply_markup=reply_markup
+                        )
+                except Exception as e:
+                    logger.error(f"Close all trades error: {e}", exc_info=True)
+                    await query.edit_message_text(f"❌ Error: {e}", reply_markup=reply_markup)
+            elif confirm_action == "clear_cache":
+                try:
+                    cleared = []
+                    # Clear common cache locations
+                    cache_paths = [
+                        self.state_dir / "cache",
+                        self.state_dir / "temp",
+                        self.state_dir / ".cache",
+                    ]
+                    for cache_path in cache_paths:
+                        if cache_path.exists() and cache_path.is_dir():
+                            shutil.rmtree(cache_path)
+                            cache_path.mkdir(exist_ok=True)
+                            cleared.append(str(cache_path.name))
+                    
+                    if cleared:
+                        text = f"✅ Cache Cleared\n\nCleared: {', '.join(cleared)}"
+                    else:
+                        text = "✅ Cache Clear Complete\n\nNo cache directories found."
+                    
+                    keyboard = [
+                        [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    ]
+                    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+                    logger.info(f"Cache cleared via Telegram: {cleared}")
+                except Exception as e:
+                    logger.error(f"Clear cache error: {e}", exc_info=True)
+                    await query.edit_message_text(f"❌ Error clearing cache: {e}", reply_markup=reply_markup)
+            elif confirm_action == "reset_performance":
+                try:
+                    # Reset performance counters in state
+                    state_file = get_state_file(self.state_dir)
+                    if state_file.exists():
+                        state = json.loads(state_file.read_text(encoding="utf-8"))
+                        # Reset performance-related fields
+                        state["daily_pnl"] = 0.0
+                        state["daily_trades"] = 0
+                        state["daily_wins"] = 0
+                        state["daily_losses"] = 0
+                        state["performance_reset_time"] = datetime.now(timezone.utc).isoformat()
+                        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                        
+                        keyboard = [
+                            [InlineKeyboardButton("💎 Performance", callback_data="menu:performance")],
+                            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                        ]
+                        await query.edit_message_text(
+                            "✅ Performance Stats Reset\n\n"
+                            "Daily counters have been reset.\n"
+                            "Trade history is preserved.",
+                            reply_markup=InlineKeyboardMarkup(keyboard)
+                        )
+                        logger.info("Performance stats reset via Telegram")
+                    else:
+                        await query.edit_message_text(
+                            "❌ State file not found.",
+                            reply_markup=reply_markup
+                        )
+                except Exception as e:
+                    logger.error(f"Reset performance error: {e}", exc_info=True)
+                    await query.edit_message_text(f"❌ Error: {e}", reply_markup=reply_markup)
             else:
                 await query.edit_message_text(f"Unknown confirmation action: {confirm_action}", reply_markup=reply_markup)
 
@@ -973,8 +1888,8 @@ class TelegramCommandHandler:
                 [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
             ]
             message = (
-                f"{status_emoji} *Strategy {action.title()}*\n\n"
-                f"Strategy: `{strategy_name}`\n\n"
+                f"{status_emoji} *Bot {action.title()}*\n\n"
+                f"Bot: `{strategy_name}`\n\n"
                 f"⚠️ *Restart the agent* for changes to take effect.\n\n"
                 f"Use System menu → Restart Agent"
             )
@@ -985,7 +1900,7 @@ class TelegramCommandHandler:
             logger.error(f"Error toggling strategy: {e}", exc_info=True)
             keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
             await query.edit_message_text(
-                f"❌ Error updating strategy: {e}\n\nPlease check config file manually.",
+                f"❌ Error updating bot: {e}\n\nPlease check config file manually.",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
@@ -1135,19 +2050,18 @@ class TelegramCommandHandler:
             
             # Check for challenge mode and load challenge data if available
             challenge_status = None
-            challenge_per_strategy = {}
+            challenge_per_strategy: dict = {}
             challenge_tracker_instance = None
             
             try:
                 from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker
-                from pearlalgo.learning.trade_database import TradeDatabase
                 
                 # Always load/create challenge tracker (will create if doesn't exist)
                 challenge_state_file = self.state_dir / "challenge_state.json"
                 try:
                     challenge_tracker_instance = ChallengeTracker(state_dir=self.state_dir)
                     challenge_tracker_instance.refresh()  # Reload from file
-                    challenge_status = challenge_tracker_instance.get_status_summary()
+                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label="Pearl Bot")
                     if not challenge_status:
                         logger.warning("Challenge tracker returned empty status summary")
                     else:
@@ -1163,62 +2077,6 @@ class TelegramCommandHandler:
                     if attempt_perf:
                         performance = dict(performance) if performance else {}
                         performance["attempt_id"] = attempt_perf.get("attempt_id")
-                
-                # Calculate per-strategy challenge metrics (for current attempt)
-                try:
-                    db_path = self.state_dir / "trades.db"
-                    if db_path.exists():
-                        trade_db = TradeDatabase(db_path)
-                        attempt_perf = challenge_tracker_instance.get_attempt_performance()
-                        attempt_start = attempt_perf.get("attempt_started_at") if attempt_perf else None
-                        
-                        if attempt_start:
-                            # Get trades since attempt started, grouped by strategy
-                            cutoff = parse_utc_timestamp(attempt_start) if isinstance(attempt_start, str) else attempt_start
-                            if cutoff:
-                                # Get all trades since attempt started
-                                all_trades = trade_db.get_recent_trades_by_exit(limit=10000)
-                                attempt_trades = []
-                                for trade in all_trades:
-                                    try:
-                                        exit_time = trade.get("exit_time") or trade.get("timestamp")
-                                        if exit_time:
-                                            trade_time = parse_utc_timestamp(exit_time) if isinstance(exit_time, str) else exit_time
-                                            if trade_time:
-                                                if hasattr(trade_time, 'tzinfo') and trade_time.tzinfo is None:
-                                                    trade_time = trade_time.replace(tzinfo=timezone.utc)
-                                                if hasattr(cutoff, 'tzinfo') and cutoff.tzinfo is None:
-                                                    cutoff = cutoff.replace(tzinfo=timezone.utc)
-                                                if hasattr(trade_time, '__ge__') and trade_time >= cutoff:
-                                                    attempt_trades.append(trade)
-                                    except Exception:
-                                        pass
-                                
-                                # Group by signal_type and calculate challenge metrics
-                                strategy_challenge = {}
-                                for trade in attempt_trades:
-                                    signal_type = trade.get("signal_type") or "unknown"
-                                    pnl = float(trade.get("pnl", 0.0))
-                                    is_win = bool(trade.get("is_win", False))
-                                    
-                                    if signal_type not in strategy_challenge:
-                                        strategy_challenge[signal_type] = {
-                                            "pnl": 0.0,
-                                            "trades": 0,
-                                            "wins": 0,
-                                            "losses": 0,
-                                        }
-                                    
-                                    strategy_challenge[signal_type]["pnl"] += pnl
-                                    strategy_challenge[signal_type]["trades"] += 1
-                                    if is_win:
-                                        strategy_challenge[signal_type]["wins"] += 1
-                                    else:
-                                        strategy_challenge[signal_type]["losses"] += 1
-                                
-                                challenge_per_strategy = strategy_challenge
-                except Exception as e:
-                    logger.debug(f"Could not calculate per-strategy challenge: {e}")
                         
             except Exception as e:
                 logger.error(f"Could not load challenge data: {e}", exc_info=True)
@@ -1271,7 +2129,7 @@ class TelegramCommandHandler:
             if not challenge_status and challenge_tracker_instance:
                 try:
                     challenge_tracker_instance.refresh()
-                    challenge_status = challenge_tracker_instance.get_status_summary()
+                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label="Pearl Bot")
                 except Exception as e:
                     logger.error(f"Could not reload challenge status: {e}", exc_info=True)
             
@@ -1281,7 +2139,7 @@ class TelegramCommandHandler:
                     from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker
                     challenge_tracker_instance = ChallengeTracker(state_dir=self.state_dir)
                     challenge_tracker_instance.refresh()
-                    challenge_status = challenge_tracker_instance.get_status_summary()
+                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label="Pearl Bot")
                     logger.info(f"Challenge status loaded: {challenge_status[:50] if challenge_status else 'None'}...")
                 except Exception as e:
                     logger.error(f"Could not load challenge at all: {e}", exc_info=True)
@@ -1303,13 +2161,13 @@ class TelegramCommandHandler:
                         balance = attempt_perf.get("current_balance", 50000.0)
                         trades = attempt_perf.get("exited_signals", 0)
                         wr = attempt_perf.get("win_rate", 0.0) * 100
-                        attempt_id = attempt_perf.get("attempt_id", 1)
+                        # attempt_id intentionally not shown in UI (we label by bot instead)
                         dd_risk = attempt_perf.get("drawdown_risk_pct", 0.0)
                         bar_filled = min(10, int(dd_risk / 10))
                         bar = "▓" * bar_filled + "░" * (10 - bar_filled)
                         
                         challenge_status = (
-                            f"🏆 *50k Challenge* (Attempt #{attempt_id})\n"
+                            "🏆 *50k Challenge* (Pearl Bot)\n"
                             f"Balance: `${balance:,.2f}` | {pnl_emoji} {pnl_str}\n"
                             f"DD Risk: {bar} {dd_risk:.0f}%\n"
                             f"Trades: {trades} | WR: {wr:.0f}%"
@@ -1330,7 +2188,7 @@ class TelegramCommandHandler:
                         current_attempt = challenge_data.get("current_attempt", {})
                         config = challenge_data.get("config", {})
                         
-                        attempt_id = current_attempt.get("attempt_id", 1)
+                        # attempt_id intentionally not shown in UI (we label by bot instead)
                         pnl = current_attempt.get("pnl", 0.0)
                         balance = config.get("start_balance", 50000.0) + pnl
                         trades = current_attempt.get("trades", 0)
@@ -1345,7 +2203,7 @@ class TelegramCommandHandler:
                         bar = "▓" * bar_filled + "░" * (10 - bar_filled)
                         
                         challenge_status = (
-                            f"🏆 *50k Challenge* (Attempt #{attempt_id})\n"
+                            "🏆 *50k Challenge* (Pearl Bot)\n"
                             f"Balance: `${balance:,.2f}` | {pnl_emoji} {pnl_str}\n"
                             f"DD Risk: {bar} {dd_risk:.0f}%\n"
                             f"Trades: {trades} | WR: {wr:.0f}%"
@@ -1374,203 +2232,86 @@ class TelegramCommandHandler:
                     pnl_sign = "-" if total_pnl < 0 else "+"
                     message += "\n\n*7d All-Time:*\n"
                     message += f"{pnl_emoji} {pnl_sign}${abs(total_pnl):,.2f} ({wins}W/{losses}L)"
-                        
-            # Add per-strategy breakdown (30 days performance by strategy) - always show if available
+            
+            # 30d by Bot (compact): keep only Total + Pearl Bot
             try:
                 from pearlalgo.learning.trade_database import TradeDatabase
+
                 db_path = self.state_dir / "trades.db"
                 if db_path.exists():
                     trade_db = TradeDatabase(db_path)
                     strategy_perf = trade_db.get_performance_by_signal_type(days=30)
                     if strategy_perf:
-                        message += "\n\n*30d by Strategy:*"
-                        # Sort by PnL descending
-                        sorted_strategies = sorted(strategy_perf.items(), key=lambda x: x[1].get("total_pnl", 0), reverse=True)
-                        
-                        # Calculate total PNL across all strategies
+                        message += "\n\n*30d by Bot:*"
+
                         total_pnl_all = sum(perf.get("total_pnl", 0.0) for perf in strategy_perf.values())
                         total_wins = sum(perf.get("wins", 0) for perf in strategy_perf.values())
                         total_losses = sum(perf.get("losses", 0) for perf in strategy_perf.values())
                         total_trades = total_wins + total_losses
                         total_wr = (total_wins / total_trades * 100) if total_trades > 0 else 0.0
                         total_emoji = "🟢" if total_pnl_all >= 0 else "🔴"
-                        
-                        # Show total PNL for all strategies
-                        message += f"\n{total_emoji} *Total All Strategies:* ${total_pnl_all:,.2f} ({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
-                        
-                        # Show individual strategies
-                        for strategy_name, perf in sorted_strategies:
-                            wins = perf.get("wins", 0)
-                            losses = perf.get("losses", 0)
-                            wr = perf.get("win_rate", 0.0) * 100
-                            pnl = perf.get("total_pnl", 0.0)
-                            pnl_emoji = "🟢" if pnl >= 0 else "🔴"
-                            strategy_display = strategy_name.replace('_', ' ').title()
-                            if strategy_name == "unified_strategy":
-                                strategy_display = "Unified Strategy"
-                            message += f"\n{pnl_emoji} *{strategy_display}:* ${pnl:,.2f} ({wins}W/{losses}L • {wr:.0f}% WR)"
+
+                        message += (
+                            f"\n{total_emoji} *Total All Bots:* ${total_pnl_all:,.2f} "
+                            f"({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
+                        )
+
+                        # "Pearl Bot" is the bot running all signal types.
+                        # So its 30d totals should reflect the full 30d trade set.
+                        message += (
+                            f"\n{total_emoji} *Pearl Bot:* ${total_pnl_all:,.2f} "
+                            f"({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
+                        )
             except Exception as e:
-                logger.debug(f"Could not load per-strategy performance: {e}")
-            
-            # Add per-strategy challenge metrics (one challenge per strategy)
-            # Load per-strategy challenges
-            try:
-                from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker
-                from pearlalgo.learning.trade_database import TradeDatabase
-                
-                db_path = self.state_dir / "trades.db"
-                if db_path.exists():
-                    trade_db = TradeDatabase(db_path)
-                    # Get all strategies
-                    all_strategies = trade_db.get_performance_by_signal_type(days=365)
-                    
-                    per_strategy_challenges = {}
-                    for strategy_name in all_strategies.keys():
-                        # Each strategy has its own challenge state directory
-                        strategy_state_dir = self.state_dir / f"challenge_{strategy_name}"
-                        strategy_state_dir.mkdir(parents=True, exist_ok=True)
-                        
-                        strategy_challenge_file = strategy_state_dir / "challenge_state.json"
-                        if strategy_challenge_file.exists():
-                            strategy_tracker = ChallengeTracker(state_dir=strategy_state_dir)
-                            strategy_tracker.refresh()
-                            strategy_status = strategy_tracker.get_status_summary()
-                            attempt_perf = strategy_tracker.get_attempt_performance()
-                            
-                            if strategy_status:
-                                per_strategy_challenges[strategy_name] = {
-                                    "status": strategy_status,
-                                    "attempt_id": attempt_perf.get("attempt_id", 1),
-                                    "balance": attempt_perf.get("current_balance", 50000.0),
-                                    "pnl": attempt_perf.get("total_pnl", 0.0),
-                                    "trades": attempt_perf.get("exited_signals", 0),
-                                    "wr": attempt_perf.get("win_rate", 0.0) * 100,
-                                }
-                    
-                    # Display per-strategy challenges
-                    if per_strategy_challenges:
-                        message += "\n\n*Challenge by Strategy (One per Strategy):*"
-                        sorted_strategies = sorted(per_strategy_challenges.items(), key=lambda x: x[1].get("pnl", 0), reverse=True)
-                        for strategy_name, challenge_data in sorted_strategies:
-                            strategy_display = strategy_name.replace('_', ' ').title()
-                            if strategy_name == "unified_strategy":
-                                strategy_display = "Unified Strategy"
-                            attempt_id = challenge_data.get("attempt_id", 1)
-                            balance = challenge_data.get("balance", 50000.0)
-                            pnl = challenge_data.get("pnl", 0.0)
-                            trades = challenge_data.get("trades", 0)
-                            wr = challenge_data.get("wr", 0.0)
-                            pnl_emoji = "🟢" if pnl >= 0 else "🔴"
-                            pnl_sign = "-" if pnl < 0 else "+"
-                            message += f"\n\n🏆 *{strategy_display}* (Attempt #{attempt_id})"
-                            message += f"\nBalance: ${balance:,.2f} | {pnl_emoji} {pnl_sign}${abs(pnl):,.2f}"
-                            message += f"\nTrades: {trades} | WR: {wr:.0f}%"
-            except Exception as e:
-                logger.debug(f"Could not load per-strategy challenges: {e}")
-            
-            # Add per-strategy challenge metrics (current attempt only) - legacy overall challenge breakdown
-            # Show this section if we have challenge data and per-strategy breakdown
-            if challenge_status and challenge_tracker_instance:
-                # Try to get per-strategy breakdown if we haven't already
-                if not challenge_per_strategy:
-                    try:
-                        from pearlalgo.learning.trade_database import TradeDatabase
-                        db_path = self.state_dir / "trades.db"
-                        if db_path.exists():
-                            trade_db = TradeDatabase(db_path)
-                            attempt_perf = challenge_tracker_instance.get_attempt_performance()
-                            attempt_start = attempt_perf.get("attempt_started_at") if attempt_perf else None
-                            
-                            if attempt_start:
-                                cutoff = parse_utc_timestamp(attempt_start) if isinstance(attempt_start, str) else attempt_start
-                                if cutoff:
-                                    all_trades = trade_db.get_recent_trades_by_exit(limit=10000)
-                                    attempt_trades = []
-                                    for trade in all_trades:
-                                        try:
-                                            exit_time = trade.get("exit_time") or trade.get("timestamp")
-                                            if exit_time:
-                                                trade_time = parse_utc_timestamp(exit_time) if isinstance(exit_time, str) else exit_time
-                                                if trade_time:
-                                                    if hasattr(trade_time, 'tzinfo') and trade_time.tzinfo is None:
-                                                        trade_time = trade_time.replace(tzinfo=timezone.utc)
-                                                    if hasattr(cutoff, 'tzinfo') and cutoff.tzinfo is None:
-                                                        cutoff = cutoff.replace(tzinfo=timezone.utc)
-                                                    if hasattr(trade_time, '__ge__') and trade_time >= cutoff:
-                                                        attempt_trades.append(trade)
-                                        except Exception:
-                                            pass
-                                    
-                                    strategy_challenge = {}
-                                    for trade in attempt_trades:
-                                        signal_type = trade.get("signal_type") or "unknown"
-                                        pnl = float(trade.get("pnl", 0.0))
-                                        is_win = bool(trade.get("is_win", False))
-                                        
-                                        if signal_type not in strategy_challenge:
-                                            strategy_challenge[signal_type] = {
-                                                "pnl": 0.0,
-                                                "trades": 0,
-                                                "wins": 0,
-                                                "losses": 0,
-                                            }
-                                        
-                                        strategy_challenge[signal_type]["pnl"] += pnl
-                                        strategy_challenge[signal_type]["trades"] += 1
-                                        if is_win:
-                                            strategy_challenge[signal_type]["wins"] += 1
-                                        else:
-                                            strategy_challenge[signal_type]["losses"] += 1
-                                    
-                                    challenge_per_strategy = strategy_challenge
-                    except Exception as e:
-                        logger.debug(f"Could not calculate per-strategy challenge (retry): {e}")
-                
-                # Display per-strategy challenge breakdown if we have data
-                if challenge_per_strategy:
-                    message += "\n\n*Challenge by Strategy (Current Attempt):*"
-                    # Get attempt starting balance
-                    try:
-                        attempt_perf = challenge_tracker_instance.get_attempt_performance()
-                        start_balance = attempt_perf.get("starting_balance", 50000.0)
-                    except Exception:
-                        start_balance = 50000.0
-                    
-                    sorted_strategies = sorted(challenge_per_strategy.items(), key=lambda x: x[1].get("pnl", 0), reverse=True)
-                    for strategy_name, metrics in sorted_strategies:
-                        pnl = metrics.get("pnl", 0.0)
-                        trades = metrics.get("trades", 0)
-                        wins = metrics.get("wins", 0)
-                        losses = metrics.get("losses", 0)
-                        wr = (wins / trades * 100) if trades > 0 else 0
-                        balance = start_balance + pnl
-                        pnl_emoji = "🟢" if pnl >= 0 else "🔴"
-                        strategy_display = strategy_name.replace('_', ' ').title()
-                        if strategy_name == "unified_strategy":
-                            strategy_display = "Unified Strategy"
-                        message += f"\n{pnl_emoji} *{strategy_display}:* ${balance:,.2f} | ${pnl:+,.2f} ({wins}W/{losses}L • {wr:.0f}% WR)"
-            
-            # Add recent exits (from state or fallback to signals.jsonl)
+                logger.debug(f"Could not load 30d by strategy (compact): {e}")
+
+            # Challenge by Bot (current challenge run)
+            if challenge_tracker_instance:
+                try:
+                    attempt_perf = challenge_tracker_instance.get_attempt_performance() or {}
+                    pnl = float(attempt_perf.get("total_pnl", 0.0) or 0.0)
+                    balance = float(
+                        attempt_perf.get(
+                            "current_balance",
+                            attempt_perf.get("starting_balance", 50_000.0),
+                        )
+                        or 50_000.0
+                    )
+                    wins = int(attempt_perf.get("wins", 0) or 0)
+                    losses = int(attempt_perf.get("losses", 0) or 0)
+                    wr = float(attempt_perf.get("win_rate", 0.0) or 0.0) * 100
+                    pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+
+                    message += "\n\n*Challenge by Bot:*"
+                    message += (
+                        f"\n{pnl_emoji} *Pearl Bot:* ${balance:,.2f} | ${pnl:+,.2f} "
+                        f"({wins}W/{losses}L • {wr:.0f}% WR)"
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not load challenge by bot: {e}")
+
+            # Recent exits (from state or fallback to signals.jsonl)
             recent_exits = state.get("recent_exits", [])
             if not isinstance(recent_exits, list) or not recent_exits:
-                # Fallback: read from signals.jsonl
                 recent_signals = self._read_recent_signals(limit=50)
                 recent_exits = []
                 for signal in reversed(recent_signals):  # Most recent first
                     if signal.get("status") == "exited":
                         pnl = signal.get("pnl")
                         if pnl is not None:
-                            recent_exits.append({
-                                "signal_id": str(signal.get("signal_id") or ""),
-                                "type": str(signal.get("type") or "unknown"),
-                                "direction": str(signal.get("direction") or "long"),
-                                "pnl": pnl,
-                                "exit_reason": str(signal.get("exit_reason") or ""),
-                                "exit_time": signal.get("exit_time") or signal.get("timestamp"),
-                            })
+                            recent_exits.append(
+                                {
+                                    "signal_id": str(signal.get("signal_id") or ""),
+                                    "type": str(signal.get("type") or "unknown"),
+                                    "direction": str(signal.get("direction") or "long"),
+                                    "pnl": pnl,
+                                    "exit_reason": str(signal.get("exit_reason") or ""),
+                                    "exit_time": signal.get("exit_time") or signal.get("timestamp"),
+                                }
+                            )
                         if len(recent_exits) >= 3:
                             break
-            
+
             if isinstance(recent_exits, list) and recent_exits:
                 message += "\n\n*Recent exits:*"
                 for t in recent_exits[:3]:
@@ -1586,18 +2327,17 @@ class TelegramCommandHandler:
                     if reason:
                         line += f" • {reason}"
                     message += line
-                    
-                    # Add timestamp if available
+
                     timestamp = t.get("exit_time") or t.get("exit_timestamp") or t.get("timestamp")
                     if timestamp:
                         try:
                             exit_time = parse_utc_timestamp(timestamp) if isinstance(timestamp, str) else timestamp
                             if exit_time:
-                                if hasattr(exit_time, 'tzinfo') and exit_time.tzinfo is None:
+                                if hasattr(exit_time, "tzinfo") and exit_time.tzinfo is None:
                                     exit_time = exit_time.replace(tzinfo=timezone.utc)
                                 try:
                                     et_exit = exit_time.astimezone(et_tz)
-                                    time_label = et_exit.strftime("%I:%M %p").lstrip('0')
+                                    time_label = et_exit.strftime("%I:%M %p").lstrip("0")
                                     message += f" • {time_label}"
                                 except Exception:
                                     pass
@@ -1903,6 +2643,63 @@ class TelegramCommandHandler:
         
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
+    async def _handle_export_performance(self, query: CallbackQuery) -> None:
+        """Export performance report."""
+        try:
+            metrics = self._read_latest_metrics()
+            state = self._read_state()
+            
+            if not metrics and not state:
+                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                await query.edit_message_text(
+                    "❌ No performance data available to export.",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                return
+            
+            # Build a text summary report
+            lines = [
+                "📋 *Performance Report*",
+                f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+                "",
+            ]
+            
+            if metrics:
+                lines.extend([
+                    "*Trading Metrics:*",
+                    f"• Total Trades: {metrics.get('exited_signals', 0)}",
+                    f"• Win Rate: {metrics.get('win_rate', 0.0):.1%}",
+                    f"• Total P&L: ${metrics.get('total_pnl', 0.0):,.2f}",
+                    f"• Average P&L: ${metrics.get('avg_pnl', 0.0):,.2f}",
+                    f"• Max Drawdown: ${metrics.get('max_drawdown', 0.0):,.2f}",
+                    "",
+                ])
+            
+            if state:
+                lines.extend([
+                    "*Current Session:*",
+                    f"• Daily P&L: ${state.get('daily_pnl', 0.0):,.2f}",
+                    f"• Daily Trades: {state.get('daily_trades', 0)}",
+                    f"• Open Positions: {state.get('execution', {}).get('positions', 0)}",
+                    "",
+                ])
+            
+            keyboard = [
+                [InlineKeyboardButton("💎 Performance", callback_data="menu:performance")],
+                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            ]
+            await query.edit_message_text(
+                "\n".join(lines),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Export performance error: {e}", exc_info=True)
+            keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+            await query.edit_message_text(
+                f"❌ Error exporting performance: {e}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
     def run(self) -> None:
         logger.info("Starting PEARLalgo Telegram Command Handler")
@@ -2166,7 +2963,7 @@ class TelegramCommandHandler:
 
         signals_file = get_signals_file(Path(state_dir))
         if not signals_file.exists():
-            await self._send_message_or_edit(update, context, "🎯 Signals\n\nNo signals file found.")
+            await self._send_message_or_edit(update, context, "⚡ Signals\n\nNo signals file found.")
             return
 
         raw_lines = []
@@ -2186,7 +2983,7 @@ class TelegramCommandHandler:
                 continue
 
         if not signals:
-            await self._send_message_or_edit(update, context, "🎯 Signals\n\nNo signals yet.")
+            await self._send_message_or_edit(update, context, "⚡ Signals\n\nNo signals yet.")
             return
 
         # Render a compact summary (keep under Telegram limit)
@@ -2230,7 +3027,7 @@ class TelegramCommandHandler:
         avg_pnl = float(metrics.get("avg_pnl", 0.0) or 0.0)
         avg_hold = float(metrics.get("avg_hold_minutes", 0.0) or 0.0)
 
-        lines = ["📈 Performance"]
+        lines = ["💎 Performance"]
         lines.append(f"• Signals: {total_signals} (completed {exited})")
         if exited <= 0:
             lines.append("• No completed trades yet")
@@ -2605,6 +3402,440 @@ class TelegramCommandHandler:
         except Exception as e:
             await self._send_message_or_edit(update, context, f"❌ Error: {e}")
 
+    # ---------------------------------------------------------------------
+    # Telegram-first PEARL bot backtesting
+    # ---------------------------------------------------------------------
+
+    async def _render_pearl_backtest_menu(self, update: Any, context: Any) -> None:
+        """Render the PEARL bot backtest menu (Telegram-first; no CLI)."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        lines = [
+            "🧪 *PEARL Bot Backtesting*",
+            "",
+            "Choose a bot to backtest, then pick a historical period.",
+            "",
+            "Data source: `data/historical/MNQ_1m_*.parquet` (resampled to 5m).",
+        ]
+
+        keyboard = [
+            [
+                InlineKeyboardButton("📈 Trend Follower", callback_data="pb:bot:trend"),
+                InlineKeyboardButton("⚡ Breakout", callback_data="pb:bot:break"),
+            ],
+            [
+                InlineKeyboardButton("📉 Mean Reversion", callback_data="pb:bot:mean"),
+                InlineKeyboardButton("🏆 Compare All", callback_data="pb:bot:all"),
+            ],
+            [
+                InlineKeyboardButton("📑 Reports", callback_data="strategy_review:reports"),
+                InlineKeyboardButton("🏠 Back to Menu", callback_data="back"),
+            ],
+        ]
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+
+    async def _render_pearl_backtest_period_menu(self, update: Any, context: Any, bot_key: str) -> None:
+        """Render the period picker for a given bot."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        bot_label = {
+            "trend": "Trend Follower",
+            "break": "Breakout",
+            "mean": "Mean Reversion",
+            "all": "Compare All",
+        }.get(bot_key, bot_key)
+
+        lines = [
+            "🧪 *Backtest Period*",
+            "",
+            f"Bot: *{bot_label}*",
+            "",
+            "Pick a historical window:",
+        ]
+
+        keyboard = [
+            [
+                InlineKeyboardButton("1w", callback_data=f"pb:run:{bot_key}:1w"),
+                InlineKeyboardButton("2w", callback_data=f"pb:run:{bot_key}:2w"),
+            ],
+            [
+                InlineKeyboardButton("4w", callback_data=f"pb:run:{bot_key}:4w"),
+                InlineKeyboardButton("6w", callback_data=f"pb:run:{bot_key}:6w"),
+            ],
+            [
+                InlineKeyboardButton("⬅️ Back", callback_data="pb:menu"),
+                InlineKeyboardButton("🏠 Back to Menu", callback_data="back"),
+            ],
+        ]
+
+        await self._send_message_or_edit(
+            update,
+            context,
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+
+    async def _handle_pearl_backtest_callback(self, update: Any, context: Any, data: str) -> None:
+        """Route pb:* callback_data for PEARL bot backtesting."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        if data == "pb:menu":
+            await self._render_pearl_backtest_menu(update, context)
+            return
+
+        if data.startswith("pb:bot:"):
+            bot_key = data.split(":")[-1]
+            await self._render_pearl_backtest_period_menu(update, context, bot_key)
+            return
+
+        if data.startswith("pb:run:"):
+            parts = data.split(":")
+            bot_key = parts[2] if len(parts) > 2 else "trend"
+            period_key = parts[3] if len(parts) > 3 else "2w"
+            if bot_key == "all":
+                await self._run_pearl_bots_comparison(update, context, period_key)
+            else:
+                await self._run_pearl_bot_backtest(update, context, bot_key, period_key)
+            return
+
+        await self._send_message_or_edit(update, context, f"❌ Unknown backtest action: {data}")
+
+    def _get_repo_root(self) -> Path:
+        """Get repository root from this file location."""
+        return Path(__file__).resolve().parent.parent.parent.parent
+
+    def _get_reports_dir(self) -> Path:
+        """Directory where Telegram backtest reports are stored (shared with report viewer)."""
+        try:
+            state_dir = Path(getattr(self, "state_dir", "data/nq_agent_state"))
+        except Exception:
+            state_dir = Path("data/nq_agent_state")
+        return state_dir.parent / "reports"
+
+    def _load_historical_ohlcv(self, period_key: str) -> "pd.DataFrame":
+        """Load OHLCV parquet for a given period key (1w/2w/4w/6w)."""
+        import pandas as pd  # local import (Telegram handler should stay lightweight)
+
+        period = (period_key or "").strip().lower()
+        if period not in {"1w", "2w", "4w", "6w"}:
+            raise ValueError(f"Unknown period: {period_key}")
+
+        root = self._get_repo_root()
+        path = root / "data" / "historical" / f"MNQ_1m_{period}.parquet"
+        if not path.exists():
+            raise FileNotFoundError(f"Historical data not found: {path}")
+
+        df = pd.read_parquet(path)
+        if not isinstance(df.index, pd.DatetimeIndex):
+            for col in ("timestamp", "time", "datetime", "date"):
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
+                    df = df.dropna(subset=[col]).set_index(col)
+                    break
+
+        if not isinstance(df.index, pd.DatetimeIndex):
+            raise ValueError("Historical data must have a DateTimeIndex or a timestamp column")
+
+        df = df.sort_index()
+        required = {"open", "high", "low", "close"}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(f"Historical data missing required columns: {missing}")
+
+        return df
+
+    def _create_pearl_bot_for_backtest(self, bot_key: str):
+        """Create a PEARL bot instance with safe backtest defaults."""
+        from pearlalgo.strategies.pearl_bots import BotConfig, create_bot
+
+        bot_map = {
+            "trend": ("TrendFollowerBot", {"min_trend_strength": 25.0, "max_pullback_pct": 0.02, "momentum_threshold": 0.005}),
+            "break": ("BreakoutBot", {"min_pattern_strength": 0.6, "require_volume_confirmation": True, "min_momentum_acceleration": 0.001}),
+            "mean": ("MeanReversionBot", {"min_mr_strength": 0.7, "require_divergence": False, "max_hold_bars": 10}),
+        }
+        if bot_key not in bot_map:
+            raise ValueError(f"Unknown bot: {bot_key}")
+
+        bot_class_name, params = bot_map[bot_key]
+        cfg = BotConfig(
+            name=bot_key,
+            description=f"Telegram backtest config for {bot_class_name}",
+            symbol="MNQ",
+            timeframe="5m",
+            max_positions=1,
+            risk_per_trade=0.01,
+            stop_loss_pct=0.005,
+            take_profit_pct=0.01,
+            min_confidence=0.6,
+            parameters=params,
+            enable_alerts=False,  # Never alert during backtests
+            webhook_url=None,
+        )
+        return create_bot(bot_class_name, cfg)
+
+    async def _run_pearl_bot_backtest(self, update: Any, context: Any, bot_key: str, period_key: str) -> None:
+        """Run a single PEARL bot backtest and write a report under data/reports/."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        bot_label = {"trend": "Trend Follower", "break": "Breakout", "mean": "Mean Reversion"}.get(bot_key, bot_key)
+        await self._send_message_or_edit(update, context, f"⏳ Running backtest…\n\nBot: {bot_label}\nPeriod: {period_key}")
+
+        try:
+            import pandas as pd  # noqa: F401
+            from datetime import datetime, timezone
+
+            from pearlalgo.strategies.pearl_bots.backtest_adapter import PearlBotBacktestAdapter
+
+            df_1m = self._load_historical_ohlcv(period_key)
+            bot = self._create_pearl_bot_for_backtest(bot_key)
+
+            adapter = PearlBotBacktestAdapter(
+                bot=bot,
+                tick_value=2.0,  # MNQ
+                slippage_ticks=0.5,
+                max_concurrent_trades=1,
+            )
+            result = adapter.run_backtest(df_1m, timeframe="5m", return_signals=True, return_trades=True)
+
+            reports_dir = self._get_reports_dir()
+            reports_dir.mkdir(parents=True, exist_ok=True)
+
+            run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            start = df_1m.index[0].strftime("%Y%m%d")
+            end = df_1m.index[-1].strftime("%Y%m%d")
+            report_name = f"pearlbot_{bot_key}_{period_key}_{start}_{end}_{run_ts}"
+            report_dir = reports_dir / report_name
+            report_dir.mkdir(parents=True, exist_ok=True)
+
+            # Write artifacts
+            (report_dir / "summary.json").write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+            if result.signals:
+                pd.DataFrame(result.signals).to_csv(report_dir / "signals.csv", index=False)
+            if result.trades:
+                pd.DataFrame(result.trades).to_csv(report_dir / "trades.csv", index=False)
+            if result.skipped_signals:
+                pd.DataFrame(result.skipped_signals).to_csv(report_dir / "skipped_signals.csv", index=False)
+
+            # Show summary
+            lines = [
+                "✅ *Backtest Complete*",
+                "",
+                f"*Bot:* {bot_label}",
+                f"*Period:* {period_key} (1m data → 5m backtest)",
+                "",
+                f"Trades: *{result.total_trades}* | Signals: *{result.total_signals}*",
+                f"Win rate: *{(result.win_rate or 0.0) * 100:.1f}%* | PF: *{result.profit_factor:.2f}*",
+                f"Total P&L: *${result.total_pnl:,.2f}*",
+                f"Max DD: *${result.max_drawdown:,.2f}* | Sharpe: *{result.sharpe_ratio:.2f}*",
+                "",
+                f"Saved report: `{report_name}`",
+            ]
+
+            keyboard = [
+                [InlineKeyboardButton("📑 Backtest Reports", callback_data="strategy_review:reports")],
+                [InlineKeyboardButton("🧪 Backtest Another", callback_data="pb:menu")],
+                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            ]
+
+            await self._send_message_or_edit(
+                update,
+                context,
+                "\n".join(lines),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.error(f"Backtest error: {e}", exc_info=True)
+            keyboard = [
+                [InlineKeyboardButton("🧪 Backtest Menu", callback_data="pb:menu")],
+                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            ]
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"❌ Backtest failed: {e}",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
+    async def _run_pearl_bots_comparison(self, update: Any, context: Any, period_key: str) -> None:
+        """Run the same backtest period for all PEARL bots and show a comparison."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        await self._send_message_or_edit(update, context, f"⏳ Running comparison backtest…\n\nBots: Trend/Breakout/MeanRev\nPeriod: {period_key}")
+
+        try:
+            import pandas as pd  # noqa: F401
+            from datetime import datetime, timezone
+
+            from pearlalgo.strategies.pearl_bots.backtest_adapter import PearlBotBacktestAdapter
+
+            df_1m = self._load_historical_ohlcv(period_key)
+            bots = [("trend", "Trend"), ("break", "Breakout"), ("mean", "MeanRev")]
+
+            results = []
+            for key, label in bots:
+                bot = self._create_pearl_bot_for_backtest(key)
+                adapter = PearlBotBacktestAdapter(
+                    bot=bot,
+                    tick_value=2.0,
+                    slippage_ticks=0.5,
+                    max_concurrent_trades=1,
+                )
+                r = adapter.run_backtest(df_1m, timeframe="5m", return_signals=False, return_trades=False)
+                results.append((label, r))
+
+            # Rank by total P&L
+            ranked = sorted(results, key=lambda x: float(getattr(x[1], "total_pnl", 0.0) or 0.0), reverse=True)
+            best_label, best = ranked[0]
+
+            reports_dir = self._get_reports_dir()
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            start = df_1m.index[0].strftime("%Y%m%d")
+            end = df_1m.index[-1].strftime("%Y%m%d")
+            report_name = f"pearlbots_compare_{period_key}_{start}_{end}_{run_ts}"
+            report_dir = reports_dir / report_name
+            report_dir.mkdir(parents=True, exist_ok=True)
+
+            summary = {
+                "period": period_key,
+                "results": [{"bot": lbl, **r.to_dict()} for (lbl, r) in results],
+                "best": best_label,
+            }
+            (report_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+            pd.DataFrame([{"bot": lbl, **r.to_dict()} for (lbl, r) in results]).to_csv(report_dir / "comparison.csv", index=False)
+
+            lines = [
+                "✅ *Comparison Backtest Complete*",
+                "",
+                f"*Period:* {period_key} (1m data → 5m backtest)",
+                "",
+                "*Results:*",
+            ]
+            for lbl, r in ranked:
+                lines.append(
+                    f"- *{lbl}*: P&L ${r.total_pnl:,.0f} | WR {(r.win_rate or 0.0) * 100:.0f}% | PF {r.profit_factor:.2f} | DD ${r.max_drawdown:,.0f}"
+                )
+            lines.extend(["", f"🏆 *Best:* {best_label}", "", f"Saved report: `{report_name}`"])
+
+            keyboard = [
+                [InlineKeyboardButton("📑 Backtest Reports", callback_data="strategy_review:reports")],
+                [InlineKeyboardButton("🧪 Backtest Menu", callback_data="pb:menu")],
+                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            ]
+            await self._send_message_or_edit(
+                update,
+                context,
+                "\n".join(lines),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.error(f"Comparison backtest error: {e}", exc_info=True)
+            keyboard = [
+                [InlineKeyboardButton("🧪 Backtest Menu", callback_data="pb:menu")],
+                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            ]
+            await self._send_message_or_edit(
+                update,
+                context,
+                f"❌ Comparison backtest failed: {e}",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
+    async def _handle_report_detail_by_idx(self, update: Any, context: Any, report_idx: int) -> None:
+        """Show report artifacts using report index (short callback_data IDs)."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        reports_dir = self._get_reports_dir()
+        if not reports_dir.exists():
+            await self._send_message_or_edit(update, context, "📑 Reports\n\nNo reports found.")
+            return
+
+        report_names = sorted([p.name for p in reports_dir.iterdir() if p.is_dir()])
+        if report_idx < 0 or report_idx >= len(report_names):
+            await self._send_message_or_edit(update, context, "❌ Report not found")
+            return
+
+        report_name = report_names[report_idx]
+        report_dir = reports_dir / report_name
+        artifacts = sorted([p.name for p in report_dir.iterdir() if p.is_file()])
+
+        rows = []
+        for i, name in enumerate(artifacts[:12]):
+            rows.append([InlineKeyboardButton(name[:28], callback_data=f"artifact:{report_idx}:{i}")])
+        rows.append([InlineKeyboardButton("⬅️ Reports", callback_data="strategy_review:reports")])
+        rows.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+
+        await self._send_message_or_edit(update, context, f"Report: {report_name}", reply_markup=InlineKeyboardMarkup(rows))
+
+    async def _handle_report_artifact_by_idx(self, update: Any, context: Any, report_idx: int, artifact_idx: int) -> None:
+        """Send a report artifact file to Telegram."""
+        if not await self._check_authorized(update):
+            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
+            return
+
+        reports_dir = self._get_reports_dir()
+        report_names = sorted([p.name for p in reports_dir.iterdir() if p.is_dir()]) if reports_dir.exists() else []
+        if report_idx < 0 or report_idx >= len(report_names):
+            await self._send_message_or_edit(update, context, "❌ Report not found")
+            return
+
+        report_name = report_names[report_idx]
+        report_dir = reports_dir / report_name
+        artifacts = sorted([p for p in report_dir.iterdir() if p.is_file()])
+        if artifact_idx < 0 or artifact_idx >= len(artifacts):
+            await self._send_message_or_edit(update, context, "❌ File not found")
+            return
+
+        file_path = artifacts[artifact_idx]
+        try:
+            bot = getattr(context, "bot", None)
+            chat_id = getattr(getattr(update, "effective_chat", None), "id", None) or getattr(self, "chat_id", None)
+            if bot is None or chat_id is None:
+                raise RuntimeError("Telegram bot/chat not available")
+            # Send as document (works for CSV/JSON/PNG/HTML)
+            with open(file_path, "rb") as f:
+                await bot.send_document(chat_id=chat_id, document=f, filename=file_path.name)
+        except Exception as e:
+            logger.error(f"Failed to send artifact {file_path}: {e}", exc_info=True)
+            await self._send_message_or_edit(update, context, f"❌ Could not send file: {e}")
+            return
+
+        # Keep navigation handy
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Report", callback_data=f"report:{report_idx}")],
+            [InlineKeyboardButton("📑 Reports", callback_data="strategy_review:reports")],
+            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+        ]
+        await self._send_message_or_edit(
+            update,
+            context,
+            f"📎 Sent: `{file_path.name}`",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+
     async def _render_strategy_review_more_menu(self, update: Any, context: Any) -> None:
         """Render Strategy Review 'More' menu (test expects Backtest/Reports/Export buttons)."""
         if not await self._check_authorized(update):
@@ -2621,11 +3852,11 @@ class TelegramCommandHandler:
                 [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
             ]
         )
-        await self._send_message_or_edit(update, context, "Strategy Review • More", reply_markup=rm)
+        await self._send_message_or_edit(update, context, "Bot Review • More", reply_markup=rm)
 
     async def _render_strategy_review_cached(self, update: Any, context: Any) -> None:
         """Placeholder cached Strategy Review render (tests patch this)."""
-        await self._send_message_or_edit(update, context, "Strategy Review")
+        await self._send_message_or_edit(update, context, "Bot Review")
 
     async def _handle_backtest_reports(self, update: Any, context: Any, *, page: int = 0) -> None:
         """List backtest reports with short callback_data IDs (<= 64 bytes)."""

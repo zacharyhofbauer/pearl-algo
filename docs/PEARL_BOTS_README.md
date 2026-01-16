@@ -65,15 +65,11 @@ Use the Strategies menu in Telegram:
 - 🛑 **Stop All Bots**: Emergency shutdown
 
 ### 3. Backtesting
-Run comprehensive backtests:
+Run backtests from Telegram:
 
-```bash
-# Backtest individual bot
-python scripts/backtesting/backtest_pearl_bot.py --bot trend_follower --period 3mo
-
-# Compare all bots
-python scripts/backtesting/compare_pearl_bots.py --period 6mo
-```
+- Open **Telegram** → **🔮 AI & Analysis** → **🧪 Backtest Bots**
+- Choose the bot + historical period (1w/2w/4w/6w)
+- View saved artifacts in **Telegram** → **🔮 AI & Analysis** → **📑 Backtest Reports**
 
 ## Architecture
 
@@ -156,11 +152,11 @@ class MyCustomBot(PearlBot):
 # Unit testing
 python -m pytest tests/test_pearl_bots/
 
-# Backtesting
-python scripts/backtesting/backtest_pearl_bot.py --bot my_custom_bot
+# Backtesting (programmatic)
+from pearlalgo.strategies.pearl_bots.backtest_adapter import backtest_pearl_bot
 
-# Performance analysis
-python scripts/backtesting/analyze_pearl_bot_performance.py
+# Example:
+# result = backtest_pearl_bot(my_bot, df_ohlcv)
 ```
 
 ## Deployment Checklist
