@@ -215,15 +215,25 @@ class TelegramCommandHandler:
                 status_label = "🛰️ Status • Offline"
         
         # Bots button - show running status
+        # Use same source of truth as main status (state file) for consistency
         bots_label = "👾 Bots"
         try:
-            sc = getattr(self, "service_controller", None)
-            if sc is not None:
-                agent_status = sc.get_agent_status() or {}
-                if agent_status.get("running"):
+            # First check state file (same as main status display)
+            if state:
+                agent_running = state.get("running", False)
+                if agent_running:
                     bots_label = "👾 Bots • Running"
                 else:
                     bots_label = "👾 Bots • Stopped"
+            else:
+                # Fallback to process check if state file not available
+                sc = getattr(self, "service_controller", None)
+                if sc is not None:
+                    agent_status = sc.get_agent_status() or {}
+                    if agent_status.get("running"):
+                        bots_label = "👾 Bots • Running"
+                    else:
+                        bots_label = "👾 Bots • Stopped"
         except Exception:
             pass
         
@@ -3036,6 +3046,7 @@ class TelegramCommandHandler:
             text += f"📊 *Data Level:* {data_level}\n"
             
             # Check data age
+            age_minutes = None
             timestamp = latest_bar.get("timestamp")
             if timestamp:
                 try:
@@ -3080,6 +3091,19 @@ class TelegramCommandHandler:
                 if buffer_target:
                     text += f" / {buffer_target} (target)"
                 text += "\n"
+            
+            # Diagnostic info for stale data
+            if age_minutes is not None and age_minutes > data_stale_threshold_minutes and agent_running and not paused:
+                data_fetch_errors = state.get("data_fetch_errors", 0)
+                connection_status = state.get("connection_status", "unknown")
+                connection_failures = state.get("connection_failures", 0)
+                
+                text += "\n🔍 *Diagnostics:*\n"
+                text += f"• Connection: {connection_status}\n"
+                if data_fetch_errors > 0:
+                    text += f"• Data fetch errors: {data_fetch_errors}\n"
+                if connection_failures > 0:
+                    text += f"• Connection failures: {connection_failures}\n"
         else:
             text += "❌ No data available\n"
             text += "\n*Possible reasons:*\n"

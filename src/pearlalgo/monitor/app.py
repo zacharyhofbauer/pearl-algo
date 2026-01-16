@@ -172,7 +172,7 @@ def _format_chart_meta(meta: Optional[dict]) -> str:
 def run_monitor() -> None:
     try:
         from PyQt6.QtCore import Qt, QTimer
-        from PyQt6.QtGui import QFont, QPixmap
+        from PyQt6.QtGui import QFont, QPixmap, QGuiApplication
         from PyQt6.QtWidgets import (
             QApplication,
             QFrame,
@@ -356,6 +356,28 @@ def run_monitor() -> None:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     win = MainWindow()
-    win.showFullScreen()
+    # Show as normal maximized window (not fullscreen) so user can resize/close
+    try:
+        target = None
+        for s in QGuiApplication.screens():
+            g = s.geometry()
+            if int(g.width()) == 2560 and int(g.height()) == 720:
+                target = s
+                break
+        if target is not None:
+            win.show()  # ensure window handle exists
+            try:
+                handle = win.windowHandle()
+                if handle is not None:
+                    handle.setScreen(target)
+            except Exception:
+                pass
+            try:
+                win.setGeometry(target.geometry())
+            except Exception:
+                pass
+        win.showMaximized()
+    except Exception:
+        win.showMaximized()
     sys.exit(app.exec())
 
