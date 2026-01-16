@@ -2477,6 +2477,17 @@ class NQAgentService:
             )
             
             if chart_path and chart_path.exists():
+                # Save chart to exports for on-demand access (Telegram menu chart button)
+                try:
+                    exports_dir = self.state_dir / "exports"
+                    exports_dir.mkdir(parents=True, exist_ok=True)
+                    export_path = exports_dir / "dashboard_latest.png"
+                    import shutil
+                    shutil.copy2(chart_path, export_path)
+                    logger.debug(f"Dashboard chart exported to {export_path}")
+                except Exception as e:
+                    logger.debug(f"Could not export dashboard chart: {e}")
+                
                 # Send the chart with current lookback for toggle button highlighting
                 success = await self.telegram_notifier.send_dashboard_chart(
                     chart_path=chart_path,

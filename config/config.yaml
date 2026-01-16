@@ -33,7 +33,7 @@ service:
   dashboard_chart_enabled: true
   dashboard_chart_interval: 3600
   dashboard_chart_timeframe: 5m
-  dashboard_chart_lookback_hours: 12
+  dashboard_chart_lookback_hours: 8
   enable_new_bar_gating: true
   adaptive_cadence_enabled: true
   scan_interval_active_seconds: 5

@@ -233,10 +233,11 @@ class TelegramCommandHandler:
                 InlineKeyboardButton(signals_label, callback_data="menu:signals"),
                 InlineKeyboardButton(performance_label, callback_data="menu:performance"),
             ],
-            # Row 2: System Monitoring + Refresh
+            # Row 2: System Monitoring + Refresh + Chart
             [
                 InlineKeyboardButton(status_label, callback_data="menu:status"),
                 InlineKeyboardButton("🔄", callback_data="action:refresh_dashboard"),
+                InlineKeyboardButton("📊", callback_data="action:toggle_chart"),
                 InlineKeyboardButton("🎛️ System Control", callback_data="menu:system"),
             ],
             # Row 3: Advanced Features
@@ -567,6 +568,238 @@ class TelegramCommandHandler:
         else:
             text = "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:"
             await query.edit_message_text(text, reply_markup=reply_markup)
+
+    async def _show_main_menu_with_chart(self, query: CallbackQuery) -> None:
+        """Show the main menu with chart displayed above the menu text."""
+        keyboard = self._get_main_menu_keyboard()
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        state = self._read_state()
+        if state:
+            try:
+                message_text = await self._build_status_dashboard_message(state)
+                chart_path = await self._generate_or_get_chart(state)
+                
+                if chart_path and chart_path.exists():
+                    try:
+                        message = query.message
+                        # Check if message already has a photo
+                        if message and message.photo:
+                            # Message has photo, edit it
+                            from telegram import InputMediaPhoto
+                            with open(chart_path, 'rb') as f:
+                                await query.edit_message_media(
+                                    media=InputMediaPhoto(
+                                        media=f,
+                                        caption=message_text,
+                                        parse_mode="Markdown"
+                                    ),
+                                    reply_markup=reply_markup
+                                )
+                        else:
+                            # Message doesn't have photo, delete and send new one with photo
+                            try:
+                                await query.message.delete()
+                            except Exception:
+                                pass
+                            # Send new message with photo
+                            with open(chart_path, 'rb') as f:
+                                sent_message = await query.message.chat.send_photo(
+                                    photo=f,
+                                    caption=message_text,
+                                    reply_markup=reply_markup,
+                                    parse_mode="Markdown"
+                                )
+                            await query.answer()  # Acknowledge the callback
+                    except Exception as e:
+                        logger.error(f"Error showing chart: {e}", exc_info=True)
+                        # Fallback to text only
+                        message = query.message
+                        if message and message.photo:
+                            # If we have a photo message, delete it first
+                            try:
+                                await message.delete()
+                            except Exception:
+                                pass
+                            await message.chat.send_message(
+                                text=message_text,
+                                reply_markup=reply_markup,
+                                parse_mode="Markdown"
+                            )
+                            await query.answer()
+                        else:
+                            await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
+                else:
+                    # No chart available - just show text menu quickly
+                    message = query.message
+                    if message and message.photo:
+                        # If we have a photo message, delete it first
+                        try:
+                            await message.delete()
+                        except Exception:
+                            pass
+                        await message.chat.send_message(
+                            text=message_text,
+                            reply_markup=reply_markup,
+                            parse_mode="Markdown"
+                        )
+                        await query.answer()
+                    else:
+                        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Error showing main menu with chart: {e}", exc_info=True)
+                await self._show_main_menu(query)
+        else:
+            text = "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:"
+            message = query.message
+            if message and message.photo:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                await message.chat.send_message(text=text, reply_markup=reply_markup)
+                await query.answer()
+            else:
+                await query.edit_message_text(text=text, reply_markup=reply_markup)
+
+    async def _toggle_chart_display(self, query: CallbackQuery) -> None:
+        """Toggle chart display on/off."""
+        try:
+            message = query.message
+            # Check if message currently has a photo (chart is showing)
+            if message and message.photo:
+                # Chart is showing, hide it (show text only)
+                # Need to delete photo message and send text message
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                # Send new text message
+                keyboard = self._get_main_menu_keyboard()
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                state = self._read_state()
+                if state:
+                    try:
+                        message_text = await self._build_status_dashboard_message(state)
+                        await message.chat.send_message(
+                            text=message_text,
+                            reply_markup=reply_markup,
+                            parse_mode="Markdown"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error sending text message: {e}", exc_info=True)
+                        text = "🎯 Pearl Algo Bot's\n\nSelect an option:"
+                        await message.chat.send_message(text=text, reply_markup=reply_markup)
+                else:
+                    text = "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:"
+                    await message.chat.send_message(text=text, reply_markup=reply_markup)
+                await query.answer()
+            else:
+                # Chart is not showing, show it
+                await self._show_main_menu_with_chart(query)
+        except Exception as e:
+            logger.error(f"Error toggling chart: {e}", exc_info=True)
+            await self._show_main_menu(query)
+
+    async def _generate_or_get_chart(self, state: dict) -> Optional[Path]:
+        """Generate chart on-demand using IBKR data."""
+        import asyncio
+        try:
+            # First check if there's a recent exported chart (faster)
+            chart_path = self.exports_dir / "dashboard_latest.png"
+            if chart_path.exists():
+                import time
+                age = time.time() - chart_path.stat().st_mtime
+                if age < 300:  # Use cached chart if < 5 minutes old
+                    return chart_path
+            
+            # Generate fresh chart
+            from datetime import timedelta
+            import pandas as pd
+            from pearlalgo.nq_agent.chart_generator import ChartGenerator
+            from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
+            
+            symbol = state.get("symbol") or "MNQ"
+            lookback_hours = 8
+            
+            # Create provider (executor manages connection automatically)
+            provider = IBKRProvider(client_id=99)  # Use different client ID
+            try:
+                # Validate connection (this ensures executor is connected)
+                connected = await provider.validate_connection()
+                if not connected:
+                    logger.warning("Could not connect to IBKR for chart generation")
+                    # Fallback to cached chart
+                    if chart_path.exists():
+                        return chart_path
+                    return None
+                
+                end = datetime.now(timezone.utc)
+                start = end - timedelta(hours=lookback_hours)
+                
+                # fetch_historical is synchronous but handles its own event loop
+                # Run in thread to avoid blocking
+                df = await asyncio.to_thread(
+                    provider.fetch_historical,
+                    symbol,
+                    start,
+                    end,
+                    "5m"
+                )
+                
+                if df is None or df.empty or len(df) < 20:
+                    logger.debug(f"Not enough data for chart: {len(df) if df is not None else 0} bars")
+                    # Fallback to cached chart
+                    if chart_path.exists():
+                        return chart_path
+                    return None
+                
+                # Generate chart
+                chart_gen = ChartGenerator()
+                
+                # Get recent trades for markers
+                trades = self._get_trades_for_chart(df, symbol)
+                
+                chart_path = chart_gen.generate_dashboard_chart(
+                    data=df,
+                    symbol=symbol,
+                    timeframe="5m",
+                    lookback_bars=min(96, len(df)),  # ~8 hours
+                    range_label="8h",
+                    figsize=(14, 6),
+                    dpi=120,
+                    show_sessions=True,  # Show Tokyo/London/NY session shading
+                    show_key_levels=True,  # Show RTH/ETH PDH/PDL/Open levels
+                    show_vwap=True,  # Show VWAP line + bands
+                    show_ma=True,  # Show moving averages
+                    ma_periods=[20, 50, 200],  # MA20, MA50, MA200
+                    show_rsi=True,  # Show RSI panel
+                    show_pressure=True,  # Show buy/sell pressure
+                    trades=trades,  # Overlay trade markers
+                )
+                
+                # Save to exports for caching
+                if chart_path and chart_path.exists():
+                    self.exports_dir.mkdir(parents=True, exist_ok=True)
+                    import shutil
+                    export_path = self.exports_dir / "dashboard_latest.png"
+                    shutil.copy2(chart_path, export_path)
+                    return export_path
+                
+                return chart_path
+            finally:
+                try:
+                    await provider.close()
+                except Exception:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Error generating chart: {e}", exc_info=True)
+            # Fallback to cached chart if available
+            chart_path = self.exports_dir / "dashboard_latest.png"
+            if chart_path.exists():
+                return chart_path
+            return None
 
     async def _show_status_menu(self, query: CallbackQuery) -> None:
         """Show status submenu with inline indicators."""
@@ -1738,7 +1971,19 @@ class TelegramCommandHandler:
                 await self._handle_export_performance(query)
             elif action_type == "refresh_dashboard":
                 # Refresh the main dashboard
-                await self._show_main_menu(query)
+                # Check if chart is currently showing (message has photo)
+                try:
+                    message = query.message
+                    if message and message.photo:
+                        # Chart is showing, refresh it too
+                        await self._show_main_menu_with_chart(query)
+                    else:
+                        await self._show_main_menu(query)
+                except Exception:
+                    await self._show_main_menu(query)
+            elif action_type == "toggle_chart":
+                # Toggle chart display
+                await self._toggle_chart_display(query)
             elif action_type == "ai_on":
                 # Enable AI chat mode
                 prefs = TelegramPrefs(state_dir=self.state_dir)
@@ -3274,13 +3519,8 @@ class TelegramCommandHandler:
         except Exception:
             return []
 
-        sm = getattr(self, "state_manager", None)
-        recent = []
-        try:
-            fn = getattr(sm, "get_recent_signals", None)
-            recent = fn() if callable(fn) else []
-        except Exception:
-            recent = []
+        # Read recent signals from signals.jsonl
+        recent = self._read_recent_signals(limit=100)  # Get more signals to find trades in window
 
         trades: list[dict] = []
         sym = str(symbol or "").upper()
@@ -3294,6 +3534,7 @@ class TelegramCommandHandler:
             if str(sig.get("symbol", "")).upper() != sym:
                 continue
 
+            # Get entry time - check multiple fields
             entry_time = item.get("entry_time") or item.get("timestamp") or sig.get("timestamp")
             if not entry_time:
                 continue
@@ -3317,13 +3558,25 @@ class TelegramCommandHandler:
                 except Exception:
                     pass
 
+            # Get entry price, stop loss, take profit
+            entry_price = item.get("entry_price") or sig.get("entry_price")
+            stop_loss = item.get("stop_loss") or sig.get("stop_loss")
+            take_profit = item.get("take_profit") or sig.get("take_profit")
+            status = item.get("status") or sig.get("status", "unknown")
+            
+            # Only include trades that have been entered
+            if status not in ["entered", "exited", "stopped", "target"]:
+                continue
+
             trades.append(
                 {
                     "signal_id": item.get("signal_id") or sig.get("signal_id") or "",
                     "direction": sig.get("direction") or item.get("direction") or "",
                     "entry_time": dt.isoformat(),
-                    "entry_price": item.get("entry_price") or sig.get("entry_price"),
-                    "status": item.get("status"),
+                    "entry_price": entry_price,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                    "status": status,
                 }
             )
 
