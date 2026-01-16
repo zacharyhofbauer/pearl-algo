@@ -40,7 +40,7 @@ class PearlBotManager:
 
     def __init__(self, config_dir: Optional[Path] = None):
         self.config_dir = config_dir or Path("config")
-        self.bots: Dict[str, LuxAlgoBot] = {}
+        self.bots: Dict[str, PearlBot] = {}
         self.bot_configs: Dict[str, Dict[str, Any]] = {}
 
         # Load bot configurations
@@ -54,15 +54,15 @@ class PearlBotManager:
             # Load service config to get bot settings
             service_config = load_service_config(validate=False) or {}
 
-            # Look for lux_algo_bots configuration
-            lux_algo_config = service_config.get('lux_algo_bots', {})
+            # Look for PEARL bot configuration (legacy alias: lux_algo_bots)
+            pearl_bots_config = service_config.get("pearl_bots") or service_config.get("lux_algo_bots") or {}
 
-            if not lux_algo_config.get('enabled', False):
-                logger.info("Lux Algo bots disabled in configuration")
+            if not pearl_bots_config.get("enabled", False):
+                logger.info("PEARL bots disabled in configuration")
                 return
 
             # Get bot configurations
-            bots_config = lux_algo_config.get('bots', {})
+            bots_config = pearl_bots_config.get("bots", {})
 
             for bot_name, bot_config in bots_config.items():
                 if not bot_config.get('enabled', False):
@@ -125,7 +125,7 @@ class PearlBotManager:
                 logger.error(f"Error analyzing with bot {bot_name}: {e}")
                 continue
 
-        logger.debug(f"Generated {len(all_signals)} signals from {len(self.bots)} Lux Algo bots")
+        logger.debug(f"Generated {len(all_signals)} signals from {len(self.bots)} PEARL bots")
         return all_signals
 
     def _convert_to_pearl_format(self, lux_signal: Any, bot_name: str) -> Dict:
@@ -197,19 +197,19 @@ class PearlBotManager:
 
     def reload_bot_configs(self) -> None:
         """Reload bot configurations from config files."""
-        logger.info("Reloading Lux Algo bot configurations...")
+        logger.info("Reloading PEARL bot configurations...")
         self.bots.clear()
         self.bot_configs.clear()
         self._load_bot_configs()
 
     def create_default_config(self) -> Dict[str, Any]:
         """
-        Create a default configuration template for Lux Algo bots.
+        Create a default configuration template for PEARL bots.
 
         This shows users how to configure the bots in their config.yaml
         """
         return {
-            "lux_algo_bots": {
+            "pearl_bots": {
                 "enabled": True,
                 "bots": {
                     "trend_follower": {

@@ -1,9 +1,9 @@
-# Lux Algo Chart Prime Style Automated Trading Bots Configuration Example
+# PEARL Automated Trading Bots Configuration Example
 #
-# Add this to your config/config.yaml to enable Lux Algo bots in the strategies menu
+# Add this to your config/config.yaml to enable PEARL bots in the strategies menu
 
-lux_algo_bots:
-  enabled: true  # Set to true to enable Lux Algo bots
+pearl_bots:
+  enabled: true  # Set to true to enable PEARL bots
 
   # Bot configurations - each bot is a complete automated strategy
   bots:

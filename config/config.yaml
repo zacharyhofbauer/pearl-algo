@@ -328,7 +328,7 @@ adaptive_sizing:
   method: kelly_criterion
   kelly_fraction: 0.25
   min_contracts: 1
-  max_contracts: 15
+  max_contracts: 25
   confidence_scaling: true
   regime_scaling: true
   session_scaling: true
@@ -432,9 +432,9 @@ claude_monitor:
   system_analysis_lookback_hours: 48
   market_analysis_lookback_hours: 168
 
-# Lux Algo Chart Prime Style Automated Trading Bots
-lux_algo_bots:
-  enabled: true
+# PEARL Automated Trading Bots (formerly lux_algo_bots)
+pearl_bots:
+  enabled: false
   bots:
     trend_follower:
       enabled: true

@@ -172,6 +172,7 @@ class NQAgentService:
         self.telegram_notifier = NQAgentTelegramNotifier(
             bot_token=telegram_bot_token,
             chat_id=telegram_chat_id,
+            state_dir=state_dir,
         )
         
         # Log Telegram configuration status

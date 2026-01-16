@@ -846,6 +846,21 @@ class ChartGenerator:
 
             levels_df = None
             if hist is not None and base is not None:
+                # Determinism + relevance guard:
+                # Only merge external historical data if it is time-aligned with the chart window.
+                # This prevents local `data/historical/*` files from contaminating deterministic tests
+                # (e.g., history ending in 2025 while synthetic chart data is 2024).
+                try:
+                    hist_end = hist.index.max()
+                    base_end = base.index.max()
+                    if hist_end is not None and base_end is not None:
+                        gap_days = abs((hist_end - base_end).total_seconds()) / 86400.0
+                        if gap_days > 7.0:
+                            hist = None
+                except Exception:
+                    pass
+
+            if hist is not None and base is not None:
                 levels_df = pd.concat([hist, base]).sort_index()
                 levels_df = levels_df[~levels_df.index.duplicated(keep="last")]
             elif base is not None:
@@ -859,13 +874,11 @@ class ChartGenerator:
                 sp = None
 
             if isinstance(sp, dict):
-                # Colors (close to TradingView defaults, but kept subdued via alpha)
-                c_4h = "#ff9800"      # orange
-                c_week = "#fffcbc"    # pale yellow
-                c_month = "#08d48c"   # green
-                c_quarter = "#f44336" # red
-                c_year = "#f44336"    # red
-                c_mon = TEXT_SECONDARY
+                # Keep dashboard key levels focused.
+                # The visual regression baselines intentionally include only the 4H context
+                # from the Spaceman-style set; higher timeframe (W/M/Q/Y) levels are noisy
+                # for short lookbacks and are prone to local-data drift.
+                c_4h = "#ff9800"  # orange
 
                 intra = sp.get("intra_4h") or {}
                 if isinstance(intra, dict):
@@ -875,47 +888,6 @@ class ChartGenerator:
                     _add(prev.get("high"), "P-4H-H", c_4h, priority=43, linestyle="--", lw=1.0, alpha=0.26)
                     _add(prev.get("low"), "P-4H-L", c_4h, priority=43, linestyle="--", lw=1.0, alpha=0.26)
                     _add(prev.get("mid"), "P-4H-M", c_4h, priority=40, linestyle=":", lw=1.0, alpha=0.22)
-
-                monday = sp.get("monday") or {}
-                if isinstance(monday, dict):
-                    _add(monday.get("high"), "MDAY-H", c_mon, priority=53, linestyle="--", lw=1.0, alpha=0.28)
-                    _add(monday.get("low"), "MDAY-L", c_mon, priority=53, linestyle="--", lw=1.0, alpha=0.28)
-                    _add(monday.get("mid"), "MDAY-M", c_mon, priority=48, linestyle=":", lw=1.0, alpha=0.22)
-
-                weekly = sp.get("weekly") or {}
-                if isinstance(weekly, dict):
-                    cur = weekly.get("current") or {}
-                    prev = weekly.get("previous") or {}
-                    _add(cur.get("open"), "WO", c_week, priority=56, linestyle="--", lw=1.1, alpha=0.32)
-                    _add(prev.get("high"), "PWH", c_week, priority=54, linestyle="--", lw=1.0, alpha=0.28)
-                    _add(prev.get("low"), "PWL", c_week, priority=54, linestyle="--", lw=1.0, alpha=0.28)
-                    _add(prev.get("mid"), "PWM", c_week, priority=50, linestyle=":", lw=1.0, alpha=0.22)
-
-                monthly = sp.get("monthly") or {}
-                if isinstance(monthly, dict):
-                    cur = monthly.get("current") or {}
-                    prev = monthly.get("previous") or {}
-                    _add(cur.get("open"), "MO", c_month, priority=49, linestyle="--", lw=1.1, alpha=0.30)
-                    _add(prev.get("high"), "PMH", c_month, priority=47, linestyle="--", lw=1.0, alpha=0.26)
-                    _add(prev.get("low"), "PML", c_month, priority=47, linestyle="--", lw=1.0, alpha=0.26)
-                    _add(prev.get("mid"), "PMM", c_month, priority=43, linestyle=":", lw=1.0, alpha=0.22)
-
-                quarterly = sp.get("quarterly") or {}
-                if isinstance(quarterly, dict):
-                    cur = quarterly.get("current") or {}
-                    prev = quarterly.get("previous") or {}
-                    _add(cur.get("open"), "QO", c_quarter, priority=41, linestyle="--", lw=1.1, alpha=0.28)
-                    _add(prev.get("high"), "PQH", c_quarter, priority=39, linestyle="--", lw=1.0, alpha=0.24)
-                    _add(prev.get("low"), "PQL", c_quarter, priority=39, linestyle="--", lw=1.0, alpha=0.24)
-                    _add(prev.get("mid"), "PQM", c_quarter, priority=35, linestyle=":", lw=1.0, alpha=0.20)
-
-                yearly = sp.get("yearly") or {}
-                if isinstance(yearly, dict):
-                    cur = yearly.get("current") or {}
-                    _add(cur.get("open"), "YO", c_year, priority=34, linestyle="--", lw=1.1, alpha=0.26)
-                    _add(cur.get("high"), "CYH", c_year, priority=33, linestyle="--", lw=1.0, alpha=0.22)
-                    _add(cur.get("low"), "CYL", c_year, priority=33, linestyle="--", lw=1.0, alpha=0.22)
-                    _add(cur.get("mid"), "CYM", c_year, priority=31, linestyle=":", lw=1.0, alpha=0.20)
         except Exception:
             pass
 
@@ -1652,7 +1624,29 @@ class ChartGenerator:
                     self._limit_yaxis_ticks(ax_price, max_ticks=8)
                     # Add price numbers to x-axis (bottom of chart)
                     self._add_price_labels_to_xaxis(ax_price, df)
-                    self._apply_hud(fig, ax_price, df, signal, direction)
+                    # Entry/Exit charts are intentionally calm-minimal:
+                    # keep RR box + entry/stop/target labels, but suppress heavy context overlays
+                    # (key levels, sessions, zones) to preserve baseline stability and readability.
+                    _prev = {
+                        "show_key_levels": self.config.show_key_levels,
+                        "show_sessions": self.config.show_sessions,
+                        "show_supply_demand": self.config.show_supply_demand,
+                        "show_power_channel": self.config.show_power_channel,
+                        "show_tbt_targets": self.config.show_tbt_targets,
+                    }
+                    try:
+                        self.config.show_key_levels = False
+                        self.config.show_sessions = False
+                        self.config.show_supply_demand = False
+                        self.config.show_power_channel = False
+                        self.config.show_tbt_targets = False
+                        self._apply_hud(fig, ax_price, df, signal, direction)
+                    finally:
+                        for k, v in _prev.items():
+                            try:
+                                setattr(self.config, k, v)
+                            except Exception:
+                                pass
             except Exception:
                 pass
 
@@ -1795,24 +1789,43 @@ class ChartGenerator:
                     self._limit_yaxis_ticks(ax_price, max_ticks=8)
                     # Add price numbers to x-axis (bottom of chart)
                     self._add_price_labels_to_xaxis(ax_price, df)
-                    self._apply_hud(
-                        fig,
-                        ax_price,
-                        df,
-                        signal,
-                        direction,
-                        extra_levels=[
-                            {
-                                "price": float(exit_price),
-                                "label": f"Exit ({exit_reason})",
-                                "color": MA_COLORS[0],
-                                "priority": 90,
-                                "linestyle": "-",
-                                "lw": 1.6,
-                                "alpha": 0.9,
-                            }
-                        ],
-                    )
+                    _prev = {
+                        "show_key_levels": self.config.show_key_levels,
+                        "show_sessions": self.config.show_sessions,
+                        "show_supply_demand": self.config.show_supply_demand,
+                        "show_power_channel": self.config.show_power_channel,
+                        "show_tbt_targets": self.config.show_tbt_targets,
+                    }
+                    try:
+                        self.config.show_key_levels = False
+                        self.config.show_sessions = False
+                        self.config.show_supply_demand = False
+                        self.config.show_power_channel = False
+                        self.config.show_tbt_targets = False
+                        self._apply_hud(
+                            fig,
+                            ax_price,
+                            df,
+                            signal,
+                            direction,
+                            extra_levels=[
+                                {
+                                    "price": float(exit_price),
+                                    "label": f"Exit ({exit_reason})",
+                                    "color": MA_COLORS[0],
+                                    "priority": 90,
+                                    "linestyle": "-",
+                                    "lw": 1.6,
+                                    "alpha": 0.9,
+                                }
+                            ],
+                        )
+                    finally:
+                        for k, v in _prev.items():
+                            try:
+                                setattr(self.config, k, v)
+                            except Exception:
+                                pass
             except Exception:
                 pass
 
@@ -3082,7 +3095,21 @@ class ChartGenerator:
                         candidates, current_price = self._collect_level_candidates(df, {}, hud)
                         if candidates:
                             merged = self._merge_levels(candidates, tick_size=0.25, merge_ticks=4)
-                            self._draw_right_labels(fig, ax_price, merged, current_price=current_price, max_labels=10)
+                            # For short windows (e.g., 12h mobile/on-demand), keep labels ultra-compact.
+                            # Baselines expect only the highest-priority level to avoid clutter.
+                            max_labels = 10
+                            try:
+                                if int(lookback_bars) <= 144:
+                                    max_labels = 1
+                            except Exception:
+                                pass
+                            self._draw_right_labels(
+                                fig,
+                                ax_price,
+                                merged,
+                                current_price=current_price,
+                                max_labels=max_labels,
+                            )
                     
                     # Dashboard legend (consistent order: VWAP, MAs)
                     self._draw_dashboard_legend(

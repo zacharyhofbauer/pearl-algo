@@ -191,6 +191,10 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "claude_monitor",
     # 50k challenge tracker
     "challenge",
+    # PEARL automated bots (formerly lux_algo_bots)
+    "pearl_bots",
+    # Backward compatibility (deprecated)
+    "lux_algo_bots",
 })
 
 # Config keys expected to be specific types after env substitution

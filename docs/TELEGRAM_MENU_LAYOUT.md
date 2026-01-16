@@ -13,8 +13,8 @@ The Telegram menu system has been completely reorganized for better usability, c
 Performance
 📡 Status 🎯          ⚙️
 System Control
-🤖 AI & Analysis      🚀
-Strategies
+🤖 AI & Analysis      🤖
+Bots
 ❓ Help
 ```
 
@@ -130,69 +130,22 @@ Strategies
 - Configuration recommendations
 - Signal quality analysis
 
-### 🚀 Strategies Menu
-**Purpose**: Manage PEARL automated trading bots
+### 🤖 Bots Menu
+**Purpose**: Start/stop the single Pearl Bot (NQ Agent service)
 
 ```
-🚀 PEARL Automated Trading Bots
+🤖 Pearl Bot
 
-🤖 Manage Bots          📊 Bot Performance
-🚀 Start All Bots       🛑 Stop All Bots
-⚙️ Bot Config           📋 Bot Details
-🔄 Refresh Status       🧹 Clear Bot Cache
+🚀 Start Pearl Bot      🛑 Stop Pearl Bot
+🔄 Restart Pearl Bot    🔄 Refresh
 🏠 Back to Menu
 ```
 
 **Key Actions:**
-- **Manage Bots**: Enable/disable individual bots with status indicators
-- **Bot Performance**: Real-time P&L, win rates, Sharpe ratios, drawdown
-- **Start/Stop All**: Bulk control of all configured bots
-- **Bot Config**: View/edit bot configuration in config.yaml
-- **Bot Details**: Technical details, parameters, and status
-- **Clear Cache**: Reset performance metrics and signal history
-
-#### 🤖 PEARL Bots Available
-
-1. **TrendFollowerBot** - Trend following with pullback entries
-   - Optimized for PEARLalgo's technical analysis
-   - Best for: Trending markets
-
-2. **BreakoutBot** - Breakout trading from consolidations
-   - Optimized for PEARLalgo's pattern recognition
-   - Best for: Ranging markets with clear breakouts
-
-3. **MeanReversionBot** - Oscillator-based mean reversion
-   - Optimized for PEARLalgo's oscillator analysis
-   - Best for: Ranging markets (higher risk)
-
-#### Bot Management Interface
-
-When you select "Manage Bots", you get individual control:
-
-```
-🤖 Manage PEARL Bots
-
-🟢 Enable TrendFollowerBot
-🟡 Disable BreakoutBot
-🔴 Enable MeanReversionBot
-🔄 Refresh Status
-🏠 Back to Menu
-```
-
-**Status Indicators:**
-- 🟢 **Green**: Bot active and healthy
-- 🟡 **Yellow**: Bot active but with warnings
-- 🔴 **Red**: Bot inactive or error state
-
-#### Performance Monitoring
-
-Real-time metrics for each bot:
-- **Signals Generated**: Total trading signals
-- **Win Rate**: Percentage of profitable trades
-- **Profit Factor**: Gross profit / Gross loss
-- **Total P&L**: Cumulative profit/loss
-- **Max Drawdown**: Peak-to-valley decline
-- **Active Positions**: Currently open trades
+- **Start Pearl Bot**: Starts the NQ Agent service in the background
+- **Stop Pearl Bot**: Stops the NQ Agent service
+- **Restart Pearl Bot**: Stop then start the service
+- **Refresh**: Re-checks service and gateway status
 
 ### ❓ Help Menu
 **Purpose**: User guidance and command reference
@@ -211,7 +164,7 @@ Menu Structure:
 📡 Status - System health and connection status
 ⚙️ System Control - Start/stop services and emergency controls
 🤖 AI & Analysis - AI-powered insights and analysis
-🚀 Strategies - Strategy management and configuration
+🤖 Bots - Start/stop the Pearl Bot service
 
 Quick Tips:
 • Use 'Back to Menu' to return to main menu

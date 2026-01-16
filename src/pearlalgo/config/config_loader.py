@@ -234,7 +234,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "method": "kelly_criterion",
         "kelly_fraction": 0.25,
         "min_contracts": 1,
-        "max_contracts": 15,
+        "max_contracts": 25,
         "confidence_scaling": True,
         "regime_scaling": True,
         "session_scaling": True,
@@ -264,7 +264,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "stop_loss_atr_multiplier": 1.5,
         "take_profit_risk_reward": 1.5,
         "min_position_size": 5,
-        "max_position_size": 15,
+        "max_position_size": 25,
         # Per-signal-type sizing overrides (Option A / risk shaping).
         # Example:
         #   signal_type_size_multipliers: { sr_bounce: 0.25 }
@@ -302,7 +302,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "mnq_tick_value": 2.0,
         "nq_tick_value": 20.0,
         "min_contracts": 5,
-        "max_contracts": 15,
+        "max_contracts": 25,
         "default_contracts": 10,
         "max_risk_per_trade_pct": 1.0,
         "max_drawdown_pct": 10.0,
@@ -438,11 +438,11 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "auto_reset_on_fail": True,
     },
     # ==========================================================================
-    # LUX ALGO CHART PRIME STYLE AUTOMATED TRADING BOTS
+    # PEARL AUTOMATED TRADING BOTS (formerly `lux_algo_bots`)
     # ==========================================================================
-    "lux_algo_bots": {
+    "pearl_bots": {
         "enabled": False,  # Disabled by default for safety
-        "bots": {},       # Empty by default, configured per deployment
+        "bots": {},        # Empty by default, configured per deployment
     },
 }
 
@@ -467,6 +467,12 @@ def load_service_config(
     """
     # Load raw config using unified loader
     config_data = load_config_yaml(config_path)
+
+    # Backward compatibility: allow legacy `lux_algo_bots` configs.
+    # Prefer `pearl_bots` if both are present.
+    if config_data and "pearl_bots" not in config_data and "lux_algo_bots" in config_data:
+        config_data = dict(config_data)
+        config_data["pearl_bots"] = config_data.get("lux_algo_bots") or {}
     
     # Validate config (logs warnings, does not fail)
     if validate and config_data:
@@ -476,6 +482,10 @@ def load_service_config(
     result = {}
     for section, defaults in _SERVICE_DEFAULTS.items():
         result[section] = {**defaults, **config_data.get(section, {})}
+
+    # Backward compatibility: keep legacy key in the merged service config.
+    if "pearl_bots" in result and "lux_algo_bots" not in result:
+        result["lux_algo_bots"] = result["pearl_bots"]
 
     # Apply optional in-process overrides (best-effort).
     # This allows experiments/backtests to tweak config without editing files.

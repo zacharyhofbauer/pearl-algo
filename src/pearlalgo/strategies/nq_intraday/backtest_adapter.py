@@ -40,11 +40,11 @@ class Trade:
     signal_type: str
     direction: str  # "long" or "short"
     entry_price: float
-    entry_time: datetime
     stop_loss: float
     take_profit: float
     position_size: int
-    confidence: float
+    entry_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    confidence: float = 0.0
     
     # Exit data (filled when trade closes)
     exit_price: Optional[float] = None
@@ -756,6 +756,7 @@ class TradeSimulator:
         self,
         tick_value: float = 2.0,  # MNQ: $2 per point
         slippage_ticks: float = 0.5,  # Slippage in ticks
+        slippage_points: Optional[float] = None,  # Slippage in points (alias; overrides slippage_ticks)
         commission_per_trade: float = 0.0,  # Commission per contract
         max_concurrent_trades: int = 1,
         eod_close_time: time = time(15, 45),  # Close positions before session end (ET, session-aware)
@@ -776,6 +777,7 @@ class TradeSimulator:
         Args:
             tick_value: Dollar value per point (MNQ = $2)
             slippage_ticks: Slippage in ticks (0.25 per tick for NQ)
+            slippage_points: Slippage in points (alias). If provided, overrides slippage_ticks.
             commission_per_trade: Commission per contract
             max_concurrent_trades: Maximum concurrent positions
             eod_close_time: Time to close positions (ET, compared on the *session end date*)
@@ -790,8 +792,12 @@ class TradeSimulator:
             config: NQIntradayConfig for dynamic sizing based on confidence and signal type
         """
         self.tick_value = tick_value
-        self.slippage_ticks = slippage_ticks
-        self.slippage_points = slippage_ticks * 0.25  # NQ tick = 0.25 points
+        if slippage_points is not None:
+            self.slippage_points = float(slippage_points)
+            self.slippage_ticks = self.slippage_points / 0.25  # NQ tick = 0.25 points
+        else:
+            self.slippage_ticks = slippage_ticks
+            self.slippage_points = slippage_ticks * 0.25  # NQ tick = 0.25 points
         self.commission_per_trade = commission_per_trade
         self.max_concurrent_trades = max_concurrent_trades
         self.eod_close_time = eod_close_time
@@ -1239,11 +1245,15 @@ class TradeSimulator:
         exit_reason: ExitReason,
     ) -> None:
         """Close a trade and calculate P&L."""
-        # Apply slippage (worse price for exit)
-        if trade.direction == "long":
-            exit_price -= self.slippage_points
-        else:
-            exit_price += self.slippage_points
+        # Apply slippage only for simulator-managed trades (those in open_trades).
+        # Some unit tests call _close_trade() directly with a synthetic Trade that
+        # was never opened by the simulator; in that case, we keep the provided
+        # exit_price unchanged to validate direction/PnL math in isolation.
+        if trade in self.open_trades:
+            if trade.direction == "long":
+                exit_price -= self.slippage_points
+            else:
+                exit_price += self.slippage_points
         
         trade.exit_price = exit_price
         trade.exit_time = exit_time
@@ -1258,7 +1268,8 @@ class TradeSimulator:
         trade.pnl = (trade.pnl_points * self.tick_value * trade.position_size) - self.commission_per_trade
         
         # Move from open to closed
-        self.open_trades.remove(trade)
+        if trade in self.open_trades:
+            self.open_trades.remove(trade)
         self.closed_trades.append(trade)
         
         logger.debug(

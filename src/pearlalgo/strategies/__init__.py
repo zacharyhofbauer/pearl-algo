@@ -3,7 +3,7 @@ Strategy implementations for the PearlAlgo trading agent.
 
 Contains:
 - nq_intraday: MNQ futures intraday strategy optimized for prop firm trading
-- lux_algo_bots: Lux Algo Chart Prime style automated trading bots
+- pearl_bots: PEARL automated trading bots (formerly lux_algo_bots)
 """
 
 # Import the main strategy for convenience

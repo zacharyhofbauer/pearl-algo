@@ -6,6 +6,7 @@ Sends signals and status updates to Telegram.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -24,7 +25,7 @@ except ImportError:
 
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import get_market_hours
-from pearlalgo.utils.paths import parse_utc_timestamp
+from pearlalgo.utils.paths import ensure_state_dir, parse_utc_timestamp
 from pearlalgo.utils.retry import async_retry_with_backoff
 from pearlalgo.utils.telegram_alerts import (
     TelegramAlerts,
@@ -94,6 +95,7 @@ class NQAgentTelegramNotifier:
         self,
         bot_token: Optional[str] = None,
         chat_id: Optional[str] = None,
+        state_dir: Optional[Path] = None,
         enabled: bool = True,
     ):
         """
@@ -107,11 +109,12 @@ class NQAgentTelegramNotifier:
         self.enabled = enabled
         self.bot_token = bot_token
         self.chat_id = chat_id
+        self.state_dir = ensure_state_dir(state_dir)
         self.telegram: Optional[TelegramAlerts] = None
         self.chart_generator: Optional[ChartGenerator] = None
         
         # Initialize Telegram UI preferences
-        self.prefs = TelegramPrefs()
+        self.prefs = TelegramPrefs(state_dir=self.state_dir)
 
         # Initialize TelegramAlerts if credentials provided
         if enabled and bot_token and chat_id:
@@ -152,6 +155,14 @@ class NQAgentTelegramNotifier:
                 logger.warning(f"Could not initialize ChartGenerator: {e}")
                 self.chart_generator = None
 
+    def _get_prefs(self) -> TelegramPrefs:
+        """Load latest Telegram preferences from disk (safe, small IO)."""
+        try:
+            return TelegramPrefs(state_dir=self.state_dir)
+        except Exception:
+            # Fall back to the instance prefs (best-effort).
+            return self.prefs
+
     async def send_signal(self, signal: Dict, buffer_data: Optional[pd.DataFrame] = None) -> bool:
         """
         Send a trading signal to Telegram using professional desk alert format.
@@ -178,6 +189,22 @@ class NQAgentTelegramNotifier:
             # Always use minimal signal format for the simplified Telegram surface.
             message = self._format_minimal_signal(signal)
             success = await self.telegram.send_message(message, dedupe=False)
+
+            # Optional: send entry chart with signal (preference-gated).
+            # Fire-and-forget so chart rendering doesn't block the scan loop.
+            try:
+                prefs = self._get_prefs()
+                auto_chart = bool(getattr(prefs, "auto_chart_on_signal", False))
+            except Exception:
+                auto_chart = False
+
+            if (
+                auto_chart
+                and self.chart_generator is not None
+                and buffer_data is not None
+                and not buffer_data.empty
+            ):
+                asyncio.create_task(self._send_signal_entry_chart(signal, buffer_data))
             
             if success:
                 return True
@@ -194,6 +221,42 @@ class NQAgentTelegramNotifier:
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_signal")
             return False
+
+    async def _send_signal_entry_chart(self, signal: Dict, buffer_data: pd.DataFrame) -> None:
+        """Generate + send an entry chart for a signal (best-effort, non-blocking)."""
+        if not self.enabled or not self.telegram:
+            return
+        if self.chart_generator is None:
+            return
+        if buffer_data is None or buffer_data.empty:
+            return
+
+        symbol = str(signal.get("symbol") or "MNQ")
+        chart_path: Optional[Path] = None
+        try:
+            chart_path = await asyncio.to_thread(
+                self.chart_generator.generate_entry_chart,
+                signal=signal,
+                buffer_data=buffer_data,
+                symbol=symbol,
+                timeframe=None,
+            )
+        except Exception as e:
+            logger.warning(f"Could not generate entry chart: {e}")
+            return
+
+        if not chart_path or not chart_path.exists():
+            return
+
+        try:
+            await self._send_photo(chart_path)
+        except Exception as e:
+            logger.warning(f"Could not send entry chart: {e}")
+        finally:
+            try:
+                chart_path.unlink()
+            except Exception:
+                pass
 
     def _format_minimal_signal(self, signal: Dict) -> str:
         """Format a minimal signal message (plain text, bounded)."""
@@ -603,7 +666,8 @@ class NQAgentTelegramNotifier:
             
             # Build navigation buttons directly on chart (no separate nav message)
             reply_markup = None
-            show_buttons = self.prefs.dashboard_buttons if self.prefs else False
+            prefs = self._get_prefs()
+            show_buttons = prefs.dashboard_buttons if prefs else False
             if show_buttons and _is_command_handler_running():
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -948,7 +1012,8 @@ class NQAgentTelegramNotifier:
             
             # Build inline buttons (no chart, so include nav here)
             reply_markup = None
-            show_buttons = self.prefs.dashboard_buttons if self.prefs else False
+            prefs = self._get_prefs()
+            show_buttons = prefs.dashboard_buttons if prefs else False
             if show_buttons and _is_command_handler_running():
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -1055,7 +1120,8 @@ class NQAgentTelegramNotifier:
             
             # Build inline buttons (consistent with entry notification)
             reply_markup = None
-            show_buttons = self.prefs.dashboard_buttons if self.prefs else False
+            prefs = self._get_prefs()
+            show_buttons = prefs.dashboard_buttons if prefs else False
             if show_buttons and handler_running:
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup

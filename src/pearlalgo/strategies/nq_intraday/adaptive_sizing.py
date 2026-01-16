@@ -37,7 +37,7 @@ class AdaptiveSizingConfig:
     
     # Position size limits
     min_contracts: int = 1
-    max_contracts: int = 15
+    max_contracts: int = 25
     
     # Feature toggles
     confidence_scaling: bool = True
@@ -79,7 +79,7 @@ class AdaptiveSizingConfig:
             method=sizing_config.get("method", "kelly_criterion"),
             kelly_fraction=sizing_config.get("kelly_fraction", 0.25),
             min_contracts=sizing_config.get("min_contracts", 1),
-            max_contracts=sizing_config.get("max_contracts", 15),
+            max_contracts=sizing_config.get("max_contracts", 25),
             confidence_scaling=sizing_config.get("confidence_scaling", True),
             regime_scaling=sizing_config.get("regime_scaling", True),
             session_scaling=sizing_config.get("session_scaling", True),

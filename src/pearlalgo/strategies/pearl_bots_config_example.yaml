@@ -1,14 +1,14 @@
-# Lux Algo Chart Prime Style Automated Trading Bots Configuration
+# PEARL Automated Trading Bots Configuration (formerly Lux Algo bots)
 #
-# This configuration enables Lux Algo Chart Prime style automated trading bots
+# This configuration enables PEARL automated trading bots
 # in your PEARLalgo NQ trading system. Each bot is a complete, self-contained
 # trading strategy with indicators, logic, risk management, and automation.
 #
 # Similar to Lux Algo's AI Strategy Alerts, these bots can be deployed as
 # zero-code automated strategies with webhook alerts and performance tracking.
 
-lux_algo_bots:
-  enabled: true  # Set to true to enable Lux Algo bots
+pearl_bots:
+  enabled: true  # Set to true to enable PEARL bots
 
   # Bot configurations - each bot is a complete automated strategy
   bots:
