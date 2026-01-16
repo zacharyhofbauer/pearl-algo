@@ -445,7 +445,7 @@ class NQScanner:
 
         # Calculate VWAP
         atr = latest.get("atr", 0) if "atr" in df.columns else 0
-        vwap_data = self.vwap_calculator.calculate_vwap(df, atr=atr)
+        vwap_data = self.vwap_calculator.calculate_vwap(df, atr=atr, dt=bar_dt)
         logger.debug(f"VWAP: {vwap_data.get('vwap', 0):.2f}, Distance: {vwap_data.get('distance_pct', 0):.2f}%")
 
         # Calculate volume profile

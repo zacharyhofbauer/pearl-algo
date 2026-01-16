@@ -373,49 +373,6 @@ class NQIntradayConfig:
 
         return config
 
-    def _apply_variant(self, variant_cfg: dict) -> None:
-        """Apply a strategy variant configuration overlay."""
-        if "enabled_signals" in variant_cfg:
-            self.enabled_signals = list(variant_cfg["enabled_signals"])
-        if "disabled_signals" in variant_cfg:
-            self.disabled_signals = list(variant_cfg["disabled_signals"])
-        if "min_risk_reward" in variant_cfg:
-            self.take_profit_risk_reward = float(variant_cfg["min_risk_reward"])
-        if "min_confidence" in variant_cfg:
-            # Store for signal generator filtering
-            self._min_confidence_override = float(variant_cfg["min_confidence"])
-        if "volatility_threshold" in variant_cfg:
-            self.volatility_threshold = float(variant_cfg["volatility_threshold"])
-        if "target_points" in variant_cfg:
-            self.scalp_target_points = float(variant_cfg["target_points"])
-            self.use_scalp_presets = True
-        if "max_stop_points" in variant_cfg:
-            self.scalp_stop_points = float(variant_cfg["max_stop_points"])
-            self.use_scalp_presets = True
-        if "position_multiplier" in variant_cfg:
-            mult = float(variant_cfg["position_multiplier"])
-            self.base_contracts = int(self.base_contracts * mult)
-            self.high_conf_contracts = int(self.high_conf_contracts * mult)
-            self.max_conf_contracts = int(self.max_conf_contracts * mult)
-        if "base_contracts" in variant_cfg:
-            self.base_contracts = int(variant_cfg["base_contracts"])
-        if "avoid_lunch_lull" in variant_cfg:
-            self.avoid_lunch_lull = bool(variant_cfg["avoid_lunch_lull"])
-        if "skip_overnight" in variant_cfg:
-            self.skip_overnight = bool(variant_cfg["skip_overnight"])
-        if "start_time" in variant_cfg:
-            self.start_time = str(variant_cfg["start_time"])
-        if "end_time" in variant_cfg:
-            self.end_time = str(variant_cfg["end_time"])
-        
-        # Adaptive volatility filter settings (A/B testing support)
-        if "adaptive_volatility_filter_enabled" in variant_cfg:
-            self.adaptive_volatility_filter_enabled = bool(variant_cfg["adaptive_volatility_filter_enabled"])
-        if "adaptive_volatility_expansion_requirement" in variant_cfg:
-            self.adaptive_volatility_expansion_requirement = float(variant_cfg["adaptive_volatility_expansion_requirement"])
-        if "adaptive_volatility_median_threshold" in variant_cfg:
-            self.adaptive_volatility_median_threshold = float(variant_cfg["adaptive_volatility_median_threshold"])
-
     def is_signal_enabled(self, signal_type: str) -> bool:
         """Check if a signal type is enabled based on configuration.
         
@@ -489,16 +446,3 @@ class NQIntradayConfig:
         
         # Default: base contracts
         return self.base_contracts
-
-    @classmethod
-    def get_variant_presets(cls) -> dict:
-        """Get the single-strategy preset for backtests/tools."""
-        return {
-            "single_strategy": {
-                "description": "Single-strategy default (drawdown-first)",
-                "enabled_signals": DEFAULT_ENABLED_SIGNALS,
-                "disabled_signals": DEFAULT_DISABLED_SIGNALS,
-                "min_risk_reward": 1.3,
-                "volatility_threshold": 0.0001,
-            },
-        }

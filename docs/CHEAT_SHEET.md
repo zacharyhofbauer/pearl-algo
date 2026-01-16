@@ -42,9 +42,9 @@
 
 ### Option A: From Telegram (Remote Control) ⭐ Recommended
 
-**Prerequisites:** Telegram Command Handler must be running (one-time setup)
+**Prerequisites:** Telegram Menu Handler must be running (one-time setup)
 
-1. **Start Telegram Command Handler** (if not already running)
+1. **Start Telegram Menu Handler** (if not already running)
    ```bash
    ./scripts/telegram/start_command_handler.sh
    ```
@@ -53,13 +53,9 @@
    ./scripts/telegram/restart_command_handler.sh --background
    ```
 
-2. **From Telegram, run:**
-   ```
-   /gateway_status    # Check Gateway
-   /start_gateway      # Start Gateway (wait for 2FA approval)
-   /start_agent        # Start Agent
-   /status             # Verify everything is running
-   ```
+2. **From Telegram, use the menu:**
+   - Send `/start` or `/menu` to access the main control panel
+   - Tap buttons for: Start/Stop Agent, Gateway Status, System Status, Signals & Trades, Performance, Tools, AI Features
 
 ### Option B: From Terminal (Traditional)
 
@@ -123,23 +119,29 @@
   ./scripts/gateway/gateway.sh api-ready    # exit 0 when API is ready
   ```
 
-- **Telegram Command Handler**
+- **Telegram Menu Handler**
   ```bash
-  ./scripts/telegram/start_command_handler.sh            # listen to commands
+  ./scripts/telegram/start_command_handler.sh            # show menu with buttons
   ./scripts/telegram/check_command_handler.sh            # is it running?
-  python3 scripts/telegram/set_bot_commands.py           # (re)push commands
+  python3 scripts/telegram/set_bot_commands.py           # (re)push menu commands
   ```
 
 ---
 
 ## 4. Telegram Usage (what to expect)
 
-- **Works even without command handler:**
+- **Works even without menu handler:**
   - Startup / shutdown notifications
   - **Dashboard** every 15 minutes (consolidated: price sparkline, MTF trends, session stats, performance)
   - Signal alerts, error/circuit‑breaker alerts
 
 > **Note:** Dashboard replaces the old separate Status/Heartbeat messages. One clean message every 15m.
+
+- **Menu Handler Features:**
+  - Interactive button-based control panel
+  - Service management (start/stop agent/gateway)
+  - Real-time monitoring and status
+  - Performance analytics and reporting
 
 ### Backtesting (Telegram) ✅
 

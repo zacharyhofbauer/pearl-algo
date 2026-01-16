@@ -1,7 +1,7 @@
 """
-Claude Client - Wrapper for Anthropic API.
+AI Client - Wrapper for OpenAI API (replaces Claude).
 
-Provides a simple interface to call Claude for code generation tasks,
+Provides a simple interface to call OpenAI for code generation tasks,
 specifically for generating unified diff patches.
 """
 
@@ -15,22 +15,22 @@ from pearlalgo.utils.logger import logger
 
 
 # ---------------------------------------------------------------------------
-# Graceful optional import (anthropic is in the [llm] extra)
+# Graceful optional import (openai is in the [llm] extra)
 # ---------------------------------------------------------------------------
 
 try:
-    import anthropic
-    ANTHROPIC_AVAILABLE = True
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
 except ImportError:
-    anthropic = None  # type: ignore
-    ANTHROPIC_AVAILABLE = False
+    OpenAI = None  # type: ignore
+    OPENAI_AVAILABLE = False
 
 
 # ---------------------------------------------------------------------------
 # Default configuration
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = "gpt-4o"
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TIMEOUT = 120  # seconds
 

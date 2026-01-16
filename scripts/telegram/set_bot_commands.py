@@ -39,10 +39,11 @@ def set_bot_commands():
     
     bot = Bot(token=bot_token)
     
-    # Minimal command surface for AI-only insights
+    # Menu-based command surface
     commands = [
-        BotCommand('analyze', 'AI strategy report'),
-        BotCommand('help', 'Show available commands'),
+        BotCommand('start', 'Show main control menu'),
+        BotCommand('menu', 'Show main control menu'),
+        BotCommand('help', 'Show help information'),
     ]
     
     try:

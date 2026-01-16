@@ -47,6 +47,7 @@ class VWAPCalculator:
         self,
         df: pd.DataFrame,
         atr: Optional[float] = None,
+        dt: Optional[datetime] = None,
     ) -> Dict:
         """
         Calculate session VWAP and VWAP bands.
@@ -54,6 +55,8 @@ class VWAPCalculator:
         Args:
             df: DataFrame with OHLCV data (must have timestamp or index)
             atr: Current ATR value for VWAP bands (optional)
+            dt: Reference timestamp for session alignment (UTC). When provided (e.g. backtests),
+                VWAP session start is computed for this timestamp's date instead of wall-clock "now".
             
         Returns:
             Dictionary with VWAP data:
@@ -70,8 +73,8 @@ class VWAPCalculator:
         if df.empty:
             return self._default_vwap()
 
-        # Get session start (9:30 ET today)
-        session_start = self._get_session_start()
+        # Get session start (9:30 ET) for the reference datetime (or "now" if not provided).
+        session_start = self._get_session_start(dt=dt)
 
         # Check if we need to reset (new session)
         if self._session_start is None or session_start.date() != self._session_start.date():
@@ -138,9 +141,14 @@ class VWAPCalculator:
             "current_price": float(current_price),
         }
 
-    def _get_session_start(self) -> datetime:
-        """Get today's session start (9:30 ET)."""
-        now = datetime.now(timezone.utc)
+    def _get_session_start(self, dt: Optional[datetime] = None) -> datetime:
+        """Get session start (9:30 ET) for the date of `dt` (defaults to now)."""
+        now = dt or datetime.now(timezone.utc)
+        if isinstance(now, pd.Timestamp):
+            now = now.to_pydatetime()
+        if now.tzinfo is None:
+            # This project treats tz-naive timestamps as UTC.
+            now = now.replace(tzinfo=timezone.utc)
 
         # Convert to ET
         if ET_TIMEZONE is not None:
@@ -178,13 +186,56 @@ class VWAPCalculator:
         if df.empty:
             return df
 
+        # Pandas will raise on tz-naive vs tz-aware comparisons.
+        # This project generally treats tz-naive timestamps as UTC (see scanner backtest handling),
+        # so we normalize `session_start` accordingly for safe comparisons.
+        ss = pd.Timestamp(session_start)
+        if ss.tz is None:
+            ss_utc = ss.tz_localize(timezone.utc)
+        else:
+            ss_utc = ss.tz_convert(timezone.utc)
+        ss_naive_utc = ss_utc.tz_localize(None)
+
         # Check if DataFrame has timestamp column or uses index
         if "timestamp" in df.columns:
+            ts = df["timestamp"]
+
+            # If timestamp column is not datetime-like, coerce to UTC (best-effort).
+            if not pd.api.types.is_datetime64_any_dtype(ts):
+                try:
+                    ts = pd.to_datetime(ts, errors="coerce", utc=True)
+                except Exception:
+                    ts = None
+
+            if ts is None:
+                logger.warning(
+                    "DataFrame timestamp column is not datetime-like; skipping session filter for VWAP"
+                )
+                return df.copy()
+
+            # Align session_start timezone awareness with the series.
+            # - tz-aware series: compare against UTC-aware session start
+            # - tz-naive series: compare against tz-naive UTC session start
+            tz = getattr(getattr(ts, "dt", None), "tz", None)
+            ss_cmp = ss_utc if tz is not None else ss_naive_utc
+
             # Filter by timestamp
-            df_filtered = df[df["timestamp"] >= session_start].copy()
-        elif df.index.name == "timestamp" or isinstance(df.index, pd.DatetimeIndex):
+            df_filtered = df[ts >= ss_cmp].copy()
+        elif isinstance(df.index, pd.DatetimeIndex) or df.index.name == "timestamp":
             # Filter by index
-            df_filtered = df[df.index >= session_start].copy()
+            idx = df.index
+            if isinstance(idx, pd.DatetimeIndex) and idx.tz is None:
+                ss_cmp = ss_naive_utc
+            elif isinstance(idx, pd.DatetimeIndex) and idx.tz is not None:
+                ss_cmp = ss_utc.tz_convert(idx.tz)
+            else:
+                # Non-datetime index marked as timestamp: fall back to copying.
+                logger.warning(
+                    "DataFrame index is not a DatetimeIndex; skipping session filter for VWAP"
+                )
+                return df.copy()
+
+            df_filtered = df[idx >= ss_cmp].copy()
         else:
             # No timestamp - assume all data is from current session
             # (This is a fallback, ideally data should have timestamps)

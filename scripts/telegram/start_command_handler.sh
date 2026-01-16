@@ -79,7 +79,7 @@ fi
 
 echo "Starting Telegram Command Handler (foreground)..."
 echo ""
-echo "This service listens for Telegram commands (/status, /signals, etc.)"
+echo "This service listens for Telegram commands (/analyze, /help)"
 echo "Press Ctrl+C to stop"
 echo ""
 
