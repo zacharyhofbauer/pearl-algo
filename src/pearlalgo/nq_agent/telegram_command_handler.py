@@ -3012,18 +3012,20 @@ class TelegramCommandHandler:
             if not isinstance(recent_exits, list) or not recent_exits:
                 recent_signals = self._read_recent_signals(limit=50)
                 recent_exits = []
-                for signal in reversed(recent_signals):  # Most recent first
-                    if signal.get("status") == "exited":
-                        pnl = signal.get("pnl")
+                for rec in reversed(recent_signals):  # Most recent first
+                    if rec.get("status") == "exited":
+                        pnl = rec.get("pnl")
                         if pnl is not None:
+                            # Fields may be at record-level OR nested in rec["signal"]
+                            sig = rec.get("signal", {}) or {}
                             recent_exits.append(
                                 {
-                                    "signal_id": str(signal.get("signal_id") or ""),
-                                    "type": str(signal.get("type") or "unknown"),
-                                    "direction": str(signal.get("direction") or "long"),
+                                    "signal_id": str(rec.get("signal_id") or ""),
+                                    "type": str(rec.get("signal_type") or sig.get("type") or "unknown"),
+                                    "direction": str(rec.get("direction") or sig.get("direction") or "long"),
                                     "pnl": pnl,
-                                    "exit_reason": str(signal.get("exit_reason") or ""),
-                                    "exit_time": signal.get("exit_time") or signal.get("timestamp"),
+                                    "exit_reason": str(rec.get("exit_reason") or ""),
+                                    "exit_time": rec.get("exit_time") or rec.get("timestamp"),
                                 }
                             )
                         if len(recent_exits) >= 3:
@@ -3065,16 +3067,36 @@ class TelegramCommandHandler:
             if active_trades_count > 0:
                 # Try to find active signal from recent signals
                 recent_signals = self._read_recent_signals(limit=20)
-                active_signal = next((s for s in recent_signals if s.get("status") == "entered"), None)
+                active_rec = next((s for s in recent_signals if s.get("status") == "entered"), None)
                 
-                if active_signal:
+                if active_rec:
+                    # Fields may be at record-level OR nested in rec["signal"]
+                    sig = active_rec.get("signal", {}) or {}
                     message += "\n\n*Current Position:*"
-                    direction = active_signal.get("direction", "").upper()
-                    signal_type = active_signal.get("type", "unknown")
-                    entry_price = active_signal.get("entry_price")
-                    stop_loss = active_signal.get("stop_loss")
-                    take_profit = active_signal.get("take_profit")
-                    confidence = active_signal.get("confidence")
+                    direction = str(active_rec.get("direction") or sig.get("direction") or "long").upper()
+                    signal_type = str(active_rec.get("signal_type") or sig.get("type") or "unknown")
+                    entry_price = active_rec.get("entry_price") or sig.get("entry_price")
+                    stop_loss = active_rec.get("stop_loss") or sig.get("stop_loss")
+                    take_profit = active_rec.get("take_profit") or sig.get("take_profit")
+                    confidence = active_rec.get("confidence") or sig.get("confidence")
+                    
+                    # Convert to float safely
+                    try:
+                        entry_price = float(entry_price) if entry_price else None
+                    except Exception:
+                        entry_price = None
+                    try:
+                        stop_loss = float(stop_loss) if stop_loss else None
+                    except Exception:
+                        stop_loss = None
+                    try:
+                        take_profit = float(take_profit) if take_profit else None
+                    except Exception:
+                        take_profit = None
+                    try:
+                        confidence = float(confidence) if confidence else None
+                    except Exception:
+                        confidence = None
                     
                     message += f"\n🎯 {symbol} {direction} | {signal_type}\n"
                     if entry_price:
@@ -3089,11 +3111,11 @@ class TelegramCommandHandler:
                         if risk > 0:
                             rr = reward / risk
                             message += f"R:R {rr:.1f}:1\n"
-                    if stop_loss:
-                        stop_pts = abs(entry_price - stop_loss) if entry_price else 0
+                    if stop_loss and entry_price:
+                        stop_pts = abs(entry_price - stop_loss)
                         message += f"Stop: ${stop_loss:,.2f} ({stop_pts:.1f} pts)\n"
-                    if take_profit:
-                        tp_pts = abs(take_profit - entry_price) if entry_price else 0
+                    if take_profit and entry_price:
+                        tp_pts = abs(take_profit - entry_price)
                         message += f"TP: ${take_profit:,.2f} ({tp_pts:.1f} pts)\n"
                     if confidence:
                         conf_pct = confidence * 100 if confidence <= 1 else confidence
