@@ -278,8 +278,10 @@ def run_monitor() -> None:
             QHBoxLayout,
             QLabel,
             QMainWindow,
+            QPushButton,
             QSizePolicy,
             QTextEdit,
+            QToolButton,
             QVBoxLayout,
             QWidget,
         )
@@ -931,61 +933,18 @@ def run_monitor() -> None:
     win = MainWindow()
     if app_icon is not None:
         win.setWindowIcon(app_icon)
-    # Show as normal maximized window (not fullscreen) so user can resize/close
+    # Set fixed window size (2560x720) - works on any screen including MacBook
+    win.setFixedSize(2560, 720)
+    # Center window on primary screen
     try:
-        target = None
-        for s in QGuiApplication.screens():
-            g = s.geometry()
-            if int(g.width()) == 2560 and int(g.height()) == 720:
-                target = s
-                break
-        if target is not None:
-            win.show()  # ensure window handle exists
-            try:
-                handle = win.windowHandle()
-                if handle is not None:
-                    handle.setScreen(target)
-            except Exception:
-                pass
-            try:
-                win.setGeometry(target.geometry())
-            except Exception:
-                pass
-        win.showMaximized()
+        primary_screen = QGuiApplication.primaryScreen()
+        if primary_screen is not None:
+            screen_geometry = primary_screen.geometry()
+            x = (screen_geometry.width() - 2560) // 2 + screen_geometry.x()
+            y = (screen_geometry.height() - 720) // 2 + screen_geometry.y()
+            win.move(x, y)
     except Exception:
-        win.showMaximized()
-    sys.exit(app.exec())
-
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    app_icon = _load_app_icon()
-    if app_icon is not None:
-        app.setWindowIcon(app_icon)
-    win = MainWindow()
-    if app_icon is not None:
-        win.setWindowIcon(app_icon)
-    # Show as normal maximized window (not fullscreen) so user can resize/close
-    try:
-        target = None
-        for s in QGuiApplication.screens():
-            g = s.geometry()
-            if int(g.width()) == 2560 and int(g.height()) == 720:
-                target = s
-                break
-        if target is not None:
-            win.show()  # ensure window handle exists
-            try:
-                handle = win.windowHandle()
-                if handle is not None:
-                    handle.setScreen(target)
-            except Exception:
-                pass
-            try:
-                win.setGeometry(target.geometry())
-            except Exception:
-                pass
-        win.showMaximized()
-    except Exception:
-        win.showMaximized()
+        pass
+    win.show()
     sys.exit(app.exec())
 
