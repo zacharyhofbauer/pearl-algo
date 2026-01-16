@@ -25,6 +25,9 @@ except ImportError:
     OpenAI = None  # type: ignore
     OPENAI_AVAILABLE = False
 
+# Backward compatibility alias (deprecated, use OPENAI_AVAILABLE)
+ANTHROPIC_AVAILABLE = OPENAI_AVAILABLE
+
 
 # ---------------------------------------------------------------------------
 # Default configuration
@@ -61,7 +64,7 @@ Example output format:
 If multiple files need changes, include all of them in the same diff output."""
 
 
-CHAT_SYSTEM_PROMPT = """You are Claude, an AI assistant inside a Telegram bot for the PearlAlgo MNQ Trading Agent.
+CHAT_SYSTEM_PROMPT = """You are an AI assistant inside a Telegram bot for the PearlAlgo MNQ Trading Agent.
 
 The user wants to chat naturally (like ChatGPT). Be clear, direct, and helpful. Ask clarifying questions when needed.
 
@@ -118,28 +121,28 @@ ONLY output the JSON array, nothing else. No explanations, no markdown."""
 
 
 class ClaudeClientError(Exception):
-    """Base exception for Claude client errors."""
+    """Base exception for AI client errors."""
     pass
 
 
 class ClaudeNotAvailableError(ClaudeClientError):
-    """Raised when anthropic package is not installed."""
+    """Raised when openai package is not installed."""
     pass
 
 
 class ClaudeAPIKeyMissingError(ClaudeClientError):
-    """Raised when ANTHROPIC_API_KEY is not set."""
+    """Raised when OPENAI_API_KEY is not set."""
     pass
 
 
 class ClaudeAPIError(ClaudeClientError):
-    """Raised when the Anthropic API returns an error."""
+    """Raised when the OpenAI API returns an error."""
     pass
 
 
 class ClaudeClient:
     """
-    Client for interacting with Claude via the Anthropic API.
+    Client for interacting with OpenAI API.
     
     Usage:
         client = ClaudeClient()
@@ -157,41 +160,41 @@ class ClaudeClient:
         timeout: Optional[float] = None,
     ):
         """
-        Initialize the Claude client.
+        Initialize the OpenAI client.
         
         Args:
-            api_key: Anthropic API key (defaults to ANTHROPIC_API_KEY env var)
-            model: Model to use (defaults to ANTHROPIC_MODEL env var or claude-sonnet-4-20250514)
-            max_tokens: Max response tokens (defaults to ANTHROPIC_MAX_TOKENS or 4096)
-            timeout: Request timeout in seconds (defaults to ANTHROPIC_TIMEOUT or 120)
+            api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
+            model: Model to use (defaults to OPENAI_MODEL env var or gpt-4o)
+            max_tokens: Max response tokens (defaults to OPENAI_MAX_TOKENS or 4096)
+            timeout: Request timeout in seconds (defaults to OPENAI_TIMEOUT or 120)
         
         Raises:
-            ClaudeNotAvailableError: If anthropic package is not installed
+            ClaudeNotAvailableError: If openai package is not installed
             ClaudeAPIKeyMissingError: If API key is not provided or found in env
         """
-        if not ANTHROPIC_AVAILABLE:
+        if not OPENAI_AVAILABLE:
             raise ClaudeNotAvailableError(
-                "anthropic package not installed. Install with: pip install -e .[llm]"
+                "openai package not installed. Install with: pip install -e .[llm]"
             )
         
         # Get API key (never log it)
-        self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        self._api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self._api_key:
             raise ClaudeAPIKeyMissingError(
-                "ANTHROPIC_API_KEY not set. Add it to your .env file."
+                "OPENAI_API_KEY not set. Add it to your .env file."
             )
         
         # Get configuration from env or use defaults
-        self._model = model or os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL)
+        self._model = model or os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
         
-        max_tokens_env = os.getenv("ANTHROPIC_MAX_TOKENS")
+        max_tokens_env = os.getenv("OPENAI_MAX_TOKENS")
         self._max_tokens = max_tokens or (int(max_tokens_env) if max_tokens_env else DEFAULT_MAX_TOKENS)
         
-        timeout_env = os.getenv("ANTHROPIC_TIMEOUT")
+        timeout_env = os.getenv("OPENAI_TIMEOUT")
         self._timeout = timeout or (float(timeout_env) if timeout_env else DEFAULT_TIMEOUT)
         
         # Initialize client
-        self._client = anthropic.Anthropic(
+        self._client = OpenAI(
             api_key=self._api_key,
             timeout=self._timeout,
         )
@@ -202,7 +205,7 @@ class ClaudeClient:
         self._disabled_reason: Optional[str] = None
         
         logger.info(
-            "Claude client initialized",
+            "OpenAI client initialized",
             extra={"model": self._model, "max_tokens": self._max_tokens, "timeout": self._timeout}
         )
 
@@ -218,7 +221,7 @@ class ClaudeClient:
             self._disabled_until = datetime.now(timezone.utc) + timedelta(seconds=int(seconds))
             self._disabled_reason = str(reason)[:200]
             logger.warning(
-                f"Claude client temporarily disabled for {seconds}s: {self._disabled_reason}",
+                f"OpenAI client temporarily disabled for {seconds}s: {self._disabled_reason}",
                 extra={"disabled_until": self._disabled_until.isoformat()},
             )
         except Exception:
@@ -268,59 +271,52 @@ class ClaudeClient:
         
         if self._is_disabled():
             raise ClaudeAPIError(
-                f"Claude temporarily disabled until {self._disabled_until.isoformat() if self._disabled_until else 'unknown'}: "
+                f"OpenAI temporarily disabled until {self._disabled_until.isoformat() if self._disabled_until else 'unknown'}: "
                 f"{self._disabled_reason or 'billing/availability issue'}"
             )
 
         logger.info(
-            "Requesting patch from Claude",
+            "Requesting patch from OpenAI",
             extra={"files": list(files.keys()), "task_preview": task[:100]}
         )
         
         try:
-            response = self._client.messages.create(
+            response = self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=self._max_tokens,
-                system=PATCH_SYSTEM_PROMPT,
                 messages=[
+                    {"role": "system", "content": PATCH_SYSTEM_PROMPT},
                     {"role": "user", "content": user_message}
                 ],
             )
             
             # Extract text from response
-            if response.content and len(response.content) > 0:
-                result = response.content[0].text
-                logger.info(
-                    "Received patch from Claude",
-                    extra={"response_length": len(result), "stop_reason": response.stop_reason}
-                )
-                return result
-            else:
-                raise ClaudeAPIError("Empty response from Claude API")
+            if response.choices and len(response.choices) > 0:
+                result = response.choices[0].message.content
+                if result:
+                    logger.info(
+                        "Received patch from OpenAI",
+                        extra={"response_length": len(result), "finish_reason": response.choices[0].finish_reason}
+                    )
+                    return result
+            raise ClaudeAPIError("Empty response from OpenAI API")
                 
-        except anthropic.APIConnectionError as e:
-            logger.error(f"Claude API connection error: {e}")
-            raise ClaudeAPIError(f"Connection error: {e}") from e
-        except anthropic.RateLimitError as e:
-            logger.error(f"Claude API rate limit: {e}")
-            raise ClaudeAPIError(f"Rate limit exceeded: {e}") from e
-        except anthropic.APIStatusError as e:
-            logger.error(f"Claude API status error: {e}")
-            try:
-                msg = str(getattr(e, "message", "") or str(e)).lower()
-                if "credit balance is too low" in msg or "insufficient" in msg and "credit" in msg:
-                    # Disable for 6 hours; operator can fix billing and restart sooner.
-                    self._disable_for(6 * 3600, reason=str(getattr(e, "message", "") or str(e)))
-            except Exception:
-                pass
-            raise ClaudeAPIError(f"API error ({e.status_code}): {e.message}") from e
         except Exception as e:
-            logger.error(f"Unexpected error calling Claude: {e}")
-            raise ClaudeAPIError(f"Unexpected error: {e}") from e
+            error_msg = str(e).lower()
+            if "rate limit" in error_msg:
+                logger.error(f"OpenAI API rate limit: {e}")
+                raise ClaudeAPIError(f"Rate limit exceeded: {e}") from e
+            elif "insufficient_quota" in error_msg or "billing" in error_msg:
+                logger.error(f"OpenAI API billing/quota error: {e}")
+                self._disable_for(6 * 3600, reason=str(e))
+                raise ClaudeAPIError(f"Billing/quota error: {e}") from e
+            else:
+                logger.error(f"Unexpected error calling OpenAI: {e}")
+                raise ClaudeAPIError(f"Unexpected error: {e}") from e
     
     def is_available(self) -> bool:
         """Check if the client is ready to make API calls."""
-        return ANTHROPIC_AVAILABLE and bool(self._api_key) and not self._is_disabled()
+        return OPENAI_AVAILABLE and bool(self._api_key) and not self._is_disabled()
     
     def chat(
         self,
@@ -328,7 +324,7 @@ class ClaudeClient:
         system_prompt: Optional[str] = None,
     ) -> str:
         """
-        Send a chat message to Claude and get a response.
+        Send a chat message to OpenAI and get a response.
         
         Args:
             messages: List of message dicts with 'role' and 'content' keys.
@@ -336,7 +332,7 @@ class ClaudeClient:
             system_prompt: Optional system prompt (defaults to CHAT_SYSTEM_PROMPT)
         
         Returns:
-            Claude's response text
+            OpenAI's response text
         
         Raises:
             ClaudeAPIError: If the API request fails
@@ -345,51 +341,49 @@ class ClaudeClient:
         
         if self._is_disabled():
             raise ClaudeAPIError(
-                f"Claude temporarily disabled until {self._disabled_until.isoformat() if self._disabled_until else 'unknown'}: "
+                f"OpenAI temporarily disabled until {self._disabled_until.isoformat() if self._disabled_until else 'unknown'}: "
                 f"{self._disabled_reason or 'billing/availability issue'}"
             )
 
         logger.info(
-            "Sending chat to Claude",
+            "Sending chat to OpenAI",
             extra={"message_count": len(messages)}
         )
         
+        # Convert messages to OpenAI format and prepend system prompt
+        openai_messages = [{"role": "system", "content": system}]
+        for msg in messages:
+            openai_messages.append({"role": msg["role"], "content": msg["content"]})
+        
         try:
-            response = self._client.messages.create(
+            response = self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=self._max_tokens,
-                system=system,
-                messages=messages,
+                messages=openai_messages,
             )
             
-            if response.content and len(response.content) > 0:
-                result = response.content[0].text
-                logger.info(
-                    "Received chat response from Claude",
-                    extra={"response_length": len(result), "stop_reason": response.stop_reason}
-                )
-                return result
-            else:
-                raise ClaudeAPIError("Empty response from Claude API")
+            if response.choices and len(response.choices) > 0:
+                result = response.choices[0].message.content
+                if result:
+                    logger.info(
+                        "Received chat response from OpenAI",
+                        extra={"response_length": len(result), "finish_reason": response.choices[0].finish_reason}
+                    )
+                    return result
+            raise ClaudeAPIError("Empty response from OpenAI API")
                 
-        except anthropic.APIConnectionError as e:
-            logger.error(f"Claude API connection error: {e}")
-            raise ClaudeAPIError(f"Connection error: {e}") from e
-        except anthropic.RateLimitError as e:
-            logger.error(f"Claude API rate limit: {e}")
-            raise ClaudeAPIError(f"Rate limit exceeded: {e}") from e
-        except anthropic.APIStatusError as e:
-            logger.error(f"Claude API status error: {e}")
-            try:
-                msg = str(getattr(e, "message", "") or str(e)).lower()
-                if "credit balance is too low" in msg or "insufficient" in msg and "credit" in msg:
-                    self._disable_for(6 * 3600, reason=str(getattr(e, "message", "") or str(e)))
-            except Exception:
-                pass
-            raise ClaudeAPIError(f"API error ({e.status_code}): {e.message}") from e
         except Exception as e:
-            logger.error(f"Unexpected error calling Claude: {e}")
-            raise ClaudeAPIError(f"Unexpected error: {e}") from e
+            error_msg = str(e).lower()
+            if "rate limit" in error_msg:
+                logger.error(f"OpenAI API rate limit: {e}")
+                raise ClaudeAPIError(f"Rate limit exceeded: {e}") from e
+            elif "insufficient_quota" in error_msg or "billing" in error_msg:
+                logger.error(f"OpenAI API billing/quota error: {e}")
+                self._disable_for(6 * 3600, reason=str(e))
+                raise ClaudeAPIError(f"Billing/quota error: {e}") from e
+            else:
+                logger.error(f"Unexpected error calling OpenAI: {e}")
+                raise ClaudeAPIError(f"Unexpected error: {e}") from e
     
     def suggest_files(
         self,
@@ -397,7 +391,7 @@ class ClaudeClient:
         available_files: list[str],
     ) -> list[str]:
         """
-        Ask Claude to suggest relevant files for a task.
+        Ask OpenAI to suggest relevant files for a task.
         
         Args:
             task: Description of the change/task
@@ -422,31 +416,35 @@ AVAILABLE FILES:
 Which files are most relevant to this task? Return a JSON array of file paths."""
         
         logger.info(
-            "Requesting file suggestions from Claude",
+            "Requesting file suggestions from OpenAI",
             extra={"task_preview": task[:100], "file_count": len(files_preview)}
         )
         
         try:
-            response = self._client.messages.create(
+            response = self._client.chat.completions.create(
                 model=self._model,
                 max_tokens=1024,
-                system=FILE_SUGGEST_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_message}],
+                messages=[
+                    {"role": "system", "content": FILE_SUGGEST_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message}
+                ],
             )
             
-            if response.content and len(response.content) > 0:
-                result = response.content[0].text.strip()
-                # Parse JSON array
-                try:
-                    suggested = json.loads(result)
-                    if isinstance(suggested, list):
-                        # Filter to only include files that actually exist in our list
-                        valid = [f for f in suggested if f in available_files]
-                        logger.info(f"Claude suggested {len(valid)} files")
-                        return valid[:8]
-                except json.JSONDecodeError:
-                    logger.warning(f"Could not parse Claude file suggestions: {result[:200]}")
-                    return []
+            if response.choices and len(response.choices) > 0:
+                result = response.choices[0].message.content
+                if result:
+                    result = result.strip()
+                    # Parse JSON array
+                    try:
+                        suggested = json.loads(result)
+                        if isinstance(suggested, list):
+                            # Filter to only include files that actually exist in our list
+                            valid = [f for f in suggested if f in available_files]
+                            logger.info(f"OpenAI suggested {len(valid)} files")
+                            return valid[:8]
+                    except json.JSONDecodeError:
+                        logger.warning(f"Could not parse OpenAI file suggestions: {result[:200]}")
+                        return []
             
             return []
                 
@@ -457,22 +455,22 @@ Which files are most relevant to this task? Return a JSON array of file paths.""
 
 def get_claude_client() -> Optional[ClaudeClient]:
     """
-    Factory function to get a Claude client instance.
+    Factory function to get an OpenAI client instance.
     
     Returns:
         ClaudeClient instance if available and configured, None otherwise.
     """
-    if not ANTHROPIC_AVAILABLE:
-        logger.debug("Claude not available: anthropic package not installed")
+    if not OPENAI_AVAILABLE:
+        logger.debug("OpenAI not available: openai package not installed")
         return None
     
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        logger.debug("Claude not available: ANTHROPIC_API_KEY not set")
+    if not os.getenv("OPENAI_API_KEY"):
+        logger.debug("OpenAI not available: OPENAI_API_KEY not set")
         return None
     
     try:
         return ClaudeClient()
     except ClaudeClientError as e:
-        logger.warning(f"Could not initialize Claude client: {e}")
+        logger.warning(f"Could not initialize OpenAI client: {e}")
         return None
 

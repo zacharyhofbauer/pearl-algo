@@ -32,13 +32,16 @@ try:
         ClaudeClient,
         ClaudeAPIError,
         get_claude_client,
-        ANTHROPIC_AVAILABLE,
+        OPENAI_AVAILABLE,
     )
 except ImportError:
     ClaudeClient = None
     ClaudeAPIError = Exception
     get_claude_client = lambda: None
-    ANTHROPIC_AVAILABLE = False
+    OPENAI_AVAILABLE = False
+
+# Backward compatibility
+ANTHROPIC_AVAILABLE = OPENAI_AVAILABLE
 
 
 # ============================================================================
@@ -203,7 +206,7 @@ class LLMSignalAnnotator:
         
         # Initialize Claude client (may be None if not configured)
         self._client: Optional[ClaudeClient] = None
-        if enabled and ANTHROPIC_AVAILABLE:
+        if enabled and OPENAI_AVAILABLE:
             try:
                 self._client = get_claude_client()
             except Exception as e:
@@ -596,7 +599,7 @@ class EntryTimingOptimizer:
         self.timeout_seconds = timeout_seconds
         
         self._client: Optional[ClaudeClient] = None
-        if enabled and ANTHROPIC_AVAILABLE:
+        if enabled and OPENAI_AVAILABLE:
             try:
                 self._client = get_claude_client()
             except Exception as e:

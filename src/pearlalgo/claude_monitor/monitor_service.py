@@ -40,13 +40,16 @@ try:
 except Exception:  # pragma: no cover
     ZoneInfo = None  # type: ignore
 
-# Claude client (optional [llm] extra)
+# OpenAI client (optional [llm] extra)
 try:
-    from pearlalgo.utils.claude_client import ClaudeClient, get_claude_client, ANTHROPIC_AVAILABLE
+    from pearlalgo.utils.claude_client import ClaudeClient, get_claude_client, OPENAI_AVAILABLE
 except ImportError:
     ClaudeClient = None  # type: ignore
     get_claude_client = lambda: None  # type: ignore
-    ANTHROPIC_AVAILABLE = False
+    OPENAI_AVAILABLE = False
+
+# Backward compatibility
+ANTHROPIC_AVAILABLE = OPENAI_AVAILABLE
 
 
 class ClaudeMonitorService:
@@ -458,7 +461,7 @@ class ClaudeMonitorService:
     
     def _init_claude_client(self) -> None:
         """Initialize Claude client if available."""
-        if not ANTHROPIC_AVAILABLE:
+        if not OPENAI_AVAILABLE:
             logger.warning("Claude not available: anthropic package not installed")
             return
         
@@ -467,7 +470,7 @@ class ClaudeMonitorService:
             if self._claude:
                 logger.info("Claude client initialized for monitoring")
             else:
-                logger.warning("Claude client not available (check ANTHROPIC_API_KEY)")
+                logger.warning("OpenAI client not available (check OPENAI_API_KEY)")
         except Exception as e:
             logger.error(f"Could not initialize Claude client: {e}")
     
