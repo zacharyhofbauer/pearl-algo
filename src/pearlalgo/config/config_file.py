@@ -182,11 +182,6 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "ml_filter",
     "drift_guard",
     # LLM features (signal annotation, risk checks, post-mortems, tuning)
-    "llm_signal_annotation",
-    "llm_risk_assessment",
-    "llm_trade_postmortem",
-    "llm_pattern_recognition",
-    "llm_adaptive_tuning",
     # 50k challenge tracker
     "challenge",
     # PEARL automated bots (formerly lux_algo_bots)

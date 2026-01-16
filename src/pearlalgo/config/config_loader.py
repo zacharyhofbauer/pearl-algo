@@ -365,50 +365,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "decay_factor": 0.0,                # Disabled for now - all observations equal weight
     },
     # ==========================================================================
-    # LLM FEATURES (optional)
-    # ==========================================================================
-    # These sections are used by the NQ agent to enrich signals with AI analysis and safety checks.
-    # They are merged into the service config so they can be read via load_service_config().
-    "llm_signal_annotation": {
-        "enabled": False,
-        "model": "claude-sonnet-4-20250514",
-        "timeout_seconds": 5,
-        "batch_mode": False,
-    },
-    "llm_risk_assessment": {
-        "enabled": False,
-        "model": "claude-sonnet-4-20250514",
-        "timeout_seconds": 3,
-        "block_on_critical": False,
-        "consider_recent_trades": 20,
-    },
-    "llm_trade_postmortem": {
-        "enabled": False,
-        "model": "claude-sonnet-4-20250514",
-        "timeout_seconds": 10,
-        "min_pnl_threshold": 50,
-        "send_to_telegram": False,
-        "batch_analysis_count": 10,
-    },
-    "llm_pattern_recognition": {
-        "enabled": False,
-        "model": "claude-sonnet-4-20250514",
-        "timeout_seconds": 30,
-        "batch_size": 10,
-        "lookback_trades": 50,
-        "min_pattern_confidence": 0.7,
-        "send_to_telegram": True,
-    },
-    "llm_adaptive_tuning": {
-        "enabled": False,
-        "model": "claude-sonnet-4-20250514",
-        "timeout_seconds": 60,
-        "analysis_interval_hours": 24,
-        "auto_apply": False,
-        "min_sample_size": 30,
-        "conservative_mode": True,
-    },
-    # ==========================================================================
     # DRIFT GUARD (Risk-Off Cooldown)
     # ==========================================================================
     # IMPORTANT: This section must be present here so drift_guard settings in

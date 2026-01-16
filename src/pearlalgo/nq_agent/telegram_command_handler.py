@@ -40,20 +40,20 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Optional AI client imports (used by /ai_patch and chat mode)
+# Optional OpenAI client imports (used by /ai_patch)
 # ---------------------------------------------------------------------------
 try:
-    from pearlalgo.utils.claude_client import (
-        ANTHROPIC_AVAILABLE,
-        ClaudeAPIError,
-        ClaudeAPIKeyMissingError,
-        ClaudeClient,
-        ClaudeNotAvailableError,
+    from pearlalgo.utils.openai_client import (
+        OPENAI_AVAILABLE,
+        OpenAIAPIError,
+        OpenAIAPIKeyMissingError,
+        OpenAIClient,
+        OpenAINotAvailableError,
     )
 except Exception:  # pragma: no cover - defensive fallback for minimal environments
-    ANTHROPIC_AVAILABLE = False
-    ClaudeClient = None  # type: ignore[assignment]
-    ClaudeAPIError = ClaudeAPIKeyMissingError = ClaudeNotAvailableError = Exception  # type: ignore[misc,assignment]
+    OPENAI_AVAILABLE = False
+    OpenAIClient = None  # type: ignore[assignment]
+    OpenAIAPIError = OpenAIAPIKeyMissingError = OpenAINotAvailableError = Exception  # type: ignore[misc,assignment]
 
 
 class TelegramCommandHandler:
@@ -250,9 +250,8 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("📊", callback_data="action:toggle_chart"),
                 InlineKeyboardButton("🎛️ System Control", callback_data="menu:system"),
             ],
-            # Row 3: Advanced Features
+            # Row 3: Bots
             [
-                InlineKeyboardButton("🔮 AI & Analysis", callback_data="menu:analysis"),
                 InlineKeyboardButton(bots_label, callback_data="menu:bots"),
             ],
             # Row 4: Settings + Help
@@ -548,14 +547,10 @@ class TelegramCommandHandler:
             await self._show_bots_menu(query)
         elif action == "pearl_bots":
             await self._show_pearl_bots_menu(query)
-        elif action == "analysis":
-            await self._show_analysis_menu(query)
         elif action == "system":
             await self._show_system_menu(query)
         elif action == "settings":
             await self._show_settings_menu(query)
-        elif action == "ai_optimize":
-            await self._run_ai_optimization(query)
         elif action == "help":
             await self._show_help(query)
         else:
@@ -746,7 +741,6 @@ class TelegramCommandHandler:
 
             chart_tf_pref = str(service_cfg.get("dashboard_chart_timeframe", "auto") or "auto").strip().lower()
             max_bars = int(service_cfg.get("dashboard_chart_max_bars", 420) or 420)
-            show_pressure = bool(service_cfg.get("dashboard_chart_show_pressure", True))
 
             def _choose_timeframe(hours: float, max_bars_local: int) -> str:
                 # Keep candle count under max_bars for readability (same candidates as service).
@@ -826,7 +820,7 @@ class TelegramCommandHandler:
                     show_ma=True,  # Show moving averages
                     ma_periods=[20, 50, 200],  # MA20, MA50, MA200
                     show_rsi=True,  # Show RSI panel
-                    show_pressure=show_pressure,  # Show buy/sell pressure (config-driven)
+                    show_pressure=True,  # Always show buy/sell pressure in menu chart
                     trades=trades,  # Overlay trade markers
                 )
                 
@@ -1313,95 +1307,6 @@ class TelegramCommandHandler:
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(error_msg, reply_markup=reply_markup, parse_mode="Markdown")
 
-    async def _show_analysis_menu(self, query: CallbackQuery) -> None:
-        """Show AI & analysis submenu with smart insights and recommendations."""
-        # Get performance data for context
-        state = self._read_state()
-        metrics = self._read_latest_metrics()
-        
-        # Build context-aware analysis menu
-        lines = ["🔮 *AI & Analysis Hub*", ""]
-        
-        # Quick Performance Summary for Context
-        if metrics:
-            total_trades = metrics.get("exited_signals", 0)
-            win_rate = float(metrics.get("win_rate", 0.0) or 0.0) * 100
-            total_pnl = float(metrics.get("total_pnl", 0.0) or 0.0)
-            
-            lines.append("*Performance Snapshot:*")
-            lines.append(f"• Total Trades: {total_trades}")
-            if total_trades > 0:
-                wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
-                lines.append(f"• Win Rate: {wr_emoji} {win_rate:.1f}%")
-                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                lines.append(f"• Total P&L: {pnl_emoji} ${total_pnl:,.2f}")
-            lines.append("")
-        
-        # AI-powered insights
-        insights = []
-        if metrics:
-            total_trades = metrics.get("exited_signals", 0)
-            win_rate = float(metrics.get("win_rate", 0.0) or 0.0) * 100
-            
-            if total_trades < 20:
-                insights.append("💡 *Tip:* Need more trades for reliable analysis (20+ recommended)")
-            elif total_trades >= 50:
-                insights.append("✅ *Good:* Sufficient trade data for analysis")
-            
-            if win_rate < 40:
-                insights.append("🔴 *Alert:* Low win rate - Bot Review recommended")
-            elif win_rate > 60:
-                insights.append("🎯 *Excellent:* High win rate - Bot performing well")
-        
-        if state:
-            daily_trades = state.get("daily_trades", 0) or 0
-            if daily_trades == 0:
-                insights.append("💭 *Notice:* No trades today - check signal generation")
-        
-        if not insights:
-            insights.append("💡 *Ready:* Use analysis tools to optimize performance")
-        
-        lines.extend(insights)
-        lines.append("")
-        lines.append("*Select analysis type:*")
-        
-        # Build dynamic button labels
-        bot_analysis_label = "🔍 Bot Analysis"
-        if metrics:
-            total_trades = metrics.get("exited_signals", 0)
-            bot_analysis_label = f"🔍 Bot Analysis • {total_trades} Trades"
-        
-        keyboard = [
-            # Row 1: Bot Analysis
-            [
-                InlineKeyboardButton(bot_analysis_label, callback_data="action:strategy_analysis"),
-                InlineKeyboardButton("📊 Trade Analysis", callback_data="action:trade_analysis"),
-            ],
-            # Row 2: Signal Analysis
-            [
-                InlineKeyboardButton("📈 Signal Analysis", callback_data="action:signal_analysis"),
-                InlineKeyboardButton("🎯 AI Analysis", callback_data="action:ai_analysis"),
-            ],
-            # Row 3: AI Features
-            [
-                InlineKeyboardButton("🤖 AI Bot Review", callback_data="action:ai_strategy_review"),
-                InlineKeyboardButton("💡 AI Config Tips", callback_data="action:ai_config_suggestions"),
-            ],
-            # Row 4: Pearl Bot AI
-            [
-                InlineKeyboardButton("🚀 AI Pearl Optimizer", callback_data="action:ai_optimize"),
-            ],
-            # Row 5: Backtesting
-            [
-                InlineKeyboardButton("🧪 Backtest Bots", callback_data="strategy_review:backtest"),
-                InlineKeyboardButton("📑 Backtest Reports", callback_data="strategy_review:reports"),
-            ],
-            # Row 6: Navigation
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
-
     async def _show_system_menu(self, query: CallbackQuery) -> None:
         """Show system control submenu with comprehensive risk warnings and status."""
         # Get system state for context
@@ -1590,64 +1495,6 @@ class TelegramCommandHandler:
         await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
-    async def _run_ai_optimization(self, query: CallbackQuery) -> None:
-        """Run AI-powered Pearl bot optimization."""
-        await query.edit_message_text("🤖 Running AI optimization analysis...\n\nThis may take a moment...")
-
-        try:
-            # Import and run optimizer
-            from scripts.backtesting.pearl_bot_ai_optimizer import PearlBotAIOptimizer
-
-            optimizer = PearlBotAIOptimizer(state_dir=self.state_dir)
-            result = optimizer.analyze_performance(days_back=7)
-
-            if 'error' in result:
-                await query.edit_message_text(f"❌ AI Analysis Failed: {result['error']}")
-                return
-
-            # Generate AI recommendations if OpenAI is available (wrapper lives in claude_client.py for backward compat)
-            recommendations = {}
-            if optimizer.claude:
-                recommendations = optimizer.generate_ai_recommendations(result)
-            else:
-                recommendations = {"note": "OpenAI API key not configured - basic analysis only"}
-
-            # Format response
-            response = "🤖 *Pearl Bot AI Analysis Complete*\n\n"
-            response += f"📊 **Performance (7 days):**\n"
-            response += f"• Trades: {result['total_trades']}\n"
-            response += f"• Win Rate: {result['win_rate']:.1%}\n"
-            response += f"• Total P&L: \\${result['total_pnl']:.2f}\n"
-            response += f"• Profit Factor: {result['profit_factor']:.2f}\n\n"
-
-            if result['bot_performance']:
-                response += "🎯 **Bot Performance:**\n"
-                for bot, perf in result['bot_performance'].items():
-                    response += f"• {bot}: {perf['win_rate']:.1%} win rate\n"
-                response += "\n"
-
-            if 'analysis' in recommendations:
-                response += "🧠 **AI Recommendations:**\n"
-                # Truncate if too long for Telegram
-                ai_text = recommendations['analysis'][:800]
-                if len(recommendations['analysis']) > 800:
-                    ai_text += "..."
-                response += ai_text
-            else:
-                response += "💡 *Next Steps:*\n"
-                response += "• Enable OpenAI API for AI recommendations\n"
-                response += "• Review risk management settings\n"
-                response += "• Consider wider stop losses\n"
-
-            keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            await query.edit_message_text(response, reply_markup=reply_markup, parse_mode="Markdown")
-
-        except Exception as e:
-            logger.error(f"AI optimization failed: {e}")
-            await query.edit_message_text(f"❌ AI Optimization Error: {str(e)}")
-
     async def _show_help(self, query: CallbackQuery) -> None:
         """Show help information."""
         help_text = (
@@ -1663,7 +1510,6 @@ class TelegramCommandHandler:
             "🛰️ Status - System health and connection status\n"
             "🎛️ System Control - Start/stop services and emergency controls\n"
             "⚙️ Settings - Charts + notification preferences\n"
-            "🔮 AI & Analysis - AI-powered insights and analysis\n"
             "👾 Bots - Start/stop the Pearl Bot service\n\n"
             "*Quick Tips:*\n"
             "• Use 'Back to Menu' to return to main menu\n"
@@ -1724,38 +1570,6 @@ class TelegramCommandHandler:
             elif action_type == "pnl_overview":
                 await query.edit_message_text("💰 P&L Overview: Loading...\n\nFeature coming soon.", reply_markup=reply_markup)
                 # TODO: Implement actual P&L overview
-            elif action_type == "strategy_analysis":
-                metrics = self._read_latest_metrics()
-                text = "🔍 Bot Analysis\n\n"
-                if metrics:
-                    text += f"Trades: {metrics.get('exited_signals', 0)}\n"
-                    text += f"Win Rate: {metrics.get('win_rate', 0.0):.1%}\n"
-                    text += f"Total P&L: {metrics.get('total_pnl', 0.0):.2f}\n"
-                else:
-                    text += "No metrics available."
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-            elif action_type == "trade_analysis":
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text("📊 Trade Analysis: Feature coming soon...", reply_markup=InlineKeyboardMarkup(keyboard))
-            elif action_type == "signal_analysis":
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text("📈 Signal Analysis: Loading...", reply_markup=InlineKeyboardMarkup(keyboard))
-            elif action_type == "ai_analysis":
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text("🎯 AI Analysis: Loading...", reply_markup=InlineKeyboardMarkup(keyboard))
-            elif action_type == "ai_strategy_review":
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text("🤖 AI Bot Review: Analyzing...", reply_markup=InlineKeyboardMarkup(keyboard))
-            elif action_type == "ai_signal_analysis":
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text("📋 AI Signal Analysis: Analyzing...", reply_markup=InlineKeyboardMarkup(keyboard))
-            elif action_type == "ai_system_analysis":
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text("🔧 AI System Analysis: Analyzing...", reply_markup=InlineKeyboardMarkup(keyboard))
-            elif action_type == "ai_config_suggestions":
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text("💡 AI Config Suggestions: Generating...", reply_markup=InlineKeyboardMarkup(keyboard))
             elif action_type == "restart_agent":
                 keyboard = [
                     [InlineKeyboardButton("✅ Confirm Restart", callback_data="confirm:restart_agent")],
@@ -2036,37 +1850,6 @@ class TelegramCommandHandler:
             elif action_type == "toggle_chart":
                 # Toggle chart display
                 await self._toggle_chart_display(query)
-            elif action_type == "ai_on":
-                # Enable AI chat mode
-                prefs = TelegramPrefs(state_dir=self.state_dir)
-                prefs.set("chat_mode", True)
-                keyboard = [
-                    [InlineKeyboardButton("🔴 Turn Off", callback_data="action:ai_off")],
-                    [InlineKeyboardButton("🔮 AI Menu", callback_data="menu:analysis")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-                ]
-                await query.edit_message_text(
-                    "✅ *AI Chat Mode: ON*\n\n"
-                    "You can now chat with the AI assistant (OpenAI).\n"
-                    "Send any message to get AI assistance.",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode="Markdown"
-                )
-            elif action_type == "ai_off":
-                # Disable AI chat mode
-                prefs = TelegramPrefs(state_dir=self.state_dir)
-                prefs.set("chat_mode", False)
-                keyboard = [
-                    [InlineKeyboardButton("🟢 Turn On", callback_data="action:ai_on")],
-                    [InlineKeyboardButton("🔮 AI Menu", callback_data="menu:analysis")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-                ]
-                await query.edit_message_text(
-                    "🔴 *AI Chat Mode: OFF*\n\n"
-                    "AI chat is now disabled.",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode="Markdown"
-                )
             else:
                 keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
                 await query.edit_message_text(f"Action not yet implemented: {action_type}", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -3655,18 +3438,6 @@ class TelegramCommandHandler:
         except Exception:
             return None
 
-    def _get_claude_hub_buttons(self):
-        """Buttons for AI Hub (minimal)."""
-        try:
-            return InlineKeyboardMarkup(
-                [
-                    [InlineKeyboardButton("🟢 AI On", callback_data="action:ai_on"), InlineKeyboardButton("🔴 AI Off", callback_data="action:ai_off")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-                ]
-            )
-        except Exception:
-            return None
-
     def _is_path_blocked(self, rel_path: str) -> bool:
         """Block unsafe files for AI patching (case-insensitive)."""
         p = str(rel_path or "").strip().replace("\\", "/")
@@ -3738,89 +3509,6 @@ class TelegramCommandHandler:
         self.prefs = prefs
         return prefs
 
-    async def _handle_ai_hub(self, update: Any, context: Any) -> None:
-        if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
-            return
-
-        prefs = self._get_prefs()
-        chat_mode = False
-        try:
-            chat_mode = bool(prefs.get("ai_chat_mode", False))
-        except Exception:
-            pass
-
-        status = "ON" if chat_mode else "OFF"
-        msg = f"🤖 AI Hub\n\nChat Mode: {status}\n\nUse /ai_on or /ai_off, or tap buttons below."
-        await self._send_message_or_edit(update, context, msg, reply_markup=self._get_claude_hub_buttons())
-
-    async def _handle_ai_on(self, update: Any, context: Any) -> None:
-        if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
-            return
-
-        prefs = self._get_prefs()
-        try:
-            prefs.set("ai_chat_mode", True)
-        except Exception:
-            pass
-
-        await self._send_message_or_edit(update, context, "✅ Chat Mode: ON", reply_markup=self._get_claude_hub_buttons())
-
-    async def _handle_ai_off(self, update: Any, context: Any) -> None:
-        if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
-            return
-
-        prefs = self._get_prefs()
-        try:
-            prefs.set("ai_chat_mode", False)
-        except Exception:
-            pass
-
-        await self._send_message_or_edit(update, context, "✅ Chat Mode: OFF", reply_markup=self._get_claude_hub_buttons())
-
-    async def _handle_claude_message(self, update: Any, context: Any) -> None:
-        """Route plain messages to wizard or AI chat when enabled."""
-        if not await self._check_authorized(update):
-            return
-
-        user_data = getattr(context, "user_data", None) or {}
-        if isinstance(user_data, dict):
-            state = user_data.get("claude_wizard_state")
-        else:
-            state = None
-
-        text = str(getattr(getattr(update, "message", None), "text", "") or "")
-
-        if state == "awaiting_task":
-            await self._process_wizard_task(update, context, text)
-            return
-        if state == "refine_search":
-            await self._process_wizard_search(update, context, text)
-            return
-
-        prefs = self._get_prefs()
-        try:
-            chat_mode = bool(prefs.get("ai_chat_mode", False))
-        except Exception:
-            chat_mode = False
-
-        if not chat_mode:
-            return
-
-        await self._process_claude_chat(update, context, text)
-
-    async def _process_claude_chat(self, update: Any, context: Any, text: str) -> None:
-        """Minimal AI chat handler (tests patch this)."""
-        await self._send_message_or_edit(update, context, "(AI chat not configured in this build)")
-
-    async def _process_wizard_task(self, update: Any, context: Any, text: str) -> None:
-        await self._send_message_or_edit(update, context, "(Wizard not configured in this build)")
-
-    async def _process_wizard_search(self, update: Any, context: Any, text: str) -> None:
-        await self._send_message_or_edit(update, context, "(Wizard not configured in this build)")
-
     async def _handle_ai_patch(self, update: Any, context: Any) -> None:
         """Generate a unified diff patch for a file via AI."""
         if not await self._check_authorized(update):
@@ -3843,7 +3531,7 @@ class TelegramCommandHandler:
             await self._send_message_or_edit(update, context, f"❌ Blocked path: {rel_path}")
             return
 
-        if not ANTHROPIC_AVAILABLE:
+        if not OPENAI_AVAILABLE:
             await self._send_message_or_edit(
                 update,
                 context,
@@ -3865,17 +3553,17 @@ class TelegramCommandHandler:
 
         # Call AI client
         try:
-            client = ClaudeClient()
+            client = OpenAIClient()
             diff = client.generate_patch(files={rel_path: content}, task=task)
             msg = diff if diff else "(No diff returned)"
             if len(msg) > 4096:
                 msg = msg[:4093] + "..."
             await self._send_message_or_edit(update, context, msg)
-        except ClaudeAPIKeyMissingError as e:
+        except OpenAIAPIKeyMissingError as e:
             await self._send_message_or_edit(update, context, f"❌ API Key missing: {e}")
-        except ClaudeNotAvailableError as e:
+        except OpenAINotAvailableError as e:
             await self._send_message_or_edit(update, context, f"❌ Not Available: {e}\n\nInstall with: pip install -e '.[llm]'")
-        except ClaudeAPIError as e:
+        except OpenAIAPIError as e:
             await self._send_message_or_edit(update, context, f"❌ API Error: {e}")
         except Exception as e:
             await self._send_message_or_edit(update, context, f"❌ Error: {e}")

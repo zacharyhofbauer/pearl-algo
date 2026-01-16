@@ -205,40 +205,6 @@ indicators:
     lookback: 14
     pivot_lookback: 5
     rsi_period: 14
-llm_signal_annotation:
-  enabled: false
-  model: gpt-4o
-  timeout_seconds: 5
-  batch_mode: false
-llm_trade_postmortem:
-  enabled: false
-  model: gpt-4o
-  timeout_seconds: 10
-  min_pnl_threshold: 500
-  send_to_telegram: true
-  batch_analysis_count: 5
-llm_pattern_recognition:
-  enabled: false
-  model: gpt-4o
-  timeout_seconds: 30
-  batch_size: 5
-  lookback_trades: 50
-  min_pattern_confidence: 0.6
-  send_to_telegram: true
-llm_risk_assessment:
-  enabled: false
-  model: gpt-4o
-  timeout_seconds: 3
-  block_on_critical: false
-  consider_recent_trades: 20
-llm_adaptive_tuning:
-  enabled: true
-  model: gpt-4o
-  timeout_seconds: 60
-  analysis_interval_hours: 6
-  auto_apply: false
-  min_sample_size: 10
-  conservative_mode: true
 execution:
   enabled: false
   armed: false

@@ -3196,6 +3196,14 @@ class ChartGenerator:
             try:
                 ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
                 if ax_price is not None:
+                    # Add right-side padding so the last candle has visual "future" space.
+                    try:
+                        right_pad = max(0, int(self.config.right_pad_bars))
+                    except Exception:
+                        right_pad = 0
+                    if right_pad and len(df) > 0:
+                        ax_price.set_xlim(-0.5, float((len(df) - 1) + right_pad))
+
                     # Limit y-axis ticks to prevent overlapping labels
                     self._limit_yaxis_ticks(ax_price, max_ticks=8)
                     # Add price numbers to x-axis (bottom of chart)

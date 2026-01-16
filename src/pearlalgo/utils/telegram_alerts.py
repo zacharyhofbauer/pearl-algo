@@ -1502,7 +1502,6 @@ class TelegramPrefs:
         "auto_chart_on_signal": False,      # Automatically generate chart with signal push
         "snooze_noncritical_alerts": False, # Temporarily suppress non-critical data alerts
         "snooze_until": None,               # ISO timestamp when snooze expires (if snoozed)
-        "ai_chat_mode": False,              # AI chat mode (messages go to the OpenAI-backed assistant)
         "interval_notifications": True,     # Enable hourly interval notifications (chart + status)
     }
     
@@ -1512,7 +1511,6 @@ class TelegramPrefs:
         "signal_detail_expanded": "Expanded Signal Details",
         "auto_chart_on_signal": "Auto-Chart on Signal",
         "snooze_noncritical_alerts": "Snooze Non-Critical Alerts",
-        "ai_chat_mode": "AI Chat Mode",
         "interval_notifications": "Interval Notifications",
     }
     
@@ -1522,7 +1520,6 @@ class TelegramPrefs:
         "signal_detail_expanded": "Show full context (regime, MTF, VWAP) in signal details by default",
         "auto_chart_on_signal": "Automatically generate and send chart with each signal alert",
         "snooze_noncritical_alerts": "Temporarily suppress non-critical data quality alerts (1 hour)",
-        "ai_chat_mode": "Send plain messages to the AI assistant (mobile Cursor mode)",
         "interval_notifications": "Hourly chart + status notifications (toggle off to disable)",
     }
     

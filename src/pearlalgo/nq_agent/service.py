@@ -106,34 +106,6 @@ except ImportError:
     PropFirmGuard = None  # type: ignore
     PropFirmStatus = None  # type: ignore
 
-# LLM Signal Annotator (optional - enabled via llm_signal_annotation.enabled)
-try:
-    from pearlalgo.nq_agent.signal_annotator import (
-        LLMSignalAnnotator,
-        SignalAnnotation,
-        get_signal_annotator,
-    )
-    LLM_ANNOTATOR_AVAILABLE = True
-except ImportError:
-    LLM_ANNOTATOR_AVAILABLE = False
-    LLMSignalAnnotator = None  # type: ignore
-    SignalAnnotation = None  # type: ignore
-    get_signal_annotator = lambda config: None  # type: ignore
-
-# LLM Risk Assessor (optional - enabled via llm_risk_assessment.enabled)
-try:
-    from pearlalgo.nq_agent.risk_assessor import (
-        RealTimeRiskAssessor,
-        RiskAssessment,
-        get_risk_assessor,
-    )
-    LLM_RISK_ASSESSOR_AVAILABLE = True
-except ImportError:
-    LLM_RISK_ASSESSOR_AVAILABLE = False
-    RealTimeRiskAssessor = None  # type: ignore
-    RiskAssessment = None  # type: ignore
-    get_risk_assessor = lambda config: None  # type: ignore
-
 
 class NQAgentService:
     """
@@ -414,65 +386,6 @@ class NQAgentService:
         else:
             if not PROP_FIRM_AVAILABLE:
                 logger.debug("Prop firm guard not available (import failed)")
-
-        # ==========================================================================
-        # LLM SIGNAL ANNOTATOR (optional)
-        # ==========================================================================
-        # Provides AI-powered analysis/explanation of signals for Telegram messages.
-        # Non-blocking with timeout - failures don't affect signal processing.
-        self.signal_annotator: Optional["LLMSignalAnnotator"] = None
-        
-        llm_annotation_settings = service_config.get("llm_signal_annotation", {}) or {}
-        if LLM_ANNOTATOR_AVAILABLE and isinstance(llm_annotation_settings, dict):
-            try:
-                if llm_annotation_settings.get("enabled", False):
-                    self.signal_annotator = get_signal_annotator(service_config)
-                    if self.signal_annotator and self.signal_annotator.is_available:
-                        logger.info(
-                            f"LLM signal annotator enabled: model={self.signal_annotator.model}, "
-                            f"timeout={self.signal_annotator.timeout_seconds}s"
-                        )
-                    else:
-                        logger.info("LLM signal annotator enabled but unavailable (API key missing?)")
-                        self.signal_annotator = None
-                else:
-                    logger.info("LLM signal annotator disabled (llm_signal_annotation.enabled=false)")
-            except Exception as e:
-                logger.warning(f"Failed to initialize LLM signal annotator: {e}")
-                self.signal_annotator = None
-        else:
-            if not LLM_ANNOTATOR_AVAILABLE:
-                logger.debug("LLM signal annotator not available (import failed)")
-
-        # ==========================================================================
-        # LLM RISK ASSESSOR (optional)
-        # ==========================================================================
-        # Provides a fast, best-effort pre-trade risk check.
-        # This does NOT block signals by default; it adds context to Telegram.
-        self.risk_assessor: Optional["RealTimeRiskAssessor"] = None
-
-        llm_risk_settings = service_config.get("llm_risk_assessment", {}) or {}
-        if LLM_RISK_ASSESSOR_AVAILABLE and isinstance(llm_risk_settings, dict):
-            try:
-                if llm_risk_settings.get("enabled", False):
-                    self.risk_assessor = get_risk_assessor(service_config)
-                    if self.risk_assessor and self.risk_assessor.is_available:
-                        logger.info(
-                            f"LLM risk assessor enabled: model={self.risk_assessor.model}, "
-                            f"timeout={self.risk_assessor.timeout_seconds}s, "
-                            f"block_on_critical={self.risk_assessor.block_on_critical}"
-                        )
-                    else:
-                        logger.info("LLM risk assessor enabled but unavailable (API key missing?)")
-                        self.risk_assessor = None
-                else:
-                    logger.info("LLM risk assessor disabled (llm_risk_assessment.enabled=false)")
-            except Exception as e:
-                logger.warning(f"Failed to initialize LLM risk assessor: {e}")
-                self.risk_assessor = None
-        else:
-            if not LLM_RISK_ASSESSOR_AVAILABLE:
-                logger.debug("LLM risk assessor not available (import failed)")
 
         self.running = False
         self.shutdown_requested = False
@@ -1813,116 +1726,6 @@ class NQAgentService:
             if execution_result:
                 signal["_execution_order_id"] = execution_result.parent_order_id
 
-            # ==========================================================================
-            # LLM ANNOTATION: AI-powered signal analysis (non-blocking, best-effort)
-            # ==========================================================================
-            # Adds human-readable explanation to the signal before Telegram delivery.
-            # Failures are graceful - annotation is optional enhancement only.
-            if self.signal_annotator is not None and self.signal_annotator.is_available:
-                try:
-                    # Get performance metrics for context
-                    perf_metrics = None
-                    try:
-                        perf = self.performance_tracker.get_performance_metrics()
-                        if perf:
-                            perf_metrics = {
-                                "win_rate": perf.get("win_rate", 0.5),
-                                "total_trades": perf.get("total_trades", 0),
-                            }
-                    except Exception:
-                        pass
-                    
-                    # Annotate signal asynchronously with timeout
-                    annotation = await self.signal_annotator.annotate_signal_async(
-                        signal=signal,
-                        market_context=None,  # Could add more context here
-                        performance_metrics=perf_metrics,
-                    )
-                    
-                    if annotation and not annotation.error:
-                        signal["_llm_annotation"] = annotation.to_dict()
-                        logger.debug(
-                            f"LLM annotation added: {annotation.confidence_note} "
-                            f"(latency={annotation.latency_ms}ms)"
-                        )
-                    elif annotation and annotation.error:
-                        logger.debug(f"LLM annotation skipped: {annotation.error}")
-                except Exception as ann_e:
-                    # Never let annotation failures affect signal processing
-                    logger.debug(f"LLM annotation failed (non-blocking): {ann_e}")
-
-            # ==========================================================================
-            # LLM RISK ASSESSMENT: fast pre-trade risk check (non-blocking, best-effort)
-            # ==========================================================================
-            # Adds a compact risk label to the signal before Telegram delivery.
-            # Failures are graceful; timeout defaults to "proceed".
-            if self.risk_assessor is not None and self.risk_assessor.is_available:
-                try:
-                    consider_n = int(getattr(self.risk_assessor, "consider_recent_trades", 20) or 20)
-
-                    # Build a small recent-trades cache for the assessor (best-effort).
-                    recent_records: List[Dict] = []
-                    try:
-                        recent_records = self.state_manager.get_recent_signals(limit=max(200, consider_n * 10))
-                    except Exception:
-                        recent_records = []
-
-                    exited: List[Dict[str, Any]] = []
-                    for rec in recent_records:
-                        if not isinstance(rec, dict):
-                            continue
-                        if rec.get("_is_test", False):
-                            continue
-                        if rec.get("status") != "exited":
-                            continue
-                        sig = rec.get("signal", {}) or {}
-                        exited.append(
-                            {
-                                "type": sig.get("type", rec.get("type", "unknown")),
-                                "is_win": bool(rec.get("is_win", False)),
-                                "confidence": sig.get("confidence"),
-                                "pnl_points": rec.get("pnl"),
-                                "exit_reason": rec.get("exit_reason"),
-                                "exit_time": rec.get("exit_time"),
-                            }
-                        )
-
-                    if exited:
-                        self.risk_assessor.update_recent_trades(exited[-consider_n:])
-
-                    # Current exposure summary (best-effort)
-                    exposure = "none"
-                    try:
-                        open_positions = []
-                        for rec in self.state_manager.get_recent_signals(limit=200):
-                            if isinstance(rec, dict) and rec.get("status") == "entered":
-                                open_positions.append(rec)
-                        if open_positions:
-                            exposure = f"{len(open_positions)} active"
-                    except Exception:
-                        pass
-
-                    assessment = await self.risk_assessor.assess_signal_async(
-                        signal=signal,
-                        market_state={"regime": signal.get("regime", {})},
-                        current_exposure=exposure,
-                    )
-
-                    # Attach only when meaningful to avoid bloating persisted signals.
-                    if assessment and not assessment.error:
-                        if (
-                            assessment.risk_level in ("medium", "high", "critical")
-                            or (assessment.primary_concern is not None)
-                            or (abs(float(assessment.size_adjustment or 1.0) - 1.0) >= 0.05)
-                        ):
-                            signal["_llm_risk_assessment"] = assessment.to_dict()
-                            logger.debug(
-                                f"LLM risk assessment: {assessment.risk_level} "
-                                f"(proceed={assessment.proceed}, latency={assessment.latency_ms}ms)"
-                            )
-                except Exception as risk_e:
-                    logger.debug(f"LLM risk assessment failed (non-blocking): {risk_e}")
-
             # Send to Telegram (await async call) with buffer data for chart generation
             signal_type = signal.get('type', 'unknown')
             signal_direction = signal.get('direction', 'unknown')
@@ -2566,9 +2369,13 @@ class NQAgentService:
                 range_label=range_label,
                 figsize=(16, 7),
                 dpi=150,
+                show_sessions=True,
+                show_key_levels=True,
+                show_vwap=True,
                 show_ma=True,  # Show moving averages to match TradingView-style chart
                 ma_periods=[20, 50, 200],  # Common MA periods
-                show_pressure=self.dashboard_chart_show_pressure,
+                show_rsi=True,
+                show_pressure=True,
                 # Overlay recent trades (entries/exits) for transparency.
                 trades=self._get_trades_for_chart(chart_data),
             )
@@ -2678,9 +2485,13 @@ class NQAgentService:
                 range_label=range_label,
                 figsize=getattr(self, "dashboard_export_figsize", (20.0, 7.3)),
                 dpi=int(getattr(self, "dashboard_export_dpi", 150) or 150),
+                show_sessions=True,
+                show_key_levels=True,
+                show_vwap=True,
                 show_ma=True,
                 ma_periods=[20, 50, 200],
-                show_pressure=bool(getattr(self, "dashboard_chart_show_pressure", True)),
+                show_rsi=True,
+                show_pressure=True,
                 trades=self._get_trades_for_chart(df_5m),
             )
         except Exception as e:
