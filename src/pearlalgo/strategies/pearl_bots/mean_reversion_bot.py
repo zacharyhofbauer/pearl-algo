@@ -1,8 +1,8 @@
 """
-Mean Reversion Bot - Lux Algo Chart Prime Style
+Mean Reversion Bot - PEARL Automated Trading System
 
 A complete automated trading bot that trades mean reversion opportunities,
-similar to Lux Algo's Oscillator Matrix (OSC) toolkit for contrarian strategies.
+optimized for PEARLalgo's oscillator-based analysis.
 
 Strategy Logic:
 - Identifies overbought/oversold conditions using multiple oscillators
@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 import numpy as np
 
-from .bot_template import LuxAlgoBot, BotConfig, TradeSignal, IndicatorSuite, register_bot
+from .bot_template import PearlBot, BotConfig, TradeSignal, IndicatorSuite, register_bot
 
 
 @dataclass
@@ -136,11 +136,11 @@ class MeanReversionIndicators(IndicatorSuite):
         }
 
 
-class MeanReversionBot(LuxAlgoBot):
+class MeanReversionBot(PearlBot):
     """
     Mean Reversion Bot - Complete automated trading system.
 
-    This bot implements a mean reversion strategy similar to Lux Algo's OSC toolkit:
+    This bot implements a mean reversion strategy optimized for PEARLalgo:
     - Identifies overbought/oversold conditions using multiple oscillators
     - Detects divergence patterns for higher-probability entries
     - Enters on exhaustion with confirmation across indicators

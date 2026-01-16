@@ -123,20 +123,24 @@ class TelegramCommandHandler:
             positions = (state.get("execution", {}).get("positions", 0) or 0)
             active_trades = state.get("active_trades_count", 0) or 0
             has_active = positions > 0 or active_trades > 0
-        
+
         return [
+            # Row 1: Core Trading Functions
+            [
+                InlineKeyboardButton("🎯 Signals & Trades", callback_data="menu:signals"),
+                InlineKeyboardButton("📊 Performance", callback_data="menu:performance"),
+            ],
+            # Row 2: System Management
             [
                 InlineKeyboardButton("📡 Status" + (" 🎯" if has_active else ""), callback_data="menu:status"),
-                InlineKeyboardButton("🎯 Signals", callback_data="menu:signals"),
+                InlineKeyboardButton("⚙️ System Control", callback_data="menu:system"),
             ],
+            # Row 3: Advanced Features
             [
-                InlineKeyboardButton("📈 Performance", callback_data="menu:performance"),
+                InlineKeyboardButton("🤖 AI & Analysis", callback_data="menu:analysis"),
                 InlineKeyboardButton("🚀 Strategies", callback_data="menu:strategies"),
             ],
-            [
-                InlineKeyboardButton("⚙️ System", callback_data="menu:system"),
-                InlineKeyboardButton("🤖 AI Features", callback_data="menu:ai"),
-            ],
+            # Row 4: Help
             [
                 InlineKeyboardButton("❓ Help", callback_data="menu:help"),
             ],
@@ -325,8 +329,6 @@ class TelegramCommandHandler:
             await self._show_analysis_menu(query)
         elif action == "system":
             await self._show_system_menu(query)
-        elif action == "ai":
-            await self._show_ai_menu(query)
         elif action == "help":
             await self._show_help(query)
         else:
@@ -381,12 +383,24 @@ class TelegramCommandHandler:
         await query.edit_message_text(f"📊 Status & Monitoring{preview}\nSelect an option:", reply_markup=reply_markup)
 
     async def _show_signals_menu(self, query: CallbackQuery) -> None:
-        """Show signals submenu."""
+        """Show signals & trades submenu."""
         keyboard = [
-            [InlineKeyboardButton("🎯 Recent Signals", callback_data="action:recent_signals")],
-            [InlineKeyboardButton("📋 Active Trades", callback_data="action:active_trades")],
-            [InlineKeyboardButton("📊 Signal History", callback_data="action:signal_history")],
-            [InlineKeyboardButton("🔍 Signal Details", callback_data="action:signal_details")],
+            # Row 1: Current Activity
+            [
+                InlineKeyboardButton("🎯 Recent Signals", callback_data="action:recent_signals"),
+                InlineKeyboardButton("📋 Active Trades", callback_data="action:active_trades"),
+            ],
+            # Row 2: Historical Data
+            [
+                InlineKeyboardButton("📊 Signal History", callback_data="action:signal_history"),
+                InlineKeyboardButton("🔍 Signal Details", callback_data="action:signal_details"),
+            ],
+            # Row 3: Quick Actions
+            [
+                InlineKeyboardButton("🚫 Close All Trades", callback_data="action:close_all_trades"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="menu:signals"),
+            ],
+            # Row 4: Navigation
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -395,159 +409,193 @@ class TelegramCommandHandler:
     async def _show_performance_menu(self, query: CallbackQuery) -> None:
         """Show performance submenu."""
         keyboard = [
-            [InlineKeyboardButton("📈 Performance Metrics", callback_data="action:performance_metrics")],
-            [InlineKeyboardButton("📊 Daily Summary", callback_data="action:daily_summary")],
-            [InlineKeyboardButton("📉 Weekly Summary", callback_data="action:weekly_summary")],
-            [InlineKeyboardButton("💰 P&L Overview", callback_data="action:pnl_overview")],
+            # Row 1: Core Metrics
+            [
+                InlineKeyboardButton("📈 Performance Metrics", callback_data="action:performance_metrics"),
+                InlineKeyboardButton("💰 P&L Overview", callback_data="action:pnl_overview"),
+            ],
+            # Row 2: Time-based Reports
+            [
+                InlineKeyboardButton("📊 Daily Summary", callback_data="action:daily_summary"),
+                InlineKeyboardButton("📉 Weekly Summary", callback_data="action:weekly_summary"),
+            ],
+            # Row 3: Actions
+            [
+                InlineKeyboardButton("🔄 Reset Stats", callback_data="action:reset_performance"),
+                InlineKeyboardButton("📋 Export Report", callback_data="action:export_performance"),
+            ],
+            # Row 4: Navigation
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("📈 Performance\n\nSelect an option:", reply_markup=reply_markup)
+        await query.edit_message_text("📊 Performance\n\nSelect an option:", reply_markup=reply_markup)
 
     async def _show_strategies_menu(self, query: CallbackQuery) -> None:
-        """Show strategies management menu."""
-        # Read config to see available strategies
-        config_path = Path("config/config.yaml")
-        strategies_info = "🚀 *Strategies*\n\n"
-        keyboard = []
-        
+        """Show PEARL automated trading bots management menu."""
+        from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+
+        strategies_info = "🚀 *PEARL Automated Trading Bots*\n\n"
+
         try:
-            import yaml
-            if config_path.exists():
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f)
-                    strategy_config = config.get("strategy", {})
-                    enabled_signals = strategy_config.get("enabled_signals", [])
-                    disabled_signals = strategy_config.get("disabled_signals", [])
-                    
-                    # Available signal types (based on common strategies)
-                    all_signals = [
-                        "unified_strategy",
-                        "momentum_long", "momentum_short", 
-                        "mean_reversion_long", "mean_reversion_short",
-                        "reversal_long", "reversal_short",
-                        "breakout_long", "breakout_short",
-                        "pullback_long", "pullback_short",
-                        "sr_bounce"
-                    ]
-                    
-                    # Show current status
-                    if enabled_signals:
-                        strategies_info += f"*Enabled:* {', '.join(enabled_signals)}\n\n"
-                    else:
-                        strategies_info += "*Enabled:* None\n\n"
-                    
-                    if disabled_signals:
-                        strategies_info += f"*Disabled:* {', '.join(disabled_signals)}\n\n"
-                    
-                    # Get active signals from state
-                    state = self._read_state()
-                    if state:
-                        signal_count = state.get("signal_count", 0)
-                        strategies_info += f"*Signals Generated:* {signal_count:,}\n\n"
-                    
-                    strategies_info += "\n*Architecture:*\n"
-                    strategies_info += "Currently: One agent runs all enabled strategies together.\n"
-                    strategies_info += "To run separate agents per strategy:\n"
-                    strategies_info += "1. Create separate config files (config_strategy1.yaml, etc.)\n"
-                    strategies_info += "2. Use different state directories per strategy\n"
-                    strategies_info += "3. Run multiple agent instances\n\n"
-                    strategies_info += "Select a strategy to toggle:"
-                    
-                    # Create buttons for each strategy (only show ones that are enabled or commonly used)
-                    # Show enabled first, then others
-                    signals_to_show = []
-                    for signal in all_signals:
-                        is_enabled = signal in enabled_signals
-                        is_disabled = signal in disabled_signals
-                        if is_enabled:
-                            signals_to_show.insert(0, signal)  # Enabled at top
-                        elif not is_disabled:
-                            signals_to_show.append(signal)  # Available but not disabled
-                    
-                    # Show enabled and available strategies
-                    for signal in signals_to_show[:8]:  # Limit to 8 to avoid too many buttons
-                        is_enabled = signal in enabled_signals
-                        is_disabled = signal in disabled_signals
-                        status_emoji = "🟢" if is_enabled else "⚪"
-                        signal_display = signal.replace('_', ' ').title()
-                        if signal == "unified_strategy":
-                            signal_display = "Unified Strategy"
-                        button_text = f"{status_emoji} {signal_display}"
-                        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"toggle_strategy:{signal}")])
+            # Get PEARL bot manager
+            manager = get_pearl_bot_manager()
+            active_bots = manager.get_active_bots()
+
+            # Show overall system status
+            total_bots = len(manager.registry.list_agents())
+            active_count = len(active_bots)
+            strategies_info += f"*Active Bots:* {active_count}/{total_bots}\n\n"
+
+            # Show individual bot status
+            if total_bots > 0:
+                strategies_info += "*Bot Status:*\n"
+                for bot_name in manager.registry.list_agents():
+                    bot = manager.registry.get_agent(bot_name)
+                    status = manager.registry.get_status(bot_name)
+                    perf = manager.performance.get(bot_name, {})
+
+                    if bot and status:
+                        # Status emoji
+                        if status.is_active:
+                            status_emoji = "🟢" if status.health_status == "healthy" else "🟡"
+                        else:
+                            status_emoji = "🔴"
+
+                        # Performance summary
+                        win_rate = perf.get('win_rate', 0)
+                        total_pnl = perf.get('total_pnl', 0)
+                        active_positions = status.active_positions
+
+                        strategies_info += f"{status_emoji} {bot.name}\n"
+                        strategies_info += f"   • Status: {'Active' if status.is_active else 'Inactive'}\n"
+                        strategies_info += f"   • Win Rate: {win_rate:.1%}\n"
+                        strategies_info += f"   • P&L: ${total_pnl:.2f}\n"
+                        strategies_info += f"   • Positions: {active_positions}\n\n"
+
+            # Show system-wide metrics
+            total_signals = sum(perf.get('total_signals', 0) for perf in manager.performance.values())
+            total_pnl = sum(perf.get('total_pnl', 0) for perf in manager.performance.values())
+
+            strategies_info += f"*System Metrics:*\n"
+            strategies_info += f"• Total Signals: {total_signals:,}\n"
+            strategies_info += f"• Combined P&L: ${total_pnl:.2f}\n"
+            strategies_info += f"• Active Positions: {sum(status.active_positions for status in manager.registry._status_cache.values())}\n"
+
         except Exception as e:
-            logger.warning(f"Could not read strategy config: {e}")
-            strategies_info += "⚠️ Could not load strategy configuration.\n\n"
-            strategies_info += "Check config/config.yaml for strategy settings."
-        
-        keyboard.append([InlineKeyboardButton("🔄 Refresh", callback_data="menu:strategies")])
-        keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+            logger.warning(f"Could not load PEARL bots status: {e}")
+            strategies_info += "⚠️ Could not load bot status.\n\n"
+            strategies_info += "Check PEARL bot configuration in config/config.yaml"
+
+        keyboard = [
+            # Row 1: Bot Management
+            [
+                InlineKeyboardButton("🤖 Manage Bots", callback_data="action:manage_pearl_bots"),
+                InlineKeyboardButton("📊 Bot Performance", callback_data="action:bot_performance"),
+            ],
+            # Row 2: Quick Actions
+            [
+                InlineKeyboardButton("🚀 Start All Bots", callback_data="action:start_all_bots"),
+                InlineKeyboardButton("🛑 Stop All Bots", callback_data="action:stop_all_bots"),
+            ],
+            # Row 3: Configuration
+            [
+                InlineKeyboardButton("⚙️ Bot Config", callback_data="action:bot_config"),
+                InlineKeyboardButton("📋 Bot Details", callback_data="action:bot_details"),
+            ],
+            # Row 4: System
+            [
+                InlineKeyboardButton("🔄 Refresh Status", callback_data="menu:strategies"),
+                InlineKeyboardButton("🧹 Clear Bot Cache", callback_data="action:clear_bot_cache"),
+            ],
+            # Row 5: Navigation
+            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+        ]
+
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(strategies_info, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _show_analysis_menu(self, query: CallbackQuery) -> None:
-        """Show analysis submenu."""
+        """Show AI & analysis submenu."""
         keyboard = [
-            [InlineKeyboardButton("🔍 Strategy Analysis", callback_data="action:strategy_analysis")],
-            [InlineKeyboardButton("📊 Trade Analysis", callback_data="action:trade_analysis")],
-            [InlineKeyboardButton("📈 Signal Analysis", callback_data="action:signal_analysis")],
-            [InlineKeyboardButton("🎯 AI Analysis", callback_data="action:ai_analysis")],
+            # Row 1: Strategy Analysis
+            [
+                InlineKeyboardButton("🔍 Strategy Analysis", callback_data="action:strategy_analysis"),
+                InlineKeyboardButton("📊 Trade Analysis", callback_data="action:trade_analysis"),
+            ],
+            # Row 2: Signal Analysis
+            [
+                InlineKeyboardButton("📈 Signal Analysis", callback_data="action:signal_analysis"),
+                InlineKeyboardButton("🎯 AI Analysis", callback_data="action:ai_analysis"),
+            ],
+            # Row 3: AI Features
+            [
+                InlineKeyboardButton("🤖 AI Strategy Review", callback_data="action:ai_strategy_review"),
+                InlineKeyboardButton("💡 AI Config Tips", callback_data="action:ai_config_suggestions"),
+            ],
+            # Row 4: Navigation
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("🔍 Analysis\n\nSelect an option:", reply_markup=reply_markup)
+        await query.edit_message_text("🤖 AI & Analysis\n\nSelect an option:", reply_markup=reply_markup)
 
     async def _show_system_menu(self, query: CallbackQuery) -> None:
         """Show system control submenu."""
         keyboard = [
-            [
-                InlineKeyboardButton("🔄 Restart Agent", callback_data="action:restart_agent"),
-                InlineKeyboardButton("🛑 Stop Agent", callback_data="action:stop_agent"),
-            ],
+            # Row 1: Trading Agent Control
             [
                 InlineKeyboardButton("🚀 Start Agent", callback_data="action:start_agent"),
-                InlineKeyboardButton("🔌 Restart Gateway", callback_data="action:restart_gateway"),
+                InlineKeyboardButton("🛑 Stop Agent", callback_data="action:stop_agent"),
             ],
-            [InlineKeyboardButton("🔄 Reset Challenge", callback_data="action:reset_challenge")],
-            [InlineKeyboardButton("⚙️ Configuration", callback_data="action:config")],
-            [InlineKeyboardButton("📋 Logs", callback_data="action:logs")],
+            # Row 2: Gateway Control
+            [
+                InlineKeyboardButton("🔌 Restart Gateway", callback_data="action:restart_gateway"),
+                InlineKeyboardButton("🔍 Gateway Status", callback_data="action:gateway_status"),
+            ],
+            # Row 3: System Management
+            [
+                InlineKeyboardButton("🔄 Reset Challenge", callback_data="action:reset_challenge"),
+                InlineKeyboardButton("🧹 Clear Cache", callback_data="action:clear_cache"),
+            ],
+            # Row 4: Configuration & Logs
+            [
+                InlineKeyboardButton("⚙️ Configuration", callback_data="action:config"),
+                InlineKeyboardButton("📋 Logs", callback_data="action:logs"),
+            ],
+            # Row 5: Emergency
+            [
+                InlineKeyboardButton("🚨 Emergency Stop", callback_data="action:emergency_stop"),
+            ],
+            # Row 6: Navigation
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("⚙️ System Control\n\n⚠️ Use with caution:", reply_markup=reply_markup)
+        await query.edit_message_text("⚙️ System Control\n\n⚠️ Use with caution - these actions affect live trading:", reply_markup=reply_markup)
 
-    async def _show_ai_menu(self, query: CallbackQuery) -> None:
-        """Show AI features submenu."""
-        keyboard = [
-            [InlineKeyboardButton("🤖 AI Strategy Review", callback_data="action:ai_strategy_review")],
-            [InlineKeyboardButton("📋 AI Signal Analysis", callback_data="action:ai_signal_analysis")],
-            [InlineKeyboardButton("🔧 AI System Analysis", callback_data="action:ai_system_analysis")],
-            [InlineKeyboardButton("💡 AI Config Suggestions", callback_data="action:ai_config_suggestions")],
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("🤖 AI Features\n\nSelect an option:", reply_markup=reply_markup)
 
     async def _show_help(self, query: CallbackQuery) -> None:
         """Show help information."""
         help_text = (
             "🎯 PEARLalgo Command Handler\n\n"
-            "Available commands:\n"
+            "*Quick Commands:*\n"
             "/start - Show main menu\n"
             "/menu - Show main menu\n"
-            "/help - Show this help message\n\n"
-            "Use the menu buttons to navigate through all features.\n\n"
-            "Features:\n"
-            "• Status & Monitoring - Check system health\n"
-            "• Signals & Trades - View trading activity\n"
-            "• Performance - View performance metrics\n"
-            "• Strategies - Start/stop trading strategies\n"
-            "• System Control - Manage services\n"
-            "• AI Features - AI-powered insights"
+            "/help - Show this help\n\n"
+            "*Menu Structure:*\n"
+            "🎯 Signals & Trades - View and manage trading activity\n"
+            "📊 Performance - Performance metrics and reports\n"
+            "📡 Status - System health and connection status\n"
+            "⚙️ System Control - Start/stop services and emergency controls\n"
+            "🤖 AI & Analysis - AI-powered insights and analysis\n"
+            "🚀 Strategies - Strategy management and configuration\n\n"
+            "*Quick Tips:*\n"
+            "• Use 'Back to Menu' to return to main menu\n"
+            "• Status indicators show active positions/trades\n"
+            "• Emergency Stop closes all positions immediately\n"
+            "• All actions are logged for audit trail"
         )
         keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(help_text, reply_markup=reply_markup)
+        await query.edit_message_text(help_text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _handle_action(self, query: CallbackQuery, action: str) -> None:
         """Handle action button presses."""
@@ -661,6 +709,23 @@ class TelegramCommandHandler:
                     "Are you sure?",
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
+            elif action_type == "manage_pearl_bots":
+                await self._handle_manage_pearl_bots(query, reply_markup)
+            elif action_type == "bot_performance":
+                await self._handle_bot_performance(query, reply_markup)
+            elif action_type == "start_all_bots":
+                await self._handle_start_all_bots(query, reply_markup)
+            elif action_type == "stop_all_bots":
+                await self._handle_stop_all_bots(query, reply_markup)
+            elif action_type == "bot_config":
+                await self._handle_bot_config(query, reply_markup)
+            elif action_type == "bot_details":
+                await self._handle_bot_details(query, reply_markup)
+            elif action_type == "clear_bot_cache":
+                await self._handle_clear_bot_cache(query, reply_markup)
+            elif action_type.startswith("toggle_bot:"):
+                bot_name = action_type[11:]  # Remove "toggle_bot:" prefix
+                await self._handle_toggle_bot(query, bot_name, reply_markup)
             else:
                 keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
                 await query.edit_message_text(f"Action not yet implemented: {action_type}", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -1736,6 +1801,221 @@ def main() -> None:
         )
     handler = TelegramCommandHandler(bot_token=bot_token, chat_id=chat_id)
     handler.run()
+
+    # PEARL Bot Management Handlers
+    async def _handle_manage_pearl_bots(self, query: CallbackQuery, reply_markup) -> None:
+        """Handle PEARL bot management interface."""
+        from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+
+        try:
+            manager = get_pearl_bot_manager()
+            bots = manager.registry.list_agents()
+
+            if not bots:
+                text = "🤖 *PEARL Automated Bots*\n\nNo bots configured.\n\nCheck config/config.yaml for PEARL bot settings."
+            else:
+                text = "🤖 *Manage Lux Algo Bots*\n\n"
+                keyboard = []
+
+                for bot_name in bots:
+                    bot = manager.registry.get_agent(bot_name)
+                    status = manager.registry.get_status(bot_name)
+
+                    if bot and status:
+                        # Status emoji
+                        if status.is_active:
+                            status_emoji = "🟢" if status.health_status == "healthy" else "🟡"
+                        else:
+                            status_emoji = "🔴"
+
+                        # Create toggle button
+                        action = "disable" if status.is_active else "enable"
+                        button_text = f"{status_emoji} {action.title()} {bot.name}"
+                        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"action:toggle_bot:{bot_name}")])
+
+                keyboard.append([InlineKeyboardButton("🔄 Refresh Status", callback_data="action:manage_lux_bots")])
+                keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+        except Exception as e:
+            logger.error(f"Error in manage pearl bots: {e}")
+            text = f"❌ Error loading bot management: {e}"
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_bot_performance(self, query: CallbackQuery, reply_markup) -> None:
+        """Handle PEARL bot performance display."""
+        from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+
+        try:
+            manager = get_pearl_bot_manager()
+            text = "📊 *PEARL Bot Performance*\n\n"
+
+            if not manager.performance:
+                text += "No performance data available.\n\nRun bots to generate performance metrics."
+            else:
+                for bot_name, perf in manager.performance.items():
+                    text += f"🤖 *{bot_name}*\n"
+                    text += f"• Signals: {perf.get('total_signals', 0)}\n"
+                    text += f"• Win Rate: {perf.get('win_rate', 0):.1%}\n"
+                    text += f"• Profit Factor: {perf.get('profit_factor', 0):.2f}\n"
+                    text += f"• Total P&L: ${perf.get('total_pnl', 0):.2f}\n"
+                    text += f"• Max Drawdown: {perf.get('max_drawdown', 0):.1%}\n\n"
+
+                # System totals
+                total_signals = sum(perf.get('total_signals', 0) for perf in manager.performance.values())
+                total_pnl = sum(perf.get('total_pnl', 0) for perf in manager.performance.values())
+                avg_win_rate = sum(perf.get('win_rate', 0) for perf in manager.performance.values()) / len(manager.performance)
+
+                text += f"📈 *System Totals*\n"
+                text += f"• Total Signals: {total_signals}\n"
+                text += f"• Combined P&L: ${total_pnl:.2f}\n"
+                text += f"• Avg Win Rate: {avg_win_rate:.1%}\n"
+
+        except Exception as e:
+            logger.error(f"Error in bot performance: {e}")
+            text = f"❌ Error loading performance data: {e}"
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_start_all_bots(self, query: CallbackQuery, reply_markup) -> None:
+        """Handle starting all PEARL bots."""
+        from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+
+        try:
+            manager = get_pearl_bot_manager()
+            started_count = 0
+
+            for bot_name in manager.registry.list_agents():
+                if manager.enable_bot(bot_name):
+                    started_count += 1
+
+            text = f"🚀 *Starting PEARL Bots*\n\nSuccessfully started {started_count} bots.\n\nAll configured bots are now active and generating signals."
+
+        except Exception as e:
+            logger.error(f"Error starting all bots: {e}")
+            text = f"❌ Error starting bots: {e}"
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_stop_all_bots(self, query: CallbackQuery, reply_markup) -> None:
+        """Handle stopping all PEARL bots."""
+        from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+
+        try:
+            manager = get_pearl_bot_manager()
+            stopped_count = 0
+
+            for bot_name in manager.registry.list_agents():
+                if manager.disable_bot(bot_name):
+                    stopped_count += 1
+
+            text = f"🛑 *Stopping PEARL Bots*\n\nSuccessfully stopped {stopped_count} bots.\n\nAll bots are now inactive and will not generate new signals."
+
+        except Exception as e:
+            logger.error(f"Error stopping all bots: {e}")
+            text = f"❌ Error stopping bots: {e}"
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_bot_config(self, query: CallbackQuery, reply_markup) -> None:
+        """Handle PEARL bot configuration display."""
+        text = "⚙️ *PEARL Bot Configuration*\n\n"
+        text += "Bots are configured in `config/config.yaml`:\n\n"
+        text += "```yaml\n"
+        text += "lux_algo_bots:  # TODO: Rename to pearl_bots\n"
+        text += "  enabled: true\n"
+        text += "  bots:\n"
+        text += "    trend_follower:\n"
+        text += "      enabled: true\n"
+        text += "      risk_per_trade: 0.01\n"
+        text += "      min_confidence: 0.7\n"
+        text += "```\n\n"
+        text += "Available bots:\n"
+        text += "• TrendFollowerBot - Trend following\n"
+        text += "• BreakoutBot - Breakout trading\n"
+        text += "• MeanReversionBot - Mean reversion\n\n"
+        text += "Edit config and restart the system to apply changes."
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_bot_details(self, query: CallbackQuery, reply_markup) -> None:
+        """Handle PEARL bot details display."""
+        from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+
+        try:
+            manager = get_pearl_bot_manager()
+            text = "📋 *PEARL Bot Details*\n\n"
+
+            for bot_name in manager.registry.list_agents():
+                bot = manager.registry.get_agent(bot_name)
+                config = manager.registry.get_config(bot_name)
+                status = manager.registry.get_status(bot_name)
+
+                if bot and config and status:
+                    text += f"🤖 *{bot.name}*\n"
+                    text += f"• Type: {bot.strategy_type.replace('_', ' ').title()}\n"
+                    text += f"• Description: {config.description}\n"
+                    text += f"• Status: {'Active' if status.is_active else 'Inactive'}\n"
+                    text += f"• Risk per Trade: {config.risk_per_trade:.1%}\n"
+                    text += f"• Min Confidence: {config.min_confidence:.1f}\n"
+                    text += f"• Active Positions: {status.active_positions}\n"
+                    text += f"• Last Signal: {status.last_signal_time.strftime('%H:%M:%S') if status.last_signal_time else 'None'}\n\n"
+
+        except Exception as e:
+            logger.error(f"Error in bot details: {e}")
+            text = f"❌ Error loading bot details: {e}"
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_clear_bot_cache(self, query: CallbackQuery, reply_markup) -> None:
+        """Handle clearing PEARL bot cache."""
+        from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+
+        try:
+            manager = get_pearl_bot_manager()
+            # Reset performance metrics for all bots
+            for bot_name in manager.registry.list_agents():
+                if bot_name in manager.performance:
+                    manager.performance[bot_name] = {
+                        'total_signals': 0, 'total_pnl': 0.0, 'win_rate': 0.0,
+                        'profit_factor': 0.0, 'max_drawdown': 0.0
+                    }
+
+            text = "🧹 *Bot Cache Cleared*\n\nPerformance metrics and signal history have been reset for all PEARL bots.\n\nBots will start fresh performance tracking."
+
+        except Exception as e:
+            logger.error(f"Error clearing bot cache: {e}")
+            text = f"❌ Error clearing cache: {e}"
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_toggle_bot(self, query: CallbackQuery, bot_name: str, reply_markup) -> None:
+        """Handle toggling individual PEARL bot on/off."""
+        from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+
+        try:
+            manager = get_pearl_bot_manager()
+            status = manager.registry.get_status(bot_name)
+
+            if status and status.is_active:
+                # Disable bot
+                if manager.disable_bot(bot_name):
+                    text = f"🛑 *Bot Disabled*\n\n{bot_name} has been stopped and will not generate new signals."
+                else:
+                    text = f"❌ *Error*\n\nFailed to disable {bot_name}."
+            else:
+                # Enable bot
+                if manager.enable_bot(bot_name):
+                    text = f"🚀 *Bot Enabled*\n\n{bot_name} is now active and generating signals."
+                else:
+                    text = f"❌ *Error*\n\nFailed to enable {bot_name}."
+
+        except Exception as e:
+            logger.error(f"Error toggling bot {bot_name}: {e}")
+            text = f"❌ Error toggling bot: {e}"
+
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
 if __name__ == "__main__":

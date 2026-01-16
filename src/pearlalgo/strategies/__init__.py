@@ -10,9 +10,9 @@ Contains:
 from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 
-# Import Lux Algo bots
-from .lux_algo_bots import (
-    LuxAlgoBot,
+# Import PEARL automated bots
+from .pearl_bots import (
+    PearlBot,
     BotConfig,
     create_bot,
     TrendFollowerBot,
@@ -21,15 +21,15 @@ from .lux_algo_bots import (
 )
 
 # Import integration layer
-from .lux_algo_integration import get_lux_algo_manager
+from .pearl_bots_integration import get_pearl_bot_manager
 
 __all__ = [
     # Existing strategies
     "NQIntradayStrategy",
     "NQIntradayConfig",
 
-    # Lux Algo bots
-    "LuxAlgoBot",
+    # PEARL automated bots
+    "PearlBot",
     "BotConfig",
     "create_bot",
     "TrendFollowerBot",
@@ -37,5 +37,5 @@ __all__ = [
     "MeanReversionBot",
 
     # Integration
-    "get_lux_algo_manager",
+    "get_pearl_bot_manager",
 ]

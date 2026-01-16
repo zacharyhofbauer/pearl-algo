@@ -1,8 +1,8 @@
 """
-Breakout Bot - Lux Algo Chart Prime Style
+Breakout Bot - PEARL Automated Trading System
 
 A complete automated trading bot that trades breakouts from consolidation patterns,
-similar to Lux Algo's Price Action Concepts (PAC) toolkit for breakout strategies.
+optimized for PEARLalgo's technical analysis framework.
 
 Strategy Logic:
 - Identifies consolidation ranges using volatility contraction
@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 import numpy as np
 
-from .bot_template import LuxAlgoBot, BotConfig, TradeSignal, IndicatorSuite, register_bot
+from .bot_template import PearlBot, BotConfig, TradeSignal, IndicatorSuite, register_bot
 
 
 @dataclass
@@ -98,14 +98,14 @@ class BreakoutIndicators(IndicatorSuite):
         }
 
 
-class BreakoutBot(LuxAlgoBot):
+class BreakoutBot(PearlBot):
     """
     Breakout Bot - Complete automated trading system.
 
-    This bot implements a breakout strategy similar to Lux Algo's PAC toolkit:
+    This bot implements a breakout strategy optimized for PEARLalgo:
     - Identifies consolidation patterns with volatility contraction
-    - Confirms breakouts with volume and momentum
-    - Enters on breakout continuation
+    - Confirms breakouts with volume and momentum analysis
+    - Enters on breakout continuation with proper risk management
     - Uses pattern-based targets and stops
     """
 

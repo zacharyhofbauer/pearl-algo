@@ -1,8 +1,8 @@
 """
-Trend Follower Bot - Lux Algo Chart Prime Style
+Trend Follower Bot - PEARL Automated Trading System
 
 A complete automated trading bot that follows trends using multiple timeframe analysis,
-similar to Lux Algo's Signals & Overlays (S&O) toolkit for trend-following strategies.
+optimized for PEARLalgo's technical analysis framework.
 
 Strategy Logic:
 - Identifies strong trends using moving averages and trend strength indicators
@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 import numpy as np
 
-from .bot_template import LuxAlgoBot, BotConfig, TradeSignal, IndicatorSuite, register_bot
+from .bot_template import PearlBot, BotConfig, TradeSignal, IndicatorSuite, register_bot
 
 
 @dataclass
@@ -109,13 +109,13 @@ class TrendFollowerIndicators(IndicatorSuite):
         }
 
 
-class TrendFollowerBot(LuxAlgoBot):
+class TrendFollowerBot(PearlBot):
     """
     Trend Follower Bot - Complete automated trading system.
 
-    This bot implements a trend-following strategy similar to Lux Algo's S&O toolkit:
-    - Identifies strong trending markets
-    - Enters on pullbacks within trends
+    This bot implements a trend-following strategy optimized for PEARLalgo:
+    - Identifies strong trending markets using technical indicators
+    - Enters on pullbacks within established trends
     - Uses volatility-adjusted risk management
     - Filters based on trend strength and momentum
     """

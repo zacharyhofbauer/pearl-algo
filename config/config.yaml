@@ -431,3 +431,40 @@ claude_monitor:
   signal_analysis_lookback_hours: 24
   system_analysis_lookback_hours: 48
   market_analysis_lookback_hours: 168
+
+# Lux Algo Chart Prime Style Automated Trading Bots
+lux_algo_bots:
+  enabled: true
+  bots:
+    trend_follower:
+      enabled: true
+      description: "Trend-following bot using moving averages and momentum"
+      bot_class: "TrendFollowerBot"
+      symbol: "MNQ"
+      timeframe: "5m"
+      max_positions: 1
+      risk_per_trade: 0.01
+      stop_loss_pct: 0.005
+      take_profit_pct: 0.01
+      min_confidence: 0.7
+      enable_alerts: true
+      parameters:
+        min_trend_strength: 25.0
+        max_pullback_pct: 0.02
+        momentum_threshold: 0.005
+    breakout_trader:
+      enabled: true
+      description: "Breakout bot trading consolidation breakouts"
+      bot_class: "BreakoutBot"
+      symbol: "MNQ"
+      timeframe: "5m"
+      max_positions: 1
+      risk_per_trade: 0.01
+      stop_loss_pct: 0.008
+      take_profit_pct: 0.015
+      min_confidence: 0.75
+      enable_alerts: true
+      parameters:
+        min_pattern_strength: 0.6
+        require_volume_confirmation: true
+        min_momentum_acceleration: 0.001

@@ -1,9 +1,8 @@
 """
-Lux Algo Bots Integration Layer
+PEARL Automated Bots Integration Layer
 
-Integrates Lux Algo Chart Prime style automated trading bots with the existing
-PEARLalgo NQ trading system. Allows seamless deployment of complete trading
-strategies alongside the current unified strategy.
+Integrates PEARL automated trading bots with the existing PEARLalgo NQ trading system.
+Allows seamless deployment of complete trading strategies alongside existing systems.
 
 This integration enables:
 - Multiple bot deployment and management
@@ -21,8 +20,8 @@ from pathlib import Path
 from pearlalgo.utils.logger import logger
 from pearlalgo.config.config_loader import load_service_config
 
-from .lux_algo_bots import (
-    LuxAlgoBot,
+from .pearl_bots import (
+    PearlBot,
     BotConfig,
     create_bot,
     TrendFollowerBot,
@@ -31,12 +30,12 @@ from .lux_algo_bots import (
 )
 
 
-class LuxAlgoBotManager:
+class PearlBotManager:
     """
-    Manager for Lux Algo Chart Prime style trading bots.
+    Manager for PEARL automated trading bots.
 
     Integrates multiple automated bots with the existing PEARLalgo system,
-    similar to how Lux Algo manages their AI-generated strategies.
+    providing coordinated deployment and performance monitoring.
     """
 
     def __init__(self, config_dir: Optional[Path] = None):
@@ -47,7 +46,7 @@ class LuxAlgoBotManager:
         # Load bot configurations
         self._load_bot_configs()
 
-        logger.info(f"LuxAlgoBotManager initialized with {len(self.bots)} bots")
+        logger.info(f"PearlBotManager initialized with {len(self.bots)} bots")
 
     def _load_bot_configs(self) -> None:
         """Load bot configurations from config files."""
@@ -273,9 +272,9 @@ class LuxAlgoBotManager:
 
 
 # Global bot manager instance
-lux_algo_manager = LuxAlgoBotManager()
+pearl_bot_manager = PearlBotManager()
 
 
-def get_lux_algo_manager() -> LuxAlgoBotManager:
-    """Get the global Lux Algo bot manager instance."""
-    return lux_algo_manager
+def get_pearl_bot_manager() -> PearlBotManager:
+    """Get the global PEARL bot manager instance."""
+    return pearl_bot_manager

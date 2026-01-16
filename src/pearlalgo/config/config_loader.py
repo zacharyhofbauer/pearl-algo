@@ -437,6 +437,13 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "auto_reset_on_pass": True,
         "auto_reset_on_fail": True,
     },
+    # ==========================================================================
+    # LUX ALGO CHART PRIME STYLE AUTOMATED TRADING BOTS
+    # ==========================================================================
+    "lux_algo_bots": {
+        "enabled": False,  # Disabled by default for safety
+        "bots": {},       # Empty by default, configured per deployment
+    },
 }
 
 

@@ -1,8 +1,8 @@
-# Lux Algo Chart Prime Style Automated Trading Bots
+# PEARL Automated Trading Bots
 
 ## Overview
 
-This implementation provides **Lux Algo Chart Prime style automated trading bots** for your PEARLalgo NQ trading system. Each "agent" (as you referred to them) is a **complete, self-contained automated trading strategy** inspired by Lux Algo's AI Strategy Alerts system.
+This implementation provides **PEARL automated trading bots** for your PEARLalgo NQ trading system. Each bot is a **complete, self-contained automated trading strategy** optimized for PEARLalgo's technical analysis framework.
 
 Unlike simple indicators, these are **full trading systems** with:
 - Complete indicator suites (PAC/S&O/OSC equivalent)
@@ -14,21 +14,21 @@ Unlike simple indicators, these are **full trading systems** with:
 ## Available Bots
 
 ### 1. TrendFollowerBot - Trend Following Strategy
-**Inspired by Lux Algo's Signals & Overlays (S&O) toolkit**
+**Optimized for PEARLalgo's technical analysis framework**
 - Identifies strong trends using moving averages and momentum
 - Enters on pullbacks within trending markets
 - Uses volatility-adjusted stops and targets
 - Best for: Trending market conditions
 
 ### 2. BreakoutBot - Breakout Trading Strategy
-**Inspired by Lux Algo's Price Action Concepts (PAC) toolkit**
+**Optimized for PEARLalgo's pattern recognition**
 - Identifies consolidation patterns with volatility contraction
 - Trades breakouts with volume and momentum confirmation
 - Uses pattern-based stops and measured targets
 - Best for: Ranging markets with clear breakouts
 
 ### 3. MeanReversionBot - Mean Reversion Strategy
-**Inspired by Lux Algo's Oscillator Matrix (OSC) toolkit**
+**Optimized for PEARLalgo's oscillator analysis**
 - Identifies overbought/oversold conditions using multiple oscillators
 - Detects divergence patterns for higher-probability entries
 - Uses volatility-based targets and time-based exits
@@ -36,7 +36,7 @@ Unlike simple indicators, these are **full trading systems** with:
 
 ## Quick Start Deployment
 
-### Step 1: Enable Lux Algo Bots in Configuration
+### Step 1: Enable PEARL Bots in Configuration
 
 Add this to your `config/config.yaml`:
 
@@ -300,16 +300,17 @@ tail -f logs/lux_algo_bots.log
 python -c "from lux_algo_bots import create_bot; bot = create_bot('TrendFollowerBot', config); print(bot.get_performance_report())"
 ```
 
-## Comparison to Lux Algo Chart Prime
+## PEARL Bots vs Other Solutions
 
-| Feature | Lux Algo Chart Prime | This Implementation |
-|---------|---------------------|-------------------|
-| Strategy Types | PAC, S&O, OSC toolkits | Trend, Breakout, Mean Reversion bots |
-| AI Generation | Searches millions of combinations | Hand-crafted strategies with parameters |
-| Backtesting | Built-in with performance metrics | Comprehensive backtesting framework |
-| Automation | Webhook alerts to bots/brokers | Direct broker integration support |
-| Cost | $39.99-$59.99/month | Included in PEARLalgo |
-| Customization | Limited to their indicators | Fully customizable Python code |
+| Feature | Traditional Indicators | PEARL Automated Bots |
+|---------|----------------------|---------------------|
+| Strategy Types | Single indicators | Complete trading systems |
+| Automation | Manual signal interpretation | Automated entry/exit logic |
+| Risk Management | User-defined | Built-in position sizing |
+| Performance Tracking | Manual logging | Automated metrics & reporting |
+| Integration | Separate tools | Native PEARLalgo integration |
+| Cost | Varies by provider | Included in PEARLalgo |
+| Customization | Limited | Fully customizable Python code |
 
 ## Next Steps
 
