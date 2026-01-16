@@ -300,6 +300,9 @@ class NQSignalGenerator:
             signal_settings.get("duplicate_price_threshold_pct", 0.5) / 100.0
         )
         
+        # Restore recent signals from file on startup (if available)
+        self._restore_recent_signals_from_file()
+        
         # Composite quality score filter (NO CAPS - purely quality-driven)
         quality_score_settings = signal_settings.get("quality_score", {}) or {}
         self._quality_score_enabled = bool(quality_score_settings.get("enabled", False))
@@ -1675,6 +1678,53 @@ class NQSignalGenerator:
                 return True
 
         return False
+
+    def _restore_recent_signals_from_file(self) -> None:
+        """Restore recent signals from signals file on startup."""
+        try:
+            from pearlalgo.utils.paths import ensure_state_dir, get_signals_file
+            from pathlib import Path
+            import json
+            
+            state_dir = ensure_state_dir()
+            signals_file = get_signals_file(state_dir)
+            
+            if not signals_file.exists():
+                return
+            
+            # Read recent signals from file (last 200 to cover duplicate window)
+            now = datetime.now(timezone.utc)
+            with open(signals_file, "r") as f:
+                lines = f.readlines()
+                for line in lines[-200:]:
+                    try:
+                        record = json.loads(line.strip())
+                        signal = record.get("signal", {})
+                        if not signal:
+                            continue
+                        
+                        timestamp_str = signal.get("timestamp", "")
+                        if not timestamp_str:
+                            continue
+                        
+                        signal_time = datetime.fromisoformat(
+                            timestamp_str.replace("Z", "+00:00")
+                        )
+                        time_diff = (now - signal_time).total_seconds()
+                        
+                        # Only include signals within the duplicate window
+                        if time_diff < self._signal_window_seconds:
+                            self._recent_signals.append(signal)
+                    except (json.JSONDecodeError, ValueError, KeyError):
+                        continue
+            
+            if self._recent_signals:
+                logger.debug(
+                    f"Restored {len(self._recent_signals)} recent signals from file "
+                    f"for duplicate detection"
+                )
+        except Exception as e:
+            logger.debug(f"Could not restore recent signals from file: {e}")
 
     def _cleanup_recent_signals(self) -> None:
         """Remove old signals from recent signals list."""

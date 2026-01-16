@@ -4,7 +4,7 @@
 learning:
   # Master toggle for entire ML system
   enabled: true
-  
+
   # Mode: "shadow" (observe only) or "live" (affects execution)
   mode: "live"
 

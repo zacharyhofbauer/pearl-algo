@@ -32,7 +32,7 @@ _SUBLINE_PREFIX = "↳ "
 # Use these constants across all Telegram views to ensure consistent wording.
 #
 # SERVICES:
-#   Agent    = NQ Agent service (the trading bot process)
+#   Agent    = NQ Agent service (the autonomous trading system)
 #   Gateway  = IBKR Gateway (the broker connection)
 #
 # ACTIVITY:

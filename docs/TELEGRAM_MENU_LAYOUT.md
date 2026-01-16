@@ -131,20 +131,20 @@ Bots
 - Signal quality analysis
 
 ### 🤖 Bots Menu
-**Purpose**: Start/stop the single Pearl Bot (NQ Agent service)
+**Purpose**: Start/stop the NQ Agent service
 
 ```
-🤖 Pearl Bot
+🤖 Pearl Bots
 
-🚀 Start Pearl Bot      🛑 Stop Pearl Bot
-🔄 Restart Pearl Bot    🔄 Refresh
+🚀 Start Agent      🛑 Stop Agent
+🔄 Restart Agent    🔄 Refresh
 🏠 Back to Menu
 ```
 
 **Key Actions:**
-- **Start Pearl Bot**: Starts the NQ Agent service in the background
-- **Stop Pearl Bot**: Stops the NQ Agent service
-- **Restart Pearl Bot**: Stop then start the service
+- **Start Agent**: Starts the NQ Agent service in the background
+- **Stop Agent**: Stops the NQ Agent service
+- **Restart Agent**: Stop then start the service
 - **Refresh**: Re-checks service and gateway status
 
 ### ❓ Help Menu

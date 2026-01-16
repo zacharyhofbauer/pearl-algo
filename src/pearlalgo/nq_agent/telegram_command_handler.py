@@ -141,6 +141,31 @@ class TelegramCommandHandler:
         # Callback query handler for button presses
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
 
+    def _count_open_challenge_positions(self) -> int:
+        """Count open challenge positions from signals.jsonl file."""
+        try:
+            signals_file = self.state_dir / "signals.jsonl"
+            if not signals_file.exists():
+                return 0
+
+            open_count = 0
+            with open(signals_file, 'r') as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            signal_data = json.loads(line.strip())
+                            # Count signals that have entry_time but no exit_time
+                            if (signal_data.get("entry_time") and
+                                not signal_data.get("exit_time") and
+                                signal_data.get("status") == "entered"):
+                                open_count += 1
+                        except json.JSONDecodeError:
+                            continue
+            return open_count
+        except Exception as e:
+            logger.warning(f"Error counting open challenge positions: {e}")
+            return 0
+
     def _get_main_menu_keyboard(self) -> list:
         """Get the main menu keyboard layout with dynamic status indicators."""
         # Show quick preview of positions if available
@@ -153,14 +178,16 @@ class TelegramCommandHandler:
         if state:
             positions = (state.get("execution", {}).get("positions", 0) or 0)
             active_trades = state.get("active_trades_count", 0) or 0
-            has_active = positions > 0 or active_trades > 0
+            # Also count open challenge positions
+            challenge_positions = self._count_open_challenge_positions()
+            total_active = positions + active_trades + challenge_positions
+            has_active = total_active > 0
             daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
 
         # Build dynamic button labels
         # Signals button - show count if active
         signals_label = "⚡ Signals & Trades"
         if has_active:
-            total_active = positions + active_trades
             signals_label = f"⚡ Signals • {total_active} Open"
         
         # Performance button - show daily P&L
@@ -178,7 +205,7 @@ class TelegramCommandHandler:
         status_label = "🛰️ Status"
         if has_active:
             # Show position count when active
-            status_label = f"🛰️ Status • {positions + active_trades} Active"
+            status_label = f"🛰️ Status • {total_active} Active"
         elif state:
             # Show connection status when no positions
             connection_status = state.get("connection_status", "unknown")
@@ -246,10 +273,10 @@ class TelegramCommandHandler:
             except Exception as e:
                 logger.error(f"Error sending status dashboard: {e}", exc_info=True)
                 # Fallback to simple menu
-                text = "🎯 PEARLalgo Trading System\n\nSelect an option:"
+                text = "🎯 Pearl Algo Bot's\n\nSelect an option:"
         else:
             # No state available, show simple menu
-            text = "🎯 PEARLalgo Trading System\n\n❌ No state data available.\n\nSelect an option:"
+            text = "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:"
         await update.message.reply_text(text, reply_markup=reply_markup)
 
     async def handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -508,12 +535,16 @@ class TelegramCommandHandler:
             await self._show_performance_menu(query)
         elif action == "bots":
             await self._show_bots_menu(query)
+        elif action == "pearl_bots":
+            await self._show_pearl_bots_menu(query)
         elif action == "analysis":
             await self._show_analysis_menu(query)
         elif action == "system":
             await self._show_system_menu(query)
         elif action == "settings":
             await self._show_settings_menu(query)
+        elif action == "ai_optimize":
+            await self._run_ai_optimization(query)
         elif action == "help":
             await self._show_help(query)
         else:
@@ -531,10 +562,10 @@ class TelegramCommandHandler:
                 await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Error showing main menu status: {e}", exc_info=True)
-                text = "🎯 PEARLalgo Trading System\n\nSelect an option:"
+                text = "🎯 Pearl Algo Bot's\n\nSelect an option:"
                 await query.edit_message_text(text, reply_markup=reply_markup)
         else:
-            text = "🎯 PEARLalgo Trading System\n\n❌ No state data available.\n\nSelect an option:"
+            text = "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:"
             await query.edit_message_text(text, reply_markup=reply_markup)
 
     async def _show_status_menu(self, query: CallbackQuery) -> None:
@@ -846,7 +877,7 @@ class TelegramCommandHandler:
                 trading_info = "📊 No signals today yet"
         
         # Build rich status display
-        lines = ["👾 *Pearl Bot Control Center*", ""]
+        lines = ["👾 *Pearl Bots*", ""]
         
         # Service Status
         lines.append("*Service Status:*")
@@ -1071,12 +1102,16 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🤖 AI Bot Review", callback_data="action:ai_strategy_review"),
                 InlineKeyboardButton("💡 AI Config Tips", callback_data="action:ai_config_suggestions"),
             ],
-            # Row 4: Backtesting
+            # Row 4: Pearl Bot AI
+            [
+                InlineKeyboardButton("🚀 AI Pearl Optimizer", callback_data="action:ai_optimize"),
+            ],
+            # Row 5: Backtesting
             [
                 InlineKeyboardButton("🧪 Backtest Bots", callback_data="strategy_review:backtest"),
                 InlineKeyboardButton("📑 Backtest Reports", callback_data="strategy_review:reports"),
             ],
-            # Row 5: Navigation
+            # Row 6: Navigation
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1270,6 +1305,64 @@ class TelegramCommandHandler:
         await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 
+    async def _run_ai_optimization(self, query: CallbackQuery) -> None:
+        """Run AI-powered Pearl bot optimization."""
+        await query.edit_message_text("🤖 Running AI optimization analysis...\n\nThis may take a moment...")
+
+        try:
+            # Import and run optimizer
+            from scripts.backtesting.pearl_bot_ai_optimizer import PearlBotAIOptimizer
+
+            optimizer = PearlBotAIOptimizer(state_dir=self.state_dir)
+            result = optimizer.analyze_performance(days_back=7)
+
+            if 'error' in result:
+                await query.edit_message_text(f"❌ AI Analysis Failed: {result['error']}")
+                return
+
+            # Generate AI recommendations if Claude is available
+            recommendations = {}
+            if optimizer.claude:
+                recommendations = optimizer.generate_ai_recommendations(result)
+            else:
+                recommendations = {"note": "Claude API key not configured - basic analysis only"}
+
+            # Format response
+            response = "🤖 *Pearl Bot AI Analysis Complete*\n\n"
+            response += f"📊 **Performance (7 days):**\n"
+            response += f"• Trades: {result['total_trades']}\n"
+            response += f"• Win Rate: {result['win_rate']:.1%}\n"
+            response += f"• Total P&L: \${result['total_pnl']:.2f}\n"
+            response += f"• Profit Factor: {result['profit_factor']:.2f}\n\n"
+
+            if result['bot_performance']:
+                response += "🎯 **Bot Performance:**\n"
+                for bot, perf in result['bot_performance'].items():
+                    response += f"• {bot}: {perf['win_rate']:.1%} win rate\n"
+                response += "\n"
+
+            if 'analysis' in recommendations:
+                response += "🧠 **AI Recommendations:**\n"
+                # Truncate if too long for Telegram
+                ai_text = recommendations['analysis'][:800]
+                if len(recommendations['analysis']) > 800:
+                    ai_text += "..."
+                response += ai_text
+            else:
+                response += "💡 *Next Steps:*\n"
+                response += "• Enable Claude API for AI recommendations\n"
+                response += "• Review risk management settings\n"
+                response += "• Consider wider stop losses\n"
+
+            keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(response, reply_markup=reply_markup, parse_mode="Markdown")
+
+        except Exception as e:
+            logger.error(f"AI optimization failed: {e}")
+            await query.edit_message_text(f"❌ AI Optimization Error: {str(e)}")
+
     async def _show_help(self, query: CallbackQuery) -> None:
         """Show help information."""
         help_text = (
@@ -1406,6 +1499,72 @@ class TelegramCommandHandler:
                     [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            elif action_type == "start_all_bots":
+                try:
+                    from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+                    bot_manager = get_pearl_bot_manager()
+                    active_bots = bot_manager.get_active_bots()
+
+                    # Enable all configured bots
+                    for bot_name in bot_manager.bot_configs.keys():
+                        bot_manager.enable_bot(bot_name)
+
+                    text = f"✅ Started all PEARL bots\n\nActive bots: {len(bot_manager.get_active_bots())}"
+                except Exception as e:
+                    logger.error(f"Error starting pearl bots: {e}")
+                    text = "❌ Error starting PEARL bots"
+
+                keyboard = [[InlineKeyboardButton("🤖 Pearl Bots", callback_data="menu:pearl_bots")]]
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            elif action_type == "stop_all_bots":
+                try:
+                    from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+                    bot_manager = get_pearl_bot_manager()
+
+                    # Disable all bots
+                    for bot_name in bot_manager.bots.keys():
+                        bot_manager.disable_bot(bot_name)
+
+                    text = "🛑 Stopped all PEARL bots"
+                except Exception as e:
+                    logger.error(f"Error stopping pearl bots: {e}")
+                    text = "❌ Error stopping PEARL bots"
+
+                keyboard = [[InlineKeyboardButton("🤖 Pearl Bots", callback_data="menu:pearl_bots")]]
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            elif action_type == "show_bot_performance":
+                try:
+                    from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+                    bot_manager = get_pearl_bot_manager()
+                    performance = bot_manager.get_bot_performance()
+
+                    lines = ["📊 *PEARL Bot Performance*", ""]
+
+                    if isinstance(performance, dict) and performance:
+                        for bot_name, perf in performance.items():
+                            if isinstance(perf, dict):
+                                total_signals = perf.get('total_signals_history', 0)
+                                win_rate = perf.get('performance', {}).get('win_rate', 0) * 100
+                                total_pnl = perf.get('performance', {}).get('total_pnl', 0)
+
+                                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                                pnl_sign = "+" if total_pnl >= 0 else ""
+
+                                lines.append(f"🤖 *{bot_name}*")
+                                lines.append(f"  • Signals: {total_signals}")
+                                lines.append(f"  • Win Rate: {win_rate:.1f}%")
+                                lines.append(f"  • P&L: {pnl_emoji} {pnl_sign}${abs(total_pnl):.2f}")
+                                lines.append("")
+                    else:
+                        lines.append("No performance data available")
+
+                    text = "\n".join(lines)
+                except Exception as e:
+                    logger.error(f"Error showing bot performance: {e}")
+                    text = "❌ Error loading bot performance"
+
+                keyboard = [[InlineKeyboardButton("🤖 Pearl Bots", callback_data="menu:pearl_bots")]]
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
             elif action_type == "restart_gateway":
                 keyboard = [
                     [InlineKeyboardButton("✅ Confirm Restart", callback_data="confirm:restart_gateway")],

@@ -7,7 +7,8 @@ Manages state persistence for the NQ agent service.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+import fcntl
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -17,6 +18,7 @@ from pearlalgo.utils.paths import (
     get_signals_file,
     get_state_file,
     get_utc_timestamp,
+    parse_utc_timestamp,
 )
 
 try:
@@ -135,11 +137,92 @@ class NQAgentStateManager:
             except Exception as e:
                 logger.debug(f"SQLite storage not enabled/available: {e}")
 
+        # Load duplicate detection settings from config
+        try:
+            from pearlalgo.config.config_loader import load_service_config
+            cfg = load_service_config(validate=False) or {}
+            signal_settings = cfg.get("signals", {}) or {}
+            self._duplicate_window_seconds = signal_settings.get("duplicate_window_seconds", 120)
+            self._duplicate_price_threshold_pct = (
+                signal_settings.get("duplicate_price_threshold_pct", 0.5) / 100.0
+            )
+        except Exception as e:
+            logger.debug(f"Could not load duplicate detection settings: {e}")
+            self._duplicate_window_seconds = 120
+            self._duplicate_price_threshold_pct = 0.005
+
         logger.info(f"NQAgentStateManager initialized: state_dir={self.state_dir}")
+
+    def _is_duplicate_signal(self, signal: Dict, recent_signals: List[Dict]) -> bool:
+        """
+        Check if signal is a duplicate of a recent signal.
+        
+        Args:
+            signal: Signal dictionary to check
+            recent_signals: List of recent signal records from file
+            
+        Returns:
+            True if duplicate
+        """
+        signal_type = signal.get("type", "")
+        signal_direction = signal.get("direction", "")
+        signal_entry = float(signal.get("entry_price", 0.0))
+        signal_timestamp_str = signal.get("timestamp", "")
+        
+        if not signal_timestamp_str:
+            return False
+            
+        try:
+            signal_time = parse_utc_timestamp(signal_timestamp_str)
+        except Exception:
+            return False
+
+        for recent_record in recent_signals:
+            recent_signal = recent_record.get("signal", {})
+            if not recent_signal:
+                continue
+                
+            recent_type = recent_signal.get("type", "")
+            recent_direction = recent_signal.get("direction", "")
+            recent_entry = float(recent_signal.get("entry_price", 0.0))
+            recent_timestamp_str = recent_signal.get("timestamp", "")
+            
+            if not recent_timestamp_str:
+                continue
+                
+            try:
+                recent_time = parse_utc_timestamp(recent_timestamp_str)
+            except Exception:
+                continue
+
+            # Check if same type and direction
+            same_type = recent_type == signal_type
+            same_direction = recent_direction == signal_direction
+            
+            if not (same_type and same_direction):
+                continue
+
+            # Check time window
+            time_diff = abs((signal_time - recent_time).total_seconds())
+            within_time_window = time_diff < self._duplicate_window_seconds
+
+            # Check if price is too close
+            price_close = False
+            if recent_entry > 0 and signal_entry > 0:
+                price_diff_pct = abs(signal_entry - recent_entry) / recent_entry
+                price_close = price_diff_pct < self._duplicate_price_threshold_pct
+
+            if within_time_window or price_close:
+                return True
+
+        return False
 
     def save_signal(self, signal: Dict) -> None:
         """
         Save a signal to persistent storage.
+        
+        Includes duplicate detection by checking recent signals from file.
+        Uses file locking to prevent race conditions.
         
         Saves in the format expected by /signals command:
         {
@@ -164,47 +247,104 @@ class NQAgentStateManager:
             signal_id = signal.get("signal_id", "")
             if not signal_id:
                 # Generate one if missing (shouldn't happen, but be safe)
-                from datetime import datetime, timezone
                 signal_id = f"{signal.get('type', 'unknown')}_{datetime.now(timezone.utc).timestamp()}"
                 signal["signal_id"] = signal_id
             
-            # Create wrapped record in format expected by /signals command
-            signal_record = {
-                "signal_id": signal_id,
-                "timestamp": get_utc_timestamp(),
-                "status": "generated",  # Default status for new signals
-                "signal": _to_json_safe(signal),  # Store JSON-safe signal dict
-            }
-
+            # Check for duplicates by reading recent signals from file
+            # Use file locking to prevent race conditions
+            lock_file = Path(str(self.signals_file) + ".lock")
             try:
-                payload = json.dumps(signal_record)
-            except TypeError as e:
-                # Last resort: write a minimal record so the signals view never goes empty.
-                logger.error(
-                    f"Signal serialization failed, writing minimal record: {e}",
-                    extra={"signal_id": signal_id},
-                )
-                minimal = {
+                with open(lock_file, "w") as lock:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                    try:
+                        # Read recent signals for duplicate checking
+                        recent_signals = []
+                        if self.signals_file.exists():
+                            try:
+                                with open(self.signals_file, "r") as f:
+                                    lines = f.readlines()
+                                    # Read last 100 signals (enough to cover duplicate window)
+                                    for line in lines[-100:]:
+                                        try:
+                                            record = json.loads(line.strip())
+                                            recent_signals.append(record)
+                                        except json.JSONDecodeError:
+                                            continue
+                            except Exception as e:
+                                logger.debug(f"Error reading signals for duplicate check: {e}")
+                        
+                        # Check for duplicates
+                        if self._is_duplicate_signal(signal, recent_signals):
+                            logger.debug(
+                                f"Skipping duplicate signal: {signal_id} (type={signal.get('type')}, "
+                                f"direction={signal.get('direction')})"
+                            )
+                            return
+                        
+                        # Create wrapped record in format expected by /signals command
+                        signal_record = {
+                            "signal_id": signal_id,
+                            "timestamp": get_utc_timestamp(),
+                            "status": "generated",  # Default status for new signals
+                            "signal": _to_json_safe(signal),  # Store JSON-safe signal dict
+                        }
+
+                        try:
+                            payload = json.dumps(signal_record)
+                        except TypeError as e:
+                            # Last resort: write a minimal record so the signals view never goes empty.
+                            logger.error(
+                                f"Signal serialization failed, writing minimal record: {e}",
+                                extra={"signal_id": signal_id},
+                            )
+                            minimal = {
+                                "signal_id": signal_id,
+                                "timestamp": get_utc_timestamp(),
+                                "status": "generated",
+                                "signal": {
+                                    "signal_id": signal_id,
+                                    "timestamp": str(signal.get("timestamp") or ""),
+                                    "symbol": str(signal.get("symbol") or ""),
+                                    "type": str(signal.get("type") or "unknown"),
+                                    "direction": str(signal.get("direction") or "unknown"),
+                                    "entry_price": float(signal.get("entry_price") or 0.0),
+                                    "stop_loss": float(signal.get("stop_loss") or 0.0),
+                                    "take_profit": float(signal.get("take_profit") or 0.0),
+                                    "confidence": float(signal.get("confidence") or 0.0),
+                                    "reason": str(signal.get("reason") or ""),
+                                },
+                            }
+                            payload = json.dumps(minimal)
+
+                        # Write signal with lock held
+                        with open(self.signals_file, "a") as f:
+                            f.write(payload + "\n")
+                    finally:
+                        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            except Exception as e:
+                logger.warning(f"File locking failed, falling back to unlocked write: {e}")
+                # Fallback: write without lock (should be rare)
+                signal_record = {
                     "signal_id": signal_id,
                     "timestamp": get_utc_timestamp(),
                     "status": "generated",
-                    "signal": {
-                        "signal_id": signal_id,
-                        "timestamp": str(signal.get("timestamp") or ""),
-                        "symbol": str(signal.get("symbol") or ""),
-                        "type": str(signal.get("type") or "unknown"),
-                        "direction": str(signal.get("direction") or "unknown"),
-                        "entry_price": float(signal.get("entry_price") or 0.0),
-                        "stop_loss": float(signal.get("stop_loss") or 0.0),
-                        "take_profit": float(signal.get("take_profit") or 0.0),
-                        "confidence": float(signal.get("confidence") or 0.0),
-                        "reason": str(signal.get("reason") or ""),
-                    },
+                    "signal": _to_json_safe(signal),
                 }
-                payload = json.dumps(minimal)
-
-            with open(self.signals_file, "a") as f:
-                f.write(payload + "\n")
+                try:
+                    payload = json.dumps(signal_record)
+                except TypeError:
+                    payload = json.dumps({
+                        "signal_id": signal_id,
+                        "timestamp": get_utc_timestamp(),
+                        "status": "generated",
+                        "signal": {
+                            "signal_id": signal_id,
+                            "type": str(signal.get("type") or "unknown"),
+                            "direction": str(signal.get("direction") or "unknown"),
+                        },
+                    })
+                with open(self.signals_file, "a") as f:
+                    f.write(payload + "\n")
 
             # Dual-write to SQLite (append-only signal event log, async if enabled)
             try:
