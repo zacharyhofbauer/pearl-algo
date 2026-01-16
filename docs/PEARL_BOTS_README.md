@@ -67,9 +67,9 @@ Use the Strategies menu in Telegram:
 ### 3. Backtesting
 Run backtests from Telegram:
 
-- Open **Telegram** → **🔮 AI & Analysis** → **🧪 Backtest Bots**
+- Open **Telegram** → **👾 Bots** → **🧪 Backtest Bots**
 - Choose the bot + historical period (1w/2w/4w/6w)
-- View saved artifacts in **Telegram** → **🔮 AI & Analysis** → **📑 Backtest Reports**
+- View saved artifacts in **Telegram** → **👾 Bots** → **📑 Backtest Reports**
 
 ## Architecture
 

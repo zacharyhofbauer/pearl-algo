@@ -54,22 +54,18 @@
 
 **Why**: These signals are consistently losing money. Better to focus on signals that work (mean_reversion_long with 47% WR).
 
-### 5. Reduced Claude API Costs (Credit Drain Fix)
-**Disabled expensive features:**
-- `llm_signal_annotation`: false (was true)
-- `llm_trade_postmortem`: false (was true)
-- `llm_pattern_recognition`: false (was true)
-- `llm_risk_assessment`: false (was true)
-- `llm_adaptive_tuning`: false (was true)
+### 5. Reduced OpenAI API Costs (Credit Drain Fix)
+**Removed LLM features:**
+- Signal annotation, trade postmortem, pattern recognition, risk assessment, adaptive tuning
 
-**Optimized Claude Monitor:**
+**Optimized AI Monitor:**
 - `realtime_monitoring`: false (was true)
 - `frequent_interval_seconds`: 900 → **3600** (4x less frequent)
 - `max_alerts_per_hour`: 12 → **6** (50% reduction)
 - `auto_apply_enabled`: false (was true - was making things worse)
 - `code_analysis_interval_hours`: 24 → **48** (2x less frequent)
 
-**Why**: Claude API was draining credits with every trade. These features weren't adding enough value to justify the cost. Monitor still runs for daily/weekly reports, but much less frequently.
+**Why**: OpenAI API was draining credits with every trade. These features weren't adding enough value to justify the cost. Monitor still runs for daily/weekly reports, but much less frequently.
 
 ## Expected Impact
 
@@ -79,7 +75,7 @@
 - R:R: 1.5:1 (unprofitable with this WR)
 - Stops: 20 points (too tight)
 - Position Size: 3 contracts
-- Claude API: High cost, low value
+- OpenAI API: High cost, low value
 
 ### After (Expected)
 - **Win Rate**: Should improve to 35-40%+ with wider stops (fewer premature exits)
@@ -87,7 +83,7 @@
 - **R:R**: 2.0:1 (better match for WR)
 - **Stops**: 30-35 points (allows trades to breathe)
 - **Position Size**: 5-10 contracts (targets $100+ wins)
-- **Claude API**: ~80% cost reduction
+- **OpenAI API**: ~80% cost reduction
 
 ## Recommendations Going Forward
 
@@ -101,7 +97,7 @@
 - Consider increasing position size on this signal type specifically
 - Reduce or eliminate mean_reversion_short if it doesn't improve
 
-### 3. Claude Monitor Decision
+### 3. AI Monitor Decision
 **Should you keep it?**
 - **YES, but simplified**: Keep daily/weekly reports, disable real-time monitoring
 - **Cost**: Now ~$10-20/month instead of $100+/month
@@ -152,8 +148,8 @@ With 10 contracts (high confidence):
 1. **Restart the agent** to apply new config
 2. **Monitor first 10-20 trades** with new settings
 3. **Track win rate improvement** - target 35-40%+
-4. **Review Claude Monitor daily reports** (should be cheaper now)
+4. **Review AI Monitor daily reports** (should be cheaper now)
 5. **Adjust further** if needed based on performance
 
 ## Files Changed
-- `config/config.yaml`: Risk settings, stop losses, position sizing, signal enable/disable, Claude API optimizations
+- `config/config.yaml`: Risk settings, stop losses, position sizing, signal enable/disable, OpenAI API optimizations

@@ -404,7 +404,6 @@ pearlalgo-dev-ai-agents/
 │   ├── learning/               # Adaptive Learning Layer (shadow mode by default)
 │   │   ├── bandit_policy.py    # Thompson sampling policy
 │   │   └── policy_state.py     # Policy statistics persistence
-│   ├── claude_monitor/         # Claude AI-powered Monitoring (optional, requires LLM extra)
 │   │   ├── monitor_service.py  # Main monitor service loop
 │   │   ├── analysis_engine.py  # Analysis orchestration
 │   │   ├── analyzers/          # Domain-specific analyzers (signal, system, market, code)
@@ -481,7 +480,6 @@ pearlalgo-dev-ai-agents/
 │   ├── NQ_AGENT_GUIDE.md       # Operational guide (how to run and operate)
 │   ├── TESTING_GUIDE.md        # Unified testing guide (all testing procedures)
 │   ├── GATEWAY.md              # IBKR Gateway setup
-│   ├── CLAUDE_MONITOR_GUIDE.md # Claude AI monitor setup and commands
 │   └── MOCK_DATA_WARNING.md    # Mock data testing notes
 │
 ├── data/                        # Data storage
@@ -520,7 +518,6 @@ These boundaries prevent accidental coupling, keep strategies portable, and make
 | `execution`      | `pearlalgo.execution.*`, `config`, `utils`      | `data_providers`, `strategies`, `learning`, `nq_agent` |
 | `learning`       | `pearlalgo.learning.*`, `config`, `utils`       | `data_providers`, `strategies`, `execution`, `nq_agent` |
 | `nq_agent`       | Any internal layer (orchestration layer)        | —                            |
-| `claude_monitor` | `claude_monitor`, `config`, `utils`, `nq_agent`, `strategies` | `data_providers`, `execution`, `learning` |
 
 #### Rationale
 
@@ -531,7 +528,6 @@ These boundaries prevent accidental coupling, keep strategies portable, and make
 - **`execution`** contains ATS execution logic (IBKR bracket orders, safety guards); independent of strategy and agent orchestration.
 - **`learning`** contains adaptive policy logic (Thompson sampling bandit); independent of strategy and agent orchestration.
 - **`nq_agent`** is the top-level orchestration layer that wires everything together.
-- **`claude_monitor`** is an optional AI-powered monitoring layer; may read from nq_agent state and strategies for analysis.
 
 #### Enforcement
 

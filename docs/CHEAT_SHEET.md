@@ -269,7 +269,7 @@ journalctl -u pearlalgo-mnq.service -p err
 
 ## 8. AI Patch Setup (Optional)
 
-Generate code patches from Telegram using Claude AI. Useful for quick fixes when mobile.
+Generate code patches from Telegram using OpenAI. Useful for quick fixes when mobile.
 
 > **Full guide:** See [AI_PATCH_GUIDE.md](AI_PATCH_GUIDE.md) for detailed documentation.
 
@@ -279,8 +279,8 @@ Generate code patches from Telegram using Claude AI. Useful for quick fixes when
 # Install LLM extra
 pip install -e .[llm]
 
-# Add to .env (get key from https://console.anthropic.com/)
-echo 'ANTHROPIC_API_KEY=sk-ant-api03-...' >> .env
+# Add to .env (get key from https://platform.openai.com/)
+echo 'OPENAI_API_KEY=sk-...' >> .env
 
 # Restart command handler
 pkill -f telegram_command_handler
@@ -322,7 +322,6 @@ Run the health check script for a fast sanity check:
 **What it verifies:**
 - ✅ NQ Agent running
 - ✅ Telegram Handler running
-- ✅ Claude Monitor running (optional)
 - ✅ IBKR Gateway running
 - ✅ State file present and fresh
 - ✅ Market & Session gates open
@@ -334,7 +333,6 @@ Run the health check script for a fast sanity check:
 # Check all services running
 pgrep -f "pearlalgo.nq_agent.main" && echo "✅ Agent OK"
 pgrep -f "telegram_command_handler" && echo "✅ Telegram OK"
-pgrep -f "claude_monitor" && echo "⚠️  Monitor (optional)"
 
 # Check state freshness
 stat data/nq_agent_state/state.json | grep Modify
@@ -354,7 +352,6 @@ grep "$(date -u +%Y-%m-%d)" data/nq_agent_state/signals.jsonl | wc -l
 |---------|------|-------|---------|
 | **NQ Agent** | `./scripts/lifecycle/stop_nq_agent_service.sh` | `./scripts/lifecycle/start_nq_agent_service.sh --background` | Stop + Start |
 | **Telegram** | `pkill -f telegram_command_handler` | `./scripts/telegram/start_command_handler.sh --background` | Kill + Start |
-| **Claude Monitor** | `./scripts/lifecycle/stop_claude_monitor.sh` | `./scripts/lifecycle/start_claude_monitor.sh --background` | Stop + Start |
 | **Gateway** | `./scripts/gateway/gateway.sh stop` | `./scripts/gateway/gateway.sh start` | Stop + Start |
 
 **Common restart scenarios:**
@@ -366,10 +363,8 @@ grep "$(date -u +%Y-%m-%d)" data/nq_agent_state/signals.jsonl | wc -l
 
 # After code change (full restart all)
 ./scripts/lifecycle/stop_nq_agent_service.sh
-./scripts/lifecycle/stop_claude_monitor.sh
 pkill -f telegram_command_handler
 ./scripts/lifecycle/start_nq_agent_service.sh --background
-./scripts/lifecycle/start_claude_monitor.sh --background
 ./scripts/telegram/start_command_handler.sh --background
 ```
 
@@ -396,8 +391,6 @@ Or from Telegram: `/performance 7d`
 - **Entry filtering** (risky): min_confidence, min_risk_reward, quality scorer
 
 ### Step 3: Test with Backtest Gate
-
-The Claude Monitor backtest gate automatically tests config changes before applying.
 
 For manual testing:
 ```bash

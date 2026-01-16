@@ -38,7 +38,7 @@ All other documents must remain consistent with this summary.
   - Chart visualization and UI features
   - Menu system and button navigation
 - `AI_PATCH_GUIDE.md`
-  - Claude AI integration for code generation via Telegram
+  - OpenAI integration for code generation via Telegram
   - Setup, usage examples, and security considerations
   - Patch application workflow
 - `ATS_ROLLOUT_GUIDE.md`

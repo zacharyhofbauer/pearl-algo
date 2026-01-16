@@ -1143,6 +1143,7 @@ def format_home_card(
     active_trades_count: int = 0,  # Number of currently active positions
     active_trades_unrealized_pnl: float | None = None,  # Total unrealized PnL across active trades (USD)
     active_trades_price_source: str | None = None,  # e.g., "level1", "historical"
+    open_positions_count: int | None = None,  # Broker-backed open positions count (optional)
     # Data level indicator (v9 - IBKR data quality visibility)
     data_level: str | None = None,  # e.g., "level1", "historical", "unknown"
     # Data staleness (v6 - separate from state staleness)
@@ -1225,6 +1226,7 @@ def format_home_card(
         quiet_reason: Why agent is quiet (e.g., "StrategySessionClosed", "NoOpportunity")
         buy_sell_pressure: Buy/Sell pressure proxy string (volume-based)
         active_trades_count: Number of currently active positions (shown when > 0)
+        open_positions_count: Broker-backed open positions (preferred for display when set)
         data_level: Data level indicator ("level1", "historical", "unknown") for IBKR visibility
         data_age_minutes: Age of market data in minutes (for v2 staleness callout)
         data_stale_threshold_minutes: Threshold in minutes for showing stale warning (default: 10)
@@ -1424,8 +1426,9 @@ def format_home_card(
         compact_metric_width=int(compact_metric_width or 10),
     ))
 
-    # CONDITIONAL: Active trades (only when > 0, calm-minimal)
-    if active_trades_count > 0:
+    # CONDITIONAL: Open positions (only when > 0, calm-minimal)
+    positions_count = active_trades_count if open_positions_count is None else int(open_positions_count or 0)
+    if positions_count > 0:
         # Optionally append unrealized PnL (total) when provided.
         suffix = ""
         if active_trades_unrealized_pnl is not None:
@@ -1439,7 +1442,7 @@ def format_home_card(
                 suffix = ""
 
         lines.append(
-            f"🎯 *{active_trades_count} active trade{'s' if active_trades_count > 1 else ''}*{suffix}"
+            f"🎯 *{positions_count} open position{'s' if positions_count > 1 else ''}*{suffix}"
         )
 
     # Last signal age (if available)

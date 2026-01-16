@@ -5,12 +5,9 @@
 **Agent Restart Needed For:**
 - ✅ Config changes (risk settings, strategy, signals, etc.)
 - ✅ When config.yaml is modified
-- ✅ After applying suggestions that change config
 
 **NO Restart Needed For:**
 - ❌ Telegram handler updates (auto-reloads)
-- ❌ Just viewing suggestions
-- ❌ Applying suggestions (handled automatically)
 
 ## Detailed Guide
 
@@ -45,16 +42,10 @@ Or via Telegram:
 ### ❌ NO Restart Needed
 
 **Telegram Handler:**
-- Command updates (like new `/suggest` command)
+- Command updates
 - Menu changes
 - Button updates
 - Handler automatically reloads on code changes
-
-**Viewing/Applying Suggestions:**
-- `/suggest` command
-- Viewing suggestions
-- Applying suggestions (changes config automatically)
-- The agent picks up config changes on next scan cycle
 
 ### 🤔 How to Know If It Worked?
 
@@ -64,11 +55,6 @@ Or via Telegram:
    tail -f logs/nq_agent.log | grep -E "Config loaded|stop_loss|risk_reward"
    ```
 2. Look for your new values in the logs
-
-**For Suggestions:**
-1. Run `/suggest` in Telegram
-2. If you see suggestions → ✅ Working
-3. If you see "not available" → Monitor needs to be started
 
 **For Telegram Commands:**
 1. Try the command
@@ -94,9 +80,6 @@ cat logs/telegram_handler.pid
 
 ### 🐛 Troubleshooting
 
-**"Claude monitor not available"**
-→ Start it: `/start` → **AI Hub** → **🔍 AI Monitor** → **▶️ Start Monitor**
-
 **Config changes not taking effect**
 → Agent needs restart (see above)
 
@@ -105,9 +88,6 @@ cat logs/telegram_handler.pid
 ```bash
 ./scripts/telegram/restart_command_handler.sh --background
 ```
-
-**Suggestions not showing**
-→ Run `/suggest new` to generate fresh suggestions
 
 ### ⚡ Quick Restart Script
 
@@ -135,10 +115,6 @@ Then just run: `~/restart_agent.sh`
 | Change Type | Agent Restart? | Handler Restart? |
 |-------------|---------------|------------------|
 | `config.yaml` changes | ✅ YES | ❌ NO |
-| Apply suggestion (config) | ❌ NO* | ❌ NO |
-| Apply suggestion (code) | ✅ YES | ❌ NO |
 | New Telegram command | ❌ NO | ✅ YES |
 | Telegram menu update | ❌ NO | ✅ YES (auto) |
-| View suggestions | ❌ NO | ❌ NO |
 
-*Config suggestions applied via ActionExecutor reload config automatically

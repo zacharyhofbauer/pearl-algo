@@ -349,7 +349,7 @@ class PerformanceTracker:
         outcome = "win" if is_win else "loss"
 
         # Update signal status with all required fields for downstream consumers
-        # (Claude Monitor, Telegram, quality scorer all rely on consistent schema)
+        # (AI monitor, Telegram, quality scorer all rely on consistent schema)
         self._update_signal_status(
             signal_id,
             "exited",

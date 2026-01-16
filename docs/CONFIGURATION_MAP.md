@@ -43,11 +43,11 @@ Optional logging environment variables (for systemd/journald):
   - **Used by**: `pearlalgo.utils.logging_config.setup_logging()`
   - **Purpose**: Set to `true` or `1` to include `extra={...}` context in text log lines. Default: `false`.
 
-Optional AI/LLM environment variables (for Claude AI integration):
+Optional AI/LLM environment variables (for OpenAI integration):
 
-- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
   - **Used by**: `pearlalgo.nq_agent.telegram_command_handler` (`/ai_patch` command)
-  - **Purpose**: API key for Claude AI code generation. Only required if using the AI patch feature.
+  - **Purpose**: API key for OpenAI code generation. Only required if using the AI patch feature.
 
 No other environment variables are required by the running agent; keep any additions explicit and documented here.
 

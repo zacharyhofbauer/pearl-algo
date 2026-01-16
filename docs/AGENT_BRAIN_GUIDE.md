@@ -3,7 +3,7 @@
 This repo has two different “brains”:
 
 - **Rule-based brain**: deterministic strategy code that scans, scores, and emits signals.
-- **Learning brain**: lightweight online learning (bandits) + optional ML filter + optional Claude monitor suggestions.
+- **Learning brain**: lightweight online learning (bandits) + optional ML filter + optional AI monitor suggestions.
 
 This guide shows the wiring so you can modify it confidently.
 
@@ -47,10 +47,8 @@ How it’s used:
 - **Features**: `src/pearlalgo/learning/feature_engineer.py`
 - **Usage**: typically start in “shadow” mode, then switch to live blocking once it proves lift.
 
-### 4) Claude Monitor (optional)
+### 4) AI Monitor (optional)
 
-- **Monitor service**: `src/pearlalgo/claude_monitor/monitor_service.py`
-- **Safety policy**: `src/pearlalgo/claude_monitor/auto_tune_policy.py`
 - **Goal**: analyze outcomes and *suggest* bounded config changes (optionally auto-apply).
 
 ## Config that matters (mental model)

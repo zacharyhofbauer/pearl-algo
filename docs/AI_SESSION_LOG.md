@@ -24,7 +24,7 @@
 | **strategies** | `nq_intraday/{strategy.py, scanner.py, signal_generator.py, signal_quality.py, config.py, backtest_adapter.py, hud_context.py, mtf_analyzer.py, regime_detector.py, volume_profile.py, order_flow.py}` | ✅ Present |
 | **data_providers** | `base.py`, `factory.py`, `ibkr/ibkr_provider.py`, `ibkr_executor.py` | ✅ Present |
 | **config** | `settings.py`, `config_loader.py`, `config_file.py` | ✅ Present |
-| **utils** | `logger.py`, `logging_config.py`, `retry.py`, `market_hours.py`, `cadence.py`, `error_handler.py`, `data_quality.py`, `telegram_alerts.py`, `service_controller.py`, `sparkline.py`, `volume_pressure.py`, `vwap.py`, `paths.py`, `claude_client.py` | ✅ Present |
+| **utils** | `logger.py`, `logging_config.py`, `retry.py`, `market_hours.py`, `cadence.py`, `error_handler.py`, `data_quality.py`, `telegram_alerts.py`, `service_controller.py`, `sparkline.py`, `volume_pressure.py`, `vwap.py`, `paths.py`, `openai_client.py` | ✅ Present |
 | **execution** | `base.py`, `ibkr/{adapter.py, tasks.py}` | ✅ Present |
 | **learning** | `bandit_policy.py`, `policy_state.py` | ✅ Present |
 
@@ -214,7 +214,7 @@ pytest tests/ -v --tb=short
 1. Disable adaptive cadence explicitly, OR
 2. Adjust timing expectations
 
-**Skipped Test:** `tests/test_ai_patch.py::TestClaudeClient::test_api_key_missing_error` — requires Anthropic API key.
+**Skipped Test:** `tests/test_ai_patch.py::TestAIPatchMissingAPIKey::test_ai_patch_reports_missing_api_key` — requires OpenAI API key.
 
 #### Config Validation Warning (Observation)
 
@@ -564,7 +564,7 @@ pytest tests/ --tb=no -q
 
 #### Skipped Test (Expected)
 
-`tests/test_ai_patch.py::TestClaudeClient::test_api_key_missing_error` — requires Anthropic API key (intentionally skipped when not available).
+`tests/test_ai_patch.py::TestAIPatchMissingAPIKey::test_ai_patch_reports_missing_api_key` — requires OpenAI API key (intentionally skipped when not available).
 
 ---
 

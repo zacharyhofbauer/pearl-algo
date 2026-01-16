@@ -217,8 +217,9 @@ class TestAIPatchMissingAPIKey:
             test_file = src_dir / "retry.py"
             test_file.write_text("def retry(): pass\n")
 
+            fake_module_path = project_root / "src" / "pearlalgo" / "nq_agent" / "telegram_command_handler.py"
             with patch.object(handler, '_send_message_or_edit', side_effect=mock_send):
-                with patch.object(Path, 'resolve', return_value=project_root):
+                with patch.object(Path, 'resolve', return_value=fake_module_path):
                     with patch('pearlalgo.nq_agent.telegram_command_handler.OPENAI_AVAILABLE', True):
                         with patch('pearlalgo.nq_agent.telegram_command_handler.OpenAIClient') as mock_client:
                             from pearlalgo.utils.openai_client import OpenAIAPIKeyMissingError

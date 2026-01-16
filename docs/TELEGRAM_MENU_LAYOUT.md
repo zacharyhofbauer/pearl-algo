@@ -13,8 +13,7 @@ The Telegram menu system has been completely reorganized for better usability, c
 Performance
 📡 Status 🎯          ⚙️
 System Control
-🤖 AI & Analysis      🤖
-Bots
+🤖 Bots
 ❓ Help
 ```
 
@@ -112,24 +111,6 @@ Bots
 - Configuration access
 - Log viewing
 
-### 🤖 AI & Analysis Menu
-**Purpose**: Access AI-powered insights and analysis tools
-
-```
-🤖 AI & Analysis
-
-🔍 Strategy Analysis   📊 Trade Analysis
-📈 Signal Analysis     🎯 AI Analysis
-🤖 AI Strategy Review  💡 AI Config Tips
-🏠 Back to Menu
-```
-
-**Key Actions:**
-- Strategy performance analysis
-- AI-powered trade insights
-- Configuration recommendations
-- Signal quality analysis
-
 ### 🤖 Bots Menu
 **Purpose**: Start/stop the NQ Agent service
 
@@ -163,7 +144,6 @@ Menu Structure:
 📊 Performance - Performance metrics and reports
 📡 Status - System health and connection status
 ⚙️ System Control - Start/stop services and emergency controls
-🤖 AI & Analysis - AI-powered insights and analysis
 🤖 Bots - Start/stop the Pearl Bot service
 
 Quick Tips:

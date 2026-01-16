@@ -96,7 +96,7 @@ conn.close()
 - ❌ Tight 20-point stops → premature exits
 - ❌ 1.5:1 R:R → unprofitable with 31% WR
 - ❌ Small positions (3 contracts) → small profits
-- ❌ High Claude API costs → draining credits
+- ❌ High OpenAI API costs → draining credits
 
 ### After Optimization
 - ✅ Wider 30-35 point stops → trades can develop
@@ -142,25 +142,6 @@ Send `/status` or check daily report (runs at 9 AM ET)
 ### If Position Sizes Too Small
 - Increase `base_contracts` from 5 to 7-8
 - Increase `max_position_size` from 15 to 20
-
-## Claude Monitor Status
-
-**Current Settings**:
-- ✅ Daily reports enabled (9 AM ET)
-- ✅ Weekly reports enabled (Monday 9 AM ET)
-- ❌ Real-time monitoring disabled (was expensive)
-- ❌ Auto-apply disabled (was making things worse)
-
-**Check Monitor Status**:
-```bash
-./scripts/lifecycle/start_claude_monitor.sh --background
-cat logs/claude_monitor.pid
-```
-
-**Review Monitor Logs**:
-```bash
-tail -f logs/claude_monitor.log
-```
 
 ## Quick Reference
 

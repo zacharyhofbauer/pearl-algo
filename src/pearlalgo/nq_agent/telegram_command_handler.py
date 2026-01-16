@@ -795,6 +795,11 @@ class TelegramCommandHandler:
                 
                 # Generate chart
                 chart_gen = ChartGenerator()
+                try:
+                    right_pad_bars = int(service_cfg.get("dashboard_chart_right_pad_bars", 40) or 40)
+                except Exception:
+                    right_pad_bars = 40
+                chart_gen.config.right_pad_bars = max(0, right_pad_bars)
                 
                 # Get recent trades for markers
                 trades = self._get_trades_for_chart(df, symbol)
@@ -1222,6 +1227,10 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🤖 Pearl Bots", callback_data="menu:pearl_bots"),
             ],
             [
+                InlineKeyboardButton("🧪 Backtest Bots", callback_data="strategy_review:backtest"),
+                InlineKeyboardButton("📑 Backtest Reports", callback_data="strategy_review:reports"),
+            ],
+            [
                 InlineKeyboardButton("🔄 Refresh Status", callback_data="menu:bots"),
                 InlineKeyboardButton("🏠 Back to Menu", callback_data="back"),
             ],
@@ -1490,6 +1499,9 @@ class TelegramCommandHandler:
                     callback_data="action:toggle_pref:signal_detail_expanded",
                 ),
             ],
+            [
+                InlineKeyboardButton("🧩 AI Patch", callback_data="action:ai_patch_help"),
+            ],
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
         await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -1570,6 +1582,17 @@ class TelegramCommandHandler:
             elif action_type == "pnl_overview":
                 await query.edit_message_text("💰 P&L Overview: Loading...\n\nFeature coming soon.", reply_markup=reply_markup)
                 # TODO: Implement actual P&L overview
+            elif action_type == "ai_patch_help":
+                text = (
+                    "🧩 AI Patch\n\n"
+                    "Usage:\n"
+                    "/ai_patch <relative_path> <instruction>\n\n"
+                    "Example:\n"
+                    "/ai_patch src/pearlalgo/utils/retry.py add jitter\n\n"
+                    "Returns a unified diff. Review before applying."
+                )
+                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             elif action_type == "restart_agent":
                 keyboard = [
                     [InlineKeyboardButton("✅ Confirm Restart", callback_data="confirm:restart_agent")],
@@ -2269,6 +2292,8 @@ class TelegramCommandHandler:
             execution_enabled = execution.get("enabled", False)
             execution_armed = execution.get("armed", False)
             execution_mode = execution.get("mode")
+            execution_positions = int(execution.get("positions", 0) or 0)
+            open_positions_count = max(execution_positions, int(active_trades_count or 0))
             
             # Quiet reason and diagnostics
             quiet_reason = state.get("quiet_reason")
@@ -2352,6 +2377,7 @@ class TelegramCommandHandler:
                 active_trades_count=active_trades_count,
                 active_trades_unrealized_pnl=active_trades_unrealized_pnl,
                 active_trades_price_source=active_trades_price_source,
+                open_positions_count=open_positions_count,
                 data_age_minutes=data_age_minutes,
                 data_stale_threshold_minutes=data_stale_threshold_minutes,
                 last_cycle_seconds=last_cycle_seconds,
