@@ -747,7 +747,6 @@ class TelegramCommandHandler:
                 # TODO: Implement actual P&L overview
             elif action_type == "strategy_analysis":
                 metrics = self._read_latest_metrics()
-                selection = self._read_strategy_selection()
                 text = "🔍 Strategy Analysis\n\n"
                 if metrics:
                     text += f"Trades: {metrics.get('exited_signals', 0)}\n"
@@ -1021,7 +1020,7 @@ class TelegramCommandHandler:
                 et_tz = pytz.timezone('US/Eastern')
                 et_time = current_time.astimezone(et_tz)
                 time_str = et_time.strftime("%I:%M %p ET").lstrip('0')
-            except:
+            except Exception:
                 time_str = current_time.strftime("%H:%M UTC") if hasattr(current_time, 'strftime') else ""
             
             # Service status
@@ -1074,7 +1073,7 @@ class TelegramCommandHandler:
                         config = yaml.safe_load(f) or {}
                         data_config = config.get("data", {})
                         data_stale_threshold_minutes = float(data_config.get("stale_data_threshold_minutes", 10.0))
-            except:
+            except Exception:
                 pass
             
             data_age_minutes = None
@@ -1131,17 +1130,16 @@ class TelegramCommandHandler:
                         if hasattr(last_cycle_dt, 'tzinfo') and last_cycle_dt.tzinfo is None:
                             last_cycle_dt = last_cycle_dt.replace(tzinfo=timezone.utc)
                         last_cycle_seconds = (datetime.now(timezone.utc) - last_cycle_dt).total_seconds()
-                except:
+                except Exception:
                     pass
             
             # Check for challenge mode and load challenge data if available
             challenge_status = None
             challenge_per_strategy = {}
             challenge_tracker_instance = None
-            challenge_per_strategy_trackers = {}  # Per-strategy challenge trackers
             
             try:
-                from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker, ChallengeConfig
+                from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker
                 from pearlalgo.learning.trade_database import TradeDatabase
                 
                 # Always load/create challenge tracker (will create if doesn't exist)
@@ -1193,7 +1191,7 @@ class TelegramCommandHandler:
                                                     cutoff = cutoff.replace(tzinfo=timezone.utc)
                                                 if hasattr(trade_time, '__ge__') and trade_time >= cutoff:
                                                     attempt_trades.append(trade)
-                                    except:
+                                    except Exception:
                                         pass
                                 
                                 # Group by signal_type and calculate challenge metrics
@@ -1417,7 +1415,7 @@ class TelegramCommandHandler:
             # Add per-strategy challenge metrics (one challenge per strategy)
             # Load per-strategy challenges
             try:
-                from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker, ChallengeConfig
+                from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker
                 from pearlalgo.learning.trade_database import TradeDatabase
                 
                 db_path = self.state_dir / "trades.db"
@@ -1500,7 +1498,7 @@ class TelegramCommandHandler:
                                                         cutoff = cutoff.replace(tzinfo=timezone.utc)
                                                     if hasattr(trade_time, '__ge__') and trade_time >= cutoff:
                                                         attempt_trades.append(trade)
-                                        except:
+                                        except Exception:
                                             pass
                                     
                                     strategy_challenge = {}
@@ -1535,7 +1533,7 @@ class TelegramCommandHandler:
                     try:
                         attempt_perf = challenge_tracker_instance.get_attempt_performance()
                         start_balance = attempt_perf.get("starting_balance", 50000.0)
-                    except:
+                    except Exception:
                         start_balance = 50000.0
                     
                     sorted_strategies = sorted(challenge_per_strategy.items(), key=lambda x: x[1].get("pnl", 0), reverse=True)
@@ -1578,7 +1576,7 @@ class TelegramCommandHandler:
                 for t in recent_exits[:3]:
                     try:
                         pnl_val = float(t.get("pnl") or 0.0)
-                    except:
+                    except Exception:
                         pnl_val = 0.0
                     pnl_emoji, pnl_str = format_pnl(pnl_val)
                     dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
@@ -1601,9 +1599,9 @@ class TelegramCommandHandler:
                                     et_exit = exit_time.astimezone(et_tz)
                                     time_label = et_exit.strftime("%I:%M %p").lstrip('0')
                                     message += f" • {time_label}"
-                                except:
+                                except Exception:
                                     pass
-                        except:
+                        except Exception:
                             pass
             
             # Add current position/signal if active
@@ -1697,7 +1695,7 @@ class TelegramCommandHandler:
         active_signals = [s for s in recent_signals if s.get("status") == "entered"]
         
         if active_signals:
-            text += f"\n*Recent Active Signals:*\n"
+            text += "\n*Recent Active Signals:*\n"
             for i, signal in enumerate(active_signals[-5:], 1):  # Show last 5
                 signal_id = signal.get("signal_id", "unknown")[:8]
                 direction = signal.get("direction", "").upper()
@@ -1734,7 +1732,7 @@ class TelegramCommandHandler:
                     try:
                         ts = parse_utc_timestamp(timestamp) if isinstance(timestamp, str) else timestamp
                         time_str = ts.strftime("%H:%M") if hasattr(ts, 'strftime') else str(timestamp)[:5]
-                    except:
+                    except Exception:
                         time_str = str(timestamp)[:5] if timestamp else ""
                 
                 text += f"{i}. {direction} {signal_type} - {status}\n"
@@ -1775,11 +1773,11 @@ class TelegramCommandHandler:
             for status, count in sorted(status_counts.items()):
                 text += f"  • {status}: {count}\n"
             
-            text += f"\n*By Direction:*\n"
+            text += "\n*By Direction:*\n"
             for direction, count in sorted(direction_counts.items()):
                 text += f"  • {direction}: {count}\n"
             
-            text += f"\n*By Type:*\n"
+            text += "\n*By Type:*\n"
             for sig_type, count in sorted(type_counts.items()):
                 text += f"  • {sig_type}: {count}\n"
         
@@ -1838,7 +1836,7 @@ class TelegramCommandHandler:
                     config = yaml.safe_load(f) or {}
                     data_config = config.get("data", {})
                     data_stale_threshold_minutes = float(data_config.get("stale_data_threshold_minutes", 10.0))
-        except:
+        except Exception:
             pass
         
         latest_bar = state.get("latest_bar", {})
