@@ -350,6 +350,51 @@ class TestDashboardChartVisualRegression:
             if chart_path.exists():
                 chart_path.unlink()
 
+    def test_monitor_render_mode_resolution_contract(self):
+        """Monitor render mode must produce stable pixel dimensions (no bbox_inches='tight')."""
+        config = self.ChartConfig()
+        generator = self.ChartGenerator(config)
+
+        chart_path = generator.generate_dashboard_chart(
+            data=self.data,
+            symbol="MNQ",
+            timeframe="5m",
+            lookback_bars=288,
+            range_label="36h",
+            figsize=(16, 4.5),  # 2560x720 @ 160 dpi
+            dpi=160,
+            render_mode="monitor",
+            show_sessions=True,
+            show_key_levels=True,
+            show_vwap=True,
+            show_ma=True,
+            ma_periods=[20, 50, 200],
+            show_rsi=True,
+            show_pressure=True,
+            title_time=FIXED_TITLE_TIME,
+        )
+
+        assert chart_path is not None and chart_path.exists(), "Monitor-mode chart generation failed"
+
+        try:
+            try:
+                from PIL import Image
+
+                with Image.open(chart_path) as img:
+                    w, h = img.size
+            except ImportError:
+                import matplotlib.pyplot as plt
+
+                arr = plt.imread(str(chart_path))
+                h, w = int(arr.shape[0]), int(arr.shape[1])
+
+            assert (w, h) == (2560, 720), f"Unexpected monitor PNG size: {(w, h)}"
+        finally:
+            try:
+                chart_path.unlink()
+            except Exception:
+                pass
+
     def test_dashboard_chart_determinism(self):
         """Verify that same inputs produce identical outputs."""
         config = self.ChartConfig()

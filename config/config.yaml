@@ -34,6 +34,9 @@ service:
   dashboard_chart_interval: 3600
   dashboard_chart_timeframe: 5m
   dashboard_chart_lookback_hours: 8
+  # Pearl Algo Monitor export sizing (stable pixel output for the wide monitor)
+  dashboard_export_size_px: [2560, 720]
+  dashboard_export_dpi: 160
   enable_new_bar_gating: true
   adaptive_cadence_enabled: true
   scan_interval_active_seconds: 5

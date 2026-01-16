@@ -453,7 +453,14 @@ class NQAgentService:
         self.dashboard_export_timeframe = str(service_settings.get("dashboard_export_timeframe", "5m") or "5m")
         self.dashboard_export_lookback_hours = float(service_settings.get("dashboard_export_lookback_hours", 12) or 12)
         self.dashboard_export_max_bars = int(service_settings.get("dashboard_export_max_bars", 600) or 600)
-        self.dashboard_export_dpi = int(service_settings.get("dashboard_export_dpi", 150) or 150)
+        self.dashboard_export_dpi = int(service_settings.get("dashboard_export_dpi", 160) or 160)
+        # Explicit pixel sizing for the monitor export (stable output dimensions).
+        # Default targets the Beelink panel (2560×720).
+        _size_raw = service_settings.get("dashboard_export_size_px", [2560, 720])
+        try:
+            self.dashboard_export_size_px = (int(_size_raw[0]), int(_size_raw[1]))  # type: ignore[index]
+        except Exception:
+            self.dashboard_export_size_px = (2560, 720)
         # Right-side "future space" padding (bars) so the last candle isn't flush to the edge.
         # Accept 0 to disable explicitly.
         try:
@@ -461,12 +468,19 @@ class NQAgentService:
             self.dashboard_export_right_pad_bars = int(_pad)
         except Exception:
             self.dashboard_export_right_pad_bars = 40
-        # Accept YAML list [w, h] for figsize
-        _figsize_raw = service_settings.get("dashboard_export_figsize", [20, 7.3])
         try:
-            self.dashboard_export_figsize = (float(_figsize_raw[0]), float(_figsize_raw[1]))  # type: ignore[index]
+            w_px, h_px = self.dashboard_export_size_px
+            dpi = float(self.dashboard_export_dpi or 160)
+            if int(w_px) <= 0 or int(h_px) <= 0 or dpi <= 0:
+                raise ValueError("invalid dashboard_export_size_px/dpi")
+            self.dashboard_export_figsize = (float(w_px) / dpi, float(h_px) / dpi)
         except Exception:
-            self.dashboard_export_figsize = (20.0, 7.3)
+            # Fallback: accept YAML list [w, h] for figsize
+            _figsize_raw = service_settings.get("dashboard_export_figsize", [20, 7.3])
+            try:
+                self.dashboard_export_figsize = (float(_figsize_raw[0]), float(_figsize_raw[1]))  # type: ignore[index]
+            except Exception:
+                self.dashboard_export_figsize = (20.0, 7.3)
         # Buy/Sell pressure (dashboard observability)
         self.pressure_lookback_bars = int(service_settings.get("pressure_lookback_bars", 24) or 24)
         self.pressure_baseline_bars = int(service_settings.get("pressure_baseline_bars", 120) or 120)
@@ -2564,8 +2578,9 @@ class NQAgentService:
                 timeframe=tf,
                 lookback_bars=lookback_bars,
                 range_label=range_label,
-                figsize=getattr(self, "dashboard_export_figsize", (20.0, 7.3)),
-                dpi=int(getattr(self, "dashboard_export_dpi", 150) or 150),
+                figsize=getattr(self, "dashboard_export_figsize", (16.0, 4.5)),
+                dpi=int(getattr(self, "dashboard_export_dpi", 160) or 160),
+                render_mode="monitor",
                 title_time=datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M ET"),
                 right_pad_bars=int(settings.get("right_pad_bars", getattr(self, "dashboard_export_right_pad_bars", 40))),
                 show_sessions=True,

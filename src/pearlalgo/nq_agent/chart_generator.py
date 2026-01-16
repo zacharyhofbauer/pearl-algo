@@ -373,6 +373,34 @@ class ChartGenerator:
                 'font.size': 10,
             }
         )
+
+    @staticmethod
+    def _save_png(fig, path: Path, *, dpi: int, render_mode: str = "telegram") -> None:
+        """
+        Save a chart PNG with render-mode-specific behavior.
+
+        Modes:
+        - telegram: content-cropped (bbox_inches='tight') with padding to reduce label clipping
+        - monitor: fixed pixel output based on figsize*dpi (no bbox_inches='tight')
+        """
+        mode = str(render_mode or "telegram").strip().lower()
+        if mode == "monitor":
+            fig.savefig(
+                str(path),
+                dpi=int(dpi),
+                facecolor=DARK_BG,
+                edgecolor="none",
+            )
+            return
+
+        fig.savefig(
+            str(path),
+            dpi=int(dpi),
+            facecolor=DARK_BG,
+            edgecolor="none",
+            bbox_inches="tight",
+            pad_inches=0.35,
+        )
     
     def _limit_yaxis_ticks(self, ax, max_ticks: int = 8) -> None:
         """Limit y-axis ticks to prevent overlapping labels.
@@ -2597,6 +2625,7 @@ class ChartGenerator:
         range_label: Optional[str] = None,
         figsize: Tuple[float, float] = (16, 7),
         dpi: int = 150,
+        render_mode: str = "telegram",
         show_sessions: bool = True,
         show_key_levels: bool = True,
         show_vwap: bool = True,
@@ -3211,8 +3240,6 @@ class ChartGenerator:
 
                     # Limit y-axis ticks to prevent overlapping labels
                     self._limit_yaxis_ticks(ax_price, max_ticks=8)
-                    # Add price numbers to x-axis (bottom of chart)
-                    self._add_price_labels_to_xaxis(ax_price, df)
                     # Sessions shading
                     if show_sessions:
                         self._draw_sessions_overlay(ax_price, hud, idx=df.index if isinstance(df.index, pd.DatetimeIndex) else None)
@@ -3229,15 +3256,15 @@ class ChartGenerator:
                         # Use shared level collection (signal={} since this is a dashboard, not a trade)
                         candidates, current_price = self._collect_level_candidates(df, {}, hud)
                         if candidates:
-                            merged = self._merge_levels(candidates, tick_size=0.25, merge_ticks=4)
-                            # For short windows (e.g., 12h mobile/on-demand), keep labels ultra-compact.
-                            # Baselines expect only the highest-priority level to avoid clutter.
-                            max_labels = 10
                             try:
-                                if int(lookback_bars) <= 144:
-                                    max_labels = 1
+                                merge_ticks = 6 if bool(self.config.compact_labels) else int(self.config.right_label_merge_ticks)
                             except Exception:
-                                pass
+                                merge_ticks = 4
+                            try:
+                                max_labels = 6 if bool(self.config.compact_labels) else int(self.config.max_right_labels)
+                            except Exception:
+                                max_labels = 10
+                            merged = self._merge_levels(candidates, tick_size=0.25, merge_ticks=merge_ticks)
                             self._draw_right_labels(
                                 fig,
                                 ax_price,
@@ -3256,16 +3283,7 @@ class ChartGenerator:
             except Exception as e:
                 logger.debug(f"Error applying HUD to dashboard chart: {e}")
 
-            # Save with improved margins for Telegram readability
-            # Increased pad_inches to prevent clipping of right labels
-            fig.savefig(
-                str(temp_path),
-                dpi=dpi,
-                facecolor=DARK_BG,
-                edgecolor="none",
-                bbox_inches="tight",
-                pad_inches=0.35,  # Increased from 0.25 to reduce clipping risk
-            )
+            self._save_png(fig, temp_path, dpi=dpi, render_mode=render_mode)
             plt.close(fig)
 
             logger.debug(f"Generated dashboard chart: {temp_path}")

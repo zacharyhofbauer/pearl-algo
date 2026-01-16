@@ -15,7 +15,6 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 import matplotlib.dates as mdates
-import matplotlib.image as mpimg
 
 @dataclass(frozen=True)
 class MonitorPaths:
@@ -270,7 +269,7 @@ def _format_activity_html(events: list[dict]) -> str:
 def run_monitor() -> None:
     try:
         from PyQt6.QtCore import Qt, QTimer
-        from PyQt6.QtGui import QFont, QIcon, QGuiApplication
+        from PyQt6.QtGui import QFont, QIcon, QGuiApplication, QPixmap
         from PyQt6.QtWidgets import (
             QApplication,
             QFrame,
@@ -312,9 +311,11 @@ def run_monitor() -> None:
             super().__init__()
             self.setFrameShape(QFrame.Shape.NoFrame)
             self._last_mtime: Optional[float] = None
+            self._last_png_mtime: Optional[float] = None
             self._data: Optional[pd.DataFrame] = None
             self._default_xlim = None
             self._default_ylim = None
+            self._pixmap_original = None
 
             self.meta_label = QLabel("Chart: (no meta)")
             self.meta_label.setStyleSheet("color: #e6edf3; font-size: 13px; font-weight: 600;")
@@ -323,6 +324,12 @@ def run_monitor() -> None:
             self.canvas = FigureCanvas(self.figure)
             self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.canvas.setStyleSheet("background-color: #0d1117;")
+
+            self.image_label = QLabel()
+            self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            self.image_label.setStyleSheet("background-color: #0d1117;")
+            self.image_label.setVisible(False)
 
             self.ax_price = None
             self.ax_vol = None
@@ -342,6 +349,7 @@ def run_monitor() -> None:
             layout.setSpacing(8)
             layout.addWidget(self.meta_label)
             layout.addWidget(self.readout_label)
+            layout.addWidget(self.image_label, 1)
             layout.addWidget(self.canvas, 1)
             self.setLayout(layout)
 
@@ -356,22 +364,60 @@ def run_monitor() -> None:
 
         def set_chart_data(self, df: Optional[pd.DataFrame], meta: Optional[dict], mtime: Optional[float]) -> None:
             self.meta_label.setText(_format_chart_meta(meta))
+            # CSV-rendered interactive mode
+            self.image_label.setVisible(False)
+            self.canvas.setVisible(True)
+            self.readout_label.setVisible(True)
             if mtime is not None and self._last_mtime == mtime:
                 return
             self._last_mtime = mtime
             self._data = df
             self._render()
 
-        def show_fallback_image(self, image_path: Path) -> None:
+        def show_png(self, image_path: Path, meta: Optional[dict], mtime: Optional[float]) -> None:
+            """Display an exported PNG using Qt-native rendering (fast + consistent)."""
+            self.meta_label.setText(_format_chart_meta(meta))
+            if mtime is not None and self._last_png_mtime == mtime:
+                return
+            self._last_png_mtime = mtime
             try:
-                self.figure.clear()
-                ax = self.figure.add_subplot(1, 1, 1)
-                img = mpimg.imread(str(image_path))
-                ax.imshow(img)
-                ax.axis("off")
-                self.canvas.draw_idle()
+                pix = QPixmap(str(image_path))
+                if pix.isNull():
+                    raise ValueError("QPixmap load failed")
+                self._pixmap_original = pix
+                self.canvas.setVisible(False)
+                self.readout_label.setVisible(False)
+                self.image_label.setVisible(True)
+                self._update_pixmap_scaled()
             except Exception:
-                self.readout_label.setText("No chart data.")
+                self.canvas.setVisible(False)
+                self.image_label.setVisible(False)
+                self.readout_label.setVisible(True)
+                self.readout_label.setText("No chart image.")
+
+        def _update_pixmap_scaled(self) -> None:
+            try:
+                if self._pixmap_original is None:
+                    return
+                size = self.image_label.size()
+                if size.width() <= 0 or size.height() <= 0:
+                    return
+                scaled = self._pixmap_original.scaled(
+                    size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                self.image_label.setPixmap(scaled)
+            except Exception:
+                return
+
+        def resizeEvent(self, event) -> None:
+            try:
+                super().resizeEvent(event)
+            except Exception:
+                pass
+            if self.image_label.isVisible():
+                self._update_pixmap_scaled()
 
         def _render(self) -> None:
             self.figure.clear()
@@ -403,7 +449,11 @@ def run_monitor() -> None:
                 self.ax_price = self.figure.add_subplot(1, 1, 1)
                 self.ax_vol = None
 
-            style = mpf.make_mpf_style(base_mpf_style="nightclouds", rc={"font.size": 9})
+            # Use regular/default chart style (simpler than nightclouds)
+            style = mpf.make_mpf_style(
+                base_mpf_style="default",
+                rc={"font.size": 9, "figure.facecolor": "#0d1117", "axes.facecolor": "#0d1117"}
+            )
             mpf.plot(
                 prepared,
                 ax=self.ax_price,
@@ -910,8 +960,15 @@ def run_monitor() -> None:
 
             # Chart
             meta = _read_json(paths.chart_meta)
+            png_path = paths.chart_png
             ohlc_path = paths.exports_dir / "dashboard_latest.ohlc.csv"
-            if ohlc_path.exists():
+            if png_path.exists():
+                try:
+                    png_mtime = png_path.stat().st_mtime
+                    self.chart.show_png(png_path, meta, png_mtime)
+                except Exception:
+                    self.chart.set_chart_data(None, meta, None)
+            elif ohlc_path.exists():
                 try:
                     mtime = ohlc_path.stat().st_mtime
                     if self._ohlc_mtime != mtime:
@@ -920,8 +977,6 @@ def run_monitor() -> None:
                     self.chart.set_chart_data(self._ohlc_df, meta, self._ohlc_mtime)
                 except Exception:
                     self.chart.set_chart_data(None, meta, None)
-            elif paths.chart_png.exists():
-                self.chart.show_fallback_image(paths.chart_png)
             else:
                 self.chart.set_chart_data(None, meta, None)
 
