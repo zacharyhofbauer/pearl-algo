@@ -186,6 +186,8 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "challenge",
     # PEARL automated bots (formerly lux_algo_bots)
     "pearl_bots",
+    # Agentic layer (optional autonomy / reasoning)
+    "agentic",
     # Backward compatibility (deprecated)
     "lux_algo_bots",
 })

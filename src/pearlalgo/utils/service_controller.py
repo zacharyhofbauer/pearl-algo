@@ -355,6 +355,10 @@ class ServiceController:
         except Exception:
             return False
 
+    def is_agent_process_running(self) -> bool:
+        """Public wrapper: check if Agent process is running."""
+        return self._is_agent_running()
+
     def get_agent_status(self) -> Dict[str, Any]:
         """Get NQ Agent Service status.
 
@@ -434,6 +438,28 @@ class ServiceController:
             details += f"\n{start_result['details']}"
 
         return {"success": overall_success, "message": message, "details": details}
+
+    async def restart_command_handler(self) -> Dict[str, Any]:
+        """Restart Telegram command handler (stop then start)."""
+        logger.info("Restarting Telegram command handler via Telegram command")
+        script = self.scripts_dir / "telegram" / "restart_command_handler.sh"
+        success, stdout, stderr = self._run_script(
+            script,
+            args=["--background"],
+            timeout=60,
+            check=False,
+        )
+        if success:
+            return {
+                "success": True,
+                "message": "✅ Telegram command handler restarted successfully",
+                "details": stdout.strip() if stdout else "Command handler restart executed",
+            }
+        return {
+            "success": False,
+            "message": "❌ Failed to restart Telegram command handler",
+            "details": stderr.strip() if stderr else stdout.strip(),
+        }
 
     def tail_log(self, log_filename: str, lines: int = 200) -> Dict[str, Any]:
         """Return the last N lines of a log file under ./logs (safe, read-only)."""

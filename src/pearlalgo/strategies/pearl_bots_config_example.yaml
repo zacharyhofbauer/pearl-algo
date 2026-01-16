@@ -69,6 +69,36 @@ pearl_bots:
         require_volume_confirmation: true  # Require volume spike on breakout
         min_momentum_acceleration: 0.001   # Minimum momentum acceleration
 
+    # Composite Bot - All-in-one multi-scenario engine (trend/breakout/reversal/BOS)
+    # Runs multiple indicator modules and uses multi-timeframe context (5m/15m + resampled HTF).
+    composite_mnq:
+      enabled: false
+      description: "Composite multi-scenario bot with multi-timeframe context"
+      bot_class: "CompositeBot"
+
+      symbol: "MNQ"
+      timeframe: "1m"
+      max_positions: 1
+
+      risk_per_trade: 0.01
+      stop_loss_pct: 0.006
+      take_profit_pct: 0.012
+      min_confidence: 0.70
+
+      enable_alerts: true
+      webhook_url: null
+
+      parameters:
+        timeframes: ["1m", "5m", "15m", "1h", "4h"]
+        max_candidates: 1
+        require_mtf_alignment: true
+        indicators:
+          enabled:
+            - power_channel
+            - tbt_chartprime
+            - supply_demand_zones
+            - smart_money_divergence
+
     # Mean Reversion Bot - Similar to Lux Algo's Oscillator Matrix (OSC)
     # Identifies overbought/oversold conditions and trades reversions
     # NOTE: Higher risk strategy - enable only if you understand mean reversion

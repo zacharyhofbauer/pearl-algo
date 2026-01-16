@@ -400,6 +400,23 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "enabled": False,  # Disabled by default for safety
         "bots": {},        # Empty by default, configured per deployment
     },
+    # ==========================================================================
+    # AGENTIC LAYER (optional autonomy / reasoning / external context)
+    # ==========================================================================
+    "agentic": {
+        "enabled": False,
+        # LLM reasoning for signals (adds/overrides `reason` on emitted signals)
+        "llm_reasoning_enabled": False,
+        "llm_reasoning_max_signals_per_cycle": 1,
+        "llm_reasoning_timeout_seconds": 20,
+        # Autonomy loop (self-tuning via config/code patches)
+        "autopilot_enabled": False,
+        "autopilot_mode": "shadow",  # shadow|live
+        "autopilot_min_interval_minutes": 60,
+        "autopilot_allow_files": ["config/config.yaml"],
+        "autopilot_auto_apply": False,
+        "autopilot_restart_after_apply": False,
+    },
 }
 
 

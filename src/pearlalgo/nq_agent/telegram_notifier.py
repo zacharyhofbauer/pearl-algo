@@ -288,6 +288,14 @@ class NQAgentTelegramNotifier:
             f"SIGNAL {symbol} {direction} | {sig_type}",
             f"entry={entry:.2f} stop={stop:.2f} target={target:.2f} conf={conf:.0%}",
         ]
+        reason = str(signal.get("reason") or "").strip()
+        if reason:
+            # Keep only first 2 lines and hard-cap length.
+            parts = [p.strip() for p in reason.splitlines() if p.strip()]
+            short = " | ".join(parts[:2])
+            if len(short) > 220:
+                short = short[:217] + "..."
+            lines.append(f"reason={short}")
         if sid_short:
             lines.append(f"id={sid_short}")
         return "\n".join(lines)

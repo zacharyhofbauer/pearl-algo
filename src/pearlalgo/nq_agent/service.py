@@ -14,6 +14,7 @@ import signal
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import math
@@ -40,6 +41,7 @@ from pearlalgo.utils.volume_pressure import (
     format_volume_pressure,
     timeframe_to_minutes,
 )
+from pearlalgo.agentic.hub import AgenticHub
 
 # Execution layer imports (optional - only used if execution.enabled)
 try:
@@ -172,6 +174,11 @@ class NQAgentService:
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
         data_settings = service_config.get("data", {})
         telegram_ui_settings = service_config.get("telegram_ui", {}) or {}
+
+        # ==========================================================================
+        # AGENTIC LAYER (optional LLM reasoning + future autonomy/news)
+        # ==========================================================================
+        self.agentic = AgenticHub(state_dir=self.state_manager.state_dir, service_config=service_config)
 
         # ==========================================================================
         # STORAGE (SQLite dual-write; keeps Telegram/mobile compatibility)
@@ -447,6 +454,13 @@ class NQAgentService:
         self.dashboard_export_lookback_hours = float(service_settings.get("dashboard_export_lookback_hours", 12) or 12)
         self.dashboard_export_max_bars = int(service_settings.get("dashboard_export_max_bars", 600) or 600)
         self.dashboard_export_dpi = int(service_settings.get("dashboard_export_dpi", 150) or 150)
+        # Right-side "future space" padding (bars) so the last candle isn't flush to the edge.
+        # Accept 0 to disable explicitly.
+        try:
+            _pad = service_settings.get("dashboard_export_right_pad_bars", 40)
+            self.dashboard_export_right_pad_bars = int(_pad)
+        except Exception:
+            self.dashboard_export_right_pad_bars = 40
         # Accept YAML list [w, h] for figsize
         _figsize_raw = service_settings.get("dashboard_export_figsize", [20, 7.3])
         try:
@@ -1065,6 +1079,11 @@ class NQAgentService:
                     # Lightweight cycle: skip heavy analysis, but still run health/status/exit grading
                     pass
                 else:
+                    # Agentic layer is agent-owned; expose it to strategy/bots without coupling.
+                    try:
+                        market_data["_agentic"] = getattr(self, "agentic", None)
+                    except Exception:
+                        pass
                     # Full analysis: new bar arrived
                     signals = self.strategy.analyze(market_data)
                     self._analysis_run_count += 1
@@ -1164,9 +1183,31 @@ class NQAgentService:
                             )
                         except Exception:
                             pass
+                        # Optional: LLM reasoning layer (agent-owned)
+                        try:
+                            await self.agentic.maybe_add_llm_reasoning(
+                                signal=signal,
+                                market_data=market_data,
+                                metrics=self.performance_tracker.get_performance_metrics(days=None)
+                                if hasattr(self, "performance_tracker")
+                                else None,
+                            )
+                        except Exception:
+                            pass
                         await self._process_signal(signal, buffer_data=buffer_data)
                 else:
                     logger.debug(f"No signals generated in cycle {self.cycle_count}")
+
+                # Agentic autopilot hook (default OFF; noop unless enabled)
+                try:
+                    await self.agentic.autopilot_tick(
+                        market_data=market_data,
+                        metrics=self.performance_tracker.get_performance_metrics(days=None)
+                        if hasattr(self, "performance_tracker")
+                        else None,
+                    )
+                except Exception:
+                    pass
 
                 # Update active trades with trailing stops (NO LIMITS - can handle 100+ trades)
                 try:
@@ -2440,9 +2481,12 @@ class NQAgentService:
 
         # Prefer using the already-fetched MTF buffer (no extra IBKR load)
         df_5m = None
+        df_15m = None
         try:
             if market_data and isinstance(market_data.get("df_5m"), pd.DataFrame):
                 df_5m = market_data.get("df_5m")
+            if market_data and isinstance(market_data.get("df_15m"), pd.DataFrame):
+                df_15m = market_data.get("df_15m")
         except Exception:
             df_5m = None
         if df_5m is None or not isinstance(df_5m, pd.DataFrame) or df_5m.empty:
@@ -2450,6 +2494,8 @@ class NQAgentService:
                 last_md = getattr(self.data_fetcher, "_last_market_data", None) or {}
                 if isinstance(last_md.get("df_5m"), pd.DataFrame):
                     df_5m = last_md.get("df_5m")
+                if isinstance(last_md.get("df_15m"), pd.DataFrame):
+                    df_15m = last_md.get("df_15m")
             except Exception:
                 df_5m = None
         if df_5m is None or not isinstance(df_5m, pd.DataFrame) or df_5m.empty:
@@ -2465,34 +2511,71 @@ class NQAgentService:
             except Exception:
                 return
 
-        tf = str(getattr(self, "dashboard_export_timeframe", "5m") or "5m")
+        settings = {}
+        try:
+            settings_path = Path(getattr(self, "state_dir", None) or self.state_manager.state_dir) / "exports" / "monitor_settings.json"
+            if settings_path.exists():
+                settings = json.loads(settings_path.read_text())
+        except Exception:
+            settings = {}
+
+        tf = str(settings.get("timeframe") or getattr(self, "dashboard_export_timeframe", "5m") or "5m")
+        if tf not in {"1m", "5m", "15m"}:
+            tf = "5m"
         mins = timeframe_to_minutes(tf) or 5
         try:
-            lookback_bars = int((float(getattr(self, "dashboard_export_lookback_hours", 12) or 12) * 60.0) / float(mins))
+            lookback_hours = float(settings.get("lookback_hours") or getattr(self, "dashboard_export_lookback_hours", 12) or 12)
+            lookback_hours = max(1.0, min(72.0, lookback_hours))
+            lookback_bars = int((lookback_hours * 60.0) / float(mins))
         except Exception:
             lookback_bars = 288
         max_bars = int(getattr(self, "dashboard_export_max_bars", 600) or 600)
         lookback_bars = max(50, min(max_bars, lookback_bars))
-        range_label = f"{int(float(getattr(self, 'dashboard_export_lookback_hours', 12) or 12))}h"
+        range_label = f"{int(round(float(lookback_hours)))}h"
+
+        chart_df = df_5m
+        if tf == "1m":
+            if market_data and isinstance(market_data.get("df"), pd.DataFrame) and not market_data.get("df").empty:
+                chart_df = market_data.get("df")
+        elif tf == "15m" and isinstance(df_15m, pd.DataFrame) and not df_15m.empty:
+            chart_df = df_15m
+
+        if chart_df is None or not isinstance(chart_df, pd.DataFrame) or chart_df.empty:
+            return
+
+        show_ma = bool(settings.get("show_ma", True))
+        show_vwap = bool(settings.get("show_vwap", True))
+        show_rsi = bool(settings.get("show_rsi", True))
+        show_pressure = bool(settings.get("show_pressure", True))
+
+        # Ensure the monitor dashboard chart has visible right padding ("future" bars).
+        try:
+            desired_pad = int(settings.get("right_pad_bars", getattr(self, "dashboard_export_right_pad_bars", 40)))
+            if getattr(chart_gen, "config", None) is not None:
+                chart_gen.config.right_pad_bars = max(0, desired_pad)
+        except Exception:
+            pass
 
         try:
             chart_path = await asyncio.to_thread(
                 chart_gen.generate_dashboard_chart,
-                data=df_5m,
+                data=chart_df,
                 symbol=self.config.symbol,
                 timeframe=tf,
                 lookback_bars=lookback_bars,
                 range_label=range_label,
                 figsize=getattr(self, "dashboard_export_figsize", (20.0, 7.3)),
                 dpi=int(getattr(self, "dashboard_export_dpi", 150) or 150),
+                title_time=datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M ET"),
+                right_pad_bars=int(settings.get("right_pad_bars", getattr(self, "dashboard_export_right_pad_bars", 40))),
                 show_sessions=True,
                 show_key_levels=True,
-                show_vwap=True,
-                show_ma=True,
+                show_vwap=show_vwap,
+                show_ma=show_ma,
                 ma_periods=[20, 50, 200],
-                show_rsi=True,
-                show_pressure=True,
-                trades=self._get_trades_for_chart(df_5m),
+                show_rsi=show_rsi,
+                show_pressure=show_pressure,
+                trades=self._get_trades_for_chart(chart_df),
             )
         except Exception as e:
             logger.debug(f"Monitor chart generation failed: {e}")
@@ -2507,6 +2590,36 @@ class NQAgentService:
                 exports_dir = self.state_manager.state_dir
             exports_dir = Path(exports_dir) / "exports"
             exports_dir.mkdir(parents=True, exist_ok=True)
+
+            # Export OHLC snapshot for interactive monitor (atomic CSV).
+            try:
+                ohlc = chart_df.tail(int(lookback_bars)).copy()
+                if "timestamp" not in ohlc.columns:
+                    if isinstance(ohlc.index, pd.DatetimeIndex):
+                        ohlc = ohlc.reset_index()
+                        if "index" in ohlc.columns and "timestamp" not in ohlc.columns:
+                            ohlc = ohlc.rename(columns={"index": "timestamp"})
+                col_map = {
+                    "open": "open",
+                    "high": "high",
+                    "low": "low",
+                    "close": "close",
+                    "volume": "volume",
+                }
+                normalized = {}
+                for col in ohlc.columns:
+                    key = str(col).lower()
+                    if key in col_map:
+                        normalized[col] = col_map[key]
+                ohlc = ohlc.rename(columns=normalized)
+                keep_cols = ["timestamp", "open", "high", "low", "close", "volume"]
+                ohlc = ohlc[[c for c in keep_cols if c in ohlc.columns]]
+                tmp_ohlc = exports_dir / ".dashboard_latest.ohlc.csv.tmp"
+                dest_ohlc = exports_dir / "dashboard_latest.ohlc.csv"
+                ohlc.to_csv(tmp_ohlc, index=False)
+                os.replace(str(tmp_ohlc), str(dest_ohlc))
+            except Exception as e:
+                logger.debug(f"Could not export monitor OHLC CSV: {e}")
 
             # Atomically replace dashboard_latest.png
             dest_png = exports_dir / "dashboard_latest.png"

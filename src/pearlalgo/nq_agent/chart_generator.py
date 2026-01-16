@@ -2605,6 +2605,7 @@ class ChartGenerator:
         show_rsi: bool = True,
         show_pressure: bool = True,
         title_time: Optional[str] = None,
+        right_pad_bars: Optional[int] = None,
         trades: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Path]:
         """
@@ -2627,6 +2628,7 @@ class ChartGenerator:
             show_pressure: Show buy/sell pressure proxy panel (signed volume histogram)
             title_time: Optional fixed time string for title (e.g., "12:00 UTC").
                         If None, uses current UTC time. Used for deterministic testing.
+            right_pad_bars: Optional extra bars of right-side padding beyond last candle.
 
         Returns:
             Path to generated PNG, or None on failure
@@ -3198,7 +3200,10 @@ class ChartGenerator:
                 if ax_price is not None:
                     # Add right-side padding so the last candle has visual "future" space.
                     try:
-                        right_pad = max(0, int(self.config.right_pad_bars))
+                        if right_pad_bars is None:
+                            right_pad = max(0, int(self.config.right_pad_bars))
+                        else:
+                            right_pad = max(0, int(right_pad_bars))
                     except Exception:
                         right_pad = 0
                     if right_pad and len(df) > 0:

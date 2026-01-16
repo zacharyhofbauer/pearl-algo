@@ -283,6 +283,10 @@ class NQSignalGenerator:
         # Load signal configuration
         signal_settings = service_config.get("signals", {})
 
+        # PEARL bots integration (optional)
+        pearl_bots_cfg = service_config.get("pearl_bots", {}) or {}
+        self._pearl_bots_enabled = bool(pearl_bots_cfg.get("enabled", False))
+
         # Central policy (allow/deny) - keeps signal_generator rules from drifting.
         self._policy: Optional["SignalPolicy"] = None
         if POLICY_AVAILABLE and SignalPolicy is not None:
@@ -629,6 +633,17 @@ class NQSignalGenerator:
 
         # Scan for signals with MTF context and order book data
         raw_signals = self.scanner.scan(df, df_5m=df_5m, df_15m=df_15m, market_data=market_data)
+
+        # Optional: run PEARL bots in parallel and merge into raw signals.
+        if self._pearl_bots_enabled:
+            try:
+                from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+                bot_manager = get_pearl_bot_manager()
+                pearl_signals = bot_manager.analyze_with_bots(market_data)
+                if pearl_signals:
+                    raw_signals.extend(pearl_signals)
+            except Exception as e:
+                logger.debug(f"PEARL bots integration failed: {e}")
 
         # Track raw signal count for diagnostics
         diagnostics.raw_signals = len(raw_signals)

@@ -264,6 +264,41 @@ class PearlBotBacktestAdapter:
                 st = (getattr(self.bot, "strategy_type", "") or "").lower()
                 indicators: Dict[str, Any]
 
+                if st == "composite":
+                    # Composite bot needs full window to build multi-timeframe context.
+                    try:
+                        bot_out = self.bot.analyze({"df": window.copy(), "_backtest": True})
+                    except Exception:
+                        bot_out = []
+                    if not bot_out:
+                        continue
+
+                    # Take the highest-confidence candidate for this bar
+                    try:
+                        signal = max(bot_out, key=lambda s: float(getattr(s, "confidence", 0.0) or 0.0))
+                    except Exception:
+                        signal = bot_out[0]
+
+                    try:
+                        signal.timestamp = ts
+                    except Exception:
+                        pass
+
+                    if float(signal.confidence) < float(self.bot.config.min_confidence):
+                        continue
+                    rr = float(getattr(signal, "risk_reward_ratio", 0.0) or 0.0)
+                    if rr > 0 and rr < 1.0:
+                        continue
+
+                    signals.append(signal)
+                    sd = signal.to_dict()
+                    sd["timestamp"] = ts.isoformat()
+                    signal_dicts.append(sd)
+                    confidences.append(float(signal.confidence))
+                    if rr > 0:
+                        risk_rewards.append(rr)
+                    continue
+
                 if st == "trend_following":
                     indicators = {
                         "trend_direction": float(row.get("trend_direction", 0.0)),

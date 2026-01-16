@@ -16,7 +16,7 @@ telegram_ui:
 risk:
   max_risk_per_trade: 0.015  # Increased from 0.01 for better R:R
   max_drawdown: 0.1
-  stop_loss_atr_multiplier: 2.0  # Reduced from 3.0 for wider stops
+  stop_loss_atr_multiplier: 4.0  # Widened - stops were hitting predictable areas
   take_profit_risk_reward: 1.5  # Reduced from 2.0 for more realistic targets
   min_position_size: 5
   max_position_size: 50
@@ -367,7 +367,7 @@ pearl_bots:
       timeframe: "5m"
       max_positions: 1
       risk_per_trade: 0.015  # Increased risk per trade
-      stop_loss_pct: 0.008  # Wider stops for trend following
+      stop_loss_pct: 0.02  # Very wide stops - let trades breathe
       take_profit_pct: 0.015  # Higher targets
       min_confidence: 0.7
       enable_alerts: true
@@ -383,7 +383,7 @@ pearl_bots:
       timeframe: "5m"
       max_positions: 1
       risk_per_trade: 0.01
-      stop_loss_pct: 0.008
+      stop_loss_pct: 0.02  # Very wide stops - let trades breathe
       take_profit_pct: 0.015
       min_confidence: 0.75
       enable_alerts: true

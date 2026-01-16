@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
+import pandas as pd
+import mplfinance as mpf
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+import matplotlib.dates as mdates
+import matplotlib.image as mpimg
 
 @dataclass(frozen=True)
 class MonitorPaths:
@@ -210,7 +219,7 @@ def _format_time_short(ts: Optional[str]) -> str:
     dt = _parse_iso(ts)
     if dt is None:
         return "--:--"
-    return dt.astimezone(timezone.utc).strftime("%H:%M")
+    return dt.astimezone(ZoneInfo("America/New_York")).strftime("%H:%M")
 
 
 def _format_signal_html(signals: list[dict]) -> str:
@@ -261,7 +270,7 @@ def _format_activity_html(events: list[dict]) -> str:
 def run_monitor() -> None:
     try:
         from PyQt6.QtCore import Qt, QTimer
-        from PyQt6.QtGui import QFont, QPixmap, QGuiApplication
+        from PyQt6.QtGui import QFont, QIcon, QGuiApplication
         from PyQt6.QtWidgets import (
             QApplication,
             QFrame,
@@ -281,49 +290,229 @@ def run_monitor() -> None:
         raise
 
     paths = _guess_paths()
+    et_tz = ZoneInfo("America/New_York")
+    icon_path = Path(__file__).resolve().parent / "assets" / "pearl.png"
+    fallback_icon_path = Path("/home/pearlalgo/pearlLogo.png")
+
+    def _load_app_icon() -> Optional[QIcon]:
+        for candidate in (icon_path, fallback_icon_path):
+            try:
+                if candidate.exists():
+                    icon = QIcon(str(candidate))
+                    if not icon.isNull():
+                        return icon
+            except Exception:
+                continue
+        return None
 
     class ChartWidget(QFrame):
         def __init__(self) -> None:
             super().__init__()
             self.setFrameShape(QFrame.Shape.NoFrame)
-            self._orig: Optional[QPixmap] = None
+            self._last_mtime: Optional[float] = None
+            self._data: Optional[pd.DataFrame] = None
+            self._default_xlim = None
+            self._default_ylim = None
 
             self.meta_label = QLabel("Chart: (no meta)")
             self.meta_label.setStyleSheet("color: #e6edf3; font-size: 13px; font-weight: 600;")
 
-            self.image_label = QLabel()
-            self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            self.image_label.setStyleSheet("background-color: #0d1117;")
+            self.figure = Figure(figsize=(10, 4.2), dpi=100)
+            self.canvas = FigureCanvas(self.figure)
+            self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            self.canvas.setStyleSheet("background-color: #0d1117;")
+
+            self.ax_price = None
+            self.ax_vol = None
+
+            self.crosshair_v = None
+            self.crosshair_h = None
+            self.readout_label = QLabel("")
+            self.readout_label.setStyleSheet(
+                "background-color: rgba(13,17,23,0.85); color: #e6edf3; "
+                "padding: 4px 6px; border: 1px solid #30363d; border-radius: 4px;"
+            )
+            self.readout_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.readout_label.setFixedHeight(24)
 
             layout = QVBoxLayout()
             layout.setContentsMargins(8, 8, 8, 8)
             layout.setSpacing(8)
             layout.addWidget(self.meta_label)
-            layout.addWidget(self.image_label, 1)
+            layout.addWidget(self.readout_label)
+            layout.addWidget(self.canvas, 1)
             self.setLayout(layout)
 
-        def set_chart(self, pix: Optional[QPixmap], meta: Optional[dict]) -> None:
-            self._orig = pix
+            self.canvas.mpl_connect("motion_notify_event", self._on_mouse_move)
+            self.canvas.mpl_connect("scroll_event", self._on_scroll)
+            self.canvas.mpl_connect("button_press_event", self._on_press)
+            self.canvas.mpl_connect("button_release_event", self._on_release)
+            self.canvas.mpl_connect("motion_notify_event", self._on_drag)
+            self.canvas.mpl_connect("button_press_event", self._on_double_click)
+            self._dragging = False
+            self._drag_last = None
+
+        def set_chart_data(self, df: Optional[pd.DataFrame], meta: Optional[dict], mtime: Optional[float]) -> None:
             self.meta_label.setText(_format_chart_meta(meta))
-            self._rescale()
-
-        def resizeEvent(self, event) -> None:  # type: ignore[override]
-            super().resizeEvent(event)
-            self._rescale()
-
-        def _rescale(self) -> None:
-            if self._orig is None or self._orig.isNull():
-                self.image_label.setText("No chart yet.")
-                self.image_label.setStyleSheet("background-color: #0d1117; color: #7d8590;")
+            if mtime is not None and self._last_mtime == mtime:
                 return
-            target = self.image_label.size()
-            scaled = self._orig.scaled(
-                target,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
+            self._last_mtime = mtime
+            self._data = df
+            self._render()
+
+        def show_fallback_image(self, image_path: Path) -> None:
+            try:
+                self.figure.clear()
+                ax = self.figure.add_subplot(1, 1, 1)
+                img = mpimg.imread(str(image_path))
+                ax.imshow(img)
+                ax.axis("off")
+                self.canvas.draw_idle()
+            except Exception:
+                self.readout_label.setText("No chart data.")
+
+        def _render(self) -> None:
+            self.figure.clear()
+            df = self._data
+            if df is None or df.empty:
+                self.readout_label.setText("No chart data.")
+                self.canvas.draw_idle()
+                return
+
+            prepared = df.copy()
+            if "timestamp" in prepared.columns:
+                prepared["timestamp"] = pd.to_datetime(prepared["timestamp"], errors="coerce")
+                prepared = prepared.set_index("timestamp")
+            prepared = prepared.rename(
+                columns={
+                    "open": "Open",
+                    "high": "High",
+                    "low": "Low",
+                    "close": "Close",
+                    "volume": "Volume",
+                }
             )
-            self.image_label.setPixmap(scaled)
+
+            has_volume = "Volume" in prepared.columns
+            if has_volume:
+                self.ax_price = self.figure.add_subplot(2, 1, 1)
+                self.ax_vol = self.figure.add_subplot(2, 1, 2, sharex=self.ax_price)
+            else:
+                self.ax_price = self.figure.add_subplot(1, 1, 1)
+                self.ax_vol = None
+
+            style = mpf.make_mpf_style(base_mpf_style="nightclouds", rc={"font.size": 9})
+            mpf.plot(
+                prepared,
+                ax=self.ax_price,
+                volume=self.ax_vol,
+                type="candle",
+                style=style,
+                show_nontrading=False,
+                warn_too_much_data=5000,
+            )
+
+            self.ax_price.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+            self.ax_price.set_ylabel("")
+            if self.ax_vol is not None:
+                self.ax_vol.set_ylabel("")
+
+            self.crosshair_v = Line2D([], [], color="#7d8590", linewidth=0.8, alpha=0.7)
+            self.crosshair_h = Line2D([], [], color="#7d8590", linewidth=0.8, alpha=0.7)
+            self.ax_price.add_line(self.crosshair_v)
+            self.ax_price.add_line(self.crosshair_h)
+
+            self._default_xlim = self.ax_price.get_xlim()
+            self._default_ylim = self.ax_price.get_ylim()
+            self.canvas.draw_idle()
+
+        def _nearest_row(self, xdata: float) -> Optional[pd.Series]:
+            if self._data is None or self._data.empty:
+                return None
+            try:
+                ts = mdates.num2date(xdata).replace(tzinfo=None)
+                df = self._data.copy()
+                if "timestamp" in df.columns:
+                    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+                    idx = df["timestamp"]
+                else:
+                    idx = pd.to_datetime(df.index)
+                if idx.empty:
+                    return None
+                i = (idx - ts).abs().idxmin()
+                return df.loc[i]
+            except Exception:
+                return None
+
+        def _on_mouse_move(self, event) -> None:
+            if event.inaxes != self.ax_price or event.xdata is None or event.ydata is None:
+                return
+            row = self._nearest_row(event.xdata)
+            if row is not None:
+                ts = row.get("timestamp")
+                if ts is None and isinstance(row.name, pd.Timestamp):
+                    ts = row.name
+                if isinstance(ts, pd.Timestamp):
+                    ts_str = ts.strftime("%H:%M")
+                else:
+                    ts_str = str(ts)[:16]
+                self.readout_label.setText(
+                    f"{ts_str}  O:{row.get('open', row.get('Open')):.2f}  "
+                    f"H:{row.get('high', row.get('High')):.2f}  "
+                    f"L:{row.get('low', row.get('Low')):.2f}  "
+                    f"C:{row.get('close', row.get('Close')):.2f}  "
+                    f"V:{row.get('volume', row.get('Volume', 0))}"
+                )
+            self.crosshair_v.set_data([event.xdata, event.xdata], self.ax_price.get_ylim())
+            self.crosshair_h.set_data(self.ax_price.get_xlim(), [event.ydata, event.ydata])
+            self.canvas.draw_idle()
+
+        def _on_scroll(self, event) -> None:
+            if event.inaxes != self.ax_price:
+                return
+            scale_factor = 1.2 if event.button == "up" else 0.8
+            xlim = self.ax_price.get_xlim()
+            ylim = self.ax_price.get_ylim()
+            x_center = event.xdata
+            y_center = event.ydata
+            if x_center is None or y_center is None:
+                return
+            new_width = (xlim[1] - xlim[0]) * scale_factor
+            new_height = (ylim[1] - ylim[0]) * scale_factor
+            self.ax_price.set_xlim([x_center - new_width / 2, x_center + new_width / 2])
+            self.ax_price.set_ylim([y_center - new_height / 2, y_center + new_height / 2])
+            self.canvas.draw_idle()
+
+        def _on_press(self, event) -> None:
+            if event.inaxes != self.ax_price or event.button != 1:
+                return
+            self._dragging = True
+            self._drag_last = (event.xdata, event.ydata)
+
+        def _on_release(self, event) -> None:
+            self._dragging = False
+            self._drag_last = None
+
+        def _on_drag(self, event) -> None:
+            if not self._dragging or event.inaxes != self.ax_price:
+                return
+            if self._drag_last is None or event.xdata is None or event.ydata is None:
+                return
+            dx = self._drag_last[0] - event.xdata
+            dy = self._drag_last[1] - event.ydata
+            xlim = self.ax_price.get_xlim()
+            ylim = self.ax_price.get_ylim()
+            self.ax_price.set_xlim([xlim[0] + dx, xlim[1] + dx])
+            self.ax_price.set_ylim([ylim[0] + dy, ylim[1] + dy])
+            self._drag_last = (event.xdata, event.ydata)
+            self.canvas.draw_idle()
+
+        def _on_double_click(self, event) -> None:
+            if event.dblclick and self.ax_price is not None:
+                if self._default_xlim and self._default_ylim:
+                    self.ax_price.set_xlim(self._default_xlim)
+                    self.ax_price.set_ylim(self._default_ylim)
+                    self.canvas.draw_idle()
 
     class MainWindow(QMainWindow):
         def __init__(self) -> None:
@@ -449,6 +638,60 @@ def run_monitor() -> None:
 
             # Center chart
             self.chart = ChartWidget()
+            self.settings_path = paths.exports_dir / "monitor_settings.json"
+            self.settings = self._load_settings()
+            self._ohlc_mtime: Optional[float] = None
+            self._ohlc_df: Optional[pd.DataFrame] = None
+
+            controls_frame = QFrame()
+            controls_layout = QHBoxLayout()
+            controls_layout.setContentsMargins(8, 4, 8, 4)
+            controls_layout.setSpacing(6)
+
+            def make_button(label: str, handler) -> QPushButton:
+                btn = QPushButton(label)
+                btn.setStyleSheet(
+                    "background-color: #161b22; color: #e6edf3; border: 1px solid #30363d; padding: 4px 8px;"
+                )
+                btn.clicked.connect(handler)  # type: ignore[arg-type]
+                return btn
+
+            def make_toggle(label: str, key: str) -> QToolButton:
+                btn = QToolButton()
+                btn.setText(label)
+                btn.setCheckable(True)
+                btn.setChecked(bool(self.settings.get(key, True)))
+                btn.setStyleSheet(
+                    "background-color: #161b22; color: #e6edf3; border: 1px solid #30363d; padding: 4px 8px;"
+                )
+                btn.clicked.connect(lambda _c, k=key, b=btn: self._set_setting(k, b.isChecked()))  # type: ignore[arg-type]
+                return btn
+
+            controls_layout.addWidget(QLabel("TF"))
+            controls_layout.addWidget(make_button("1m", lambda: self._set_setting("timeframe", "1m")))
+            controls_layout.addWidget(make_button("5m", lambda: self._set_setting("timeframe", "5m")))
+            controls_layout.addWidget(make_button("15m", lambda: self._set_setting("timeframe", "15m")))
+
+            controls_layout.addWidget(QLabel("Lookback"))
+            controls_layout.addWidget(make_button("2h", lambda: self._set_setting("lookback_hours", 2)))
+            controls_layout.addWidget(make_button("6h", lambda: self._set_setting("lookback_hours", 6)))
+            controls_layout.addWidget(make_button("12h", lambda: self._set_setting("lookback_hours", 12)))
+            controls_layout.addWidget(make_button("24h", lambda: self._set_setting("lookback_hours", 24)))
+
+            self.right_pad_label = QLabel(f"Pad {int(self.settings.get('right_pad_bars', 40))}")
+            self.right_pad_label.setStyleSheet("color: #7d8590;")
+            controls_layout.addWidget(self.right_pad_label)
+            controls_layout.addWidget(make_button("-", lambda: self._adjust_right_pad(-5)))
+            controls_layout.addWidget(make_button("+", lambda: self._adjust_right_pad(5)))
+
+            controls_layout.addWidget(make_toggle("MA", "show_ma"))
+            controls_layout.addWidget(make_toggle("VWAP", "show_vwap"))
+            controls_layout.addWidget(make_toggle("RSI", "show_rsi"))
+            controls_layout.addWidget(make_toggle("Pressure", "show_pressure"))
+            controls_layout.addWidget(make_button("Reset", self._reset_settings))
+
+            controls_layout.addStretch(1)
+            controls_frame.setLayout(controls_layout)
 
             # Right panel
             right_frame = QFrame()
@@ -486,7 +729,14 @@ def run_monitor() -> None:
             content_layout.setContentsMargins(0, 0, 0, 0)
             content_layout.setSpacing(0)
             content_layout.addWidget(left_frame)
-            content_layout.addWidget(self.chart, 1)
+            chart_container = QVBoxLayout()
+            chart_container.setContentsMargins(0, 0, 0, 0)
+            chart_container.setSpacing(0)
+            chart_widget = QWidget()
+            chart_widget.setLayout(chart_container)
+            chart_container.addWidget(controls_frame)
+            chart_container.addWidget(self.chart, 1)
+            content_layout.addWidget(chart_widget, 1)
             content_layout.addWidget(right_frame)
             content.setLayout(content_layout)
 
@@ -512,7 +762,16 @@ def run_monitor() -> None:
                 except Exception:
                     pass
 
-            for f in [paths.state_json, paths.signals_jsonl, paths.events_jsonl, paths.chart_png, paths.chart_meta, paths.agent_log]:
+            for f in [
+                paths.state_json,
+                paths.signals_jsonl,
+                paths.events_jsonl,
+                paths.chart_png,
+                paths.chart_meta,
+                paths.agent_log,
+                paths.exports_dir / "dashboard_latest.ohlc.csv",
+                self.settings_path,
+            ]:
                 if f.exists():
                     try:
                         self.watcher.addPath(str(f))
@@ -525,6 +784,53 @@ def run_monitor() -> None:
             self.timer.start()
 
             self.refresh()
+
+        def _load_settings(self) -> dict:
+            try:
+                if self.settings_path.exists():
+                    return json.loads(self.settings_path.read_text())
+            except Exception:
+                pass
+            return {
+                "timeframe": "5m",
+                "lookback_hours": 12,
+                "right_pad_bars": 40,
+                "show_ma": True,
+                "show_vwap": True,
+                "show_rsi": True,
+                "show_pressure": True,
+            }
+
+        def _save_settings(self) -> None:
+            try:
+                self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp_path = Path(str(self.settings_path) + ".tmp")
+                with open(tmp_path, "w") as f:
+                    json.dump(self.settings, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, self.settings_path)
+            except Exception:
+                pass
+
+        def _set_setting(self, key: str, value: Any) -> None:
+            self.settings[key] = value
+            if key == "right_pad_bars":
+                self.right_pad_label.setText(f"Pad {int(value)}")
+            self._save_settings()
+
+        def _adjust_right_pad(self, delta: int) -> None:
+            try:
+                cur = int(self.settings.get("right_pad_bars", 40))
+            except Exception:
+                cur = 40
+            cur = max(0, min(200, cur + int(delta)))
+            self._set_setting("right_pad_bars", cur)
+
+        def _reset_settings(self) -> None:
+            self.settings = self._load_settings()
+            self.right_pad_label.setText(f"Pad {int(self.settings.get('right_pad_bars', 40))}")
+            self._save_settings()
 
         def refresh(self) -> None:
             state = _read_json(paths.state_json) or {}
@@ -551,7 +857,7 @@ def run_monitor() -> None:
             if dt is not None:
                 age_s = int((datetime.now(timezone.utc) - dt).total_seconds())
             age_str = f"{age_s}s ago" if age_s is not None and age_s >= 0 else "unknown"
-            now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
+            now_str = datetime.now(et_tz).strftime("%H:%M ET")
 
             self.status_label.setText(
                 " ".join(
@@ -602,17 +908,62 @@ def run_monitor() -> None:
 
             # Chart
             meta = _read_json(paths.chart_meta)
-            pix = None
-            if paths.chart_png.exists():
+            ohlc_path = paths.exports_dir / "dashboard_latest.ohlc.csv"
+            if ohlc_path.exists():
                 try:
-                    pix = QPixmap(str(paths.chart_png))
+                    mtime = ohlc_path.stat().st_mtime
+                    if self._ohlc_mtime != mtime:
+                        self._ohlc_df = pd.read_csv(ohlc_path)
+                        self._ohlc_mtime = mtime
+                    self.chart.set_chart_data(self._ohlc_df, meta, self._ohlc_mtime)
                 except Exception:
-                    pix = None
-            self.chart.set_chart(pix, meta)
+                    self.chart.set_chart_data(None, meta, None)
+            elif paths.chart_png.exists():
+                self.chart.show_fallback_image(paths.chart_png)
+            else:
+                self.chart.set_chart_data(None, meta, None)
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    app_icon = _load_app_icon()
+    if app_icon is not None:
+        app.setWindowIcon(app_icon)
     win = MainWindow()
+    if app_icon is not None:
+        win.setWindowIcon(app_icon)
+    # Show as normal maximized window (not fullscreen) so user can resize/close
+    try:
+        target = None
+        for s in QGuiApplication.screens():
+            g = s.geometry()
+            if int(g.width()) == 2560 and int(g.height()) == 720:
+                target = s
+                break
+        if target is not None:
+            win.show()  # ensure window handle exists
+            try:
+                handle = win.windowHandle()
+                if handle is not None:
+                    handle.setScreen(target)
+            except Exception:
+                pass
+            try:
+                win.setGeometry(target.geometry())
+            except Exception:
+                pass
+        win.showMaximized()
+    except Exception:
+        win.showMaximized()
+    sys.exit(app.exec())
+
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app_icon = _load_app_icon()
+    if app_icon is not None:
+        app.setWindowIcon(app_icon)
+    win = MainWindow()
+    if app_icon is not None:
+        win.setWindowIcon(app_icon)
     # Show as normal maximized window (not fullscreen) so user can resize/close
     try:
         target = None

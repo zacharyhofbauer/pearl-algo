@@ -134,15 +134,52 @@ class PearlBotManager:
 
         This ensures compatibility with the existing signal processing pipeline.
         """
+        # Compute risk/reward in the same shape expected by SignalPolicy + signal generator.
+        rr = 0.0
+        try:
+            entry = float(getattr(lux_signal, "entry_price", 0.0) or 0.0)
+            stop = float(getattr(lux_signal, "stop_loss", 0.0) or 0.0)
+            target = float(getattr(lux_signal, "take_profit", 0.0) or 0.0)
+            direction = str(getattr(lux_signal, "direction", "long") or "long").lower()
+            if entry > 0 and stop > 0 and target > 0:
+                if direction == "long":
+                    risk = entry - stop
+                    reward = target - entry
+                else:
+                    risk = stop - entry
+                    reward = entry - target
+                if risk > 0:
+                    rr = float(reward / risk)
+        except Exception:
+            rr = 0.0
+
+        mtf_alignment_score = 0.0
+        try:
+            feats = getattr(lux_signal, "features", {}) or {}
+            if isinstance(feats, dict):
+                mtf_alignment_score = float(feats.get("mtf_alignment_score", 0.0) or 0.0)
+        except Exception:
+            mtf_alignment_score = 0.0
+
+        # Prefer configured bot key for later status updates.
+        bot_cfg = self.bot_configs.get(bot_name, {}) or {}
+        symbol = str(bot_cfg.get("symbol") or getattr(getattr(self.bots.get(bot_name), "config", None), "symbol", "") or "MNQ")
+        timeframe = str(bot_cfg.get("timeframe") or getattr(getattr(self.bots.get(bot_name), "config", None), "timeframe", "") or "")
+
         return {
-            "type": f"lux_algo_{lux_signal.bot_name.lower()}",
+            "type": f"pearl_bot_{bot_name}",
+            "symbol": symbol,
+            "timeframe": timeframe,
             "direction": lux_signal.direction,
             "confidence": lux_signal.confidence,
             "entry_price": lux_signal.entry_price,
             "stop_loss": lux_signal.stop_loss,
             "take_profit": lux_signal.take_profit,
+            "risk_reward": rr,
+            "mtf_alignment_score": mtf_alignment_score,
             "reason": lux_signal.reason,
             "bot_name": lux_signal.bot_name,
+            "pearl_bot_key": bot_name,
             "bot_version": lux_signal.bot_version,
             "indicators_used": lux_signal.indicators_used,
             "features": lux_signal.features,
@@ -151,6 +188,8 @@ class PearlBotManager:
             "signal_id": lux_signal.signal_id,
             "timestamp": lux_signal.timestamp.isoformat(),
             # Additional metadata for tracking
+            "pearl_bot": True,
+            # Backward compatibility (deprecated)
             "lux_algo_bot": True,
             "strategy_type": self.bots[bot_name].strategy_type,
         }
@@ -247,6 +286,32 @@ class PearlBotManager:
                             "require_volume_confirmation": True,
                             "min_momentum_acceleration": 0.001
                         }
+                    },
+                    "composite": {
+                        "enabled": False,
+                        "description": "Composite bot combining trend/breakout/reversal/BOS with multi-timeframe context",
+                        "bot_class": "CompositeBot",
+                        "symbol": "MNQ",
+                        "timeframe": "1m",
+                        "max_positions": 1,
+                        "risk_per_trade": 0.01,
+                        "stop_loss_pct": 0.006,
+                        "take_profit_pct": 0.012,
+                        "min_confidence": 0.70,
+                        "enable_alerts": True,
+                        "parameters": {
+                            "timeframes": ["1m", "5m", "15m", "1h", "4h"],
+                            "max_candidates": 1,
+                            "require_mtf_alignment": True,
+                            "indicators": {
+                                "enabled": [
+                                    "power_channel",
+                                    "tbt_chartprime",
+                                    "supply_demand_zones",
+                                    "smart_money_divergence",
+                                ]
+                            },
+                        },
                     },
                     "mean_reverter": {
                         "enabled": False,  # Disabled by default as it's more risky

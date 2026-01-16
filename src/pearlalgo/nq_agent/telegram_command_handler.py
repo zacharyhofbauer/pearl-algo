@@ -14,7 +14,9 @@ Simple and intuitive nested button menu system.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Any
@@ -32,7 +34,7 @@ from pearlalgo.utils.telegram_alerts import (
 
 try:
     from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
-    from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
+    from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
@@ -140,6 +142,7 @@ class TelegramCommandHandler:
 
         # Callback query handler for button presses
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_message))
 
     def _count_open_challenge_positions(self) -> int:
         """Count open challenge positions from signals.jsonl file."""
@@ -186,12 +189,12 @@ class TelegramCommandHandler:
 
         # Build dynamic button labels
         # Signals button - show count if active
-        signals_label = "⚡ Signals & Trades"
+        signals_label = "📡 Signals & Trades"
         if has_active:
             signals_label = f"⚡ Signals • {total_active} Open"
         
         # Performance button - show daily P&L
-        performance_label = "💎 Performance"
+        performance_label = "📈 Performance"
         if daily_pnl != 0:
             pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
             pnl_sign = "+" if daily_pnl >= 0 else ""
@@ -199,7 +202,7 @@ class TelegramCommandHandler:
                 pnl_display = f"{pnl_sign}${abs(daily_pnl)/1000:.1f}k"
             else:
                 pnl_display = f"{pnl_sign}${abs(daily_pnl):.0f}"
-            performance_label = f"💎 Performance {pnl_emoji}{pnl_display}"
+            performance_label = f"📈 Performance {pnl_emoji}{pnl_display}"
         
         # Status button - show contextual info
         status_label = "🛰️ Status"
@@ -238,17 +241,17 @@ class TelegramCommandHandler:
             pass
         
         return [
-            # Row 1: Core Trading Functions
+            # Row 1: Signals + Performance
             [
                 InlineKeyboardButton(signals_label, callback_data="menu:signals"),
                 InlineKeyboardButton(performance_label, callback_data="menu:performance"),
             ],
-            # Row 2: System Monitoring + Refresh + Chart
+            # Row 2: Status + quick actions + System
             [
                 InlineKeyboardButton(status_label, callback_data="menu:status"),
                 InlineKeyboardButton("🔄", callback_data="action:refresh_dashboard"),
                 InlineKeyboardButton("📊", callback_data="action:toggle_chart"),
-                InlineKeyboardButton("🎛️ System Control", callback_data="menu:system"),
+                InlineKeyboardButton("🎛️ System", callback_data="menu:system"),
             ],
             # Row 3: Bots
             [
@@ -288,6 +291,81 @@ class TelegramCommandHandler:
             # No state available, show simple menu
             text = "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:"
         await update.message.reply_text(text, reply_markup=reply_markup)
+
+    async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle plain text messages for AI patch wizard."""
+        if not update.message:
+            return
+        if not await self._check_authorized(update):
+            return
+
+        text = str(update.message.text or "").strip()
+        if not text:
+            return
+
+        state = None
+        try:
+            state = getattr(self, "_patch_wizard_state", {}).get("state")
+        except Exception:
+            state = None
+
+        ai_state = None
+        try:
+            ai_state = getattr(self, "_ai_ops_state", {}).get("state")
+        except Exception:
+            ai_state = None
+
+        if ai_state == "awaiting_aiops_file_text":
+            rel_path = text
+            if self._is_path_blocked(rel_path):
+                await update.message.reply_text("❌ Blocked path. Send a different file path.")
+                return
+            self._ai_ops_state["file"] = rel_path
+            self._ai_ops_state["state"] = "awaiting_aiops_instruction"
+            await update.message.reply_text(
+                "Send the instruction text now.\n\nExample:\nreduce stop_loss_pct by 0.002"
+            )
+            return
+
+        if ai_state == "awaiting_aiops_instruction":
+            rel_path = None
+            try:
+                rel_path = getattr(self, "_ai_ops_state", {}).get("file")
+            except Exception:
+                rel_path = None
+            if not rel_path:
+                await update.message.reply_text("No file selected. Tap AI Ops again.")
+                return
+            instruction = text
+            self._ai_ops_state["instruction"] = instruction
+            self._ai_ops_state["state"] = "generating"
+            await self._run_ai_ops_patch(update, context)
+            return
+
+        if state == "awaiting_file_text":
+            rel_path = text
+            if self._is_path_blocked(rel_path):
+                await update.message.reply_text("❌ Blocked path. Send a different file path.")
+                return
+            self._patch_wizard_state["file"] = rel_path
+            self._patch_wizard_state["state"] = "awaiting_instruction"
+            await update.message.reply_text(
+                "Send the instruction text now.\n\nExample:\nadd jitter to retry backoff"
+            )
+            return
+
+        if state == "awaiting_instruction":
+            rel_path = None
+            try:
+                rel_path = getattr(self, "_patch_wizard_state", {}).get("file")
+            except Exception:
+                rel_path = None
+            if not rel_path:
+                await update.message.reply_text("No file selected. Tap AI Patch Wizard again.")
+                return
+            instruction = text
+            self._patch_wizard_state["state"] = None
+            await self._run_ai_patch(update, context, rel_path=rel_path, task=instruction)
 
     async def handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show help information."""
@@ -530,6 +608,14 @@ class TelegramCommandHandler:
 
             if callback_data.startswith("pb:"):
                 await self._handle_pearl_backtest_callback(update, context, callback_data)
+                return
+
+            if callback_data.startswith("patch:"):
+                await self._handle_patch_callback(query, callback_data)
+                return
+
+            if callback_data.startswith("aiops:"):
+                await self._handle_ai_ops_callback(query, callback_data)
                 return
 
             # Handle other actions (from notifier, etc.)
@@ -1227,6 +1313,9 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🤖 Pearl Bots", callback_data="menu:pearl_bots"),
             ],
             [
+                InlineKeyboardButton("🧠 AI Ops", callback_data="action:ai_ops"),
+            ],
+            [
                 InlineKeyboardButton("🧪 Backtest Bots", callback_data="strategy_review:backtest"),
                 InlineKeyboardButton("📑 Backtest Reports", callback_data="strategy_review:reports"),
             ],
@@ -1500,11 +1589,381 @@ class TelegramCommandHandler:
                 ),
             ],
             [
-                InlineKeyboardButton("🧩 AI Patch", callback_data="action:ai_patch_help"),
+                InlineKeyboardButton("🧩 AI Patch Wizard", callback_data="action:ai_patch_wizard"),
             ],
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
         await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    async def _ensure_openai_ready(self, target: Any) -> bool:
+        """Ensure OpenAI dependency and API key are set."""
+        if not OPENAI_AVAILABLE:
+            msg = "❌ OpenAI Not Available (dependency not installed).\n\nInstall with: pip install -e '.[llm]'"
+        elif not os.environ.get("OPENAI_API_KEY"):
+            msg = "❌ OPENAI_API_KEY is not set."
+        else:
+            return True
+
+        if hasattr(target, "edit_message_text"):
+            await target.edit_message_text(msg)
+        elif hasattr(target, "message") and getattr(target, "message", None):
+            await target.message.reply_text(msg)
+        elif hasattr(target, "reply_text"):
+            await target.reply_text(msg)
+        return False
+
+    async def _show_ai_patch_wizard(self, query: CallbackQuery) -> None:
+        """Show AI patch wizard with file selection buttons."""
+        if not await self._ensure_openai_ready(query):
+            return
+        try:
+            # Best-effort: store wizard state on instance-scoped dict
+            if not hasattr(self, "_patch_wizard_state"):
+                self._patch_wizard_state = {}
+            self._patch_wizard_state["state"] = "awaiting_file"
+            self._patch_wizard_state.pop("file", None)
+        except Exception:
+            pass
+
+        lines = ["🧩 *AI Patch Wizard*", "", "Select a file:"]
+        keyboard = [
+            [InlineKeyboardButton("src/pearlalgo/utils/retry.py", callback_data="patch:file:src/pearlalgo/utils/retry.py")],
+            [InlineKeyboardButton("src/pearlalgo/nq_agent/telegram_command_handler.py", callback_data="patch:file:src/pearlalgo/nq_agent/telegram_command_handler.py")],
+            [InlineKeyboardButton("src/pearlalgo/nq_agent/service.py", callback_data="patch:file:src/pearlalgo/nq_agent/service.py")],
+            [InlineKeyboardButton("config/config.yaml", callback_data="patch:file:config/config.yaml")],
+            [InlineKeyboardButton("docs/AI_PATCH_GUIDE.md", callback_data="patch:file:docs/AI_PATCH_GUIDE.md")],
+            [InlineKeyboardButton("Other file (type path)", callback_data="patch:other")],
+            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+        ]
+        await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    async def _handle_patch_callback(self, query: CallbackQuery, callback_data: str) -> None:
+        """Handle AI patch wizard callbacks."""
+        if not hasattr(self, "_patch_wizard_state"):
+            self._patch_wizard_state = {}
+
+        if callback_data.startswith("patch:file:"):
+            rel_path = callback_data[len("patch:file:") :]
+            if self._is_path_blocked(rel_path):
+                await query.edit_message_text("❌ Blocked path. Pick a different file.")
+                return
+            self._patch_wizard_state["file"] = rel_path
+            self._patch_wizard_state["state"] = "awaiting_instruction"
+            await query.edit_message_text(
+                "Send the instruction text now.\n\nExample:\nadd jitter to retry backoff"
+            )
+            return
+
+    async def _show_ai_ops_menu(self, query: CallbackQuery) -> None:
+        """Show AI ops menu for bot selection."""
+        if not await self._ensure_openai_ready(query):
+            return
+        try:
+            from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+            bot_manager = get_pearl_bot_manager()
+            bot_names = list(bot_manager.bot_configs.keys())
+        except Exception:
+            bot_names = []
+
+        lines = ["🧠 *AI Ops*", "", "Select a bot:"]
+        keyboard = []
+        for name in bot_names[:8]:
+            keyboard.append([InlineKeyboardButton(name, callback_data=f"aiops:bot:{name}")])
+        keyboard.append([InlineKeyboardButton("NQ Agent", callback_data="aiops:bot:nq_agent")])
+        keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+
+        if not hasattr(self, "_ai_ops_state"):
+            self._ai_ops_state = {}
+        self._ai_ops_state.clear()
+        self._ai_ops_state["state"] = "awaiting_bot"
+
+        await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    async def _handle_ai_ops_callback(self, query: CallbackQuery, callback_data: str) -> None:
+        """Handle AI ops wizard callbacks."""
+        if not hasattr(self, "_ai_ops_state"):
+            self._ai_ops_state = {}
+
+        if callback_data.startswith("aiops:bot:"):
+            bot = callback_data[len("aiops:bot:") :]
+            self._ai_ops_state["bot"] = bot
+            self._ai_ops_state["state"] = "awaiting_scope"
+            keyboard = [
+                [InlineKeyboardButton("Config change", callback_data="aiops:scope:config")],
+                [InlineKeyboardButton("Code change", callback_data="aiops:scope:code")],
+                [InlineKeyboardButton("Both (config+code)", callback_data="aiops:scope:both")],
+                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            ]
+            await query.edit_message_text(
+                f"Bot: `{bot}`\n\nSelect change scope:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown",
+            )
+            return
+
+        if callback_data.startswith("aiops:scope:"):
+            scope = callback_data[len("aiops:scope:") :]
+            self._ai_ops_state["scope"] = scope
+            if scope == "config":
+                self._ai_ops_state["file"] = "config/config.yaml"
+                self._ai_ops_state["state"] = "awaiting_aiops_instruction"
+                await query.edit_message_text(
+                    "Send the instruction text now.\n\nExample:\nreduce stop_loss_pct by 0.002"
+                )
+                return
+
+            lines = ["Select a file:"]
+            keyboard = [
+                [InlineKeyboardButton("src/pearlalgo/strategies/pearl_bots/bot_template.py", callback_data="aiops:file:src/pearlalgo/strategies/pearl_bots/bot_template.py")],
+                [InlineKeyboardButton("src/pearlalgo/strategies/pearl_bots_integration.py", callback_data="aiops:file:src/pearlalgo/strategies/pearl_bots_integration.py")],
+                [InlineKeyboardButton("src/pearlalgo/strategies/pearl_bots/market_regime_detector.py", callback_data="aiops:file:src/pearlalgo/strategies/pearl_bots/market_regime_detector.py")],
+                [InlineKeyboardButton("config/config.yaml", callback_data="aiops:file:config/config.yaml")],
+                [InlineKeyboardButton("Other file (type path)", callback_data="aiops:other")],
+                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            ]
+            self._ai_ops_state["state"] = "awaiting_aiops_file"
+            await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            return
+
+        if callback_data.startswith("aiops:file:"):
+            rel_path = callback_data[len("aiops:file:") :]
+            if self._is_path_blocked(rel_path):
+                await query.edit_message_text("❌ Blocked path. Pick a different file.")
+                return
+            self._ai_ops_state["file"] = rel_path
+            self._ai_ops_state["state"] = "awaiting_aiops_instruction"
+            await query.edit_message_text(
+                "Send the instruction text now.\n\nExample:\nreduce stop_loss_pct by 0.002"
+            )
+            return
+
+        if callback_data == "aiops:other":
+            self._ai_ops_state["state"] = "awaiting_aiops_file_text"
+            self._ai_ops_state.pop("file", None)
+            await query.edit_message_text(
+                "Send the file path now.\n\nExample:\nsrc/pearlalgo/strategies/pearl_bots/bot_template.py"
+            )
+            return
+
+        if callback_data == "aiops:accept":
+            await self._apply_ai_ops_patch(query)
+            return
+
+        if callback_data == "aiops:decline":
+            self._ai_ops_state.clear()
+            await query.edit_message_text("Declined. No changes applied.")
+            return
+
+        if callback_data.startswith("aiops:restart:"):
+            action = callback_data.split(":")[-1]
+            await self._handle_ai_ops_restart(query, action)
+            return
+
+    def _load_ai_ops_memory(self) -> dict:
+        path = self.state_dir / "ai_ops_memory.json"
+        if not path.exists():
+            return {"entries": []}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"entries": []}
+
+    def _save_ai_ops_memory(self, memory: dict) -> None:
+        path = self.state_dir / "ai_ops_memory.json"
+        try:
+            path.write_text(json.dumps(memory, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    async def _run_ai_ops_patch(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Generate AI ops patch and present accept/decline."""
+        if not await self._ensure_openai_ready(update):
+            return
+        state = getattr(self, "_ai_ops_state", {})
+        bot = state.get("bot")
+        rel_path = state.get("file")
+        instruction = state.get("instruction")
+        if not bot or not rel_path or not instruction:
+            await update.message.reply_text("AI Ops state missing. Restart AI Ops.")
+            return
+
+        if self._is_path_blocked(rel_path):
+            await update.message.reply_text("❌ Blocked path. Select a different file.")
+            return
+
+        memory = self._load_ai_ops_memory()
+        memory_entries = memory.get("entries", [])[-5:]
+        memory_summary = "\n".join(
+            f"- {m.get('timestamp')} {m.get('bot')}: {m.get('summary')}" for m in memory_entries
+        )
+
+        perf_summary = {}
+        bot_config = {}
+        if bot != "nq_agent":
+            try:
+                from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+                bot_manager = get_pearl_bot_manager()
+                bot_config = bot_manager.bot_configs.get(bot, {})
+                perf_summary = bot_manager.get_bot_performance(bot).get("performance", {}) if hasattr(bot_manager, "get_bot_performance") else {}
+            except Exception:
+                perf_summary = {}
+        else:
+            try:
+                perf_summary = self._read_latest_metrics() or {}
+            except Exception:
+                perf_summary = {}
+
+        try:
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            target = (project_root / rel_path).resolve()
+            if project_root not in target.parents and target != project_root:
+                await update.message.reply_text("❌ Blocked path.")
+                return
+            content = target.read_text(encoding="utf-8")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Could not read file: {e}")
+            return
+
+        additional_context = (
+            f"BOT: {bot}\n"
+            f"BOT_CONFIG: {json.dumps(bot_config, indent=2)}\n"
+            f"PERFORMANCE: {json.dumps(perf_summary, indent=2)}\n"
+            f"MEMORY:\n{memory_summary or '- none'}"
+        )
+
+        try:
+            client = OpenAIClient()
+            diff = client.generate_patch(files={rel_path: content}, task=instruction, additional_context=additional_context)
+        except OpenAIAPIKeyMissingError as e:
+            await update.message.reply_text(f"❌ API Key missing: {e}")
+            return
+        except OpenAINotAvailableError as e:
+            await update.message.reply_text(f"❌ Not Available: {e}\n\nInstall with: pip install -e '.[llm]'")
+            return
+        except OpenAIAPIError as e:
+            await update.message.reply_text(f"❌ API Error: {e}")
+            return
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {e}")
+            return
+
+        exports_dir = self.state_dir / "exports"
+        exports_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        diff_path = exports_dir / f"ai_ops_patch_{ts}.diff"
+        try:
+            diff_path.write_text(diff or "", encoding="utf-8")
+        except Exception:
+            pass
+
+        self._ai_ops_state["diff"] = diff
+        self._ai_ops_state["diff_path"] = str(diff_path)
+
+        preview = diff or "(No diff returned)"
+        if len(preview) > 3500:
+            preview = preview[:3500] + "\n... (truncated)"
+
+        text = (
+            f"🧠 AI Ops Proposal\n"
+            f"Bot: `{bot}`\n"
+            f"File: `{rel_path}`\n\n"
+            f"{preview}"
+        )
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Accept", callback_data="aiops:accept"),
+                InlineKeyboardButton("❌ Decline", callback_data="aiops:decline"),
+            ],
+            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+        ]
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    async def _apply_ai_ops_patch(self, query: CallbackQuery) -> None:
+        state = getattr(self, "_ai_ops_state", {})
+        diff_path = state.get("diff_path")
+        if not diff_path or not Path(diff_path).exists():
+            await query.edit_message_text("❌ Patch not found. Re-run AI Ops.")
+            return
+
+        success, details = self._apply_patch_diff(Path(diff_path))
+        if not success:
+            await query.edit_message_text(f"❌ Patch apply failed:\n{details}")
+            return
+
+        memory = self._load_ai_ops_memory()
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "bot": state.get("bot"),
+            "summary": state.get("instruction"),
+            "file": state.get("file"),
+        }
+        memory["entries"] = (memory.get("entries", []) + [entry])[-20:]
+        self._save_ai_ops_memory(memory)
+
+        keyboard = [
+            [InlineKeyboardButton("Restart Agent", callback_data="aiops:restart:agent")],
+            [InlineKeyboardButton("Restart Telegram", callback_data="aiops:restart:telegram")],
+            [InlineKeyboardButton("Restart Gateway", callback_data="aiops:restart:gateway")],
+            [InlineKeyboardButton("Restart All", callback_data="aiops:restart:all")],
+            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+        ]
+        await query.edit_message_text(
+            "✅ Patch applied. Select a restart option:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    def _apply_patch_diff(self, diff_path: Path) -> tuple[bool, str]:
+        try:
+            result = subprocess.run(
+                ["git", "apply", "--whitespace=nowarn", str(diff_path)],
+                cwd=str(Path(__file__).resolve().parent.parent.parent.parent),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                return True, result.stdout.strip() or "applied"
+            return False, result.stderr.strip() or result.stdout.strip()
+        except Exception as e:
+            return False, str(e)
+
+    async def _handle_ai_ops_restart(self, query: CallbackQuery, action: str) -> None:
+        sc = getattr(self, "service_controller", None)
+        if sc is None:
+            await query.edit_message_text("❌ Service controller not available.")
+            return
+
+        if action == "agent":
+            result = await sc.restart_agent(background=True)
+        elif action == "telegram":
+            result = await sc.restart_command_handler()
+        elif action == "gateway":
+            result = await sc.restart_gateway()
+        elif action == "all":
+            res_agent = await sc.restart_agent(background=True)
+            res_tel = await sc.restart_command_handler()
+            res_gw = await sc.restart_gateway()
+            result = {
+                "message": "Restarted agent, telegram, gateway",
+                "details": f"Agent: {res_agent.get('message')}\nTelegram: {res_tel.get('message')}\nGateway: {res_gw.get('message')}",
+            }
+        else:
+            await query.edit_message_text("Unknown restart option.")
+            return
+
+        msg = result.get("message", "Restart executed.")
+        details = result.get("details")
+        if details:
+            msg = f"{msg}\n\n{details}"
+        await query.edit_message_text(msg)
+
+        if callback_data == "patch:other":
+            self._patch_wizard_state["state"] = "awaiting_file_text"
+            self._patch_wizard_state.pop("file", None)
+            await query.edit_message_text(
+                "Send the file path now.\n\nExample:\nsrc/pearlalgo/utils/retry.py"
+            )
+            return
 
 
     async def _show_help(self, query: CallbackQuery) -> None:
@@ -1582,17 +2041,10 @@ class TelegramCommandHandler:
             elif action_type == "pnl_overview":
                 await query.edit_message_text("💰 P&L Overview: Loading...\n\nFeature coming soon.", reply_markup=reply_markup)
                 # TODO: Implement actual P&L overview
-            elif action_type == "ai_patch_help":
-                text = (
-                    "🧩 AI Patch\n\n"
-                    "Usage:\n"
-                    "/ai_patch <relative_path> <instruction>\n\n"
-                    "Example:\n"
-                    "/ai_patch src/pearlalgo/utils/retry.py add jitter\n\n"
-                    "Returns a unified diff. Review before applying."
-                )
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            elif action_type == "ai_patch_wizard":
+                await self._show_ai_patch_wizard(query)
+            elif action_type == "ai_ops":
+                await self._show_ai_ops_menu(query)
             elif action_type == "restart_agent":
                 keyboard = [
                     [InlineKeyboardButton("✅ Confirm Restart", callback_data="confirm:restart_agent")],
@@ -2200,8 +2652,8 @@ class TelegramCommandHandler:
             except Exception:
                 time_str = current_time.strftime("%H:%M UTC") if hasattr(current_time, 'strftime') else ""
             
-            # Service status
-            agent_running = state.get("running", False)
+            # Service status - use live process check, not stale state file
+            agent_running = bool(self._is_agent_process_running())
             paused = state.get("paused", False)
             pause_reason = state.get("pause_reason")
             
@@ -3552,20 +4004,16 @@ class TelegramCommandHandler:
 
         rel_path = str(args[0])
         task = " ".join(str(a) for a in args[1:]).strip()
+        await self._run_ai_patch(update, context, rel_path=rel_path, task=task)
 
+    async def _run_ai_patch(self, update: Any, context: Any, *, rel_path: str, task: str) -> None:
+        """Shared AI patch runner for command and wizard flows."""
+        if not await self._ensure_openai_ready(update):
+            return
         if self._is_path_blocked(rel_path):
             await self._send_message_or_edit(update, context, f"❌ Blocked path: {rel_path}")
             return
 
-        if not OPENAI_AVAILABLE:
-            await self._send_message_or_edit(
-                update,
-                context,
-                "❌ OpenAI Not Available (dependency not installed).\n\nInstall with: pip install -e '.[llm]'",
-            )
-            return
-
-        # Resolve file within repo
         try:
             project_root = Path(__file__).resolve().parent.parent.parent.parent
             target = (project_root / rel_path).resolve()
@@ -3577,7 +4025,6 @@ class TelegramCommandHandler:
             await self._send_message_or_edit(update, context, f"❌ Could not read file: {e}")
             return
 
-        # Call AI client
         try:
             client = OpenAIClient()
             diff = client.generate_patch(files={rel_path: content}, task=task)
