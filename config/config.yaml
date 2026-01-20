@@ -127,6 +127,7 @@ signals:
       - trending_bearish
     unified_strategy:
       allowed_regimes:
+      - ranging
       - trending_bullish
       - trending_bearish
       # No session restrictions - can trade all day

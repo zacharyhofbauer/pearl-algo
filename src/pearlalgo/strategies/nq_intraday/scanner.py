@@ -86,6 +86,9 @@ class NQScanner:
             service_config: Full service configuration for adaptive stops (optional)
         """
         self.config = config or NQIntradayConfig()
+        # Keep a reference to the canonical service config so scanner gates can follow
+        # config.yaml (signals.regime_filters) instead of drifting into hard-coded behavior.
+        self._service_config = service_config if isinstance(service_config, dict) else {}
         self.regime_detector = RegimeDetector()
         self.mtf_analyzer = MTFAnalyzer()
         self.vwap_calculator = VWAPCalculator()
@@ -709,10 +712,21 @@ class NQScanner:
         session = regime.get("session", "afternoon")
         regime_type = regime.get("regime", "unknown")
         
-        # Only trade in trending regimes (trending_bullish for longs, trending_bearish for shorts)
-        if regime_type not in ("trending_bullish", "trending_bearish"):
-            self.last_gate_reasons.append(f"Regime filter: {regime_type} not trending")
-            logger.debug(f"Skipping signals in {regime_type} regime (only trending allowed)")
+        # Regime allowlist for unified strategy (canonical: signals.regime_filters.unified_strategy.allowed_regimes).
+        # Default behavior (when config not present) remains "trending only".
+        allowed_regimes = None
+        try:
+            rf = (self._service_config.get("signals", {}) or {}).get("regime_filters", {}) or {}
+            allowed_regimes = (rf.get("unified_strategy", {}) or {}).get("allowed_regimes")
+            if not isinstance(allowed_regimes, (list, tuple, set)):
+                allowed_regimes = None
+        except Exception:
+            allowed_regimes = None
+        if allowed_regimes is None:
+            allowed_regimes = ("trending_bullish", "trending_bearish")
+        if regime_type not in set(allowed_regimes):
+            self.last_gate_reasons.append(f"Regime filter: {regime_type} not allowed")
+            logger.debug(f"Skipping signals in {regime_type} regime (allowed={list(allowed_regimes)})")
             return signals
 
         # ====================================================================
@@ -816,6 +830,57 @@ class NQScanner:
                 # VWAP boost
                 confidence = self.vwap_calculator.adjust_confidence_by_vwap("short", confidence, vwap_data)
                 
+                confidence = min(confidence, 1.0)
+
+        # RANGING: mean-reversion around VWAP (both directions).
+        # This avoids the prior "trending-only" bias which produced prolonged quiet periods in ranging regimes.
+        elif regime_type == "ranging":
+            try:
+                vwap_val = float(vwap or 0.0)
+            except Exception:
+                vwap_val = 0.0
+            try:
+                dist_pct = float(vwap_data.get("distance_pct", 0.0) or 0.0)  # percent
+            except Exception:
+                dist_pct = 0.0
+
+            # Require a meaningful VWAP deviation to avoid spam in tight chop.
+            dev_min_pct = 0.05  # 0.05% (~12.5 pts on 25k)
+
+            # Long mean-reversion: price below VWAP + oversold RSI.
+            if (
+                vwap_val > 0
+                and current_price < vwap_val
+                and dist_pct <= -dev_min_pct
+                and rsi <= 40
+            ):
+                signal_type = "unified_strategy"
+                direction = "long"
+                confidence = 0.62
+                if dist_pct <= -0.10:
+                    confidence += 0.05
+                if rsi <= 35:
+                    confidence += 0.05
+                if macd_hist > -0.4:
+                    confidence += 0.03
+                confidence = min(confidence, 1.0)
+
+            # Short mean-reversion: price above VWAP + overbought RSI.
+            elif (
+                vwap_val > 0
+                and current_price > vwap_val
+                and dist_pct >= dev_min_pct
+                and rsi >= 60
+            ):
+                signal_type = "unified_strategy"
+                direction = "short"
+                confidence = 0.62
+                if dist_pct >= 0.10:
+                    confidence += 0.05
+                if rsi >= 65:
+                    confidence += 0.05
+                if macd_hist < 0.4:
+                    confidence += 0.03
                 confidence = min(confidence, 1.0)
         
         # Generate signal if conditions met
