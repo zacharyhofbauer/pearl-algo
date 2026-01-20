@@ -3868,8 +3868,15 @@ class TelegramCommandHandler:
         except Exception:
             return []
 
-        # Read recent signals from signals.jsonl
-        recent = self._read_recent_signals(limit=100)  # Get more signals to find trades in window
+        # Prefer StateManager (testable + consistent), fallback to direct file read.
+        recent: list[dict] = []
+        try:
+            if getattr(self, "state_manager", None) is not None and hasattr(self.state_manager, "get_recent_signals"):
+                recent = self.state_manager.get_recent_signals(limit=100)  # type: ignore[assignment]
+            else:
+                recent = self._read_recent_signals(limit=100)
+        except Exception:
+            recent = self._read_recent_signals(limit=100)
 
         trades: list[dict] = []
         sym = str(symbol or "").upper()

@@ -1426,7 +1426,7 @@ def format_home_card(
         compact_metric_width=int(compact_metric_width or 10),
     ))
 
-    # CONDITIONAL: Open positions (only when > 0, calm-minimal)
+    # CONDITIONAL: Active trades / open positions (only when > 0, calm-minimal)
     positions_count = active_trades_count if open_positions_count is None else int(open_positions_count or 0)
     if positions_count > 0:
         # Optionally append unrealized PnL (total) when provided.
@@ -1441,9 +1441,8 @@ def format_home_card(
             except Exception:
                 suffix = ""
 
-        lines.append(
-            f"🎯 *{positions_count} open position{'s' if positions_count > 1 else ''}*{suffix}"
-        )
+        noun = "active trade" if open_positions_count is None else "open position"
+        lines.append(f"🎯 *{positions_count} {noun}{'s' if positions_count != 1 else ''}*{suffix}")
 
     # Last signal age (if available)
     if last_signal_age:
