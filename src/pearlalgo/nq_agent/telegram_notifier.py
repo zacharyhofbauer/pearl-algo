@@ -2021,6 +2021,8 @@ class NQAgentTelegramNotifier:
             else:
                 message += "\n💡 Use /status or /activity to monitor"
 
+            # Startup message does not require inline buttons.
+            reply_markup = None
             await self.telegram.send_message(message, reply_markup=reply_markup)
             return True
         except Exception as e:
