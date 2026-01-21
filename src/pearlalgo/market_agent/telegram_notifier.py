@@ -1,5 +1,5 @@
 """
-NQ Agent Telegram Notifier
+Market Agent Telegram Notifier
 
 Sends signals and status updates to Telegram.
 """
@@ -58,7 +58,7 @@ from pearlalgo.utils.telegram_alerts import (
 )
 
 try:
-    from pearlalgo.nq_agent.chart_generator import ChartGenerator
+    from pearlalgo.market_agent.chart_generator import ChartGenerator
     CHART_GENERATOR_AVAILABLE = True
 except ImportError:
     CHART_GENERATOR_AVAILABLE = False
@@ -84,7 +84,7 @@ def _is_command_handler_running() -> bool:
         return False
 
 
-class NQAgentTelegramNotifier:
+class MarketAgentTelegramNotifier:
     """
     Telegram notifier for NQ agent signals.
     
@@ -125,7 +125,7 @@ class NQAgentTelegramNotifier:
                     enabled=True,
                 )
                 logger.info(
-                    f"NQAgentTelegramNotifier initialized successfully: "
+                    f"MarketAgentTelegramNotifier initialized successfully: "
                     f"enabled={self.enabled}, telegram_instance={self.telegram is not None}"
                 )
             except Exception as e:

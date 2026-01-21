@@ -18,7 +18,7 @@ if [ -z "$PIDS" ]; then
     echo ""
     echo "To start it, run:"
     echo "  cd $PROJECT_DIR"
-    echo "  python3 -m pearlalgo.nq_agent.telegram_command_handler"
+    echo "  python3 -m pearlalgo.market_agent.telegram_command_handler"
     echo ""
     echo "Or use the helper script:"
     echo "  ./scripts/telegram/start_command_handler.sh"

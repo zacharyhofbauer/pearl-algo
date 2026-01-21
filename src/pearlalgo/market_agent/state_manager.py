@@ -92,7 +92,7 @@ def _to_json_safe(obj):
     return str(obj)
 
 
-class NQAgentStateManager:
+class MarketAgentStateManager:
     """
     Manages state persistence for NQ agent.
     
@@ -154,7 +154,7 @@ class NQAgentStateManager:
             self._duplicate_window_seconds = 120
             self._duplicate_price_threshold_pct = 0.005
 
-        logger.info(f"NQAgentStateManager initialized: state_dir={self.state_dir}")
+        logger.info(f"MarketAgentStateManager initialized: state_dir={self.state_dir}")
 
     def _is_duplicate_signal(self, signal: Dict, recent_signals: List[Dict]) -> bool:
         """

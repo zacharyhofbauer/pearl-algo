@@ -23,7 +23,7 @@ from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.retry import async_retry_with_backoff
 
 
-class NQAgentDataFetcher:
+class MarketAgentDataFetcher:
     """
     Data fetcher for NQ agent.
     
@@ -97,7 +97,7 @@ class NQAgentDataFetcher:
         self._last_market_data: Optional[Dict] = None
 
         logger.info(
-            f"NQAgentDataFetcher initialized with provider={type(data_provider).__name__}, "
+            f"MarketAgentDataFetcher initialized with provider={type(data_provider).__name__}, "
             f"base_cache_enabled={self._enable_base_cache}, mtf_cache_enabled={self._enable_mtf_cache}"
         )
 

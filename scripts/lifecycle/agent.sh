@@ -105,7 +105,7 @@ if [ "$COMMAND" = "status" ]; then
             exit 0
         fi
     fi
-    if pgrep -f "pearlalgo.nq_agent.main" > /dev/null 2>&1; then
+    if pgrep -f "pearlalgo.market_agent.main" > /dev/null 2>&1; then
         echo "🟡 Agent process detected but PID file missing for $MARKET_UPPER"
         exit 0
     fi
@@ -176,7 +176,7 @@ if [ "$BACKGROUND_MODE" = true ]; then
         mv "$LOG_FILE" "${LOG_FILE}.1"
         echo "📁 Rotated previous log to ${LOG_FILE}.1"
     fi
-    nohup "$PYTHON_CMD" -m pearlalgo.nq_agent.main >> "$LOG_FILE" 2>&1 &
+    nohup "$PYTHON_CMD" -m pearlalgo.market_agent.main >> "$LOG_FILE" 2>&1 &
     SERVICE_PID=$!
     echo $SERVICE_PID > "$PID_FILE"
     echo "✅ Agent $MARKET_UPPER started in background (PID: $SERVICE_PID)"
@@ -188,7 +188,7 @@ echo "=== Starting Agent $MARKET_UPPER (Foreground Mode) ==="
 echo "   Press Ctrl+C to stop"
 echo ""
 
-"$PYTHON_CMD" -m pearlalgo.nq_agent.main &
+"$PYTHON_CMD" -m pearlalgo.market_agent.main &
 SERVICE_PID=$!
 echo $SERVICE_PID > "$PID_FILE"
 

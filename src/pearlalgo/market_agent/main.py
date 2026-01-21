@@ -30,7 +30,7 @@ except Exception as e:
 
 from pearlalgo.config.config_file import load_config_yaml
 from pearlalgo.data_providers.factory import create_data_provider
-from pearlalgo.nq_agent.service import NQAgentService
+from pearlalgo.market_agent.service import MarketAgentService
 from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.utils.logging_config import set_run_id, setup_logging
 from pearlalgo.utils.paths import ensure_state_dir
@@ -52,7 +52,7 @@ async def main():
     except ImportError:
         pass  # loguru not available, run_id still in context var
     
-    logger.info(f"Starting NQ Agent Service (MNQ-native config) | run_id={run_id}")
+    logger.info(f"Starting Market Agent Service | run_id={run_id}")
 
     import os
 
@@ -96,7 +96,7 @@ async def main():
     state_dir = ensure_state_dir()
 
     # Create service with Telegram configuration
-    service = NQAgentService(
+    service = MarketAgentService(
         data_provider=data_provider,
         config=config,
         state_dir=state_dir,

@@ -105,7 +105,7 @@ FILE_SUGGEST_SYSTEM_PROMPT = """You are a file suggestion assistant. Given a tas
 Return a JSON array of file paths, ordered by relevance (most relevant first). Include at most 8 files.
 
 Example output:
-["src/pearlalgo/utils/retry.py", "src/pearlalgo/nq_agent/main.py"]
+["src/pearlalgo/utils/retry.py", "src/pearlalgo/market_agent/main.py"]
 
 ONLY output the JSON array, nothing else. No explanations, no markdown."""
 

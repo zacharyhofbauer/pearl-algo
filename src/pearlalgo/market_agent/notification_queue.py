@@ -12,7 +12,7 @@ Key Features:
 - Notification batching for high-frequency updates
 
 Usage:
-    from pearlalgo.nq_agent.notification_queue import NotificationQueue
+    from pearlalgo.market_agent.notification_queue import NotificationQueue
 
     # Create queue with notifier
     queue = NotificationQueue(telegram_notifier)
@@ -39,7 +39,7 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional, TYPE_CHECKING
 from pearlalgo.utils.logger import logger
 
 if TYPE_CHECKING:
-    from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
+    from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
 
 
 class Priority(IntEnum):
@@ -72,7 +72,7 @@ class NotificationQueue:
 
     def __init__(
         self,
-        telegram_notifier: "NQAgentTelegramNotifier",
+        telegram_notifier: "MarketAgentTelegramNotifier",
         max_queue_size: int = 1000,
         batch_delay_seconds: float = 0.5,
         max_retries: int = 3,

@@ -355,7 +355,7 @@ class ServiceController:
 
             # Fallback: check by process name (non-specific)
             result = subprocess.run(
-                ["pgrep", "-f", "pearlalgo.nq_agent.main"],
+                ["pgrep", "-f", "pearlalgo.market_agent.main"],
                 capture_output=True,
                 timeout=5,
             )

@@ -65,7 +65,7 @@ if [ "$BACKGROUND" = true ]; then
     echo "  PID file: $PID_FILE"
     echo ""
 
-    nohup "$PYTHON_CMD" -m pearlalgo.nq_agent.telegram_command_handler \
+    nohup "$PYTHON_CMD" -m pearlalgo.market_agent.telegram_command_handler \
         > "$LOG_FILE" 2>&1 &
     SERVICE_PID=$!
     echo "$SERVICE_PID" > "$PID_FILE"
@@ -83,7 +83,7 @@ echo "This service listens for Telegram commands (/analyze, /help)"
 echo "Press Ctrl+C to stop"
 echo ""
 
-"$PYTHON_CMD" -m pearlalgo.nq_agent.telegram_command_handler
+"$PYTHON_CMD" -m pearlalgo.market_agent.telegram_command_handler
 
 
 

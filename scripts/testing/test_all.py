@@ -70,10 +70,10 @@ except ImportError:
     spec.loader.exec_module(mock_data_provider)
     MockDataProvider = mock_data_provider.MockDataProvider
 
-from pearlalgo.nq_agent.service import NQAgentService  # noqa: E402
-from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier  # noqa: E402
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig  # noqa: E402
-from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy  # noqa: E402
+from pearlalgo.market_agent.service import MarketAgentService  # noqa: E402
+from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier  # noqa: E402
+# nq_intraday removed - using pearl_bot_auto now
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG  # noqa: E402
 from pearlalgo.utils.logging_config import setup_logging  # noqa: E402
 
 
@@ -92,7 +92,7 @@ async def test_telegram_notifications():
         print("   Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
         return False
     
-    notifier = NQAgentTelegramNotifier(
+    notifier = MarketAgentTelegramNotifier(
         bot_token=bot_token,
         chat_id=chat_id,
         enabled=True,
@@ -194,14 +194,17 @@ async def test_signal_generation():
     print()
     
     print("Creating strategy...")
-    config = NQIntradayConfig(symbol="MNQ", timeframe="1m")
-    strategy = NQIntradayStrategy(config=config)
+    # nq_intraday removed - using pearl_bot_auto config
+    config = PEARL_BOT_CONFIG.copy()
+    config["symbol"] = "MNQ"
+    config["timeframe"] = "1m"
+    strategy = None  # Using generate_signals directly now
     print("✅ Strategy created")
     print()
     
     print("Generating signals...")
-    market_data = {"df": df, "latest_bar": latest_bar}
-    signals = strategy.analyze(market_data)
+    from pearlalgo.strategies.trading_bots.pearl_bot_auto import generate_signals
+    signals = generate_signals(df, config=config)
     print(f"✅ Generated {len(signals)} signal(s)")
     print()
     
@@ -226,9 +229,9 @@ async def test_signal_generation():
 
 
 async def test_service_with_mock():
-    """Test NQ agent service with mock data."""
+    """Test Market Agent service with mock data."""
     print("=" * 60)
-    print("NQ Agent Test with Mock Data")
+    print("Market Agent Test with Mock Data")
     print("=" * 60)
     print()
     
@@ -251,12 +254,15 @@ async def test_service_with_mock():
     print()
     
     print("Creating configuration...")
-    config = NQIntradayConfig(symbol="MNQ", timeframe="1m", scan_interval=5)
+    # nq_intraday removed - using pearl_bot_auto config
+    config = PEARL_BOT_CONFIG.copy()
+    config["symbol"] = "MNQ"
+    config["timeframe"] = "1m"
     print("✅ Configuration created")
     print()
     
     print("Creating NQ agent service...")
-    service = NQAgentService(
+    service = MarketAgentService(
         data_provider=mock_provider,
         config=config,
         telegram_bot_token=telegram_bot_token,

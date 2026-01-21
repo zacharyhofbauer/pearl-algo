@@ -19,9 +19,10 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from pearlalgo.strategies.nq_intraday.indicators import get_enabled_indicators
-from pearlalgo.strategies.nq_intraday.indicators.base import IndicatorSignal
-from pearlalgo.strategies.nq_intraday.mtf_analyzer import MTFAnalyzer
+# nq_intraday imports removed - composite_bot uses its own indicators
+# from pearlalgo.strategies.nq_intraday.indicators import get_enabled_indicators
+# from pearlalgo.strategies.nq_intraday.indicators.base import IndicatorSignal
+# from pearlalgo.strategies.nq_intraday.mtf_analyzer import MTFAnalyzer
 from pearlalgo.utils.logger import logger
 
 from .bot_template import BotConfig, IndicatorSuite, TradeSignal, TradingBot, register_bot
@@ -60,15 +61,12 @@ class CompositeBot(TradingBot):
     def __init__(self, config: BotConfig):
         super().__init__(config)
         self._suite = CompositeIndicatorSuite()
-        self._mtf = MTFAnalyzer()
+        # MTFAnalyzer removed (was from nq_intraday)
+        self._mtf = None
 
-        indicators_cfg = (
-            self.config.parameters.get("indicators", {})
-            if isinstance(self.config.parameters, dict)
-            else {}
-        )
-        cfg_for_loader = {"indicators": indicators_cfg} if indicators_cfg else None
-        self._indicators = get_enabled_indicators(cfg_for_loader)
+        # Indicators removed (was from nq_intraday)
+        # Use simple indicators instead or disable
+        self._indicators = []
 
         tfs = []
         if isinstance(self.config.parameters, dict):
@@ -136,18 +134,8 @@ class CompositeBot(TradingBot):
             else self._resample(df_base, "15m")
         )
 
+        # MTF analyzer removed (was from nq_intraday)
         mtf = None
-        try:
-            if (
-                df_5m_idx is not None
-                and df_15m_idx is not None
-                and (not df_5m_idx.empty)
-                and (not df_15m_idx.empty)
-            ):
-                mtf = self._mtf.analyze(df_5m_idx, df_15m_idx)
-        except Exception as e:
-            logger.debug(f"CompositeBot MTF analyze failed: {e}")
-            mtf = None
 
         entry_timeframes = self._timeframes[: max(1, min(len(self._timeframes), 3))]
         candidates: List[TradeSignal] = []
@@ -242,27 +230,12 @@ class CompositeBot(TradingBot):
         latest = df_work.iloc[-1]
 
         features: Dict[str, float] = {}
-        indicator_signals: List[tuple[str, IndicatorSignal]] = []
+        # IndicatorSignal removed (was from nq_intraday)
+        indicator_signals: List[tuple[str, Any]] = []
 
-        for ind in self._indicators:
-            try:
-                df_work = ind.calculate(df_work)
-                latest = df_work.iloc[-1]
-                ind_feats = ind.as_features(latest, df_work)
-                for k, v in (ind_feats or {}).items():
-                    try:
-                        features[k] = float(v)
-                    except Exception:
-                        continue
-
-                sig = ind.generate_signal(latest, df_work, atr=atr)
-                if sig is not None:
-                    indicator_signals.append((ind.name, sig))
-            except Exception as e:
-                logger.debug(
-                    f"CompositeBot indicator failed: {getattr(ind, 'name', type(ind).__name__)}: {e}"
-                )
-                continue
+        # Indicators removed (was from nq_intraday) - composite_bot disabled for now
+        # Use pearl_bot_auto instead
+        pass
 
         out: List[TradeSignal] = []
         for ind_name, ind_sig in indicator_signals:
@@ -375,11 +348,13 @@ class CompositeBot(TradingBot):
         self,
         *,
         ind_name: str,
-        ind_sig: IndicatorSignal,
+        ind_sig: Any,  # IndicatorSignal removed (was from nq_intraday)
         entry_tf: str,
         mtf: Optional[Dict[str, Any]],
         features: Dict[str, float],
-    ) -> TradeSignal:
+    ) -> Optional[TradeSignal]:
+        # CompositeBot disabled - use pearl_bot_auto instead
+        return None
         reason_lines = [
             f"SCENARIO: {ind_sig.type}",
             f"ENTRY_TF: {entry_tf}",

@@ -1,5 +1,5 @@
 """
-Chart Generator for NQ Agent using mplfinance.
+Chart Generator for Market Agent using mplfinance.
 
 Generates professional trading charts with entry, stop loss, and take profit levels.
 This is the production chart generator using mplfinance library.
@@ -323,7 +323,7 @@ class ChartGenerator:
         if not sym:
             return None
 
-        # Resolve repo root from this file location: src/pearlalgo/nq_agent/chart_generator.py
+        # Resolve repo root from this file location: src/pearlalgo/market_agent/chart_generator.py
         try:
             repo_root = Path(__file__).resolve().parents[3]
         except Exception:
@@ -948,7 +948,9 @@ class ChartGenerator:
         # SpacemanBTC-style higher-timeframe levels (Weekly/Monthly/Quarterly/Yearly/4H/Monday).
         # Compute at chart-render time using the candle window + optional local parquet history.
         try:
-            from pearlalgo.strategies.nq_intraday.hud_context import compute_spaceman_key_levels
+            # nq_intraday removed - hud_context functions disabled
+            # from pearlalgo.strategies.nq_intraday.hud_context import compute_spaceman_key_levels
+            compute_spaceman_key_levels = None
 
             symbol = str(signal.get("symbol") or hud.get("symbol") or "MNQ")
             hist = self._load_key_level_history(symbol)
@@ -2768,7 +2770,9 @@ class ChartGenerator:
             # Build HUD context for overlays
             hud: Dict[str, Any] = {}
             try:
-                from pearlalgo.strategies.nq_intraday.hud_context import build_hud_context
+                # nq_intraday removed - hud_context functions disabled
+                # from pearlalgo.strategies.nq_intraday.hud_context import build_hud_context
+                build_hud_context = None
 
                 # Convert back to lowercase for hud_context (it expects lowercase OHLCV)
                 hud_df = df.reset_index().copy()

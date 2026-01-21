@@ -1,5 +1,5 @@
 """
-Telegram Command Handler for NQ Agent.
+Telegram Command Handler for Market Agent.
 
 Provides simple button-based remote control interface for the trading system.
 
@@ -866,7 +866,7 @@ class TelegramCommandHandler:
             
             # Generate fresh chart
             from datetime import timedelta
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator
+            from pearlalgo.market_agent.chart_generator import ChartGenerator
             from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
             from pearlalgo.config.config_loader import load_service_config
             from pearlalgo.utils.volume_pressure import timeframe_to_minutes
@@ -1622,8 +1622,8 @@ class TelegramCommandHandler:
         lines = ["🧩 *AI Patch Wizard*", "", "Select a file:"]
         keyboard = [
             [InlineKeyboardButton("src/pearlalgo/utils/retry.py", callback_data="patch:file:src/pearlalgo/utils/retry.py")],
-            [InlineKeyboardButton("src/pearlalgo/nq_agent/telegram_command_handler.py", callback_data="patch:file:src/pearlalgo/nq_agent/telegram_command_handler.py")],
-            [InlineKeyboardButton("src/pearlalgo/nq_agent/service.py", callback_data="patch:file:src/pearlalgo/nq_agent/service.py")],
+            [InlineKeyboardButton("src/pearlalgo/market_agent/telegram_command_handler.py", callback_data="patch:file:src/pearlalgo/market_agent/telegram_command_handler.py")],
+            [InlineKeyboardButton("src/pearlalgo/market_agent/service.py", callback_data="patch:file:src/pearlalgo/market_agent/service.py")],
             [InlineKeyboardButton("config/config.yaml", callback_data="patch:file:config/config.yaml")],
             [InlineKeyboardButton("docs/AI_PATCH_GUIDE.md", callback_data="patch:file:docs/AI_PATCH_GUIDE.md")],
             [InlineKeyboardButton("Other file (type path)", callback_data="patch:other")],
@@ -1787,7 +1787,7 @@ class TelegramCommandHandler:
 
         perf_summary = {}
         bot_config = {}
-        if bot == "nq_agent":
+        if bot == "market_agent":
             try:
                 perf_summary = self._read_latest_metrics() or {}
             except Exception:

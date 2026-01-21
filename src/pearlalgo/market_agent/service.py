@@ -1,7 +1,7 @@
 """
-NQ Agent Service
+Market Agent Service
 
-Main 24/7 service for running NQ intraday strategy.
+Main 24/7 service for running market trading strategies.
 """
 
 from __future__ import annotations
@@ -24,11 +24,11 @@ from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
 
 from pearlalgo.config.config_loader import load_service_config, parse_market_hours_overrides
 from pearlalgo.data_providers.base import DataProvider
-from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
-from pearlalgo.nq_agent.health_monitor import HealthMonitor
-from pearlalgo.nq_agent.performance_tracker import PerformanceTracker
-from pearlalgo.nq_agent.state_manager import NQAgentStateManager
-from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
+from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
+from pearlalgo.market_agent.health_monitor import HealthMonitor
+from pearlalgo.market_agent.performance_tracker import PerformanceTracker
+from pearlalgo.market_agent.state_manager import MarketAgentStateManager
+from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
 from pearlalgo.strategies.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.utils.cadence import CadenceMetrics, CadenceScheduler
 from pearlalgo.utils.data_quality import DataQualityChecker
@@ -85,7 +85,7 @@ except ImportError:
     ContextFeatures = None  # type: ignore
     ContextualDecision = None  # type: ignore
 
-class NQAgentService:
+class MarketAgentService:
     """
     24/7 service for NQ intraday trading strategy.
     
@@ -101,7 +101,7 @@ class NQAgentService:
         telegram_chat_id: Optional[str] = None,
     ):
         """
-        Initialize NQ agent service.
+        Initialize market agent service.
         
         Args:
             data_provider: Data provider instance
@@ -121,17 +121,17 @@ class NQAgentService:
             "symbol": self.config.get("symbol", "MNQ"),
             "timeframe": self.config.get("timeframe", "5m"),
         }
-        self.data_fetcher = NQAgentDataFetcher(data_provider, config=nq_config_dict)
+        self.data_fetcher = MarketAgentDataFetcher(data_provider, config=nq_config_dict)
         
         # TradeManager removed (was part of nq_intraday)
         self.trade_manager = None
         
-        self.state_manager = NQAgentStateManager(state_dir=state_dir)
+        self.state_manager = MarketAgentStateManager(state_dir=state_dir)
         self.performance_tracker = PerformanceTracker(
             state_dir=state_dir,
             state_manager=self.state_manager,
         )
-        self.telegram_notifier = NQAgentTelegramNotifier(
+        self.telegram_notifier = MarketAgentTelegramNotifier(
             bot_token=telegram_bot_token,
             chat_id=telegram_chat_id,
             state_dir=state_dir,
@@ -220,7 +220,7 @@ class NQAgentService:
         self._challenge_tracker: Optional["ChallengeTracker"] = None
         self._challenge_enabled = False
         try:
-            from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker, ChallengeConfig
+            from pearlalgo.market_agent.challenge_tracker import ChallengeTracker, ChallengeConfig
             
             challenge_cfg = service_config.get("challenge", {}) or {}
             self._challenge_enabled = bool(challenge_cfg.get("enabled", False))
@@ -566,7 +566,7 @@ class NQAgentService:
         else:
             logger.debug("Contextual bandit not available (import failed)")
 
-        logger.info("NQAgentService initialized")
+        logger.info("MarketAgentService initialized")
 
     async def start(self) -> None:
         """Start the service."""
@@ -2312,7 +2312,7 @@ class NQAgentService:
         chart_gen = getattr(self.telegram_notifier, "chart_generator", None)
         if chart_gen is None:
             try:
-                from pearlalgo.nq_agent.chart_generator import ChartGenerator
+                from pearlalgo.market_agent.chart_generator import ChartGenerator
 
                 chart_gen = ChartGenerator()
             except Exception:

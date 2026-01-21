@@ -20,7 +20,7 @@ from pearlalgo.utils.paths import (
     get_utc_timestamp,
     parse_utc_timestamp,
 )
-from pearlalgo.nq_agent.state_manager import _to_json_safe
+from pearlalgo.market_agent.state_manager import _to_json_safe
 
 try:
     from pearlalgo.learning.trade_database import TradeDatabase
@@ -30,7 +30,7 @@ except Exception:
     TradeDatabase = None  # type: ignore
 
 if TYPE_CHECKING:
-    from pearlalgo.nq_agent.state_manager import NQAgentStateManager
+    from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 
 
 class PerformanceTracker:
@@ -47,7 +47,7 @@ class PerformanceTracker:
     def __init__(
         self,
         state_dir: Optional[Path] = None,
-        state_manager: Optional["NQAgentStateManager"] = None,
+        state_manager: Optional["MarketAgentStateManager"] = None,
     ):
         """
         Initialize performance tracker.

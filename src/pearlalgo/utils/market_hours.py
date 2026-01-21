@@ -240,7 +240,7 @@ def configure_market_hours(
     Configure the global MarketHours instance with optional overrides.
 
     This function exists to keep `utils` boundary-clean: config-driven behavior is wired
-    by higher layers (e.g., `nq_agent`), then injected here.
+    by higher layers (e.g., `market_agent`), then injected here.
     """
     global _market_hours, _market_hours_holiday_overrides, _market_hours_early_closes
     _market_hours_holiday_overrides = set(holiday_overrides or [])
@@ -258,7 +258,7 @@ def get_market_hours() -> MarketHours:
     Get global market hours instance.
     
     Market-hours overrides (holidays/early closes) must be configured by a higher layer
-    (e.g., `pearlalgo.nq_agent.service`) via `configure_market_hours()`.
+    (e.g., `pearlalgo.market_agent.service`) via `configure_market_hours()`.
     """
     global _market_hours
     if _market_hours is None:

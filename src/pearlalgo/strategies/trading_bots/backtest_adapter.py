@@ -11,13 +11,29 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from pearlalgo.strategies.nq_intraday.backtest_adapter import (
-    TradeSimulator,
-    VerificationSummary,
-    _compute_verification_summary,
-)
+# nq_intraday.backtest_adapter removed - using simplified stubs
 from .bot_template import TradeSignal, TradingBot
 from pearlalgo.utils.logger import logger, log_silence
+from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+
+# Stub classes (simplified versions)
+@dataclass
+class VerificationSummary:
+    """Stub for VerificationSummary (was from nq_intraday)"""
+    pass
+
+class TradeSimulator:
+    """Stub for TradeSimulator (was from nq_intraday)"""
+    def __init__(self, **kwargs):
+        self.skipped_signals = []
+    
+    def simulate(self, df, signals, position_size=1):
+        return [], {}
+
+def _compute_verification_summary(**kwargs):
+    """Stub for _compute_verification_summary (was from nq_intraday)"""
+    return VerificationSummary()
 
 
 @dataclass

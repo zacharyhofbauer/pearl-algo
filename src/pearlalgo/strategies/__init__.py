@@ -2,7 +2,7 @@
 Strategy implementations for the PearlAlgo trading agent.
 
 Contains:
-- nq_intraday: MNQ futures intraday strategy optimized for prop firm trading
+- pearl_bot_auto: Single-file strategy from Pine Scripts (main production bot)
 - trading bots: AutoBot variants (backtesting/analysis)
 """
 
