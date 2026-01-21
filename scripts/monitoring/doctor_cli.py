@@ -235,21 +235,6 @@ def build_doctor_rollup(db, *, hours: float = 24.0) -> Dict[str, Any]:
         except Exception:
             pass
 
-        # Drift guard state (persisted by service in state_dir)
-        try:
-            dg_path = state_dir / "drift_guard_state.json"
-            if dg_path.exists():
-                raw = json.loads(dg_path.read_text(encoding="utf-8"))
-                if isinstance(raw, dict):
-                    brain["drift_guard"] = {
-                        "active": bool(raw.get("active", False)),
-                        "until": raw.get("until"),
-                        "reason": raw.get("reason"),
-                        "adjustments": raw.get("adjustments") if isinstance(raw.get("adjustments", {}), dict) else {},
-                    }
-        except Exception:
-            pass
-
         # ML lift (shadow A/B) from graded exits (trades table)
         try:
             if isinstance(ml_cfg, dict) and bool(ml_cfg.get("enabled", False)):
@@ -484,18 +469,6 @@ def format_doctor_rollup_text(r: Dict[str, Any]) -> str:
                     f"- ML: preds={int(m.get('predictions', 0) or 0)} | pass@{float(m.get('min_probability', 0.55) or 0.55):.2f}="
                     f"{int(m.get('passed', 0) or 0)} | fallback={int(m.get('fallbacks', 0) or 0)}"
                 )
-            except Exception:
-                pass
-
-        dg = brain.get("drift_guard") or {}
-        if dg:
-            try:
-                if bool(dg.get("active", False)):
-                    reason = str(dg.get("reason") or "")[:80]
-                    until = str(dg.get("until") or "")
-                    lines.append(f"- DriftGuard: ON until {until} ({reason})")
-                else:
-                    lines.append("- DriftGuard: OFF")
             except Exception:
                 pass
 

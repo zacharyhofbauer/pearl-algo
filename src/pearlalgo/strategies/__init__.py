@@ -6,9 +6,8 @@ Contains:
 - trading bots: AutoBot variants (backtesting/analysis)
 """
 
-# Import the main strategy for convenience
-from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+# Import PearlBot Auto (replaces nq_intraday)
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
 
 # Import PEARL automated bots
 from .trading_bots import (
@@ -22,9 +21,9 @@ from .trading_bots import (
 )
 
 __all__ = [
-    # Existing strategies
-    "NQIntradayStrategy",
-    "NQIntradayConfig",
+    # PearlBot Auto (replaces nq_intraday)
+    "generate_signals",
+    "PEARL_BOT_CONFIG",
 
     # Trading bots
     "TradingBot",

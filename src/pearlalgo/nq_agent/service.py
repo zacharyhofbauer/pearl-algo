@@ -29,10 +29,7 @@ from pearlalgo.nq_agent.health_monitor import HealthMonitor
 from pearlalgo.nq_agent.performance_tracker import PerformanceTracker
 from pearlalgo.nq_agent.state_manager import NQAgentStateManager
 from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
-from pearlalgo.strategies.nq_intraday.trade_manager import TradeManager
-from pearlalgo.strategies.trading_bots.pearl_bot import PearlBot
-from pearlalgo.strategies.trading_bots.bot_template import BotConfig
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.utils.cadence import CadenceMetrics, CadenceScheduler
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
@@ -98,7 +95,7 @@ class NQAgentService:
     def __init__(
         self,
         data_provider: DataProvider,
-        config: Optional[NQIntradayConfig] = None,
+        config: Optional[Dict] = None,
         state_dir: Optional[Path] = None,
         telegram_bot_token: Optional[str] = None,
         telegram_chat_id: Optional[str] = None,
@@ -113,28 +110,22 @@ class NQAgentService:
             telegram_bot_token: Telegram bot token (optional)
             telegram_chat_id: Telegram chat ID (optional)
         """
-        self.config = config or NQIntradayConfig()
+        # Use PearlBot Auto config (from Pine Scripts)
+        self.config = config or PEARL_BOT_CONFIG.copy()
         
-        # Create PearlBot instead of NQIntradayStrategy
-        bot_config = BotConfig(
-            name="PearlBot",
-            description="Main production trading bot",
-            version="1.0.0",
-            symbol=self.config.symbol,
-            timeframe=self.config.timeframe,
-            parameters={
-                "lookback_periods": self.config.lookback_periods,
-                "min_volume": self.config.min_volume,
-                "indicators": getattr(self.config, "indicators", {}),
-            },
-        )
-        self.strategy = PearlBot(config=bot_config)
+        # No strategy object needed - we'll call generate_signals directly
+        self.strategy = None  # Will use generate_signals function
         
-        self.data_fetcher = NQAgentDataFetcher(data_provider, config=self.config)
+        # Create a simple config dict for data_fetcher compatibility
+        nq_config_dict = {
+            "symbol": self.config.get("symbol", "MNQ"),
+            "timeframe": self.config.get("timeframe", "5m"),
+        }
+        self.data_fetcher = NQAgentDataFetcher(data_provider, config=nq_config_dict)
         
-        # Initialize TradeManager for trailing stops and swing trade management
-        service_config = load_service_config()
-        self.trade_manager = TradeManager(service_config)
+        # TradeManager removed (was part of nq_intraday)
+        self.trade_manager = None
+        
         self.state_manager = NQAgentStateManager(state_dir=state_dir)
         self.performance_tracker = PerformanceTracker(
             state_dir=state_dir,
@@ -618,7 +609,9 @@ class NQAgentService:
             except Exception:
                 config_dict["futures_market_open"] = None
             try:
-                config_dict["strategy_session_open"] = bool(self.strategy.scanner.is_market_hours())
+                # Check trading session using pearl_bot_auto time filter
+                from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+                config_dict["strategy_session_open"] = check_trading_session(datetime.now(timezone.utc), self.config)
             except Exception:
                 config_dict["strategy_session_open"] = None
             
@@ -1002,8 +995,12 @@ class NQAgentService:
                     # Lightweight cycle: skip heavy analysis, but still run health/status/exit grading
                     pass
                 else:
-                    # Full analysis: new bar arrived
-                    signals = self.strategy.analyze(market_data)
+                    # Full analysis: new bar arrived - use pearl_bot_auto
+                    df = market_data.get("df")
+                    if df is not None and not df.empty:
+                        signals = generate_signals(df, config=self.config, current_time=datetime.now(timezone.utc))
+                    else:
+                        signals = []
                     self._analysis_run_count += 1
                     # Update last analyzed bar timestamp
                     if current_bar_ts is not None:
@@ -1030,16 +1027,15 @@ class NQAgentService:
                 
                 # Prefer latest_bar timestamp for session check (reduces wall-clock drift issues).
                 # Fall back to wall-clock time if no latest_bar available.
-                strategy_session_open = self.strategy.scanner.is_market_hours(dt=latest_bar_time)
+                from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+                check_time = latest_bar_time if latest_bar_time else datetime.now(timezone.utc)
+                strategy_session_open = check_trading_session(check_time, self.config)
                 futures_market_open = False
                 try:
                     futures_market_open = bool(get_market_hours().is_market_open())
                 except Exception:
                     futures_market_open = False
-                regime_info = "unknown"
-                if hasattr(self.strategy, 'scanner') and hasattr(self.strategy.scanner, 'regime_detector'):
-                    # Try to get last detected regime (would need to store it)
-                    regime_info = "detected"
+                regime_info = "unknown"  # Regime detection removed with nq_intraday
                 
                 logger.info(
                     "Cycle completed",
@@ -1080,7 +1076,7 @@ class NQAgentService:
                             except Exception:
                                 pass  # Non-fatal
                         
-                        # Add trade to TradeManager for trailing stop management
+                        # TradeManager removed (was part of nq_intraday)
                         # Get buffer data for chart generation
                         buffer_data = market_data.get("df", pd.DataFrame())
                         try:
@@ -1107,17 +1103,19 @@ class NQAgentService:
 
                 # Update active trades with trailing stops (NO LIMITS - can handle 100+ trades)
                 try:
-                    # Prepare market data for TradeManager
+                    # TradeManager removed - no trailing stop management needed
                     df = market_data.get("df", pd.DataFrame())
                     latest_bar = market_data.get("latest_bar", {})
                     current_price = float(latest_bar.get("close", 0)) if latest_bar else (float(df["close"].iloc[-1]) if not df.empty else 0)
                     previous_price = float(df["close"].iloc[-2]) if len(df) >= 2 else current_price
                     
-                    # Get ATR from scanner if available
+                    # Get ATR using pearl_bot_auto
                     atr = 10.0  # Default
-                    if hasattr(self.strategy.scanner, "get_atr") and not df.empty:
+                    if not df.empty:
                         try:
-                            atr = float(self.strategy.scanner.get_atr(df))
+                            from pearlalgo.strategies.trading_bots.pearl_bot_auto import calculate_atr
+                            atr_series = calculate_atr(df, period=14)
+                            atr = float(atr_series.iloc[-1]) if not atr_series.empty else 10.0
                         except Exception:
                             pass
                     
@@ -1130,12 +1128,11 @@ class NQAgentService:
                         "market_open": market_data.get("market_open", True),
                     }
                     
-                    # Track stop updates for notifications
-                    active_trades_before = len(self.trade_manager.get_active_trades())
-                    exit_signals = self.trade_manager.update_trades(trade_market_data)
+                    # TradeManager removed - no trailing stop management
+                    active_trades_before = 0
+                    exit_signals = []
                     
-                    # Notify on significant stop updates (breakeven moves, large trailing updates)
-                    for trade in self.trade_manager.get_active_trades():
+                    # No trade manager - virtual broker handles exits
                         # Persist stop changes so virtual exit grading uses the latest stop_loss.
                         # (Virtual exits read stop_loss from the nested `signal` in signals.jsonl.)
                         try:
@@ -1216,19 +1213,9 @@ class NQAgentService:
                 signal_diagnostics = None
                 signal_diagnostics_raw = None
 
-                # Note: NQIntradayStrategy uses `signal_generator` (not `generator`)
-                try:
-                    if hasattr(self.strategy, "signal_generator") and hasattr(self.strategy.signal_generator, "last_diagnostics"):
-                        diag = self.strategy.signal_generator.last_diagnostics
-                        if diag is not None:
-                            # Render as compact string for Telegram (e.g., "Raw: 3 → Valid: 0 | Filtered: 2 conf")
-                            signal_diagnostics = diag.format_compact() if hasattr(diag, "format_compact") else str(diag)
-                            try:
-                                signal_diagnostics_raw = diag.to_dict() if hasattr(diag, "to_dict") else None
-                            except Exception:
-                                signal_diagnostics_raw = None
-                except Exception:
-                    pass
+                # Signal diagnostics removed with pearl_bot_auto (simpler signal generation)
+                signal_diagnostics = None
+                signal_diagnostics_raw = None
                 
                 # Persist to instance variables for _save_state() (surfaced in /status)
                 self._last_quiet_reason = quiet_reason
@@ -1466,13 +1453,7 @@ class NQAgentService:
             except Exception as e:
                 logger.debug(f"Could not track virtual entry for {signal_id}: {e}")
 
-            # Add to TradeManager for trailing stop / breakeven management AFTER signal_id exists.
-            try:
-                tm = getattr(self, "trade_manager", None)
-                if entry_tracked and tm is not None:
-                    tm.add_trade(signal)
-            except Exception as e:
-                logger.debug(f"Failed to add trade to TradeManager (non-fatal): {e}")
+            # TradeManager removed (was part of nq_intraday) - virtual broker handles trades
 
             # ==========================================================================
             # BANDIT POLICY: Evaluate signal type and decide whether to execute
@@ -1823,11 +1804,7 @@ class NQAgentService:
                     )
                     exited_this_cycle.add(sig_id)
 
-                    # Keep TradeManager in sync with virtual exits (avoid managing already-exited trades)
-                    try:
-                        tm = getattr(self, "trade_manager", None)
-                        if tm is not None:
-                            tm.remove_trade(sig_id)
+                    # TradeManager removed - virtual broker handles exits
                     except Exception:
                         pass
 
@@ -2896,7 +2873,8 @@ class NQAgentService:
         
         session_open = False
         try:
-            session_open = bool(self.strategy.scanner.is_market_hours(dt=bar_time))
+            from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+            session_open = check_trading_session(bar_time, self.config) if bar_time else False
         except Exception:
             # If session check fails, assume closed (conservative)
             session_open = False
@@ -3026,7 +3004,8 @@ class NQAgentService:
                         bar_time = bar_time.replace(tzinfo=timezone.utc)
             
             # Check strategy session first (more specific)
-            strategy_session_open = self.strategy.scanner.is_market_hours(dt=bar_time)
+            from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+            strategy_session_open = check_trading_session(bar_time, self.config) if bar_time else False
             if not strategy_session_open:
                 return "StrategySessionClosed"
             
@@ -3600,7 +3579,8 @@ class NQAgentService:
 
         strategy_session_open = None
         try:
-            strategy_session_open = bool(self.strategy.scanner.is_market_hours())
+            from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+            strategy_session_open = check_trading_session(datetime.now(timezone.utc), self.config)
         except Exception:
             strategy_session_open = None
 
@@ -4085,30 +4065,14 @@ class NQAgentService:
         # Reuse futures_market_open from earlier check (avoid duplicate API call)
         state["futures_market_open"] = futures_market_open
         try:
-            state["strategy_session_open"] = bool(self.strategy.scanner.is_market_hours())
+            from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+            state["strategy_session_open"] = check_trading_session(datetime.now(timezone.utc), self.config)
         except Exception:
             state["strategy_session_open"] = None
 
-        # Persist current regime snapshot from scanner (best-effort)
-        try:
-            reg = getattr(self.strategy.scanner, "last_regime", None)
-            if isinstance(reg, dict):
-                # Ensure JSON serializable (convert numpy scalars, timestamps, etc.)
-                reg_safe: Dict[str, Any] = {}
-                for k, v in reg.items():
-                    if hasattr(v, "isoformat"):
-                        reg_safe[k] = v.isoformat()
-                    elif hasattr(v, "item"):  # numpy scalar
-                        reg_safe[k] = v.item()
-                    else:
-                        reg_safe[k] = v
-                state["regime"] = reg_safe
-            else:
-                state["regime"] = None
-            state["regime_timestamp"] = getattr(self.strategy.scanner, "last_regime_timestamp", None)
-        except Exception:
-            state["regime"] = None
-            state["regime_timestamp"] = None
+        # Regime detection removed with nq_intraday
+        state["regime"] = None
+        state["regime_timestamp"] = None
 
         # Compute and persist buy/sell pressure from last market data (best-effort)
         try:

@@ -17,7 +17,7 @@ from pearlalgo.utils.paths import parse_utc_timestamp
 
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.data_providers.base import DataProvider
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+# NQIntradayConfig removed - using dict config now
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.retry import async_retry_with_backoff
@@ -33,17 +33,17 @@ class NQAgentDataFetcher:
     def __init__(
         self,
         data_provider: DataProvider,
-        config: Optional[NQIntradayConfig] = None,
+        config: Optional[Dict] = None,
     ):
         """
         Initialize data fetcher.
         
         Args:
             data_provider: Data provider instance
-            config: Configuration instance (optional)
+            config: Configuration dict (optional)
         """
         self.data_provider = data_provider
-        self.config = config or NQIntradayConfig()
+        self.config = config or {}
 
         # Load data configuration
         service_config = load_service_config()
@@ -127,15 +127,15 @@ class NQAgentDataFetcher:
                 ErrorHandler.handle_data_fetch_error(
                     e,
                     context={
-                        "symbol": self.config.symbol,
-                        "timeframe": self.config.timeframe,
+                        "symbol": self.config.get("symbol", "MNQ"),
+                        "timeframe": self.config.get("timeframe", "5m"),
                         "stage": "historical_fetch",
                     },
                 )
                 df = pd.DataFrame()
 
             if df.empty:
-                logger.warning(f"No historical data available for {self.config.symbol} (Error 162 may be blocking historical data)")
+                logger.warning(f"No historical data available for {self.config.get("symbol", "MNQ")} (Error 162 may be blocking historical data)")
                 # Don't return early - still try to get latest bar (Level 1 real-time data might work)
                 # Set df to empty DataFrame but continue to try get_latest_bar
                 df = pd.DataFrame()
@@ -164,7 +164,7 @@ class NQAgentDataFetcher:
             if not df.empty:
                 # Log data freshness status
                 if not data_freshness_warning:
-                    logger.debug(f"Data is fresh: {len(df)} bars retrieved for {self.config.symbol}")
+                    logger.debug(f"Data is fresh: {len(df)} bars retrieved for {self.config.get("symbol", "MNQ")}")
                     # Use centralized normalization to avoid double-reset_index issues
                     self._data_buffer = self._normalize_to_strategy_buffer(df, self._buffer_size)
                 
@@ -192,13 +192,13 @@ class NQAgentDataFetcher:
             if hasattr(self.data_provider, 'get_latest_bar'):
                 try:
                     if asyncio.iscoroutinefunction(self.data_provider.get_latest_bar):
-                        latest_bar = await self.data_provider.get_latest_bar(self.config.symbol)
+                        latest_bar = await self.data_provider.get_latest_bar(self.config.get("symbol", "MNQ"))
                     else:
                         # Run sync method in executor
                         loop = asyncio.get_event_loop()
                         latest_bar = await loop.run_in_executor(
                             None,
-                            lambda: self.data_provider.get_latest_bar(self.config.symbol)
+                            lambda: self.data_provider.get_latest_bar(self.config.get("symbol", "MNQ"))
                         )
                     
                     if latest_bar:
@@ -219,24 +219,24 @@ class NQAgentDataFetcher:
                             # If data is very fresh (< 30 seconds), likely real-time
                             if age_seconds < 30:
                                 data_source = "real-time"
-                                logger.debug(f"Latest bar for {self.config.symbol} from real-time data (age: {age_seconds:.1f}s)")
+                                logger.debug(f"Latest bar for {self.config.get("symbol", "MNQ")} from real-time data (age: {age_seconds:.1f}s)")
                             else:
                                 data_source = "historical"
                                 logger.info(
-                                    f"Latest bar for {self.config.symbol} from historical data "
+                                    f"Latest bar for {self.config.get("symbol", "MNQ")} from historical data "
                                     f"(age: {age_minutes:.1f} minutes, price: ${latest_bar.get('close', 0):.2f})"
                                 )
                                 
                                 # Warn if data is stale
                                 if age_minutes > self.stale_data_threshold_minutes:
                                     logger.warning(
-                                        f"⚠️  Stale data detected for {self.config.symbol}: "
+                                        f"⚠️  Stale data detected for {self.config.get("symbol", "MNQ")}: "
                                         f"{age_minutes:.1f} minutes old (threshold: {self.stale_data_threshold_minutes} min). "
                                         f"Price may not match current market."
                                     )
                         else:
                             data_source = "provider"
-                            logger.debug(f"Latest bar for {self.config.symbol} from provider (timestamp not available)")
+                            logger.debug(f"Latest bar for {self.config.get("symbol", "MNQ")} from provider (timestamp not available)")
                 except Exception as e:
                     logger.error(f"❌ Could not fetch latest bar from provider: {e}. Will use historical data fallback.", exc_info=True)
                     data_source = "fallback"
@@ -306,21 +306,21 @@ class NQAgentDataFetcher:
                         age_minutes = age_seconds / 60
                         
                         logger.debug(
-                            f"Using last bar from historical data as latest_bar for {self.config.symbol} "
+                            f"Using last bar from historical data as latest_bar for {self.config.get("symbol", "MNQ")} "
                             f"(age: {age_minutes:.1f} minutes, price: ${close_val:.2f})"
                         )
                         
                         # Warn if historical fallback is stale
                         if age_minutes > self.stale_data_threshold_minutes:
                             logger.warning(
-                                f"⚠️  Historical fallback data for {self.config.symbol} is stale: "
+                                f"⚠️  Historical fallback data for {self.config.get("symbol", "MNQ")} is stale: "
                                 f"{age_minutes:.1f} minutes old (threshold: {self.stale_data_threshold_minutes} min). "
                                 f"Price ${close_val:.2f} may not match current market."
                             )
                 else:
                     # No historical data AND no real-time data - this is a problem
                     logger.error(
-                        f"❌ CRITICAL: No data available for {self.config.symbol}\n"
+                        f"❌ CRITICAL: No data available for {self.config.get("symbol", "MNQ")}\n"
                         f"   - Historical data blocked by Error 162 (TWS conflict)\n"
                         f"   - Level 1 real-time data not available (Error 354 or subscription issue)\n"
                         f"   \n"
@@ -333,7 +333,7 @@ class NQAgentDataFetcher:
                     latest_bar = None
 
             if latest_bar is None:
-                logger.warning(f"No latest bar available for {self.config.symbol}")
+                logger.warning(f"No latest bar available for {self.config.get("symbol", "MNQ")}")
                 market_data = {"df": pd.DataFrame(), "latest_bar": None}
                 self._last_market_data = market_data
                 return market_data
@@ -380,7 +380,7 @@ class NQAgentDataFetcher:
             # Use ErrorHandler for standardized error handling
             ErrorHandler.handle_data_fetch_error(
                 e,
-                context={"symbol": self.config.symbol, "timeframe": self.config.timeframe},
+                context={"symbol": self.config.get("symbol", "MNQ"), "timeframe": self.config.get("timeframe", "5m")},
             )
             # Return empty data instead of raising to allow graceful degradation
             market_data = {
@@ -487,10 +487,10 @@ class NQAgentDataFetcher:
         df = await loop.run_in_executor(
             None,
             lambda: self.data_provider.fetch_historical(
-                self.config.symbol,
+                self.config.get("symbol", "MNQ"),
                 start=start,
                 end=end,
-                timeframe=self.config.timeframe,
+                timeframe=self.config.get("timeframe", "5m"),
             )
         )
         
@@ -599,7 +599,7 @@ class NQAgentDataFetcher:
                 df_5m = await loop.run_in_executor(
                     None,
                     lambda: self.data_provider.fetch_historical(
-                        self.config.symbol,
+                        self.config.get("symbol", "MNQ"),
                         start=start_5m,
                         end=end,
                         timeframe="5m",
@@ -613,7 +613,7 @@ class NQAgentDataFetcher:
                 df_15m = await loop.run_in_executor(
                     None,
                     lambda: self.data_provider.fetch_historical(
-                        self.config.symbol,
+                        self.config.get("symbol", "MNQ"),
                         start=start_15m,
                         end=end,
                         timeframe="15m",

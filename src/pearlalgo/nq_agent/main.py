@@ -31,7 +31,7 @@ except Exception as e:
 from pearlalgo.config.config_file import load_config_yaml
 from pearlalgo.data_providers.factory import create_data_provider
 from pearlalgo.nq_agent.service import NQAgentService
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.utils.logging_config import set_run_id, setup_logging
 from pearlalgo.utils.paths import ensure_state_dir
 
@@ -69,12 +69,8 @@ async def main():
             telegram_bot_token = telegram_bot_token or telegram_config.get("bot_token")
             telegram_chat_id = telegram_chat_id or telegram_config.get("chat_id")
 
-    # Create configuration (load from config.yaml if available)
-    try:
-        config = NQIntradayConfig.from_config_file()
-    except Exception as e:
-        logger.warning(f"Could not load config from file, using defaults: {e}")
-        config = NQIntradayConfig()
+    # Use PearlBot Auto config
+    config = PEARL_BOT_CONFIG.copy()
 
     # Create data provider (use factory to get appropriate provider)
     # Default to IBKR if no provider specified via env var

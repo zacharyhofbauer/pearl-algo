@@ -21,7 +21,7 @@ from .trend_follower_bot import TrendFollowerBot
 from .breakout_bot import BreakoutBot
 from .mean_reversion_bot import MeanReversionBot
 from .composite_bot import CompositeBot, PearlAutoBot
-from .pearl_bot import PearlBot
+from .pearl_bot_auto import generate_signals, run_pearlbot, VirtualBroker, CONFIG
 
 __all__ = [
     # Base classes
@@ -39,6 +39,10 @@ __all__ = [
     "MeanReversionBot",
     "CompositeBot",
     "PearlAutoBot",
-    "PearlBot",
+    # PearlBot Auto (Pine Script-based)
+    "generate_signals",
+    "run_pearlbot",
+    "VirtualBroker",
+    "CONFIG",
 ]
 
