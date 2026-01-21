@@ -711,6 +711,7 @@ class NQScanner:
         
         session = regime.get("session", "afternoon")
         regime_type = regime.get("regime", "unknown")
+        regime_vol = str(regime.get("volatility") or "").strip()
         
         # Regime allowlist for unified strategy (canonical: signals.regime_filters.unified_strategy.allowed_regimes).
         # Default behavior (when config not present) remains "trending only".
@@ -769,7 +770,11 @@ class NQScanner:
         if (regime_type == "trending_bullish" and
             ema_fast > ema_slow and  # EMA crossover or trending
             current_price > vwap and  # Price above VWAP
-            (vwap_upper_1 <= 0 or current_price <= vwap_upper_1) and  # avoid buying above +1σ VWAP
+            (
+                regime_vol != "low"
+                or vwap_upper_1 <= 0
+                or current_price <= vwap_upper_1
+            ) and  # avoid buying above +1σ VWAP in low-vol chop
             40 <= rsi <= 70 and  # RSI in bullish range
             macd_hist > 0):  # MACD bullish
             
@@ -808,7 +813,11 @@ class NQScanner:
         elif (regime_type == "trending_bearish" and
               ema_fast < ema_slow and  # EMA crossover or trending
               current_price < vwap and  # Price below VWAP
-              (vwap_lower_1 <= 0 or current_price >= vwap_lower_1) and  # avoid selling below -1σ VWAP
+              (
+                  regime_vol != "low"
+                  or vwap_lower_1 <= 0
+                  or current_price >= vwap_lower_1
+              ) and  # avoid selling below -1σ VWAP in low-vol chop
               30 <= rsi <= 60 and  # RSI in bearish range
               macd_hist < 0):  # MACD bearish
             
