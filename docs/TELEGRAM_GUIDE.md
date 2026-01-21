@@ -1,60 +1,74 @@
-# Telegram Integration Guide (Minimal)
+# Telegram Integration Guide
 
-This guide documents the **AI-only Telegram interface** for the single-strategy system.
+This guide documents the **Telegram Command Handler** (menu-driven control plane) for the PearlAlgo MNQ Agent.
 
----
+## What runs
 
-## 1. Quick Start
+- **Command handler service**: `python -m pearlalgo.nq_agent.telegram_command_handler`
+  - Renders the **main menu** and sub-menus via inline buttons.
+  - Reads **agent state** from `data/nq_agent_state/state.json` and signal history from `data/nq_agent_state/signals.jsonl`.
+  - Uses the project’s lifecycle scripts via `pearlalgo.utils.service_controller.ServiceController` for safe orchestration.
 
-### 1.1 Requirements
+## Quick start
 
-- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set in `.env`
+### Requirements
+
+- `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set in `.env` (see `env.example`)
 - Bot created via [@BotFather](https://t.me/botfather)
-- NQ Agent service configured and running
 
-### 1.2 Set Commands via BotFather
-
-1. Open Telegram and start a chat with `@BotFather`.
-2. Send `/setcommands`.
-3. Select your bot.
-4. Paste this command list:
-   ```
-   analyze - AI strategy report
-   help - Show available commands
-   ```
-
-### 1.3 Start the Telegram Command Handler
+### Start the command handler
 
 ```bash
 cd /path/to/pearlalgo-dev-ai-agents
 ./scripts/telegram/start_command_handler.sh
 ```
 
-The handler listens for `/analyze` and `/help` only.
+For background mode:
 
----
+```bash
+./scripts/telegram/start_command_handler.sh --background
+```
 
-## 2. Available Commands
+### (Optional) sync BotFather commands
 
-### `/analyze`
+```bash
+python3 scripts/telegram/set_bot_commands.py
+```
 
-Returns a compact AI report with:
-- Latest performance summary (from `data/nq_agent_state/exports/performance_*_metrics.json`)
-- Single-strategy recommendation (from `data/nq_agent_state/exports/strategy_selection_*.json`)
+## Supported commands
 
-### `/help`
+The command handler intentionally keeps slash commands minimal:
 
-Shows the minimal command list.
+- `/start` (or `/menu`): Show the main menu
+- `/help`: Help text
+- `/settings`: Preferences (charts/notifications UI toggles)
 
----
+Everything else is accessed via the button menus (safer and easier to operate on mobile).
 
-## 3. Tips
+## Menu map (operator-facing)
 
-- If `/analyze` says the selection report is missing, run:
-  ```
-  python3 scripts/backtesting/strategy_selection.py
-  ```
-- To update BotFather commands programmatically:
-  ```
-  python3 scripts/telegram/set_bot_commands.py
-  ```
+- **Signals & Trades**: recent signals, active trades, signal details
+- **Performance**: rollups, exports, diagnostics
+- **Status**: agent + gateway connectivity, state freshness, data quality
+- **System**: start/stop/restart agent, gateway controls, logs (read-only)
+- **Bots**: PearlBot controls, Telegram-first backtests, report browsing
+- **Settings**: alert/UI preferences and the AI Patch Wizard (if enabled)
+
+## Safety & authorization
+
+- The handler **only responds to the configured chat ID** (`TELEGRAM_CHAT_ID`). Other chats are blocked.
+- AI patching blocks sensitive paths (`data/`, `logs/`, `.env`, `.venv/`, `.git/`, etc).
+
+## Troubleshooting
+
+- Restart handler:
+
+```bash
+./scripts/telegram/restart_command_handler.sh --background
+```
+
+- If you expect backtest recommendations, generate the selection export:
+
+```bash
+python3 scripts/backtesting/strategy_selection.py
+```

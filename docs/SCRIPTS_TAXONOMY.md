@@ -12,6 +12,11 @@ This document standardizes the roles of all scripts under `scripts/` and identif
   - **Behavior**: Uses PID file if available, falls back to `pgrep -f "pearlalgo.nq_agent.main"`.
 - `check_nq_agent_status.sh`
   - **Role**: Check process and basic state (PID, uptime, state file summary, gateway status).
+- `start_monitor_suite.sh`
+  - **Role**: Operator convenience script to start the full local suite (Gateway + Agent + Telegram handler + Monitor UI).
+  - **Notes**: Intended for desktop/VNC sessions; pairs with `stop_monitor_suite.sh`.
+- `stop_monitor_suite.sh`
+  - **Role**: Stop the full local suite started by `start_monitor_suite.sh`.
 
 ## Gateway (`scripts/gateway/`)
 
@@ -28,6 +33,8 @@ Canonical script:
   - **Behavior**: Changes to project root, activates `.venv` if present, selects `.venv/bin/python3` when available, verifies `pearlalgo` import, ensures only one handler instance via `pgrep -f "telegram_command_handler"`, then runs `-m pearlalgo.nq_agent.telegram_command_handler`.
 - `check_command_handler.sh`
   - **Role**: Check if command handler process is running and show PIDs.
+- `restart_command_handler.sh`
+  - **Role**: Restart the Telegram command handler (thin wrapper around stop/start semantics).
 - `set_bot_commands.py`
   - **Role**: Helper to set BotFather commands via Telegram API using `python-telegram-bot`.
 
@@ -63,6 +70,8 @@ Backtesting scripts for strategy validation on historical data.
   - **Role**: Unified validation runner supporting modes: `telegram`, `signals`, `service`, `arch`.
 - `run_tests.sh`
   - **Role**: Developer convenience script to run the pytest unit suite under `tests/` (uses `.venv` when present).
+- `check_architecture_boundaries.py`
+  - **Role**: AST-based module boundary enforcement (warn-only by default; strict mode via `PEARLALGO_ARCH_ENFORCE=1`).
 - `test_signal_starvation_fixes.py`
   - **Role**: Strategy regression validations (anti-starvation fixes).
 - `test_data_quality.py`, `test_e2e_simulation.py`
@@ -75,12 +84,16 @@ Backtesting scripts for strategy validation on historical data.
   - **Role**: Validate strategy outputs/assumptions for given historical data.
 - `check_signals.py`
   - **Role**: Diagnostic tool to check signals file format, count, and validity. Useful for troubleshooting signal persistence issues.
+- `generate_backtest_baseline.py`
+  - **Role**: Generate deterministic baseline image for backtest visual regression testing.
 - `generate_dashboard_baseline.py`
   - **Role**: Generate deterministic dashboard baseline image for visual regression testing.
   - **Behavior**: Creates fixed synthetic OHLCV data and renders a chart with deterministic parameters; outputs to `tests/fixtures/charts/dashboard_baseline.png`.
 - `generate_entry_exit_baselines.py`
   - **Role**: Generate deterministic entry/exit baseline images for visual regression testing.
   - **Behavior**: Renders entry and exit charts; outputs to `tests/fixtures/charts/entry_baseline.png` and `tests/fixtures/charts/exit_baseline.png`.
+- `generate_mobile_baseline.py`
+  - **Role**: Generate deterministic baseline image for mobile dashboard visual regression testing.
 - `generate_on_demand_chart_baseline.py`
   - **Role**: Generate deterministic baseline image for the Telegram `/chart` (on-demand) dashboard chart.
   - **Behavior**: Renders the 12h lookback variant; outputs to `tests/fixtures/charts/on_demand_chart_12h_baseline.png`.
@@ -117,6 +130,34 @@ they do **not** contain trading or strategy logic.
   - **Role**: Localhost status server for standard tooling integration (curl, Prometheus, systemd health checks).
   - **Behavior**: Reads `data/nq_agent_state/state.json`; exposes `GET /healthz` (200/503), `GET /metrics` (Prometheus), and `GET /` (simple HTML status page).
   - **Usage**: `python3 scripts/monitoring/serve_nq_agent_status.py [--port 9100]`
+
+- `doctor_cli.py`
+  - **Role**: Operator CLI “doctor” for a compact rollup of recent behavior (signals, rejects, sizing, stops).
+  - **Usage**: `python3 scripts/monitoring/doctor_cli.py --hours 24`
+
+## Monitor UI (`scripts/monitor/`)
+
+Local GUI tooling (optional). These scripts launch the Qt-based monitor.
+
+- `start_monitor.sh`
+  - **Role**: Start the monitor UI (foreground/background).
+- `restart_monitor.sh`
+  - **Role**: Restart the monitor UI.
+
+## Setup / Migration (`scripts/setup/`)
+
+Environment- and machine-specific helpers (WiFi / network migration / connectivity).
+These scripts orchestrate OS configuration; they do not contain trading logic.
+
+- `verify_wifi_connection.sh`, `check_network_settings.sh`, `pre_migration_check.sh`
+  - **Role**: Preflight checks and verification helpers for WiFi migrations.
+- `connect_xprs.sh`, `ensure_auto_connect.sh`
+  - **Role**: Network connection helpers (ISP / captive portal / auto-connect workflows).
+
+## Ops Shortcuts (`scripts/`)
+
+- `health_check.sh`
+  - **Role**: Fast local health snapshot (processes, gateway, state.json, recent signals/log errors). Requires `jq`.
 
 ## General Guidelines
 

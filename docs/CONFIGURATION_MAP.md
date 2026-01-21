@@ -46,7 +46,7 @@ Optional logging environment variables (for systemd/journald):
 Optional AI/LLM environment variables (for OpenAI integration):
 
 - `OPENAI_API_KEY`
-  - **Used by**: `pearlalgo.nq_agent.telegram_command_handler` (`/ai_patch` command)
+  - **Used by**: `pearlalgo.nq_agent.telegram_command_handler` (AI Patch Wizard)
   - **Purpose**: API key for OpenAI code generation. Only required if using the AI patch feature.
 
 No other environment variables are required by the running agent; keep any additions explicit and documented here.

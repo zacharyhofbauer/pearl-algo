@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pytest
@@ -32,6 +31,19 @@ from tests.fixtures.deterministic_data import (
     FIXED_TITLE_TIME,
 )
 
+# Import shared visual regression utilities
+from tests.fixtures.visual_regression_utils import (
+    validate_png_file,
+    load_image_as_array,
+    compare_images,
+    save_diff_artifact,
+    format_regression_failure_message,
+    DEFAULT_PIXEL_TOLERANCE,
+    DEFAULT_MAX_DIFF_PIXELS_PCT,
+    DETERMINISM_PIXEL_TOLERANCE,
+    DETERMINISM_MAX_DIFF_PIXELS_PCT,
+)
+
 # === Constants ===
 
 # Paths
@@ -39,143 +51,9 @@ FIXTURES_DIR = project_root / "tests" / "fixtures" / "charts"
 BASELINE_PATH = FIXTURES_DIR / "dashboard_baseline.png"
 DIFF_OUTPUT_DIR = project_root / "tests" / "artifacts"
 
-# Tolerance for image comparison (allows for minor font rendering differences)
-# Measured as mean absolute difference per pixel (0-255 scale)
-PIXEL_TOLERANCE = 2.0  # Allow ~0.8% variance per channel
-MAX_DIFF_PIXELS_PCT = 1.0  # Allow up to 1% of pixels to differ
-
-# PNG magic bytes (first 8 bytes of any valid PNG file)
-PNG_MAGIC = b'\x89PNG\r\n\x1a\n'
-
-
-def validate_png_file(path: Path) -> tuple[bool, str]:
-    """
-    Validate that a file is a valid PNG image.
-    
-    Returns:
-        (is_valid, error_message)
-    """
-    if not path.exists():
-        return False, f"File does not exist: {path}"
-    
-    if path.stat().st_size == 0:
-        return False, f"File is empty: {path}"
-    
-    # Check PNG magic bytes
-    try:
-        with open(path, "rb") as f:
-            header = f.read(8)
-        if header != PNG_MAGIC:
-            return False, f"Invalid PNG header: got {header!r}, expected {PNG_MAGIC!r}"
-    except Exception as e:
-        return False, f"Could not read file: {e}"
-    
-    # Try to actually load the image to verify it's not truncated/corrupt
-    try:
-        try:
-            from PIL import Image
-            img = Image.open(path)
-            img.verify()  # Verify without loading full data
-        except ImportError:
-            import matplotlib.pyplot as plt
-            plt.imread(str(path))  # Will raise if corrupt
-    except Exception as e:
-        return False, f"Image file is corrupt or unreadable: {e}"
-    
-    return True, ""
-
-
-def load_image_as_array(path: Path) -> Optional[np.ndarray]:
-    """Load an image file as a numpy array."""
-    try:
-        from PIL import Image
-        img = Image.open(path)
-        return np.array(img)
-    except ImportError:
-        # Fallback to matplotlib
-        import matplotlib.pyplot as plt
-        img = plt.imread(str(path))
-        # Convert to uint8 if normalized float
-        if img.dtype == np.float32 or img.dtype == np.float64:
-            img = (img * 255).astype(np.uint8)
-        return img
-    except Exception:
-        return None
-
-
-def compare_images(
-    actual: np.ndarray,
-    expected: np.ndarray,
-    tolerance: float = PIXEL_TOLERANCE,
-    max_diff_pct: float = MAX_DIFF_PIXELS_PCT,
-) -> tuple[bool, float, float, Optional[np.ndarray]]:
-    """
-    Compare two images with tolerance for rendering differences.
-    
-    Returns:
-        (passed, mean_diff, diff_pct, diff_image)
-    """
-    # Handle shape differences
-    if actual.shape != expected.shape:
-        # Try to align by cropping/padding to smaller dimensions
-        h = min(actual.shape[0], expected.shape[0])
-        w = min(actual.shape[1], expected.shape[1])
-        actual = actual[:h, :w]
-        expected = expected[:h, :w]
-        
-        # If still different (e.g., channel count), fail
-        if actual.shape != expected.shape:
-            return False, 255.0, 100.0, None
-
-    # Compute difference
-    diff = np.abs(actual.astype(np.float32) - expected.astype(np.float32))
-    
-    # Mean difference per pixel
-    mean_diff = float(np.mean(diff))
-    
-    # Percentage of pixels with any difference
-    diff_pixels = np.any(diff > tolerance, axis=-1) if diff.ndim == 3 else (diff > tolerance)
-    diff_pct = float(np.mean(diff_pixels) * 100)
-    
-    # Create diff visualization (highlight differences in red)
-    diff_image = expected.copy()
-    if diff.ndim == 3:
-        mask = np.any(diff > tolerance, axis=-1)
-        diff_image[mask] = [255, 0, 0, 255] if diff_image.shape[-1] == 4 else [255, 0, 0]
-    
-    passed = (mean_diff <= tolerance) and (diff_pct <= max_diff_pct)
-    return passed, mean_diff, diff_pct, diff_image
-
-
-def save_diff_artifact(
-    actual: np.ndarray,
-    expected: np.ndarray,
-    diff: Optional[np.ndarray],
-    name: str,
-) -> Path:
-    """Save comparison artifacts for debugging failed tests."""
-    DIFF_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        from PIL import Image
-        
-        if actual is not None:
-            Image.fromarray(actual).save(DIFF_OUTPUT_DIR / f"{name}_actual.png")
-        if expected is not None:
-            Image.fromarray(expected).save(DIFF_OUTPUT_DIR / f"{name}_expected.png")
-        if diff is not None:
-            Image.fromarray(diff).save(DIFF_OUTPUT_DIR / f"{name}_diff.png")
-    except ImportError:
-        import matplotlib.pyplot as plt
-        
-        if actual is not None:
-            plt.imsave(str(DIFF_OUTPUT_DIR / f"{name}_actual.png"), actual)
-        if expected is not None:
-            plt.imsave(str(DIFF_OUTPUT_DIR / f"{name}_expected.png"), expected)
-        if diff is not None:
-            plt.imsave(str(DIFF_OUTPUT_DIR / f"{name}_diff.png"), diff)
-    
-    return DIFF_OUTPUT_DIR
+# Use default tolerances from shared module
+PIXEL_TOLERANCE = DEFAULT_PIXEL_TOLERANCE
+MAX_DIFF_PIXELS_PCT = DEFAULT_MAX_DIFF_PIXELS_PCT
 
 
 class TestBaselineValidity:
@@ -335,15 +213,18 @@ class TestDashboardChartVisualRegression:
             
             if not passed:
                 # Save diff artifacts for debugging
-                artifact_dir = save_diff_artifact(actual, expected, diff_image, "dashboard")
+                artifact_dir = save_diff_artifact(
+                    actual, expected, diff_image, "dashboard", output_dir=DIFF_OUTPUT_DIR
+                )
                 pytest.fail(
-                    f"Visual regression detected!\n"
-                    f"  Mean pixel difference: {mean_diff:.2f} (tolerance: {PIXEL_TOLERANCE})\n"
-                    f"  Pixels differing: {diff_pct:.2f}% (tolerance: {MAX_DIFF_PIXELS_PCT}%)\n"
-                    f"  Diff artifacts saved to: {artifact_dir}\n"
-                    f"\n"
-                    f"If this change is intentional, update the baseline:\n"
-                    f"  python3 scripts/testing/generate_dashboard_baseline.py"
+                    format_regression_failure_message(
+                        mean_diff=mean_diff,
+                        diff_pct=diff_pct,
+                        tolerance=PIXEL_TOLERANCE,
+                        max_diff_pct=MAX_DIFF_PIXELS_PCT,
+                        artifact_dir=artifact_dir,
+                        baseline_update_command="python3 scripts/testing/generate_dashboard_baseline.py",
+                    )
                 )
         finally:
             # Clean up
@@ -433,8 +314,8 @@ class TestDashboardChartVisualRegression:
             # Should be nearly identical (allow for minor floating-point variance)
             passed, mean_diff, diff_pct, _ = compare_images(
                 img1, img2,
-                tolerance=0.5,  # Very tight tolerance for same-run comparison
-                max_diff_pct=0.1,
+                tolerance=DETERMINISM_PIXEL_TOLERANCE,
+                max_diff_pct=DETERMINISM_MAX_DIFF_PIXELS_PCT,
             )
             
             assert passed, (

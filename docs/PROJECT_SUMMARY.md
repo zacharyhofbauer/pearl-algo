@@ -33,8 +33,8 @@
 ### Key Highlights
 
 - ✅ **Fully Automated**: Runs 24/7 with minimal intervention
-- ✅ **Prop Firm Optimized**: MNQ contracts (5-15 per trade), 1% risk per trade, 10% max drawdown
-- ✅ **Scalping Focus**: Adaptive cadence (5s active, 30s idle), tighter stops (1.5x ATR), quick profits (1.2:1 min R:R filter)
+- ✅ **Prop Firm Optimized**: MNQ futures with explicit risk caps and guardrails (see `config/config.yaml`)
+- ✅ **Scalping Focus**: Adaptive cadence (5s active, 30s idle, 300s closed) + confidence/R:R filters + adaptive stops/sizing
 - ✅ **Real-time Data**: Connects to Interactive Brokers (IBKR) Gateway for live market data
 - ✅ **Intelligent Signals**: Uses technical analysis to generate high-confidence trading signals
 - ✅ **Mobile-Friendly Notifications**: Rich Telegram notifications optimized for mobile viewing
@@ -62,7 +62,7 @@ The MNQ Trading Agent is designed to:
 - **Trading session (StrategySessionOpen)**: Prop-firm window 18:00 - 16:10 ET (NY time). Positions must be flat by 16:10.
 - **Futures market window (FuturesMarketOpen)**: CME ETH Sun 18:00 ET → Fri 17:00 ET (Mon–Thu 17:00–18:00 ET maintenance break)
 - **Market**: CME Group futures exchange
-- **Trading Style**: Prop firm - 5-15 contracts per trade, 1% risk, quick scalps
+- **Trading Style**: Prop-firm intraday swings and scalps; sizing/risk thresholds are configured in `config/config.yaml`
 
 ### Design Philosophy
 
@@ -637,16 +637,17 @@ telegram:
 
 # Risk Management (Prop Firm Style)
 risk:
-  max_risk_per_trade: 0.01      # 1% max risk per trade (prop firm conservative)
+  max_risk_per_trade: 0.015     # Max risk per trade (fraction of account; configurable)
   max_drawdown: 0.10            # 10% account drawdown limit (prop firm typical)
-  stop_loss_atr_multiplier: 1.5 # Tighter stops for scalping
+  stop_loss_atr_multiplier: 4.0 # ATR-based stop shaping (additional adaptive stops may apply)
   take_profit_risk_reward: 1.5  # Target R:R for TP calculation (filter uses signals.min_risk_reward)
   min_position_size: 5          # Minimum contracts per trade
-  max_position_size: 15         # Maximum contracts per trade
+  max_position_size: 50         # Maximum contracts per trade (additional per-signal caps may apply)
 
 # Signal Filtering (actual R:R filter threshold)
 signals:
-  min_risk_reward: 1.2          # Minimum R:R to pass filter (tuned from 1.5)
+  min_confidence: 0.55          # Minimum confidence to pass filter
+  min_risk_reward: 1.3          # Minimum R:R to pass filter
 ```
 
 ### Configuration Precedence
@@ -686,9 +687,9 @@ In practice:
 - **Real-time Analysis**: Adaptive cadence (5s active session, 30s idle, 300s market closed)
 - **Technical Indicators**: RSI, MACD, ATR, EMA, Bollinger Bands, VWAP, Volume Profile
 - **Pattern Detection**: Unified strategy (EMA crossover + VWAP bias + RSI confirmation + ATR stops)
-- **Confidence Filtering**: Minimum 50% confidence threshold (prop firm adjusted)
-- **Risk/Reward Validation**: Minimum 1.2:1 R/R ratio (configurable via `signals.min_risk_reward`)
-- **Position Sizing**: 5-15 MNQ contracts per trade (dynamic sizing available)
+- **Confidence Filtering**: Configurable via `signals.min_confidence`
+- **Risk/Reward Validation**: Configurable via `signals.min_risk_reward`
+- **Position Sizing**: Configurable via `risk.*` and `strategy.*` (dynamic sizing supported)
 - **Session Filters**: Configurable lunch lull avoidance (disabled by default)
 
 ### 2. Mobile-Optimized Telegram Notifications

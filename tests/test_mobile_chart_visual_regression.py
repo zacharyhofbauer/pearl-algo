@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pytest
@@ -32,6 +31,19 @@ from tests.fixtures.deterministic_data import (
     FIXED_TITLE_TIME,
 )
 
+# Import shared visual regression utilities
+from tests.fixtures.visual_regression_utils import (
+    validate_png_file,
+    load_image_as_array,
+    compare_images,
+    save_diff_artifact,
+    format_regression_failure_message,
+    MOBILE_PIXEL_TOLERANCE,
+    MOBILE_MAX_DIFF_PIXELS_PCT,
+    DETERMINISM_PIXEL_TOLERANCE,
+    DETERMINISM_MAX_DIFF_PIXELS_PCT,
+)
+
 # === Constants ===
 
 # Paths
@@ -43,89 +55,9 @@ DIFF_OUTPUT_DIR = project_root / "tests" / "artifacts"
 MOBILE_FIGSIZE = (8, 5)
 MOBILE_DPI = 150
 
-# Tolerance for image comparison (allows for minor font rendering differences)
-PIXEL_TOLERANCE = 2.5  # Slightly higher tolerance for mobile (font scaling)
-MAX_DIFF_PIXELS_PCT = 2.0  # Allow up to 2% of pixels to differ for mobile
-
-# PNG magic bytes
-PNG_MAGIC = b'\x89PNG\r\n\x1a\n'
-
-
-def validate_png_file(path: Path) -> tuple[bool, str]:
-    """Validate that a file is a valid PNG image."""
-    if not path.exists():
-        return False, f"File does not exist: {path}"
-    
-    if path.stat().st_size == 0:
-        return False, f"File is empty: {path}"
-    
-    try:
-        with open(path, "rb") as f:
-            header = f.read(8)
-        if header != PNG_MAGIC:
-            return False, f"Invalid PNG header: got {header!r}, expected {PNG_MAGIC!r}"
-    except Exception as e:
-        return False, f"Could not read file: {e}"
-    
-    try:
-        try:
-            from PIL import Image
-            img = Image.open(path)
-            img.verify()
-        except ImportError:
-            import matplotlib.pyplot as plt
-            plt.imread(str(path))
-    except Exception as e:
-        return False, f"Image file is corrupt or unreadable: {e}"
-    
-    return True, ""
-
-
-def load_image_as_array(path: Path) -> Optional[np.ndarray]:
-    """Load an image file as a numpy array."""
-    try:
-        from PIL import Image
-        img = Image.open(path)
-        return np.array(img)
-    except ImportError:
-        import matplotlib.pyplot as plt
-        img = plt.imread(str(path))
-        if img.dtype == np.float32 or img.dtype == np.float64:
-            img = (img * 255).astype(np.uint8)
-        return img
-    except Exception:
-        return None
-
-
-def compare_images(
-    actual: np.ndarray,
-    expected: np.ndarray,
-    tolerance: float = PIXEL_TOLERANCE,
-    max_diff_pct: float = MAX_DIFF_PIXELS_PCT,
-) -> tuple[bool, float, float, Optional[np.ndarray]]:
-    """Compare two images with tolerance for rendering differences."""
-    if actual.shape != expected.shape:
-        h = min(actual.shape[0], expected.shape[0])
-        w = min(actual.shape[1], expected.shape[1])
-        actual = actual[:h, :w]
-        expected = expected[:h, :w]
-        
-        if actual.shape != expected.shape:
-            return False, 255.0, 100.0, None
-
-    diff = np.abs(actual.astype(np.float32) - expected.astype(np.float32))
-    mean_diff = float(np.mean(diff))
-    
-    diff_pixels = np.any(diff > tolerance, axis=-1) if diff.ndim == 3 else (diff > tolerance)
-    diff_pct = float(np.mean(diff_pixels) * 100)
-    
-    diff_image = expected.copy()
-    if diff.ndim == 3:
-        mask = np.any(diff > tolerance, axis=-1)
-        diff_image[mask] = [255, 0, 0, 255] if diff_image.shape[-1] == 4 else [255, 0, 0]
-    
-    passed = (mean_diff <= tolerance) and (diff_pct <= max_diff_pct)
-    return passed, mean_diff, diff_pct, diff_image
+# Use mobile-specific tolerances from shared module (higher than default)
+PIXEL_TOLERANCE = MOBILE_PIXEL_TOLERANCE
+MAX_DIFF_PIXELS_PCT = MOBILE_MAX_DIFF_PIXELS_PCT
 
 
 class TestMobileBaselineValidity:
@@ -298,7 +230,11 @@ class TestMobileDashboardChartVisualRegression:
         Path(chart1_path).unlink(missing_ok=True)
         Path(chart2_path).unlink(missing_ok=True)
         
-        passed, mean_diff, diff_pct, _ = compare_images(img1, img2, tolerance=0.5, max_diff_pct=0.1)
+        passed, mean_diff, diff_pct, _ = compare_images(
+            img1, img2,
+            tolerance=DETERMINISM_PIXEL_TOLERANCE,
+            max_diff_pct=DETERMINISM_MAX_DIFF_PIXELS_PCT,
+        )
         
         assert passed, (
             f"Mobile chart non-determinism detected: mean_diff={mean_diff:.2f}, "

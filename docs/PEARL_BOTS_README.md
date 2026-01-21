@@ -46,7 +46,7 @@ PEARL Bots are complete automated trading systems that combine:
 Add to `config/config.yaml`:
 
 ```yaml
-lux_algo_bots:  # TODO: Rename to pearl_bots
+pearl_bots:
   enabled: true
   bots:
     trend_follower:
@@ -56,6 +56,9 @@ lux_algo_bots:  # TODO: Rename to pearl_bots
       risk_per_trade: 0.01
       min_confidence: 0.7
 ```
+
+**Notes**
+- `pearl_bots` is the canonical key. A legacy alias `lux_algo_bots` is still accepted for backward compatibility.
 
 ### 2. Telegram Control
 Use the **🤖 Bots** menu in Telegram:
@@ -135,7 +138,7 @@ Built-in risk controls:
 ### Creating Custom Bots
 
 ```python
-from pearl_bots import PearlBot, BotConfig, TradeSignal
+from pearlalgo.strategies.pearl_bots import PearlBot, BotConfig, TradeSignal
 
 class MyCustomBot(PearlBot):
     def get_indicator_suite(self):
@@ -190,9 +193,9 @@ from pearlalgo.strategies.pearl_bots.backtest_adapter import backtest_pearl_bot
 ## Support
 
 ### Documentation
-- `docs/PEARL_BOTS_DEPLOYMENT.md` - Complete deployment guide
-- `docs/PEARL_BOTS_INTEGRATION.md` - Technical integration details
-- `docs/TELEGRAM_MENU_LAYOUT.md` - Menu system documentation
+- `docs/PROJECT_SUMMARY.md` - Architecture + module boundaries (source of truth)
+- `docs/TELEGRAM_GUIDE.md` - Telegram command handler + menus
+- `docs/TESTING_GUIDE.md` - Validation + backtesting workflows
 
 ### Configuration Files
 - `config/pearl_bots_example.yaml` - Sample configurations

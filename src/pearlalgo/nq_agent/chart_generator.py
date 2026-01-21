@@ -119,6 +119,87 @@ _stabilize_matplotlib_rcparams()
 
 
 @dataclass
+class RenderManifest:
+    """
+    Optional debug manifest capturing render semantics for non-pixel regression.
+    
+    This enables semantic regression checks even when small anti-aliasing
+    differences cause pixel noise. Default OFF to avoid performance impact.
+    
+    Usage:
+        chart_path = generator.generate_dashboard_chart(
+            ...,
+            manifest_path=Path("/tmp/chart_manifest.json"),
+        )
+        # Produces both chart.png and chart_manifest.json
+    """
+    # Render inputs
+    chart_type: str = ""
+    symbol: str = ""
+    timeframe: str = ""
+    lookback_bars: int = 0
+    figsize: Tuple[float, float] = (0.0, 0.0)
+    dpi: int = 0
+    render_mode: str = "telegram"
+    
+    # Timestamp info
+    render_timestamp: str = ""
+    title_time: str = ""
+    
+    # Drawn elements summary
+    num_candles: int = 0
+    price_range: Tuple[float, float] = (0.0, 0.0)
+    
+    # Levels and labels
+    levels: List[Dict[str, Any]] = field(default_factory=list)
+    merged_labels: List[Dict[str, Any]] = field(default_factory=list)
+    
+    # Overlays
+    sessions: List[str] = field(default_factory=list)
+    zones: List[Dict[str, Any]] = field(default_factory=list)
+    
+    # Markers
+    trade_markers: List[Dict[str, Any]] = field(default_factory=list)
+    ema_crossover_markers: List[Dict[str, Any]] = field(default_factory=list)
+    
+    # Indicators
+    indicators: List[str] = field(default_factory=list)
+    
+    # Config snapshot (for reproducibility)
+    config_snapshot: Dict[str, Any] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert manifest to JSON-serializable dict."""
+        return {
+            "chart_type": self.chart_type,
+            "symbol": self.symbol,
+            "timeframe": self.timeframe,
+            "lookback_bars": self.lookback_bars,
+            "figsize": list(self.figsize),
+            "dpi": self.dpi,
+            "render_mode": self.render_mode,
+            "render_timestamp": self.render_timestamp,
+            "title_time": self.title_time,
+            "num_candles": self.num_candles,
+            "price_range": list(self.price_range),
+            "levels": self.levels,
+            "merged_labels": self.merged_labels,
+            "sessions": self.sessions,
+            "zones": self.zones,
+            "trade_markers": self.trade_markers,
+            "ema_crossover_markers": self.ema_crossover_markers,
+            "indicators": self.indicators,
+            "config_snapshot": self.config_snapshot,
+        }
+    
+    def save(self, path: Path) -> None:
+        """Save manifest to JSON file."""
+        import json
+        with open(path, "w") as f:
+            json.dump(self.to_dict(), f, indent=2, default=str)
+
+
+@dataclass
 class ChartConfig:
     """Configuration for chart generation with TradingView-style defaults."""
     show_vwap: bool = True
@@ -2636,6 +2717,7 @@ class ChartGenerator:
         title_time: Optional[str] = None,
         right_pad_bars: Optional[int] = None,
         trades: Optional[List[Dict[str, Any]]] = None,
+        manifest_path: Optional[Path] = None,
     ) -> Optional[Path]:
         """
         Generate a TradingView-style dashboard chart.
@@ -2658,6 +2740,10 @@ class ChartGenerator:
             title_time: Optional fixed time string for title (e.g., "12:00 UTC").
                         If None, uses current UTC time. Used for deterministic testing.
             right_pad_bars: Optional extra bars of right-side padding beyond last candle.
+            trades: Optional list of trade dicts to overlay as markers.
+            manifest_path: Optional path to save a JSON render manifest for semantic
+                          regression checks. Default None (no manifest). When provided,
+                          saves chart metadata (inputs, indicators, config) alongside PNG.
 
         Returns:
             Path to generated PNG, or None on failure
@@ -3285,6 +3371,39 @@ class ChartGenerator:
 
             self._save_png(fig, temp_path, dpi=dpi, render_mode=render_mode)
             plt.close(fig)
+
+            # Optional: emit render manifest for semantic regression checks
+            if manifest_path is not None:
+                try:
+                    manifest = RenderManifest(
+                        chart_type="dashboard",
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        lookback_bars=lookback_bars,
+                        figsize=figsize,
+                        dpi=dpi,
+                        render_mode=render_mode,
+                        render_timestamp=datetime.now(timezone.utc).isoformat(),
+                        title_time=str(title_time) if title_time else "",
+                        num_candles=len(df),
+                        price_range=(float(df["Low"].min()), float(df["High"].max())),
+                        indicators=[
+                            f"EMA{p}" for p in (ma_periods_list if show_ma else [])
+                        ] + (["VWAP"] if show_vwap else []) + (["RSI"] if show_rsi else []),
+                        sessions=list(hud.get("sessions", [])) if isinstance(hud, dict) else [],
+                        config_snapshot={
+                            "show_sessions": show_sessions,
+                            "show_key_levels": show_key_levels,
+                            "show_vwap": show_vwap,
+                            "show_ma": show_ma,
+                            "show_rsi": show_rsi,
+                            "show_pressure": show_pressure,
+                        },
+                    )
+                    manifest.save(Path(manifest_path))
+                    logger.debug(f"Saved render manifest: {manifest_path}")
+                except Exception as me:
+                    logger.debug(f"Could not save render manifest: {me}")
 
             logger.debug(f"Generated dashboard chart: {temp_path}")
             return temp_path

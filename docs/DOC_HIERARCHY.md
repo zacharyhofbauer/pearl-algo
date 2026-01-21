@@ -14,6 +14,9 @@ All other documents must remain consistent with this summary.
 
 ## 2. Operational Guides
 
+- `START_HERE.md`
+  - Single-page operator entrypoint
+  - What runs in production + safe defaults + fast validation
 - `CHEAT_SHEET.md`
   - One-page PEARLalgo operational quick reference
   - Daily startup flow, core scripts, Telegram expectations, fast troubleshooting
@@ -21,6 +24,9 @@ All other documents must remain consistent with this summary.
   - How to start/stop/check the NQ Agent Service
   - Daily operations and monitoring
   - Troubleshooting specific to the agent service
+- `RESTART_GUIDE.md`
+  - When restarts are required (agent vs handler)
+  - Canonical restart commands and verification steps
 - `GATEWAY.md`
   - IBKR Gateway setup and lifecycle
   - 2FA flows and VNC usage
@@ -36,7 +42,8 @@ All other documents must remain consistent with this summary.
   - Quick start, command handler startup, command behavior reference
   - Remote control (service control commands)
   - Chart visualization and UI features
-  - Menu system and button navigation
+- `LINUX_MONITOR.md`
+  - Local monitor UI launch guide (Qt-based; optional)
 - `AI_PATCH_GUIDE.md`
   - OpenAI integration for code generation via Telegram
   - Setup, usage examples, and security considerations
@@ -68,6 +75,8 @@ All other documents must remain consistent with this summary.
   - Mapping of environment variables, `config/config.yaml`, and code defaults to their consumers
 - `CHART_VISUAL_SCHEMA.md`
   - Visual semantics + regression contracts for chart outputs (source: `src/pearlalgo/nq_agent/chart_generator.py`)
+- `PEARL_BOTS_README.md`
+  - Operator and developer reference for PEARL bots (configuration + Telegram-first backtesting)
 
 ## 5. Cross‑references
 

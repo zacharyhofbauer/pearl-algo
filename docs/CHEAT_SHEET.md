@@ -277,34 +277,29 @@ Generate code patches from Telegram using OpenAI. Useful for quick fixes when mo
 
 ```bash
 # Install LLM extra
-pip install -e .[llm]
+pip install -e ".[llm]"
 
 # Add to .env (get key from https://platform.openai.com/)
-echo 'OPENAI_API_KEY=sk-...' >> .env
+# OPENAI_API_KEY=sk-...
 
 # Restart command handler
-pkill -f telegram_command_handler
-./scripts/telegram/start_command_handler.sh --background
+./scripts/telegram/restart_command_handler.sh --background
 ```
 
-**Usage from Telegram:**
+**Usage from Telegram (recommended):**
 
-```
-/ai_patch <file(s)> <task>
-```
-
-**Examples:**
-
-```
-/ai_patch src/pearlalgo/utils/retry.py add jitter to backoff
-/ai_patch src/foo.py,src/bar.py refactor X to Y
-```
+- `/start` → **⚙️ Settings** → **🧩 AI Patch Wizard**
+- Pick a file (or “Other file (type path)”), then send the instruction text
 
 **Apply the patch:**
 
 ```bash
-# Save the .diff file from Telegram, then:
+# Save the diff text from Telegram, then apply it locally.
+# If this repo is in git:
 git apply patch.diff
+#
+# If not using git:
+patch -p1 < patch.diff
 ```
 
 **Blocked paths** (for security): `data/`, `logs/`, `.env`, `ibkr/`, `.venv/`
@@ -351,7 +346,7 @@ grep "$(date -u +%Y-%m-%d)" data/nq_agent_state/signals.jsonl | wc -l
 | Service | Stop | Start | Restart |
 |---------|------|-------|---------|
 | **NQ Agent** | `./scripts/lifecycle/stop_nq_agent_service.sh` | `./scripts/lifecycle/start_nq_agent_service.sh --background` | Stop + Start |
-| **Telegram** | `pkill -f telegram_command_handler` | `./scripts/telegram/start_command_handler.sh --background` | Kill + Start |
+| **Telegram** | `pkill -f telegram_command_handler` | `./scripts/telegram/start_command_handler.sh --background` | `./scripts/telegram/restart_command_handler.sh --background` |
 | **Gateway** | `./scripts/gateway/gateway.sh stop` | `./scripts/gateway/gateway.sh start` | Stop + Start |
 
 **Common restart scenarios:**

@@ -1,27 +1,69 @@
-# TradingView Pine Script Indicators
+# PearlAlgo MNQ Trading Agent
 
-This folder is for your TradingView Pine script files.
+Production-ready MNQ trading agent with a modular architecture:
+data providers (IBKR), strategy/scanner/signal generation, state + metrics, Telegram UI,
+and optional execution + learning layers (disabled/safe by default).
 
-## Usage
+## Quick start (local)
 
-1. **Export Pine script from TradingView:**
-   - Open indicator in TradingView
-   - Click "Source" to view Pine code
-   - Copy the code
-   - Save as `.pine` file here
+### Prereqs
 
-2. **When you're ready to update charts:**
-   - Tell me which indicators you've added/updated
-   - I'll manually update the Python implementations
-   - I'll update chart generation to use them
+- Python **3.12+**
+- IBKR Gateway reachable (see `docs/GATEWAY.md`)
+- Telegram bot credentials (see `env.example`)
 
-## Current Scripts
+### Install
 
-- `TrendlineBreakoutsWithTargets_ChartPrime.pine` → `tbt_chartprime.py`
+```bash
+cd ~/pearlalgo-dev-ai-agents
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
 
-## File Naming
+### Configure
 
-Use descriptive names matching TradingView:
-- `TrendlineBreakoutsWithTargets_ChartPrime.pine`
-- `SRPowerChannel_ChartPrime.pine`
-- `SupplyDemandVisibleRange_LuxAlgo.pine`
+```bash
+cp env.example .env
+# Edit .env with TELEGRAM_* and IBKR_* values
+```
+
+Service behavior is configured in `config/config.yaml`.
+
+### Run (operator scripts)
+
+```bash
+# Start IBKR Gateway
+./scripts/gateway/gateway.sh start
+
+# Start the MNQ agent
+./scripts/lifecycle/start_nq_agent_service.sh --background
+
+# Start Telegram command handler (menus)
+./scripts/telegram/start_command_handler.sh --background
+
+# Check status
+./scripts/lifecycle/check_nq_agent_status.sh
+```
+
+## Validation
+
+```bash
+# Unit tests (pytest)
+./scripts/testing/run_tests.sh
+
+# Validation runner (telegram/signals/service/arch)
+python3 scripts/testing/test_all.py
+```
+
+## Docs (start here)
+
+- `docs/START_HERE.md`
+- `docs/PROJECT_SUMMARY.md` (single source of truth)
+- `docs/NQ_AGENT_GUIDE.md`
+- `docs/TELEGRAM_GUIDE.md`
+- `docs/TESTING_GUIDE.md`
+
+## TradingView indicators
+
+TradingView Pine scripts live under `indicators/` (see `indicators/README.md`).

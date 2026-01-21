@@ -22,6 +22,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Shell scripts**:
   - `scripts/telegram/start_command_handler.sh`
   - `scripts/telegram/check_command_handler.sh`
+  - `scripts/telegram/restart_command_handler.sh`
 - **Supporting script**:
   - `scripts/telegram/set_bot_commands.py` (sets BotFather commands via API)
 - **Docs**:
@@ -113,10 +114,20 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Scripts**:
   - `scripts/monitoring/watchdog_nq_agent.py` – cron/systemd-timer friendly watchdog for stalled state / silent failures (optional)
   - `scripts/monitoring/serve_nq_agent_status.py` – localhost HTTP server exposing `/healthz` and `/metrics` (optional sidecar)
+  - `scripts/monitoring/doctor_cli.py` – operator CLI rollup (signals, rejects, sizing, stops)
+  - `scripts/health_check.sh` – fast local health snapshot (requires `jq`)
 - **Docs**:
   - `docs/NQ_AGENT_GUIDE.md` (monitoring section)
   - `docs/PROJECT_SUMMARY.md` (status server section)
   - `docs/SCRIPTS_TAXONOMY.md` (monitoring section)
+
+## Monitor UI (Optional)
+
+- **Logical component**: Local desktop monitoring UI (Qt-based)
+- **Python entry module**: `pearlalgo.monitor` (run via `python -m pearlalgo.monitor`)
+- **Scripts**:
+  - `scripts/monitor/start_monitor.sh`, `scripts/monitor/restart_monitor.sh`
+  - `scripts/lifecycle/start_monitor_suite.sh`, `scripts/lifecycle/stop_monitor_suite.sh`
 
 ## Utilities / Cross‑cutting Concerns
 

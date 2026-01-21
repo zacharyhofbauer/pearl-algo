@@ -1,7 +1,7 @@
 # Chart Visual Schema & Trust Contracts
 
 **Status**: Authoritative reference for chart visual semantics  
-**Last Updated**: 2025-12-29  
+**Last Updated**: 2026-01-21  
 **Source of Truth**: `src/pearlalgo/nq_agent/chart_generator.py`
 
 ---
@@ -102,12 +102,43 @@ Elements are layered from back to front. Lower z-order = further back.
 
 ### Markers
 
-| Marker | Size | Usage |
-|--------|------|-------|
-| `^` (up triangle) | 300 | Long signal entry point |
-| `v` (down triangle) | 300 | Short signal entry point |
+#### Trade Entry/Exit Markers (Entry/Exit Charts)
+
+| Marker | Size | Color | Usage |
+|--------|------|-------|-------|
+| `^` (up triangle) | 300 | `#26a69a` (green) | Long signal entry point |
+| `v` (down triangle) | 300 | `#ef5350` (red) | Short signal entry point |
 
 **Contract**: Triangles point in trade direction. Placed at/near candle extremes.
+
+#### Dashboard Trade Markers (Outcome-Colored)
+
+On dashboard charts, historical trades are overlaid with outcome-colored markers:
+
+| Marker | Color | Meaning |
+|--------|-------|---------|
+| `^` (up triangle) | `#26a69a` (green) | Long entry, winning trade |
+| `^` (up triangle) | `#ef5350` (red) | Long entry, losing trade |
+| `^` (up triangle) | `#26a69a` (light) | Long entry, open/unknown outcome |
+| `v` (down triangle) | `#26a69a` (green) | Short entry, winning trade |
+| `v` (down triangle) | `#ef5350` (red) | Short entry, losing trade |
+| `v` (down triangle) | `#ef5350` (light) | Short entry, open/unknown outcome |
+| `o` (circle) | `#26a69a` / `#ef5350` / gray | Exit point (colored by outcome) |
+
+**Contract**: Marker SHAPE indicates direction (up=long, down=short). Marker COLOR indicates outcome (green=win, red=loss).
+
+#### EMA Crossover Markers (Dashboard Only)
+
+Dashboard charts include EMA 9/20 crossover markers with **distinct colors** to avoid confusion with trade markers:
+
+| Marker | Color | Hex | Meaning |
+|--------|-------|-----|---------|
+| `^` (up triangle) | Cyan | `#00bcd4` | Bullish crossover (EMA9 > EMA20) |
+| `v` (down triangle) | Pink | `#e91e63` | Bearish crossover (EMA9 < EMA20) |
+
+**WARNING - Semantic Ambiguity Risk**: EMA crossover markers use the same SHAPES (`^`/`v`) as trade markers but DIFFERENT COLORS (cyan/pink vs green/red). Traders must rely on color to distinguish indicator signals from trade markers.
+
+**Contract**: EMA crossover colors (cyan/pink) must NEVER match trade marker colors (green/red).
 
 ### Boxes/Zones
 
@@ -244,11 +275,64 @@ Same structure as dashboard, plus:
 
 ## Testing & Regression
 
-### Visual Regression Test
+### Visual Regression Tests
 
-- File: `tests/test_dashboard_chart_visual_regression.py`
-- Baseline: `tests/fixtures/charts/dashboard_baseline.png`
-- Tolerance: 2.0 mean pixel diff, 1% max differing pixels
+All chart types have dedicated visual regression tests with baseline images:
+
+| Chart Type | Test File | Baseline Image | Generator Script | Tolerance |
+|------------|-----------|----------------|------------------|-----------|
+| Dashboard | `tests/test_dashboard_chart_visual_regression.py` | `dashboard_baseline.png` | `generate_dashboard_baseline.py` | 2.0 px / 1% |
+| Mobile Dashboard | `tests/test_mobile_chart_visual_regression.py` | `mobile_dashboard_baseline.png` | `generate_mobile_baseline.py` | 2.5 px / 2% |
+| On-Demand (12h) | `tests/test_on_demand_chart_visual_regression.py` | `on_demand_chart_12h_baseline.png` | `generate_on_demand_chart_baseline.py` | 2.0 px / 1% |
+| Entry Chart | `tests/test_entry_exit_chart_visual_regression.py` | `entry_baseline.png` | `generate_entry_exit_baselines.py` | 2.0 px / 1% |
+| Exit Chart | `tests/test_entry_exit_chart_visual_regression.py` | `exit_baseline.png` | `generate_entry_exit_baselines.py` | 2.0 px / 1% |
+| Backtest Chart | `tests/test_backtest_chart_visual_regression.py` | `backtest_baseline.png` | `generate_backtest_baseline.py` | 2.0 px / 1% |
+
+All baselines are located in: `tests/fixtures/charts/`  
+All generator scripts are located in: `scripts/testing/`
+
+### Shared Visual Regression Utilities
+
+Common utilities for all visual regression tests are centralized in:
+- `tests/fixtures/visual_regression_utils.py`
+
+This module provides:
+- `validate_png_file()` - PNG header and integrity validation
+- `load_image_as_array()` - Image loading with PIL/matplotlib fallback
+- `compare_images()` - Pixel-wise comparison with tolerance
+- `save_diff_artifact()` - Diff visualization for debugging
+- Standard tolerance constants (`DEFAULT_PIXEL_TOLERANCE`, `MOBILE_PIXEL_TOLERANCE`, etc.)
+
+### Semantic Contract Tests (Non-Rendering)
+
+Fast unit tests that verify visual contracts without rendering:
+- File: `tests/test_chart_semantic_contracts.py`
+
+Tests include:
+- Color constant values (candle, signal, entry, VWAP, MA colors)
+- Z-order hierarchy (session < zones < lines < candles < labels)
+- Alpha caps (zones transparent enough to see through)
+- Font size bounds (readable range)
+- Marker color distinctness (trade vs EMA crossover)
+- `_merge_levels` anchor-price contract
+- Priority hierarchy for right-side labels
+- ChartConfig default values
+
+### Cross-Timeframe Consistency Tests
+
+- File: `tests/test_cross_timeframe_chart_consistency.py`
+
+Verifies that the same signal looks consistent across 1m, 5m, and 15m timeframes.
+
+### Edge Case Stress Tests
+
+- File: `tests/test_chart_edge_cases.py`
+
+Tests chart behavior under extreme conditions:
+- High volatility data
+- Data gaps (missing bars)
+- Zero/minimal volume
+- Extreme price levels
 
 ### Determinism Hooks
 
@@ -258,11 +342,25 @@ Same structure as dashboard, plus:
 
 ### Baseline Update Process
 
+Only run after intentional visual changes with explicit approval:
+
 ```bash
+# Update all baselines
 python3 scripts/testing/generate_dashboard_baseline.py
+python3 scripts/testing/generate_mobile_baseline.py
+python3 scripts/testing/generate_on_demand_chart_baseline.py
+python3 scripts/testing/generate_entry_exit_baselines.py
+python3 scripts/testing/generate_backtest_baseline.py
 ```
 
-Only run after intentional visual changes with explicit approval.
+Individual baseline updates:
+```bash
+# Entry only
+python3 scripts/testing/generate_entry_exit_baselines.py --entry-only
+
+# Exit only
+python3 scripts/testing/generate_entry_exit_baselines.py --exit-only
+```
 
 ---
 
@@ -305,10 +403,66 @@ config = ChartConfig(
 
 ---
 
+## Optional Render Manifest (Semantic Regression)
+
+For semantic regression checks that don't depend on pixel-level comparison, charts can emit a JSON manifest capturing render inputs and drawn elements.
+
+### Usage
+
+```python
+from pathlib import Path
+
+chart_path = generator.generate_dashboard_chart(
+    data=data,
+    symbol="MNQ",
+    timeframe="5m",
+    manifest_path=Path("/tmp/chart_manifest.json"),  # Optional
+)
+# Produces both chart.png and chart_manifest.json
+```
+
+### Manifest Schema
+
+```json
+{
+  "chart_type": "dashboard",
+  "symbol": "MNQ",
+  "timeframe": "5m",
+  "lookback_bars": 288,
+  "figsize": [16, 7],
+  "dpi": 150,
+  "render_mode": "telegram",
+  "render_timestamp": "2026-01-21T12:00:00+00:00",
+  "title_time": "12:00 UTC",
+  "num_candles": 288,
+  "price_range": [24900.0, 25100.0],
+  "indicators": ["EMA9", "EMA20", "EMA50", "VWAP", "RSI"],
+  "sessions": ["Tokyo", "London", "New York"],
+  "config_snapshot": {
+    "show_sessions": true,
+    "show_key_levels": true,
+    "show_vwap": true,
+    "show_ma": true,
+    "show_rsi": true,
+    "show_pressure": true
+  }
+}
+```
+
+**Note**: The manifest is OFF by default. Enable only when needed for debugging or semantic regression checks.
+
+---
+
 ## Document History
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-01-21 | Added optional render manifest for semantic regression | AI Agent |
+| 2026-01-21 | Added comprehensive baseline/test/generator inventory | AI Agent |
+| 2026-01-21 | Documented EMA crossover markers (cyan/pink) with semantic ambiguity warning | AI Agent |
+| 2026-01-21 | Documented dashboard trade markers (outcome-colored) | AI Agent |
+| 2026-01-21 | Added reference to semantic contract tests | AI Agent |
+| 2026-01-21 | Added shared visual regression utilities documentation | AI Agent |
 | 2025-12-31 | Added optional config: mobile_enhanced_fonts, compact_labels | AI Agent |
 | 2025-12-31 | Added font size and alpha constants for code clarity | AI Agent |
 | 2025-12-31 | Added z-order comments explaining layering rationale | AI Agent |

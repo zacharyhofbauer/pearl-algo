@@ -503,50 +503,6 @@ class TelegramCommandHandler:
         except Exception:
             return None
 
-    async def handle_analyze(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.message:
-            return
-        logger.info("Received /analyze command")
-        metrics = self._read_latest_metrics()
-        selection = self._read_strategy_selection()
-
-        lines = ["AI Bot Report", f"Generated: {datetime.now(timezone.utc).isoformat()}"]
-
-        if metrics:
-            lines.extend(
-                [
-                    "",
-                    "Performance (latest export):",
-                    f"- Trades: {metrics.get('exited_signals', 0)}",
-                    f"- Win rate: {metrics.get('win_rate', 0.0):.1%}",
-                    f"- Total PnL: {metrics.get('total_pnl', 0.0):.2f}",
-                    f"- Avg PnL: {metrics.get('avg_pnl', 0.0):.2f}",
-                ]
-            )
-        else:
-            lines.append("")
-            lines.append("No performance metrics export found.")
-
-        if selection:
-            top = None
-            ranked = selection.get("ranked_by_type_direction", [])
-            if ranked:
-                top = ranked[0]
-            lines.append("")
-            lines.append("Bot recommendation:")
-            if top:
-                lines.append(f"- Top: {top.get('key')} (score {top.get('score', 0.0):.2f})")
-                lines.append(f"- Trades: {top.get('count', 0)} | WR {top.get('win_rate', 0.0):.1%}")
-                lines.append(f"- Max DD: {top.get('max_drawdown', 0.0):.2f}")
-            else:
-                lines.append("- No ranked bot found in selection report.")
-        else:
-            lines.append("")
-            lines.append("No bot selection report found. Run:")
-            lines.append("  python3 scripts/backtesting/strategy_selection.py")
-
-        await update.message.reply_text("\n".join(lines))
-
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle button callback queries."""
         query = update.callback_query

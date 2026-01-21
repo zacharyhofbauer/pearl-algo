@@ -33,15 +33,22 @@ from tests.fixtures.deterministic_data import (
     SEED,
 )
 
-# Reuse validation and comparison utilities from dashboard tests
-from tests.test_dashboard_chart_visual_regression import (
+# Import shared visual regression utilities
+from tests.fixtures.visual_regression_utils import (
     validate_png_file,
     load_image_as_array,
     compare_images,
     save_diff_artifact,
-    PIXEL_TOLERANCE,
-    MAX_DIFF_PIXELS_PCT,
+    format_regression_failure_message,
+    DEFAULT_PIXEL_TOLERANCE,
+    DEFAULT_MAX_DIFF_PIXELS_PCT,
+    DETERMINISM_PIXEL_TOLERANCE,
+    DETERMINISM_MAX_DIFF_PIXELS_PCT,
 )
+
+# Use default tolerances from shared module
+PIXEL_TOLERANCE = DEFAULT_PIXEL_TOLERANCE
+MAX_DIFF_PIXELS_PCT = DEFAULT_MAX_DIFF_PIXELS_PCT
 
 # === Constants ===
 
@@ -169,15 +176,18 @@ class TestEntryChartVisualRegression:
             passed, mean_diff, diff_pct, diff_image = compare_images(actual, expected)
             
             if not passed:
-                artifact_dir = save_diff_artifact(actual, expected, diff_image, "entry")
+                artifact_dir = save_diff_artifact(
+                    actual, expected, diff_image, "entry", output_dir=DIFF_OUTPUT_DIR
+                )
                 pytest.fail(
-                    f"Entry chart visual regression detected!\n"
-                    f"  Mean pixel difference: {mean_diff:.2f} (tolerance: {PIXEL_TOLERANCE})\n"
-                    f"  Pixels differing: {diff_pct:.2f}% (tolerance: {MAX_DIFF_PIXELS_PCT}%)\n"
-                    f"  Diff artifacts saved to: {artifact_dir}\n"
-                    f"\n"
-                    f"If this change is intentional, update the baseline:\n"
-                    f"  python3 scripts/testing/generate_entry_exit_baselines.py --entry-only"
+                    format_regression_failure_message(
+                        mean_diff=mean_diff,
+                        diff_pct=diff_pct,
+                        tolerance=PIXEL_TOLERANCE,
+                        max_diff_pct=MAX_DIFF_PIXELS_PCT,
+                        artifact_dir=artifact_dir,
+                        baseline_update_command="python3 scripts/testing/generate_entry_exit_baselines.py --entry-only",
+                    )
                 )
         finally:
             if chart_path.exists():
@@ -215,8 +225,8 @@ class TestEntryChartVisualRegression:
             
             passed, mean_diff, diff_pct, _ = compare_images(
                 img1, img2,
-                tolerance=0.5,
-                max_diff_pct=0.1,
+                tolerance=DETERMINISM_PIXEL_TOLERANCE,
+                max_diff_pct=DETERMINISM_MAX_DIFF_PIXELS_PCT,
             )
             
             assert passed, (
@@ -312,15 +322,18 @@ class TestExitChartVisualRegression:
             passed, mean_diff, diff_pct, diff_image = compare_images(actual, expected)
             
             if not passed:
-                artifact_dir = save_diff_artifact(actual, expected, diff_image, "exit")
+                artifact_dir = save_diff_artifact(
+                    actual, expected, diff_image, "exit", output_dir=DIFF_OUTPUT_DIR
+                )
                 pytest.fail(
-                    f"Exit chart visual regression detected!\n"
-                    f"  Mean pixel difference: {mean_diff:.2f} (tolerance: {PIXEL_TOLERANCE})\n"
-                    f"  Pixels differing: {diff_pct:.2f}% (tolerance: {MAX_DIFF_PIXELS_PCT}%)\n"
-                    f"  Diff artifacts saved to: {artifact_dir}\n"
-                    f"\n"
-                    f"If this change is intentional, update the baseline:\n"
-                    f"  python3 scripts/testing/generate_entry_exit_baselines.py --exit-only"
+                    format_regression_failure_message(
+                        mean_diff=mean_diff,
+                        diff_pct=diff_pct,
+                        tolerance=PIXEL_TOLERANCE,
+                        max_diff_pct=MAX_DIFF_PIXELS_PCT,
+                        artifact_dir=artifact_dir,
+                        baseline_update_command="python3 scripts/testing/generate_entry_exit_baselines.py --exit-only",
+                    )
                 )
         finally:
             if chart_path.exists():
@@ -364,8 +377,8 @@ class TestExitChartVisualRegression:
             
             passed, mean_diff, diff_pct, _ = compare_images(
                 img1, img2,
-                tolerance=0.5,
-                max_diff_pct=0.1,
+                tolerance=DETERMINISM_PIXEL_TOLERANCE,
+                max_diff_pct=DETERMINISM_MAX_DIFF_PIXELS_PCT,
             )
             
             assert passed, (
