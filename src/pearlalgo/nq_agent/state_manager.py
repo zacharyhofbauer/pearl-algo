@@ -104,11 +104,11 @@ class NQAgentStateManager:
         Initialize state manager.
         
         Args:
-            state_dir: Directory for state files (default: ./data/nq_agent_state)
+            state_dir: Directory for state files (default: ./data/agent_state/<MARKET>)
         """
         # Track whether the caller explicitly provided a state_dir (tests do this via tmp_path).
         # If explicit, ALL persistence (including SQLite) must stay inside that directory to
-        # avoid unit tests polluting the live agent state under data/nq_agent_state.
+        # avoid unit tests polluting the live agent state under data/agent_state/<MARKET>.
         self._explicit_state_dir = state_dir is not None
 
         self.state_dir = ensure_state_dir(state_dir)
@@ -130,7 +130,7 @@ class NQAgentStateManager:
                     # IMPORTANT:
                     # - In production (no explicit state_dir), honor config.db_path if provided.
                     # - In tests (explicit state_dir), ALWAYS use state_dir/trades.db regardless of config,
-                    #   so tests cannot write into data/nq_agent_state/trades.db.
+                    #   so tests cannot write into data/agent_state/<MARKET>/trades.db.
                     if self._explicit_state_dir:
                         db_path = self.state_dir / "trades.db"
                     else:

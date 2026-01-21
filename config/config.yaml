@@ -68,7 +68,7 @@ data:
   mtf_refresh_seconds_15m: 900
 storage:
   sqlite_enabled: true
-  db_path: data/nq_agent_state/trades.db
+  db_path: data/agent_state/NQ/trades.db
   async_writes_enabled: true
   async_queue_max_size: 1000
   async_queue_priority_trades: true
@@ -359,7 +359,7 @@ prop_firm:
   nq_tick_value: 20.0
   contract_size_multiplier: 1.0
 
-# PEARL Automated Trading Bots (formerly lux_algo_bots)
+# Trading Bot (AutoBot selection)
 trading_bot:
   enabled: false
   selected: "PearlAutoBot"
@@ -368,40 +368,3 @@ trading_bot:
       class: "PearlAutoBot"
       enabled: true
       parameters: {}
-
-# Legacy multi-bot config (deprecated; still accepted)
-pearl_bots:
-  enabled: true
-  bots:
-    trend_follower:
-      enabled: true
-      description: "Trend-following bot using moving averages and momentum"
-      bot_class: "TrendFollowerBot"
-      symbol: "MNQ"
-      timeframe: "5m"
-      max_positions: 1
-      risk_per_trade: 0.015  # Increased risk per trade
-      stop_loss_pct: 0.02  # Very wide stops - let trades breathe
-      take_profit_pct: 0.015  # Higher targets
-      min_confidence: 0.7
-      enable_alerts: true
-      parameters:
-        min_trend_strength: 25.0
-        max_pullback_pct: 0.02
-        momentum_threshold: 0.005
-    breakout_trader:
-      enabled: true
-      description: "Breakout bot trading consolidation breakouts"
-      bot_class: "BreakoutBot"
-      symbol: "MNQ"
-      timeframe: "5m"
-      max_positions: 1
-      risk_per_trade: 0.01
-      stop_loss_pct: 0.02  # Very wide stops - let trades breathe
-      take_profit_pct: 0.015
-      min_confidence: 0.75
-      enable_alerts: true
-      parameters:
-        min_pattern_strength: 0.6
-        require_volume_confirmation: true
-        min_momentum_acceleration: 0.001

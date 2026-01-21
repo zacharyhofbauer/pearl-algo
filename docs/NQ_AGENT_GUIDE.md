@@ -28,10 +28,10 @@ cd /path/to/pearlalgo-dev-ai-agents
 ./scripts/gateway/gateway.sh status
 
 # 2. Start MNQ Agent Service (foreground - shows live logs in terminal)
-./scripts/lifecycle/start_nq_agent_service.sh
+./scripts/lifecycle/agent.sh start --market NQ
 
 # 3. Check status (in another terminal)
-./scripts/lifecycle/check_nq_agent_status.sh
+./scripts/lifecycle/check_agent_status.sh --market NQ
 ```
 
 **Note:** The service runs in foreground mode by default, showing all logs directly in your terminal. Press `Ctrl+C` to stop. To run in background (no terminal output), use `--background` flag.
@@ -90,19 +90,19 @@ For detailed gateway setup, see `GATEWAY.md`.
 
 ### Start Service (Foreground - Default)
 ```bash
-./scripts/lifecycle/start_nq_agent_service.sh
+./scripts/lifecycle/agent.sh start --market NQ
 ```
 **Default behavior:** Service runs in foreground with live terminal output. All logs appear in your terminal. Press `Ctrl+C` to stop.
 
 ### Start Service (Background)
 ```bash
-./scripts/lifecycle/start_nq_agent_service.sh --background
+./scripts/lifecycle/agent.sh start --market NQ --background
 ```
 **Background mode:** Service runs in background with output captured to `logs/nq_agent.log`. Use this if you want to run the service detached from your terminal session.
 
 ### Stop Service
 ```bash
-./scripts/lifecycle/stop_nq_agent_service.sh
+./scripts/lifecycle/agent.sh stop --market NQ
 
 # Or manually:
 pkill -f "pearlalgo.nq_agent.main"
@@ -113,7 +113,7 @@ kill $(cat logs/nq_agent.pid) 2>/dev/null || true
 
 ### Check Service Status
 ```bash
-./scripts/lifecycle/check_nq_agent_status.sh
+./scripts/lifecycle/check_agent_status.sh --market NQ
 
 # Or manually:
 ps aux | grep "pearlalgo.nq_agent.main"
@@ -243,13 +243,13 @@ R:R: 1.47:1
 
 2. **Check Service Status:**
    ```bash
-   ./scripts/lifecycle/check_nq_agent_status.sh
+   ./scripts/lifecycle/check_agent_status.sh --market NQ
    ```
 
 3. **Review Overnight Activity:**
    - Check Telegram for overnight notifications
-   - Review service state: `cat data/nq_agent_state/state.json | jq`
-   - Check recent signals: `tail -20 data/nq_agent_state/signals.jsonl | jq`
+   - Review service state: `cat data/agent_state/NQ/state.json | jq`
+   - Check recent signals: `tail -20 data/agent_state/NQ/signals.jsonl | jq`
 
 ### During Trading Hours
 - Monitor Telegram for signals
@@ -279,33 +279,33 @@ R:R: 1.47:1
 
 **Check Service Status:**
 ```bash
-./scripts/lifecycle/check_nq_agent_status.sh
+./scripts/lifecycle/check_agent_status.sh --market NQ
 ```
 
 **View Service State:**
 ```bash
-cat data/nq_agent_state/state.json | jq
+cat data/agent_state/NQ/state.json | jq
 ```
 
 **View Recent Signals:**
 ```bash
-tail -20 data/nq_agent_state/signals.jsonl | jq
+tail -20 data/agent_state/NQ/signals.jsonl | jq
 ```
 
 **View Performance Metrics:**
 ```bash
-cat data/nq_agent_state/performance.json | jq
+cat data/agent_state/NQ/performance.json | jq
 ```
 
 **View Real-time Logs:**
 ```bash
 # Run service in foreground to see live logs:
-./scripts/lifecycle/start_nq_agent_service.sh
+./scripts/lifecycle/agent.sh start --market NQ
 ```
 
 **View Real-time Signals:**
 ```bash
-tail -f data/nq_agent_state/signals.jsonl | jq
+tail -f data/agent_state/NQ/signals.jsonl | jq
 ```
 
 ### External Watchdog (cron/systemd timer) (optional)
@@ -314,17 +314,17 @@ If you want an **independent safety net** outside the running agent process (det
 
 ```bash
 # Local check (prints summary + exit code)
-python3 scripts/monitoring/watchdog_nq_agent.py --verbose
+python3 scripts/monitoring/watchdog_agent.py --market NQ --verbose
 
 # Alert to Telegram (requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
-python3 scripts/monitoring/watchdog_nq_agent.py --telegram
+python3 scripts/monitoring/watchdog_agent.py --market NQ --telegram
 ```
 
-The watchdog is designed for cron/systemd timers (e.g., every 5 minutes). It reads `data/nq_agent_state/state.json` and returns non‑zero exit codes for warning/critical conditions.
+The watchdog is designed for cron/systemd timers (e.g., every 5 minutes). It reads `data/agent_state/NQ/state.json` and returns non‑zero exit codes for warning/critical conditions.
 
 **Cron example (every 5 minutes):**
 ```cron
-*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/watchdog_nq_agent.py --telegram
+*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/watchdog_agent.py --market NQ --telegram
 ```
 
 ### Status Server (optional)
@@ -333,10 +333,10 @@ A lightweight localhost HTTP server for standard tooling (curl, Prometheus, syst
 
 ```bash
 # Start on default port (9100)
-python3 scripts/monitoring/serve_nq_agent_status.py
+python3 scripts/monitoring/serve_agent_status.py --market NQ
 
 # Custom port
-python3 scripts/monitoring/serve_nq_agent_status.py --port 9200
+python3 scripts/monitoring/serve_agent_status.py --market NQ --port 9200
 ```
 
 **Endpoints:**
@@ -379,7 +379,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 3. **Check for errors:**
    - If running in foreground, check terminal output
    - Check Telegram for error notifications
-   - Review service state: `cat data/nq_agent_state/state.json | jq .error_count`
+   - Review service state: `cat data/agent_state/NQ/state.json | jq .error_count`
 
 4. **Verify configuration:**
    ```bash
@@ -396,7 +396,7 @@ The status server reads from `state.json` and does not affect the trading agent.
    - Run: `python3 scripts/testing/test_all.py telegram` to confirm Telegram delivery is healthy.
 3. **Check buffer size:**
    ```bash
-   cat data/nq_agent_state/state.json | jq .buffer_size
+   cat data/agent_state/NQ/state.json | jq .buffer_size
    ```
    Should be > 10 bars. If low, check data provider connection.
 4. **Check signal confidence threshold** (minimum 50% required, configurable in `config.yaml`)
@@ -423,18 +423,18 @@ The status server reads from `state.json` and does not affect the trading agent.
 
 1. **Check error count:**
    ```bash
-   cat data/nq_agent_state/state.json | jq .error_count
+   cat data/agent_state/NQ/state.json | jq .error_count
    ```
 
 2. **Service auto-pauses after 10 consecutive errors** (circuit breaker)
 3. **Check for error details:**
    - If running in foreground, check terminal output for ERROR messages
    - Check Telegram for error notifications
-   - Review service state: `cat data/nq_agent_state/state.json | jq`
+   - Review service state: `cat data/agent_state/NQ/state.json | jq`
 
 4. **Check connection failures:**
    ```bash
-   cat data/nq_agent_state/state.json | jq .connection_failures
+   cat data/agent_state/NQ/state.json | jq .connection_failures
    ```
 
 ### Data Quality Issues
@@ -448,7 +448,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 4. **Review data quality alerts:**
    - Check Telegram for data quality warnings
    - If running in foreground, check terminal output for warnings
-   - Review service state: `cat data/nq_agent_state/state.json | jq`
+   - Review service state: `cat data/agent_state/NQ/state.json | jq`
 
 ### IBKR Error 162: TWS Session Conflict
 
@@ -475,27 +475,27 @@ The status server reads from `state.json` and does not affect the trading agent.
 
 4. **Restart NQ Agent Service:**
    ```bash
-   ./scripts/lifecycle/stop_nq_agent_service.sh
-   ./scripts/lifecycle/start_nq_agent_service.sh
+   ./scripts/lifecycle/agent.sh stop --market NQ
+   ./scripts/lifecycle/agent.sh start --market NQ
    ```
 
 **Prevention:** Only use Gateway (not TWS) when running the automated service. If you need TWS for manual trading, disconnect Gateway first.
 
 ### Multiple Service Processes Running
 
-**Symptom:** `check_nq_agent_status.sh` shows multiple PIDs running
+**Symptom:** `check_agent_status.sh --market NQ` shows multiple PIDs running
 
 **Cause:** Service didn't stop cleanly, leaving orphaned processes
 
 **Solution:**
 1. **Stop all service processes:**
    ```bash
-   ./scripts/lifecycle/stop_nq_agent_service.sh
+   ./scripts/lifecycle/agent.sh stop --market NQ
    ```
 
 2. **Verify all processes are stopped:**
    ```bash
-   ./scripts/lifecycle/check_nq_agent_status.sh
+   ./scripts/lifecycle/check_agent_status.sh --market NQ
    ```
 
 3. **If processes persist, manually kill them:**
@@ -514,7 +514,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 
 5. **Restart service:**
    ```bash
-   ./scripts/lifecycle/start_nq_agent_service.sh
+   ./scripts/lifecycle/agent.sh start --market NQ
    ```
 
 ---
@@ -529,9 +529,9 @@ The status server reads from `state.json` and does not affect the trading agent.
 - `logs/nq_agent.pid` - Process ID file (for background mode)
 
 **State & Data:**
-- `data/nq_agent_state/state.json` - Current service state
-- `data/nq_agent_state/signals.jsonl` - Signal history (JSONL format)
-- `data/nq_agent_state/performance.json` - Performance metrics
+- `data/agent_state/NQ/state.json` - Current service state
+- `data/agent_state/NQ/signals.jsonl` - Signal history (JSONL format)
+- `data/agent_state/NQ/performance.json` - Performance metrics
 
 **Scripts:**
 - `scripts/lifecycle/` - Service lifecycle scripts

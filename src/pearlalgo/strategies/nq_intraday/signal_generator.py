@@ -637,7 +637,7 @@ class NQSignalGenerator:
         # Optional: run selected trading bot (single source of truth).
         if self._trading_bot_enabled:
             try:
-                from pearlalgo.strategies.pearl_bots_integration import get_trading_bot_manager
+                from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager
                 bot_manager = get_trading_bot_manager()
                 trading_signals = bot_manager.analyze(market_data)
                 raw_signals = trading_signals or []

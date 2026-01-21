@@ -32,7 +32,9 @@ class MonitorPaths:
 
 def _guess_paths() -> MonitorPaths:
     project_root = Path(__file__).resolve().parent.parent.parent.parent
-    state_dir = project_root / "data" / "nq_agent_state"
+    market = os.getenv("PEARLALGO_MARKET", "NQ").strip().upper()
+    env_state_dir = os.getenv("PEARLALGO_STATE_DIR")
+    state_dir = Path(env_state_dir) if env_state_dir else (project_root / "data" / "agent_state" / market)
     exports_dir = state_dir / "exports"
     logs_dir = project_root / "logs"
     return MonitorPaths(
@@ -45,7 +47,7 @@ def _guess_paths() -> MonitorPaths:
         chart_png=exports_dir / "dashboard_latest.png",
         chart_meta=exports_dir / "dashboard_latest.meta.json",
         logs_dir=logs_dir,
-        agent_log=logs_dir / "nq_agent.log",
+        agent_log=logs_dir / f"agent_{market}.log",
     )
 
 

@@ -292,7 +292,7 @@ python3 scripts/testing/test_all.py service
 ./scripts/gateway/gateway.sh status
 
 # Check agent status
-./scripts/lifecycle/check_nq_agent_status.sh
+./scripts/lifecycle/check_agent_status.sh --market NQ
 ```
 
 **Expected:**
@@ -386,10 +386,10 @@ Check performance metrics via Telegram weekly summary or state file:
 
 ```bash
 # Check state file
-cat data/nq_agent_state/state.json | jq
+cat data/agent_state/NQ/state.json | jq
 
 # Check performance metrics
-cat data/nq_agent_state/performance.json | jq
+cat data/agent_state/NQ/performance.json | jq
 ```
 
 **Key Metrics to Track:**
@@ -758,7 +758,7 @@ python3 scripts/testing/test_all.py arch
 PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 
 # Check status
-./scripts/lifecycle/check_nq_agent_status.sh
+./scripts/lifecycle/check_agent_status.sh --market NQ
 ```
 
 ### Key Files
@@ -769,7 +769,7 @@ PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 - `tests/test_error_recovery.py` - Circuit breaker and recovery behaviors
 - `tests/mock_data_provider.py` - Mock data provider
 - Service logs are emitted to stdout/stderr (terminal output, systemd journal, or Docker logs)
-- `data/nq_agent_state/state.json` - Service state
+- `data/agent_state/<MARKET>/state.json` - Service state
 
 ### Key Metrics
 - **Cycles:** Number of analysis cycles completed

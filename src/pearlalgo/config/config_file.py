@@ -188,14 +188,10 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     # LLM features (signal annotation, risk checks, post-mortems, tuning)
     # 50k challenge tracker
     "challenge",
-    # PEARL automated bots (formerly lux_algo_bots)
-    "pearl_bots",
     # Single trading bot selection (AutoBot)
     "trading_bot",
     # Agentic layer (optional autonomy / reasoning)
     "agentic",
-    # Backward compatibility (deprecated)
-    "lux_algo_bots",
 })
 
 # Config keys expected to be specific types after env substitution

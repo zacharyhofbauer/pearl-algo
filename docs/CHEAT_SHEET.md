@@ -74,12 +74,12 @@
 3. **Start NQ Agent Service**
    - **Foreground (see logs)**
      ```bash
-     ./scripts/lifecycle/start_nq_agent_service.sh
+     ./scripts/lifecycle/agent.sh start --market NQ
      ```
    - **Background**
      ```bash
-     ./scripts/lifecycle/start_nq_agent_service.sh --background
-     ./scripts/lifecycle/check_nq_agent_status.sh
+     ./scripts/lifecycle/agent.sh start --market NQ --background
+     ./scripts/lifecycle/check_agent_status.sh --market NQ
      ```
 
 4. **Start Telegram Command Handler** (for remote control)
@@ -104,11 +104,10 @@
 
 - **Service lifecycle**
   ```bash
-  ./scripts/lifecycle/start_nq_agent_service.sh          # start (fg)
-  ./scripts/lifecycle/start_nq_agent_service.sh --background
-  ./scripts/lifecycle/start_nq_agent_service.sh --execution-dry-run  # ATS (dry_run, disarmed; logs only)
-  ./scripts/lifecycle/stop_nq_agent_service.sh           # stop
-  ./scripts/lifecycle/check_nq_agent_status.sh           # status
+  ./scripts/lifecycle/agent.sh start --market NQ         # start (fg)
+  ./scripts/lifecycle/agent.sh start --market NQ --background
+  ./scripts/lifecycle/agent.sh stop --market NQ          # stop
+  ./scripts/lifecycle/check_agent_status.sh --market NQ  # status
   ```
 
 - **Gateway**
@@ -189,13 +188,13 @@
 - **No Telegram responses to `/status`:**
   ```bash
   ./scripts/telegram/check_command_handler.sh
-  ./scripts/lifecycle/check_nq_agent_status.sh
+  ./scripts/lifecycle/check_agent_status.sh --market NQ
   ```
 
 - **No market data / no signals:**
   ```bash
   ./scripts/gateway/gateway.sh status
-  cat data/nq_agent_state/state.json | jq .buffer_size
+  cat data/agent_state/NQ/state.json | jq .buffer_size
   ```
 
 - **Status looks “weird” (e.g., cycles >> bars, signals generated but no alerts):**
@@ -204,9 +203,9 @@
   - Use Telegram `/status` to see **session/total cycles** and **signals generated vs delivered vs failed**.
 - **Service looks stuck / weird:**
   ```bash
-  ./scripts/lifecycle/check_nq_agent_status.sh
-  ./scripts/lifecycle/stop_nq_agent_service.sh
-  ./scripts/lifecycle/start_nq_agent_service.sh
+  ./scripts/lifecycle/check_agent_status.sh --market NQ
+  ./scripts/lifecycle/agent.sh stop --market NQ
+  ./scripts/lifecycle/agent.sh start --market NQ
   ```
 
 - **Verify Telegram config quickly:**
@@ -260,7 +259,7 @@ journalctl -u pearlalgo-mnq.service -p err
 ## 7. Where things live
 
 - **Config**: `config/config.yaml`, `.env`
-- **State**: `data/nq_agent_state/` (`state.json`, `signals.jsonl`, `exports/`)
+- **State**: `data/agent_state/<MARKET>/` (`state.json`, `signals.jsonl`, `exports/`)
 - **Services & scripts**: `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/`
 - **Logs**: stdout/stderr (foreground), journald (systemd), or Docker logs
 - **Deep-dive docs**: `NQ_AGENT_GUIDE.md`, `GATEWAY.md`, `TELEGRAM_GUIDE.md`, `PROJECT_SUMMARY.md`
@@ -330,13 +329,13 @@ pgrep -f "pearlalgo.nq_agent.main" && echo "✅ Agent OK"
 pgrep -f "telegram_command_handler" && echo "✅ Telegram OK"
 
 # Check state freshness
-stat data/nq_agent_state/state.json | grep Modify
+stat data/agent_state/NQ/state.json | grep Modify
 
 # Check signal diagnostics
-cat data/nq_agent_state/state.json | jq '.signal_diagnostics'
+cat data/agent_state/NQ/state.json | jq '.signal_diagnostics'
 
 # Check today's signals
-grep "$(date -u +%Y-%m-%d)" data/nq_agent_state/signals.jsonl | wc -l
+grep "$(date -u +%Y-%m-%d)" data/agent_state/NQ/signals.jsonl | wc -l
 ```
 
 ---
@@ -345,7 +344,7 @@ grep "$(date -u +%Y-%m-%d)" data/nq_agent_state/signals.jsonl | wc -l
 
 | Service | Stop | Start | Restart |
 |---------|------|-------|---------|
-| **NQ Agent** | `./scripts/lifecycle/stop_nq_agent_service.sh` | `./scripts/lifecycle/start_nq_agent_service.sh --background` | Stop + Start |
+| **Agent (NQ)** | `./scripts/lifecycle/agent.sh stop --market NQ` | `./scripts/lifecycle/agent.sh start --market NQ --background` | Stop + Start |
 | **Telegram** | `pkill -f telegram_command_handler` | `./scripts/telegram/start_command_handler.sh --background` | `./scripts/telegram/restart_command_handler.sh --background` |
 | **Gateway** | `./scripts/gateway/gateway.sh stop` | `./scripts/gateway/gateway.sh start` | Stop + Start |
 
@@ -353,13 +352,13 @@ grep "$(date -u +%Y-%m-%d)" data/nq_agent_state/signals.jsonl | wc -l
 
 ```bash
 # After config.yaml change (full restart)
-./scripts/lifecycle/stop_nq_agent_service.sh
-./scripts/lifecycle/start_nq_agent_service.sh --background
+./scripts/lifecycle/agent.sh stop --market NQ
+./scripts/lifecycle/agent.sh start --market NQ --background
 
 # After code change (full restart all)
-./scripts/lifecycle/stop_nq_agent_service.sh
+./scripts/lifecycle/agent.sh stop --market NQ
 pkill -f telegram_command_handler
-./scripts/lifecycle/start_nq_agent_service.sh --background
+./scripts/lifecycle/agent.sh start --market NQ --background
 ./scripts/telegram/start_command_handler.sh --background
 ```
 
@@ -373,7 +372,7 @@ pkill -f telegram_command_handler
 
 ```bash
 # View 7-day metrics
-cat data/nq_agent_state/signals.jsonl | jq -s '
+cat data/agent_state/NQ/signals.jsonl | jq -s '
   [.[] | select(.status == "exited")] |
   {total: length, wins: [.[] | select(.is_win == true)] | length, pnl: [.[].pnl] | add}'
 ```
@@ -398,15 +397,15 @@ python scripts/backtesting/backtest_cli.py signal \
 
 Edit `config/config.yaml` and restart:
 ```bash
-./scripts/lifecycle/stop_nq_agent_service.sh
-./scripts/lifecycle/start_nq_agent_service.sh --background
+./scripts/lifecycle/agent.sh stop --market NQ
+./scripts/lifecycle/agent.sh start --market NQ --background
 ```
 
 ### Step 5: Verify No Opportunity Loss
 
 Check signal diagnostics after a few cycles:
 ```bash
-cat data/nq_agent_state/state.json | jq '.signal_diagnostics_raw'
+cat data/agent_state/NQ/state.json | jq '.signal_diagnostics_raw'
 ```
 
 - `raw_signals` should be similar to before

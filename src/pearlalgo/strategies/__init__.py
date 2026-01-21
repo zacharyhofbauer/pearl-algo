@@ -3,7 +3,7 @@ Strategy implementations for the PearlAlgo trading agent.
 
 Contains:
 - nq_intraday: MNQ futures intraday strategy optimized for prop firm trading
-- pearl_bots: PEARL automated trading bots (formerly lux_algo_bots)
+- trading bots: AutoBot variants (single-bot runtime; variants for backtests)
 """
 
 # Import the main strategy for convenience
@@ -12,7 +12,7 @@ from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 
 # Import PEARL automated bots
 from .pearl_bots import (
-    PearlBot,
+    TradingBot,
     BotConfig,
     create_bot,
     TrendFollowerBot,
@@ -22,15 +22,15 @@ from .pearl_bots import (
 )
 
 # Import integration layer
-from .pearl_bots_integration import get_pearl_bot_manager, get_trading_bot_manager
+from .trading_bot_manager import get_trading_bot_manager
 
 __all__ = [
     # Existing strategies
     "NQIntradayStrategy",
     "NQIntradayConfig",
 
-    # PEARL automated bots
-    "PearlBot",
+    # Trading bots
+    "TradingBot",
     "BotConfig",
     "create_bot",
     "TrendFollowerBot",
@@ -39,6 +39,5 @@ __all__ = [
     "PearlAutoBot",
 
     # Integration
-    "get_pearl_bot_manager",
     "get_trading_bot_manager",
 ]

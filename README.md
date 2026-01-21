@@ -37,13 +37,13 @@ Service behavior is configured in `config/config.yaml`.
 ./scripts/gateway/gateway.sh start
 
 # Start the MNQ agent
-./scripts/lifecycle/start_nq_agent_service.sh --background
+./scripts/lifecycle/agent.sh start --market NQ --background
 
 # Start Telegram command handler (menus)
 ./scripts/telegram/start_command_handler.sh --background
 
 # Check status
-./scripts/lifecycle/check_nq_agent_status.sh
+./scripts/lifecycle/check_agent_status.sh --market NQ
 ```
 
 ## Validation

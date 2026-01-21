@@ -53,12 +53,12 @@ class PerformanceTracker:
         Initialize performance tracker.
         
         Args:
-            state_dir: Directory for state files (default: ./data/nq_agent_state)
+            state_dir: Directory for state files (default: ./data/agent_state/<MARKET>)
             state_manager: State manager instance for signal persistence (optional)
         """
         # Track whether caller explicitly provided a state_dir (tests do this).
         # If explicit, SQLite writes MUST stay inside that directory to avoid polluting
-        # the live agent DB under data/nq_agent_state.
+        # the live agent DB under data/agent_state/<MARKET>.
         self._explicit_state_dir = state_dir is not None
 
         self.state_dir = ensure_state_dir(state_dir)

@@ -136,9 +136,9 @@ def build_doctor_rollup(db, *, hours: float = 24.0) -> Dict[str, Any]:
     # -----------------------------------------------------------------------------
     brain: Dict[str, Any] = {}
     try:
-        # Derive state_dir from DB path (production default: data/nq_agent_state/)
+        # Derive state_dir from DB path (production default: data/agent_state/<MARKET>/)
         state_dir = getattr(db, "db_path", None)
-        state_dir = Path(state_dir).parent if state_dir else Path("data/nq_agent_state")
+        state_dir = Path(state_dir).parent if state_dir else Path("data/agent_state/NQ")
 
         from pearlalgo.config.config_loader import load_service_config
 
@@ -538,7 +538,7 @@ def main() -> int:
         print("SQLite storage disabled. Enable `storage.sqlite_enabled: true` in config/config.yaml.")
         return 2
 
-    db_path = args.db_path or str(storage_cfg.get("db_path") or "data/nq_agent_state/trades.db")
+    db_path = args.db_path or str(storage_cfg.get("db_path") or "data/agent_state/NQ/trades.db")
     db = TradeDatabase(Path(db_path))
 
     rollup = build_doctor_rollup(db, hours=args.hours)

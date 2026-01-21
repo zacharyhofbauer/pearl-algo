@@ -20,7 +20,7 @@ except ImportError:
     # Fallback if module not available
     def ensure_state_dir(state_dir=None):
         if state_dir is None:
-            state_dir = Path("data/nq_agent_state")
+            state_dir = Path("data/agent_state/NQ")
         state_path = Path(state_dir)
         state_path.mkdir(parents=True, exist_ok=True)
         return state_path

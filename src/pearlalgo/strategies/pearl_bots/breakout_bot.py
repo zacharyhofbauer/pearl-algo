@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 import numpy as np
 
-from .bot_template import PearlBot, BotConfig, TradeSignal, IndicatorSuite, register_bot
+from .bot_template import BotConfig, TradeSignal, IndicatorSuite, TradingBot, register_bot
 
 
 @dataclass
@@ -98,7 +98,7 @@ class BreakoutIndicators(IndicatorSuite):
         }
 
 
-class BreakoutBot(PearlBot):
+class BreakoutBot(TradingBot):
     """
     Breakout Bot - Complete automated trading system.
 

@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.paths import ensure_state_dir
 
 
 @dataclass
@@ -266,7 +267,7 @@ class MetaLearner:
             state_dir: Directory for state persistence
         """
         self.config = config or MetaConfig()
-        self.state_dir = state_dir or Path("data/nq_agent_state")
+        self.state_dir = ensure_state_dir(state_dir)
         self.state_file = self.state_dir / "meta_state.json"
         
         # Load state

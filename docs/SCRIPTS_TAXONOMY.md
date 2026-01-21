@@ -4,14 +4,11 @@ This document standardizes the roles of all scripts under `scripts/` and identif
 
 ## Lifecycle (`scripts/lifecycle/`)
 
-- `start_nq_agent_service.sh`
-  - **Role**: Canonical way to start the NQ Agent Service.
-  - **Behavior**: Activates `.venv` if present, verifies `pearlalgo` is importable, supports foreground and `--background` modes, manages PID file in `logs/nq_agent.pid`.
-- `stop_nq_agent_service.sh`
-  - **Role**: Canonical way to stop the NQ Agent Service.
-  - **Behavior**: Uses PID file if available, falls back to `pgrep -f "pearlalgo.nq_agent.main"`.
-- `check_nq_agent_status.sh`
-  - **Role**: Check process and basic state (PID, uptime, state file summary, gateway status).
+- `agent.sh`
+  - **Role**: Canonical market-aware agent lifecycle CLI (start/stop/restart/status).
+  - **Behavior**: Sets `PEARLALGO_MARKET`, `PEARLALGO_CONFIG_PATH`, `PEARLALGO_STATE_DIR`; manages PID/log per market in `logs/agent_<MARKET>.pid` and `logs/agent_<MARKET>.log`.
+- `check_agent_status.sh`
+  - **Role**: Check process and basic state summary for a market (`--market NQ|ES|GC`).
 - `start_monitor_suite.sh`
   - **Role**: Operator convenience script to start the full local suite (Gateway + Agent + Telegram handler + Monitor UI).
   - **Notes**: Intended for desktop/VNC sessions; pairs with `stop_monitor_suite.sh`.
@@ -53,16 +50,12 @@ Backtesting scripts for strategy validation on historical data.
   - **Role**: Robustness / stress-testing harness for backtests (parameter and scenario sweeps).
 - `strategy_selection.py`
   - **Role**: Generate `strategy_selection_*.json` exports used by Telegram `/analyze` and operator dashboards.
-- `backtest_pearl_bot.py`
-  - **Role**: Backtest a single PEARL bot configuration on historical data.
-- `compare_pearl_bots.py`
-  - **Role**: Compare multiple PEARL bots across a period and produce a ranked summary.
+- `backtest_trading_bot.py`
+  - **Role**: Backtest a single trading bot variant (including `PearlAutoBot`) on historical data.
+- `compare_trading_bots.py`
+  - **Role**: Compare trading bot variants across the same period and produce a ranked summary.
 - `train_ml_filter.py`
   - **Role**: Train/update the ML signal filter artifact used by `ml_filter` (offline; no production execution side effects).
-- `analyze_pearl_bot_performance.py`
-  - **Role**: Post-process PEARL bot backtest outputs into performance tables/charts.
-- `test_enhanced_pearl_bots.py`
-  - **Role**: Standalone PEARL bot validation harness (not collected by pytest; intended for manual runs).
 
 ## Testing (`scripts/testing/`)
 
@@ -121,15 +114,15 @@ Scripts for repository hygiene and cleanup operations.
 External safety nets intended for cron/systemd timers. These scripts validate runtime health/state;
 they do **not** contain trading or strategy logic.
 
-- `watchdog_nq_agent.py`
+- `watchdog_agent.py`
   - **Role**: External watchdog for state freshness + silent failure detection.
-  - **Behavior**: Reads `data/nq_agent_state/state.json`, checks staleness against scan interval and dashboard cadence, and can optionally send Telegram alerts.
-  - **Usage**: `python3 scripts/monitoring/watchdog_nq_agent.py [--telegram] [--verbose]`
+  - **Behavior**: Reads `data/agent_state/<MARKET>/state.json`, checks staleness against scan interval and dashboard cadence, and can optionally send Telegram alerts.
+  - **Usage**: `python3 scripts/monitoring/watchdog_agent.py --market NQ [--telegram] [--verbose]`
 
-- `serve_nq_agent_status.py`
+- `serve_agent_status.py`
   - **Role**: Localhost status server for standard tooling integration (curl, Prometheus, systemd health checks).
-  - **Behavior**: Reads `data/nq_agent_state/state.json`; exposes `GET /healthz` (200/503), `GET /metrics` (Prometheus), and `GET /` (simple HTML status page).
-  - **Usage**: `python3 scripts/monitoring/serve_nq_agent_status.py [--port 9100]`
+  - **Behavior**: Reads `data/agent_state/<MARKET>/state.json`; exposes `GET /healthz` (200/503), `GET /metrics` (Prometheus), and `GET /` (simple HTML status page).
+  - **Usage**: `python3 scripts/monitoring/serve_agent_status.py --market NQ [--port 9100]`
 
 - `doctor_cli.py`
   - **Role**: Operator CLI “doctor” for a compact rollup of recent behavior (signals, rejects, sizing, stops).

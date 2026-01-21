@@ -210,8 +210,8 @@ Read and understand:
 - src/pearlalgo/nq_agent/performance_tracker.py - Performance metrics
 
 State files:
-- data/nq_agent_state/state.json - Agent state
-- data/nq_agent_state/signals.jsonl - Signal history
+- data/agent_state/<MARKET>/state.json - Agent state
+- data/agent_state/<MARKET>/signals.jsonl - Signal history
 
 2.2 LIFECYCLE VERIFICATION
 Verify:
@@ -415,13 +415,13 @@ NQ Agent:
 - src/pearlalgo/strategies/nq_intraday/signal_generator.py
 - src/pearlalgo/strategies/nq_intraday/adaptive_stops.py
 - src/pearlalgo/nq_agent/state_manager.py
-- data/nq_agent_state/state.json
+- data/agent_state/<MARKET>/state.json
 
 Execution & Learning:
 - src/pearlalgo/execution/base.py
 - src/pearlalgo/execution/ibkr/adapter.py
 - src/pearlalgo/learning/bandit_policy.py
-- data/nq_agent_state/policy_state.json
+- data/agent_state/<MARKET>/policy_state.json
 
 Documentation:
 - docs/PROJECT_SUMMARY.md

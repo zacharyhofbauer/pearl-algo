@@ -75,8 +75,8 @@ All other documents must remain consistent with this summary.
   - Mapping of environment variables, `config/config.yaml`, and code defaults to their consumers
 - `CHART_VISUAL_SCHEMA.md`
   - Visual semantics + regression contracts for chart outputs (source: `src/pearlalgo/nq_agent/chart_generator.py`)
-- `PEARL_BOTS_README.md`
-  - Operator and developer reference for PEARL bots (configuration + Telegram-first backtesting)
+- `TRADING_BOT_GUIDE.md`
+  - Operator and developer reference for the single trading bot (AutoBot) model
 - `INVENTORY_LEDGER.md`
   - File-by-file keep/merge/delete decisions with proofs (generated during cleanup)
 

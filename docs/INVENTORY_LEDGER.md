@@ -60,8 +60,8 @@ Purpose: File-by-file keep/merge/delete decisions with proofs
 | File | Decision | Role | Referenced By |
 |------|----------|------|---------------|
 | `strategies/nq_intraday/*.py` | KEEP | Core strategy logic | service, tests |
-| `strategies/pearl_bots/*.py` | KEEP | Modular bot framework | telegram, backtest |
-| `strategies/pearl_bots_integration.py` | KEEP | Bot manager integration | signal_generator, telegram |
+| `strategies/pearl_bots/*.py` | KEEP | Trading bot variants + backtest harness | telegram, backtest |
+| `strategies/trading_bot_manager.py` | KEEP | Single trading bot manager integration | signal_generator, telegram |
 | `strategies/agent_manager.py` | **DELETED** | Unused multi-agent scaffold | None (deleted) |
 
 ### Learning (KEEP / SCAFFOLD)
@@ -149,7 +149,7 @@ No scripts flagged for deletion.
 | File | Decision | Role |
 |------|----------|------|
 | `config.yaml` | KEEP | Primary configuration |
-| `pearl_bots_example.yaml` | KEEP | Pearl bot config template |
+| `markets/` | KEEP | Per-market config examples (NQ/ES/GC) |
 
 ---
 
@@ -178,7 +178,7 @@ No scripts flagged for deletion.
 | `MPLFINANCE_QUICK_START.md` | KEEP | Chart reference |
 | `CHART_VISUAL_SCHEMA.md` | KEEP | Chart contracts |
 | `CHART_STRATEGY.md` | KEEP | Chart strategy |
-| `PEARL_BOTS_README.md` | KEEP | Pearl bots reference |
+| `TRADING_BOT_GUIDE.md` | KEEP | Single trading bot (AutoBot) reference |
 | `ARCHITECTURE.md` | KEEP | System architecture |
 | `AGENT_BRAIN_GUIDE.md` | KEEP | Agent internals |
 | `LINUX_MONITOR.md` | KEEP | Monitor UI guide |

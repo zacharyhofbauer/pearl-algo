@@ -315,7 +315,7 @@ cmd_api_ready() {
     echo "Gateway is ready for connections!"
     echo ""
     echo "You can now start the NQ Agent service:"
-    echo "   ./scripts/lifecycle/start_nq_agent_service.sh"
+    echo "   ./scripts/lifecycle/agent.sh start --market NQ --background"
     exit 0
   fi
 
@@ -350,7 +350,7 @@ cmd_monitor() {
       echo "Gateway is ready for connections!"
       echo ""
       echo "You can now start the NQ Agent service:"
-      echo "   ./scripts/lifecycle/start_nq_agent_service.sh"
+      echo "   ./scripts/lifecycle/agent.sh start --market NQ --background"
       exit 0
     fi
 
@@ -494,7 +494,7 @@ cmd_2fa_status() {
     echo "✅ API port ${API_PORT} is LISTENING - Gateway is ready!"
     echo ""
     echo "You can now start the NQ Agent service:"
-    echo "   ./scripts/lifecycle/start_nq_agent_service.sh"
+    echo "   ./scripts/lifecycle/agent.sh start --market NQ --background"
     exit 0
   fi
 
@@ -570,7 +570,7 @@ cmd_wait_2fa() {
       echo "✅✅✅ SUCCESS! Gateway is authenticated and API is ready!"
       echo ""
       echo "You can now start the NQ Agent service:"
-      echo "   ./scripts/lifecycle/start_nq_agent_service.sh"
+      echo "   ./scripts/lifecycle/agent.sh start --market NQ --background"
       exit 0
     fi
 

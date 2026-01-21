@@ -4215,8 +4215,31 @@ class NQAgentService:
         except Exception:
             version = "0.2.2"  # Fallback to known version
 
+        # Market + trading bot identity for multi-market observability (Telegram/UI/ops)
+        market_label = None
+        try:
+            import os
+
+            market_label = str(os.getenv("PEARLALGO_MARKET") or "NQ").strip().upper()
+        except Exception:
+            market_label = "NQ"
+
+        trading_bot_state: Optional[Dict[str, Any]] = None
+        try:
+            from pearlalgo.config.config_loader import load_service_config
+
+            cfg = load_service_config(validate=False) or {}
+            tb = cfg.get("trading_bot", {}) or {}
+            trading_bot_state = {
+                "enabled": bool(tb.get("enabled", False)),
+                "selected": tb.get("selected"),
+            }
+        except Exception:
+            trading_bot_state = None
+
         state = {
             # Core service state
+            "market": market_label,
             "running": self.running,
             "paused": self.paused,
             "pause_reason": self.pause_reason,
@@ -4320,6 +4343,7 @@ class NQAgentService:
             # Operational metadata
             "run_id": run_id,
             "version": version,
+            "trading_bot": trading_bot_state,
         }
         # Reuse futures_market_open from earlier check (avoid duplicate API call)
         state["futures_market_open"] = futures_market_open

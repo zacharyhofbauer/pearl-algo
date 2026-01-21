@@ -17,13 +17,13 @@ from pearlalgo.strategies.nq_intraday.backtest_adapter import (
     VerificationSummary,
     _compute_verification_summary,
 )
-from pearlalgo.strategies.pearl_bots.bot_template import PearlBot, TradeSignal
+from pearlalgo.strategies.pearl_bots.bot_template import TradeSignal, TradingBot
 from pearlalgo.utils.logger import logger, log_silence
 
 
 @dataclass
-class PearlBotBacktestResult:
-    """Results from a pearl bot backtest."""
+class TradingBotBacktestResult:
+    """Results from a trading bot backtest."""
     
     bot_name: str
     total_bars: int
@@ -110,17 +110,17 @@ def _resample_ohlcv(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     return df.resample(rule).agg(agg).dropna()
 
 
-class PearlBotBacktestAdapter:
+class TradingBotBacktestAdapter:
     """
     Backtesting adapter for PEARL bots.
     
-    Integrates pearl bots with the existing TradeSimulator infrastructure
+    Integrates trading bot variants with the existing TradeSimulator infrastructure
     to provide comprehensive backtesting capabilities.
     """
     
     def __init__(
         self,
-        bot: PearlBot,
+        bot: TradingBot,
         tick_value: float = 2.0,  # MNQ: $2 per point
         slippage_ticks: float = 0.5,
         max_concurrent_trades: int = 1,
@@ -133,7 +133,7 @@ class PearlBotBacktestAdapter:
         Initialize backtest adapter.
         
         Args:
-            bot: PearlBot instance to backtest
+            bot: TradingBot instance to backtest
             tick_value: Dollar value per point
             slippage_ticks: Slippage in ticks
             max_concurrent_trades: Maximum concurrent positions
@@ -160,7 +160,7 @@ class PearlBotBacktestAdapter:
         timeframe: str = "5m",
         return_signals: bool = True,
         return_trades: bool = True,
-    ) -> PearlBotBacktestResult:
+    ) -> TradingBotBacktestResult:
         """
         Run backtest on historical data.
         
@@ -171,10 +171,10 @@ class PearlBotBacktestAdapter:
             return_trades: Include trades in result
             
         Returns:
-            PearlBotBacktestResult with comprehensive metrics
+            TradingBotBacktestResult with comprehensive metrics
         """
         if df.empty:
-            return PearlBotBacktestResult(
+            return TradingBotBacktestResult(
                 bot_name=self.bot.name,
                 total_bars=0,
                 total_signals=0,
@@ -200,7 +200,7 @@ class PearlBotBacktestAdapter:
         df_tf = _resample_ohlcv(df, timeframe=timeframe)
 
         if df_tf.empty:
-            return PearlBotBacktestResult(
+            return TradingBotBacktestResult(
                 bot_name=self.bot.name,
                 total_bars=0,
                 total_signals=0,
@@ -424,7 +424,7 @@ class PearlBotBacktestAdapter:
         max_equity = max(simulator.equity_curve) if simulator.equity_curve else 0
         max_dd_pct = (metrics["max_drawdown"] / max_equity * 100) if max_equity > 0 else 0.0
         
-        return PearlBotBacktestResult(
+        return TradingBotBacktestResult(
             bot_name=self.bot.name,
             total_bars=len(df_tf),
             total_signals=len(signals),
@@ -450,8 +450,8 @@ class PearlBotBacktestAdapter:
         )
 
 
-def backtest_pearl_bot(
-    bot: PearlBot,
+def backtest_trading_bot(
+    bot: TradingBot,
     df: pd.DataFrame,
     tick_value: float = 2.0,
     slippage_ticks: float = 0.5,
@@ -462,12 +462,12 @@ def backtest_pearl_bot(
     max_stop_points: Optional[float] = None,
     return_signals: bool = True,
     return_trades: bool = True,
-) -> PearlBotBacktestResult:
+) -> TradingBotBacktestResult:
     """
-    Convenience function to backtest a pearl bot.
+    Convenience function to backtest a trading bot variant.
     
     Args:
-        bot: PearlBot instance
+        bot: TradingBot instance
         df: OHLCV DataFrame
         tick_value: Dollar value per point
         slippage_ticks: Slippage in ticks
@@ -480,9 +480,9 @@ def backtest_pearl_bot(
         return_trades: Include trades in result
         
     Returns:
-        PearlBotBacktestResult
+        TradingBotBacktestResult
     """
-    adapter = PearlBotBacktestAdapter(
+    adapter = TradingBotBacktestAdapter(
         bot=bot,
         tick_value=tick_value,
         slippage_ticks=slippage_ticks,

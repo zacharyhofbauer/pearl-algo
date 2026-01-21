@@ -140,7 +140,7 @@ The MNQ Trading Agent is designed to:
 - Persists service state to JSON
 - Saves signals to JSONL file
 - Loads state on startup
-- State directory: `data/nq_agent_state/`
+- State directory: `data/agent_state/<MARKET>/`
 
 **Performance Tracker** (`performance_tracker.py`):
 - Tracks signal generation → entry → exit lifecycle
@@ -439,9 +439,8 @@ pearlalgo-dev-ai-agents/
 │
 ├── scripts/                     # Utility scripts (organized by category)
 │   ├── lifecycle/                  # Service lifecycle scripts
-│   │   ├── start_nq_agent_service.sh    # Start service (background)
-│   │   ├── stop_nq_agent_service.sh     # Stop service
-│   │   └── check_nq_agent_status.sh      # Check status
+│   │   ├── agent.sh                     # Start/stop/restart/status (market-aware)
+│   │   └── check_agent_status.sh        # Check status (market-aware)
 │   ├── gateway/                    # IBKR Gateway scripts
 │   │   └── gateway.sh                  # Gateway CLI (start/stop/status/2FA/VNC/setup)
 │   ├── telegram/                   # Telegram command-handler scripts
@@ -449,7 +448,8 @@ pearlalgo-dev-ai-agents/
 │   │   ├── check_command_handler.sh     # Check handler status
 │   │   └── set_bot_commands.py          # Push BotFather commands via API
 │   ├── monitoring/                 # Monitoring scripts (external safety nets)
-│   │   └── watchdog_nq_agent.py         # State freshness watchdog (cron/systemd timer)
+│   │   ├── watchdog_agent.py            # State freshness watchdog (cron/systemd timer)
+│   │   └── serve_agent_status.py        # Localhost /healthz + /metrics sidecar (optional)
 │   ├── maintenance/                # Maintenance/hygiene scripts
 │   │   └── purge_runtime_artifacts.sh   # Safe cleanup (requires --yes)
 │   ├── backtesting/               # Backtesting scripts
@@ -483,7 +483,7 @@ pearlalgo-dev-ai-agents/
 │   └── MOCK_DATA_WARNING.md    # Mock data testing notes
 │
 ├── data/                        # Data storage
-│   ├── nq_agent_state/         # Service state (see State Schema below)
+│   ├── agent_state/            # Per-market service state (see State Schema below)
 │   │   ├── state.json          # Current state (authoritative for /status + watchdog)
 │   │   ├── signals.jsonl       # Signal history (JSONL, all signals)
 │   │   └── exports/            # Performance exports (7d metrics, signals snapshots)
@@ -491,7 +491,7 @@ pearlalgo-dev-ai-agents/
 │   └── historical/              # Historical data (parquet)
 │
 ├── logs/                        # PID + handler logs (runtime artifacts; gitignored)
-│   └── nq_agent.pid            # Process ID
+│   └── agent_NQ.pid            # Process ID (per market: agent_<MARKET>.pid)
 │
 ├── ibkr/                        # IBKR Gateway files
 │   ├── ibc/                    # IBC (Interactive Brokers Controller)
@@ -542,7 +542,7 @@ python3 scripts/testing/test_all.py arch
 PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 ```
 
-### State Schema (`data/nq_agent_state/state.json`)
+### State Schema (`data/agent_state/<MARKET>/state.json`)
 
 The `state.json` file is the authoritative source of truth for the agent's operational state.
 It is read by the Telegram command handler (`/status`), the external watchdog, and the optional status server.
@@ -832,22 +832,22 @@ pip install -e .
 
 **Start Service (Foreground - default)**:
 ```bash
-./scripts/lifecycle/start_nq_agent_service.sh
+./scripts/lifecycle/agent.sh start --market NQ
 ```
 
 **Start Service (Background)**:
 ```bash
-./scripts/lifecycle/start_nq_agent_service.sh --background
+./scripts/lifecycle/agent.sh start --market NQ --background
 ```
 
 **Stop Service**:
 ```bash
-./scripts/lifecycle/stop_nq_agent_service.sh
+./scripts/lifecycle/agent.sh stop --market NQ
 ```
 
 **Check Status**:
 ```bash
-./scripts/lifecycle/check_nq_agent_status.sh
+./scripts/lifecycle/check_agent_status.sh --market NQ
 ```
 
 **View Logs**:
@@ -902,15 +902,15 @@ docker run --rm -it \\
 
 ### Service Management
 
-- **PID File**: `logs/nq_agent.pid` (for process management)
+- **PID File**: `logs/agent_<MARKET>.pid` (for process management)
 - **Logs**: stdout/stderr (systemd journal, Docker logs) and Telegram notifications
-- **State Directory**: `data/nq_agent_state/` (persistent state)
+- **State Directory**: `data/agent_state/<MARKET>/` (persistent state)
 
 ### Daily Operations
 
 **Morning Checklist**:
 1. Verify IBKR Gateway is running: `./scripts/gateway/gateway.sh status`
-2. Check service status: `./scripts/lifecycle/check_nq_agent_status.sh`
+2. Check service status: `./scripts/lifecycle/check_agent_status.sh --market NQ`
 3. Review overnight errors/status (Telegram and/or `journalctl -u pearlalgo-mnq.service --since yesterday`)
 
 **During Trading**:
@@ -938,25 +938,25 @@ docker run --rm -it \\
 
 **Check Service Status**:
 ```bash
-./scripts/lifecycle/check_nq_agent_status.sh
+./scripts/lifecycle/check_agent_status.sh --market NQ
 ps aux | grep "pearlalgo.nq_agent.main"
 ```
 
 **View State**:
 ```bash
-cat data/nq_agent_state/state.json | jq
+cat data/agent_state/NQ/state.json | jq
 ```
 
 **View Recent Signals**:
 ```bash
-tail -20 data/nq_agent_state/signals.jsonl | jq
+tail -20 data/agent_state/NQ/signals.jsonl | jq
 ```
 
 **View Performance**:
 ```bash
-# Performance metrics are computed on-demand and exported to data/nq_agent_state/exports/
+# Performance metrics are computed on-demand and exported to data/agent_state/<MARKET>/exports/
 # Use /performance command in Telegram, or:
-ls -la data/nq_agent_state/exports/
+ls -la data/agent_state/NQ/exports/
 ```
 
 ### External Watchdog
@@ -965,15 +965,15 @@ The watchdog script validates state freshness from outside the agent process:
 
 ```bash
 # Check health (exit codes: 0=OK, 1=Warning, 2=Critical, 3=Error)
-python3 scripts/monitoring/watchdog_nq_agent.py --verbose
+python3 scripts/monitoring/watchdog_agent.py --market NQ --verbose
 
 # Send alerts to Telegram on issues
-python3 scripts/monitoring/watchdog_nq_agent.py --telegram
+python3 scripts/monitoring/watchdog_agent.py --market NQ --telegram
 ```
 
 Add to cron for continuous monitoring (every 5 minutes):
 ```cron
-*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/watchdog_nq_agent.py --telegram
+*/5 * * * * cd /path/to/pearlalgo-dev-ai-agents && python3 scripts/monitoring/watchdog_agent.py --market NQ --telegram
 ```
 
 ### Status Server (Optional)
@@ -982,10 +982,10 @@ A lightweight localhost HTTP server for standard tooling integration:
 
 ```bash
 # Start the status server (default port 9100)
-python3 scripts/monitoring/serve_nq_agent_status.py
+python3 scripts/monitoring/serve_agent_status.py --market NQ
 
 # Custom port
-python3 scripts/monitoring/serve_nq_agent_status.py --port 9200
+python3 scripts/monitoring/serve_agent_status.py --market NQ --port 9200
 ```
 
 **Endpoints:**
@@ -1201,13 +1201,13 @@ Use `docs/prompts/promptbook_engineering.md` for structured improvement iteratio
 ./scripts/gateway/gateway.sh setup
 
 # Start MNQ Agent Service
-./scripts/lifecycle/start_nq_agent_service.sh
+./scripts/lifecycle/agent.sh start --market NQ
 
 # Stop MNQ Agent Service
-./scripts/lifecycle/stop_nq_agent_service.sh
+./scripts/lifecycle/agent.sh stop --market NQ
 
 # Check Service Status
-./scripts/lifecycle/check_nq_agent_status.sh
+./scripts/lifecycle/check_agent_status.sh --market NQ
 
 # Run Tests
 python3 scripts/testing/test_all.py
@@ -1225,11 +1225,11 @@ journalctl -u pearlalgo-mnq.service -f
 ### File Locations
 
 - **Logs**: stdout/stderr (systemd journal, Docker logs) + `logs/telegram_handler.log` (handler background mode)
-- **State**: `data/nq_agent_state/state.json`
-- **Signals**: `data/nq_agent_state/signals.jsonl`
-- **Performance exports**: `data/nq_agent_state/exports/` (7d metrics, signals snapshots)
+- **State**: `data/agent_state/<MARKET>/state.json`
+- **Signals**: `data/agent_state/<MARKET>/signals.jsonl`
+- **Performance exports**: `data/agent_state/<MARKET>/exports/` (7d metrics, signals snapshots)
 - **Config**: `config/config.yaml`
-- **PID**: `logs/nq_agent.pid`
+- **PID**: `logs/agent_<MARKET>.pid`
 
 ### Documentation
 

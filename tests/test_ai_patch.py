@@ -33,7 +33,7 @@ class TestPathBlocking:
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
         assert handler._is_path_blocked("data/state.json") is True
-        assert handler._is_path_blocked("data/nq_agent_state/signals.jsonl") is True
+        assert handler._is_path_blocked("data/agent_state/NQ/signals.jsonl") is True
 
     def test_blocks_logs_directory(self):
         """Paths starting with logs/ should be blocked."""
@@ -41,7 +41,7 @@ class TestPathBlocking:
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
-        assert handler._is_path_blocked("logs/nq_agent.log") is True
+        assert handler._is_path_blocked("logs/agent_NQ.log") is True
         assert handler._is_path_blocked("logs/telegram_handler.log") is True
 
     def test_blocks_env_file(self):

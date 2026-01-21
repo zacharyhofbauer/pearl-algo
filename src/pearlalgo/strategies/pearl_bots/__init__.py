@@ -1,21 +1,14 @@
 """
-PEARL Automated Trading Bots
+Trading Bot Variants (AutoBot variants)
 
-A collection of complete, self-contained automated trading bots for the
-PEARLalgo trading system. Each bot is a full trading strategy with custom
-indicators, automated logic, risk management, and performance tracking.
+A collection of complete, self-contained trading bot variants.
 
-Available Bots:
-- TrendFollowerBot: Trend-following strategies with pullback entries
-- BreakoutBot: Breakout trading from consolidation patterns
-- MeanReversionBot: Mean reversion using oscillator analysis
-
-Each bot can be deployed as a zero-code automated strategy within PEARLalgo,
-with comprehensive backtesting and performance monitoring capabilities.
+Runtime executes **one selected AutoBot** (see `trading_bot` config). The additional
+variants are intended for backtesting and future AutoBot options.
 """
 
 from .bot_template import (
-    PearlBot,
+    TradingBot,
     BotConfig,
     TradeSignal,
     BotPerformance,
@@ -31,7 +24,7 @@ from .composite_bot import CompositeBot, PearlAutoBot
 
 __all__ = [
     # Base classes
-    'PearlBot',
+    'TradingBot',
     'BotConfig',
     'TradeSignal',
     'BotPerformance',

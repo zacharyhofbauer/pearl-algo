@@ -488,7 +488,7 @@ class GetLatestBarTask(Task):
                                 f"   8. Wait 2-3 minutes for changes to propagate\n"
                                 f"   9. Restart Gateway: ./scripts/gateway/gateway.sh stop && sleep 5 && ./scripts/gateway/gateway.sh start\n"
                                 f"   10. Wait 30 seconds for Gateway to fully connect\n"
-                                f"   11. Restart service: ./scripts/lifecycle/start_nq_agent_service.sh\n"
+                                f"   11. Restart service: ./scripts/lifecycle/agent.sh start --market NQ --background\n"
                                 f"   \n"
                                 f"   Note: Subscription must be ACTIVE, PAID, and ACKNOWLEDGED for API access.\n"
                                 f"   Will use historical data fallback."

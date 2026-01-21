@@ -190,13 +190,13 @@ def main() -> int:
     parser.add_argument(
         "--signals-path",
         type=Path,
-        default=Path("data/nq_agent_state/signals.jsonl"),
+        default=Path("data/agent_state/NQ/signals.jsonl"),
         help="Path to signals.jsonl with exited trades",
     )
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=Path("data/nq_agent_state/exports"),
+        default=Path("data/agent_state/NQ/exports"),
         help="Output directory for report JSON",
     )
     parser.add_argument(

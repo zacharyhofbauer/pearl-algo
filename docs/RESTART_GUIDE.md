@@ -32,8 +32,8 @@ The **trading agent** needs restart when you change `config/config.yaml`:
 **How to Restart:**
 ```bash
 cd /home/pearlalgo/pearlalgo-dev-ai-agents
-./scripts/lifecycle/stop_nq_agent_service.sh
-./scripts/lifecycle/start_nq_agent_service.sh --background
+./scripts/lifecycle/agent.sh stop --market NQ
+./scripts/lifecycle/agent.sh start --market NQ --background
 ```
 
 Or via Telegram:
@@ -100,9 +100,9 @@ Create this script for easy restarts:
 cd /home/pearlalgo/pearlalgo-dev-ai-agents
 
 echo "🔄 Restarting Agent..."
-./scripts/lifecycle/stop_nq_agent_service.sh
+./scripts/lifecycle/agent.sh stop --market NQ
 sleep 2
-./scripts/lifecycle/start_nq_agent_service.sh --background
+./scripts/lifecycle/agent.sh start --market NQ --background
 
 echo "✅ Agent restarted!"
 echo "PID: $(cat logs/nq_agent.pid)"

@@ -373,7 +373,7 @@ async def main():
     print("Next Steps:")
     print("  1. Fix any failed tests")
     print("  2. Run a short-run service test (mock): python3 scripts/testing/test_all.py service")
-    print("  3. Start the real service: ./scripts/lifecycle/start_nq_agent_service.sh")
+    print("  3. Start the real service: ./scripts/lifecycle/agent.sh start --market NQ --background")
     print("  4. Monitor: foreground terminal output and Telegram (or systemd journal if deployed)")
     print()
     

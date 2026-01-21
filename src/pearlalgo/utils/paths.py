@@ -21,7 +21,7 @@ def ensure_state_dir(state_dir: Optional[Path] = None) -> Path:
     Ensure state directory exists, creating it if necessary.
     
     Args:
-        state_dir: Optional state directory path (defaults to "data/nq_agent_state")
+        state_dir: Optional state directory path (defaults to "data/agent_state/<MARKET>")
         
     Returns:
         Path to the state directory (guaranteed to exist)
@@ -32,11 +32,8 @@ def ensure_state_dir(state_dir: Optional[Path] = None) -> Path:
             state_dir = Path(env_state_dir)
         else:
             market = os.getenv("PEARLALGO_MARKET")
-            if market:
-                market_label = str(market).strip().upper()
-                state_dir = Path("data") / "agent_state" / market_label
-            else:
-                state_dir = Path("data/nq_agent_state")
+            market_label = str(market or "NQ").strip().upper()
+            state_dir = Path("data") / "agent_state" / market_label
     
     state_path = Path(state_dir)
     state_path.mkdir(parents=True, exist_ok=True)

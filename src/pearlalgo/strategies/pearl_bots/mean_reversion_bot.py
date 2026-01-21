@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Any
 import pandas as pd
 import numpy as np
 
-from .bot_template import PearlBot, BotConfig, TradeSignal, IndicatorSuite, register_bot
+from .bot_template import BotConfig, TradeSignal, IndicatorSuite, TradingBot, register_bot
 
 
 @dataclass
@@ -136,7 +136,7 @@ class MeanReversionIndicators(IndicatorSuite):
         }
 
 
-class MeanReversionBot(PearlBot):
+class MeanReversionBot(TradingBot):
     """
     Mean Reversion Bot - Complete automated trading system.
 

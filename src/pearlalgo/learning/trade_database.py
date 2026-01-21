@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.paths import ensure_state_dir
 
 
 @dataclass
@@ -101,7 +102,7 @@ class TradeDatabase:
         Args:
             db_path: Path to SQLite database file
         """
-        self.db_path = db_path or Path("data/nq_agent_state/trades.db")
+        self.db_path = db_path or (ensure_state_dir(None) / "trades.db")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
         self._init_schema()

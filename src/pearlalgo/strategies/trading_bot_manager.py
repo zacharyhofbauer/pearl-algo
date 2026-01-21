@@ -1,26 +1,25 @@
 """
-PEARL Automated Trading Bot Integration Layer
+Trading Bot Manager integration layer.
 
-Integrates a single, all-in-one AutoBot with the PEARLalgo NQ trading system.
+Integrates a single, all-in-one AutoBot with the agent signal pipeline.
 This enforces one decision stream at runtime and avoids signal merging.
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Any
-import json
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from pearlalgo.utils.logger import logger
 from pearlalgo.config.config_loader import load_service_config
+from pearlalgo.utils.logger import logger
 
 from .pearl_bots import (
-    PearlBot,
     BotConfig,
-    create_bot,
-    TrendFollowerBot,
     BreakoutBot,
     MeanReversionBot,
+    TradingBot,
+    TrendFollowerBot,
+    create_bot,
 )
 
 
@@ -33,7 +32,7 @@ class TradingBotManager:
 
     def __init__(self, config_dir: Optional[Path] = None):
         self.config_dir = config_dir or Path("config")
-        self.bot: Optional[PearlBot] = None
+        self.bot: Optional[TradingBot] = None
         self.bot_config: Dict[str, Any] = {}
         self.selected_name: Optional[str] = None
 
@@ -48,24 +47,26 @@ class TradingBotManager:
     def _load_trading_bot(self) -> None:
         """Load the selected trading bot from config."""
         try:
-            # Load service config to get bot settings
             service_config = load_service_config(validate=False) or {}
-
             trading_bot_cfg = service_config.get("trading_bot") or {}
 
             if not trading_bot_cfg.get("enabled", False):
                 logger.info("Trading bot disabled in configuration")
                 return
+
             selected = trading_bot_cfg.get("selected")
             available = trading_bot_cfg.get("available", {}) or {}
             if not isinstance(available, dict) or not selected or selected not in available:
-                logger.warning("Trading bot config missing selected/available; no bot loaded")
+                logger.warning("trading_bot config missing selected/available; no bot loaded")
                 return
 
             selected_cfg = available.get(selected) or {}
             if not selected_cfg.get("enabled", False):
                 logger.warning(f"Selected trading bot is disabled: {selected}")
                 return
+
+            # Ensure bot implementations are imported (registry side-effects)
+            _ = (TrendFollowerBot, BreakoutBot, MeanReversionBot)
 
             bot_class_name = selected_cfg.get("class") or selected_cfg.get("bot_class") or selected
             params = selected_cfg.get("parameters", {})
@@ -90,7 +91,6 @@ class TradingBotManager:
             self.bot = create_bot(str(bot_class_name), config)
 
             logger.info(f"Loaded trading bot: {self.selected_name} ({bot_class_name})")
-
         except Exception as e:
             logger.error(f"Failed to load trading bot configuration: {e}")
 
@@ -109,27 +109,22 @@ class TradingBotManager:
             logger.error(f"Error analyzing with trading bot {self.selected_name}: {e}")
             return []
 
-        all_signals = [self._convert_to_pearl_format(signal) for signal in bot_signals]
-        logger.debug(f"Generated {len(all_signals)} signals from trading bot {self.selected_name}")
-        return all_signals
+        signals = [self._convert_to_signal_format(signal) for signal in bot_signals]
+        logger.debug(f"Generated {len(signals)} signals from trading bot {self.selected_name}")
+        return signals
 
-    # Backward-compatible alias
-    def analyze_with_bots(self, market_data: Dict) -> List[Dict]:
-        return self.analyze(market_data)
-
-    def _convert_to_pearl_format(self, lux_signal: Any) -> Dict:
+    def _convert_to_signal_format(self, bot_signal: Any) -> Dict:
         """
-        Convert Lux Algo bot signal to PEARLalgo signal format.
+        Convert a bot signal to the agent signal dict shape.
 
         This ensures compatibility with the existing signal processing pipeline.
         """
-        # Compute risk/reward in the same shape expected by SignalPolicy + signal generator.
         rr = 0.0
         try:
-            entry = float(getattr(lux_signal, "entry_price", 0.0) or 0.0)
-            stop = float(getattr(lux_signal, "stop_loss", 0.0) or 0.0)
-            target = float(getattr(lux_signal, "take_profit", 0.0) or 0.0)
-            direction = str(getattr(lux_signal, "direction", "long") or "long").lower()
+            entry = float(getattr(bot_signal, "entry_price", 0.0) or 0.0)
+            stop = float(getattr(bot_signal, "stop_loss", 0.0) or 0.0)
+            target = float(getattr(bot_signal, "take_profit", 0.0) or 0.0)
+            direction = str(getattr(bot_signal, "direction", "long") or "long").lower()
             if entry > 0 and stop > 0 and target > 0:
                 if direction == "long":
                     risk = entry - stop
@@ -144,50 +139,60 @@ class TradingBotManager:
 
         mtf_alignment_score = 0.0
         try:
-            feats = getattr(lux_signal, "features", {}) or {}
+            feats = getattr(bot_signal, "features", {}) or {}
             if isinstance(feats, dict):
                 mtf_alignment_score = float(feats.get("mtf_alignment_score", 0.0) or 0.0)
         except Exception:
             mtf_alignment_score = 0.0
 
-        # Prefer configured bot key for later status updates.
         bot_cfg = self.bot_config or {}
-        symbol = str(bot_cfg.get("symbol") or getattr(getattr(self.bot, "config", None), "symbol", "") or "MNQ")
-        timeframe = str(bot_cfg.get("timeframe") or getattr(getattr(self.bot, "config", None), "timeframe", "") or "")
+        symbol = str(
+            bot_cfg.get("symbol")
+            or getattr(getattr(self.bot, "config", None), "symbol", "")
+            or "MNQ"
+        )
+        timeframe = str(
+            bot_cfg.get("timeframe")
+            or getattr(getattr(self.bot, "config", None), "timeframe", "")
+            or ""
+        )
         bot_name = self.selected_name or getattr(self.bot, "name", "trading_bot")
 
         return {
             "type": f"trading_bot_{bot_name}",
             "symbol": symbol,
             "timeframe": timeframe,
-            "direction": lux_signal.direction,
-            "confidence": lux_signal.confidence,
-            "entry_price": lux_signal.entry_price,
-            "stop_loss": lux_signal.stop_loss,
-            "take_profit": lux_signal.take_profit,
+            "direction": bot_signal.direction,
+            "confidence": bot_signal.confidence,
+            "entry_price": bot_signal.entry_price,
+            "stop_loss": bot_signal.stop_loss,
+            "take_profit": bot_signal.take_profit,
             "risk_reward": rr,
             "mtf_alignment_score": mtf_alignment_score,
-            "reason": lux_signal.reason,
-            "bot_name": lux_signal.bot_name,
-            "pearl_bot_key": bot_name,
-            "bot_version": lux_signal.bot_version,
-            "indicators_used": lux_signal.indicators_used,
-            "features": lux_signal.features,
-            "risk_reward_ratio": lux_signal.risk_reward_ratio,
-            "position_size_pct": lux_signal.position_size_pct,
-            "signal_id": lux_signal.signal_id,
-            "timestamp": lux_signal.timestamp.isoformat(),
+            "reason": bot_signal.reason,
+            "bot_name": bot_signal.bot_name,
+            "trading_bot_key": bot_name,
+            "bot_version": bot_signal.bot_version,
+            "indicators_used": bot_signal.indicators_used,
+            "features": bot_signal.features,
+            "risk_reward_ratio": bot_signal.risk_reward_ratio,
+            "position_size_pct": bot_signal.position_size_pct,
+            "signal_id": bot_signal.signal_id,
+            "timestamp": bot_signal.timestamp.isoformat(),
             # Additional metadata for tracking
-            "pearl_bot": True,
-            # Backward compatibility (deprecated)
-            "lux_algo_bot": True,
+            "trading_bot": True,
             "strategy_type": getattr(self.bot, "strategy_type", ""),
         }
 
-    def update_bot_signal_status(self, bot_name: str, signal_id: str,
-                               status: str, execution_price: Optional[float] = None,
-                               exit_price: Optional[float] = None) -> None:
-        """Update signal status for a specific bot."""
+    def update_bot_signal_status(
+        self,
+        bot_name: str,
+        signal_id: str,
+        status: str,
+        execution_price: Optional[float] = None,
+        exit_price: Optional[float] = None,
+    ) -> None:
+        """Update signal status for the selected bot."""
         if self.bot is not None and bot_name == self.selected_name:
             self.bot.update_signal_status(signal_id, status, execution_price, exit_price)
 
@@ -230,11 +235,7 @@ class TradingBotManager:
         self._load_trading_bot()
 
     def create_default_config(self) -> Dict[str, Any]:
-        """
-        Create a default configuration template for trading_bot.
-
-        This shows users how to configure the AutoBot in config.yaml.
-        """
+        """Create a default configuration template for `trading_bot`."""
         return {
             "trading_bot": {
                 "enabled": True,
@@ -270,12 +271,3 @@ def get_trading_bot_manager() -> TradingBotManager:
     """Get the global trading bot manager instance."""
     return trading_bot_manager
 
-
-# Backward-compatible aliases
-PearlBotManager = TradingBotManager
-pearl_bot_manager = trading_bot_manager
-
-
-def get_pearl_bot_manager() -> TradingBotManager:
-    """Backward-compatible alias for the trading bot manager."""
-    return trading_bot_manager

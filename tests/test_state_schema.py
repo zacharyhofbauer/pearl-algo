@@ -75,7 +75,7 @@ class TestStateSchemaFields:
     
     def test_state_file_exists_and_readable(self):
         """Verify state.json exists and is valid JSON."""
-        state_file = project_root / "data" / "nq_agent_state" / "state.json"
+        state_file = project_root / "data" / "agent_state" / "NQ" / "state.json"
         
         if not state_file.exists():
             pytest.skip("state.json not present (agent may not have run)")
@@ -87,7 +87,7 @@ class TestStateSchemaFields:
     
     def test_state_has_core_fields(self):
         """Verify state.json includes core stable fields."""
-        state_file = project_root / "data" / "nq_agent_state" / "state.json"
+        state_file = project_root / "data" / "agent_state" / "NQ" / "state.json"
         
         if not state_file.exists():
             pytest.skip("state.json not present")
@@ -105,7 +105,7 @@ class TestStateSchemaFields:
         If the agent hasn't been restarted, some extended fields may be missing
         (this is expected during rolling upgrades).
         """
-        state_file = project_root / "data" / "nq_agent_state" / "state.json"
+        state_file = project_root / "data" / "agent_state" / "NQ" / "state.json"
         
         if not state_file.exists():
             pytest.skip("state.json not present")
@@ -129,7 +129,7 @@ class TestStateSchemaFields:
         These fields are added in v0.3.0+ for "why no signals?" observability.
         They may be None but the keys should exist after agent restart.
         """
-        state_file = project_root / "data" / "nq_agent_state" / "state.json"
+        state_file = project_root / "data" / "agent_state" / "NQ" / "state.json"
         
         if not state_file.exists():
             pytest.skip("state.json not present")
@@ -158,7 +158,7 @@ class TestStateSchemaFields:
     
     def test_config_has_required_fields(self):
         """Verify config section has required fields."""
-        state_file = project_root / "data" / "nq_agent_state" / "state.json"
+        state_file = project_root / "data" / "agent_state" / "NQ" / "state.json"
         
         if not state_file.exists():
             pytest.skip("state.json not present")
@@ -172,7 +172,7 @@ class TestStateSchemaFields:
     
     def test_timestamp_fields_are_iso_format(self):
         """Verify timestamp fields are valid ISO format."""
-        state_file = project_root / "data" / "nq_agent_state" / "state.json"
+        state_file = project_root / "data" / "agent_state" / "NQ" / "state.json"
         
         if not state_file.exists():
             pytest.skip("state.json not present")
@@ -242,7 +242,7 @@ class TestHealthEvaluation:
     
     def test_healthy_state_returns_healthy(self, mock_state_healthy):
         """Healthy state should evaluate as healthy."""
-        from serve_nq_agent_status import evaluate_health
+        from serve_agent_status import evaluate_health
         
         is_healthy, status, details = evaluate_health(mock_state_healthy)
         
@@ -252,7 +252,7 @@ class TestHealthEvaluation:
     
     def test_stopped_state_returns_healthy(self, mock_state_healthy):
         """Stopped agent is not unhealthy (intentional stop)."""
-        from serve_nq_agent_status import evaluate_health
+        from serve_agent_status import evaluate_health
         
         mock_state_healthy["running"] = False
         
@@ -263,7 +263,7 @@ class TestHealthEvaluation:
     
     def test_paused_state_returns_unhealthy(self, mock_state_healthy):
         """Paused agent should be flagged."""
-        from serve_nq_agent_status import evaluate_health
+        from serve_agent_status import evaluate_health
         
         mock_state_healthy["paused"] = True
         mock_state_healthy["pause_reason"] = "consecutive_errors"
@@ -275,7 +275,7 @@ class TestHealthEvaluation:
     
     def test_stale_state_returns_unhealthy(self, mock_state_stale):
         """Stale state should be flagged."""
-        from serve_nq_agent_status import evaluate_health
+        from serve_agent_status import evaluate_health
         
         is_healthy, status, details = evaluate_health(mock_state_stale)
         
@@ -284,7 +284,7 @@ class TestHealthEvaluation:
     
     def test_consecutive_errors_flagged(self, mock_state_healthy):
         """High consecutive errors should be flagged."""
-        from serve_nq_agent_status import evaluate_health
+        from serve_agent_status import evaluate_health
         
         mock_state_healthy["consecutive_errors"] = 10
         
@@ -295,7 +295,7 @@ class TestHealthEvaluation:
     
     def test_state_error_handled(self):
         """State file errors should be handled gracefully."""
-        from serve_nq_agent_status import evaluate_health
+        from serve_agent_status import evaluate_health
         
         error_state = {"_error": "state_file_missing", "_path": "/test/path"}
         
@@ -306,7 +306,7 @@ class TestHealthEvaluation:
     
     def test_market_closed_tolerates_stale_cycle(self, mock_state_stale):
         """Stale cycle during closed market should not flag cycle_stale."""
-        from serve_nq_agent_status import evaluate_health
+        from serve_agent_status import evaluate_health
         
         mock_state_stale["futures_market_open"] = False
         # Keep data_fresh as True to isolate the test
@@ -327,7 +327,7 @@ class TestPrometheusMetrics:
     
     def test_metrics_output_is_valid_prometheus_format(self):
         """Generated metrics should be valid Prometheus text format."""
-        from serve_nq_agent_status import generate_metrics
+        from serve_agent_status import generate_metrics
         
         state = {
             "running": True,
@@ -363,7 +363,7 @@ class TestPrometheusMetrics:
     
     def test_metrics_handles_missing_fields(self):
         """Metrics generation should handle missing fields gracefully."""
-        from serve_nq_agent_status import generate_metrics
+        from serve_agent_status import generate_metrics
         
         minimal_state = {"running": True}
         
@@ -374,7 +374,7 @@ class TestPrometheusMetrics:
     
     def test_metrics_handles_state_error(self):
         """Metrics generation should handle state errors."""
-        from serve_nq_agent_status import generate_metrics
+        from serve_agent_status import generate_metrics
         
         error_state = {"_error": "state_file_missing"}
         

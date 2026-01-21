@@ -25,14 +25,14 @@ This repo is a **trading platform** with three hard requirements:
 We **dual-write** signals/trades to SQLite (queryable, durable) while keeping JSON/JSONL
 for compatibility with existing Telegram/mobile views.
 
-- DB: `data/nq_agent_state/trades.db`
+- DB: `data/agent_state/<MARKET>/trades.db`
 - Config: `storage.sqlite_enabled` in `config/config.yaml`
 
 ### Quick operational checklist
 
 - **Gateway**: `./scripts/gateway/gateway.sh start`
-- **Agent**: `./scripts/lifecycle/start_nq_agent_service.sh`
-- **Status**: `./scripts/lifecycle/check_nq_agent_status.sh`
+- **Agent**: `./scripts/lifecycle/agent.sh start --market NQ --background`
+- **Status**: `./scripts/lifecycle/check_agent_status.sh --market NQ`
 
 ### Fast validation (mobile + CLI)
 

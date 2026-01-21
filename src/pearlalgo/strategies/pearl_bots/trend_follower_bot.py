@@ -20,7 +20,7 @@ import numpy as np
 from functools import lru_cache
 import hashlib
 
-from .bot_template import PearlBot, BotConfig, TradeSignal, IndicatorSuite, register_bot
+from .bot_template import BotConfig, TradeSignal, IndicatorSuite, TradingBot, register_bot
 
 
 @dataclass
@@ -183,7 +183,7 @@ class CachedTrendFollowerIndicators(IndicatorSuite):
         }
 
 
-class TrendFollowerBot(PearlBot):
+class TrendFollowerBot(TradingBot):
     """
     Trend Follower Bot - Complete automated trading system with performance optimizations.
 

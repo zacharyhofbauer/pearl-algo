@@ -77,7 +77,7 @@ class MockUpdate:
 def temp_state_dir():
     """Create a temporary state directory for testing."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        state_dir = Path(tmpdir) / "nq_agent_state"
+        state_dir = Path(tmpdir) / "agent_state" / "NQ"
         state_dir.mkdir(parents=True)
         yield state_dir
 

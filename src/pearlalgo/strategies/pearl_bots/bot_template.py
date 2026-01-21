@@ -1,17 +1,14 @@
 """
-PEARL Automated Trading Bots
+Trading Bot Framework (AutoBot variants)
 
-Template framework for creating complete, self-contained automated trading bots
-for the PEARLalgo trading system.
+Framework for creating complete, self-contained automated trading bots for the system.
 
-Each bot is a complete trading system with:
+Each trading bot is a complete decision engine with:
 - Custom indicator suites and technical analysis
 - Automated entry/exit rules and logic
 - Integrated risk management and position sizing
-- Comprehensive performance tracking and optimization
+- Performance tracking and diagnostics
 - Alert/webhook capabilities for automation
-
-These bots can be deployed as zero-code automated strategies within PEARLalgo.
 """
 
 from __future__ import annotations
@@ -253,11 +250,11 @@ class BotPerformance:
                     self.sortino_ratio = (mean_return / downside_std) * np.sqrt(252)
 
 
-class PearlBot(ABC):
+class TradingBot(ABC):
     """
-    Abstract base class for PEARL automated trading bots.
+    Abstract base class for trading bots (AutoBot variants).
 
-    Each bot is a complete, self-contained trading system for PEARLalgo,
+    Each bot is a complete, self-contained trading system for the platform,
     combining custom indicators, automated rules, risk management, and performance tracking.
     """
 
@@ -530,15 +527,15 @@ class PearlBot(ABC):
 
 
 # Factory function to create bots by name
-BOT_REGISTRY: Dict[str, type[PearlBot]] = {}
+BOT_REGISTRY: Dict[str, type[TradingBot]] = {}
 
 
-def register_bot(bot_class: type[PearlBot]) -> None:
+def register_bot(bot_class: type[TradingBot]) -> None:
     """Register a bot class for creation by name."""
     BOT_REGISTRY[bot_class.__name__] = bot_class
 
 
-def create_bot(bot_name: str, config: BotConfig) -> PearlBot:
+def create_bot(bot_name: str, config: BotConfig) -> TradingBot:
     """Create a bot instance by name."""
     if bot_name not in BOT_REGISTRY:
         raise ValueError(f"Bot '{bot_name}' not registered")

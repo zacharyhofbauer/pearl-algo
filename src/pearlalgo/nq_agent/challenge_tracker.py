@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from pearlalgo.utils.logger import logger
-from pearlalgo.utils.paths import get_utc_timestamp
+from pearlalgo.utils.paths import ensure_state_dir, get_utc_timestamp
 
 
 @dataclass
@@ -110,12 +110,11 @@ class ChallengeTracker:
 
         Args:
             config: Challenge configuration
-            state_dir: State directory (default: data/nq_agent_state)
+            state_dir: State directory (default: data/agent_state/<MARKET>)
             trade_db: TradeDatabase for attempt history (optional)
         """
         self.config = config or ChallengeConfig()
-        self.state_dir = state_dir or Path("data/nq_agent_state")
-        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.state_dir = ensure_state_dir(state_dir)
         self._trade_db = trade_db
 
         self.state_file = self.state_dir / "challenge_state.json"

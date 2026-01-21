@@ -207,7 +207,7 @@ class TestMarkdownSafetyRegression:
         paths = [
             "logs/nq_agent.pid",
             "/home/user/nq_agent/logs/nq_agent.pid",
-            "data/nq_agent_state/state.json",
+            "data/agent_state/NQ/state.json",
         ]
         
         for path in paths:

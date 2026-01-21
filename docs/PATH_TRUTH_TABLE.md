@@ -2,15 +2,14 @@
 
 Canonical mapping between logical components, Python entry points, shell scripts, and documentation references.
 
-## NQ Agent Service
+## Market Agent Service
 
-- **Logical component**: NQ Agent Service (production trading loop)
+- **Logical component**: Market Agent Service (one process per market; production trading loop)
 - **Python entry module**: `pearlalgo.nq_agent.main`
 - **Primary service class**: `pearlalgo.nq_agent.service.NQAgentService`
 - **Lifecycle scripts**:
-  - `scripts/lifecycle/start_nq_agent_service.sh`
-  - `scripts/lifecycle/stop_nq_agent_service.sh`
-  - `scripts/lifecycle/check_nq_agent_status.sh`
+  - `scripts/lifecycle/agent.sh` (start/stop/restart/status; `--market NQ|ES|GC`)
+  - `scripts/lifecycle/check_agent_status.sh` (state summary; `--market NQ|ES|GC`)
 - **Docs**:
   - `docs/NQ_AGENT_GUIDE.md`
   - `docs/PROJECT_SUMMARY.md`
@@ -51,7 +50,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `signal_sweep.py` – sweep signal thresholds / variants (optional)
   - `robustness_cli.py` – robustness runs (optional)
   - `strategy_selection.py` – generates strategy selection exports (used by Telegram `/analyze`)
-  - `backtest_pearl_bot.py`, `compare_pearl_bots.py` – PEARL bot backtests (optional; see PEARL bots docs)
+  - `backtest_trading_bot.py`, `compare_trading_bots.py` – trading bot variant backtests (optional; see `docs/TRADING_BOT_GUIDE.md`)
 - **Testing scripts** (`scripts/testing/`):
   - `run_tests.sh` – pytest unit test runner (canonical)
   - `test_all.py` – unified validation runner (telegram / signals / service / arch)
@@ -81,7 +80,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.execution.ibkr.tasks` – Order placement tasks
   - `pearlalgo.learning.bandit_policy` – Thompson sampling policy
   - `pearlalgo.learning.policy_state` – Policy statistics persistence
-- **State files** (in `data/nq_agent_state/`):
+- **State files** (in `data/agent_state/<MARKET>/`):
   - `policy_state.json` – Per-signal-type bandit statistics
 - **Docs**:
   - `docs/ATS_ROLLOUT_GUIDE.md` – Safe rollout procedures
@@ -112,8 +111,8 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 - **Logical component**: External watchdog / state freshness validator + optional localhost status server
 - **Scripts**:
-  - `scripts/monitoring/watchdog_nq_agent.py` – cron/systemd-timer friendly watchdog for stalled state / silent failures (optional)
-  - `scripts/monitoring/serve_nq_agent_status.py` – localhost HTTP server exposing `/healthz` and `/metrics` (optional sidecar)
+  - `scripts/monitoring/watchdog_agent.py` – cron/systemd-timer friendly watchdog for stalled state / silent failures (optional)
+  - `scripts/monitoring/serve_agent_status.py` – localhost HTTP server exposing `/healthz` and `/metrics` (optional sidecar)
   - `scripts/monitoring/doctor_cli.py` – operator CLI rollup (signals, rejects, sizing, stops)
   - `scripts/health_check.sh` – fast local health snapshot (requires `jq`)
 - **Docs**:

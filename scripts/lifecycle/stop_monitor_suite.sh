@@ -18,12 +18,14 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 NO_GATEWAY=false
 NO_TELEGRAM=false
 NO_MONITOR=false
+MARKET="${PEARLALGO_MARKET:-NQ}"
 
 for arg in "$@"; do
   case "$arg" in
     --no-gateway) NO_GATEWAY=true ;;
     --no-telegram) NO_TELEGRAM=true ;;
     --no-monitor) NO_MONITOR=true ;;
+    --market=*) MARKET="${arg#*=}" ;;
   esac
 done
 
@@ -44,8 +46,8 @@ if [ "$NO_TELEGRAM" = false ]; then
 fi
 
 echo ""
-echo "-> Stopping NQ Agent..."
-./scripts/lifecycle/stop_nq_agent_service.sh || true
+echo "-> Stopping Agent (market=${MARKET})..."
+./scripts/lifecycle/agent.sh stop --market "$MARKET" || true
 
 if [ "$NO_GATEWAY" = false ]; then
   echo ""

@@ -25,7 +25,7 @@ from pearlalgo.strategies.nq_intraday.indicators.base import IndicatorSignal
 from pearlalgo.strategies.nq_intraday.mtf_analyzer import MTFAnalyzer
 from pearlalgo.utils.logger import logger
 
-from .bot_template import BotConfig, IndicatorSuite, PearlBot, TradeSignal, register_bot
+from .bot_template import BotConfig, IndicatorSuite, TradeSignal, TradingBot, register_bot
 
 
 @dataclass
@@ -44,7 +44,7 @@ class CompositeIndicatorSuite(IndicatorSuite):
         return {}
 
 
-class CompositeBot(PearlBot):
+class CompositeBot(TradingBot):
     """
     Composite bot that combines multiple scenario engines.
 

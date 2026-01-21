@@ -29,7 +29,7 @@ This guide shows the wiring so you can modify it confidently.
 ### 1) Fast online learning (Bandit)
 
 - **Policy**: `src/pearlalgo/learning/bandit_policy.py`
-- **State on disk**: `data/nq_agent_state/policy_state.json`
+- **State on disk**: `data/agent_state/<MARKET>/policy_state.json`
 - **What it learns**: per-`signal_type` win/loss (Beta distribution) + avg pnl.
 
 How it’s used:
@@ -67,7 +67,7 @@ Important knobs:
 1. **Make sure outcomes are being tracked**
    - Virtual PnL should be enabled (`virtual_pnl.enabled: true`) so exits record wins/losses.
 2. **Inspect what it learned**
-   - Look at `data/nq_agent_state/policy_state.json` for per-type win rate / samples / avg pnl.
+   - Look at `data/agent_state/<MARKET>/policy_state.json` for per-type win rate / samples / avg pnl.
 3. **Let learning influence behavior**
    - Switch bandit from shadow → live (and tune threshold/explore rate) when you’re ready.
 4. **Graduate to context + ML**

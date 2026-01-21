@@ -90,11 +90,6 @@ class TelegramCommandHandler:
     def _resolve_state_dir_for_market(self, market: str) -> Path:
         market_upper = str(market or "NQ").strip().upper()
         default_dir = Path("data") / "agent_state" / market_upper
-        if market_upper == "NQ":
-            legacy_dir = Path("data/nq_agent_state")
-            if default_dir.exists() or not legacy_dir.exists():
-                return ensure_state_dir(default_dir)
-            return ensure_state_dir(legacy_dir)
         return ensure_state_dir(default_dir)
 
     def _set_active_market(self, market: str) -> None:
@@ -955,8 +950,14 @@ class TelegramCommandHandler:
             active_trades = state.get("active_trades_count", 0) or 0
             latest_price = state.get("latest_price")
             connection_status = state.get("connection_status", "unknown")
+            market_label = state.get("market") or self.active_market
+            tb = state.get("trading_bot") or {}
+            tb_enabled = bool(tb.get("enabled", False))
+            tb_selected = tb.get("selected") or "PearlAutoBot"
             
             preview = "\n"
+            preview += f"🌐 Market: {market_label}\n"
+            preview += f"🤖 Trading Bot: {tb_selected if tb_enabled else 'OFF (scanner)'}\n"
             if latest_price:
                 preview += f"💰 Price: ${latest_price:,.2f}\n"
             preview += f"🎯 Positions: {positions} | Active: {active_trades}\n"
@@ -1320,7 +1321,7 @@ class TelegramCommandHandler:
     async def _show_pearl_bots_menu(self, query: CallbackQuery) -> None:
         """Show trading bot submenu with status and controls."""
         try:
-            from pearlalgo.strategies.pearl_bots_integration import get_trading_bot_manager
+            from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager
 
             bot_manager = get_trading_bot_manager()
             active_bots = bot_manager.get_active_bots()
@@ -1368,7 +1369,7 @@ class TelegramCommandHandler:
             await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
 
         except Exception as e:
-            logger.error(f"Error showing pearl bots menu: {e}", exc_info=True)
+            logger.error(f"Error showing trading bot menu: {e}", exc_info=True)
             error_msg = "❌ *Error loading Trading Bot menu*"
             keyboard = [[InlineKeyboardButton("🏠 Back to Bots", callback_data="menu:bots")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1650,7 +1651,7 @@ class TelegramCommandHandler:
         if not await self._ensure_openai_ready(query):
             return
         try:
-            from pearlalgo.strategies.pearl_bots_integration import get_trading_bot_manager
+            from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager
             bot_manager = get_trading_bot_manager()
             bot_name = getattr(bot_manager, "selected_name", None)
             bot_names = [bot_name] if bot_name else []
@@ -1707,7 +1708,7 @@ class TelegramCommandHandler:
             lines = ["Select a file:"]
             keyboard = [
                 [InlineKeyboardButton("src/pearlalgo/strategies/pearl_bots/bot_template.py", callback_data="aiops:file:src/pearlalgo/strategies/pearl_bots/bot_template.py")],
-                [InlineKeyboardButton("src/pearlalgo/strategies/pearl_bots_integration.py", callback_data="aiops:file:src/pearlalgo/strategies/pearl_bots_integration.py")],
+                [InlineKeyboardButton("src/pearlalgo/strategies/trading_bot_manager.py", callback_data="aiops:file:src/pearlalgo/strategies/trading_bot_manager.py")],
                 [InlineKeyboardButton("src/pearlalgo/strategies/pearl_bots/market_regime_detector.py", callback_data="aiops:file:src/pearlalgo/strategies/pearl_bots/market_regime_detector.py")],
                 [InlineKeyboardButton("config/config.yaml", callback_data="aiops:file:config/config.yaml")],
                 [InlineKeyboardButton("Other file (type path)", callback_data="aiops:other")],
@@ -1793,7 +1794,7 @@ class TelegramCommandHandler:
         bot_config = {}
         if bot != "nq_agent":
             try:
-                from pearlalgo.strategies.pearl_bots_integration import get_trading_bot_manager
+                from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager
                 bot_manager = get_trading_bot_manager()
                 bot_config = getattr(bot_manager, "bot_config", {}) or {}
                 perf = bot_manager.get_bot_performance(bot) if hasattr(bot_manager, "get_bot_performance") else {}
@@ -2088,7 +2089,7 @@ class TelegramCommandHandler:
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             elif action_type == "show_bot_performance":
                 try:
-                    from pearlalgo.strategies.pearl_bots_integration import get_trading_bot_manager
+                    from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager
                     bot_manager = get_trading_bot_manager()
                     performance = bot_manager.get_bot_performance()
 
@@ -3692,7 +3693,7 @@ class TelegramCommandHandler:
         try:
             state_dir = getattr(self, "state_dir", None) or ensure_state_dir(None)
         except Exception:
-            state_dir = Path("data/nq_agent_state")
+            state_dir = Path("data/agent_state/NQ")
 
         signals_file = get_signals_file(Path(state_dir))
         if not signals_file.exists():
@@ -4051,11 +4052,11 @@ class TelegramCommandHandler:
             await self._send_message_or_edit(update, context, f"❌ Error: {e}")
 
     # ---------------------------------------------------------------------
-    # Telegram-first PEARL bot backtesting
+    # Telegram-first trading bot backtesting
     # ---------------------------------------------------------------------
 
     async def _render_pearl_backtest_menu(self, update: Any, context: Any) -> None:
-        """Render the PEARL bot backtest menu (Telegram-first; no CLI)."""
+        """Render the trading bot backtest menu (Telegram-first; no CLI)."""
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
@@ -4141,7 +4142,7 @@ class TelegramCommandHandler:
         )
 
     async def _handle_pearl_backtest_callback(self, update: Any, context: Any, data: str) -> None:
-        """Route pb:* callback_data for PEARL bot backtesting."""
+        """Route pb:* callback_data for trading bot backtesting."""
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
@@ -4174,9 +4175,9 @@ class TelegramCommandHandler:
     def _get_reports_dir(self) -> Path:
         """Directory where Telegram backtest reports are stored (shared with report viewer)."""
         try:
-            state_dir = Path(getattr(self, "state_dir", "data/nq_agent_state"))
+            state_dir = Path(getattr(self, "state_dir", "data/agent_state/NQ"))
         except Exception:
-            state_dir = Path("data/nq_agent_state")
+            state_dir = Path("data/agent_state/NQ")
         return state_dir.parent / "reports"
 
     def _load_historical_ohlcv(self, period_key: str) -> "pd.DataFrame":
@@ -4212,7 +4213,7 @@ class TelegramCommandHandler:
         return df
 
     def _create_pearl_bot_for_backtest(self, bot_key: str):
-        """Create a PEARL bot instance with safe backtest defaults."""
+        """Create a trading bot instance with safe backtest defaults."""
         from pearlalgo.strategies.pearl_bots import BotConfig, create_bot
 
         bot_map = {
@@ -4252,7 +4253,7 @@ class TelegramCommandHandler:
         return create_bot(bot_class_name, cfg)
 
     async def _run_pearl_bot_backtest(self, update: Any, context: Any, bot_key: str, period_key: str) -> None:
-        """Run a single PEARL bot backtest and write a report under data/reports/."""
+        """Run a single trading bot backtest and write a report under data/reports/."""
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
@@ -4269,12 +4270,12 @@ class TelegramCommandHandler:
             import pandas as pd  # noqa: F401
             from datetime import datetime, timezone
 
-            from pearlalgo.strategies.pearl_bots.backtest_adapter import PearlBotBacktestAdapter
+            from pearlalgo.strategies.pearl_bots.backtest_adapter import TradingBotBacktestAdapter
 
             df_1m = self._load_historical_ohlcv(period_key)
             bot = self._create_pearl_bot_for_backtest(bot_key)
 
-            adapter = PearlBotBacktestAdapter(
+            adapter = TradingBotBacktestAdapter(
                 bot=bot,
                 tick_value=2.0,  # MNQ
                 slippage_ticks=0.5,
@@ -4361,7 +4362,7 @@ class TelegramCommandHandler:
             import pandas as pd  # noqa: F401
             from datetime import datetime, timezone
 
-            from pearlalgo.strategies.pearl_bots.backtest_adapter import PearlBotBacktestAdapter
+            from pearlalgo.strategies.pearl_bots.backtest_adapter import TradingBotBacktestAdapter
 
             df_1m = self._load_historical_ohlcv(period_key)
             bots = [("pearl", "PearlAutoBot"), ("trend", "Trend"), ("break", "Breakout"), ("mean", "MeanRev")]
@@ -4369,7 +4370,7 @@ class TelegramCommandHandler:
             results = []
             for key, label in bots:
                 bot = self._create_pearl_bot_for_backtest(key)
-                adapter = PearlBotBacktestAdapter(
+                adapter = TradingBotBacktestAdapter(
                     bot=bot,
                     tick_value=2.0,
                     slippage_ticks=0.5,
@@ -4541,9 +4542,9 @@ class TelegramCommandHandler:
             return
 
         try:
-            state_dir = Path(getattr(self, "state_dir", "data/nq_agent_state"))
+            state_dir = Path(getattr(self, "state_dir", "data/agent_state/NQ"))
         except Exception:
-            state_dir = Path("data/nq_agent_state")
+            state_dir = Path("data/agent_state/NQ")
 
         reports_dir = state_dir.parent / "reports"
         if not reports_dir.exists():
@@ -4580,9 +4581,9 @@ class TelegramCommandHandler:
             return
 
         try:
-            state_dir = Path(getattr(self, "state_dir", "data/nq_agent_state"))
+            state_dir = Path(getattr(self, "state_dir", "data/agent_state/NQ"))
         except Exception:
-            state_dir = Path("data/nq_agent_state")
+            state_dir = Path("data/agent_state/NQ")
 
         report_dir = state_dir.parent / "reports" / str(report_name)
         if not report_dir.exists():

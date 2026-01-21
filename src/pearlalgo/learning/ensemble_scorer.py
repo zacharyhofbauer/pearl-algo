@@ -23,6 +23,7 @@ import numpy as np
 
 from pearlalgo.learning.feature_engineer import FeatureVector
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.paths import ensure_state_dir
 
 # Optional imports for ML libraries
 try:
@@ -346,7 +347,7 @@ class EnsembleScorer:
             state_dir: Directory for model persistence
         """
         self.config = config or EnsembleConfig()
-        self.state_dir = state_dir or Path("data/nq_agent_state")
+        self.state_dir = ensure_state_dir(state_dir)
         self.models_dir = self.state_dir / "ml_models"
         
         # Training data buffer
