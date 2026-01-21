@@ -75,11 +75,19 @@ class TelegramCommandHandler:
             raise ImportError("python-telegram-bot required for command handler")
         self.bot_token = bot_token
         self.chat_id = str(chat_id)
-        self.state_dir = ensure_state_dir(state_dir)
-        self.exports_dir = self.state_dir / "exports"
         self._available_markets = ["NQ", "ES", "GC"]
         self.active_market = "NQ"
-        self._set_active_market(os.getenv("PEARLALGO_MARKET", "NQ"))
+        self._repo_root = self._get_repo_root()
+
+        # If a state_dir is explicitly provided, honor it (single-market/pinned use).
+        # Otherwise, default to per-market state under <repo>/data/agent_state/<MARKET>.
+        env_market = os.getenv("PEARLALGO_MARKET", "NQ")
+        if state_dir is not None:
+            self.active_market = str(env_market or "NQ").strip().upper()
+            self.state_dir = ensure_state_dir(state_dir)
+            self.exports_dir = self.state_dir / "exports"
+        else:
+            self._set_active_market(env_market)
         self._startup_ping = bool(startup_ping)
         self.application = (
             Application.builder()
@@ -90,10 +98,13 @@ class TelegramCommandHandler:
         self.service_controller = ServiceController()
         self._register_handlers()
 
-    def _resolve_state_dir_for_market(self, market: str) -> Path:
+    def _state_dir_path_for_market(self, market: str) -> Path:
+        """Absolute state dir path for a given market (does not create it)."""
         market_upper = str(market or "NQ").strip().upper()
-        default_dir = Path("data") / "agent_state" / market_upper
-        return ensure_state_dir(default_dir)
+        return (Path(self._repo_root) / "data" / "agent_state" / market_upper).resolve()
+
+    def _resolve_state_dir_for_market(self, market: str) -> Path:
+        return ensure_state_dir(self._state_dir_path_for_market(market))
 
     def _set_active_market(self, market: str) -> None:
         market_upper = str(market or "NQ").strip().upper()
@@ -555,7 +566,7 @@ class TelegramCommandHandler:
         else:
             # Telegram backtesting / strategy review flows
             if callback_data == "strategy_review:backtest":
-                await self._render_pearl_backtest_menu(update, context)
+                await self._render_trading_bot_backtest_menu(update, context)
                 return
             if callback_data == "strategy_review:reports":
                 await self._handle_backtest_reports(update, context, page=0)
@@ -590,7 +601,7 @@ class TelegramCommandHandler:
                     return
 
             if callback_data.startswith("pb:"):
-                await self._handle_pearl_backtest_callback(update, context, callback_data)
+                await self._handle_trading_bot_backtest_callback(update, context, callback_data)
                 return
 
             if callback_data.startswith("patch:"):
@@ -646,14 +657,64 @@ class TelegramCommandHandler:
             await query.edit_message_text(text, reply_markup=reply_markup)
 
     async def _show_markets_menu(self, query: CallbackQuery) -> None:
-        """Show market selector menu."""
+        """Show market selector menu with per-market status overview."""
+        # Small fallback mapping for display when a market has no state yet.
+        default_symbols = {"NQ": "MNQ", "ES": "MES", "GC": "MGC"}
+
+        active_symbol = default_symbols.get(self.active_market, self.active_market)
+        try:
+            active_state = self._read_state() or {}
+            active_symbol = str(active_state.get("symbol") or active_symbol)
+        except Exception:
+            pass
+
         lines = [
             "🌐 *Markets*",
             "",
-            f"Active market: *{self.active_market}*",
+            f"Active market: *{self.active_market}* ({active_symbol})",
             "",
-            "Select a market:",
+            "*Overview:*",
         ]
+
+        # Build quick status lines from process check + state.json (if present).
+        sc = getattr(self, "service_controller", None)
+        for market in self._available_markets:
+            running = False
+            try:
+                if sc is not None:
+                    running = bool((sc.get_agent_status(market=market) or {}).get("running"))
+            except Exception:
+                running = False
+
+            state = None
+            try:
+                state_file = self._state_dir_path_for_market(market) / "state.json"
+                if state_file.exists():
+                    state = json.loads(state_file.read_text(encoding="utf-8"))
+            except Exception:
+                state = None
+
+            symbol = default_symbols.get(market, market)
+            bot_status = "unknown"
+            if isinstance(state, dict) and state:
+                symbol = str(state.get("symbol") or symbol)
+                tb = state.get("trading_bot") or {}
+                tb_enabled = bool(tb.get("enabled", False))
+                tb_selected = tb.get("selected") or "PearlAutoBot"
+                bot_status = tb_selected if tb_enabled else "OFF (scanner)"
+            else:
+                bot_status = "no state"
+
+            status_emoji = "🟢" if running else "🔴"
+            lines.append(f"- *{market}* {status_emoji} | {symbol} | 🤖 {bot_status}")
+
+        lines.extend(
+            [
+                "",
+                "Select a market (this only switches the Telegram UI context):",
+            ]
+        )
+
         keyboard = []
         for market in self._available_markets:
             label = f"✅ {market}" if market == self.active_market else market
@@ -953,12 +1014,15 @@ class TelegramCommandHandler:
             latest_price = state.get("latest_price")
             connection_status = state.get("connection_status", "unknown")
             market_label = state.get("market") or self.active_market
+            symbol = state.get("symbol")
             tb = state.get("trading_bot") or {}
             tb_enabled = bool(tb.get("enabled", False))
             tb_selected = tb.get("selected") or "PearlAutoBot"
             
             preview = "\n"
             preview += f"🌐 Market: {market_label}\n"
+            if symbol:
+                preview += f"📈 Symbol: {symbol}\n"
             preview += f"🤖 Trading Bot: {tb_selected if tb_enabled else 'OFF (scanner)'}\n"
             if latest_price:
                 preview += f"💰 Price: ${latest_price:,.2f}\n"
@@ -2607,6 +2671,14 @@ class TelegramCommandHandler:
         try:
             # Extract data for format_home_card
             symbol = state.get("symbol", "MNQ")
+            market_label = state.get("market") or self.active_market
+
+            # Trading bot identity (single source of truth) - surfaced in UI for clarity.
+            tb_state = state.get("trading_bot") or {}
+            tb_enabled = bool(tb_state.get("enabled", False))
+            tb_selected = tb_state.get("selected") or "PearlAutoBot"
+            trading_bot_status = tb_selected if tb_enabled else "OFF (scanner)"
+            trading_bot_label = tb_selected if tb_enabled else "Scanner"
             
             # Format time
             from datetime import datetime, timezone
@@ -2750,7 +2822,7 @@ class TelegramCommandHandler:
                 try:
                     challenge_tracker_instance = ChallengeTracker(state_dir=self.state_dir)
                     challenge_tracker_instance.refresh()  # Reload from file
-                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label="Pearl Bot")
+                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label=trading_bot_label)
                     if not challenge_status:
                         logger.warning("Challenge tracker returned empty status summary")
                     else:
@@ -2813,13 +2885,25 @@ class TelegramCommandHandler:
                 execution_armed=execution_armed,
                 execution_mode=execution_mode,
             )
+
+            # Inject market + trading bot identity near the top for operator clarity.
+            try:
+                ui_line = f"🌐 Market: *{market_label}* | 🤖 Bot: *{trading_bot_status}*"
+                msg_lines = str(message).splitlines()
+                if msg_lines:
+                    msg_lines.insert(1, ui_line)
+                    message = "\n".join(msg_lines)
+                else:
+                    message = ui_line
+            except Exception:
+                pass
             
             # Add challenge metrics if available (before recent exits)
             # Always show challenge - it should always exist (created automatically if missing)
             if not challenge_status and challenge_tracker_instance:
                 try:
                     challenge_tracker_instance.refresh()
-                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label="Pearl Bot")
+                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label=trading_bot_label)
                 except Exception as e:
                     logger.error(f"Could not reload challenge status: {e}", exc_info=True)
             
@@ -2829,7 +2913,7 @@ class TelegramCommandHandler:
                     from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker
                     challenge_tracker_instance = ChallengeTracker(state_dir=self.state_dir)
                     challenge_tracker_instance.refresh()
-                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label="Pearl Bot")
+                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label=trading_bot_label)
                     logger.info(f"Challenge status loaded: {challenge_status[:50] if challenge_status else 'None'}...")
                 except Exception as e:
                     logger.error(f"Could not load challenge at all: {e}", exc_info=True)
@@ -2857,7 +2941,7 @@ class TelegramCommandHandler:
                         bar = "▓" * bar_filled + "░" * (10 - bar_filled)
                         
                         challenge_status = (
-                            "🏆 *50k Challenge* (Pearl Bot)\n"
+                            f"🏆 *50k Challenge* ({trading_bot_label})\n"
                             f"Balance: `${balance:,.2f}` | {pnl_emoji} {pnl_str}\n"
                             f"DD Risk: {bar} {dd_risk:.0f}%\n"
                             f"Trades: {trades} | WR: {wr:.0f}%"
@@ -2893,7 +2977,7 @@ class TelegramCommandHandler:
                         bar = "▓" * bar_filled + "░" * (10 - bar_filled)
                         
                         challenge_status = (
-                            "🏆 *50k Challenge* (Pearl Bot)\n"
+                            f"🏆 *50k Challenge* ({trading_bot_label})\n"
                             f"Balance: `${balance:,.2f}` | {pnl_emoji} {pnl_str}\n"
                             f"DD Risk: {bar} {dd_risk:.0f}%\n"
                             f"Trades: {trades} | WR: {wr:.0f}%"
@@ -2923,7 +3007,7 @@ class TelegramCommandHandler:
                     message += "\n\n*7d All-Time:*\n"
                     message += f"{pnl_emoji} {pnl_sign}${abs(total_pnl):,.2f} ({wins}W/{losses}L)"
             
-            # 30d by Bot (compact): keep only Total + Pearl Bot
+            # 30d performance (sum across signal types)
             try:
                 from pearlalgo.learning.trade_database import TradeDatabase
 
@@ -2932,7 +3016,7 @@ class TelegramCommandHandler:
                     trade_db = TradeDatabase(db_path)
                     strategy_perf = trade_db.get_performance_by_signal_type(days=30)
                     if strategy_perf:
-                        message += "\n\n*30d by Bot:*"
+                        message += "\n\n*30d Performance:*"
 
                         total_pnl_all = sum(perf.get("total_pnl", 0.0) for perf in strategy_perf.values())
                         total_wins = sum(perf.get("wins", 0) for perf in strategy_perf.values())
@@ -2942,20 +3026,13 @@ class TelegramCommandHandler:
                         total_emoji = "🟢" if total_pnl_all >= 0 else "🔴"
 
                         message += (
-                            f"\n{total_emoji} *Total All Bots:* ${total_pnl_all:,.2f} "
-                            f"({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
-                        )
-
-                        # "Pearl Bot" is the bot running all signal types.
-                        # So its 30d totals should reflect the full 30d trade set.
-                        message += (
-                            f"\n{total_emoji} *Pearl Bot:* ${total_pnl_all:,.2f} "
+                            f"\n{total_emoji} *Total:* ${total_pnl_all:,.2f} "
                             f"({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
                         )
             except Exception as e:
                 logger.debug(f"Could not load 30d by strategy (compact): {e}")
 
-            # Challenge by Bot (current challenge run)
+            # Challenge (current run)
             if challenge_tracker_instance:
                 try:
                     attempt_perf = challenge_tracker_instance.get_attempt_performance() or {}
@@ -2972,9 +3049,9 @@ class TelegramCommandHandler:
                     wr = float(attempt_perf.get("win_rate", 0.0) or 0.0) * 100
                     pnl_emoji = "🟢" if pnl >= 0 else "🔴"
 
-                    message += "\n\n*Challenge by Bot:*"
+                    message += "\n\n*Challenge (current run):*"
                     message += (
-                        f"\n{pnl_emoji} *Pearl Bot:* ${balance:,.2f} | ${pnl:+,.2f} "
+                        f"\n{pnl_emoji} *{trading_bot_label}:* ${balance:,.2f} | ${pnl:+,.2f} "
                         f"({wins}W/{losses}L • {wr:.0f}% WR)"
                     )
                 except Exception as e:
@@ -4047,19 +4124,21 @@ class TelegramCommandHandler:
     # Telegram-first trading bot backtesting
     # ---------------------------------------------------------------------
 
-    async def _render_pearl_backtest_menu(self, update: Any, context: Any) -> None:
+    async def _render_trading_bot_backtest_menu(self, update: Any, context: Any) -> None:
         """Render the trading bot backtest menu (Telegram-first; no CLI)."""
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
 
+        default_symbols = {"NQ": "MNQ", "ES": "MES", "GC": "MGC"}
+        hist_symbol = default_symbols.get(self.active_market, "MNQ")
         lines = [
             "🧪 *Backtest (Advanced)*",
             "",
             "Recommended: backtest 💎 *PearlAutoBot* (all-in-one).",
             "Variants are individual strategy bots.",
             "",
-            "Data source: `data/historical/MNQ_1m_*.parquet` (resampled to 5m).",
+            f"Data source: `data/historical/{hist_symbol}_1m_*.parquet` (resampled to 5m).",
         ]
 
         keyboard = [
@@ -4088,7 +4167,7 @@ class TelegramCommandHandler:
             parse_mode="Markdown",
         )
 
-    async def _render_pearl_backtest_period_menu(self, update: Any, context: Any, bot_key: str) -> None:
+    async def _render_trading_bot_backtest_period_menu(self, update: Any, context: Any, bot_key: str) -> None:
         """Render the period picker for a given bot."""
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
@@ -4133,19 +4212,19 @@ class TelegramCommandHandler:
             parse_mode="Markdown",
         )
 
-    async def _handle_pearl_backtest_callback(self, update: Any, context: Any, data: str) -> None:
+    async def _handle_trading_bot_backtest_callback(self, update: Any, context: Any, data: str) -> None:
         """Route pb:* callback_data for trading bot backtesting."""
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
 
         if data == "pb:menu":
-            await self._render_pearl_backtest_menu(update, context)
+            await self._render_trading_bot_backtest_menu(update, context)
             return
 
         if data.startswith("pb:bot:"):
             bot_key = data.split(":")[-1]
-            await self._render_pearl_backtest_period_menu(update, context, bot_key)
+            await self._render_trading_bot_backtest_period_menu(update, context, bot_key)
             return
 
         if data.startswith("pb:run:"):
@@ -4153,16 +4232,20 @@ class TelegramCommandHandler:
             bot_key = parts[2] if len(parts) > 2 else "trend"
             period_key = parts[3] if len(parts) > 3 else "2w"
             if bot_key == "all":
-                await self._run_pearl_bots_comparison(update, context, period_key)
+                await self._run_trading_bots_comparison(update, context, period_key)
             else:
-                await self._run_pearl_bot_backtest(update, context, bot_key, period_key)
+                await self._run_trading_bot_backtest(update, context, bot_key, period_key)
             return
 
         await self._send_message_or_edit(update, context, f"❌ Unknown backtest action: {data}")
 
     def _get_repo_root(self) -> Path:
-        """Get repository root from this file location."""
-        return Path(__file__).resolve().parent.parent.parent.parent
+        """Get repository root from this file location (or cached value)."""
+        try:
+            root = Path(getattr(self, "_repo_root"))
+            return root.resolve()
+        except Exception:
+            return Path(__file__).resolve().parent.parent.parent.parent
 
     def _get_reports_dir(self) -> Path:
         """Directory where Telegram backtest reports are stored (shared with report viewer)."""
@@ -4180,8 +4263,10 @@ class TelegramCommandHandler:
         if period not in {"1w", "2w", "4w", "6w"}:
             raise ValueError(f"Unknown period: {period_key}")
 
+        default_symbols = {"NQ": "MNQ", "ES": "MES", "GC": "MGC"}
+        hist_symbol = default_symbols.get(self.active_market, "MNQ")
         root = self._get_repo_root()
-        path = root / "data" / "historical" / f"MNQ_1m_{period}.parquet"
+        path = root / "data" / "historical" / f"{hist_symbol}_1m_{period}.parquet"
         if not path.exists():
             raise FileNotFoundError(f"Historical data not found: {path}")
 
@@ -4204,10 +4289,12 @@ class TelegramCommandHandler:
 
         return df
 
-    def _create_pearl_bot_for_backtest(self, bot_key: str):
+    def _create_trading_bot_for_backtest(self, bot_key: str):
         """Create a trading bot instance with safe backtest defaults."""
         from pearlalgo.strategies.trading_bots import BotConfig, create_bot
 
+        default_symbols = {"NQ": "MNQ", "ES": "MES", "GC": "MGC"}
+        sym = default_symbols.get(self.active_market, "MNQ")
         bot_map = {
             "pearl": (
                 "PearlAutoBot",
@@ -4231,7 +4318,7 @@ class TelegramCommandHandler:
         cfg = BotConfig(
             name=bot_key,
             description=f"Telegram backtest config for {bot_class_name}",
-            symbol="MNQ",
+            symbol=sym,
             timeframe="5m",
             max_positions=1,
             risk_per_trade=0.01,
@@ -4244,7 +4331,7 @@ class TelegramCommandHandler:
         )
         return create_bot(bot_class_name, cfg)
 
-    async def _run_pearl_bot_backtest(self, update: Any, context: Any, bot_key: str, period_key: str) -> None:
+    async def _run_trading_bot_backtest(self, update: Any, context: Any, bot_key: str, period_key: str) -> None:
         """Run a single trading bot backtest and write a report under data/reports/."""
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
@@ -4265,11 +4352,13 @@ class TelegramCommandHandler:
             from pearlalgo.strategies.trading_bots.backtest_adapter import TradingBotBacktestAdapter
 
             df_1m = self._load_historical_ohlcv(period_key)
-            bot = self._create_pearl_bot_for_backtest(bot_key)
+            bot = self._create_trading_bot_for_backtest(bot_key)
 
+            tick_value_map = {"NQ": 2.0, "ES": 5.0, "GC": 10.0}  # $ per point for micro futures
+            tick_value = float(tick_value_map.get(self.active_market, 2.0))
             adapter = TradingBotBacktestAdapter(
                 bot=bot,
-                tick_value=2.0,  # MNQ
+                tick_value=tick_value,
                 slippage_ticks=0.5,
                 max_concurrent_trades=1,
             )
@@ -4282,9 +4371,9 @@ class TelegramCommandHandler:
             start = df_1m.index[0].strftime("%Y%m%d")
             end = df_1m.index[-1].strftime("%Y%m%d")
             if bot_key == "pearl":
-                report_name = f"pearlbot_{period_key}_{start}_{end}_{run_ts}"
+                report_name = f"tradingbot_{period_key}_{start}_{end}_{run_ts}"
             else:
-                report_name = f"pearlbot_variant_{bot_key}_{period_key}_{start}_{end}_{run_ts}"
+                report_name = f"tradingbot_variant_{bot_key}_{period_key}_{start}_{end}_{run_ts}"
             report_dir = reports_dir / report_name
             report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -4338,7 +4427,7 @@ class TelegramCommandHandler:
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
 
-    async def _run_pearl_bots_comparison(self, update: Any, context: Any, period_key: str) -> None:
+    async def _run_trading_bots_comparison(self, update: Any, context: Any, period_key: str) -> None:
         """Run the same backtest period for all bot variants and show a comparison."""
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
@@ -4361,10 +4450,12 @@ class TelegramCommandHandler:
 
             results = []
             for key, label in bots:
-                bot = self._create_pearl_bot_for_backtest(key)
+                bot = self._create_trading_bot_for_backtest(key)
+                tick_value_map = {"NQ": 2.0, "ES": 5.0, "GC": 10.0}  # $ per point for micro futures
+                tick_value = float(tick_value_map.get(self.active_market, 2.0))
                 adapter = TradingBotBacktestAdapter(
                     bot=bot,
-                    tick_value=2.0,
+                    tick_value=tick_value,
                     slippage_ticks=0.5,
                     max_concurrent_trades=1,
                 )
@@ -4380,7 +4471,7 @@ class TelegramCommandHandler:
             run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             start = df_1m.index[0].strftime("%Y%m%d")
             end = df_1m.index[-1].strftime("%Y%m%d")
-            report_name = f"pearlbots_compare_{period_key}_{start}_{end}_{run_ts}"
+            report_name = f"tradingbots_compare_{period_key}_{start}_{end}_{run_ts}"
             report_dir = reports_dir / report_name
             report_dir.mkdir(parents=True, exist_ok=True)
 
