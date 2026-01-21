@@ -1,7 +1,7 @@
 """
-PearlAlgo MNQ Trading Agent
+PearlAlgo Market Trading Agent
 
-Automated trading system for MNQ (Micro E-mini NASDAQ-100) futures,
+Automated trading system for futures markets (MNQ, ES, GC, etc.),
 optimized for prop firm style trading with intraday swings and quick scalps.
 """
 

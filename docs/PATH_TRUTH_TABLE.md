@@ -5,8 +5,8 @@ Canonical mapping between logical components, Python entry points, shell scripts
 ## Market Agent Service
 
 - **Logical component**: Market Agent Service (one process per market; production trading loop)
-- **Python entry module**: `pearlalgo.nq_agent.main`
-- **Primary service class**: `pearlalgo.nq_agent.service.NQAgentService`
+- **Python entry module**: `pearlalgo.market_agent.main`
+- **Primary service class**: `pearlalgo.market_agent.service.MarketAgentService`
 - **Lifecycle scripts**:
   - `scripts/lifecycle/agent.sh` (start/stop/restart/status; `--market NQ|ES|GC`)
   - `scripts/lifecycle/check_agent_status.sh` (state summary; `--market NQ|ES|GC`)
@@ -17,7 +17,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 ## Telegram Command Handler
 
 - **Logical component**: Telegram Command Handler (interactive bot commands)
-- **Python entry module**: `pearlalgo.nq_agent.telegram_command_handler`
+- **Python entry module**: `pearlalgo.market_agent.telegram_command_handler`
 - **Shell scripts**:
   - `scripts/telegram/start_command_handler.sh`
   - `scripts/telegram/check_command_handler.sh`
@@ -43,7 +43,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 - **Logical component**: Strategy logic and automated tests
 - **Python modules**:
-  - Strategy config/logic: `pearlalgo.strategies.nq_intraday.*`
+  - Strategy config/logic: `pearlalgo.strategies.trading_bots.pearl_bot_auto`
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
 - **Backtesting scripts** (`scripts/backtesting/`):
   - `strategy_selection.py` – generates strategy selection exports (used by Telegram `/analyze`)

@@ -564,45 +564,7 @@ class TelegramCommandHandler:
             # Return to main menu
             await self._show_main_menu(query)
         else:
-            # Telegram backtesting / strategy review flows
-            if callback_data == "strategy_review:backtest":
-                await self._render_trading_bot_backtest_menu(update, context)
-                return
-            if callback_data == "strategy_review:reports":
-                await self._handle_backtest_reports(update, context, page=0)
-                return
-            if callback_data.startswith("reports:page:"):
-                try:
-                    page = int(callback_data.split(":")[-1])
-                except Exception:
-                    page = 0
-                await self._handle_backtest_reports(update, context, page=page)
-                return
-            if callback_data.startswith("report:"):
-                try:
-                    report_idx = int(callback_data.split(":")[-1])
-                except Exception:
-                    report_idx = 0
-                await self._handle_report_detail_by_idx(update, context, report_idx)
-                return
-            if callback_data.startswith("artifact:"):
-                # artifact:<report_idx>:<artifact_idx>
-                parts = callback_data.split(":")
-                if len(parts) >= 3:
-                    try:
-                        report_idx = int(parts[1])
-                    except Exception:
-                        report_idx = 0
-                    try:
-                        artifact_idx = int(parts[2])
-                    except Exception:
-                        artifact_idx = 0
-                    await self._handle_report_artifact_by_idx(update, context, report_idx, artifact_idx)
-                    return
-
-            if callback_data.startswith("pb:"):
-                await self._handle_trading_bot_backtest_callback(update, context, callback_data)
-                return
+            # Strategy review flows (backtest functionality removed - using pearl_bot_auto only)
 
             if callback_data.startswith("patch:"):
                 await self._handle_patch_callback(query, callback_data)
@@ -1658,7 +1620,7 @@ class TelegramCommandHandler:
         keyboard = []
         for name in bot_names[:8]:
             keyboard.append([InlineKeyboardButton(name, callback_data=f"aiops:bot:{name}")])
-        keyboard.append([InlineKeyboardButton("NQ Agent", callback_data="aiops:bot:nq_agent")])
+        keyboard.append([InlineKeyboardButton("Market Agent", callback_data="aiops:bot:market_agent")])
         keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
 
         if not hasattr(self, "_ai_ops_state"):
@@ -2297,7 +2259,7 @@ class TelegramCommandHandler:
                 await query.edit_message_text("🔌 Restarting IBKR Gateway...\n\nPlease check status.", reply_markup=reply_markup)
             elif confirm_action == "reset_challenge":
                 try:
-                    from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker
+                    from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
                     challenge_tracker = ChallengeTracker(state_dir=self.state_dir)
                     new_attempt = challenge_tracker.manual_reset(reason="telegram_reset")
                     
@@ -2695,7 +2657,7 @@ class TelegramCommandHandler:
             challenge_tracker_instance = None
             
             try:
-                from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker
+                from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
                 
                 # Always load/create challenge tracker (will create if doesn't exist)
                 challenge_state_file = self.state_dir / "challenge_state.json"
@@ -2801,7 +2763,7 @@ class TelegramCommandHandler:
             # If still no challenge_status, try to create/load one more time
             if not challenge_status:
                 try:
-                    from pearlalgo.nq_agent.challenge_tracker import ChallengeTracker
+                    from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
                     challenge_tracker_instance = ChallengeTracker(state_dir=self.state_dir)
                     challenge_tracker_instance.refresh()
                     challenge_status = challenge_tracker_instance.get_status_summary(bot_label=trading_bot_label)
@@ -4012,10 +3974,8 @@ class TelegramCommandHandler:
             await self._send_message_or_edit(update, context, f"❌ Error: {e}")
 
     # ---------------------------------------------------------------------
-    # Telegram-first trading bot backtesting
+    # Trading bot backtesting removed - using pearl_bot_auto only
     # ---------------------------------------------------------------------
-
-    async def _render_trading_bot_backtest_menu(self, update: Any, context: Any) -> None:
         """Render the trading bot backtest menu (Telegram-first; no CLI)."""
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
@@ -4058,77 +4018,7 @@ class TelegramCommandHandler:
             parse_mode="Markdown",
         )
 
-    async def _render_trading_bot_backtest_period_menu(self, update: Any, context: Any, bot_key: str) -> None:
-        """Render the period picker for a given bot."""
-        if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
-            return
-
-        bot_label = {
-            "pearl": "PearlAutoBot (All-in-One)",
-            "trend": "Trend Follower",
-            "break": "Breakout",
-            "mean": "Mean Reversion",
-            "all": "Compare All",
-        }.get(bot_key, bot_key)
-
-        lines = [
-            "🧪 *Backtest Period*",
-            "",
-            f"Bot: *{bot_label}*",
-            "",
-            "Pick a historical window:",
-        ]
-
-        keyboard = [
-            [
-                InlineKeyboardButton("1w", callback_data=f"pb:run:{bot_key}:1w"),
-                InlineKeyboardButton("2w", callback_data=f"pb:run:{bot_key}:2w"),
-            ],
-            [
-                InlineKeyboardButton("4w", callback_data=f"pb:run:{bot_key}:4w"),
-                InlineKeyboardButton("6w", callback_data=f"pb:run:{bot_key}:6w"),
-            ],
-            [
-                InlineKeyboardButton("⬅️ Back", callback_data="pb:menu"),
-                InlineKeyboardButton("🏠 Back to Menu", callback_data="back"),
-            ],
-        ]
-
-        await self._send_message_or_edit(
-            update,
-            context,
-            "\n".join(lines),
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown",
-        )
-
-    async def _handle_trading_bot_backtest_callback(self, update: Any, context: Any, data: str) -> None:
-        """Route pb:* callback_data for trading bot backtesting."""
-        if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
-            return
-
-        if data == "pb:menu":
-            await self._render_trading_bot_backtest_menu(update, context)
-            return
-
-        if data.startswith("pb:bot:"):
-            bot_key = data.split(":")[-1]
-            await self._render_trading_bot_backtest_period_menu(update, context, bot_key)
-            return
-
-        if data.startswith("pb:run:"):
-            parts = data.split(":")
-            bot_key = parts[2] if len(parts) > 2 else "trend"
-            period_key = parts[3] if len(parts) > 3 else "2w"
-            if bot_key == "all":
-                await self._run_trading_bots_comparison(update, context, period_key)
-            else:
-                await self._run_trading_bot_backtest(update, context, bot_key, period_key)
-            return
-
-        await self._send_message_or_edit(update, context, f"❌ Unknown backtest action: {data}")
+    # Backtesting execution methods removed - using pearl_bot_auto only
 
     def _get_repo_root(self) -> Path:
         """Get repository root from this file location (or cached value)."""
@@ -4146,271 +4036,7 @@ class TelegramCommandHandler:
             state_dir = Path("data/agent_state/NQ")
         return state_dir.parent / "reports"
 
-    def _load_historical_ohlcv(self, period_key: str) -> "pd.DataFrame":
-        """Load OHLCV parquet for a given period key (1w/2w/4w/6w)."""
-        import pandas as pd  # local import (Telegram handler should stay lightweight)
-
-        period = (period_key or "").strip().lower()
-        if period not in {"1w", "2w", "4w", "6w"}:
-            raise ValueError(f"Unknown period: {period_key}")
-
-        default_symbols = {"NQ": "MNQ", "ES": "MES", "GC": "MGC"}
-        hist_symbol = default_symbols.get(self.active_market, "MNQ")
-        root = self._get_repo_root()
-        path = root / "data" / "historical" / f"{hist_symbol}_1m_{period}.parquet"
-        if not path.exists():
-            raise FileNotFoundError(f"Historical data not found: {path}")
-
-        df = pd.read_parquet(path)
-        if not isinstance(df.index, pd.DatetimeIndex):
-            for col in ("timestamp", "time", "datetime", "date"):
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
-                    df = df.dropna(subset=[col]).set_index(col)
-                    break
-
-        if not isinstance(df.index, pd.DatetimeIndex):
-            raise ValueError("Historical data must have a DateTimeIndex or a timestamp column")
-
-        df = df.sort_index()
-        required = {"open", "high", "low", "close"}
-        missing = required - set(df.columns)
-        if missing:
-            raise ValueError(f"Historical data missing required columns: {missing}")
-
-        return df
-
-    def _create_trading_bot_for_backtest(self, bot_key: str):
-        """Create a trading bot instance with safe backtest defaults."""
-        from pearlalgo.strategies.trading_bots import BotConfig, create_bot
-
-        default_symbols = {"NQ": "MNQ", "ES": "MES", "GC": "MGC"}
-        sym = default_symbols.get(self.active_market, "MNQ")
-        bot_map = {
-            "pearl": (
-                "PearlAutoBot",
-                {
-                    "timeframes": ["5m", "15m"],
-                    "max_candidates": 1,
-                    "require_mtf_alignment": True,
-                    "indicators": {
-                        "enabled": ["power_channel", "tbt_chartprime", "supply_demand_zones", "smart_money_divergence"]
-                    },
-                },
-            ),
-            "trend": ("TrendFollowerBot", {"min_trend_strength": 25.0, "max_pullback_pct": 0.02, "momentum_threshold": 0.005}),
-            "break": ("BreakoutBot", {"min_pattern_strength": 0.6, "require_volume_confirmation": True, "min_momentum_acceleration": 0.001}),
-            "mean": ("MeanReversionBot", {"min_mr_strength": 0.7, "require_divergence": False, "max_hold_bars": 10}),
-        }
-        if bot_key not in bot_map:
-            raise ValueError(f"Unknown bot: {bot_key}")
-
-        bot_class_name, params = bot_map[bot_key]
-        cfg = BotConfig(
-            name=bot_key,
-            description=f"Telegram backtest config for {bot_class_name}",
-            symbol=sym,
-            timeframe="5m",
-            max_positions=1,
-            risk_per_trade=0.01,
-            stop_loss_pct=0.005,
-            take_profit_pct=0.01,
-            min_confidence=0.6,
-            parameters=params,
-            enable_alerts=False,  # Never alert during backtests
-            webhook_url=None,
-        )
-        return create_bot(bot_class_name, cfg)
-
-    async def _run_trading_bot_backtest(self, update: Any, context: Any, bot_key: str, period_key: str) -> None:
-        """Run a single trading bot backtest and write a report under data/reports/."""
-        if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
-            return
-
-        bot_label = {
-            "pearl": "PearlAutoBot (All-in-One)",
-            "trend": "Trend Follower",
-            "break": "Breakout",
-            "mean": "Mean Reversion",
-        }.get(bot_key, bot_key)
-        await self._send_message_or_edit(update, context, f"⏳ Running backtest…\n\nBot: {bot_label}\nPeriod: {period_key}")
-
-        try:
-            import pandas as pd  # noqa: F401
-            from datetime import datetime, timezone
-
-            from pearlalgo.strategies.trading_bots.backtest_adapter import TradingBotBacktestAdapter
-
-            df_1m = self._load_historical_ohlcv(period_key)
-            bot = self._create_trading_bot_for_backtest(bot_key)
-
-            tick_value_map = {"NQ": 2.0, "ES": 5.0, "GC": 10.0}  # $ per point for micro futures
-            tick_value = float(tick_value_map.get(self.active_market, 2.0))
-            adapter = TradingBotBacktestAdapter(
-                bot=bot,
-                tick_value=tick_value,
-                slippage_ticks=0.5,
-                max_concurrent_trades=1,
-            )
-            result = adapter.run_backtest(df_1m, timeframe="5m", return_signals=True, return_trades=True)
-
-            reports_dir = self._get_reports_dir()
-            reports_dir.mkdir(parents=True, exist_ok=True)
-
-            run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            start = df_1m.index[0].strftime("%Y%m%d")
-            end = df_1m.index[-1].strftime("%Y%m%d")
-            if bot_key == "pearl":
-                report_name = f"tradingbot_{period_key}_{start}_{end}_{run_ts}"
-            else:
-                report_name = f"tradingbot_variant_{bot_key}_{period_key}_{start}_{end}_{run_ts}"
-            report_dir = reports_dir / report_name
-            report_dir.mkdir(parents=True, exist_ok=True)
-
-            # Write artifacts
-            (report_dir / "summary.json").write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
-            if result.signals:
-                pd.DataFrame(result.signals).to_csv(report_dir / "signals.csv", index=False)
-            if result.trades:
-                pd.DataFrame(result.trades).to_csv(report_dir / "trades.csv", index=False)
-            if result.skipped_signals:
-                pd.DataFrame(result.skipped_signals).to_csv(report_dir / "skipped_signals.csv", index=False)
-
-            # Show summary
-            lines = [
-                "✅ *Backtest Complete*",
-                "",
-                f"*Bot:* {bot_label}",
-                f"*Period:* {period_key} (1m data → 5m backtest)",
-                "",
-                f"Trades: *{result.total_trades}* | Signals: *{result.total_signals}*",
-                f"Win rate: *{(result.win_rate or 0.0) * 100:.1f}%* | PF: *{result.profit_factor:.2f}*",
-                f"Total P&L: *${result.total_pnl:,.2f}*",
-                f"Max DD: *${result.max_drawdown:,.2f}* | Sharpe: *{result.sharpe_ratio:.2f}*",
-                "",
-                f"Saved report: `{report_name}`",
-            ]
-
-            keyboard = [
-                [InlineKeyboardButton("📑 Backtest Reports", callback_data="strategy_review:reports")],
-                [InlineKeyboardButton("🧪 Backtest Another", callback_data="pb:menu")],
-                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-            ]
-
-            await self._send_message_or_edit(
-                update,
-                context,
-                "\n".join(lines),
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="Markdown",
-            )
-        except Exception as e:
-            logger.error(f"Backtest error: {e}", exc_info=True)
-            keyboard = [
-                [InlineKeyboardButton("🧪 Backtest Menu", callback_data="pb:menu")],
-                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-            ]
-            await self._send_message_or_edit(
-                update,
-                context,
-                f"❌ Backtest failed: {e}",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-            )
-
-    async def _run_trading_bots_comparison(self, update: Any, context: Any, period_key: str) -> None:
-        """Run the same backtest period for all bot variants and show a comparison."""
-        if not await self._check_authorized(update):
-            await self._send_message_or_edit(update, context, "❌ Unauthorized access")
-            return
-
-        await self._send_message_or_edit(
-            update,
-            context,
-            f"⏳ Running comparison backtest…\n\nBots: PearlAutoBot/Trend/Breakout/MeanRev\nPeriod: {period_key}",
-        )
-
-        try:
-            import pandas as pd  # noqa: F401
-            from datetime import datetime, timezone
-
-            from pearlalgo.strategies.trading_bots.backtest_adapter import TradingBotBacktestAdapter
-
-            df_1m = self._load_historical_ohlcv(period_key)
-            bots = [("pearl", "PearlAutoBot"), ("trend", "Trend"), ("break", "Breakout"), ("mean", "MeanRev")]
-
-            results = []
-            for key, label in bots:
-                bot = self._create_trading_bot_for_backtest(key)
-                tick_value_map = {"NQ": 2.0, "ES": 5.0, "GC": 10.0}  # $ per point for micro futures
-                tick_value = float(tick_value_map.get(self.active_market, 2.0))
-                adapter = TradingBotBacktestAdapter(
-                    bot=bot,
-                    tick_value=tick_value,
-                    slippage_ticks=0.5,
-                    max_concurrent_trades=1,
-                )
-                r = adapter.run_backtest(df_1m, timeframe="5m", return_signals=False, return_trades=False)
-                results.append((label, r))
-
-            # Rank by total P&L
-            ranked = sorted(results, key=lambda x: float(getattr(x[1], "total_pnl", 0.0) or 0.0), reverse=True)
-            best_label, best = ranked[0]
-
-            reports_dir = self._get_reports_dir()
-            reports_dir.mkdir(parents=True, exist_ok=True)
-            run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            start = df_1m.index[0].strftime("%Y%m%d")
-            end = df_1m.index[-1].strftime("%Y%m%d")
-            report_name = f"tradingbots_compare_{period_key}_{start}_{end}_{run_ts}"
-            report_dir = reports_dir / report_name
-            report_dir.mkdir(parents=True, exist_ok=True)
-
-            summary = {
-                "period": period_key,
-                "results": [{"bot": lbl, **r.to_dict()} for (lbl, r) in results],
-                "best": best_label,
-            }
-            (report_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-            pd.DataFrame([{"bot": lbl, **r.to_dict()} for (lbl, r) in results]).to_csv(report_dir / "comparison.csv", index=False)
-
-            lines = [
-                "✅ *Comparison Backtest Complete*",
-                "",
-                f"*Period:* {period_key} (1m data → 5m backtest)",
-                "",
-                "*Results:*",
-            ]
-            for lbl, r in ranked:
-                lines.append(
-                    f"- *{lbl}*: P&L ${r.total_pnl:,.0f} | WR {(r.win_rate or 0.0) * 100:.0f}% | PF {r.profit_factor:.2f} | DD ${r.max_drawdown:,.0f}"
-                )
-            lines.extend(["", f"🏆 *Best:* {best_label}", "", f"Saved report: `{report_name}`"])
-
-            keyboard = [
-                [InlineKeyboardButton("📑 Backtest Reports", callback_data="strategy_review:reports")],
-                [InlineKeyboardButton("🧪 Backtest Menu", callback_data="pb:menu")],
-                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-            ]
-            await self._send_message_or_edit(
-                update,
-                context,
-                "\n".join(lines),
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="Markdown",
-            )
-        except Exception as e:
-            logger.error(f"Comparison backtest error: {e}", exc_info=True)
-            keyboard = [
-                [InlineKeyboardButton("🧪 Backtest Menu", callback_data="pb:menu")],
-                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-            ]
-            await self._send_message_or_edit(
-                update,
-                context,
-                f"❌ Comparison backtest failed: {e}",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-            )
+    # Backtesting execution methods removed - using pearl_bot_auto only
 
     async def _handle_report_detail_by_idx(self, update: Any, context: Any, report_idx: int) -> None:
         """Show report artifacts using report index (short callback_data IDs)."""

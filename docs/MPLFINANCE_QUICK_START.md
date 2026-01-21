@@ -2,7 +2,7 @@
 
 This document is the **canonical reference** for chart generation in this repository.
 
-- **Implementation**: `src/pearlalgo/nq_agent/chart_generator.py`
+- **Implementation**: `src/pearlalgo/market_agent/chart_generator.py`
 - **API**: `ChartGenerator` + `ChartConfig`
 - **Backend**: `mplfinance` (candles/volume/styling)
 
@@ -29,7 +29,7 @@ pip install mplfinance
 ## Usage
 
 ```python
-from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
 
 generator = ChartGenerator(ChartConfig())
 

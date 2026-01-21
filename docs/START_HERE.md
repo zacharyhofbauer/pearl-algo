@@ -8,11 +8,11 @@ This repo is a **trading platform** with three hard requirements:
 
 ### What runs in production
 
-- **Service**: `src/pearlalgo/nq_agent/service.py` (orchestrator)
+- **Service**: `src/pearlalgo/market_agent/service.py` (orchestrator)
 - **Market data**: `src/pearlalgo/data_providers/` (IBKR provider + executor)
-- **Strategy**: `src/pearlalgo/strategies/nq_intraday/` (scanner + signal_generator + regime/MTF/order flow)
+- **Strategy**: `src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py` (single-file strategy from Pine Scripts)
 - **Execution**: `src/pearlalgo/execution/` (adapters; guarded by config + arming)
-- **State/metrics**: `src/pearlalgo/nq_agent/state_manager.py`, `performance_tracker.py`
+- **State/metrics**: `src/pearlalgo/market_agent/state_manager.py`, `performance_tracker.py`
 - **Ops/UI**: Telegram notifier + command handler
 
 ### The single source of truth
@@ -47,8 +47,8 @@ for compatibility with existing Telegram/mobile views.
 
 ### How to extend (future-proof path)
 
-- **Add an indicator**: `src/pearlalgo/strategies/nq_intraday/indicators/`
-- **Add a strategy**: create a new folder under `src/pearlalgo/strategies/` and implement a scanner/signal generator that emits the same normalized signal schema.
+- **Add an indicator**: Add functions to `src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py` or create new trading bot files
+- **Add a strategy**: Create a new file in `src/pearlalgo/strategies/trading_bots/` following the single-file pattern, or extend `pearl_bot_auto.py`
 - **Add a data provider**: implement `src/pearlalgo/data_providers/base.py` and register in `factory.py`.
 - **Add an execution adapter**: implement `src/pearlalgo/execution/base.py` and register in the execution factory.
 

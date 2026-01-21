@@ -71,7 +71,7 @@
    ./scripts/gateway/gateway.sh status   # expect: RUNNING + API READY
    ```
 
-3. **Start NQ Agent Service**
+3. **Start Market Agent Service**
    - **Foreground (see logs)**
      ```bash
      ./scripts/lifecycle/agent.sh start --market NQ
@@ -325,7 +325,7 @@ Run the health check script for a fast sanity check:
 
 ```bash
 # Check all services running
-pgrep -f "pearlalgo.nq_agent.main" && echo "✅ Agent OK"
+pgrep -f "pearlalgo.market_agent.main" && echo "✅ Agent OK"
 pgrep -f "telegram_command_handler" && echo "✅ Telegram OK"
 
 # Check state freshness

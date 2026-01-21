@@ -53,7 +53,7 @@ forbidden_modules = [
     "pearlalgo.config",
     "pearlalgo.data_providers",
     "pearlalgo.strategies",
-    "pearlalgo.nq_agent",
+    "pearlalgo.market_agent",
 ]
 
 [[tool.importlinter.contracts]]
@@ -63,7 +63,7 @@ source_modules = ["pearlalgo.config"]
 forbidden_modules = [
     "pearlalgo.data_providers",
     "pearlalgo.strategies",
-    "pearlalgo.nq_agent",
+    "pearlalgo.market_agent",
 ]
 
 [[tool.importlinter.contracts]]
@@ -72,7 +72,7 @@ type = "forbidden"
 source_modules = ["pearlalgo.data_providers"]
 forbidden_modules = [
     "pearlalgo.strategies",
-    "pearlalgo.nq_agent",
+    "pearlalgo.market_agent",
 ]
 
 [[tool.importlinter.contracts]]
@@ -81,7 +81,7 @@ type = "forbidden"
 source_modules = ["pearlalgo.strategies"]
 forbidden_modules = [
     "pearlalgo.data_providers",
-    "pearlalgo.nq_agent",
+    "pearlalgo.market_agent",
 ]
 
 [[tool.importlinter.contracts]]
@@ -92,7 +92,7 @@ forbidden_modules = [
     "pearlalgo.data_providers",
     "pearlalgo.strategies",
     "pearlalgo.learning",
-    "pearlalgo.nq_agent",
+    "pearlalgo.market_agent",
 ]
 
 [[tool.importlinter.contracts]]
@@ -103,5 +103,5 @@ forbidden_modules = [
     "pearlalgo.data_providers",
     "pearlalgo.strategies",
     "pearlalgo.execution",
-    "pearlalgo.nq_agent",
+    "pearlalgo.market_agent",
 ]

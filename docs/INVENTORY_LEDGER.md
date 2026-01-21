@@ -18,10 +18,9 @@ Purpose: File-by-file keep/delete decisions grounded in the current tree.
 |------|----------|------|
 | `config/*` | KEEP | Config loading + schema + settings |
 | `data_providers/*` | KEEP | IBKR data provider + executor |
-| `nq_agent/*` | KEEP | Main service loop + Telegram UI + state |
-| `strategies/nq_intraday/*` | KEEP | Runtime strategy pipeline |
-| `strategies/nq_intraday/signal_policy.py` | KEEP | Central signal gating |
-| `strategies/trading_bots/*` | KEEP | Backtesting-only bot variants |
+| `market_agent/*` | KEEP | Main service loop + Telegram UI + state |
+| `strategies/trading_bots/pearl_bot_auto.py` | KEEP | Main runtime strategy (single-file, from Pine Scripts) |
+| `strategies/trading_bots/*` | KEEP | Additional trading bot variants |
 | `execution/base.py` | KEEP | Execution interfaces |
 | `execution/ibkr/*` | KEEP | IBKR execution adapter |
 | `learning/*` | KEEP | Bandit + contextual learning + ML filter + trade DB |
@@ -35,7 +34,8 @@ Purpose: File-by-file keep/delete decisions grounded in the current tree.
 | `agentic/*` | DELETE | Optional subsystem; untested; removed to reduce surface area |
 | `monitor/*` | DELETE | Desktop UI not referenced or tested |
 | `prop_firm/*` | DELETE | Optional guardrails not active; removed to reduce surface area |
-| `policy/*` | DELETE | Replaced by `strategies/nq_intraday/signal_policy.py` |
+| `policy/*` | DELETE | Removed - signal logic now in pearl_bot_auto.py |
+| `strategies/nq_intraday/*` | DELETE | Removed - replaced by pearl_bot_auto.py |
 | `execution/tradovate/*` | DELETE | Unused adapter; IBKR-only execution |
 | `learning/meta_learner.py` | DELETE | Unwired scaffold |
 | `learning/regime_adaptive.py` | DELETE | Unwired scaffold |

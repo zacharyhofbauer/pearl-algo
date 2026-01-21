@@ -22,7 +22,7 @@ Canonical script:
 
 - `start_command_handler.sh`
   - **Role**: Canonical entry to start Telegram Command Handler.
-  - **Behavior**: Changes to project root, activates `.venv` if present, selects `.venv/bin/python3` when available, verifies `pearlalgo` import, ensures only one handler instance via `pgrep -f "telegram_command_handler"`, then runs `-m pearlalgo.nq_agent.telegram_command_handler`.
+  - **Behavior**: Changes to project root, activates `.venv` if present, selects `.venv/bin/python3` when available, verifies `pearlalgo` import, ensures only one handler instance via `pgrep -f "telegram_command_handler"`, then runs `-m pearlalgo.market_agent.telegram_command_handler`.
 - `check_command_handler.sh`
   - **Role**: Check if command handler process is running and show PIDs.
 - `restart_command_handler.sh`

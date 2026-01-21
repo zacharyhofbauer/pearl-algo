@@ -4,7 +4,7 @@ This guide documents the **Telegram Command Handler** (menu-driven control plane
 
 ## What runs
 
-- **Command handler service**: `python -m pearlalgo.nq_agent.telegram_command_handler`
+- **Command handler service**: `python -m pearlalgo.market_agent.telegram_command_handler`
   - Renders the **main menu** and sub-menus via inline buttons.
   - Reads **agent state** from `data/agent_state/<MARKET>/state.json` and signal history from `data/agent_state/<MARKET>/signals.jsonl`.
   - Uses the project’s lifecycle scripts via `pearlalgo.utils.service_controller.ServiceController` for safe orchestration.

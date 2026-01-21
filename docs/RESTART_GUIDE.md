@@ -65,7 +65,7 @@ Or via Telegram:
 
 **Check Agent Status:**
 ```bash
-ps aux | grep "pearlalgo.nq_agent.main" | grep -v grep
+ps aux | grep "pearlalgo.market_agent.main" | grep -v grep
 cat logs/agent_NQ.pid
 ```
 

@@ -516,13 +516,13 @@ python3 scripts/testing/check_architecture_boundaries.py --verbose
 
 The boundary checker scans all Python files under `src/pearlalgo/` and verifies that:
 
-- `utils/` does not import from `config`, `data_providers`, `strategies`, `execution`, `learning`, or `nq_agent`
-- `config/` does not import from `data_providers`, `strategies`, `execution`, `learning`, or `nq_agent`
-- `data_providers/` does not import from `strategies`, `execution`, `learning`, or `nq_agent`
-- `strategies/` does not import from `data_providers`, `execution`, `learning`, or `nq_agent`
-- `execution/` does not import from `data_providers`, `strategies`, `learning`, or `nq_agent`
-- `learning/` does not import from `data_providers`, `strategies`, `execution`, or `nq_agent`
-- `nq_agent/` may import from any internal layer (it's the orchestration layer)
+- `utils/` does not import from `config`, `data_providers`, `strategies`, `execution`, `learning`, or `market_agent`
+- `config/` does not import from `data_providers`, `strategies`, `execution`, `learning`, or `market_agent`
+- `data_providers/` does not import from `strategies`, `execution`, `learning`, or `market_agent`
+- `strategies/` does not import from `data_providers`, `execution`, `learning`, or `market_agent`
+- `execution/` does not import from `data_providers`, `strategies`, `learning`, or `market_agent`
+- `learning/` does not import from `data_providers`, `strategies`, `execution`, or `market_agent`
+- `market_agent/` may import from any internal layer (it's the orchestration layer)
 
 ### When to Run
 
@@ -811,7 +811,7 @@ This section summarizes the current test coverage and highlights areas for futur
 
 - `mock_data_provider.py` – common mock provider for unit/integration tests
 - `test_base_cache.py` – base historical caching behavior (cache hits, buffer shape, timestamp extraction)
-- `test_config_wiring.py` – config propagation from `config.yaml` to `NQAgentService` and `NQAgentDataFetcher`
+- `test_config_wiring.py` – config propagation from `config.yaml` to `MarketAgentService` and `MarketAgentDataFetcher`
 - `test_edge_cases.py` – focused edge-case tests (no-data fetch + short-run service lifecycle)
 - `test_error_recovery.py` – circuit-breaker behavior (connection-failure pause) using a stub provider
 - `test_signal_generation_edge_cases.py` – edge cases for signal generation (NaN, inf, extreme prices, malformed data)
@@ -837,7 +837,7 @@ These gaps are **observational only** and do not change behavior.
 The following gaps have been addressed with explicit test coverage:
 
 1. **Configuration wiring** (`test_config_wiring.py`)
-   - Tests verify that values from `config/config.yaml` and `Settings` correctly propagate into `NQAgentService` (intervals, thresholds, flags) and `NQAgentDataFetcher` (buffer sizes, cache settings).
+   - Tests verify that values from `config/config.yaml` and `Settings` correctly propagate into `MarketAgentService` (intervals, thresholds, flags) and `MarketAgentDataFetcher` (buffer sizes, cache settings).
 
 2. **Volume profile edge cases** (`test_signal_generation_edge_cases.py`)
    - The previously-xfail test for `inf` values is now passing. `VolumeProfile.calculate_profile()` sanitizes non-finite values before computing buckets.

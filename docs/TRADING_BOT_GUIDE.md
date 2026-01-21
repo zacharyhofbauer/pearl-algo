@@ -1,12 +1,12 @@
 # Trading Bot (AutoBot) Guide
 
 This repository keeps **trading bots** for **backtesting and analysis only**.
-Runtime signal generation is provided by the core strategy pipeline in `strategies/nq_intraday`.
+Runtime signal generation is provided by the core strategy in `strategies/trading_bots/pearl_bot_auto.py`.
 
 ## Runtime model (clarified)
 
 - **Agent**: one running process for a single market (e.g., NQ).
-- **Strategy**: `nq_intraday` scanner + signal generator (runtime source of signals).
+- **Strategy**: `pearl_bot_auto` single-file strategy (runtime source of signals).
 - **Trading bots (AutoBot variants)**: **backtesting-only**, used for offline evaluation.
 
 ## Backtesting (canonical usage)

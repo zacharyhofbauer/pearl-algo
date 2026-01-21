@@ -2,7 +2,7 @@
 
 **Status**: Authoritative reference for chart visual semantics  
 **Last Updated**: 2026-01-21  
-**Source of Truth**: `src/pearlalgo/nq_agent/chart_generator.py`
+**Source of Truth**: `src/pearlalgo/market_agent/chart_generator.py`
 
 ---
 

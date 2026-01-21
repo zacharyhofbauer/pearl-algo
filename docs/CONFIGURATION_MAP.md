@@ -1,6 +1,6 @@
 # Configuration Map
 
-This document maps configuration sources (environment variables, config files, and code defaults) to their usage in the NQ Agent system.
+This document maps configuration sources (environment variables, config files, and code defaults) to their usage in the Market Agent system.
 
 ## 1. Configuration sources
 
@@ -11,21 +11,21 @@ Primary environment variables:
 - `TELEGRAM_BOT_TOKEN`
   - **Used by**:
     - `config/config.yaml` (`telegram.bot_token`)
-    - `pearlalgo.nq_agent.main` (fallback when config.yaml not fully populated)
-    - `pearlalgo.nq_agent.telegram_command_handler.main`
+    - `pearlalgo.market_agent.main` (fallback when config.yaml not fully populated)
+    - `pearlalgo.market_agent.telegram_command_handler.main`
   - **Purpose**: Bot token for Telegram notifications and command handler.
 - `TELEGRAM_CHAT_ID`
   - **Used by**:
     - `config/config.yaml` (`telegram.chat_id`)
-    - `pearlalgo.nq_agent.main`
-    - `pearlalgo.nq_agent.telegram_command_handler.main`
+    - `pearlalgo.market_agent.main`
+    - `pearlalgo.market_agent.telegram_command_handler.main`
   - **Purpose**: Authorized chat ID for notifications and bot commands.
 - `IBKR_HOST`, `IBKR_PORT`, `IBKR_CLIENT_ID`, `IBKR_DATA_CLIENT_ID`
   - **Used by**:
     - `pearlalgo.config.settings.Settings` (normalization and defaults)
   - **Purpose**: IBKR Gateway connection settings.
 - `PEARLALGO_DATA_PROVIDER`
-  - **Used by**: `pearlalgo.nq_agent.main` (`provider_name = os.getenv("PEARLALGO_DATA_PROVIDER", "ibkr")`)
+  - **Used by**: `pearlalgo.market_agent.main` (`provider_name = os.getenv("PEARLALGO_DATA_PROVIDER", "ibkr")`)
   - **Purpose**: Selects data provider implementation (default `ibkr`).
 - `PEARLALGO_IB_HOST`, `PEARLALGO_IB_PORT`, `PEARLALGO_IB_CLIENT_ID`, `PEARLALGO_IB_DATA_CLIENT_ID`
   - **Used by**: `pearlalgo.config.settings.Settings` (fallbacks when `IBKR_*` are not set).
@@ -46,7 +46,7 @@ Optional logging environment variables (for systemd/journald):
 Optional AI/LLM environment variables (for OpenAI integration):
 
 - `OPENAI_API_KEY`
-  - **Used by**: `pearlalgo.nq_agent.telegram_command_handler` (AI Patch Wizard)
+  - **Used by**: `pearlalgo.market_agent.telegram_command_handler` (AI Patch Wizard)
   - **Purpose**: API key for OpenAI code generation. Only required if using the AI patch feature.
 
 No other environment variables are required by the running agent; keep any additions explicit and documented here.
@@ -56,29 +56,29 @@ No other environment variables are required by the running agent; keep any addit
 Key sections and their consumers:
 
 - `symbol`, `timeframe`, `scan_interval`
-  - **Used by**: `strategies.nq_intraday.config.NQIntradayConfig` and `pearlalgo.nq_agent.service` via strategy config.
+  - **Used by**: `strategies.trading_bots.pearl_bot_auto.CONFIG` and `pearlalgo.market_agent.service` via strategy config.
 - `telegram.*`
-  - **Used by**: `pearlalgo.nq_agent.main` and `pearlalgo.nq_agent.telegram_notifier` (through DI from main and service).
+  - **Used by**: `pearlalgo.market_agent.main` and `pearlalgo.market_agent.telegram_notifier` (through DI from main and service).
 - `risk.*`
-  - **Used by**: `strategies.nq_intraday.config.NQIntradayConfig` and downstream strategy components.
+  - **Used by**: `strategies.trading_bots.pearl_bot_auto.CONFIG` and downstream strategy components.
 - `service.*`, `circuit_breaker.*`, `data.*`, `signals.*`, `performance.*`
   - **Used by**: `pearlalgo.config.config_loader.load_service_config()` and then by:
-    - `pearlalgo.nq_agent.service` (service intervals + alert throttles, circuit breaker thresholds)
-    - `pearlalgo.nq_agent.data_fetcher` (data buffer sizes)
-    - `pearlalgo.nq_agent.performance_tracker` (performance history limits)
-    - `strategies.nq_intraday.*` (signal thresholds, where applicable).
+    - `pearlalgo.market_agent.service` (service intervals + alert throttles, circuit breaker thresholds)
+    - `pearlalgo.market_agent.data_fetcher` (data buffer sizes)
+    - `pearlalgo.market_agent.performance_tracker` (performance history limits)
+    - `strategies.trading_bots.pearl_bot_auto` (signal thresholds, where applicable).
 - `strategy`, `strategy_variants`
-  - **Used by**: `strategies.nq_intraday.config.NQIntradayConfig` for advanced strategy configuration.
+  - **Used by**: `strategies.trading_bots.pearl_bot_auto.CONFIG` for advanced strategy configuration.
   - **Purpose**: Allow runtime strategy parameter overrides and define strategy variants for backtesting/experimentation.
 - `market_hours`
   - **Used by**: `pearlalgo.utils.market_hours` and strategy session logic.
   - **Purpose**: Define market hours and session windows for trading logic.
 - `execution.*` (ATS; disabled by default)
-  - **Used by**: `pearlalgo.execution.ibkr.adapter`, `pearlalgo.nq_agent.service`
+  - **Used by**: `pearlalgo.execution.ibkr.adapter`, `pearlalgo.market_agent.service`
   - **Purpose**: Automated execution configuration (enabled, armed, mode, limits, whitelist).
   - **Defaults**: `enabled: false`, `armed: false`, `mode: dry_run`
 - `learning.*` (ATS; shadow mode by default)
-  - **Used by**: `pearlalgo.learning.bandit_policy`, `pearlalgo.nq_agent.service`
+  - **Used by**: `pearlalgo.learning.bandit_policy`, `pearlalgo.market_agent.service`
   - **Purpose**: Adaptive learning policy configuration (mode, thresholds, priors).
   - **Defaults**: `enabled: true`, `mode: shadow`
 
@@ -93,7 +93,7 @@ Notes:
 - Intended for **infrastructure** and **deployment** configuration:
   - IBKR host/port/client IDs
 
-### 1.4 Strategy config (`pearlalgo.strategies.nq_intraday.config`)
+### 1.4 Strategy config (`pearlalgo.strategies.trading_bots.pearl_bot_auto`)
 
 - Strategy‑specific parameters such as symbol, timeframe, risk parameters, ATR multipliers, R:R ratios.
 - May read environment overrides (via `os.getenv` helper) but is primarily driven by `config/config.yaml`.
@@ -115,7 +115,7 @@ Notes:
 - **Settings (`pearlalgo.config.settings`)** – infrastructure and environment glue (`src/pearlalgo/config/settings.py`):
   - Normalization of env vars
   - Validation of IBKR settings
-- **Strategy config (`pearlalgo.strategies.nq_intraday.config`)** – trading logic parameters (`src/pearlalgo/strategies/nq_intraday/config.py`):
+- **Strategy config (`pearlalgo.strategies.trading_bots.pearl_bot_auto`)** – trading logic parameters (`src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py`):
   - ATR multipliers, risk/reward thresholds
   - Session definitions and regime parameters
 
@@ -126,7 +126,7 @@ Notes:
 2. **New service behavior toggle or threshold?**
    - Add to `config/config.yaml` and load via `load_service_config()` or strategy config; avoid hard‑coding in multiple modules.
 3. **New strategy‑specific parameter?**
-   - Add to `src/pearlalgo/strategies/nq_intraday/config.py` and reference from strategy components.
+   - Add to `src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py` CONFIG dictionary and reference from strategy functions.
 4. **Avoid magic numbers** when they influence trading or service behavior; prefer a named config key with a documented default.
 
 This document is descriptive and does not alter runtime behavior, but it should be kept up to date when configuration wiring changes.

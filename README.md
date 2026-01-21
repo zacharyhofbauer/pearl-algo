@@ -1,6 +1,6 @@
-# PearlAlgo MNQ Trading Agent
+# PearlAlgo Market Trading Agent
 
-Production-ready MNQ trading agent with a modular architecture:
+Production-ready market trading agent with a modular architecture:
 data providers (IBKR), strategy/scanner/signal generation, state + metrics, Telegram UI,
 and optional execution + learning layers (disabled/safe by default).
 
@@ -36,7 +36,7 @@ Service behavior is configured in `config/config.yaml`.
 # Start IBKR Gateway
 ./scripts/gateway/gateway.sh start
 
-# Start the MNQ agent
+# Start the market agent
 ./scripts/lifecycle/agent.sh start --market NQ --background
 
 # Start Telegram command handler (menus)

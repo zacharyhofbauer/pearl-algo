@@ -72,7 +72,7 @@ All other documents must remain consistent with this summary.
 - `CONFIGURATION_MAP.md`
   - Mapping of environment variables, `config/config.yaml`, and code defaults to their consumers
 - `CHART_VISUAL_SCHEMA.md`
-  - Visual semantics + regression contracts for chart outputs (source: `src/pearlalgo/nq_agent/chart_generator.py`)
+  - Visual semantics + regression contracts for chart outputs (source: `src/pearlalgo/market_agent/chart_generator.py`)
 - `TRADING_BOT_GUIDE.md`
   - Operator and developer reference for the single trading bot (AutoBot) model
 - `INVENTORY_LEDGER.md`

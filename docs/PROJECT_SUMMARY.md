@@ -119,7 +119,7 @@ The MNQ Trading Agent is designed to:
 
 ## Core Components
 
-### 1. NQ Agent Service (`src/pearlalgo/nq_agent/`)
+### 1. Market Agent Service (`src/pearlalgo/market_agent/`)
 
 **Main Service** (`service.py`):
 - 24/7 service loop with adaptive cadence (5s active, 30s idle, 300s market closed; base scan_interval configurable)
@@ -171,36 +171,37 @@ The MNQ Trading Agent is designed to:
 - Creates data provider via factory
 - Handles graceful shutdown
 
-### 2. NQ Strategy (`src/pearlalgo/strategies/nq_intraday/`)
+### 2. Trading Strategy (`src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py`)
 
-**Strategy** (`strategy.py`):
-- Coordinates scanner and signal generator
-- Main entry point for strategy analysis
+**PearlBot Auto** (`pearl_bot_auto.py`):
+- Single-file, self-contained strategy derived from Pine Script indicators
+- Converted from 8 Pine Script files in `resources/pinescript/pearlbot/`:
+  - EMA_Crossover.pine
+  - VWAP_AA.pine
+  - Volume.pine
+  - Trading Sessions.pine
+  - S&R Power (ChartPrime).pine
+  - TBT (ChartPrime).pine
+  - Supply & Demand Visible Range (Lux).pine
+  - SpacemanBTC Key Level V13.1.pine
 
-**Scanner** (`scanner.py`):
-- Strategy session detection (configurable; default 18:00–16:10 ET, NY time)
-- Technical indicator calculations:
-  - RSI (Relative Strength Index)
-  - MACD (Moving Average Convergence Divergence)
-  - ATR (Average True Range)
-  - EMA (Exponential Moving Averages)
-  - Bollinger Bands
-- Pattern detection:
-  - Unified strategy (EMA crossover + VWAP bias + RSI confirmation + ATR stops)
+**Key Features**:
+- **Virtual Broker Mode**: Only generates signals, no real execution (perfect for testing live without real money)
+- **Pure Function Design**: All indicators implemented as pure Python functions (portable to Pine Script/C#)
+- **Signal Generation**: `generate_signals()` function processes market data and returns trading signals
+- **Configuration**: Global `CONFIG` dictionary holds all strategy parameters
+- **Indicators Included**:
+  - EMA Crossover (fast/slow)
+  - VWAP with standard deviation bands
+  - Volume analysis
+  - Trading session detection
+  - Support & Resistance levels
+  - Supply & Demand zones
+  - Key level detection
 
-**Signal Generator** (`signal_generator.py`):
-- Validates scanner results
-- Filters signals by confidence threshold (minimum 50% for prop firm)
-- Calculates entry, stop-loss, and take-profit levels
-- Risk/reward ratio validation (minimum 1.2:1 R:R filter, configurable via `signals.min_risk_reward`)
-- Position sizing calculation (5-15 MNQ contracts)
-- Risk amount calculation (MNQ tick value: $2/point)
-- Duplicate signal prevention (5-minute window)
-
-**Config** (`config.py`):
-- Strategy configuration (symbol: MNQ, timeframe, risk parameters)
-- Prop firm defaults: Risk/stops/sizing configurable via `config/config.yaml` (see Configuration section)
-- Loads from `config/config.yaml` or uses defaults
+**Entry Point**:
+- `generate_signals(df, config, current_time)` - Main signal generation function
+- `run_pearlbot(df, config, virtual_broker)` - Full bot execution with virtual broker
 
 ### 3. Data Providers (`src/pearlalgo/data_providers/`)
 
@@ -260,7 +261,7 @@ The MNQ Trading Agent is designed to:
 - Loads from environment variables
 - Type validation
 
-**Symbols**: Symbol definitions are embedded in strategy configuration (`src/pearlalgo/strategies/nq_intraday/config.py`). The system currently uses MNQ (Mini NQ) futures.
+**Symbols**: Symbol definitions are in the strategy configuration (`src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py` CONFIG). The system supports multiple markets (MNQ, ES, GC, etc.) via market-aware configuration.
 
 ---
 
@@ -275,7 +276,7 @@ Load .env and config.yaml
   ↓
 Create Data Provider (via factory)
   ↓
-Create NQAgentService
+Create MarketAgentService
   ↓
 Start Service Loop
 ```
@@ -291,10 +292,10 @@ Data Fetcher.fetch_latest_data()
   ├─→ Update buffer (last 100 bars)
   └─→ Get latest bar
   ↓
-Strategy.analyze(market_data)
+pearl_bot_auto.generate_signals(df, config)
   ↓
-  ├─→ Scanner.scan() → Technical indicators
-  └─→ Signal Generator.generate() → Validated signals
+  ├─→ Calculate indicators (EMA, VWAP, Volume, S&R, etc.)
+  └─→ Detect signals (crossover, VWAP position, key levels)
   ↓
 For each signal:
   ├─→ Performance Tracker.track_signal_generated()
@@ -374,7 +375,7 @@ Signal Count Incremented
 ```
 pearlalgo-dev-ai-agents/
 ├── src/pearlalgo/              # Main source code
-│   ├── nq_agent/               # MNQ Agent Service
+│   ├── market_agent/           # Market Agent Service (market-agnostic)
 │   │   ├── main.py             # Entry point
 │   │   ├── service.py          # Main service loop
 │   │   ├── data_fetcher.py     # Data fetching logic
@@ -383,19 +384,16 @@ pearlalgo-dev-ai-agents/
 │   │   ├── telegram_notifier.py    # Telegram notifications
 │   │   ├── telegram_command_handler.py  # Interactive Telegram bot commands (separate service)
 │   │   ├── chart_generator.py    # mplfinance chart generation (optional, Telegram)
-│   │   └── health_monitor.py       # Health monitoring
-│   ├── strategies/nq_intraday/ # MNQ Strategy (prop firm optimized)
-│   │   ├── strategy.py         # Main strategy class
-│   │   ├── scanner.py          # Market scanning
-│   │   ├── signal_generator.py # Signal generation
-│   │   ├── signal_quality.py   # Signal quality scoring
-│   │   ├── config.py           # Strategy configuration
-│   │   ├── hud_context.py      # HUD/display context builder
-│   │   ├── mtf_analyzer.py     # Multi-timeframe analysis
-│   │   ├── regime_detector.py  # Market regime detection
-│   │   ├── volume_profile.py   # Volume profile analysis
-│   │   ├── order_flow.py       # Order flow analysis
-│   │   └── backtest_adapter.py # Backtesting adapter
+│   │   ├── health_monitor.py       # Health monitoring
+│   │   └── challenge_tracker.py    # Challenge tracking
+│   ├── strategies/trading_bots/ # Trading Bot Strategies
+│   │   ├── pearl_bot_auto.py   # Main strategy (single-file, from Pine Scripts)
+│   │   ├── composite_bot.py    # Multi-strategy bot
+│   │   ├── trend_follower_bot.py  # Trend following bot
+│   │   ├── breakout_bot.py     # Breakout bot
+│   │   ├── mean_reversion_bot.py  # Mean reversion bot
+│   │   ├── backtest_adapter.py # Backtesting adapter
+│   │   └── market_regime_detector.py  # Market regime detection
 │   ├── execution/              # ATS Execution Layer (disabled by default)
 │   │   ├── base.py             # ExecutionAdapter interface, ExecutionConfig
 │   │   └── ibkr/               # IBKR execution implementation
@@ -513,13 +511,13 @@ These boundaries prevent accidental coupling, keep strategies portable, and make
 
 | Source Layer     | May Import                                      | Must NOT Import              |
 |------------------|-------------------------------------------------|------------------------------|
-| `utils`          | `pearlalgo.utils.*`, stdlib, third-party        | `config`, `data_providers`, `strategies`, `nq_agent` |
-| `config`         | `pearlalgo.config.*`, `pearlalgo.utils.*`       | `data_providers`, `strategies`, `nq_agent` |
-| `data_providers` | `pearlalgo.data_providers.*`, `config`, `utils` | `strategies`, `nq_agent`     |
-| `strategies`     | `pearlalgo.strategies.*`, `config`, `utils`, `learning` | `data_providers`, `nq_agent` |
-| `execution`      | `pearlalgo.execution.*`, `config`, `utils`      | `data_providers`, `strategies`, `learning`, `nq_agent` |
-| `learning`       | `pearlalgo.learning.*`, `config`, `utils`       | `data_providers`, `strategies`, `execution`, `nq_agent` |
-| `nq_agent`       | Any internal layer (orchestration layer)        | —                            |
+| `utils`          | `pearlalgo.utils.*`, stdlib, third-party        | `config`, `data_providers`, `strategies`, `market_agent` |
+| `config`         | `pearlalgo.config.*`, `pearlalgo.utils.*`       | `data_providers`, `strategies`, `market_agent` |
+| `data_providers` | `pearlalgo.data_providers.*`, `config`, `utils` | `strategies`, `market_agent`     |
+| `strategies`     | `pearlalgo.strategies.*`, `config`, `utils`, `learning` | `data_providers`, `market_agent` |
+| `execution`      | `pearlalgo.execution.*`, `config`, `utils`      | `data_providers`, `strategies`, `learning`, `market_agent` |
+| `learning`       | `pearlalgo.learning.*`, `config`, `utils`       | `data_providers`, `strategies`, `execution`, `market_agent` |
+| `market_agent`   | Any internal layer (orchestration layer)        | —                            |
 
 #### Rationale
 
@@ -529,7 +527,7 @@ These boundaries prevent accidental coupling, keep strategies portable, and make
 - **`strategies`** contain trading logic; they must remain independent of specific data providers and the orchestrating agent so they can be tested in isolation or reused elsewhere. Strategies may optionally import from `learning` for ML signal filtering (guarded with try/except for graceful degradation).
 - **`execution`** contains ATS execution logic (IBKR bracket orders, safety guards); independent of strategy and agent orchestration.
 - **`learning`** contains adaptive policy logic (Thompson sampling bandit); independent of strategy and agent orchestration.
-- **`nq_agent`** is the top-level orchestration layer that wires everything together.
+- **`market_agent`** is the top-level orchestration layer that wires everything together.
 
 #### Enforcement
 
@@ -665,7 +663,7 @@ Configuration is resolved using the following precedence rules:
    - Risk/position sizing and prop‑firm assumptions
    - Service intervals, data buffers, and signal thresholds
 3. **Code defaults** in:
-   - `src/pearlalgo/strategies/nq_intraday/config.py` (`NQIntradayConfig`)
+   - `src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py` (`CONFIG` dictionary)
    - `pearlalgo.config.config_loader.load_service_config`
    - `pearlalgo.config.settings.Settings`
 
@@ -675,9 +673,9 @@ Configuration is resolved using the following precedence rules:
 In practice:
 - **Change behavior** (symbol, risk, scan intervals, thresholds) by editing `config/config.yaml`.
 - **Change infrastructure or secrets** (IBKR, Telegram, provider selection) by editing `.env`.
-- The agent entrypoint (`pearlalgo.nq_agent.main`) reads from the environment and uses `config/config.yaml`
+- The agent entrypoint (`pearlalgo.market_agent.main`) reads from the environment and uses `config/config.yaml`
   for service/strategy defaults (and Telegram enablement when env vars are missing).
-- The Telegram command handler (`pearlalgo.nq_agent.telegram_command_handler`) requires Telegram credentials
+- The Telegram command handler (`pearlalgo.market_agent.telegram_command_handler`) requires Telegram credentials
   in `.env` / environment variables.
 
 ---
@@ -872,7 +870,7 @@ Type=simple
 WorkingDirectory=/path/to/pearlalgo-dev-ai-agents
 Environment=\"PYTHONUNBUFFERED=1\"
 EnvironmentFile=/path/to/pearlalgo-dev-ai-agents/.env
-ExecStart=/path/to/pearlalgo-dev-ai-agents/.venv/bin/python -m pearlalgo.nq_agent.main
+ExecStart=/path/to/pearlalgo-dev-ai-agents/.venv/bin/python -m pearlalgo.market_agent.main
 Restart=on-failure
 RestartSec=10
 
@@ -942,7 +940,7 @@ docker run --rm -it \\
 **Check Service Status**:
 ```bash
 ./scripts/lifecycle/check_agent_status.sh --market NQ
-ps aux | grep "pearlalgo.nq_agent.main"
+ps aux | grep "pearlalgo.market_agent.main"
 ```
 
 **View State**:

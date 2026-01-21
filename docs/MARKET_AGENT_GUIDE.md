@@ -105,7 +105,7 @@ For detailed gateway setup, see `GATEWAY.md`.
 ./scripts/lifecycle/agent.sh stop --market NQ
 
 # Or manually:
-pkill -f "pearlalgo.nq_agent.main"
+pkill -f "pearlalgo.market_agent.main"
 
 # Or using PID file:
 kill $(cat logs/agent_NQ.pid) 2>/dev/null || true
@@ -116,7 +116,7 @@ kill $(cat logs/agent_NQ.pid) 2>/dev/null || true
 ./scripts/lifecycle/check_agent_status.sh --market NQ
 
 # Or manually:
-ps aux | grep "pearlalgo.nq_agent.main"
+ps aux | grep "pearlalgo.market_agent.main"
 ```
 
 ### View Logs
@@ -491,7 +491,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 3. **If processes persist, manually kill them:**
    ```bash
    # Find all processes
-   pgrep -f "pearlalgo.nq_agent.main"
+   pgrep -f "pearlalgo.market_agent.main"
    
    # Kill each PID
    kill -9 <PID>
