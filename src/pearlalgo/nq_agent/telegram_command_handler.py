@@ -19,7 +19,10 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    import pandas as pd
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import ensure_state_dir, get_state_file, get_signals_file, parse_utc_timestamp
@@ -611,8 +614,8 @@ class TelegramCommandHandler:
             await self._show_performance_menu(query)
         elif action == "bots":
             await self._show_bots_menu(query)
-        elif action == "pearl_bots":
-            await self._show_pearl_bots_menu(query)
+        elif action == "trading_bot":
+            await self._show_trading_bot_menu(query)
         elif action == "markets":
             await self._show_markets_menu(query)
         elif action == "system":
@@ -693,7 +696,7 @@ class TelegramCommandHandler:
                                 pass
                             # Send new message with photo
                             with open(chart_path, 'rb') as f:
-                                sent_message = await query.message.chat.send_photo(
+                                await query.message.chat.send_photo(
                                     photo=f,
                                     caption=message_text,
                                     reply_markup=reply_markup,
@@ -804,7 +807,6 @@ class TelegramCommandHandler:
             
             # Generate fresh chart
             from datetime import timedelta
-            import pandas as pd
             from pearlalgo.nq_agent.chart_generator import ChartGenerator
             from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
             from pearlalgo.config.config_loader import load_service_config
@@ -1226,7 +1228,6 @@ class TelegramCommandHandler:
         
         # Get additional context
         state = self._read_state()
-        uptime_info = ""
         connection_info = ""
         trading_info = ""
         
@@ -1302,7 +1303,7 @@ class TelegramCommandHandler:
 
         keyboard = [
             [
-                InlineKeyboardButton("💎 Trading Bot", callback_data="menu:pearl_bots"),
+                InlineKeyboardButton("💎 Trading Bot", callback_data="menu:trading_bot"),
                 InlineKeyboardButton("🧪 Backtest (Advanced)", callback_data="strategy_review:backtest"),
             ],
             [
@@ -1318,7 +1319,7 @@ class TelegramCommandHandler:
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
 
-    async def _show_pearl_bots_menu(self, query: CallbackQuery) -> None:
+    async def _show_trading_bot_menu(self, query: CallbackQuery) -> None:
         """Show trading bot submenu with status and controls."""
         try:
             from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager
@@ -1360,7 +1361,7 @@ class TelegramCommandHandler:
             keyboard = [
                 [
                     InlineKeyboardButton("📊 Bot Performance", callback_data="action:show_bot_performance"),
-                    InlineKeyboardButton("🔄 Refresh Status", callback_data="menu:pearl_bots"),
+                    InlineKeyboardButton("🔄 Refresh Status", callback_data="menu:trading_bot"),
                 ],
                 [InlineKeyboardButton("🏠 Back to Bots", callback_data="menu:bots")],
             ]
@@ -1452,7 +1453,7 @@ class TelegramCommandHandler:
         if not agent_running:
             start_label = "🚀 Start Agent"
         else:
-            stop_label = f"🛑 Stop Agent" if not has_positions else f"🛑 Stop ({positions_count} open)"
+            stop_label = "🛑 Stop Agent" if not has_positions else f"🛑 Stop ({positions_count} open)"
         
         if has_positions:
             emergency_label = f"🚨 Emergency Stop ({positions_count})"
@@ -1707,9 +1708,9 @@ class TelegramCommandHandler:
 
             lines = ["Select a file:"]
             keyboard = [
-                [InlineKeyboardButton("src/pearlalgo/strategies/pearl_bots/bot_template.py", callback_data="aiops:file:src/pearlalgo/strategies/pearl_bots/bot_template.py")],
+                [InlineKeyboardButton("src/pearlalgo/strategies/trading_bots/bot_template.py", callback_data="aiops:file:src/pearlalgo/strategies/trading_bots/bot_template.py")],
                 [InlineKeyboardButton("src/pearlalgo/strategies/trading_bot_manager.py", callback_data="aiops:file:src/pearlalgo/strategies/trading_bot_manager.py")],
-                [InlineKeyboardButton("src/pearlalgo/strategies/pearl_bots/market_regime_detector.py", callback_data="aiops:file:src/pearlalgo/strategies/pearl_bots/market_regime_detector.py")],
+                [InlineKeyboardButton("src/pearlalgo/strategies/trading_bots/market_regime_detector.py", callback_data="aiops:file:src/pearlalgo/strategies/trading_bots/market_regime_detector.py")],
                 [InlineKeyboardButton("config/config.yaml", callback_data="aiops:file:config/config.yaml")],
                 [InlineKeyboardButton("Other file (type path)", callback_data="aiops:other")],
                 [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
@@ -1734,7 +1735,7 @@ class TelegramCommandHandler:
             self._ai_ops_state["state"] = "awaiting_aiops_file_text"
             self._ai_ops_state.pop("file", None)
             await query.edit_message_text(
-                "Send the file path now.\n\nExample:\nsrc/pearlalgo/strategies/pearl_bots/bot_template.py"
+                "Send the file path now.\n\nExample:\nsrc/pearlalgo/strategies/trading_bots/bot_template.py"
             )
             return
 
@@ -1951,14 +1952,6 @@ class TelegramCommandHandler:
             msg = f"{msg}\n\n{details}"
         await query.edit_message_text(msg)
 
-        if callback_data == "patch:other":
-            self._patch_wizard_state["state"] = "awaiting_file_text"
-            self._patch_wizard_state.pop("file", None)
-            await query.edit_message_text(
-                "Send the file path now.\n\nExample:\nsrc/pearlalgo/utils/retry.py"
-            )
-            return
-
 
     async def _show_help(self, query: CallbackQuery) -> None:
         """Show help information."""
@@ -2118,7 +2111,7 @@ class TelegramCommandHandler:
                     logger.error(f"Error showing bot performance: {e}")
                     text = "❌ Error loading trading bot performance"
 
-                keyboard = [[InlineKeyboardButton("🤖 Trading Bot", callback_data="menu:pearl_bots")]]
+                keyboard = [[InlineKeyboardButton("🤖 Trading Bot", callback_data="menu:trading_bot")]]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
             elif action_type == "restart_gateway":
                 keyboard = [
@@ -2161,7 +2154,7 @@ class TelegramCommandHandler:
                     daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
                     
                     if positions > 0:
-                        impact_lines.append(f"📊 *Impact Preview:*")
+                        impact_lines.append("📊 *Impact Preview:*")
                         impact_lines.append(f"• Will close {positions} open position(s)")
                         if daily_pnl != 0:
                             pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
@@ -2747,7 +2740,6 @@ class TelegramCommandHandler:
             
             # Check for challenge mode and load challenge data if available
             challenge_status = None
-            challenge_per_strategy: dict = {}
             challenge_tracker_instance = None
             
             try:
@@ -4214,7 +4206,7 @@ class TelegramCommandHandler:
 
     def _create_pearl_bot_for_backtest(self, bot_key: str):
         """Create a trading bot instance with safe backtest defaults."""
-        from pearlalgo.strategies.pearl_bots import BotConfig, create_bot
+        from pearlalgo.strategies.trading_bots import BotConfig, create_bot
 
         bot_map = {
             "pearl": (
@@ -4270,7 +4262,7 @@ class TelegramCommandHandler:
             import pandas as pd  # noqa: F401
             from datetime import datetime, timezone
 
-            from pearlalgo.strategies.pearl_bots.backtest_adapter import TradingBotBacktestAdapter
+            from pearlalgo.strategies.trading_bots.backtest_adapter import TradingBotBacktestAdapter
 
             df_1m = self._load_historical_ohlcv(period_key)
             bot = self._create_pearl_bot_for_backtest(bot_key)
@@ -4362,7 +4354,7 @@ class TelegramCommandHandler:
             import pandas as pd  # noqa: F401
             from datetime import datetime, timezone
 
-            from pearlalgo.strategies.pearl_bots.backtest_adapter import TradingBotBacktestAdapter
+            from pearlalgo.strategies.trading_bots.backtest_adapter import TradingBotBacktestAdapter
 
             df_1m = self._load_historical_ohlcv(period_key)
             bots = [("pearl", "PearlAutoBot"), ("trend", "Trend"), ("break", "Breakout"), ("mean", "MeanRev")]

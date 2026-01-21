@@ -52,7 +52,7 @@ Or via Telegram:
 **For Config Changes:**
 1. Check agent logs:
    ```bash
-   tail -f logs/nq_agent.log | grep -E "Config loaded|stop_loss|risk_reward"
+   tail -f logs/agent_NQ.log | grep -E "Config loaded|stop_loss|risk_reward"
    ```
 2. Look for your new values in the logs
 
@@ -66,7 +66,7 @@ Or via Telegram:
 **Check Agent Status:**
 ```bash
 ps aux | grep "pearlalgo.nq_agent.main" | grep -v grep
-cat logs/nq_agent.pid
+cat logs/agent_NQ.pid
 ```
 
 **Check Telegram Handler:**
@@ -105,7 +105,7 @@ sleep 2
 ./scripts/lifecycle/agent.sh start --market NQ --background
 
 echo "✅ Agent restarted!"
-echo "PID: $(cat logs/nq_agent.pid)"
+echo "PID: $(cat logs/agent_NQ.pid)"
 ```
 
 Then just run: `~/restart_agent.sh`

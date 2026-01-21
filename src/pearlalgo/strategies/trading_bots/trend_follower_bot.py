@@ -1,8 +1,7 @@
 """
-Trend Follower Bot - PEARL Automated Trading System
+Trend Follower Bot (variant)
 
-A complete automated trading bot that follows trends using multiple timeframe analysis,
-optimized for PEARLalgo's technical analysis framework.
+A complete automated trading bot that follows trends using multiple timeframe analysis.
 
 Strategy Logic:
 - Identifies strong trends using moving averages and trend strength indicators
@@ -44,7 +43,9 @@ class CachedTrendFollowerIndicators(IndicatorSuite):
         # Use last 100 bars + parameter hash for cache key
         recent_data = df.tail(100) if len(df) > 100 else df
         data_hash = hashlib.md5(str(recent_data.values.tobytes()).encode()).hexdigest()[:16]
-        param_hash = hashlib.md5(f"{self.fast_ma_period}_{self.slow_ma_period}_{self.trend_strength_period}_{self.volatility_period}_{self.momentum_period}".encode()).hexdigest()[:8]
+        param_hash = hashlib.md5(
+            f"{self.fast_ma_period}_{self.slow_ma_period}_{self.trend_strength_period}_{self.volatility_period}_{self.momentum_period}".encode()
+        ).hexdigest()[:8]
         return f"{data_hash}_{param_hash}"
 
     def _calculate_base_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -53,57 +54,74 @@ class CachedTrendFollowerIndicators(IndicatorSuite):
         df_calc = df.copy()
 
         # Vectorized moving averages
-        df_calc['fast_ma'] = df_calc['close'].rolling(self.fast_ma_period, min_periods=1).mean()
-        df_calc['slow_ma'] = df_calc['close'].rolling(self.slow_ma_period, min_periods=1).mean()
+        df_calc["fast_ma"] = df_calc["close"].rolling(self.fast_ma_period, min_periods=1).mean()
+        df_calc["slow_ma"] = df_calc["close"].rolling(self.slow_ma_period, min_periods=1).mean()
 
         # Trend direction (vectorized)
-        df_calc['trend_direction'] = np.where(
-            df_calc['fast_ma'] > df_calc['slow_ma'], 1,
-            np.where(df_calc['fast_ma'] < df_calc['slow_ma'], -1, 0)
+        df_calc["trend_direction"] = np.where(
+            df_calc["fast_ma"] > df_calc["slow_ma"],
+            1,
+            np.where(df_calc["fast_ma"] < df_calc["slow_ma"], -1, 0),
         )
 
         # Pre-calculate components for ADX (True Range and Directional Movement)
-        high_low = df_calc['high'] - df_calc['low']
-        high_close = (df_calc['high'] - df_calc['close'].shift(1)).abs()
-        low_close = (df_calc['low'] - df_calc['close'].shift(1)).abs()
+        high_low = df_calc["high"] - df_calc["low"]
+        high_close = (df_calc["high"] - df_calc["close"].shift(1)).abs()
+        low_close = (df_calc["low"] - df_calc["close"].shift(1)).abs()
 
         # True Range (vectorized max)
-        df_calc['tr'] = np.maximum.reduce([high_low, high_close, low_close])
+        df_calc["tr"] = np.maximum.reduce([high_low, high_close, low_close])
 
         # Directional Movement (vectorized)
-        df_calc['plus_dm'] = np.where(
-            (df_calc['high'] - df_calc['high'].shift(1)) > (df_calc['low'].shift(1) - df_calc['low']),
-            np.maximum(df_calc['high'] - df_calc['high'].shift(1), 0), 0
+        df_calc["plus_dm"] = np.where(
+            (df_calc["high"] - df_calc["high"].shift(1))
+            > (df_calc["low"].shift(1) - df_calc["low"]),
+            np.maximum(df_calc["high"] - df_calc["high"].shift(1), 0),
+            0,
         )
-        df_calc['minus_dm'] = np.where(
-            (df_calc['low'].shift(1) - df_calc['low']) > (df_calc['high'] - df_calc['high'].shift(1)),
-            np.maximum(df_calc['low'].shift(1) - df_calc['low'], 0), 0
+        df_calc["minus_dm"] = np.where(
+            (df_calc["low"].shift(1) - df_calc["low"])
+            > (df_calc["high"] - df_calc["high"].shift(1)),
+            np.maximum(df_calc["low"].shift(1) - df_calc["low"], 0),
+            0,
         )
 
         # Smoothed calculations (ATR and DI values)
-        df_calc['atr'] = df_calc['tr'].rolling(self.trend_strength_period, min_periods=1).mean()
-        df_calc['plus_di_smooth'] = df_calc['plus_dm'].rolling(self.trend_strength_period, min_periods=1).mean()
-        df_calc['minus_di_smooth'] = df_calc['minus_dm'].rolling(self.trend_strength_period, min_periods=1).mean()
+        df_calc["atr"] = df_calc["tr"].rolling(self.trend_strength_period, min_periods=1).mean()
+        df_calc["plus_di_smooth"] = (
+            df_calc["plus_dm"].rolling(self.trend_strength_period, min_periods=1).mean()
+        )
+        df_calc["minus_di_smooth"] = (
+            df_calc["minus_dm"].rolling(self.trend_strength_period, min_periods=1).mean()
+        )
 
         # Directional Indicators
-        df_calc['plus_di'] = 100 * df_calc['plus_di_smooth'] / df_calc['atr']
-        df_calc['minus_di'] = 100 * df_calc['minus_di_smooth'] / df_calc['atr']
+        df_calc["plus_di"] = 100 * df_calc["plus_di_smooth"] / df_calc["atr"]
+        df_calc["minus_di"] = 100 * df_calc["minus_di_smooth"] / df_calc["atr"]
 
         # ADX components
-        df_calc['dx'] = 100 * np.abs(df_calc['plus_di'] - df_calc['minus_di']) / (df_calc['plus_di'] + df_calc['minus_di'])
-        df_calc['trend_strength'] = df_calc['dx'].rolling(self.trend_strength_period, min_periods=1).mean()
+        df_calc["dx"] = (
+            100
+            * np.abs(df_calc["plus_di"] - df_calc["minus_di"])
+            / (df_calc["plus_di"] + df_calc["minus_di"])
+        )
+        df_calc["trend_strength"] = (
+            df_calc["dx"].rolling(self.trend_strength_period, min_periods=1).mean()
+        )
 
         # Momentum indicators (vectorized)
-        df_calc['roc'] = df_calc['close'].pct_change(self.momentum_period)
-        df_calc['momentum'] = df_calc['close'] / df_calc['close'].shift(self.momentum_period) - 1
+        df_calc["roc"] = df_calc["close"].pct_change(self.momentum_period)
+        df_calc["momentum"] = df_calc["close"] / df_calc["close"].shift(self.momentum_period) - 1
 
         # Volatility for position sizing
-        df_calc['returns'] = df_calc['close'].pct_change()
-        df_calc['volatility'] = df_calc['returns'].rolling(self.volatility_period, min_periods=1).std()
+        df_calc["returns"] = df_calc["close"].pct_change()
+        df_calc["volatility"] = (
+            df_calc["returns"].rolling(self.volatility_period, min_periods=1).std()
+        )
 
         # Pullback detection (price deviation from trend)
-        df_calc['trend_price'] = (df_calc['fast_ma'] + df_calc['slow_ma']) / 2
-        df_calc['pullback_pct'] = (df_calc['close'] - df_calc['trend_price']) / df_calc['trend_price']
+        df_calc["trend_price"] = (df_calc["fast_ma"] + df_calc["slow_ma"]) / 2
+        df_calc["pullback_pct"] = (df_calc["close"] - df_calc["trend_price"]) / df_calc["trend_price"]
 
         return df_calc
 
@@ -159,14 +177,14 @@ class CachedTrendFollowerIndicators(IndicatorSuite):
     def _extract_signals(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Extract final signals from calculated dataframe."""
         return {
-            'fast_ma': df['fast_ma'].iloc[-1],
-            'slow_ma': df['slow_ma'].iloc[-1],
-            'trend_direction': df['trend_direction'].iloc[-1],
-            'trend_strength': df['trend_strength'].iloc[-1],
-            'momentum': df['momentum'].iloc[-1],
-            'pullback_pct': df['pullback_pct'].iloc[-1],
-            'volatility': df['volatility'].iloc[-1],
-            'current_price': df['close'].iloc[-1],
+            "fast_ma": df["fast_ma"].iloc[-1],
+            "slow_ma": df["slow_ma"].iloc[-1],
+            "trend_direction": df["trend_direction"].iloc[-1],
+            "trend_strength": df["trend_strength"].iloc[-1],
+            "momentum": df["momentum"].iloc[-1],
+            "pullback_pct": df["pullback_pct"].iloc[-1],
+            "volatility": df["volatility"].iloc[-1],
+            "current_price": df["close"].iloc[-1],
             # Don't return full dataframe to save memory
         }
 
@@ -175,11 +193,11 @@ class CachedTrendFollowerIndicators(IndicatorSuite):
         signals = self.calculate_signals(df)
 
         return {
-            'trend_direction': float(signals.get('trend_direction', 0)),
-            'trend_strength': float(signals.get('trend_strength', 0)),
-            'momentum': float(signals.get('momentum', 0)),
-            'pullback_pct': float(signals.get('pullback_pct', 0)),
-            'volatility': float(signals.get('volatility', 0)),
+            "trend_direction": float(signals.get("trend_direction", 0)),
+            "trend_strength": float(signals.get("trend_strength", 0)),
+            "momentum": float(signals.get("momentum", 0)),
+            "pullback_pct": float(signals.get("pullback_pct", 0)),
+            "volatility": float(signals.get("volatility", 0)),
         }
 
 
@@ -187,7 +205,7 @@ class TrendFollowerBot(TradingBot):
     """
     Trend Follower Bot - Complete automated trading system with performance optimizations.
 
-    This bot implements a trend-following strategy optimized for PEARLalgo:
+    This bot implements a trend-following strategy:
     - Identifies strong trending markets using technical indicators
     - Enters on pullbacks within established trends
     - Uses volatility-adjusted risk management
@@ -201,9 +219,9 @@ class TrendFollowerBot(TradingBot):
         self.indicators = CachedTrendFollowerIndicators()
 
         # Bot-specific parameters
-        self.min_trend_strength = self.config.parameters.get('min_trend_strength', 25.0)
-        self.max_pullback_pct = self.config.parameters.get('max_pullback_pct', 0.02)
-        self.momentum_threshold = self.config.parameters.get('momentum_threshold', 0.005)
+        self.min_trend_strength = self.config.parameters.get("min_trend_strength", 25.0)
+        self.max_pullback_pct = self.config.parameters.get("max_pullback_pct", 0.02)
+        self.momentum_threshold = self.config.parameters.get("momentum_threshold", 0.005)
 
     @property
     def name(self) -> str:
@@ -211,8 +229,10 @@ class TrendFollowerBot(TradingBot):
 
     @property
     def description(self) -> str:
-        return ("Lux Algo Chart Prime style trend-following bot. Identifies strong trends "
-                "and enters on pullbacks with volatility-adjusted stops.")
+        return (
+            "Trend-following bot. Identifies strong trends and enters on pullbacks "
+            "with volatility-adjusted stops."
+        )
 
     @property
     def strategy_type(self) -> str:
@@ -225,18 +245,18 @@ class TrendFollowerBot(TradingBot):
         """
         Core signal generation logic for trend following.
 
-        Strategy rules (similar to Lux Algo AI-generated strategies):
+        Strategy rules:
         1. Trend must be strong enough (ADX > threshold)
         2. Price must be in a pullback within the trend
         3. Momentum must align with trend direction
         4. Enter counter to pullback direction
         """
-        trend_direction = indicators.get('trend_direction', 0)
-        trend_strength = indicators.get('trend_strength', 0)
-        pullback_pct = indicators.get('pullback_pct', 0)
-        momentum = indicators.get('momentum', 0)
-        current_price = indicators.get('current_price', 0)
-        volatility = indicators.get('volatility', 0)
+        trend_direction = indicators.get("trend_direction", 0)
+        trend_strength = indicators.get("trend_strength", 0)
+        pullback_pct = indicators.get("pullback_pct", 0)
+        momentum = indicators.get("momentum", 0)
+        current_price = indicators.get("current_price", 0)
+        volatility = indicators.get("volatility", 0)
 
         # Must have a strong trend
         if trend_strength < self.min_trend_strength:
@@ -253,8 +273,8 @@ class TrendFollowerBot(TradingBot):
 
         # Momentum must align with trend (but not be extreme)
         momentum_aligned = (
-            (trend_direction > 0 and momentum > self.momentum_threshold) or
-            (trend_direction < 0 and momentum < -self.momentum_threshold)
+            (trend_direction > 0 and momentum > self.momentum_threshold)
+            or (trend_direction < 0 and momentum < -self.momentum_threshold)
         )
 
         if not momentum_aligned:
@@ -286,9 +306,10 @@ class TrendFollowerBot(TradingBot):
             stop_loss = entry_price + vol_adjustment
             take_profit = entry_price - (vol_adjustment * 2)
 
-        # Create signal with reasoning
-        reason = (f"Strong {direction} trend (strength: {trend_strength:.1f}) "
-                 f"with pullback opportunity. Momentum: {momentum:.4f}")
+        reason = (
+            f"Strong {direction} trend (strength: {trend_strength:.1f}) "
+            f"with pullback opportunity. Momentum: {momentum:.4f}"
+        )
 
         return TradeSignal(
             direction=direction,
@@ -299,15 +320,15 @@ class TrendFollowerBot(TradingBot):
             bot_name=self.name,
             bot_version=self.config.version,
             reason=reason,
-            indicators_used=['trend_strength', 'momentum', 'pullback_pct', 'volatility'],
+            indicators_used=["trend_strength", "momentum", "pullback_pct", "volatility"],
             features={
-                'trend_strength': trend_strength,
-                'momentum': momentum,
-                'pullback_pct': pullback_pct,
-                'volatility': volatility,
-            }
+                "trend_strength": trend_strength,
+                "momentum": momentum,
+                "pullback_pct": pullback_pct,
+                "volatility": volatility,
+            },
         )
 
 
-# Register the bot for creation by name
 register_bot(TrendFollowerBot)
+

@@ -55,9 +55,9 @@ class BotConfig:
 
     # Risk management
     risk_per_trade: float = 0.01  # 1% of capital
-    stop_loss_pct: float = 0.005   # 0.5% stop loss
+    stop_loss_pct: float = 0.005  # 0.5% stop loss
     take_profit_pct: float = 0.01  # 1% take profit
-    max_drawdown_pct: float = 0.05 # 5% max drawdown
+    max_drawdown_pct: float = 0.05  # 5% max drawdown
 
     # Entry filters
     min_confidence: float = 0.6
@@ -66,7 +66,9 @@ class BotConfig:
 
     # Market regime settings
     enable_regime_filtering: bool = True
-    allowed_regimes: List[str] = field(default_factory=lambda: ["trending_bull", "trending_bear", "ranging"])
+    allowed_regimes: List[str] = field(
+        default_factory=lambda: ["trending_bull", "trending_bear", "ranging"]
+    )
     regime_risk_multiplier: float = 1.0
 
     # ML enhancement settings
@@ -188,10 +190,12 @@ class BotPerformance:
         # Track equity curve for drawdown calculation
         self._equity_curve.append(self.total_pnl)
         self._peak_equity = max(self._peak_equity, self.total_pnl)
-        
+
         # Track returns for Sharpe/Sortino calculation
         if len(self._equity_curve) > 1:
-            return_pct = (pnl / abs(self._equity_curve[-2])) if self._equity_curve[-2] != 0 else 0.0
+            return_pct = (
+                (pnl / abs(self._equity_curve[-2])) if self._equity_curve[-2] != 0 else 0.0
+            )
             self._returns.append(return_pct)
 
         if pnl > 0:
@@ -237,11 +241,11 @@ class BotPerformance:
             returns_array = np.array(self._returns)
             mean_return = np.mean(returns_array)
             std_return = np.std(returns_array)
-            
+
             # Sharpe ratio (annualized, assuming daily returns)
             if std_return > 0:
                 self.sharpe_ratio = (mean_return / std_return) * np.sqrt(252)
-            
+
             # Sortino ratio (only downside deviation)
             downside_returns = returns_array[returns_array < 0]
             if len(downside_returns) > 0:
@@ -294,7 +298,9 @@ class TradingBot(ABC):
         pass
 
     @abstractmethod
-    def generate_signal_logic(self, df: pd.DataFrame, indicators: Dict[str, Any]) -> Optional[TradeSignal]:
+    def generate_signal_logic(
+        self, df: pd.DataFrame, indicators: Dict[str, Any]
+    ) -> Optional[TradeSignal]:
         """
         Core signal generation logic.
 
@@ -313,7 +319,7 @@ class TradingBot(ABC):
             return []
 
         try:
-            df = market_data.get('df')
+            df = market_data.get("df")
             if df is None or df.empty:
                 return []
 
@@ -332,7 +338,7 @@ class TradingBot(ABC):
                     return []
 
             # Get latest bar data
-            latest_bar = market_data.get('latest_bar', {})
+            latest_bar = market_data.get("latest_bar", {})
 
             # Calculate indicators
             indicator_suite = self.get_indicator_suite()
@@ -357,8 +363,10 @@ class TradingBot(ABC):
                         signal.regime_confidence = regime_info[2]
                         # Apply regime confidence adjustment
                         regime_filters = market_regime_detector.get_regime_filter(regime_info[0])
-                        confidence_boost = regime_filters.get('confidence_boost', 0.0)
-                        signal.regime_adjusted_confidence = min(1.0, signal.confidence + confidence_boost)
+                        confidence_boost = regime_filters.get("confidence_boost", 0.0)
+                        signal.regime_adjusted_confidence = min(
+                            1.0, signal.confidence + confidence_boost
+                        )
 
                     # Track active signals
                     self.active_signals.append(signal)
@@ -378,9 +386,13 @@ class TradingBot(ABC):
             logger.error(f"Error in {self.name} analysis: {e}", exc_info=True)
             return []
 
-    def update_signal_status(self, signal_id: str, status: str,
-                           execution_price: Optional[float] = None,
-                           exit_price: Optional[float] = None) -> None:
+    def update_signal_status(
+        self,
+        signal_id: str,
+        status: str,
+        execution_price: Optional[float] = None,
+        exit_price: Optional[float] = None,
+    ) -> None:
         """Update the status of an active signal."""
         for signal in self.active_signals:
             if signal.signal_id == signal_id:
@@ -417,7 +429,9 @@ class TradingBot(ABC):
             "performance": self.performance.__dict__,
             "active_signals": len(self.active_signals),
             "total_signals_history": len(self.signal_history),
-            "last_analysis": self.last_analysis_time.isoformat() if self.last_analysis_time else None,
+            "last_analysis": self.last_analysis_time.isoformat()
+            if self.last_analysis_time
+            else None,
             "is_active": self.is_active,
         }
 
@@ -430,7 +444,9 @@ class TradingBot(ABC):
         # This would integrate with the existing market hours logic
         return True  # Placeholder
 
-    def _detect_market_regime(self, df: pd.DataFrame) -> Optional[tuple[MarketRegime, Any, float]]:
+    def _detect_market_regime(
+        self, df: pd.DataFrame
+    ) -> Optional[tuple[MarketRegime, Any, float]]:
         """Detect current market regime for regime-aware trading."""
         try:
             return market_regime_detector.detect_regime(df)
@@ -438,8 +454,9 @@ class TradingBot(ABC):
             logger.warning(f"Failed to detect market regime: {e}")
             return None
 
-    def _apply_risk_management(self, signal: TradeSignal, df: pd.DataFrame,
-                              regime_info: Optional[tuple] = None) -> TradeSignal:
+    def _apply_risk_management(
+        self, signal: TradeSignal, df: pd.DataFrame, regime_info: Optional[tuple] = None
+    ) -> TradeSignal:
         """Apply regime-aware risk management rules to the signal."""
         # Base risk amount
         risk_amount = self.config.risk_per_trade
@@ -448,7 +465,7 @@ class TradingBot(ABC):
         if regime_info:
             regime, metrics, confidence = regime_info
             regime_filters = market_regime_detector.get_regime_filter(regime)
-            risk_multiplier = regime_filters.get('risk_multiplier', 1.0)
+            risk_multiplier = regime_filters.get("risk_multiplier", 1.0)
             risk_amount *= risk_multiplier * self.config.regime_risk_multiplier
 
         # Calculate position size based on risk per trade
@@ -468,7 +485,11 @@ class TradingBot(ABC):
     def _validate_signal(self, signal: TradeSignal, regime_info: Optional[tuple] = None) -> bool:
         """Validate signal against bot configuration with regime awareness."""
         # Use regime-adjusted confidence if available
-        effective_confidence = signal.regime_adjusted_confidence if signal.regime_adjusted_confidence > 0 else signal.confidence
+        effective_confidence = (
+            signal.regime_adjusted_confidence
+            if signal.regime_adjusted_confidence > 0
+            else signal.confidence
+        )
 
         # Check confidence threshold
         if effective_confidence < self.config.min_confidence:
@@ -483,7 +504,7 @@ class TradingBot(ABC):
         if regime_info:
             regime, metrics, confidence = regime_info
             regime_filters = market_regime_detector.get_regime_filter(regime)
-            max_positions = min(max_positions, regime_filters.get('max_positions', max_positions))
+            max_positions = min(max_positions, regime_filters.get("max_positions", max_positions))
 
         if len(self.active_signals) >= max_positions:
             return False
@@ -514,7 +535,9 @@ class TradingBot(ABC):
 
             # Here you would implement webhook sending
             # For now, just log it
-            logger.info(f"ALERT: {self.name} generated {signal.direction} signal at {signal.entry_price}")
+            logger.info(
+                f"ALERT: {self.name} generated {signal.direction} signal at {signal.entry_price}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to send alert for {signal.signal_id}: {e}")
@@ -541,3 +564,4 @@ def create_bot(bot_name: str, config: BotConfig) -> TradingBot:
         raise ValueError(f"Bot '{bot_name}' not registered")
 
     return BOT_REGISTRY[bot_name](config)
+

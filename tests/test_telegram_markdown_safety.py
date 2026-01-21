@@ -7,8 +7,6 @@ to prevent Telegram Markdown parse errors.
 
 from __future__ import annotations
 
-import pytest
-
 from pearlalgo.utils.telegram_alerts import (
     escape_markdown,
     escape_subprocess_output,
@@ -23,7 +21,7 @@ class TestEscapeMarkdown:
     
     def test_escapes_underscores(self):
         """Underscores should be escaped."""
-        assert escape_markdown("nq_agent.pid") == "nq\\_agent.pid"
+        assert escape_markdown("agent_NQ.pid") == "agent\\_NQ.pid"
     
     def test_escapes_asterisks(self):
         """Asterisks should be escaped."""
@@ -55,7 +53,7 @@ class TestEscapeSubprocessOutput:
     
     def test_escapes_underscores_in_paths(self):
         """File paths with underscores should be escaped."""
-        output = "Started process from nq_agent.pid"
+        output = "Started process from agent_NQ.pid"
         escaped = escape_subprocess_output(output)
         assert "_" not in escaped or "\\_" in escaped
     
@@ -108,14 +106,14 @@ class TestEscapeSubprocessOutput:
         output = """✅ Virtual environment activated
 NQ Agent Service started in background
    PID: 12345
-   PID File: logs/nq_agent.pid
+   PID File: logs/agent_NQ.pid
 
 ⚠️  Note: Logs are not saved to file."""
         
         escaped = escape_subprocess_output(output)
         
-        # Should have escaped underscores in "nq_agent.pid"
-        assert "nq\\_agent" in escaped
+        # Should have escaped underscores in "agent_NQ.pid"
+        assert "agent\\_NQ" in escaped
         # Regular text should be present
         assert "Virtual environment activated" in escaped
         # Emojis should be preserved
@@ -128,7 +126,7 @@ class TestSafeLabel:
     
     def test_replaces_underscores_with_spaces(self):
         """Underscores should be replaced with spaces."""
-        assert safe_label("nq_agent_service") == "nq agent service"
+        assert safe_label("agent_service") == "agent service"
     
     def test_handles_empty_string(self):
         """Empty string should return empty string."""
@@ -205,8 +203,8 @@ class TestMarkdownSafetyRegression:
     def test_pid_file_path_safe(self):
         """Common PID file path patterns should be safe."""
         paths = [
-            "logs/nq_agent.pid",
-            "/home/user/nq_agent/logs/nq_agent.pid",
+            "logs/agent_NQ.pid",
+            "/home/user/agent/logs/agent_NQ.pid",
             "data/agent_state/NQ/state.json",
         ]
         
@@ -221,10 +219,10 @@ class TestMarkdownSafetyRegression:
     def test_shell_script_output_safe(self):
         """Shell script output with various markers should be safe."""
         outputs = [
-            "✅ NQ Agent Service started successfully",
+            "✅ Agent Service started successfully (NQ)",
             "⚠️ Warning: IBKR Gateway is not running",
-            "❌ Failed to start NQ Agent Service",
-            "Process PID: 12345 (nq_agent.pid)",
+            "❌ Failed to start Agent Service (NQ)",
+            "Process PID: 12345 (agent_NQ.pid)",
             "Config: config/config.yaml loaded",
         ]
         
@@ -235,14 +233,14 @@ class TestMarkdownSafetyRegression:
     
     def test_combined_message_safe(self):
         """Combined message with multiple dynamic parts should be safe."""
-        message_template = "✅ NQ Agent Service started successfully\n"
-        details = "Agent process is running\nPID File: logs/nq_agent.pid"
+        message_template = "✅ Agent Service started successfully (NQ)\n"
+        details = "Agent process is running\nPID File: logs/agent_NQ.pid"
         
         escaped_details = escape_subprocess_output(details)
         full_message = f"{message_template}\n{escaped_details}"
         
         # The full message should be safe
-        assert "\\nq\\_agent" in full_message or "nq\\_agent" in full_message
+        assert "agent\\_NQ" in full_message
 
 
 

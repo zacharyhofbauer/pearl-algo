@@ -35,9 +35,10 @@ def ensure_state_dir(state_dir: Optional[Path] = None) -> Path:
             market_label = str(market or "NQ").strip().upper()
             state_dir = Path("data") / "agent_state" / market_label
     
-    state_path = Path(state_dir)
+    state_path = Path(state_dir).expanduser()
     state_path.mkdir(parents=True, exist_ok=True)
-    return state_path
+    # Return an absolute path for consistency (tests + operators).
+    return state_path.resolve()
 
 
 def get_signals_file(state_dir: Path) -> Path:

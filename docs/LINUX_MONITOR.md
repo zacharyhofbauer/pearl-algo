@@ -44,11 +44,11 @@ cd ~/pearlalgo-dev-ai-agents
 ### Logs
 
 - Monitor log: `logs/pearl_algo_monitor.log`
-- Agent log (background mode): `logs/nq_agent.log`
+- Agent log (background mode): `logs/agent_NQ.log`
 
 ```bash
 tail -n 200 logs/pearl_algo_monitor.log
-tail -n 200 logs/nq_agent.log
+tail -n 200 logs/agent_NQ.log
 ```
 
 ### Common issues

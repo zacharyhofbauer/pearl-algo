@@ -98,7 +98,7 @@ For detailed gateway setup, see `GATEWAY.md`.
 ```bash
 ./scripts/lifecycle/agent.sh start --market NQ --background
 ```
-**Background mode:** Service runs in background with output captured to `logs/nq_agent.log`. Use this if you want to run the service detached from your terminal session.
+**Background mode:** Service runs in background with output captured to `logs/agent_NQ.log`. Use this if you want to run the service detached from your terminal session.
 
 ### Stop Service
 ```bash
@@ -108,7 +108,7 @@ For detailed gateway setup, see `GATEWAY.md`.
 pkill -f "pearlalgo.nq_agent.main"
 
 # Or using PID file:
-kill $(cat logs/nq_agent.pid) 2>/dev/null || true
+kill $(cat logs/agent_NQ.pid) 2>/dev/null || true
 ```
 
 ### Check Service Status
@@ -122,7 +122,7 @@ ps aux | grep "pearlalgo.nq_agent.main"
 ### View Logs
 **Foreground mode (default):** Logs appear directly in your terminal - no file needed.
 
-**Background mode:** Logs are written to `logs/nq_agent.log` (with basic rotation - previous log saved as `nq_agent.log.1`). View with: `tail -f logs/nq_agent.log`
+**Background mode:** Logs are written to `logs/agent_NQ.log` (with basic rotation - previous log saved as `agent_NQ.log.1`). View with: `tail -f logs/agent_NQ.log`
 
 ---
 
@@ -509,7 +509,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 
 4. **Clean up PID file:**
    ```bash
-   rm -f logs/nq_agent.pid
+   rm -f logs/agent_NQ.pid
    ```
 
 5. **Restart service:**
@@ -526,7 +526,7 @@ The status server reads from `state.json` and does not affect the trading agent.
 - `.env` - Environment variables (not in git)
 
 **Process Management:**
-- `logs/nq_agent.pid` - Process ID file (for background mode)
+- `logs/agent_NQ.pid` - Process ID file (for background mode)
 
 **State & Data:**
 - `data/agent_state/NQ/state.json` - Current service state

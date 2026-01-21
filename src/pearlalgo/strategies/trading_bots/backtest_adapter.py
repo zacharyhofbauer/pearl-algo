@@ -1,8 +1,7 @@
 """
-PEARL Bot Backtesting Adapter
+Trading Bot Backtesting Adapter
 
-Integrates PEARL bots with the existing backtesting infrastructure,
-providing comprehensive backtesting capabilities for automated trading bots.
+Integrates trading bot variants with the existing backtesting infrastructure.
 """
 
 from __future__ import annotations
@@ -17,21 +16,21 @@ from pearlalgo.strategies.nq_intraday.backtest_adapter import (
     VerificationSummary,
     _compute_verification_summary,
 )
-from pearlalgo.strategies.pearl_bots.bot_template import TradeSignal, TradingBot
+from .bot_template import TradeSignal, TradingBot
 from pearlalgo.utils.logger import logger, log_silence
 
 
 @dataclass
 class TradingBotBacktestResult:
     """Results from a trading bot backtest."""
-    
+
     bot_name: str
     total_bars: int
     total_signals: int
     total_trades: int
     winning_trades: int
     losing_trades: int
-    
+
     # Performance metrics
     win_rate: float
     total_pnl: float
@@ -43,19 +42,19 @@ class TradingBotBacktestResult:
     avg_win: float
     avg_loss: float
     avg_hold_time_minutes: float
-    
+
     # Signal metrics
     avg_confidence: float
     avg_risk_reward: float
-    
+
     # Trade journal
     trades: Optional[List[Dict]] = None
     signals: Optional[List[Dict]] = None
     skipped_signals: Optional[List[Dict]] = None
-    
+
     # Verification diagnostics
     verification: Optional[VerificationSummary] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON export."""
         return {
@@ -89,7 +88,6 @@ def _normalize_resample_rule(timeframe: str) -> str:
         return "5min"
     if tf.endswith("m") and tf[:-1].isdigit():
         return f"{int(tf[:-1])}min"
-    # Fallback: assume caller passed a valid pandas rule
     return timeframe
 
 
@@ -112,12 +110,12 @@ def _resample_ohlcv(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
 
 class TradingBotBacktestAdapter:
     """
-    Backtesting adapter for PEARL bots.
-    
+    Backtesting adapter for trading bots.
+
     Integrates trading bot variants with the existing TradeSimulator infrastructure
     to provide comprehensive backtesting capabilities.
     """
-    
+
     def __init__(
         self,
         bot: TradingBot,
@@ -129,19 +127,6 @@ class TradingBotBacktestAdapter:
         max_contracts: int = 10,
         max_stop_points: Optional[float] = None,
     ):
-        """
-        Initialize backtest adapter.
-        
-        Args:
-            bot: TradingBot instance to backtest
-            tick_value: Dollar value per point
-            slippage_ticks: Slippage in ticks
-            max_concurrent_trades: Maximum concurrent positions
-            account_balance: Account balance for risk-based sizing
-            max_risk_per_trade: Max risk per trade as fraction
-            max_contracts: Maximum contracts per trade
-            max_stop_points: Maximum allowed stop distance in points
-        """
         self.bot = bot
         self.tick_value = tick_value
         self.slippage_ticks = slippage_ticks
@@ -150,10 +135,9 @@ class TradingBotBacktestAdapter:
         self.max_risk_per_trade = max_risk_per_trade
         self.max_contracts = max_contracts
         self.max_stop_points = max_stop_points
-        
-        # Reset bot performance for clean backtest
+
         self.bot.reset_performance()
-    
+
     def run_backtest(
         self,
         df: pd.DataFrame,
@@ -161,18 +145,6 @@ class TradingBotBacktestAdapter:
         return_signals: bool = True,
         return_trades: bool = True,
     ) -> TradingBotBacktestResult:
-        """
-        Run backtest on historical data.
-        
-        Args:
-            df: OHLCV DataFrame with DateTimeIndex
-            timeframe: Timeframe string (e.g., "5m", "1m")
-            return_signals: Include signals in result
-            return_trades: Include trades in result
-            
-        Returns:
-            TradingBotBacktestResult with comprehensive metrics
-        """
         if df.empty:
             return TradingBotBacktestResult(
                 bot_name=self.bot.name,
@@ -194,8 +166,7 @@ class TradingBotBacktestAdapter:
                 avg_confidence=0.0,
                 avg_risk_reward=0.0,
             )
-        
-        # Ensure sorted and resample (historical datasets are 1m; bots default to 5m logic)
+
         df = df.sort_index()
         df_tf = _resample_ohlcv(df, timeframe=timeframe)
 
@@ -221,13 +192,6 @@ class TradingBotBacktestAdapter:
                 avg_risk_reward=0.0,
             )
 
-        # Precompute indicators ONCE for speed.
-        #
-        # Some indicator suites return a full computed dataframe under key "df"
-        # (e.g., mean reversion / breakout). Others intentionally do NOT return
-        # the full dataframe for memory reasons (e.g., cached trend follower).
-        # For backtests, we need the full indicator series; so we fall back to
-        # a suite-provided internal method if available.
         indicator_suite = self.bot.get_indicator_suite()
         df_ind: pd.DataFrame
         try:
@@ -247,7 +211,6 @@ class TradingBotBacktestAdapter:
             else:
                 df_ind = df_tf.copy()
 
-        # Generate signals bar-by-bar without recomputing rolling indicators.
         signals: List[TradeSignal] = []
         signal_dicts: List[Dict] = []
         confidences: List[float] = []
@@ -265,7 +228,6 @@ class TradingBotBacktestAdapter:
                 indicators: Dict[str, Any]
 
                 if st == "composite":
-                    # Composite bot needs full window to build multi-timeframe context.
                     try:
                         bot_out = self.bot.analyze({"df": window.copy(), "_backtest": True})
                     except Exception:
@@ -273,7 +235,6 @@ class TradingBotBacktestAdapter:
                     if not bot_out:
                         continue
 
-                    # Take the highest-confidence candidate for this bar
                     try:
                         signal = max(bot_out, key=lambda s: float(getattr(s, "confidence", 0.0) or 0.0))
                     except Exception:
@@ -345,14 +306,13 @@ class TradingBotBacktestAdapter:
                         "bb_position": float(row.get("bb_position", 0.5)),
                     }
                 else:
-                    # Unknown bot type: skip (backtest adapter expects known PEARL bots)
+                    # Unknown bot type: skip (backtest adapter expects known variants)
                     continue
 
                 signal = self.bot.generate_signal_logic(window, indicators)
                 if signal is None:
                     continue
 
-                # Ensure timestamps match the dataframe index for TradeSimulator equality checks.
                 try:
                     signal.timestamp = ts
                 except Exception:
@@ -360,7 +320,6 @@ class TradingBotBacktestAdapter:
 
                 signal = self.bot._apply_risk_management(signal, window)
 
-                # Basic validation (avoid max_positions blocking during backtests).
                 if signal.confidence < float(self.bot.config.min_confidence):
                     continue
                 if float(getattr(signal, "risk_reward_ratio", 0.0) or 0.0) < 1.0:
@@ -375,21 +334,21 @@ class TradingBotBacktestAdapter:
                 if rr > 0:
                     risk_rewards.append(rr)
 
-        # Convert signals to format expected by TradeSimulator
         simulator_signals: List[Dict] = []
         for signal in signals:
-            simulator_signals.append({
-                "timestamp": signal.timestamp.isoformat(),
-                "type": signal.bot_name,
-                "direction": signal.direction,
-                "confidence": signal.confidence,
-                "entry_price": signal.entry_price,
-                "stop_loss": signal.stop_loss,
-                "take_profit": signal.take_profit,
-                "signal_id": signal.signal_id,
-            })
-        
-        # Run trade simulation
+            simulator_signals.append(
+                {
+                    "timestamp": signal.timestamp.isoformat(),
+                    "type": signal.bot_name,
+                    "direction": signal.direction,
+                    "confidence": signal.confidence,
+                    "entry_price": signal.entry_price,
+                    "stop_loss": signal.stop_loss,
+                    "take_profit": signal.take_profit,
+                    "signal_id": signal.signal_id,
+                }
+            )
+
         simulator = TradeSimulator(
             tick_value=self.tick_value,
             slippage_ticks=self.slippage_ticks,
@@ -399,19 +358,16 @@ class TradingBotBacktestAdapter:
             max_contracts=self.max_contracts,
             max_stop_points=self.max_stop_points,
         )
-        
+
         with log_silence():
             closed_trades, metrics = simulator.simulate(df_tf, simulator_signals, position_size=1)
-        
-        # Calculate averages
+
         avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
         avg_rr = sum(risk_rewards) / len(risk_rewards) if risk_rewards else 0.0
-        
-        # Convert trades to dict format
+
         trades_list = [t.to_dict() for t in closed_trades] if return_trades else None
         skipped_list = [s.to_dict() for s in simulator.skipped_signals] if return_trades else None
-        
-        # Compute verification summary
+
         bottleneck_counts: Dict[str, int] = {}
         verification = _compute_verification_summary(
             signals=signal_dicts,
@@ -419,11 +375,10 @@ class TradingBotBacktestAdapter:
             bottleneck_counts=bottleneck_counts,
             gate_reasons=[],
         )
-        
-        # Calculate max drawdown percentage
+
         max_equity = max(simulator.equity_curve) if simulator.equity_curve else 0
         max_dd_pct = (metrics["max_drawdown"] / max_equity * 100) if max_equity > 0 else 0.0
-        
+
         return TradingBotBacktestResult(
             bot_name=self.bot.name,
             total_bars=len(df_tf),
@@ -437,7 +392,7 @@ class TradingBotBacktestAdapter:
             max_drawdown=metrics["max_drawdown"],
             max_drawdown_pct=max_dd_pct,
             sharpe_ratio=metrics["sharpe_ratio"],
-            sortino_ratio=0.0,  # Not calculated by TradeSimulator
+            sortino_ratio=0.0,
             avg_win=metrics["avg_win"],
             avg_loss=metrics["avg_loss"],
             avg_hold_time_minutes=metrics["avg_hold_time_minutes"],
@@ -463,25 +418,6 @@ def backtest_trading_bot(
     return_signals: bool = True,
     return_trades: bool = True,
 ) -> TradingBotBacktestResult:
-    """
-    Convenience function to backtest a trading bot variant.
-    
-    Args:
-        bot: TradingBot instance
-        df: OHLCV DataFrame
-        tick_value: Dollar value per point
-        slippage_ticks: Slippage in ticks
-        max_concurrent_trades: Max concurrent positions
-        account_balance: Account balance for risk sizing
-        max_risk_per_trade: Max risk per trade fraction
-        max_contracts: Max contracts per trade
-        max_stop_points: Max stop distance cap
-        return_signals: Include signals in result
-        return_trades: Include trades in result
-        
-    Returns:
-        TradingBotBacktestResult
-    """
     adapter = TradingBotBacktestAdapter(
         bot=bot,
         tick_value=tick_value,
@@ -492,9 +428,6 @@ def backtest_trading_bot(
         max_contracts=max_contracts,
         max_stop_points=max_stop_points,
     )
-    
-    return adapter.run_backtest(
-        df=df,
-        return_signals=return_signals,
-        return_trades=return_trades,
-    )
+
+    return adapter.run_backtest(df=df, return_signals=return_signals, return_trades=return_trades)
+

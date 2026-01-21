@@ -24,20 +24,19 @@ from .composite_bot import CompositeBot, PearlAutoBot
 
 __all__ = [
     # Base classes
-    'TradingBot',
-    'BotConfig',
-    'TradeSignal',
-    'BotPerformance',
-    'IndicatorSuite',
-
+    "TradingBot",
+    "BotConfig",
+    "TradeSignal",
+    "BotPerformance",
+    "IndicatorSuite",
     # Factory functions
-    'create_bot',
-    'register_bot',
-
+    "create_bot",
+    "register_bot",
     # Bot implementations
-    'TrendFollowerBot',
-    'BreakoutBot',
-    'MeanReversionBot',
-    'CompositeBot',
-    'PearlAutoBot',
+    "TrendFollowerBot",
+    "BreakoutBot",
+    "MeanReversionBot",
+    "CompositeBot",
+    "PearlAutoBot",
 ]
+

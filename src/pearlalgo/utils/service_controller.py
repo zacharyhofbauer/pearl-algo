@@ -262,8 +262,6 @@ class ServiceController:
                 check=False,
             )
 
-            success = result.returncode == 0
-
             # Verify it started
             await asyncio.sleep(3)
             is_running = self._is_agent_running(market=market)
@@ -354,22 +352,6 @@ class ServiceController:
                         return True
                 except Exception:
                     pass
-
-            # Backward compatibility: legacy NQ PID file
-            if market_upper == "NQ":
-                legacy_pid_file = self.project_root / "logs" / "nq_agent.pid"
-                if legacy_pid_file.exists():
-                    try:
-                        pid = int(legacy_pid_file.read_text().strip())
-                        result = subprocess.run(
-                            ["ps", "-p", str(pid)],
-                            capture_output=True,
-                            timeout=5,
-                        )
-                        if result.returncode == 0:
-                            return True
-                    except Exception:
-                        pass
 
             # Fallback: check by process name (non-specific)
             result = subprocess.run(
@@ -511,15 +493,10 @@ class ServiceController:
             return {"success": False, "message": "❌ Failed to tail log", "details": str(e)}
 
     def tail_agent_log(self, market: str = "NQ", lines: int = 200) -> Dict[str, Any]:
-        """Tail the market-specific agent log (or legacy NQ log)."""
+        """Tail the market-specific agent log."""
         market_upper = str(market).upper()
         log_filename = f"agent_{market_upper}.log"
-        result = self.tail_log(log_filename, lines=lines)
-        if result.get("success"):
-            return result
-        if market_upper == "NQ":
-            return self.tail_log("nq_agent.log", lines=lines)
-        return result
+        return self.tail_log(log_filename, lines=lines)
 
     async def check_api_ready(self) -> Dict[str, Any]:
         """Check whether IBKR Gateway API is ready (script if present, else port probe)."""

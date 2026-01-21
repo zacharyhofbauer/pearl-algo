@@ -1,5 +1,5 @@
 """
-Market Regime Detection for PEARL Bots
+Market Regime Detection for Trading Bots
 
 Classifies market conditions to enable regime-aware trading strategies:
 - trending_bull: Strong upward trends
@@ -12,7 +12,7 @@ Classifies market conditions to enable regime-aware trading strategies:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 from enum import Enum
 import pandas as pd
 import numpy as np
@@ -22,6 +22,7 @@ from pearlalgo.utils.logger import logger
 
 class MarketRegime(Enum):
     """Market regime classifications."""
+
     TRENDING_BULL = "trending_bull"
     TRENDING_BEAR = "trending_bear"
     RANGING = "ranging"
@@ -32,6 +33,7 @@ class MarketRegime(Enum):
 @dataclass
 class RegimeMetrics:
     """Metrics used for regime classification."""
+
     adx: float  # Trend strength (0-100)
     trend_direction: int  # -1, 0, 1
     volatility_ratio: float  # Current vs historical volatility
@@ -89,30 +91,52 @@ class MarketRegimeDetector:
         adx = self._calculate_adx(df)
 
         # Trend direction from moving averages
-        fast_ma = df['close'].rolling(20).mean()
-        slow_ma = df['close'].rolling(50).mean()
-        trend_direction = 1 if fast_ma.iloc[-1] > slow_ma.iloc[-1] else -1 if fast_ma.iloc[-1] < slow_ma.iloc[-1] else 0
+        fast_ma = df["close"].rolling(20).mean()
+        slow_ma = df["close"].rolling(50).mean()
+        trend_direction = (
+            1
+            if fast_ma.iloc[-1] > slow_ma.iloc[-1]
+            else -1
+            if fast_ma.iloc[-1] < slow_ma.iloc[-1]
+            else 0
+        )
 
         # Volatility analysis
-        current_volatility = df['close'].pct_change().rolling(self.volatility_lookback).std().iloc[-1]
-        historical_volatility = df['close'].pct_change().rolling(self.volatility_lookback * 4).std().iloc[-1]
-        volatility_ratio = current_volatility / historical_volatility if historical_volatility > 0 else 1.0
+        current_volatility = (
+            df["close"].pct_change().rolling(self.volatility_lookback).std().iloc[-1]
+        )
+        historical_volatility = (
+            df["close"]
+            .pct_change()
+            .rolling(self.volatility_lookback * 4)
+            .std()
+            .iloc[-1]
+        )
+        volatility_ratio = (
+            current_volatility / historical_volatility if historical_volatility > 0 else 1.0
+        )
 
         # Range vs ATR analysis
-        daily_range = (df['high'] - df['low']).rolling(20).mean().iloc[-1]
+        daily_range = (df["high"] - df["low"]).rolling(20).mean().iloc[-1]
         atr = self._calculate_atr(df)
         range_ratio = daily_range / atr if atr > 0 else 1.0
 
         # Momentum consistency
-        momentum = df['close'].pct_change(self.momentum_period)
-        momentum_consistency = abs(momentum.rolling(20).mean().iloc[-1]) / momentum.rolling(20).std().iloc[-1] if momentum.rolling(20).std().iloc[-1] > 0 else 0.0
+        momentum = df["close"].pct_change(self.momentum_period)
+        mom_std = momentum.rolling(20).std().iloc[-1]
+        momentum_consistency = (
+            abs(momentum.rolling(20).mean().iloc[-1]) / mom_std if mom_std > 0 else 0.0
+        )
 
         # Volume trend (if volume data available)
         volume_trend = 0.0
-        if 'volume' in df.columns:
-            volume_ma_short = df['volume'].rolling(10).mean()
-            volume_ma_long = df['volume'].rolling(30).mean()
-            volume_trend = (volume_ma_short.iloc[-1] - volume_ma_long.iloc[-1]) / volume_ma_long.iloc[-1] if volume_ma_long.iloc[-1] > 0 else 0.0
+        if "volume" in df.columns:
+            volume_ma_short = df["volume"].rolling(10).mean()
+            volume_ma_long = df["volume"].rolling(30).mean()
+            denom = volume_ma_long.iloc[-1]
+            volume_trend = (
+                (volume_ma_short.iloc[-1] - volume_ma_long.iloc[-1]) / denom if denom > 0 else 0.0
+            )
 
         return RegimeMetrics(
             adx=adx,
@@ -121,25 +145,27 @@ class MarketRegimeDetector:
             range_ratio=range_ratio,
             momentum_consistency=momentum_consistency,
             volume_trend=volume_trend,
-            confidence=0.0  # Will be set by classifier
+            confidence=0.0,  # Will be set by classifier
         )
 
     def _calculate_adx(self, df: pd.DataFrame) -> float:
         """Calculate Average Directional Index (ADX)."""
         # True Range
-        high_low = df['high'] - df['low']
-        high_close = (df['high'] - df['close'].shift(1)).abs()
-        low_close = (df['low'] - df['close'].shift(1)).abs()
+        high_low = df["high"] - df["low"]
+        high_close = (df["high"] - df["close"].shift(1)).abs()
+        low_close = (df["low"] - df["close"].shift(1)).abs()
         tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
 
         # Directional Movement
         plus_dm = np.where(
-            (df['high'] - df['high'].shift(1)) > (df['low'].shift(1) - df['low']),
-            np.maximum(df['high'] - df['high'].shift(1), 0), 0
+            (df["high"] - df["high"].shift(1)) > (df["low"].shift(1) - df["low"]),
+            np.maximum(df["high"] - df["high"].shift(1), 0),
+            0,
         )
         minus_dm = np.where(
-            (df['low'].shift(1) - df['low']) > (df['high'] - df['high'].shift(1)),
-            np.maximum(df['low'].shift(1) - df['low'], 0), 0
+            (df["low"].shift(1) - df["low"]) > (df["high"] - df["high"].shift(1)),
+            np.maximum(df["low"].shift(1) - df["low"], 0),
+            0,
         )
 
         # Smoothed calculations
@@ -153,16 +179,16 @@ class MarketRegimeDetector:
         dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
         adx = dx.rolling(self.adx_period).mean()
 
-        return adx.iloc[-1] if not pd.isna(adx.iloc[-1]) else 0.0
+        return float(adx.iloc[-1]) if not pd.isna(adx.iloc[-1]) else 0.0
 
     def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> float:
         """Calculate Average True Range."""
-        high_low = df['high'] - df['low']
-        high_close = (df['high'] - df['close'].shift(1)).abs()
-        low_close = (df['low'] - df['close'].shift(1)).abs()
+        high_low = df["high"] - df["low"]
+        high_close = (df["high"] - df["close"].shift(1)).abs()
+        low_close = (df["low"] - df["close"].shift(1)).abs()
         tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
         atr = tr.rolling(period).mean()
-        return atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else 0.0
+        return float(atr.iloc[-1]) if not pd.isna(atr.iloc[-1]) else 0.0
 
     def _classify_regime(self, metrics: RegimeMetrics) -> tuple[MarketRegime, float]:
         """
@@ -178,23 +204,27 @@ class MarketRegimeDetector:
         }
 
         # Trending Bull conditions
-        if (metrics.adx > self.trend_strength_threshold and
-            metrics.trend_direction > 0 and
-            metrics.momentum_consistency > self.momentum_consistency_threshold):
+        if (
+            metrics.adx > self.trend_strength_threshold
+            and metrics.trend_direction > 0
+            and metrics.momentum_consistency > self.momentum_consistency_threshold
+        ):
             scores[MarketRegime.TRENDING_BULL] = (
-                0.4 * min(metrics.adx / 50.0, 1.0) +  # ADX strength
-                0.3 * metrics.momentum_consistency +   # Momentum consistency
-                0.3 * (1.0 - metrics.volatility_ratio)  # Lower volatility bonus
+                0.4 * min(metrics.adx / 50.0, 1.0)  # ADX strength
+                + 0.3 * metrics.momentum_consistency  # Momentum consistency
+                + 0.3 * (1.0 - metrics.volatility_ratio)  # Lower volatility bonus
             )
 
         # Trending Bear conditions
-        if (metrics.adx > self.trend_strength_threshold and
-            metrics.trend_direction < 0 and
-            metrics.momentum_consistency > self.momentum_consistency_threshold):
+        if (
+            metrics.adx > self.trend_strength_threshold
+            and metrics.trend_direction < 0
+            and metrics.momentum_consistency > self.momentum_consistency_threshold
+        ):
             scores[MarketRegime.TRENDING_BEAR] = (
-                0.4 * min(metrics.adx / 50.0, 1.0) +  # ADX strength
-                0.3 * metrics.momentum_consistency +   # Momentum consistency
-                0.3 * (1.0 - metrics.volatility_ratio)  # Lower volatility bonus
+                0.4 * min(metrics.adx / 50.0, 1.0)
+                + 0.3 * metrics.momentum_consistency
+                + 0.3 * (1.0 - metrics.volatility_ratio)
             )
 
         # Volatile conditions (high volatility regardless of trend)
@@ -202,20 +232,20 @@ class MarketRegimeDetector:
             scores[MarketRegime.VOLATILE] = min(metrics.volatility_ratio / 2.0, 1.0)
 
         # Ranging conditions (low trend strength, low volatility)
-        if (metrics.adx < self.trend_strength_threshold * 0.5 and
-            metrics.volatility_ratio < 1.2 and
-            metrics.range_ratio < 1.5):
+        if (
+            metrics.adx < self.trend_strength_threshold * 0.5
+            and metrics.volatility_ratio < 1.2
+            and metrics.range_ratio < 1.5
+        ):
             scores[MarketRegime.RANGING] = (
-                0.4 * (1.0 - metrics.adx / 50.0) +      # Low ADX
-                0.3 * (1.0 - metrics.volatility_ratio) +  # Low volatility
-                0.3 * (1.0 - metrics.momentum_consistency) # Inconsistent momentum
+                0.4 * (1.0 - metrics.adx / 50.0)  # Low ADX
+                + 0.3 * (1.0 - metrics.volatility_ratio)  # Low volatility
+                + 0.3 * (1.0 - metrics.momentum_consistency)  # Inconsistent momentum
             )
 
-        # Find the regime with highest score
         best_regime = max(scores.items(), key=lambda x: x[1])
-        confidence = best_regime[1]
+        confidence = float(best_regime[1])
 
-        # If no regime scores above threshold, classify as mixed
         if confidence < 0.3:
             return MarketRegime.MIXED, confidence
 
@@ -230,7 +260,7 @@ class MarketRegimeDetector:
             range_ratio=1.0,
             momentum_consistency=0.0,
             volume_trend=0.0,
-            confidence=0.0
+            confidence=0.0,
         )
 
     def get_regime_filter(self, regime: MarketRegime) -> Dict[str, Any]:
@@ -279,7 +309,7 @@ class MarketRegimeDetector:
                 "max_positions": 1,
                 "risk_multiplier": 0.7,
                 "confidence_boost": 0.0,
-            }
+            },
         }
 
         return filters.get(regime, filters[MarketRegime.MIXED])
@@ -287,3 +317,4 @@ class MarketRegimeDetector:
 
 # Global instance for reuse
 market_regime_detector = MarketRegimeDetector()
+

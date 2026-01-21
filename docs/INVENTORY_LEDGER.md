@@ -60,7 +60,7 @@ Purpose: File-by-file keep/merge/delete decisions with proofs
 | File | Decision | Role | Referenced By |
 |------|----------|------|---------------|
 | `strategies/nq_intraday/*.py` | KEEP | Core strategy logic | service, tests |
-| `strategies/pearl_bots/*.py` | KEEP | Trading bot variants + backtest harness | telegram, backtest |
+| `strategies/trading_bots/*.py` | KEEP | Trading bot variants + backtest harness | telegram, backtest |
 | `strategies/trading_bot_manager.py` | KEEP | Single trading bot manager integration | signal_generator, telegram |
 | `strategies/agent_manager.py` | **DELETED** | Unused multi-agent scaffold | None (deleted) |
 

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.utils.logger import logger
 
-from .pearl_bots import (
+from .trading_bots import (
     BotConfig,
     BreakoutBot,
     MeanReversionBot,

@@ -14,7 +14,7 @@ from __future__ import annotations
 import tempfile
 import types
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -130,7 +130,7 @@ class TestPathBlocking:
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
         assert handler._is_path_blocked("DATA/state.json") is True
-        assert handler._is_path_blocked("LOGS/nq_agent.log") is True
+        assert handler._is_path_blocked("LOGS/agent_NQ.log") is True
         assert handler._is_path_blocked(".ENV") is True
 
 

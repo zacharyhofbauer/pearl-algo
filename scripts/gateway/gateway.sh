@@ -415,13 +415,13 @@ cmd_tws_conflict() {
 
   echo ""
 
-  if [ -f "logs/nq_agent.log" ]; then
-    ERROR_162_COUNT="$(grep -c "Error 162\|TWS session\|different IP" logs/nq_agent.log 2>/dev/null || echo "0")"
+  if [ -f "logs/agent_NQ.log" ]; then
+    ERROR_162_COUNT="$(grep -c "Error 162\|TWS session\|different IP" logs/agent_NQ.log 2>/dev/null || echo "0")"
     ERROR_162_COUNT="$(echo "$ERROR_162_COUNT" | tr -d '\n' | head -1)"
     if [ -n "$ERROR_162_COUNT" ] && [ "$ERROR_162_COUNT" -gt 0 ] 2>/dev/null; then
       echo "⚠️  Error 162 detected in logs ($ERROR_162_COUNT occurrences)"
       echo "   Recent occurrences:"
-      grep "Error 162\|TWS session\|different IP" logs/nq_agent.log | tail -3 | sed 's/^/   /'
+      grep "Error 162\|TWS session\|different IP" logs/agent_NQ.log | tail -3 | sed 's/^/   /'
       echo ""
       echo "💡 This indicates a TWS/Gateway IP conflict."
     else

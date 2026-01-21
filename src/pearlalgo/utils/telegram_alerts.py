@@ -330,7 +330,7 @@ def escape_subprocess_output(text: str) -> str:
     Escape subprocess/shell output for safe inclusion in Telegram Markdown messages.
     
     This is more aggressive than escape_markdown() since subprocess output can contain
-    arbitrary characters including file paths (nq_agent.pid), shell escape sequences, etc.
+    arbitrary characters including file paths (agent_NQ.pid), shell escape sequences, etc.
     
     For reliability, we strip ANSI escape sequences and escape Markdown-sensitive chars.
     """
@@ -428,7 +428,7 @@ def format_next_session_time(
         return "Menu → Settings → Config"
     
     try:
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta
         import pytz
         
         et_tz = pytz.timezone('US/Eastern')
@@ -547,7 +547,7 @@ def format_signal_action_cue(
     if status_lower == "generated":
         return f"⏳ Monitor for {dir_action} entry at target price"
     elif status_lower == "entered":
-        return f"🎯 Position ACTIVE - Watch stop/TP levels"
+        return "🎯 Position ACTIVE - Watch stop/TP levels"
     elif status_lower == "exited":
         return "✅ Trade completed - Review performance"
     elif status_lower == "expired":
@@ -574,7 +574,7 @@ def format_signal_timing(
         return ""
     
     try:
-        from datetime import datetime, timezone
+        from datetime import timezone
         import pytz
         from pearlalgo.utils.paths import parse_utc_timestamp
         
@@ -1459,7 +1459,7 @@ def format_home_card(
             win_rate = performance.get("win_rate", 0.0) * 100
             total_pnl = performance.get("total_pnl", 0.0)
             lines.append("")  # Blank line
-            lines.append(f"*7d Performance:*")
+            lines.append("*7d Performance:*")
             lines.append(
                 format_performance_line(
                     wins,
@@ -1967,7 +1967,6 @@ class TelegramAlerts:
         """
         side_emoji = "🟢" if side.lower() == "long" else "🔴"
         side_text = side.upper()
-        sep = _format_separator(25)
 
         # Check if this is an options signal
         is_options = option_symbol is not None or option_type is not None
@@ -2165,7 +2164,7 @@ class TelegramAlerts:
         """
         loss_pct = abs((stop_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
 
-        message = f"🛑 *Stop Loss Hit*\n\n"
+        message = "🛑 *Stop Loss Hit*\n\n"
         message += f"*Symbol:* {symbol}\n"
         message += f"*Direction:* {direction.upper()}\n"
         message += f"*Entry:* ${entry_price:,.2f}\n"
@@ -2197,7 +2196,7 @@ class TelegramAlerts:
         """
         profit_pct = abs((target_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
 
-        message = f"🎯 *Take Profit Hit*\n\n"
+        message = "🎯 *Take Profit Hit*\n\n"
         message += f"*Symbol:* {symbol}\n"
         message += f"*Direction:* {direction.upper()}\n"
         message += f"*Entry:* ${entry_price:,.2f}\n"

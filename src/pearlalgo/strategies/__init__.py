@@ -11,7 +11,7 @@ from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 
 # Import PEARL automated bots
-from .pearl_bots import (
+from .trading_bots import (
     TradingBot,
     BotConfig,
     create_bot,

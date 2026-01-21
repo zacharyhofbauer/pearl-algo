@@ -19,6 +19,12 @@ from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner
 from pearlalgo.strategies.nq_intraday.signal_quality import SignalQualityScorer
 
+# Trading bot integration (single-bot runtime). Kept as a module-level accessor so tests can monkeypatch it.
+def get_trading_bot_manager():  # type: ignore[no-untyped-def]
+    from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager as _get_trading_bot_manager
+
+    return _get_trading_bot_manager()
+
 # Central policy layer (v2.1): single place for allow/deny rules (min_conf, min_rr, regime/session)
 try:
     from pearlalgo.policy.signal_policy import SignalPolicy
@@ -637,7 +643,6 @@ class NQSignalGenerator:
         # Optional: run selected trading bot (single source of truth).
         if self._trading_bot_enabled:
             try:
-                from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager
                 bot_manager = get_trading_bot_manager()
                 trading_signals = bot_manager.analyze(market_data)
                 raw_signals = trading_signals or []
@@ -1698,7 +1703,6 @@ class NQSignalGenerator:
         """Restore recent signals from signals file on startup."""
         try:
             from pearlalgo.utils.paths import ensure_state_dir, get_signals_file
-            from pathlib import Path
             import json
             
             state_dir = ensure_state_dir()

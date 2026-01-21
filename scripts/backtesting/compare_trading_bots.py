@@ -25,8 +25,8 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
-from pearlalgo.strategies.pearl_bots import BotConfig, create_bot  # noqa: E402
-from pearlalgo.strategies.pearl_bots.backtest_adapter import backtest_trading_bot  # noqa: E402
+from pearlalgo.strategies.trading_bots import BotConfig, create_bot  # noqa: E402
+from pearlalgo.strategies.trading_bots.backtest_adapter import backtest_trading_bot  # noqa: E402
 
 
 ALL_BOTS = ["PearlAutoBot", "TrendFollowerBot", "BreakoutBot", "MeanReversionBot"]

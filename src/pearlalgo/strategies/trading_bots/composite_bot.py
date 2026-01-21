@@ -15,9 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
 from pearlalgo.strategies.nq_intraday.indicators import get_enabled_indicators
@@ -63,18 +62,19 @@ class CompositeBot(TradingBot):
         self._suite = CompositeIndicatorSuite()
         self._mtf = MTFAnalyzer()
 
-        # Indicator modules (configurable)
-        indicators_cfg = self.config.parameters.get("indicators", {}) if isinstance(self.config.parameters, dict) else {}
+        indicators_cfg = (
+            self.config.parameters.get("indicators", {})
+            if isinstance(self.config.parameters, dict)
+            else {}
+        )
         cfg_for_loader = {"indicators": indicators_cfg} if indicators_cfg else None
         self._indicators = get_enabled_indicators(cfg_for_loader)
 
-        # Timeframes
         tfs = []
         if isinstance(self.config.parameters, dict):
             tfs = list(self.config.parameters.get("timeframes") or [])
         self._timeframes = self._normalize_timeframes([self.config.timeframe] + tfs)
 
-        # Controls
         self._max_candidates = int(self.config.parameters.get("max_candidates", 3) or 3)
         self._require_alignment = bool(self.config.parameters.get("require_mtf_alignment", True))
 
@@ -107,7 +107,6 @@ class CompositeBot(TradingBot):
 
         backtest_mode = bool(market_data.get("_backtest", False))
 
-        # Market filters + regime filters (reuse base behaviors)
         if not self._passes_market_filters(df_raw):
             return []
 
@@ -117,27 +116,39 @@ class CompositeBot(TradingBot):
             if regime_info and regime_info[0].value not in self.config.allowed_regimes:
                 return []
 
-        # Timeframe context (best-effort; resampling requires a datetime index)
         df_base = self._ensure_datetime_index(df_raw)
         if df_base is None or df_base.empty:
-            # Fallback: run only on raw df without resampling
-            return self._analyze_single_df(df_raw, mtf=None, regime_info=regime_info, backtest_mode=backtest_mode)
+            return self._analyze_single_df(
+                df_raw, mtf=None, regime_info=regime_info, backtest_mode=backtest_mode
+            )
 
         df_5m = market_data.get("df_5m") if isinstance(market_data.get("df_5m"), pd.DataFrame) else None
         df_15m = market_data.get("df_15m") if isinstance(market_data.get("df_15m"), pd.DataFrame) else None
 
-        df_5m_idx = self._ensure_datetime_index(df_5m) if df_5m is not None and not df_5m.empty else self._resample(df_base, "5m")
-        df_15m_idx = self._ensure_datetime_index(df_15m) if df_15m is not None and not df_15m.empty else self._resample(df_base, "15m")
+        df_5m_idx = (
+            self._ensure_datetime_index(df_5m)
+            if df_5m is not None and not df_5m.empty
+            else self._resample(df_base, "5m")
+        )
+        df_15m_idx = (
+            self._ensure_datetime_index(df_15m)
+            if df_15m is not None and not df_15m.empty
+            else self._resample(df_base, "15m")
+        )
 
         mtf = None
         try:
-            if df_5m_idx is not None and df_15m_idx is not None and (not df_5m_idx.empty) and (not df_15m_idx.empty):
+            if (
+                df_5m_idx is not None
+                and df_15m_idx is not None
+                and (not df_5m_idx.empty)
+                and (not df_15m_idx.empty)
+            ):
                 mtf = self._mtf.analyze(df_5m_idx, df_15m_idx)
         except Exception as e:
             logger.debug(f"CompositeBot MTF analyze failed: {e}")
             mtf = None
 
-        # Evaluate candidate signals on selected entry timeframes (smallest N timeframes)
         entry_timeframes = self._timeframes[: max(1, min(len(self._timeframes), 3))]
         candidates: List[TradeSignal] = []
 
@@ -145,9 +156,10 @@ class CompositeBot(TradingBot):
             df_tf = df_base if tf == self.config.timeframe else self._resample(df_base, tf)
             if df_tf is None or df_tf.empty:
                 continue
-            candidates.extend(self._analyze_df_for_signals(df_tf, entry_tf=tf, mtf=mtf, regime_info=regime_info))
+            candidates.extend(
+                self._analyze_df_for_signals(df_tf, entry_tf=tf, mtf=mtf, regime_info=regime_info)
+            )
 
-        # BOS on 5m structure (single candidate)
         if df_5m_idx is not None and not df_5m_idx.empty:
             bos_sig = self._bos_candidate(df_5m_idx, mtf=mtf)
             if bos_sig is not None:
@@ -156,18 +168,15 @@ class CompositeBot(TradingBot):
         if not candidates:
             return []
 
-        # Rank by confidence and return top-N (default 1)
         candidates = sorted(candidates, key=lambda s: float(s.confidence), reverse=True)
         chosen = candidates[: max(1, self._max_candidates)]
 
-        # Apply risk management + validation + state tracking (skip state tracking in backtests)
         out: List[TradeSignal] = []
         for sig in chosen:
             sig = self._apply_risk_management(sig, df_base, regime_info)
             if not self._validate_signal(sig, regime_info):
                 continue
 
-            # Attach regime fields expected by telemetry / downstream formatting.
             if regime_info:
                 try:
                     sig.market_regime = str(getattr(regime_info[0], "value", "") or "")
@@ -177,7 +186,6 @@ class CompositeBot(TradingBot):
                     sig.regime_confidence = float(regime_info[2] or 0.0)
                 except Exception:
                     sig.regime_confidence = 0.0
-                # Keep default regime_adjusted_confidence = 0 unless you add explicit boosts.
 
             if not backtest_mode:
                 self.active_signals.append(sig)
@@ -198,8 +206,9 @@ class CompositeBot(TradingBot):
         regime_info: Optional[tuple],
         backtest_mode: bool,
     ) -> List[TradeSignal]:
-        # No resampling possible; run indicators on the provided dataframe only.
-        candidates = self._analyze_df_for_signals(df, entry_tf=self.config.timeframe, mtf=mtf, regime_info=regime_info)
+        candidates = self._analyze_df_for_signals(
+            df, entry_tf=self.config.timeframe, mtf=mtf, regime_info=regime_info
+        )
         if not candidates:
             return []
         candidates = sorted(candidates, key=lambda s: float(s.confidence), reverse=True)
@@ -250,7 +259,9 @@ class CompositeBot(TradingBot):
                 if sig is not None:
                     indicator_signals.append((ind.name, sig))
             except Exception as e:
-                logger.debug(f"CompositeBot indicator failed: {getattr(ind, 'name', type(ind).__name__)}: {e}")
+                logger.debug(
+                    f"CompositeBot indicator failed: {getattr(ind, 'name', type(ind).__name__)}: {e}"
+                )
                 continue
 
         out: List[TradeSignal] = []
@@ -296,15 +307,12 @@ class CompositeBot(TradingBot):
         for s in signals:
             d = 1 if s.direction == "long" else -1
 
-            # Alignment gating
             if self._require_alignment and align == "conflicting" and (d5 * d < 0 or d15 * d < 0):
                 continue
 
-            # Soft scaling by alignment score
             scale = 0.5 + 0.5 * max(0.0, min(score, 1.0))
             s.confidence = float(max(0.0, min(1.0, float(s.confidence) * scale)))
 
-            # Add alignment context into reason (append, deterministic)
             s.reason = (
                 f"{s.reason}\n"
                 f"MTF alignment: {align} score={score:.2f}\n"
@@ -334,14 +342,18 @@ class CompositeBot(TradingBot):
             stop = prev_high - atr
             take = entry + atr * 2.5
             conf = 0.55
-            reason = f"SCENARIO: bos_breakout\nENTRY_TF: 5m\nBreak above prior swing high {prev_high:.2f}"
+            reason = (
+                f"SCENARIO: bos_breakout\nENTRY_TF: 5m\nBreak above prior swing high {prev_high:.2f}"
+            )
         elif close < prev_low:
             direction = "short"
             entry = close
             stop = prev_low + atr
             take = entry - atr * 2.5
             conf = 0.55
-            reason = f"SCENARIO: bos_breakout\nENTRY_TF: 5m\nBreak below prior swing low {prev_low:.2f}"
+            reason = (
+                f"SCENARIO: bos_breakout\nENTRY_TF: 5m\nBreak below prior swing low {prev_low:.2f}"
+            )
         else:
             return None
 
@@ -368,7 +380,6 @@ class CompositeBot(TradingBot):
         mtf: Optional[Dict[str, Any]],
         features: Dict[str, float],
     ) -> TradeSignal:
-        # Compose deterministic reasoning text (no decorative output)
         reason_lines = [
             f"SCENARIO: {ind_sig.type}",
             f"ENTRY_TF: {entry_tf}",
@@ -376,9 +387,10 @@ class CompositeBot(TradingBot):
             f"TRIGGER: {ind_sig.reason}",
         ]
 
-        # Attach minimal MTF summary if present
         if mtf and isinstance(mtf.get("alignment"), str):
-            reason_lines.append(f"MTF alignment: {mtf.get('alignment')} score={float(mtf.get('alignment_score', 0.0) or 0.0):.2f}")
+            reason_lines.append(
+                f"MTF alignment: {mtf.get('alignment')} score={float(mtf.get('alignment_score', 0.0) or 0.0):.2f}"
+            )
 
         md = ind_sig.metadata or {}
         md_flat: Dict[str, Any] = {}
