@@ -77,6 +77,8 @@ All other documents must remain consistent with this summary.
   - Visual semantics + regression contracts for chart outputs (source: `src/pearlalgo/nq_agent/chart_generator.py`)
 - `PEARL_BOTS_README.md`
   - Operator and developer reference for PEARL bots (configuration + Telegram-first backtesting)
+- `INVENTORY_LEDGER.md`
+  - File-by-file keep/merge/delete decisions with proofs (generated during cleanup)
 
 ## 5. Cross‑references
 

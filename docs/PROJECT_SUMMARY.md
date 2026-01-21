@@ -71,7 +71,7 @@ The MNQ Trading Agent is designed to:
 - **Transparency**: Comprehensive logging and Telegram notifications
 - **Modularity**: Clean separation of concerns (data, strategy, execution)
 - **Testability**: Mock data providers for testing without live market data
-- **Prop Firm Focus**: Conservative risk (1% per trade), position sizing (5-15 contracts), quick scalps
+- **Prop Firm Focus**: Configurable risk (default 1.5% per trade), dynamic position sizing, quick scalps
 
 ---
 
@@ -151,7 +151,7 @@ The MNQ Trading Agent is designed to:
 **Telegram Notifier** (`telegram_notifier.py`):
 - Sends all notification types:
   - Signal notifications (entry, stop, target, R:R)
-  - Dashboard updates (every 15 minutes)
+  - Dashboard updates (configurable via `dashboard_chart_interval`, default 1 hour)
   - Data quality alerts
   - Performance summaries
   - Startup/shutdown notifications
@@ -199,7 +199,7 @@ The MNQ Trading Agent is designed to:
 
 **Config** (`config.py`):
 - Strategy configuration (symbol: MNQ, timeframe, risk parameters)
-- Prop firm defaults: 1% risk, 1.5x ATR stops, 1.2:1 min R:R filter, 5-15 contracts
+- Prop firm defaults: Risk/stops/sizing configurable via `config/config.yaml` (see Configuration section)
 - Loads from `config/config.yaml` or uses defaults
 
 ### 3. Data Providers (`src/pearlalgo/data_providers/`)
@@ -302,7 +302,7 @@ For each signal:
   └─→ Telegram Notifier.send_signal()
   ↓
 Periodic Updates:
-  ├─→ Dashboard Update (every 15 min)
+  ├─→ Dashboard Update (hourly by default)
   └─→ State Save (every 10 cycles)
 ```
 
@@ -695,7 +695,7 @@ In practice:
 ### 2. Mobile-Optimized Telegram Notifications
 
 - **Signal Notifications**: Entry, stop-loss, take-profit, R:R ratio
-- **Dashboard Updates**: Every 15 minutes with performance metrics
+- **Dashboard Updates**: Hourly (configurable) with performance metrics
 - **Data Quality Alerts**: Stale data, buffer issues, fetch failures
 - **Performance Summaries**: Daily/weekly statistics
 - **Service Notifications**: Startup, shutdown, recovery, circuit breaker
@@ -929,7 +929,7 @@ docker run --rm -it \\
 
 ### Automatic Monitoring
 
-- **Dashboard Updates**: Every 15 minutes
+- **Dashboard Updates**: Hourly (configurable)
 - **Data Quality Alerts**: When issues detected
 - **Error Alerts**: Circuit breaker, consecutive errors
 - **Recovery Notifications**: When service recovers
@@ -1246,7 +1246,7 @@ journalctl -u pearlalgo-mnq.service -f
 
 - **MNQ (Mini NQ)**: $2 per point, 1/10th size of NQ
 - **NQ**: $20 per point
-- **Benefits**: Lower margin, better position sizing (5-15 contracts), prop firm friendly
+- **Benefits**: Lower margin, configurable position sizing, prop firm friendly
 
 ### Position Sizing
 
@@ -1280,7 +1280,7 @@ R:R: 1.47:1
 The **PearlAlgo MNQ Trading Agent** is a production-ready, automated trading system optimized for **prop firm style trading** that provides:
 
 - ✅ **Reliable Operation**: 24/7 service with robust error handling and connection monitoring
-- ✅ **Prop Firm Optimized**: MNQ contracts, 5-15 position sizing, 1% risk, quick scalps
+- ✅ **Prop Firm Optimized**: MNQ contracts, configurable position sizing/risk, quick scalps
 - ✅ **Intelligent Signals**: Technical analysis-based signal generation with multi-timeframe confirmation
 - ✅ **Mobile-Friendly Notifications**: Rich Telegram notifications with position sizing and risk calculations
 - ✅ **Performance Tracking**: Comprehensive metrics and tracking

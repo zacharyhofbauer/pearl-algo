@@ -148,7 +148,7 @@ risk:
 
 # Service Intervals
 service:
-  status_update_interval: 900   # 15 minutes (dashboard interval)
+  status_update_interval: 3600  # 1 hour (status interval)
   heartbeat_interval: 86400     # Disabled - dashboard replaces heartbeat
   state_save_interval: 10  # cycles
 
@@ -179,7 +179,7 @@ telegram:
 - `risk.min_position_size` / `max_position_size`: Contract range (5-15)
 
 **Service Behavior:**
-- `service.status_update_interval`: Dashboard update frequency (default: 900 = 15 minutes)
+- `service.status_update_interval`: Status update frequency (default: 3600 = 1 hour)
 - `service.heartbeat_interval`: Legacy heartbeat (disabled; dashboard replaces it)
 - `circuit_breaker.*`: Error threshold settings
 
@@ -189,7 +189,7 @@ For complete configuration reference, see `PROJECT_SUMMARY.md` (Configuration se
 
 The system is optimized for **prop firm style trading** with MNQ:
 - **MNQ Benefits:** 1/10th size of NQ ($2/point vs $20/point), better position sizing
-- **Position Sizing:** 5-15 contracts per trade (default: 10)
+- **Position Sizing:** Configurable via `risk.max_position_size` (default: 50, dynamic sizing enabled)
 - **Risk Management:** 1% max risk per trade, 10% max drawdown
 - **Scalping Focus:** Tighter stops (1.5x ATR), quicker profits (1.5:1 R:R), faster scanning (30s)
 
@@ -242,12 +242,12 @@ R:R: 1.47:1
 ## 📊 Monitoring
 
 ### Automatic Monitoring (via Telegram)
-- **Dashboard**: Every 15 minutes with price sparkline, MTF trends, session stats, performance
+- **Dashboard**: Hourly by default with price sparkline, MTF trends, session stats, performance
 - **Data quality alerts**: When data issues detected
 - **Signal notifications**: When trading signals are generated
 - **Service notifications**: Startup/shutdown/recovery alerts
 
-> **Note:** Dashboard replaces the old separate Status/Heartbeat messages. One clean message every 15m with all key info.
+> **Note:** Dashboard replaces the old separate Status/Heartbeat messages. One clean message per `dashboard_chart_interval` (default 1h) with all key info.
 
 ### Manual Monitoring Commands
 

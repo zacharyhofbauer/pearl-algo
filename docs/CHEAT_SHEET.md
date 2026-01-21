@@ -132,10 +132,10 @@
 
 - **Works even without menu handler:**
   - Startup / shutdown notifications
-  - **Dashboard** every 15 minutes (consolidated: price sparkline, MTF trends, session stats, performance)
+  - **Dashboard** hourly by default (consolidated: price sparkline, MTF trends, session stats, performance)
   - Signal alerts, error/circuit‑breaker alerts
 
-> **Note:** Dashboard replaces the old separate Status/Heartbeat messages. One clean message every 15m.
+> **Note:** Dashboard replaces the old separate Status/Heartbeat messages. One clean message per `dashboard_chart_interval` (default 1h).
 
 - **Menu Handler Features:**
   - Interactive button-based control panel

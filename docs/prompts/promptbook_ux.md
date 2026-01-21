@@ -148,7 +148,7 @@ Read and understand:
 
 Message Types:
 - Signal notifications: Entry, stop, target, R:R, position size
-- Dashboard updates: Every 15 minutes, price sparkline, MTF trends, session stats
+- Dashboard updates: Hourly by default (configurable), price sparkline, MTF trends, session stats
 - Status cards: Agent state with inline buttons
 - Alerts: Data quality, circuit breaker, connection failures, recovery
 - Command responses: /status, /signals, /performance, /config, /health, etc.
@@ -164,7 +164,7 @@ From code and docs, infer:
 1.3 CLARITY EVALUATION
 For each message type, evaluate:
 - 3-second parseability
-- Silence reads as intentional; dashboard cadence is every 15 minutes
+- Silence reads as intentional; dashboard cadence is hourly by default
 - Each message reduces uncertainty
 - State transitions are obvious without explanation
 

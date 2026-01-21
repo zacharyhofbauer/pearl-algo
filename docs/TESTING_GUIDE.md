@@ -336,7 +336,7 @@ Monitor logs for:
   - Risk/reward >= 1.5:1
 
 #### 4. Dashboard Updates
-Check Telegram for periodic dashboard updates (every 15 minutes):
+Check Telegram for periodic dashboard updates (hourly by default):
 
 **What to Verify:**
 - ✅ Dashboard shows "RUNNING" status
