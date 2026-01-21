@@ -453,15 +453,17 @@ pearlalgo-dev-ai-agents/
 │   ├── maintenance/                # Maintenance/hygiene scripts
 │   │   └── purge_runtime_artifacts.sh   # Safe cleanup (requires --yes)
 │   ├── backtesting/               # Backtesting scripts
-│   │   └── backtest_cli.py            # Canonical backtest CLI (signal + full modes)
+│   │   ├── backtest_trading_bot.py     # Single trading bot backtest
+│   │   ├── compare_trading_bots.py     # Trading bot comparison
+│   │   ├── strategy_selection.py       # Strategy selection exports
+│   │   └── train_ml_filter.py          # Offline ML filter training
 │   └── testing/                    # Testing and validation scripts
 │       ├── test_all.py                  # Unified test runner
-│       ├── validate_strategy.py         # Comprehensive validation
 │       ├── run_tests.sh                 # Run pytest unit tests
+│       ├── check_architecture_boundaries.py  # Module boundary enforcement
 │       ├── smoke_test_ibkr.py           # IBKR smoke test
-│       ├── check_no_secrets.py          # Secret detection guardrail
-│       ├── test_data_quality.py         # Data quality validation
-│       └── test_e2e_simulation.py       # End-to-end simulation
+│       ├── smoke_multi_market.py        # Multi-market isolation smoke
+│       └── check_no_secrets.py          # Secret detection guardrail
 │
 ├── tests/                       # Pytest suite (fast, assertion-driven)
 │   ├── mock_data_provider.py   # Synthetic OHLCV for tests (no external deps)
@@ -477,7 +479,7 @@ pearlalgo-dev-ai-agents/
 │
 ├── docs/                        # Documentation
 │   ├── PROJECT_SUMMARY.md      # This file (single source of truth)
-│   ├── NQ_AGENT_GUIDE.md       # Operational guide (how to run and operate)
+│   ├── MARKET_AGENT_GUIDE.md   # Operational guide (how to run and operate)
 │   ├── TESTING_GUIDE.md        # Unified testing guide (all testing procedures)
 │   ├── GATEWAY.md              # IBKR Gateway setup
 │   └── MOCK_DATA_WARNING.md    # Mock data testing notes
@@ -757,9 +759,10 @@ In practice:
 
 3. **Testing & Validation Scripts** (`scripts/testing/`):
    - `test_all.py`: Unified runner (telegram / signals / short-run service / arch)
-   - `validate_strategy.py`: Strategy validation helper
+   - `check_architecture_boundaries.py`: Module boundary enforcement (warn-only by default)
    - `smoke_test_ibkr.py`: IBKR connectivity + entitlement smoke test
-   - `test_data_quality.py`, `test_e2e_simulation.py`, `test_signal_starvation_fixes.py`: Targeted validations
+   - `smoke_multi_market.py`: Multi-market config/state isolation smoke
+   - `check_no_secrets.py`: Secret detection guardrail
 
 ### Running Tests
 
@@ -1032,7 +1035,7 @@ ExecStartPost=/bin/sh -c 'until curl -sf http://localhost:9100/healthz; do sleep
 ### Ranked Opportunity Clusters
 
 The following opportunity clusters are ranked by leverage and risk, updated as of 2025-12-30.
-Use `docs/prompts/promptbook_engineering.md` for structured improvement iterations.
+Use this document as the canonical reference for improvement iterations.
 
 #### 1. Operational Risk (Highest Leverage)
 
@@ -1212,8 +1215,8 @@ Use `docs/prompts/promptbook_engineering.md` for structured improvement iteratio
 # Run Tests
 python3 scripts/testing/test_all.py
 
-# Validate Strategy
-python3 scripts/testing/validate_strategy.py
+# Multi-market smoke check
+python3 scripts/testing/smoke_multi_market.py
 
 # View Logs (foreground: printed in terminal; systemd: journal)
 journalctl -u pearlalgo-mnq.service -f
@@ -1233,7 +1236,7 @@ journalctl -u pearlalgo-mnq.service -f
 
 ### Documentation
 
-- **Complete Guide**: `docs/NQ_AGENT_GUIDE.md` (includes prop firm configuration)
+- **Complete Guide**: `docs/MARKET_AGENT_GUIDE.md` (includes prop firm configuration)
 - **Testing Guide**: `docs/TESTING_GUIDE.md`
 - **Gateway Setup**: `docs/GATEWAY.md`
 - **Project Summary**: `docs/PROJECT_SUMMARY.md` (this file)
@@ -1292,13 +1295,21 @@ The system is ready for production use and optimized for prop firm trading with 
 ---
 
 **For detailed guides, see:**
-- `docs/NQ_AGENT_GUIDE.md` - Operational guide (how to run and operate)
+- `docs/MARKET_AGENT_GUIDE.md` - Operational guide (how to run and operate)
 - `docs/TESTING_GUIDE.md` - Complete testing guide (all testing procedures)
 - `docs/GATEWAY.md` - IBKR Gateway setup
 - `docs/MARKET_DATA_SUBSCRIPTION.md` - How to get live market data (fix Error 354)
 
 **Last Updated:** 2025-12-31  
 **Current Configuration:** MNQ (Mini NQ) - Prop Firm Style Trading
+
+
+
+
+
+
+
+
 
 
 

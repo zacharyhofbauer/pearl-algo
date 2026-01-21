@@ -1,7 +1,7 @@
 # PEARLalgo Cheat Sheet
 
 > **Goal:** One-page operational quick reference for daily use.
-> For full details, see `NQ_AGENT_GUIDE.md`, `GATEWAY.md`, and `TELEGRAM_GUIDE.md`.
+> For full details, see `MARKET_AGENT_GUIDE.md`, `GATEWAY.md`, and `TELEGRAM_GUIDE.md`.
 
 ---
 
@@ -262,7 +262,7 @@ journalctl -u pearlalgo-mnq.service -p err
 - **State**: `data/agent_state/<MARKET>/` (`state.json`, `signals.jsonl`, `exports/`)
 - **Services & scripts**: `scripts/lifecycle/`, `scripts/gateway/`, `scripts/telegram/`
 - **Logs**: stdout/stderr (foreground), journald (systemd), or Docker logs
-- **Deep-dive docs**: `NQ_AGENT_GUIDE.md`, `GATEWAY.md`, `TELEGRAM_GUIDE.md`, `PROJECT_SUMMARY.md`
+- **Deep-dive docs**: `MARKET_AGENT_GUIDE.md`, `GATEWAY.md`, `TELEGRAM_GUIDE.md`, `PROJECT_SUMMARY.md`
 
 ---
 

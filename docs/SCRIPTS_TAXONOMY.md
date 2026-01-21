@@ -39,15 +39,6 @@ Canonical script:
 
 Backtesting scripts for strategy validation on historical data.
 
-- `backtest_cli.py`
-  - **Role**: Canonical unified backtest CLI.
-  - **Modes**: `signal` (fast signal-only) and `full` (trade simulation with risk-based sizing).
-  - **Usage**: `python scripts/backtesting/backtest_cli.py signal --data-path data.parquet`
-  - **Features**: Date range slicing, chart generation, HTML reports.
-- `signal_sweep.py`
-  - **Role**: Sweep signal thresholds / variants (batch experiments; outputs summaries).
-- `robustness_cli.py`
-  - **Role**: Robustness / stress-testing harness for backtests (parameter and scenario sweeps).
 - `strategy_selection.py`
   - **Role**: Generate `strategy_selection_*.json` exports used by Telegram `/analyze` and operator dashboards.
 - `backtest_trading_bot.py`
@@ -60,46 +51,17 @@ Backtesting scripts for strategy validation on historical data.
 ## Testing (`scripts/testing/`)
 
 - `test_all.py`
-  - **Role**: Unified validation runner supporting modes: `telegram`, `signals`, `service`, `arch`.
+  - **Role**: Unified validation runner supporting modes: `telegram`, `signals`, `service`.
 - `run_tests.sh`
   - **Role**: Developer convenience script to run the pytest unit suite under `tests/` (uses `.venv` when present).
 - `check_architecture_boundaries.py`
   - **Role**: AST-based module boundary enforcement (warn-only by default; strict mode via `PEARLALGO_ARCH_ENFORCE=1`).
-- `test_signal_starvation_fixes.py`
-  - **Role**: Strategy regression validations (anti-starvation fixes).
-- `test_data_quality.py`, `test_e2e_simulation.py`
-  - **Role**: Data‑quality and end‑to‑end tests.
-- `test_mplfinance_chart.py`
-  - **Role**: Chart generation smoke test (mplfinance).
 - `smoke_test_ibkr.py`
   - **Role**: Quick connectivity and entitlement smoke test for IBKR.
-- `validate_strategy.py`
-  - **Role**: Validate strategy outputs/assumptions for given historical data.
-- `check_signals.py`
-  - **Role**: Diagnostic tool to check signals file format, count, and validity. Useful for troubleshooting signal persistence issues.
-- `generate_backtest_baseline.py`
-  - **Role**: Generate deterministic baseline image for backtest visual regression testing.
-- `generate_dashboard_baseline.py`
-  - **Role**: Generate deterministic dashboard baseline image for visual regression testing.
-  - **Behavior**: Creates fixed synthetic OHLCV data and renders a chart with deterministic parameters; outputs to `tests/fixtures/charts/dashboard_baseline.png`.
-- `generate_entry_exit_baselines.py`
-  - **Role**: Generate deterministic entry/exit baseline images for visual regression testing.
-  - **Behavior**: Renders entry and exit charts; outputs to `tests/fixtures/charts/entry_baseline.png` and `tests/fixtures/charts/exit_baseline.png`.
-- `generate_mobile_baseline.py`
-  - **Role**: Generate deterministic baseline image for mobile dashboard visual regression testing.
-- `generate_on_demand_chart_baseline.py`
-  - **Role**: Generate deterministic baseline image for the Telegram `/chart` (on-demand) dashboard chart.
-  - **Behavior**: Renders the 12h lookback variant; outputs to `tests/fixtures/charts/on_demand_chart_12h_baseline.png`.
+- `smoke_multi_market.py`
+  - **Role**: Multi-market state/config isolation smoke test (NQ/ES/GC).
 - `check_no_secrets.py`
   - **Role**: Secret detection guardrail; scans codebase for accidentally committed secrets/tokens.
-- `live_probe_mnq.py`
-  - **Role**: Read-only IBKR MNQ data verification probe.
-  - **Behavior**: Validates connection, contract resolution, latest bar fetch, historical data, and data freshness without modifying state.
-  - **Usage**: `python3 scripts/testing/live_probe_mnq.py [--verbose]`
-- `soak_test_mock_service.py`
-  - **Role**: Bounded soak test harness for service loop validation.
-  - **Behavior**: Runs the service loop with mock data for a configurable duration; monitors memory drift, cadence metrics, and error rates.
-  - **Usage**: `python3 scripts/testing/soak_test_mock_service.py [--duration SECONDS] [--verbose]`
 
 ## Maintenance (`scripts/maintenance/`)
 
@@ -127,25 +89,6 @@ they do **not** contain trading or strategy logic.
 - `doctor_cli.py`
   - **Role**: Operator CLI “doctor” for a compact rollup of recent behavior (signals, rejects, sizing, stops).
   - **Usage**: `python3 scripts/monitoring/doctor_cli.py --hours 24`
-
-## Monitor UI (`scripts/monitor/`)
-
-Local GUI tooling (optional). These scripts launch the Qt-based monitor.
-
-- `start_monitor.sh`
-  - **Role**: Start the monitor UI (foreground/background).
-- `restart_monitor.sh`
-  - **Role**: Restart the monitor UI.
-
-## Setup / Migration (`scripts/setup/`)
-
-Environment- and machine-specific helpers (WiFi / network migration / connectivity).
-These scripts orchestrate OS configuration; they do not contain trading logic.
-
-- `verify_wifi_connection.sh`, `check_network_settings.sh`, `pre_migration_check.sh`
-  - **Role**: Preflight checks and verification helpers for WiFi migrations.
-- `connect_xprs.sh`, `ensure_auto_connect.sh`
-  - **Role**: Network connection helpers (ISP / captive portal / auto-connect workflows).
 
 ## Ops Shortcuts (`scripts/`)
 

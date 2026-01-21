@@ -166,7 +166,7 @@ No scripts flagged for deletion.
 | `CONFIGURATION_MAP.md` | KEEP | Config reference |
 | `START_HERE.md` | KEEP | Operator quickstart |
 | `CHEAT_SHEET.md` | KEEP | Daily operations |
-| `NQ_AGENT_GUIDE.md` | KEEP | Agent operations |
+| `MARKET_AGENT_GUIDE.md` | KEEP | Agent operations |
 | `RESTART_GUIDE.md` | KEEP | Restart procedures |
 | `GATEWAY.md` | KEEP | IBKR Gateway |
 | `TELEGRAM_GUIDE.md` | KEEP | Telegram integration |
@@ -177,23 +177,23 @@ No scripts flagged for deletion.
 | `MARKET_DATA_SUBSCRIPTION.md` | KEEP | IBKR subscriptions |
 | `MPLFINANCE_QUICK_START.md` | KEEP | Chart reference |
 | `CHART_VISUAL_SCHEMA.md` | KEEP | Chart contracts |
-| `CHART_STRATEGY.md` | KEEP | Chart strategy |
+| `CHART_STRATEGY.md` | DELETE | Redundant with chart schema and guides |
 | `TRADING_BOT_GUIDE.md` | KEEP | Single trading bot (AutoBot) reference |
-| `ARCHITECTURE.md` | KEEP | System architecture |
-| `AGENT_BRAIN_GUIDE.md` | KEEP | Agent internals |
-| `LINUX_MONITOR.md` | KEEP | Monitor UI guide |
-| `WIFI_MIGRATION_GUIDE.md` | KEEP | Network migration |
-| `ROADMAP.md` | KEEP | Future plans |
-| `TRADINGVIEW_INDICATOR_PORTING.md` | KEEP | Indicator porting |
+| `ARCHITECTURE.md` | DELETE | Superseded by PROJECT_SUMMARY.md |
+| `AGENT_BRAIN_GUIDE.md` | DELETE | Superseded by PROJECT_SUMMARY.md |
+| `LINUX_MONITOR.md` | DELETE | Monitor UI removed |
+| `WIFI_MIGRATION_GUIDE.md` | DELETE | Non-canonical ops content |
+| `ROADMAP.md` | DELETE | Out-of-band planning |
+| `TRADINGVIEW_INDICATOR_PORTING.md` | DELETE | Non-operator reference |
 
-### Prompts (KEEP)
+### Prompts (DELETE)
 
 | File | Decision | Role |
 |------|----------|------|
-| `prompts/promptbook_engineering.md` | KEEP | Engineering prompts |
-| `prompts/promptbook_trading.md` | KEEP | Trading prompts |
-| `prompts/promptbook_ux.md` | KEEP | UX prompts |
-| `prompts/MSGODSCRIPT.md` | KEEP | Script reference |
+| `prompts/promptbook_engineering.md` | DELETE | Non-operator prompts |
+| `prompts/promptbook_trading.md` | DELETE | Non-operator prompts |
+| `prompts/promptbook_ux.md` | DELETE | Non-operator prompts |
+| `prompts/MSGODSCRIPT.md` | DELETE | Non-operator prompts |
 
 ---
 

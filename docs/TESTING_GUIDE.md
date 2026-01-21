@@ -38,10 +38,10 @@ python3 scripts/testing/test_all.py arch
 PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 ```
 
-### Option 2: Comprehensive Validation
+### Option 2: Multi-market smoke check
 ```bash
-# Run complete validation suite
-python3 scripts/testing/validate_strategy.py
+# Verify config/state isolation across NQ/ES/GC
+python3 scripts/testing/smoke_multi_market.py
 ```
 
 ### Option 3: Automated Test Script
@@ -742,9 +742,6 @@ Decision: Keep change
 # Unified test runner (recommended)
 python3 scripts/testing/test_all.py [mode]
 
-# Comprehensive validation
-python3 scripts/testing/validate_strategy.py
-
 # Unit tests
 pytest tests/ -v
 
@@ -759,12 +756,17 @@ PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 
 # Check status
 ./scripts/lifecycle/check_agent_status.sh --market NQ
+
+# Multi-market smoke check
+python3 scripts/testing/smoke_multi_market.py
 ```
 
 ### Key Files
 - `scripts/testing/test_all.py` - Unified test runner
 - `scripts/testing/check_architecture_boundaries.py` - Module boundary enforcement
-- `scripts/testing/validate_strategy.py` - Comprehensive validation
+- `scripts/testing/smoke_multi_market.py` - Multi-market config/state smoke
+- `scripts/testing/smoke_test_ibkr.py` - IBKR connectivity smoke
+- `scripts/testing/check_no_secrets.py` - Secret detection guardrail
 - `tests/test_edge_cases.py` - Edge-case coverage (market hours/data quality/service)
 - `tests/test_error_recovery.py` - Circuit breaker and recovery behaviors
 - `tests/mock_data_provider.py` - Mock data provider
@@ -801,13 +803,9 @@ This section summarizes the current test coverage and highlights areas for futur
 
 #### Tests under `scripts/testing/`
 
-- `test_signal_starvation_fixes.py` – strategy regression validations (anti-starvation fixes)
-- `test_data_quality.py` – data quality checks
-- `test_e2e_simulation.py` – end‑to‑end simulation
-- `test_mplfinance_chart.py` – chart generation smoke test
-- `check_signals.py` – signals file diagnostics (format/count/validity)
 - `smoke_test_ibkr.py` – IBKR connectivity smoke test
-- `validate_strategy.py` – strategy validation helper
+- `smoke_multi_market.py` – multi-market config/state isolation smoke test
+- `check_no_secrets.py` – secret detection guardrail
 
 #### Tests under `tests/`
 
@@ -878,7 +876,7 @@ The following gaps have been addressed with explicit test coverage:
 ## 📚 Additional Resources
 
 - **[PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)** - Complete system reference
-- **[NQ_AGENT_GUIDE.md](NQ_AGENT_GUIDE.md)** - Operational guide
+- **[MARKET_AGENT_GUIDE.md](MARKET_AGENT_GUIDE.md)** - Operational guide
 - **[GATEWAY.md](GATEWAY.md)** - IBKR Gateway setup
 - **[MOCK_DATA_WARNING.md](MOCK_DATA_WARNING.md)** - Mock data limitations
 

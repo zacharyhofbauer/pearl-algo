@@ -60,7 +60,7 @@ python3 scripts/testing/test_all.py
 
 - `docs/START_HERE.md`
 - `docs/PROJECT_SUMMARY.md` (single source of truth)
-- `docs/NQ_AGENT_GUIDE.md`
+- `docs/MARKET_AGENT_GUIDE.md`
 - `docs/TELEGRAM_GUIDE.md`
 - `docs/TESTING_GUIDE.md`
 

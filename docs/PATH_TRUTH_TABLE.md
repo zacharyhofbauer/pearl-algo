@@ -11,7 +11,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `scripts/lifecycle/agent.sh` (start/stop/restart/status; `--market NQ|ES|GC`)
   - `scripts/lifecycle/check_agent_status.sh` (state summary; `--market NQ|ES|GC`)
 - **Docs**:
-  - `docs/NQ_AGENT_GUIDE.md`
+  - `docs/MARKET_AGENT_GUIDE.md`
   - `docs/PROJECT_SUMMARY.md`
 
 ## Telegram Command Handler
@@ -46,26 +46,16 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - Strategy config/logic: `pearlalgo.strategies.nq_intraday.*`
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
 - **Backtesting scripts** (`scripts/backtesting/`):
-  - `backtest_cli.py` – canonical unified backtest CLI (signal + full trade modes)
-  - `signal_sweep.py` – sweep signal thresholds / variants (optional)
-  - `robustness_cli.py` – robustness runs (optional)
   - `strategy_selection.py` – generates strategy selection exports (used by Telegram `/analyze`)
-  - `backtest_trading_bot.py`, `compare_trading_bots.py` – trading bot variant backtests (optional; see `docs/TRADING_BOT_GUIDE.md`)
+  - `backtest_trading_bot.py`, `compare_trading_bots.py` – trading bot variant backtests (see `docs/TRADING_BOT_GUIDE.md`)
+  - `train_ml_filter.py` – offline training for ML signal filter artifacts
 - **Testing scripts** (`scripts/testing/`):
   - `run_tests.sh` – pytest unit test runner (canonical)
-  - `test_all.py` – unified validation runner (telegram / signals / service / arch)
-  - `validate_strategy.py`
+  - `test_all.py` – unified validation runner (telegram / signals / service)
+  - `check_architecture_boundaries.py` – module boundary enforcement (warn-only by default)
   - `smoke_test_ibkr.py`
+  - `smoke_multi_market.py`
   - `check_no_secrets.py` – secret detection guardrail
-  - `test_signal_starvation_fixes.py`
-  - `test_data_quality.py`, `test_e2e_simulation.py`
-  - `test_mplfinance_chart.py`
-  - `check_signals.py`
-  - `generate_dashboard_baseline.py` – generate deterministic baseline image for visual regression tests
-  - `generate_entry_exit_baselines.py` – generate deterministic entry/exit baseline images for visual regression tests
-  - `generate_on_demand_chart_baseline.py` – generate deterministic `/chart` (on-demand) baseline image (12h lookback)
-  - `live_probe_mnq.py` – read-only IBKR MNQ data verification probe (connection, contract, freshness)
-  - `soak_test_mock_service.py` – bounded soak test harness (memory drift, cadence, error rate monitoring)
 - **Docs**:
   - `docs/TESTING_GUIDE.md`
   - `docs/MOCK_DATA_WARNING.md`
@@ -97,7 +87,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.config.settings` – Pydantic settings for infrastructure
 - **Docs**:
   - `docs/PROJECT_SUMMARY.md` (configuration section)
-  - `docs/NQ_AGENT_GUIDE.md` (configuration snippets)
+  - `docs/MARKET_AGENT_GUIDE.md` (configuration snippets)
 
 ## Maintenance
 
@@ -116,17 +106,9 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `scripts/monitoring/doctor_cli.py` – operator CLI rollup (signals, rejects, sizing, stops)
   - `scripts/health_check.sh` – fast local health snapshot (requires `jq`)
 - **Docs**:
-  - `docs/NQ_AGENT_GUIDE.md` (monitoring section)
+  - `docs/MARKET_AGENT_GUIDE.md` (monitoring section)
   - `docs/PROJECT_SUMMARY.md` (status server section)
   - `docs/SCRIPTS_TAXONOMY.md` (monitoring section)
-
-## Monitor UI (Optional)
-
-- **Logical component**: Local desktop monitoring UI (Qt-based)
-- **Python entry module**: `pearlalgo.monitor` (run via `python -m pearlalgo.monitor`)
-- **Scripts**:
-  - `scripts/monitor/start_monitor.sh`, `scripts/monitor/restart_monitor.sh`
-  - `scripts/lifecycle/start_monitor_suite.sh`, `scripts/lifecycle/stop_monitor_suite.sh`
 
 ## Utilities / Cross‑cutting Concerns
 

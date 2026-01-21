@@ -2886,15 +2886,26 @@ class TelegramCommandHandler:
                 execution_mode=execution_mode,
             )
 
-            # Inject market + trading bot identity near the top for operator clarity.
+            # Inject market + symbol + trading bot identity near the top for operator clarity.
             try:
-                ui_line = f"🌐 Market: *{market_label}* | 🤖 Bot: *{trading_bot_status}*"
+                ai_status = "OFF"
+                if OPENAI_AVAILABLE:
+                    try:
+                        OpenAIClient()
+                        ai_status = "🟢 Ready"
+                    except Exception:
+                        ai_status = "🔴 Not configured"
+
+                ui_lines = [
+                    f"🌐 Market: *{market_label}* | 📈 Symbol: *{symbol}*",
+                    f"🤖 Trading Bot: *{trading_bot_status}* | 🧠 AI: *{ai_status}*",
+                ]
                 msg_lines = str(message).splitlines()
                 if msg_lines:
-                    msg_lines.insert(1, ui_line)
+                    msg_lines[1:1] = ui_lines
                     message = "\n".join(msg_lines)
                 else:
-                    message = ui_line
+                    message = "\n".join(ui_lines)
             except Exception:
                 pass
             

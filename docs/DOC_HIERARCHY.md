@@ -1,6 +1,6 @@
 # Documentation Hierarchy
 
-This file defines the canonical documentation structure for the NQ Agent repository.
+This file defines the canonical documentation structure for the Market Agent repository.
 
 ## 1. Architecture (single source of truth)
 
@@ -20,8 +20,8 @@ All other documents must remain consistent with this summary.
 - `CHEAT_SHEET.md`
   - One-page PEARLalgo operational quick reference
   - Daily startup flow, core scripts, Telegram expectations, fast troubleshooting
-- `NQ_AGENT_GUIDE.md`
-  - How to start/stop/check the NQ Agent Service
+- `MARKET_AGENT_GUIDE.md`
+  - How to start/stop/check the Market Agent Service
   - Daily operations and monitoring
   - Troubleshooting specific to the agent service
 - `RESTART_GUIDE.md`
@@ -42,8 +42,6 @@ All other documents must remain consistent with this summary.
   - Quick start, command handler startup, command behavior reference
   - Remote control (service control commands)
   - Chart visualization and UI features
-- `LINUX_MONITOR.md`
-  - Local monitor UI launch guide (Qt-based; optional)
 - `AI_PATCH_GUIDE.md`
   - OpenAI integration for code generation via Telegram
   - Setup, usage examples, and security considerations

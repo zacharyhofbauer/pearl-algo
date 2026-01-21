@@ -54,7 +54,7 @@ for compatibility with existing Telegram/mobile views.
 
 ### Where to go next
 
-- **Architecture overview**: `docs/ARCHITECTURE.md`
-- **Operational runbooks**: `docs/NQ_AGENT_GUIDE.md`, `docs/GATEWAY.md`, `docs/TELEGRAM_GUIDE.md`
+- **Architecture overview**: `docs/PROJECT_SUMMARY.md`
+- **Operational runbooks**: `docs/MARKET_AGENT_GUIDE.md`, `docs/GATEWAY.md`, `docs/TELEGRAM_GUIDE.md`
 - **Testing**: `docs/TESTING_GUIDE.md`
 
