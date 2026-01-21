@@ -137,6 +137,16 @@ symbol: "MNQ"  # Mini NQ (1/10th size of NQ, better for prop firms)
 timeframe: "5m"  # 5-minute bars for intraday swings (primary), with 1-2m for execution pinpointing
 scan_interval: 30  # Check for signals every 30 seconds
 
+# Trading Bot (single source of trade intent)
+trading_bot:
+  enabled: false
+  selected: "PearlAutoBot"
+  available:
+    PearlAutoBot:
+      class: "PearlAutoBot"
+      enabled: true
+      parameters: {}
+
 # Risk Management (Prop Firm Style)
 risk:
   max_risk_per_trade: 0.01  # 1% max risk per trade
@@ -184,6 +194,22 @@ telegram:
 - `circuit_breaker.*`: Error threshold settings
 
 For complete configuration reference, see `PROJECT_SUMMARY.md` (Configuration section).
+
+### Scaling to ES/GC (multi-market)
+
+Recommended model: **one agent process per market**, one trading bot per agent.
+
+Example launch for ES (using the market-aware script):
+```bash
+./scripts/lifecycle/agent.sh start --market ES --background
+```
+
+Each market instance should use its own:
+- `PEARLALGO_MARKET` (NQ/ES/GC)
+- `PEARLALGO_CONFIG_PATH` (per-market config file)
+- `PEARLALGO_STATE_DIR` (per-market state directory)
+
+The Telegram UI provides a Markets menu to switch between NQ/ES/GC while keeping each market isolated.
 
 ### Prop Firm Trading Configuration
 

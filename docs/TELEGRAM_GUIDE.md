@@ -51,8 +51,15 @@ Everything else is accessed via the button menus (safer and easier to operate on
 - **Performance**: rollups, exports, diagnostics
 - **Status**: agent + gateway connectivity, state freshness, data quality
 - **System**: start/stop/restart agent, gateway controls, logs (read-only)
-- **Bots**: PearlBot controls, Telegram-first backtests, report browsing
+- **Bots**: trading bot controls, Telegram-first backtests, report browsing
+- **Markets**: select NQ/ES/GC (one UI controlling one market at a time)
 - **Settings**: alert/UI preferences and the AI Patch Wizard (if enabled)
+
+## Multi-market usage
+
+The command handler can control multiple market agents (NQ/ES/GC) from one UI:
+- Use **Markets** to select the active market
+- All reads/writes (state, reports, actions) are scoped to the selected market
 
 ## Safety & authorization
 

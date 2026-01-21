@@ -1,14 +1,8 @@
 """
-PEARL Automated Bots Integration Layer
+PEARL Automated Trading Bot Integration Layer
 
-Integrates PEARL automated trading bots with the existing PEARLalgo NQ trading system.
-Allows seamless deployment of complete trading strategies alongside existing systems.
-
-This integration enables:
-- Multiple bot deployment and management
-- Bot performance tracking and comparison
-- Configuration-based bot selection
-- Compatibility with existing signal processing pipeline
+Integrates a single, all-in-one AutoBot with the PEARLalgo NQ trading system.
+This enforces one decision stream at runtime and avoids signal merging.
 """
 
 from __future__ import annotations
@@ -30,105 +24,100 @@ from .pearl_bots import (
 )
 
 
-class PearlBotManager:
+class TradingBotManager:
     """
-    Manager for PEARL automated trading bots.
+    Manager for a single active trading bot (AutoBot).
 
-    Integrates multiple automated bots with the existing PEARLalgo system,
-    providing coordinated deployment and performance monitoring.
+    Ensures only the selected trading bot is instantiated and evaluated.
     """
 
     def __init__(self, config_dir: Optional[Path] = None):
         self.config_dir = config_dir or Path("config")
-        self.bots: Dict[str, PearlBot] = {}
-        self.bot_configs: Dict[str, Dict[str, Any]] = {}
+        self.bot: Optional[PearlBot] = None
+        self.bot_config: Dict[str, Any] = {}
+        self.selected_name: Optional[str] = None
 
-        # Load bot configurations
-        self._load_bot_configs()
+        # Load trading bot configuration
+        self._load_trading_bot()
 
-        logger.info(f"PearlBotManager initialized with {len(self.bots)} bots")
+        if self.bot is not None:
+            logger.info(f"TradingBotManager initialized with bot={self.selected_name}")
+        else:
+            logger.info("TradingBotManager initialized with no active bot")
 
-    def _load_bot_configs(self) -> None:
-        """Load bot configurations from config files."""
+    def _load_trading_bot(self) -> None:
+        """Load the selected trading bot from config."""
         try:
             # Load service config to get bot settings
             service_config = load_service_config(validate=False) or {}
 
-            # Look for PEARL bot configuration (legacy alias: lux_algo_bots)
-            pearl_bots_config = service_config.get("pearl_bots") or service_config.get("lux_algo_bots") or {}
+            trading_bot_cfg = service_config.get("trading_bot") or {}
 
-            if not pearl_bots_config.get("enabled", False):
-                logger.info("PEARL bots disabled in configuration")
+            if not trading_bot_cfg.get("enabled", False):
+                logger.info("Trading bot disabled in configuration")
+                return
+            selected = trading_bot_cfg.get("selected")
+            available = trading_bot_cfg.get("available", {}) or {}
+            if not isinstance(available, dict) or not selected or selected not in available:
+                logger.warning("Trading bot config missing selected/available; no bot loaded")
                 return
 
-            # Get bot configurations
-            bots_config = pearl_bots_config.get("bots", {})
+            selected_cfg = available.get(selected) or {}
+            if not selected_cfg.get("enabled", False):
+                logger.warning(f"Selected trading bot is disabled: {selected}")
+                return
 
-            for bot_name, bot_config in bots_config.items():
-                if not bot_config.get('enabled', False):
-                    continue
+            bot_class_name = selected_cfg.get("class") or selected_cfg.get("bot_class") or selected
+            params = selected_cfg.get("parameters", {})
 
-                try:
-                    # Create bot configuration
-                    config = BotConfig(
-                        name=bot_name,
-                        description=bot_config.get('description', ''),
-                        symbol=bot_config.get('symbol', 'MNQ'),
-                        timeframe=bot_config.get('timeframe', '5m'),
-                        max_positions=bot_config.get('max_positions', 1),
-                        risk_per_trade=bot_config.get('risk_per_trade', 0.01),
-                        stop_loss_pct=bot_config.get('stop_loss_pct', 0.005),
-                        take_profit_pct=bot_config.get('take_profit_pct', 0.01),
-                        min_confidence=bot_config.get('min_confidence', 0.6),
-                        parameters=bot_config.get('parameters', {}),
-                        enable_alerts=bot_config.get('enable_alerts', True),
-                        webhook_url=bot_config.get('webhook_url'),
-                    )
+            config = BotConfig(
+                name=str(selected),
+                description=str(selected_cfg.get("description", "")),
+                symbol=str(selected_cfg.get("symbol", "MNQ")),
+                timeframe=str(selected_cfg.get("timeframe", "5m")),
+                max_positions=int(selected_cfg.get("max_positions", 1) or 1),
+                risk_per_trade=float(selected_cfg.get("risk_per_trade", 0.01) or 0.01),
+                stop_loss_pct=float(selected_cfg.get("stop_loss_pct", 0.005) or 0.005),
+                take_profit_pct=float(selected_cfg.get("take_profit_pct", 0.01) or 0.01),
+                min_confidence=float(selected_cfg.get("min_confidence", 0.6) or 0.6),
+                parameters=params if isinstance(params, dict) else {},
+                enable_alerts=bool(selected_cfg.get("enable_alerts", True)),
+                webhook_url=selected_cfg.get("webhook_url"),
+            )
 
-                    # Create and register bot
-                    bot_class_name = bot_config.get('bot_class', f"{bot_name}Bot")
-                    bot = create_bot(bot_class_name, config)
+            self.selected_name = str(selected)
+            self.bot_config = selected_cfg
+            self.bot = create_bot(str(bot_class_name), config)
 
-                    self.bots[bot_name] = bot
-                    self.bot_configs[bot_name] = bot_config
-
-                    logger.info(f"Loaded bot: {bot_name} ({bot_class_name})")
-
-                except Exception as e:
-                    logger.error(f"Failed to load bot {bot_name}: {e}")
-                    continue
+            logger.info(f"Loaded trading bot: {self.selected_name} ({bot_class_name})")
 
         except Exception as e:
-            logger.error(f"Failed to load bot configurations: {e}")
+            logger.error(f"Failed to load trading bot configuration: {e}")
 
-    def analyze_with_bots(self, market_data: Dict) -> List[Dict]:
+    def analyze(self, market_data: Dict) -> List[Dict]:
         """
-        Analyze market data with all active Lux Algo bots.
+        Analyze market data with the selected trading bot.
 
         Returns signals in the format expected by the existing signal processing pipeline.
         """
-        if not self.bots:
+        if self.bot is None:
             return []
 
-        all_signals = []
+        try:
+            bot_signals = self.bot.analyze(market_data)
+        except Exception as e:
+            logger.error(f"Error analyzing with trading bot {self.selected_name}: {e}")
+            return []
 
-        for bot_name, bot in self.bots.items():
-            try:
-                bot_signals = bot.analyze(market_data)
-
-                # Convert Lux Algo signals to PEARLalgo format
-                for signal in bot_signals:
-                    pearl_signal = self._convert_to_pearl_format(signal, bot_name)
-                    all_signals.append(pearl_signal)
-
-            except Exception as e:
-                logger.error(f"Error analyzing with bot {bot_name}: {e}")
-                continue
-
-        logger.debug(f"Generated {len(all_signals)} signals from {len(self.bots)} PEARL bots")
+        all_signals = [self._convert_to_pearl_format(signal) for signal in bot_signals]
+        logger.debug(f"Generated {len(all_signals)} signals from trading bot {self.selected_name}")
         return all_signals
 
-    def _convert_to_pearl_format(self, lux_signal: Any, bot_name: str) -> Dict:
+    # Backward-compatible alias
+    def analyze_with_bots(self, market_data: Dict) -> List[Dict]:
+        return self.analyze(market_data)
+
+    def _convert_to_pearl_format(self, lux_signal: Any) -> Dict:
         """
         Convert Lux Algo bot signal to PEARLalgo signal format.
 
@@ -162,12 +151,13 @@ class PearlBotManager:
             mtf_alignment_score = 0.0
 
         # Prefer configured bot key for later status updates.
-        bot_cfg = self.bot_configs.get(bot_name, {}) or {}
-        symbol = str(bot_cfg.get("symbol") or getattr(getattr(self.bots.get(bot_name), "config", None), "symbol", "") or "MNQ")
-        timeframe = str(bot_cfg.get("timeframe") or getattr(getattr(self.bots.get(bot_name), "config", None), "timeframe", "") or "")
+        bot_cfg = self.bot_config or {}
+        symbol = str(bot_cfg.get("symbol") or getattr(getattr(self.bot, "config", None), "symbol", "") or "MNQ")
+        timeframe = str(bot_cfg.get("timeframe") or getattr(getattr(self.bot, "config", None), "timeframe", "") or "")
+        bot_name = self.selected_name or getattr(self.bot, "name", "trading_bot")
 
         return {
-            "type": f"pearl_bot_{bot_name}",
+            "type": f"trading_bot_{bot_name}",
             "symbol": symbol,
             "timeframe": timeframe,
             "direction": lux_signal.direction,
@@ -191,114 +181,68 @@ class PearlBotManager:
             "pearl_bot": True,
             # Backward compatibility (deprecated)
             "lux_algo_bot": True,
-            "strategy_type": self.bots[bot_name].strategy_type,
+            "strategy_type": getattr(self.bot, "strategy_type", ""),
         }
 
     def update_bot_signal_status(self, bot_name: str, signal_id: str,
                                status: str, execution_price: Optional[float] = None,
                                exit_price: Optional[float] = None) -> None:
         """Update signal status for a specific bot."""
-        if bot_name in self.bots:
-            self.bots[bot_name].update_signal_status(
-                signal_id, status, execution_price, exit_price
-            )
+        if self.bot is not None and bot_name == self.selected_name:
+            self.bot.update_signal_status(signal_id, status, execution_price, exit_price)
 
     def get_bot_performance(self, bot_name: Optional[str] = None) -> Dict[str, Any]:
-        """Get performance metrics for bots."""
-        if bot_name and bot_name in self.bots:
-            return self.bots[bot_name].get_performance_report()
-
-        # Return performance for all bots
-        return {
-            bot_name: bot.get_performance_report()
-            for bot_name, bot in self.bots.items()
-        }
+        """Get performance metrics for the trading bot."""
+        if self.bot is None:
+            return {}
+        if bot_name and bot_name != self.selected_name:
+            return {}
+        return {self.selected_name or "trading_bot": self.bot.get_performance_report()}
 
     def get_active_bots(self) -> List[str]:
-        """Get list of active bot names."""
-        return [name for name, bot in self.bots.items() if bool(getattr(bot, "is_active", True))]
+        """Get list of active bot names (single bot)."""
+        if self.bot is None or not self.selected_name:
+            return []
+        return [self.selected_name] if bool(getattr(self.bot, "is_active", True)) else []
 
     def enable_bot(self, bot_name: str) -> bool:
-        """Enable a specific bot."""
-        if bot_name in self.bots:
-            self.bots[bot_name].is_active = True
-            logger.info(f"Enabled bot: {bot_name}")
+        """Enable the selected bot (no-op for others)."""
+        if self.bot is not None and bot_name == self.selected_name:
+            self.bot.is_active = True
+            logger.info(f"Enabled trading bot: {bot_name}")
             return True
         return False
 
     def disable_bot(self, bot_name: str) -> bool:
-        """Disable a specific bot."""
-        if bot_name in self.bots:
-            self.bots[bot_name].is_active = False
-            logger.info(f"Disabled bot: {bot_name}")
+        """Disable the selected bot (no-op for others)."""
+        if self.bot is not None and bot_name == self.selected_name:
+            self.bot.is_active = False
+            logger.info(f"Disabled trading bot: {bot_name}")
             return True
         return False
 
     def reload_bot_configs(self) -> None:
-        """Reload bot configurations from config files."""
-        logger.info("Reloading PEARL bot configurations...")
-        self.bots.clear()
-        self.bot_configs.clear()
-        self._load_bot_configs()
+        """Reload trading bot configuration from config files."""
+        logger.info("Reloading trading bot configuration...")
+        self.bot = None
+        self.bot_config = {}
+        self.selected_name = None
+        self._load_trading_bot()
 
     def create_default_config(self) -> Dict[str, Any]:
         """
-        Create a default configuration template for PEARL bots.
+        Create a default configuration template for trading_bot.
 
-        This shows users how to configure the bots in their config.yaml
+        This shows users how to configure the AutoBot in config.yaml.
         """
         return {
-            "pearl_bots": {
+            "trading_bot": {
                 "enabled": True,
-                "bots": {
-                    "trend_follower": {
+                "selected": "PearlAutoBot",
+                "available": {
+                    "PearlAutoBot": {
+                        "class": "PearlAutoBot",
                         "enabled": True,
-                        "description": "Trend-following bot using moving averages and momentum",
-                        "bot_class": "TrendFollowerBot",
-                        "symbol": "MNQ",
-                        "timeframe": "5m",
-                        "max_positions": 1,
-                        "risk_per_trade": 0.01,
-                        "stop_loss_pct": 0.005,
-                        "take_profit_pct": 0.01,
-                        "min_confidence": 0.7,
-                        "enable_alerts": True,
-                        "parameters": {
-                            "min_trend_strength": 25.0,
-                            "max_pullback_pct": 0.02,
-                            "momentum_threshold": 0.005
-                        }
-                    },
-                    "breakout_trader": {
-                        "enabled": True,
-                        "description": "Breakout bot trading consolidation breakouts",
-                        "bot_class": "BreakoutBot",
-                        "symbol": "MNQ",
-                        "timeframe": "5m",
-                        "max_positions": 1,
-                        "risk_per_trade": 0.01,
-                        "stop_loss_pct": 0.008,
-                        "take_profit_pct": 0.015,
-                        "min_confidence": 0.75,
-                        "enable_alerts": True,
-                        "parameters": {
-                            "min_pattern_strength": 0.6,
-                            "require_volume_confirmation": True,
-                            "min_momentum_acceleration": 0.001
-                        }
-                    },
-                    "composite": {
-                        "enabled": False,
-                        "description": "Composite bot combining trend/breakout/reversal/BOS with multi-timeframe context",
-                        "bot_class": "CompositeBot",
-                        "symbol": "MNQ",
-                        "timeframe": "1m",
-                        "max_positions": 1,
-                        "risk_per_trade": 0.01,
-                        "stop_loss_pct": 0.006,
-                        "take_profit_pct": 0.012,
-                        "min_confidence": 0.70,
-                        "enable_alerts": True,
                         "parameters": {
                             "timeframes": ["1m", "5m", "15m", "1h", "4h"],
                             "max_candidates": 1,
@@ -312,34 +256,26 @@ class PearlBotManager:
                                 ]
                             },
                         },
-                    },
-                    "mean_reverter": {
-                        "enabled": False,  # Disabled by default as it's more risky
-                        "description": "Mean reversion bot using oscillator analysis",
-                        "bot_class": "MeanReversionBot",
-                        "symbol": "MNQ",
-                        "timeframe": "5m",
-                        "max_positions": 1,
-                        "risk_per_trade": 0.008,  # Lower risk for mean reversion
-                        "stop_loss_pct": 0.003,
-                        "take_profit_pct": 0.008,
-                        "min_confidence": 0.8,
-                        "enable_alerts": True,
-                        "parameters": {
-                            "min_mr_strength": 0.7,
-                            "require_divergence": False,
-                            "max_hold_bars": 10
-                        }
                     }
-                }
+                },
             }
         }
 
 
-# Global bot manager instance
-pearl_bot_manager = PearlBotManager()
+# Global trading bot manager instance
+trading_bot_manager = TradingBotManager()
 
 
-def get_pearl_bot_manager() -> PearlBotManager:
-    """Get the global PEARL bot manager instance."""
-    return pearl_bot_manager
+def get_trading_bot_manager() -> TradingBotManager:
+    """Get the global trading bot manager instance."""
+    return trading_bot_manager
+
+
+# Backward-compatible aliases
+PearlBotManager = TradingBotManager
+pearl_bot_manager = trading_bot_manager
+
+
+def get_pearl_bot_manager() -> TradingBotManager:
+    """Backward-compatible alias for the trading bot manager."""
+    return trading_bot_manager

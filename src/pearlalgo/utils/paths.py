@@ -11,6 +11,7 @@ All functions use consistent defaults and patterns to ensure maintainability.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -26,7 +27,16 @@ def ensure_state_dir(state_dir: Optional[Path] = None) -> Path:
         Path to the state directory (guaranteed to exist)
     """
     if state_dir is None:
-        state_dir = Path("data/nq_agent_state")
+        env_state_dir = os.getenv("PEARLALGO_STATE_DIR")
+        if env_state_dir:
+            state_dir = Path(env_state_dir)
+        else:
+            market = os.getenv("PEARLALGO_MARKET")
+            if market:
+                market_label = str(market).strip().upper()
+                state_dir = Path("data") / "agent_state" / market_label
+            else:
+                state_dir = Path("data/nq_agent_state")
     
     state_path = Path(state_dir)
     state_path.mkdir(parents=True, exist_ok=True)

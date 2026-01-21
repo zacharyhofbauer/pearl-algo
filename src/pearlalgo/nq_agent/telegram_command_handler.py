@@ -74,6 +74,9 @@ class TelegramCommandHandler:
         self.chat_id = str(chat_id)
         self.state_dir = ensure_state_dir(state_dir)
         self.exports_dir = self.state_dir / "exports"
+        self._available_markets = ["NQ", "ES", "GC"]
+        self.active_market = "NQ"
+        self._set_active_market(os.getenv("PEARLALGO_MARKET", "NQ"))
         self._startup_ping = bool(startup_ping)
         self.application = (
             Application.builder()
@@ -83,6 +86,24 @@ class TelegramCommandHandler:
         )
         self.service_controller = ServiceController()
         self._register_handlers()
+
+    def _resolve_state_dir_for_market(self, market: str) -> Path:
+        market_upper = str(market or "NQ").strip().upper()
+        default_dir = Path("data") / "agent_state" / market_upper
+        if market_upper == "NQ":
+            legacy_dir = Path("data/nq_agent_state")
+            if default_dir.exists() or not legacy_dir.exists():
+                return ensure_state_dir(default_dir)
+            return ensure_state_dir(legacy_dir)
+        return ensure_state_dir(default_dir)
+
+    def _set_active_market(self, market: str) -> None:
+        market_upper = str(market or "NQ").strip().upper()
+        if market_upper not in self._available_markets:
+            market_upper = "NQ"
+        self.active_market = market_upper
+        self.state_dir = self._resolve_state_dir_for_market(market_upper)
+        self.exports_dir = self.state_dir / "exports"
 
     async def _post_init(self, application: Application) -> None:
         """Runs once after the Telegram application initializes."""
@@ -217,6 +238,9 @@ class TelegramCommandHandler:
             elif connection_status == "disconnected":
                 status_label = "🛰️ Status • Offline"
         
+        # Market button
+        market_label = f"🌐 Market • {self.active_market}"
+
         # Bots button - show running status
         # Use same source of truth as main status (state file) for consistency
         bots_label = "🤖 Bots"
@@ -232,7 +256,7 @@ class TelegramCommandHandler:
                 # Fallback to process check if state file not available
                 sc = getattr(self, "service_controller", None)
                 if sc is not None:
-                    agent_status = sc.get_agent_status() or {}
+                    agent_status = sc.get_agent_status(market=self.active_market) or {}
                     if agent_status.get("running"):
                         bots_label = "🤖 Bots • Running"
                     else:
@@ -241,6 +265,10 @@ class TelegramCommandHandler:
             pass
         
         return [
+            # Row 0: Market selector
+            [
+                InlineKeyboardButton(market_label, callback_data="menu:markets"),
+            ],
             # Row 1: Signals + Performance
             [
                 InlineKeyboardButton(signals_label, callback_data="menu:signals"),
@@ -384,7 +412,7 @@ class TelegramCommandHandler:
             "/help - Show this help message\n"
             "/settings - Alert preferences (charts, notifications)\n\n"
             "Use 🎛️ System to start/stop the agent.\n"
-            "Use 🤖 Bots for PearlBot controls, backtests, and reports."
+            "Use 🤖 Bots for trading bot controls, backtests, and reports."
         )
         await update.message.reply_text(text)
 
@@ -590,6 +618,8 @@ class TelegramCommandHandler:
             await self._show_bots_menu(query)
         elif action == "pearl_bots":
             await self._show_pearl_bots_menu(query)
+        elif action == "markets":
+            await self._show_markets_menu(query)
         elif action == "system":
             await self._show_system_menu(query)
         elif action == "settings":
@@ -616,6 +646,22 @@ class TelegramCommandHandler:
         else:
             text = "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:"
             await query.edit_message_text(text, reply_markup=reply_markup)
+
+    async def _show_markets_menu(self, query: CallbackQuery) -> None:
+        """Show market selector menu."""
+        lines = [
+            "🌐 *Markets*",
+            "",
+            f"Active market: *{self.active_market}*",
+            "",
+            "Select a market:",
+        ]
+        keyboard = []
+        for market in self._available_markets:
+            label = f"✅ {market}" if market == self.active_market else market
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"action:set_market:{market}")])
+        keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+        await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     async def _show_main_menu_with_chart(self, query: CallbackQuery) -> None:
         """Show the main menu with chart displayed above the menu text."""
@@ -1162,14 +1208,14 @@ class TelegramCommandHandler:
             await query.edit_message_text("💎 Performance\n\nSelect an option:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def _show_bots_menu(self, query: CallbackQuery) -> None:
-        """Show bot hub menu (PearlBot-first) with status and advanced tools."""
+        """Show bot hub menu (trading-bot-first) with status and advanced tools."""
         agent_status = {"running": False, "message": "Unknown"}
         gateway_status = {"process_running": False, "port_listening": False}
 
         try:
             sc = getattr(self, "service_controller", None)
             if sc is not None:
-                agent_status = sc.get_agent_status() or agent_status
+                agent_status = sc.get_agent_status(market=self.active_market) or agent_status
                 gateway_status = sc.get_gateway_status() or gateway_status
         except Exception as e:
             logger.warning(f"Could not load bot status: {e}")
@@ -1204,7 +1250,7 @@ class TelegramCommandHandler:
                 trading_info = "📊 No signals today yet"
         
         # Build rich status display
-        lines = ["🤖 *Bots*", ""]
+        lines = ["🤖 *Bots*", f"*Market:* {self.active_market}", ""]
         
         # Service Status
         lines.append("*Service Status:*")
@@ -1250,12 +1296,12 @@ class TelegramCommandHandler:
         
         lines.append("")
         lines.append("*Bot Tools:*")
-        lines.append("• 💎 *PearlBot* = all-in-one composite bot (recommended)")
+        lines.append("• 💎 *PearlAutoBot* = all-in-one trading bot (recommended)")
         lines.append("• 🧪 Backtest is an advanced tool (runs offline on saved data)")
 
         keyboard = [
             [
-                InlineKeyboardButton("💎 PearlBot", callback_data="menu:pearl_bots"),
+                InlineKeyboardButton("💎 Trading Bot", callback_data="menu:pearl_bots"),
                 InlineKeyboardButton("🧪 Backtest (Advanced)", callback_data="strategy_review:backtest"),
             ],
             [
@@ -1272,65 +1318,45 @@ class TelegramCommandHandler:
         await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _show_pearl_bots_menu(self, query: CallbackQuery) -> None:
-        """Show Pearl automated trading bots submenu with status and controls."""
+        """Show trading bot submenu with status and controls."""
         try:
-            # Import pearl bot manager
-            from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
+            from pearlalgo.strategies.pearl_bots_integration import get_trading_bot_manager
 
-            bot_manager = get_pearl_bot_manager()
+            bot_manager = get_trading_bot_manager()
             active_bots = bot_manager.get_active_bots()
             bot_performance = bot_manager.get_bot_performance()
 
-            lines = ["🤖 *PEARL Automated Trading Bots*", ""]
-
-            # Overall status
-            total_bots = len(bot_performance) if isinstance(bot_performance, dict) else 0
-            active_count = len(active_bots)
-
-            lines.append(f"*System Status:* {active_count}/{total_bots} bots active")
+            lines = ["🤖 *Trading Bot*", ""]
+            active_name = active_bots[0] if active_bots else "None"
+            lines.append(f"*Active trading bot:* {active_name}")
             lines.append("")
 
-            # Individual bot status
             if isinstance(bot_performance, dict) and bot_performance:
                 lines.append("*Bot Performance:*")
-
                 for bot_name, perf in bot_performance.items():
                     if isinstance(perf, dict):
-                        # Extract key metrics
-                        total_signals = perf.get('total_signals_history', 0)
-                        win_rate = perf.get('performance', {}).get('win_rate', 0) * 100
-                        total_pnl = perf.get('performance', {}).get('total_pnl', 0)
-                        active_positions = perf.get('active_signals', 0)
+                        total_signals = perf.get("total_signals_history", 0)
+                        win_rate = perf.get("performance", {}).get("win_rate", 0) * 100
+                        total_pnl = perf.get("performance", {}).get("total_pnl", 0)
+                        active_positions = perf.get("active_signals", 0)
 
-                        # Status indicator
-                        is_active = bot_name in active_bots
-                        status_emoji = "🟢" if is_active else "🔴"
-                        status_text = "Active" if is_active else "Inactive"
-
-                        # Format bot info
+                        status_emoji = "🟢" if bot_name in active_bots else "🔴"
                         pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
                         pnl_sign = "+" if total_pnl >= 0 else ""
 
                         lines.append(f"{status_emoji} *{bot_name}*")
-                        lines.append(f"  └─ Status: {status_text}")
                         lines.append(f"  └─ Signals: {total_signals}, Win Rate: {win_rate:.1f}%")
                         lines.append(f"  └─ P&L: {pnl_emoji} {pnl_sign}${abs(total_pnl):.2f}")
                         lines.append(f"  └─ Active Positions: {active_positions}")
                         lines.append("")
-
             else:
-                lines.append("❌ *No bots configured*")
-                lines.append("Add pearl_bots configuration to your config.yaml")
+                lines.append("❌ *No trading bot configured*")
+                lines.append("Add trading_bot configuration to your config.yaml")
                 lines.append("")
 
             lines.append("*Bot Controls:*")
 
-            # Control buttons
             keyboard = [
-                [
-                    InlineKeyboardButton("🚀 Start All Bots", callback_data="action:start_all_bots"),
-                    InlineKeyboardButton("🛑 Stop All Bots", callback_data="action:stop_all_bots"),
-                ],
                 [
                     InlineKeyboardButton("📊 Bot Performance", callback_data="action:show_bot_performance"),
                     InlineKeyboardButton("🔄 Refresh Status", callback_data="menu:pearl_bots"),
@@ -1343,7 +1369,7 @@ class TelegramCommandHandler:
 
         except Exception as e:
             logger.error(f"Error showing pearl bots menu: {e}", exc_info=True)
-            error_msg = "❌ *Error loading Pearl Bots menu*"
+            error_msg = "❌ *Error loading Trading Bot menu*"
             keyboard = [[InlineKeyboardButton("🏠 Back to Bots", callback_data="menu:bots")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(error_msg, reply_markup=reply_markup, parse_mode="Markdown")
@@ -1360,7 +1386,7 @@ class TelegramCommandHandler:
         try:
             sc = getattr(self, "service_controller", None)
             if sc is not None:
-                agent_status = sc.get_agent_status() or {}
+                agent_status = sc.get_agent_status(market=self.active_market) or {}
                 agent_running = bool(agent_status.get("running"))
         except Exception:
             pass
@@ -1624,13 +1650,14 @@ class TelegramCommandHandler:
         if not await self._ensure_openai_ready(query):
             return
         try:
-            from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
-            bot_manager = get_pearl_bot_manager()
-            bot_names = list(bot_manager.bot_configs.keys())
+            from pearlalgo.strategies.pearl_bots_integration import get_trading_bot_manager
+            bot_manager = get_trading_bot_manager()
+            bot_name = getattr(bot_manager, "selected_name", None)
+            bot_names = [bot_name] if bot_name else []
         except Exception:
             bot_names = []
 
-        lines = ["🧠 *AI Ops*", "", "Select a bot:"]
+        lines = ["🧠 *AI Ops*", "", "Select a target:"]
         keyboard = []
         for name in bot_names[:8]:
             keyboard.append([InlineKeyboardButton(name, callback_data=f"aiops:bot:{name}")])
@@ -1766,10 +1793,11 @@ class TelegramCommandHandler:
         bot_config = {}
         if bot != "nq_agent":
             try:
-                from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
-                bot_manager = get_pearl_bot_manager()
-                bot_config = bot_manager.bot_configs.get(bot, {})
-                perf_summary = bot_manager.get_bot_performance(bot).get("performance", {}) if hasattr(bot_manager, "get_bot_performance") else {}
+                from pearlalgo.strategies.pearl_bots_integration import get_trading_bot_manager
+                bot_manager = get_trading_bot_manager()
+                bot_config = getattr(bot_manager, "bot_config", {}) or {}
+                perf = bot_manager.get_bot_performance(bot) if hasattr(bot_manager, "get_bot_performance") else {}
+                perf_summary = perf.get(bot, {}).get("performance", {}) if isinstance(perf, dict) else {}
             except Exception:
                 perf_summary = {}
         else:
@@ -1899,13 +1927,13 @@ class TelegramCommandHandler:
             return
 
         if action == "agent":
-            result = await sc.restart_agent(background=True)
+            result = await sc.restart_agent(background=True, market=self.active_market)
         elif action == "telegram":
             result = await sc.restart_command_handler()
         elif action == "gateway":
             result = await sc.restart_gateway()
         elif action == "all":
-            res_agent = await sc.restart_agent(background=True)
+            res_agent = await sc.restart_agent(background=True, market=self.active_market)
             res_tel = await sc.restart_command_handler()
             res_gw = await sc.restart_gateway()
             result = {
@@ -1946,7 +1974,7 @@ class TelegramCommandHandler:
             "🛰️ Status - System health and connection status\n"
             "🎛️ System Control - Start/stop services and emergency controls\n"
             "⚙️ Settings - Charts + notification preferences\n"
-            "🤖 Bots - PearlBot controls, backtests, reports\n\n"
+            "🤖 Bots - trading bot controls, backtests, reports\n\n"
             "*Quick Tips:*\n"
             "• Use 'Back to Menu' to return to main menu\n"
             "• Status indicators show active positions/trades\n"
@@ -1961,6 +1989,12 @@ class TelegramCommandHandler:
         """Handle action button presses."""
         if action.startswith("action:"):
             action_type = action[7:]  # Remove "action:" prefix
+
+            if action_type.startswith("set_market:"):
+                market = action_type.split(":", 1)[1]
+                self._set_active_market(market)
+                await self._show_markets_menu(query)
+                return
 
             # Preferences toggles (settings menu)
             if action_type.startswith("toggle_pref:"):
@@ -2015,19 +2049,25 @@ class TelegramCommandHandler:
                     [InlineKeyboardButton("✅ Confirm Restart", callback_data="confirm:restart_agent")],
                     [InlineKeyboardButton("❌ Cancel", callback_data="back")],
                 ]
-                await query.edit_message_text("🔄 Restart Agent\n\n⚠️ This will restart the NQ Agent service.\n\nAre you sure?", reply_markup=InlineKeyboardMarkup(keyboard))
+                await query.edit_message_text(
+                    f"🔄 Restart Agent ({self.active_market})\n\n⚠️ This will restart the agent service.\n\nAre you sure?",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                )
             elif action_type == "stop_agent":
                 keyboard = [
                     [InlineKeyboardButton("✅ Confirm Stop", callback_data="confirm:stop_agent")],
                     [InlineKeyboardButton("❌ Cancel", callback_data="back")],
                 ]
-                await query.edit_message_text("🛑 Stop Agent\n\n⚠️ This will stop the NQ Agent service.\n\nAre you sure?", reply_markup=InlineKeyboardMarkup(keyboard))
+                await query.edit_message_text(
+                    f"🛑 Stop Agent ({self.active_market})\n\n⚠️ This will stop the agent service.\n\nAre you sure?",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                )
             elif action_type == "start_agent":
                 sc = getattr(self, "service_controller", None)
                 if sc is None:
                     text = "❌ Service controller not available."
                 else:
-                    result = await sc.start_agent(background=True)
+                    result = await sc.start_agent(background=True, market=self.active_market)
                     text = result.get("message", "Started agent.")
                     details = result.get("details")
                     if details:
@@ -2039,45 +2079,20 @@ class TelegramCommandHandler:
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             elif action_type == "start_all_bots":
-                try:
-                    from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
-                    bot_manager = get_pearl_bot_manager()
-                    active_bots = bot_manager.get_active_bots()
-
-                    # Enable all configured bots
-                    for bot_name in bot_manager.bot_configs.keys():
-                        bot_manager.enable_bot(bot_name)
-
-                    text = f"✅ Started all PEARL bots\n\nActive bots: {len(bot_manager.get_active_bots())}"
-                except Exception as e:
-                    logger.error(f"Error starting pearl bots: {e}")
-                    text = "❌ Error starting PEARL bots"
-
-                keyboard = [[InlineKeyboardButton("🤖 Pearl Bots", callback_data="menu:pearl_bots")]]
+                text = "⚠️ Single trading bot only. Use the trading_bot config to select the active AutoBot."
+                keyboard = [[InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")]]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             elif action_type == "stop_all_bots":
-                try:
-                    from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
-                    bot_manager = get_pearl_bot_manager()
-
-                    # Disable all bots
-                    for bot_name in bot_manager.bots.keys():
-                        bot_manager.disable_bot(bot_name)
-
-                    text = "🛑 Stopped all PEARL bots"
-                except Exception as e:
-                    logger.error(f"Error stopping pearl bots: {e}")
-                    text = "❌ Error stopping PEARL bots"
-
-                keyboard = [[InlineKeyboardButton("🤖 Pearl Bots", callback_data="menu:pearl_bots")]]
+                text = "⚠️ Single trading bot only. Use the trading_bot config to select the active AutoBot."
+                keyboard = [[InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")]]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             elif action_type == "show_bot_performance":
                 try:
-                    from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
-                    bot_manager = get_pearl_bot_manager()
+                    from pearlalgo.strategies.pearl_bots_integration import get_trading_bot_manager
+                    bot_manager = get_trading_bot_manager()
                     performance = bot_manager.get_bot_performance()
 
-                    lines = ["📊 *PEARL Bot Performance*", ""]
+                    lines = ["📊 *Trading Bot Performance*", ""]
 
                     if isinstance(performance, dict) and performance:
                         for bot_name, perf in performance.items():
@@ -2100,9 +2115,9 @@ class TelegramCommandHandler:
                     text = "\n".join(lines)
                 except Exception as e:
                     logger.error(f"Error showing bot performance: {e}")
-                    text = "❌ Error loading bot performance"
+                    text = "❌ Error loading trading bot performance"
 
-                keyboard = [[InlineKeyboardButton("🤖 Pearl Bots", callback_data="menu:pearl_bots")]]
+                keyboard = [[InlineKeyboardButton("🤖 Trading Bot", callback_data="menu:pearl_bots")]]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
             elif action_type == "restart_gateway":
                 keyboard = [
@@ -2312,7 +2327,7 @@ class TelegramCommandHandler:
                 if sc is None:
                     text = "❌ Service controller not available."
                 else:
-                    result = await sc.restart_agent(background=True)
+                    result = await sc.restart_agent(background=True, market=self.active_market)
                     text = result.get("message", "Restarted agent.")
                     details = result.get("details")
                     if details:
@@ -2328,7 +2343,7 @@ class TelegramCommandHandler:
                 if sc is None:
                     text = "❌ Service controller not available."
                 else:
-                    result = await sc.stop_agent()
+                    result = await sc.stop_agent(market=self.active_market)
                     text = result.get("message", "Stopped agent.")
                     details = result.get("details")
                     if details:
@@ -2388,7 +2403,7 @@ class TelegramCommandHandler:
                     
                     # Stop the agent
                     if sc is not None:
-                        result = await sc.stop_agent()
+                        result = await sc.stop_agent(market=self.active_market)
                         messages.append(f"✅ Agent stopped: {result.get('message', 'OK')}")
                     else:
                         messages.append("⚠️ Service controller not available")
@@ -4048,7 +4063,7 @@ class TelegramCommandHandler:
         lines = [
             "🧪 *Backtest (Advanced)*",
             "",
-            "Recommended: backtest 💎 *PearlBot* (all-in-one).",
+            "Recommended: backtest 💎 *PearlAutoBot* (all-in-one).",
             "Variants are individual strategy bots.",
             "",
             "Data source: `data/historical/MNQ_1m_*.parquet` (resampled to 5m).",
@@ -4056,7 +4071,7 @@ class TelegramCommandHandler:
 
         keyboard = [
             [
-                InlineKeyboardButton("💎 PearlBot (All-in-One)", callback_data="pb:bot:pearl"),
+                InlineKeyboardButton("💎 PearlAutoBot (All-in-One)", callback_data="pb:bot:pearl"),
                 InlineKeyboardButton("🏆 Compare All", callback_data="pb:bot:all"),
             ],
             [
@@ -4087,7 +4102,7 @@ class TelegramCommandHandler:
             return
 
         bot_label = {
-            "pearl": "PearlBot (All-in-One)",
+            "pearl": "PearlAutoBot (All-in-One)",
             "trend": "Trend Follower",
             "break": "Breakout",
             "mean": "Mean Reversion",
@@ -4202,7 +4217,7 @@ class TelegramCommandHandler:
 
         bot_map = {
             "pearl": (
-                "CompositeBot",
+                "PearlAutoBot",
                 {
                     "timeframes": ["5m", "15m"],
                     "max_candidates": 1,
@@ -4243,7 +4258,7 @@ class TelegramCommandHandler:
             return
 
         bot_label = {
-            "pearl": "PearlBot (All-in-One)",
+            "pearl": "PearlAutoBot (All-in-One)",
             "trend": "Trend Follower",
             "break": "Breakout",
             "mean": "Mean Reversion",
@@ -4331,7 +4346,7 @@ class TelegramCommandHandler:
             )
 
     async def _run_pearl_bots_comparison(self, update: Any, context: Any, period_key: str) -> None:
-        """Run the same backtest period for all PEARL bots and show a comparison."""
+        """Run the same backtest period for all bot variants and show a comparison."""
         if not await self._check_authorized(update):
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
@@ -4339,7 +4354,7 @@ class TelegramCommandHandler:
         await self._send_message_or_edit(
             update,
             context,
-            f"⏳ Running comparison backtest…\n\nBots: PearlBot/Trend/Breakout/MeanRev\nPeriod: {period_key}",
+            f"⏳ Running comparison backtest…\n\nBots: PearlAutoBot/Trend/Breakout/MeanRev\nPeriod: {period_key}",
         )
 
         try:
@@ -4349,7 +4364,7 @@ class TelegramCommandHandler:
             from pearlalgo.strategies.pearl_bots.backtest_adapter import PearlBotBacktestAdapter
 
             df_1m = self._load_historical_ohlcv(period_key)
-            bots = [("pearl", "PearlBot"), ("trend", "Trend"), ("break", "Breakout"), ("mean", "MeanRev")]
+            bots = [("pearl", "PearlAutoBot"), ("trend", "Trend"), ("break", "Breakout"), ("mean", "MeanRev")]
 
             results = []
             for key, label in bots:

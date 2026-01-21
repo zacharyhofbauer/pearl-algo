@@ -164,6 +164,15 @@ class TestLoadConfigYaml:
         assert result["symbol"] == "MNQ"
         assert result["timeframe"] == "5m"
 
+    def test_load_uses_env_config_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """PEARLALGO_CONFIG_PATH should be honored when config_path is None."""
+        config_file = tmp_path / "env_config.yaml"
+        config_file.write_text("symbol: ES\ntimeframe: 5m\n")
+        monkeypatch.setenv("PEARLALGO_CONFIG_PATH", str(config_file))
+
+        result = load_config_yaml()
+        assert result["symbol"] == "ES"
+
     def test_load_nonexistent_returns_empty(self, tmp_path: Path) -> None:
         """Test that loading a nonexistent file returns empty dict."""
         result = load_config_yaml(tmp_path / "does_not_exist.yaml")

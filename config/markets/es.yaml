@@ -1,0 +1,12 @@
+symbol: "MES"
+timeframe: "5m"
+scan_interval: 30
+
+trading_bot:
+  enabled: false
+  selected: "PearlAutoBot"
+  available:
+    PearlAutoBot:
+      class: "PearlAutoBot"
+      enabled: true
+      parameters: {}

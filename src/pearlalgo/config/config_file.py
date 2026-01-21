@@ -96,9 +96,13 @@ def load_config_yaml(
         Returns empty dict if file doesn't exist or fails to load.
     """
     if config_path is None:
-        # Find project root (4 levels up from this file: config_file.py -> config -> pearlalgo -> src -> project)
-        project_root = Path(__file__).parent.parent.parent.parent
-        config_path = project_root / "config" / "config.yaml"
+        env_path = os.getenv("PEARLALGO_CONFIG_PATH")
+        if env_path:
+            config_path = Path(env_path)
+        else:
+            # Find project root (4 levels up from this file: config_file.py -> config -> pearlalgo -> src -> project)
+            project_root = Path(__file__).parent.parent.parent.parent
+            config_path = project_root / "config" / "config.yaml"
     else:
         config_path = Path(config_path)
     
@@ -186,6 +190,8 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "challenge",
     # PEARL automated bots (formerly lux_algo_bots)
     "pearl_bots",
+    # Single trading bot selection (AutoBot)
+    "trading_bot",
     # Agentic layer (optional autonomy / reasoning)
     "agentic",
     # Backward compatibility (deprecated)

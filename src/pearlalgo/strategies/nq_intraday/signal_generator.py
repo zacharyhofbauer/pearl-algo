@@ -283,9 +283,9 @@ class NQSignalGenerator:
         # Load signal configuration
         signal_settings = service_config.get("signals", {})
 
-        # PEARL bots integration (optional)
-        pearl_bots_cfg = service_config.get("pearl_bots", {}) or {}
-        self._pearl_bots_enabled = bool(pearl_bots_cfg.get("enabled", False))
+        # Trading bot integration (optional)
+        trading_bot_cfg = service_config.get("trading_bot", {}) or {}
+        self._trading_bot_enabled = bool(trading_bot_cfg.get("enabled", False))
 
         # Central policy (allow/deny) - keeps signal_generator rules from drifting.
         self._policy: Optional["SignalPolicy"] = None
@@ -634,16 +634,16 @@ class NQSignalGenerator:
         # Scan for signals with MTF context and order book data
         raw_signals = self.scanner.scan(df, df_5m=df_5m, df_15m=df_15m, market_data=market_data)
 
-        # Optional: run PEARL bots in parallel and merge into raw signals.
-        if self._pearl_bots_enabled:
+        # Optional: run selected trading bot (single source of truth).
+        if self._trading_bot_enabled:
             try:
-                from pearlalgo.strategies.pearl_bots_integration import get_pearl_bot_manager
-                bot_manager = get_pearl_bot_manager()
-                pearl_signals = bot_manager.analyze_with_bots(market_data)
-                if pearl_signals:
-                    raw_signals.extend(pearl_signals)
+                from pearlalgo.strategies.pearl_bots_integration import get_trading_bot_manager
+                bot_manager = get_trading_bot_manager()
+                trading_signals = bot_manager.analyze(market_data)
+                raw_signals = trading_signals or []
             except Exception as e:
-                logger.debug(f"PEARL bots integration failed: {e}")
+                logger.debug(f"Trading bot integration failed: {e}")
+                raw_signals = []
 
         # Track raw signal count for diagnostics
         diagnostics.raw_signals = len(raw_signals)

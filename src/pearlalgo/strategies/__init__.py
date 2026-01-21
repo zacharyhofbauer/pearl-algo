@@ -18,10 +18,11 @@ from .pearl_bots import (
     TrendFollowerBot,
     BreakoutBot,
     MeanReversionBot,
+    PearlAutoBot,
 )
 
 # Import integration layer
-from .pearl_bots_integration import get_pearl_bot_manager
+from .pearl_bots_integration import get_pearl_bot_manager, get_trading_bot_manager
 
 __all__ = [
     # Existing strategies
@@ -35,7 +36,9 @@ __all__ = [
     "TrendFollowerBot",
     "BreakoutBot",
     "MeanReversionBot",
+    "PearlAutoBot",
 
     # Integration
     "get_pearl_bot_manager",
+    "get_trading_bot_manager",
 ]

@@ -214,23 +214,27 @@ class ServiceController:
         else:
             return "🔴 Gateway is NOT RUNNING"
 
-    async def start_agent(self, background: bool = True) -> Dict[str, Any]:
-        """Start NQ Agent Service.
+    async def start_agent(self, background: bool = True, market: str = "NQ") -> Dict[str, Any]:
+        """Start market-specific Agent Service.
 
         Args:
             background: If True, start in background mode
+            market: Market identifier (e.g., NQ/ES/GC)
 
         Returns:
             Dictionary with success status and message
         """
-        script = self.scripts_dir / "lifecycle" / "start_nq_agent_service.sh"
-        logger.info("Starting NQ Agent Service via Telegram command", extra={"background": background})
+        script = self.scripts_dir / "lifecycle" / "agent.sh"
+        logger.info(
+            "Starting Agent Service via Telegram command",
+            extra={"background": background, "market": market},
+        )
 
         # Check if already running
-        if self._is_agent_running():
+        if self._is_agent_running(market=market):
             return {
                 "success": False,
-                "message": "⚠️ NQ Agent Service is already running",
+                "message": f"⚠️ Agent Service is already running ({market})",
                 "details": "Use /stop_agent first if you want to restart",
             }
 
@@ -241,9 +245,9 @@ class ServiceController:
             logger.warning("Starting agent without Gateway running")
 
         # Run start script
-        args = []
+        args = ["start", "--market", str(market)]
         if background:
-            args = ["--background"]
+            args.append("--background")
 
         try:
             script_path = str(script)
@@ -262,19 +266,19 @@ class ServiceController:
 
             # Verify it started
             await asyncio.sleep(3)
-            is_running = self._is_agent_running()
+            is_running = self._is_agent_running(market=market)
 
             if is_running:
                 return {
                     "success": True,
-                    "message": "✅ NQ Agent Service started successfully",
+                    "message": f"✅ Agent Service started successfully ({market})",
                     "details": result.stdout.strip() if result.stdout else "Agent process is running",
                     "background": background,
                 }
             else:
                 return {
                     "success": False,
-                    "message": "⚠️ Start command executed but agent not detected",
+                    "message": f"⚠️ Start command executed but agent not detected ({market})",
                     "details": result.stderr.strip() if result.stderr else result.stdout.strip(),
                 }
 
@@ -287,50 +291,56 @@ class ServiceController:
         except Exception as e:
             return {
                 "success": False,
-                "message": "❌ Failed to start NQ Agent Service",
+                "message": f"❌ Failed to start Agent Service ({market})",
                 "details": str(e),
             }
 
-    async def stop_agent(self) -> Dict[str, Any]:
-        """Stop NQ Agent Service.
+    async def stop_agent(self, market: str = "NQ") -> Dict[str, Any]:
+        """Stop market-specific Agent Service.
 
         Returns:
             Dictionary with success status and message
         """
-        script = self.scripts_dir / "lifecycle" / "stop_nq_agent_service.sh"
-        logger.info("Stopping NQ Agent Service via Telegram command")
+        script = self.scripts_dir / "lifecycle" / "agent.sh"
+        logger.info("Stopping Agent Service via Telegram command", extra={"market": market})
 
-        if not self._is_agent_running():
+        if not self._is_agent_running(market=market):
             return {
                 "success": False,
-                "message": "⚠️ NQ Agent Service is not running",
+                "message": f"⚠️ Agent Service is not running ({market})",
                 "details": "Nothing to stop",
             }
 
-        success, stdout, stderr = self._run_script(script, timeout=30, check=False)
+        success, stdout, stderr = self._run_script(
+            script,
+            args=["stop", "--market", str(market)],
+            timeout=30,
+            check=False,
+        )
 
         # Verify it's stopped
         await asyncio.sleep(2)
-        is_running = self._is_agent_running()
+        is_running = self._is_agent_running(market=market)
 
         if not is_running:
             return {
                 "success": True,
-                "message": "✅ NQ Agent Service stopped successfully",
+                "message": f"✅ Agent Service stopped successfully ({market})",
                 "details": stdout.strip() if stdout else "Agent process stopped",
             }
         else:
             return {
                 "success": False,
-                "message": "⚠️ Stop command executed but agent still running",
+                "message": f"⚠️ Stop command executed but agent still running ({market})",
                 "details": stderr.strip() if stderr else stdout.strip(),
             }
 
-    def _is_agent_running(self) -> bool:
-        """Check if Agent process is running."""
+    def _is_agent_running(self, market: str = "NQ") -> bool:
+        """Check if Agent process is running for a market."""
         try:
-            # Check PID file first
-            pid_file = self.project_root / "logs" / "nq_agent.pid"
+            market_upper = str(market).upper()
+            # Check market-specific PID file first
+            pid_file = self.project_root / "logs" / f"agent_{market_upper}.pid"
             if pid_file.exists():
                 try:
                     pid = int(pid_file.read_text().strip())
@@ -345,7 +355,23 @@ class ServiceController:
                 except Exception:
                     pass
 
-            # Fallback: check by process name
+            # Backward compatibility: legacy NQ PID file
+            if market_upper == "NQ":
+                legacy_pid_file = self.project_root / "logs" / "nq_agent.pid"
+                if legacy_pid_file.exists():
+                    try:
+                        pid = int(legacy_pid_file.read_text().strip())
+                        result = subprocess.run(
+                            ["ps", "-p", str(pid)],
+                            capture_output=True,
+                            timeout=5,
+                        )
+                        if result.returncode == 0:
+                            return True
+                    except Exception:
+                        pass
+
+            # Fallback: check by process name (non-specific)
             result = subprocess.run(
                 ["pgrep", "-f", "pearlalgo.nq_agent.main"],
                 capture_output=True,
@@ -359,13 +385,13 @@ class ServiceController:
         """Public wrapper: check if Agent process is running."""
         return self._is_agent_running()
 
-    def get_agent_status(self) -> Dict[str, Any]:
-        """Get NQ Agent Service status.
+    def get_agent_status(self, market: str = "NQ") -> Dict[str, Any]:
+        """Get market-specific Agent Service status.
 
         Returns:
             Dictionary with agent status information
         """
-        is_running = self._is_agent_running()
+        is_running = self._is_agent_running(market=market)
 
         return {
             "running": is_running,
@@ -374,8 +400,8 @@ class ServiceController:
         }
 
 
-    async def restart_agent(self, background: bool = True) -> Dict[str, Any]:
-        """Restart NQ Agent Service (stop then start).
+    async def restart_agent(self, background: bool = True, market: str = "NQ") -> Dict[str, Any]:
+        """Restart market-specific Agent Service (stop then start).
 
         Args:
             background: If True, start in background mode
@@ -383,9 +409,12 @@ class ServiceController:
         Returns:
             Dictionary with success status and message/details
         """
-        logger.info("Restarting NQ Agent Service via Telegram command", extra={"background": background})
+        logger.info(
+            "Restarting Agent Service via Telegram command",
+            extra={"background": background, "market": market},
+        )
 
-        stop_result = await self.stop_agent()
+        stop_result = await self.stop_agent(market=market)
         # If it wasn't running, continue to start anyway
         if not stop_result.get("success") and "not running" not in str(stop_result.get("message", "")).lower():
             return {
@@ -395,7 +424,7 @@ class ServiceController:
             }
 
         await asyncio.sleep(2)
-        start_result = await self.start_agent(background=background)
+        start_result = await self.start_agent(background=background, market=market)
 
         overall_success = bool(start_result.get("success"))
         message = "✅ Agent restarted successfully" if overall_success else "⚠️ Agent restart attempted but service not detected"
@@ -480,6 +509,17 @@ class ServiceController:
             return {"success": True, "message": f"📄 Tail of {log_filename}", "details": tail}
         except Exception as e:
             return {"success": False, "message": "❌ Failed to tail log", "details": str(e)}
+
+    def tail_agent_log(self, market: str = "NQ", lines: int = 200) -> Dict[str, Any]:
+        """Tail the market-specific agent log (or legacy NQ log)."""
+        market_upper = str(market).upper()
+        log_filename = f"agent_{market_upper}.log"
+        result = self.tail_log(log_filename, lines=lines)
+        if result.get("success"):
+            return result
+        if market_upper == "NQ":
+            return self.tail_log("nq_agent.log", lines=lines)
+        return result
 
     async def check_api_ready(self) -> Dict[str, Any]:
         """Check whether IBKR Gateway API is ready (script if present, else port probe)."""

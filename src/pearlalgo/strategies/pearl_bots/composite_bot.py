@@ -502,5 +502,22 @@ class CompositeBot(PearlBot):
             return 0.0
 
 
+class PearlAutoBot(CompositeBot):
+    """
+    PearlAutoBot - canonical all-in-one AutoBot.
+
+    This preserves CompositeBot behavior while standardizing naming.
+    """
+
+    @property
+    def name(self) -> str:
+        return "PearlAutoBot"
+
+    @property
+    def description(self) -> str:
+        return "PearlAutoBot: all-in-one composite bot with multi-scenario logic"
+
+
 register_bot(CompositeBot)
+register_bot(PearlAutoBot)
 

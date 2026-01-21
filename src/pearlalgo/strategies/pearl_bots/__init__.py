@@ -27,7 +27,7 @@ from .bot_template import (
 from .trend_follower_bot import TrendFollowerBot
 from .breakout_bot import BreakoutBot
 from .mean_reversion_bot import MeanReversionBot
-from .composite_bot import CompositeBot
+from .composite_bot import CompositeBot, PearlAutoBot
 
 __all__ = [
     # Base classes
@@ -46,4 +46,5 @@ __all__ = [
     'BreakoutBot',
     'MeanReversionBot',
     'CompositeBot',
+    'PearlAutoBot',
 ]

@@ -360,6 +360,16 @@ prop_firm:
   contract_size_multiplier: 1.0
 
 # PEARL Automated Trading Bots (formerly lux_algo_bots)
+trading_bot:
+  enabled: false
+  selected: "PearlAutoBot"
+  available:
+    PearlAutoBot:
+      class: "PearlAutoBot"
+      enabled: true
+      parameters: {}
+
+# Legacy multi-bot config (deprecated; still accepted)
 pearl_bots:
   enabled: true
   bots:

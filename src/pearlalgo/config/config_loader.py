@@ -42,6 +42,8 @@ from typing import Any, Dict, Mapping, Optional
 from pearlalgo.config.config_file import load_config_yaml, log_config_warnings
 from pearlalgo.utils.logger import logger
 
+_LEGACY_TRADING_BOT_WARNING_SENT = False
+
 # Optional per-call override (used for experiments/backtests; never persisted).
 # ContextVar keeps this safe across async tasks. It does NOT affect other processes.
 _SERVICE_CONFIG_OVERRIDE: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
@@ -401,6 +403,20 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "bots": {},        # Empty by default, configured per deployment
     },
     # ==========================================================================
+    # SINGLE TRADING BOT (AutoBot selection)
+    # ==========================================================================
+    "trading_bot": {
+        "enabled": False,
+        "selected": "PearlAutoBot",
+        "available": {
+            "PearlAutoBot": {
+                "class": "PearlAutoBot",
+                "enabled": True,
+                "parameters": {},
+            }
+        },
+    },
+    # ==========================================================================
     # AGENTIC LAYER (optional autonomy / reasoning / external context)
     # ==========================================================================
     "agentic": {
@@ -446,6 +462,50 @@ def load_service_config(
     if config_data and "pearl_bots" not in config_data and "lux_algo_bots" in config_data:
         config_data = dict(config_data)
         config_data["pearl_bots"] = config_data.get("lux_algo_bots") or {}
+
+    # Normalize legacy multi-bot configs to the single `trading_bot` schema.
+    if config_data and "trading_bot" not in config_data:
+        legacy_cfg = config_data.get("pearl_bots") or config_data.get("lux_algo_bots") or {}
+        if isinstance(legacy_cfg, dict) and legacy_cfg:
+            bots_cfg = legacy_cfg.get("bots", {}) if isinstance(legacy_cfg.get("bots", {}), dict) else {}
+            available: Dict[str, Dict[str, Any]] = {}
+            for bot_name, bot_cfg in bots_cfg.items():
+                if not isinstance(bot_cfg, dict):
+                    continue
+                class_name = bot_cfg.get("bot_class") or bot_cfg.get("class") or f"{bot_name}Bot"
+                params = bot_cfg.get("parameters", {})
+                available[str(bot_name)] = {
+                    "class": str(class_name) if class_name else "",
+                    "enabled": bool(bot_cfg.get("enabled", False)),
+                    "parameters": params if isinstance(params, dict) else {},
+                }
+
+            selected = None
+            enabled_names = [name for name, cfg in available.items() if cfg.get("enabled")]
+            if enabled_names:
+                preferred = [
+                    name for name in enabled_names
+                    if available.get(name, {}).get("class") in {"PearlAutoBot", "CompositeBot"}
+                ]
+                selected = sorted(preferred or enabled_names)[0]
+            elif available:
+                selected = sorted(available.keys())[0]
+
+            config_data = dict(config_data)
+            config_data["trading_bot"] = {
+                "enabled": bool(legacy_cfg.get("enabled", False)),
+                "selected": selected,
+                "available": available,
+            }
+
+            global _LEGACY_TRADING_BOT_WARNING_SENT
+            if not _LEGACY_TRADING_BOT_WARNING_SENT:
+                logger.warning(
+                    "Legacy pearl_bots/lux_algo_bots detected; normalized to trading_bot. "
+                    "Only the selected trading bot will run. "
+                    "Update config to use trading_bot."
+                )
+                _LEGACY_TRADING_BOT_WARNING_SENT = True
     
     # Validate config (logs warnings, does not fail)
     if validate and config_data:
@@ -475,6 +535,21 @@ def load_service_config(
     except Exception as e:
         logger.warning(f"Could not apply execution env overrides: {e}")
     
+    # Validate trading_bot selection when enabled (fail fast on misconfig)
+    trading_bot_cfg = result.get("trading_bot", {}) or {}
+    if trading_bot_cfg.get("enabled", False):
+        selected = trading_bot_cfg.get("selected")
+        available = trading_bot_cfg.get("available", {})
+        if not selected:
+            raise ValueError("trading_bot.selected is required when trading_bot.enabled is true")
+        if not isinstance(available, dict) or selected not in available:
+            raise ValueError(f"trading_bot.selected={selected!r} is not present in trading_bot.available")
+        selected_cfg = available.get(selected) or {}
+        if not bool(selected_cfg.get("enabled", False)):
+            raise ValueError(f"Selected trading bot {selected!r} is disabled in trading_bot.available")
+        if not str(selected_cfg.get("class") or "").strip():
+            raise ValueError(f"Selected trading bot {selected!r} has no class configured")
+
     return result
 
 

@@ -1,8 +1,16 @@
-# PEARL Automated Trading Bots Configuration (formerly Lux Algo bots)
+# Legacy PEARL Automated Trading Bots Configuration (deprecated)
 #
-# This configuration enables PEARL automated trading bots
-# in your PEARLalgo NQ trading system. Each bot is a complete, self-contained
-# trading strategy with indicators, logic, risk management, and automation.
+# Use trading_bot in config/config.yaml for single-bot runtime.
+#
+# Migration example:
+# trading_bot:
+#   enabled: true
+#   selected: "PearlAutoBot"
+#   available:
+#     PearlAutoBot:
+#       class: "PearlAutoBot"
+#       enabled: true
+#       parameters: {}
 #
 # Similar to Lux Algo's AI Strategy Alerts, these bots can be deployed as
 # zero-code automated strategies with webhook alerts and performance tracking.

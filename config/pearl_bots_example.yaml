@@ -1,6 +1,16 @@
-# PEARL Automated Trading Bots Configuration Example
+# Legacy PEARL Automated Trading Bots Configuration Example (deprecated)
 #
-# Add this to your config/config.yaml to enable PEARL bots in the strategies menu
+# Use trading_bot in config/config.yaml for single-bot runtime.
+#
+# Migration example:
+# trading_bot:
+#   enabled: true
+#   selected: "PearlAutoBot"
+#   available:
+#     PearlAutoBot:
+#       class: "PearlAutoBot"
+#       enabled: true
+#       parameters: {}
 
 pearl_bots:
   enabled: true  # Set to true to enable PEARL bots

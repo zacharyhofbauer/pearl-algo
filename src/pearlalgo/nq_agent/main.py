@@ -33,6 +33,7 @@ from pearlalgo.data_providers.factory import create_data_provider
 from pearlalgo.nq_agent.service import NQAgentService
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
 from pearlalgo.utils.logging_config import set_run_id, setup_logging
+from pearlalgo.utils.paths import ensure_state_dir
 
 
 async def main():
@@ -95,10 +96,14 @@ async def main():
         logger.error(f"Failed to create data provider '{provider_name}': {e}")
         return
 
+    # Resolve state directory (supports PEARLALGO_STATE_DIR / PEARLALGO_MARKET overrides)
+    state_dir = ensure_state_dir()
+
     # Create service with Telegram configuration
     service = NQAgentService(
         data_provider=data_provider,
         config=config,
+        state_dir=state_dir,
         telegram_bot_token=telegram_bot_token,
         telegram_chat_id=telegram_chat_id,
     )

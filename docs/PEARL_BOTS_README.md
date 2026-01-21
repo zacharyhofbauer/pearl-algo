@@ -1,10 +1,10 @@
-# PEARL Automated Trading Bots
+# PEARL Trading Bot (AutoBot)
 
 Complete, self-contained automated trading bots for the PEARLalgo system.
 
 ## Overview
 
-PEARL Bots are complete automated trading systems that combine:
+The PEARL Trading Bot (AutoBot) is a complete automated trading system that combines:
 - Custom technical indicators and analysis
 - Automated entry/exit logic with risk management
 - Real-time performance tracking and optimization
@@ -12,6 +12,8 @@ PEARL Bots are complete automated trading systems that combine:
 - Comprehensive backtesting capabilities
 
 ## Available Bots
+
+These are **variants** for backtesting or future AutoBot options. Runtime uses **one selected AutoBot**.
 
 ### 🤖 TrendFollowerBot
 **Strategy**: Trend following with pullback entries
@@ -46,26 +48,24 @@ PEARL Bots are complete automated trading systems that combine:
 Add to `config/config.yaml`:
 
 ```yaml
-pearl_bots:
+trading_bot:
   enabled: true
-  bots:
-    trend_follower:
+  selected: "PearlAutoBot"
+  available:
+    PearlAutoBot:
+      class: "PearlAutoBot"
       enabled: true
-      description: "Trend-following bot"
-      bot_class: "TrendFollowerBot"
-      risk_per_trade: 0.01
-      min_confidence: 0.7
+      parameters: {}
 ```
 
 **Notes**
-- `pearl_bots` is the canonical key. A legacy alias `lux_algo_bots` is still accepted for backward compatibility.
+- `trading_bot` is the canonical key.
+- Legacy `pearl_bots` / `lux_algo_bots` are still accepted and normalized at startup.
 
 ### 2. Telegram Control
 Use the **🤖 Bots** menu in Telegram:
-- 🤖 **Manage Bots**: Enable/disable individual bots
+- 🤖 **Trading Bot**: Active bot status (singular)
 - 📊 **Bot Performance**: View real-time metrics
-- 🚀 **Start All Bots**: Bulk activation
-- 🛑 **Stop All Bots**: Emergency shutdown
 
 ### 3. Backtesting
 Run backtests from Telegram:
@@ -186,9 +186,8 @@ from pearlalgo.strategies.pearl_bots.backtest_adapter import backtest_pearl_bot
 - Review market conditions vs strategy type
 
 **Signal conflicts:**
-- Check bot overlap in same market conditions
-- Adjust bot priorities
-- Use market regime filtering
+- Ensure only one AutoBot is selected under `trading_bot`
+- Verify the bot is enabled in `trading_bot.available`
 
 ## Support
 
