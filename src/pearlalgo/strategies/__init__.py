@@ -3,7 +3,7 @@ Strategy implementations for the PearlAlgo trading agent.
 
 Contains:
 - nq_intraday: MNQ futures intraday strategy optimized for prop firm trading
-- trading bots: AutoBot variants (single-bot runtime; variants for backtests)
+- trading bots: AutoBot variants (backtesting/analysis)
 """
 
 # Import the main strategy for convenience
@@ -21,9 +21,6 @@ from .trading_bots import (
     PearlAutoBot,
 )
 
-# Import integration layer
-from .trading_bot_manager import get_trading_bot_manager
-
 __all__ = [
     # Existing strategies
     "NQIntradayStrategy",
@@ -38,6 +35,4 @@ __all__ = [
     "MeanReversionBot",
     "PearlAutoBot",
 
-    # Integration
-    "get_trading_bot_manager",
 ]

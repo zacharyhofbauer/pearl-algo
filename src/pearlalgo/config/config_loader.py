@@ -42,6 +42,15 @@ from typing import Any, Dict, Mapping, Optional
 from pearlalgo.config.config_file import load_config_yaml, log_config_warnings
 from pearlalgo.utils.logger import logger
 
+# Schema validation (optional - only validates if explicitly requested)
+try:
+    from pearlalgo.config.config_schema import validate_config, FullServiceConfig
+    SCHEMA_VALIDATION_AVAILABLE = True
+except ImportError:
+    SCHEMA_VALIDATION_AVAILABLE = False
+    validate_config = None  # type: ignore
+    FullServiceConfig = None  # type: ignore
+
 # Optional per-call override (used for experiments/backtests; never persisted).
 # ContextVar keeps this safe across async tasks. It does NOT affect other processes.
 _SERVICE_CONFIG_OVERRIDE: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
@@ -298,15 +307,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "max_records": 1000,
         "default_lookback_days": 7,
     },
-    "prop_firm": {
-        "mnq_tick_value": 2.0,
-        "nq_tick_value": 20.0,
-        "min_contracts": 5,
-        "max_contracts": 25,
-        "default_contracts": 10,
-        "max_risk_per_trade_pct": 1.0,
-        "max_drawdown_pct": 10.0,
-    },
     # Market hours configuration (for holiday/early-close overrides)
     # Disabled by default to preserve current behavior.
     # Enable by setting enable_config_overrides: true and providing dates.
@@ -328,7 +328,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "enabled": False,                   # Master toggle - must be true for any execution
         "armed": False,                     # Runtime toggle - must be true to place orders
         "mode": "dry_run",                  # "dry_run" (log only), "paper", or "live"
-        "adapter": "ibkr",                  # "ibkr" | "tradovate"
+        "adapter": "ibkr",
         # Risk limits (hard caps)
         "max_positions": 1,                 # Maximum concurrent positions
         "max_orders_per_day": 20,           # Maximum orders per trading day
@@ -365,24 +365,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "decay_factor": 0.0,                # Disabled for now - all observations equal weight
     },
     # ==========================================================================
-    # DRIFT GUARD (Risk-Off Cooldown)
-    # ==========================================================================
-    # IMPORTANT: This section must be present here so drift_guard settings in
-    # config/config.yaml actually affect the running agent.
-    "drift_guard": {
-        "enabled": True,
-        "lookback_trades": 20,
-        "min_trades": 10,
-        "win_rate_floor": 0.40,
-        "volatility_spike_enabled": True,
-        "volatility_levels": ["high", "extreme"],
-        "require_atr_expansion": True,
-        "cooldown_minutes": 60,
-        "tighten_min_confidence_delta": 0.05,
-        "tighten_min_risk_reward_delta": 0.20,
-        "size_multiplier": 0.50,
-    },
-    # ==========================================================================
     # 50K CHALLENGE TRACKER (Pass/Fail Rules)
     # ==========================================================================
     "challenge": {
@@ -392,37 +374,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "profit_target": 3000.0,
         "auto_reset_on_pass": True,
         "auto_reset_on_fail": True,
-    },
-    # ==========================================================================
-    # SINGLE TRADING BOT (AutoBot selection)
-    # ==========================================================================
-    "trading_bot": {
-        "enabled": False,
-        "selected": "PearlAutoBot",
-        "available": {
-            "PearlAutoBot": {
-                "class": "PearlAutoBot",
-                "enabled": True,
-                "parameters": {},
-            }
-        },
-    },
-    # ==========================================================================
-    # AGENTIC LAYER (optional autonomy / reasoning / external context)
-    # ==========================================================================
-    "agentic": {
-        "enabled": False,
-        # LLM reasoning for signals (adds/overrides `reason` on emitted signals)
-        "llm_reasoning_enabled": False,
-        "llm_reasoning_max_signals_per_cycle": 1,
-        "llm_reasoning_timeout_seconds": 20,
-        # Autonomy loop (self-tuning via config/code patches)
-        "autopilot_enabled": False,
-        "autopilot_mode": "shadow",  # shadow|live
-        "autopilot_min_interval_minutes": 60,
-        "autopilot_allow_files": ["config/config.yaml"],
-        "autopilot_auto_apply": False,
-        "autopilot_restart_after_apply": False,
     },
 }
 
@@ -473,21 +424,6 @@ def load_service_config(
     except Exception as e:
         logger.warning(f"Could not apply execution env overrides: {e}")
     
-    # Validate trading_bot selection when enabled (fail fast on misconfig)
-    trading_bot_cfg = result.get("trading_bot", {}) or {}
-    if trading_bot_cfg.get("enabled", False):
-        selected = trading_bot_cfg.get("selected")
-        available = trading_bot_cfg.get("available", {})
-        if not selected:
-            raise ValueError("trading_bot.selected is required when trading_bot.enabled is true")
-        if not isinstance(available, dict) or selected not in available:
-            raise ValueError(f"trading_bot.selected={selected!r} is not present in trading_bot.available")
-        selected_cfg = available.get(selected) or {}
-        if not bool(selected_cfg.get("enabled", False)):
-            raise ValueError(f"Selected trading bot {selected!r} is disabled in trading_bot.available")
-        if not str(selected_cfg.get("class") or "").strip():
-            raise ValueError(f"Selected trading bot {selected!r} has no class configured")
-
     return result
 
 
@@ -570,6 +506,49 @@ def load_market_hours_overrides(
     except Exception as e:
         logger.warning(f"Could not load market hours overrides: {e}")
         return set(), {}
+
+
+def validate_service_config(
+    config_path: Optional[Path] = None,
+    *,
+    raise_on_error: bool = True,
+) -> Optional["FullServiceConfig"]:
+    """
+    Validate service configuration against the Pydantic schema.
+
+    This provides comprehensive type checking and constraint validation
+    for the config.yaml file. Use this at startup to catch configuration
+    errors early.
+
+    Args:
+        config_path: Path to config.yaml (defaults to config/config.yaml)
+        raise_on_error: If True, raises ValidationError on invalid config.
+                       If False, logs warning and returns None.
+
+    Returns:
+        Validated FullServiceConfig instance, or None if validation failed
+        and raise_on_error is False.
+
+    Raises:
+        ImportError: If schema validation module is not available
+        pydantic.ValidationError: If config is invalid and raise_on_error is True
+    """
+    if not SCHEMA_VALIDATION_AVAILABLE:
+        raise ImportError(
+            "Schema validation requires pydantic. "
+            "Install with: pip install pydantic>=2.8"
+        )
+
+    try:
+        config_data = load_config_yaml(config_path)
+        validated = validate_config(config_data)
+        logger.info("Configuration validated successfully against schema")
+        return validated
+    except Exception as e:
+        if raise_on_error:
+            raise
+        logger.warning(f"Configuration validation failed: {e}")
+        return None
 
 
 

@@ -6,23 +6,23 @@ authors = [{ name = "PearlAlgo", email = "dev@pearlalgo.ai" }]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "pandas>=2.2",
-    "numpy>=2.0",
-    "pydantic>=2.8",
-    "pydantic-settings>=2.6",
-    "python-dotenv>=1.0",
-    "loguru>=0.7.0",
-    "python-telegram-bot>=20.0",
-    "PyYAML>=6.0",
+    "pandas>=2.2,<3.0",
+    "numpy>=2.0,<3.0",
+    "pydantic>=2.8,<3.0",
+    "pydantic-settings>=2.6,<3.0",
+    "python-dotenv>=1.0,<2.0",
+    "loguru>=0.7.0,<1.0",
+    "python-telegram-bot>=20.0,<22.0",
+    "PyYAML>=6.0,<7.0",
     "pytz>=2024.1",
-    "ib-insync>=0.9.86",
-    "matplotlib>=3.8.0",
-    "mplfinance>=0.12.10b0",
-    "pyarrow>=16.0.0",
+    "ib-insync>=0.9.86,<1.0",
+    "matplotlib>=3.8.0,<4.0",
+    "mplfinance>=0.12.10b0,<0.13",
+    "pyarrow>=16.0.0,<18.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.21.0", "ruff>=0.6"]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.21.0", "pytest-cov>=4.1.0", "ruff>=0.6"]
 lint = ["import-linter>=2.0"]
 llm = ["openai>=1.40.0"]
 monitor = ["PyQt6>=6.5"]

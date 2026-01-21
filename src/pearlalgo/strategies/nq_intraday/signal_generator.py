@@ -20,14 +20,9 @@ from pearlalgo.strategies.nq_intraday.scanner import NQScanner
 from pearlalgo.strategies.nq_intraday.signal_quality import SignalQualityScorer
 
 # Trading bot integration (single-bot runtime). Kept as a module-level accessor so tests can monkeypatch it.
-def get_trading_bot_manager():  # type: ignore[no-untyped-def]
-    from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager as _get_trading_bot_manager
-
-    return _get_trading_bot_manager()
-
 # Central policy layer (v2.1): single place for allow/deny rules (min_conf, min_rr, regime/session)
 try:
-    from pearlalgo.policy.signal_policy import SignalPolicy
+    from pearlalgo.strategies.nq_intraday.signal_policy import SignalPolicy
     POLICY_AVAILABLE = True
 except Exception:
     POLICY_AVAILABLE = False
@@ -290,8 +285,7 @@ class NQSignalGenerator:
         signal_settings = service_config.get("signals", {})
 
         # Trading bot integration (optional)
-        trading_bot_cfg = service_config.get("trading_bot", {}) or {}
-        self._trading_bot_enabled = bool(trading_bot_cfg.get("enabled", False))
+        self._trading_bot_enabled = False
 
         # Central policy (allow/deny) - keeps signal_generator rules from drifting.
         self._policy: Optional["SignalPolicy"] = None
@@ -581,31 +575,9 @@ class NQSignalGenerator:
             self.last_diagnostics = diagnostics
             return []
 
-        # Drift guard (risk-off cooldown) adjustments, provided by the service.
-        # This can temporarily tighten thresholds + reduce sizing when conditions degrade.
-        drift_state = market_data.get("drift_guard") if isinstance(market_data, dict) else None
-        drift_adj = {}
-        drift_active = False
-        try:
-            if isinstance(drift_state, dict):
-                drift_active = bool(drift_state.get("active", False))
-                drift_adj = drift_state.get("adjustments", {}) if isinstance(drift_state.get("adjustments", {}), dict) else {}
-        except Exception:
-            drift_active = False
-            drift_adj = {}
-
-        try:
-            eff_min_conf = float(self._min_confidence) + float(drift_adj.get("min_confidence_delta", 0.0) or 0.0)
-        except Exception:
-            eff_min_conf = float(self._min_confidence)
-        try:
-            eff_min_rr = float(self._min_risk_reward) + float(drift_adj.get("min_risk_reward_delta", 0.0) or 0.0)
-        except Exception:
-            eff_min_rr = float(self._min_risk_reward)
-        try:
-            drift_size_mult = float(drift_adj.get("size_multiplier", 1.0) or 1.0)
-        except Exception:
-            drift_size_mult = 1.0
+        # Effective thresholds for policy gates.
+        eff_min_conf = float(self._min_confidence)
+        eff_min_rr = float(self._min_risk_reward)
 
         # Check market hours using the *bar timestamp* (critical for backtests).
         # If we don't pass a datetime, the scanner defaults to "now", which makes
@@ -639,16 +611,6 @@ class NQSignalGenerator:
 
         # Scan for signals with MTF context and order book data
         raw_signals = self.scanner.scan(df, df_5m=df_5m, df_15m=df_15m, market_data=market_data)
-
-        # Optional: run selected trading bot (single source of truth).
-        if self._trading_bot_enabled:
-            try:
-                bot_manager = get_trading_bot_manager()
-                trading_signals = bot_manager.analyze(market_data)
-                raw_signals = trading_signals or []
-            except Exception as e:
-                logger.debug(f"Trading bot integration failed: {e}")
-                raw_signals = []
 
         # Track raw signal count for diagnostics
         diagnostics.raw_signals = len(raw_signals)
@@ -868,18 +830,6 @@ class NQSignalGenerator:
 
             validated_signal = self._format_signal(signal, market_data)
 
-            # Attach drift guard context (compact) for transparency.
-            if isinstance(drift_state, dict):
-                try:
-                    validated_signal["_drift_guard"] = {
-                        "active": bool(drift_state.get("active", False)),
-                        "until": drift_state.get("until"),
-                        "reason": drift_state.get("reason"),
-                        "adjustments": drift_adj,
-                    }
-                except Exception:
-                    pass
-            
             # Track stop-cap applications
             if validated_signal.get("_stop_cap_applied", False):
                 diagnostics.stop_cap_applied += 1
@@ -1076,24 +1026,11 @@ class NQSignalGenerator:
                 except Exception as e:
                     logger.debug(f"Adaptive sizing failed (non-blocking): {e}")
 
-            # Drift guard sizing reduction (cooldown): apply AFTER adaptive sizing so it acts as a final brake.
-            if drift_active and drift_size_mult != 1.0:
-                try:
-                    before = int(validated_signal.get("position_size", 0) or 0)
-                    if before > 0:
-                        after = max(1, int(round(before * drift_size_mult)))
-                        if after != before:
-                            validated_signal["_drift_position_size_before"] = before
-                            validated_signal["_drift_size_multiplier"] = float(drift_size_mult)
-                            validated_signal["position_size"] = after
-                except Exception:
-                    pass
-
             # Per-signal-type sizing overrides (keep signals enabled; scale risk instead of filtering trades).
-            # Applied AFTER adaptive sizing and drift guard so it acts as a final, explicit brake.
+            # Applied AFTER adaptive sizing so it acts as a final, explicit brake.
             self._apply_signal_type_sizing_overrides(validated_signal)
 
-            # Ensure risk_amount reflects any sizing overrides (adaptive sizing / drift guard).
+            # Ensure risk_amount reflects any sizing overrides (adaptive sizing).
             try:
                 entry = float(validated_signal.get("entry_price", 0.0) or 0.0)
                 stop = float(validated_signal.get("stop_loss", 0.0) or 0.0)

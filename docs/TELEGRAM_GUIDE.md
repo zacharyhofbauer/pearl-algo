@@ -51,7 +51,7 @@ Everything else is accessed via the button menus (safer and easier to operate on
 - **Performance**: rollups, exports, diagnostics
 - **Status**: agent + gateway connectivity, state freshness, data quality
 - **System**: start/stop/restart agent, gateway controls, logs (read-only)
-- **Bots**: trading bot controls, Telegram-first backtests, report browsing
+- **Bots**: backtests and report browsing
 - **Markets**: select NQ/ES/GC (one UI controlling one market at a time)
 - **Settings**: alert/UI preferences and the AI Patch Wizard (if enabled)
 

@@ -50,30 +50,6 @@ from pearlalgo.learning.ensemble_scorer import (
     EnsemblePrediction,
 )
 
-# Regime detection (Layer 4)
-from pearlalgo.learning.regime_adaptive import (
-    RegimeAdaptivePolicy,
-    RegimeConfig,
-    RegimeParameters,
-    RegimeState,
-)
-
-# Meta-learning (Layer 5)
-from pearlalgo.learning.meta_learner import (
-    MetaLearner,
-    MetaConfig,
-    Experience,
-    LearningCurveStats,
-)
-
-# Risk metrics
-from pearlalgo.learning.risk_metrics import (
-    RiskMetricsCalculator,
-    RiskMetricsConfig,
-    TradeResult,
-    PerformanceMetrics,
-)
-
 # Trade database
 from pearlalgo.learning.trade_database import (
     TradeDatabase,
@@ -104,24 +80,6 @@ __all__ = [
     "EnsembleScorer",
     "EnsembleConfig",
     "EnsemblePrediction",
-    
-    # Layer 4: Regime
-    "RegimeAdaptivePolicy",
-    "RegimeConfig",
-    "RegimeParameters",
-    "RegimeState",
-    
-    # Layer 5: Meta-Learning
-    "MetaLearner",
-    "MetaConfig",
-    "Experience",
-    "LearningCurveStats",
-    
-    # Risk Metrics
-    "RiskMetricsCalculator",
-    "RiskMetricsConfig",
-    "TradeResult",
-    "PerformanceMetrics",
     
     # Database
     "TradeDatabase",

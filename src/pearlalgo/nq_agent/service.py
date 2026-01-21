@@ -30,8 +30,9 @@ from pearlalgo.nq_agent.performance_tracker import PerformanceTracker
 from pearlalgo.nq_agent.state_manager import NQAgentStateManager
 from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
 from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
-from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
 from pearlalgo.strategies.nq_intraday.trade_manager import TradeManager
+from pearlalgo.strategies.trading_bots.pearl_bot import PearlBot
+from pearlalgo.strategies.trading_bots.bot_template import BotConfig
 from pearlalgo.utils.cadence import CadenceMetrics, CadenceScheduler
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
@@ -41,7 +42,6 @@ from pearlalgo.utils.volume_pressure import (
     format_volume_pressure,
     timeframe_to_minutes,
 )
-from pearlalgo.agentic.hub import AgenticHub
 
 # Execution layer imports (optional - only used if execution.enabled)
 try:
@@ -72,15 +72,6 @@ except ImportError:
     TRADE_DB_AVAILABLE = False
     TradeDatabase = None  # type: ignore
 
-# Drift guard (optional - enabled via drift_guard.enabled)
-try:
-    from pearlalgo.policy.drift_guard import DriftGuard, DriftGuardConfig
-    DRIFT_GUARD_AVAILABLE = True
-except ImportError:
-    DRIFT_GUARD_AVAILABLE = False
-    DriftGuard = None  # type: ignore
-    DriftGuardConfig = None  # type: ignore
-
 # Contextual learning (optional - used for richer "learn by session/regime" analytics)
 try:
     from pearlalgo.learning.contextual_bandit import (
@@ -96,18 +87,6 @@ except ImportError:
     ContextualBanditConfig = None  # type: ignore
     ContextFeatures = None  # type: ignore
     ContextualDecision = None  # type: ignore
-
-# Prop firm guard imports (optional - enabled via prop_firm.enabled)
-try:
-    from pearlalgo.prop_firm.guard import PropFirmConfig, PropFirmDecision, PropFirmGuard, PropFirmStatus
-    PROP_FIRM_AVAILABLE = True
-except ImportError:
-    PROP_FIRM_AVAILABLE = False
-    PropFirmConfig = None  # type: ignore
-    PropFirmDecision = None  # type: ignore
-    PropFirmGuard = None  # type: ignore
-    PropFirmStatus = None  # type: ignore
-
 
 class NQAgentService:
     """
@@ -135,7 +114,22 @@ class NQAgentService:
             telegram_chat_id: Telegram chat ID (optional)
         """
         self.config = config or NQIntradayConfig()
-        self.strategy = NQIntradayStrategy(config=self.config)
+        
+        # Create PearlBot instead of NQIntradayStrategy
+        bot_config = BotConfig(
+            name="PearlBot",
+            description="Main production trading bot",
+            version="1.0.0",
+            symbol=self.config.symbol,
+            timeframe=self.config.timeframe,
+            parameters={
+                "lookback_periods": self.config.lookback_periods,
+                "min_volume": self.config.min_volume,
+                "indicators": getattr(self.config, "indicators", {}),
+            },
+        )
+        self.strategy = PearlBot(config=bot_config)
+        
         self.data_fetcher = NQAgentDataFetcher(data_provider, config=self.config)
         
         # Initialize TradeManager for trailing stops and swing trade management
@@ -174,11 +168,6 @@ class NQAgentService:
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
         data_settings = service_config.get("data", {})
         telegram_ui_settings = service_config.get("telegram_ui", {}) or {}
-
-        # ==========================================================================
-        # AGENTIC LAYER (optional LLM reasoning + future autonomy/news)
-        # ==========================================================================
-        self.agentic = AgenticHub(state_dir=self.state_manager.state_dir, service_config=service_config)
 
         # ==========================================================================
         # STORAGE (SQLite dual-write; keeps Telegram/mobile compatibility)
@@ -270,38 +259,6 @@ class NQAgentService:
         # ==========================================================================
         # DRIFT GUARD (Risk-Off Cooldown)
         # ==========================================================================
-        # Tightens filters + reduces sizing when performance degrades or volatility shocks.
-        self._drift_guard: Optional["DriftGuard"] = None
-        self._drift_guard_config: Optional["DriftGuardConfig"] = None
-        self._drift_guard_state: Optional[Dict] = None
-        self._drift_guard_last_alert_at: Optional[datetime] = None
-        self._last_regime_snapshot: Optional[Dict] = None
-        if DRIFT_GUARD_AVAILABLE and DriftGuard is not None and DriftGuardConfig is not None:
-            try:
-                self._drift_guard_config = DriftGuardConfig.from_dict(service_config)
-                if self._drift_guard_config.enabled:
-                    self._drift_guard = DriftGuard(
-                        self._drift_guard_config,
-                        state_path=(self.state_manager.state_dir / "drift_guard_state.json"),
-                    )
-                    self._drift_guard_state = self._drift_guard.state.to_dict(self._drift_guard_config)
-                    logger.info(
-                        "Drift guard enabled: cooldown=%sm lookback=%s min_trades=%s floor=%s size_mult=%s",
-                        self._drift_guard_config.cooldown_minutes,
-                        self._drift_guard_config.lookback_trades,
-                        self._drift_guard_config.min_trades,
-                        self._drift_guard_config.win_rate_floor,
-                        self._drift_guard_config.size_multiplier,
-                    )
-                else:
-                    logger.info("Drift guard disabled (drift_guard.enabled=false)")
-            except Exception as e:
-                logger.warning(f"Drift guard init failed (continuing without): {e}")
-                self._drift_guard = None
-                self._drift_guard_config = None
-                self._drift_guard_state = None
-
-        # ==========================================================================
         # ML LIFT GATING (Shadow A/B → allow blocking only if it shows lift)
         # ==========================================================================
         ml_cfg = service_config.get("ml_filter", {}) or {}
@@ -349,50 +306,6 @@ class NQAgentService:
             configure_market_hours(holiday_overrides=holidays, early_closes=early_closes)
         except Exception as e:
             logger.warning(f"Could not configure market hours overrides: {e}")
-
-        # ==========================================================================
-        # PROP FIRM GUARD (optional)
-        # ==========================================================================
-        # This is *separate* from strategy risk parameters and is intended to:
-        # - Protect evaluation accounts (max contracts, max loss, consistency)
-        # - Annotate signals (manual workflow) and/or gate ATS execution (auto workflow)
-        self.prop_firm_guard: Optional["PropFirmGuard"] = None
-        self._prop_firm_config: Optional["PropFirmConfig"] = None
-        self._prop_firm_status: Optional["PropFirmStatus"] = None
-
-        prop_firm_settings = service_config.get("prop_firm", {}) or {}
-        if PROP_FIRM_AVAILABLE and isinstance(prop_firm_settings, dict):
-            try:
-                # Build config from service config with session-aware defaults
-                self._prop_firm_config = PropFirmConfig.from_dict(
-                    prop_firm_settings,
-                    session_start_time=str(getattr(self.config, "start_time", "") or ""),
-                    session_end_time=str(getattr(self.config, "end_time", "") or ""),
-                )
-                if self._prop_firm_config.enabled:
-                    self.prop_firm_guard = PropFirmGuard(
-                        self._prop_firm_config,
-                        state_dir=self.state_manager.state_dir,
-                    )
-                    # Seed status for first cycle (best-effort)
-                    try:
-                        self._prop_firm_status = self.prop_firm_guard.compute_status()
-                    except Exception:
-                        self._prop_firm_status = None
-                    logger.info(
-                        f"Prop firm guard enabled: profile={self._prop_firm_config.profile}, "
-                        f"account_size=${self._prop_firm_config.account_size:,.0f}"
-                    )
-                else:
-                    logger.info("Prop firm guard disabled (prop_firm.enabled=false)")
-            except Exception as e:
-                logger.error(f"Failed to initialize prop firm guard: {e}", exc_info=True)
-                self.prop_firm_guard = None
-                self._prop_firm_config = None
-                self._prop_firm_status = None
-        else:
-            if not PROP_FIRM_AVAILABLE:
-                logger.debug("Prop firm guard not available (import failed)")
 
         self.running = False
         self.shutdown_requested = False
@@ -576,9 +489,6 @@ class NQAgentService:
                 self._execution_config = ExecutionConfig.from_dict(execution_settings)
                 if execution_adapter_name in ("ibkr", "", "interactivebrokers"):
                     self.execution_adapter = IBKRExecutionAdapter(self._execution_config)
-                elif execution_adapter_name in ("tradovate", "tdv"):
-                    from pearlalgo.execution.tradovate.adapter import TradovateExecutionAdapter
-                    self.execution_adapter = TradovateExecutionAdapter(self._execution_config)
                 else:
                     raise ValueError(f"Unknown execution.adapter: {execution_adapter_name!r}")
                 logger.info(
@@ -1083,7 +993,6 @@ class NQAgentService:
                 try:
                     if isinstance(market_data, dict):
                         market_data["ml_blocking_allowed"] = bool(getattr(self, "_ml_blocking_allowed", False))
-                        market_data["drift_guard"] = self._drift_guard_state or {"active": False}
                 except Exception:
                     pass
 
@@ -1093,11 +1002,6 @@ class NQAgentService:
                     # Lightweight cycle: skip heavy analysis, but still run health/status/exit grading
                     pass
                 else:
-                    # Agentic layer is agent-owned; expose it to strategy/bots without coupling.
-                    try:
-                        market_data["_agentic"] = getattr(self, "agentic", None)
-                    except Exception:
-                        pass
                     # Full analysis: new bar arrived
                     signals = self.strategy.analyze(market_data)
                     self._analysis_run_count += 1
@@ -1197,31 +1101,9 @@ class NQAgentService:
                             )
                         except Exception:
                             pass
-                        # Optional: LLM reasoning layer (agent-owned)
-                        try:
-                            await self.agentic.maybe_add_llm_reasoning(
-                                signal=signal,
-                                market_data=market_data,
-                                metrics=self.performance_tracker.get_performance_metrics(days=None)
-                                if hasattr(self, "performance_tracker")
-                                else None,
-                            )
-                        except Exception:
-                            pass
                         await self._process_signal(signal, buffer_data=buffer_data)
                 else:
                     logger.debug(f"No signals generated in cycle {self.cycle_count}")
-
-                # Agentic autopilot hook (default OFF; noop unless enabled)
-                try:
-                    await self.agentic.autopilot_tick(
-                        market_data=market_data,
-                        metrics=self.performance_tracker.get_performance_metrics(days=None)
-                        if hasattr(self, "performance_tracker")
-                        else None,
-                    )
-                except Exception:
-                    pass
 
                 # Update active trades with trailing stops (NO LIMITS - can handle 100+ trades)
                 try:
@@ -1322,11 +1204,7 @@ class NQAgentService:
                 except Exception as e:
                     logger.debug(f"Virtual exit update failed (non-fatal): {e}")
 
-                # Refresh drift guard + ML lift metrics AFTER we grade exits (so decisions use latest outcomes).
-                try:
-                    await self._refresh_drift_guard()
-                except Exception as e:
-                    logger.debug(f"Drift guard refresh failed (non-fatal): {e}")
+                # Refresh ML lift metrics AFTER we grade exits (so decisions use latest outcomes).
                 try:
                     self._refresh_ml_lift()
                 except Exception as e:
@@ -1670,68 +1548,6 @@ class NQAgentService:
                         f"Execution blocked by policy (live mode): {policy_decision.reason}"
                     )
 
-            # ==========================================================================
-            # PROP FIRM GUARD: annotate signal + optionally block/cap execution
-            # ==========================================================================
-            # This runs even when execution is disabled so manual traders still get
-            # "would this violate rules?" guidance in the Telegram alert.
-            if self.prop_firm_guard is not None:
-                try:
-                    pf_status = self.prop_firm_guard.compute_status()
-                    self._prop_firm_status = pf_status
-                    pf_decision = self.prop_firm_guard.evaluate_signal(signal, status=pf_status)
-
-                    # Apply size adjustment (affects both Telegram display and execution)
-                    if pf_decision.adjusted_size is not None:
-                        try:
-                            original_size = int(signal.get("position_size") or 1)
-                        except Exception:
-                            original_size = 1
-                        signal["position_size"] = int(pf_decision.adjusted_size)
-                        # Recompute risk amount when possible (keeps message consistent)
-                        try:
-                            entry = float(signal.get("entry_price") or 0.0)
-                            stop = float(signal.get("stop_loss") or 0.0)
-                            tick_value = float(signal.get("tick_value") or 0.0)
-                            if entry > 0 and stop > 0 and tick_value > 0:
-                                risk_per_contract = abs(entry - stop) * tick_value
-                                signal["risk_amount"] = risk_per_contract * int(signal["position_size"])
-                        except Exception:
-                            pass
-
-                        logger.info(
-                            f"Prop firm size cap applied: {original_size} -> {signal['position_size']} "
-                            f"(reason={pf_decision.reason})"
-                        )
-
-                    # Attach compact prop firm context for downstream consumers (Telegram, state)
-                    signal["_prop_firm"] = {
-                        "enabled": True,
-                        "profile": pf_status.profile,
-                        "allow": pf_decision.allow,
-                        "reason": pf_decision.reason,
-                        "adjusted_size": pf_decision.adjusted_size,
-                        "equity_est": pf_status.equity_est,
-                        "min_balance": pf_status.min_balance,
-                        "remaining_drawdown": pf_status.remaining_drawdown,
-                        "available_drawdown": pf_status.available_drawdown,
-                        "daily_pnl": pf_status.daily_pnl,
-                        "daily_profit_cap": pf_status.daily_profit_cap,
-                        "days_traded": pf_status.days_traded,
-                        "min_trading_days": pf_status.min_trading_days,
-                    }
-
-                    # If we were going to execute, allow the prop firm guard to block it.
-                    if should_execute and not pf_decision.allow:
-                        should_execute = False
-                        execution_status = f"prop_firm_block:{pf_decision.reason}"
-                        logger.info(f"Execution blocked by prop firm guard: {pf_decision.reason}")
-                except Exception as pf_e:
-                    signal["_prop_firm"] = {
-                        "enabled": True,
-                        "error": str(pf_e)[:120],
-                    }
-            
             if should_execute and self.execution_adapter is not None:
                 try:
                     # Check preconditions (enabled, armed, limits, cooldowns)
@@ -3894,8 +3710,6 @@ class NQAgentService:
                 if self.contextual_policy is not None
                 else {"enabled": False, "mode": "disabled"}
             ),
-            # Drift guard (risk-off cooldown)
-            "drift_guard": (self._drift_guard_state or {"active": False}),
             # ML filter operational status (shadow/live + lift gating)
             "ml_filter": {
                 "mode": getattr(self, "_ml_filter_mode", "shadow"),
@@ -4092,69 +3906,6 @@ class NQAgentService:
         except Exception as e:
             logger.debug(f"Could not refresh ML lift metrics: {e}")
 
-    async def _refresh_drift_guard(self) -> None:
-        """Update drift guard state and send operator alerts on transitions."""
-        if self._drift_guard is None or self._drift_guard_config is None:
-            return
-
-        now = datetime.now(timezone.utc)
-        # Snapshot previous active state so we don't spam operators when the guard extends
-        # its cooldown window every cycle.
-        prev_active = False
-        try:
-            prev_active = bool((self._drift_guard_state or {}).get("active", False))
-        except Exception:
-            prev_active = False
-        recent_trades = []
-        if getattr(self, "_sqlite_enabled", False) and self._trade_db is not None:
-            try:
-                # Pull enough to evaluate lookback and min_trades
-                n = max(int(self._drift_guard_config.lookback_trades), int(self._drift_guard_config.min_trades))
-                recent_trades = self._trade_db.get_recent_trades_by_exit(limit=max(1, n))
-            except Exception:
-                recent_trades = []
-
-        # Current regime snapshot from scanner (best-effort)
-        regime = None
-        try:
-            regime = getattr(self.strategy.scanner, "last_regime", None)
-        except Exception:
-            regime = None
-
-        state, transition = self._drift_guard.update(regime=regime, recent_trades=recent_trades, now=now)
-        self._drift_guard_state = state.to_dict(self._drift_guard_config)
-
-        # Operator alerts (deduped):
-        # Only alert when the guard *enters* cooldown (OFF -> ON) or *ends*.
-        send_on = bool(transition.get("triggered") and not prev_active)
-        send_off = bool(transition.get("ended"))
-        if (not send_on and not send_off) or not self.telegram_notifier.enabled or self.telegram_notifier.telegram is None:
-            return
-
-        # Hard cooldown to avoid spam (even if state toggles quickly)
-        if self._drift_guard_last_alert_at is not None:
-            if (now - self._drift_guard_last_alert_at).total_seconds() < 300:
-                return
-
-        try:
-            if send_on:
-                adj = state.adjustments(self._drift_guard_config)
-                msg = (
-                    "🛡 Drift Guard: ON\n"
-                    f"- reason: {transition.get('reason', '')}\n"
-                    f"- until (UTC): {state.until}\n"
-                    f"- tighten: +{adj.get('min_confidence_delta', 0):.2f} conf, +{adj.get('min_risk_reward_delta', 0):.2f} R:R\n"
-                    f"- size mult: ×{adj.get('size_multiplier', 1.0):.2f}\n"
-                )
-                await self.telegram_notifier.telegram.send_message(msg, parse_mode=None, dedupe=False)
-                self._drift_guard_last_alert_at = now
-            elif send_off:
-                msg = "🛡 Drift Guard: OFF (cooldown ended)"
-                await self.telegram_notifier.telegram.send_message(msg, parse_mode=None, dedupe=False)
-                self._drift_guard_last_alert_at = now
-        except Exception as e:
-            logger.debug(f"Could not send drift guard alert: {e}")
-
     def _save_state(self) -> None:
         """Save current service state."""
         # Include lightweight data freshness metadata for Telegram UI / operators.
@@ -4223,19 +3974,6 @@ class NQAgentService:
             market_label = str(os.getenv("PEARLALGO_MARKET") or "NQ").strip().upper()
         except Exception:
             market_label = "NQ"
-
-        trading_bot_state: Optional[Dict[str, Any]] = None
-        try:
-            from pearlalgo.config.config_loader import load_service_config
-
-            cfg = load_service_config(validate=False) or {}
-            tb = cfg.get("trading_bot", {}) or {}
-            trading_bot_state = {
-                "enabled": bool(tb.get("enabled", False)),
-                "selected": tb.get("selected"),
-            }
-        except Exception:
-            trading_bot_state = None
 
         state = {
             # Core service state
@@ -4343,7 +4081,6 @@ class NQAgentService:
             # Operational metadata
             "run_id": run_id,
             "version": version,
-            "trading_bot": trading_bot_state,
         }
         # Reuse futures_market_open from earlier check (avoid duplicate API call)
         state["futures_market_open"] = futures_market_open
@@ -4396,28 +4133,6 @@ class NQAgentService:
                     )
         except Exception:
             pass
-
-        # ==========================================================================
-        # PROP FIRM status (best-effort)
-        # ==========================================================================
-        # Persist prop firm metrics so Telegram UI can show "how close to limits?"
-        # even if execution is disabled (manual trading workflow).
-        state["prop_firm"] = (
-            {"enabled": bool(getattr(self._prop_firm_config, "enabled", False)), "profile": getattr(self._prop_firm_config, "profile", None)}
-            if self._prop_firm_config is not None
-            else {"enabled": False}
-        )
-        if self.prop_firm_guard is not None:
-            try:
-                pf_status = self.prop_firm_guard.compute_status()
-                self._prop_firm_status = pf_status
-                state["prop_firm"] = pf_status.to_dict()
-            except Exception as pf_e:
-                state["prop_firm"] = {
-                    "enabled": True,
-                    "profile": getattr(self._prop_firm_config, "profile", None) if self._prop_firm_config else None,
-                    "error": str(pf_e)[:120],
-                }
 
         # ==========================================================================
         # ATS (Automated Trading System) status - for Telegram commands

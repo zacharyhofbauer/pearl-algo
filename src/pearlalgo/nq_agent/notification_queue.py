@@ -1,0 +1,356 @@
+"""
+Async Notification Queue for Telegram Integration.
+
+This module provides a decoupled notification system that prevents Telegram
+failures from blocking the main trading service loop.
+
+Key Features:
+- Async queue-based notification delivery
+- Automatic retry with exponential backoff
+- Graceful degradation when Telegram is unavailable
+- Priority levels for critical vs informational messages
+- Notification batching for high-frequency updates
+
+Usage:
+    from pearlalgo.nq_agent.notification_queue import NotificationQueue
+
+    # Create queue with notifier
+    queue = NotificationQueue(telegram_notifier)
+
+    # Start background processing
+    await queue.start()
+
+    # Queue notifications (non-blocking)
+    await queue.enqueue_signal(signal, priority=Priority.HIGH)
+    await queue.enqueue_status(status, priority=Priority.LOW)
+
+    # Graceful shutdown
+    await queue.stop()
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import IntEnum
+from typing import Any, Callable, Coroutine, Dict, List, Optional, TYPE_CHECKING
+
+from pearlalgo.utils.logger import logger
+
+if TYPE_CHECKING:
+    from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
+
+
+class Priority(IntEnum):
+    """Notification priority levels."""
+    CRITICAL = 0  # Circuit breaker, risk warnings
+    HIGH = 1      # Signals, entries, exits
+    NORMAL = 2    # Status updates, heartbeats
+    LOW = 3       # Dashboard charts, metrics
+
+
+@dataclass(order=True)
+class Notification:
+    """A queued notification with metadata."""
+    priority: int
+    timestamp: float = field(compare=False)
+    notification_type: str = field(compare=False)
+    payload: Dict[str, Any] = field(compare=False)
+    callback: Optional[Callable[..., Coroutine]] = field(compare=False, default=None)
+    retry_count: int = field(compare=False, default=0)
+    max_retries: int = field(compare=False, default=3)
+
+
+class NotificationQueue:
+    """
+    Async notification queue for Telegram integration.
+
+    This class decouples Telegram notifications from the main service loop,
+    ensuring that Telegram failures don't block signal generation or trading.
+    """
+
+    def __init__(
+        self,
+        telegram_notifier: "NQAgentTelegramNotifier",
+        max_queue_size: int = 1000,
+        batch_delay_seconds: float = 0.5,
+        max_retries: int = 3,
+        retry_backoff_base: float = 2.0,
+    ):
+        """
+        Initialize the notification queue.
+
+        Args:
+            telegram_notifier: The Telegram notifier instance
+            max_queue_size: Maximum queue size (oldest dropped when full)
+            batch_delay_seconds: Delay between processing batches
+            max_retries: Maximum retry attempts per notification
+            retry_backoff_base: Base for exponential backoff (seconds)
+        """
+        self.notifier = telegram_notifier
+        self.max_queue_size = max_queue_size
+        self.batch_delay = batch_delay_seconds
+        self.max_retries = max_retries
+        self.retry_backoff_base = retry_backoff_base
+
+        self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=max_queue_size)
+        self._running = False
+        self._task: Optional[asyncio.Task] = None
+        self._stats = {
+            "enqueued": 0,
+            "delivered": 0,
+            "failed": 0,
+            "dropped": 0,
+            "retried": 0,
+        }
+
+    async def start(self) -> None:
+        """Start the background notification processor."""
+        if self._running:
+            return
+
+        self._running = True
+        self._task = asyncio.create_task(self._process_loop())
+        logger.info("Notification queue started")
+
+    async def stop(self, timeout: float = 10.0) -> None:
+        """
+        Stop the notification processor gracefully.
+
+        Args:
+            timeout: Maximum time to wait for pending notifications
+        """
+        if not self._running:
+            return
+
+        self._running = False
+
+        # Wait for queue to drain (with timeout)
+        try:
+            await asyncio.wait_for(self._drain_queue(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"Notification queue drain timed out, {self._queue.qsize()} items remaining")
+
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+
+        logger.info(f"Notification queue stopped: {self._stats}")
+
+    async def _drain_queue(self) -> None:
+        """Drain remaining items from the queue."""
+        while not self._queue.empty():
+            await asyncio.sleep(0.1)
+
+    async def _process_loop(self) -> None:
+        """Main processing loop for notifications."""
+        while self._running:
+            try:
+                # Get next notification (with timeout to check running state)
+                try:
+                    notification = await asyncio.wait_for(
+                        self._queue.get(),
+                        timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    continue
+
+                # Process the notification
+                success = await self._deliver(notification)
+
+                if not success and notification.retry_count < notification.max_retries:
+                    # Schedule retry with backoff
+                    notification.retry_count += 1
+                    backoff = self.retry_backoff_base ** notification.retry_count
+                    await asyncio.sleep(backoff)
+
+                    # Re-queue for retry
+                    try:
+                        self._queue.put_nowait(notification)
+                        self._stats["retried"] += 1
+                    except asyncio.QueueFull:
+                        self._stats["dropped"] += 1
+                        logger.warning(f"Notification dropped after retry (queue full): {notification.notification_type}")
+                elif not success:
+                    self._stats["failed"] += 1
+                    logger.warning(f"Notification failed after {notification.max_retries} retries: {notification.notification_type}")
+                else:
+                    self._stats["delivered"] += 1
+
+                self._queue.task_done()
+
+                # Small delay between notifications
+                await asyncio.sleep(self.batch_delay)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in notification processor: {e}")
+                await asyncio.sleep(1.0)
+
+    async def _deliver(self, notification: Notification) -> bool:
+        """
+        Deliver a notification via Telegram.
+
+        Args:
+            notification: The notification to deliver
+
+        Returns:
+            True if delivered successfully, False otherwise
+        """
+        try:
+            if notification.callback:
+                await notification.callback(**notification.payload)
+                return True
+
+            # Handle built-in notification types
+            ntype = notification.notification_type
+            payload = notification.payload
+
+            if ntype == "signal":
+                return await self.notifier.send_signal(
+                    payload.get("signal"),
+                    buffer_data=payload.get("buffer_data"),
+                )
+            elif ntype == "message":
+                await self.notifier.send_message(payload.get("message", ""))
+                return True
+            elif ntype == "status":
+                await self.notifier.send_enhanced_status(payload.get("status", {}))
+                return True
+            elif ntype == "dashboard":
+                await self.notifier.send_dashboard(payload.get("status", {}))
+                return True
+            elif ntype == "circuit_breaker":
+                await self.notifier.send_circuit_breaker_alert(
+                    payload.get("error_type", ""),
+                    payload.get("consecutive_errors", 0),
+                )
+                return True
+            elif ntype == "data_quality":
+                await self.notifier.send_data_quality_alert(payload.get("details", {}))
+                return True
+            elif ntype == "entry":
+                await self.notifier.send_entry_notification(payload.get("entry_info", {}))
+                return True
+            elif ntype == "exit":
+                await self.notifier.send_exit_notification(payload.get("exit_info", {}))
+                return True
+            elif ntype == "heartbeat":
+                await self.notifier.send_heartbeat(payload.get("status", {}))
+                return True
+            else:
+                logger.warning(f"Unknown notification type: {ntype}")
+                return False
+
+        except Exception as e:
+            logger.debug(f"Notification delivery failed ({notification.notification_type}): {e}")
+            return False
+
+    async def enqueue(
+        self,
+        notification_type: str,
+        payload: Dict[str, Any],
+        priority: Priority = Priority.NORMAL,
+        callback: Optional[Callable[..., Coroutine]] = None,
+    ) -> bool:
+        """
+        Enqueue a notification for delivery.
+
+        Args:
+            notification_type: Type of notification
+            payload: Notification data
+            priority: Delivery priority
+            callback: Optional custom callback coroutine
+
+        Returns:
+            True if enqueued, False if queue is full
+        """
+        notification = Notification(
+            priority=priority.value,
+            timestamp=datetime.now(timezone.utc).timestamp(),
+            notification_type=notification_type,
+            payload=payload,
+            callback=callback,
+            max_retries=self.max_retries,
+        )
+
+        try:
+            self._queue.put_nowait(notification)
+            self._stats["enqueued"] += 1
+            return True
+        except asyncio.QueueFull:
+            self._stats["dropped"] += 1
+            logger.warning(f"Notification dropped (queue full): {notification_type}")
+            return False
+
+    async def enqueue_signal(
+        self,
+        signal: Any,
+        buffer_data: Optional[Any] = None,
+        priority: Priority = Priority.HIGH,
+    ) -> bool:
+        """Convenience method to enqueue a signal notification."""
+        return await self.enqueue(
+            "signal",
+            {"signal": signal, "buffer_data": buffer_data},
+            priority=priority,
+        )
+
+    async def enqueue_message(
+        self,
+        message: str,
+        priority: Priority = Priority.NORMAL,
+    ) -> bool:
+        """Convenience method to enqueue a text message."""
+        return await self.enqueue(
+            "message",
+            {"message": message},
+            priority=priority,
+        )
+
+    async def enqueue_status(
+        self,
+        status: Dict[str, Any],
+        priority: Priority = Priority.LOW,
+    ) -> bool:
+        """Convenience method to enqueue a status update."""
+        return await self.enqueue(
+            "status",
+            {"status": status},
+            priority=priority,
+        )
+
+    async def enqueue_circuit_breaker(
+        self,
+        error_type: str,
+        consecutive_errors: int,
+        priority: Priority = Priority.CRITICAL,
+    ) -> bool:
+        """Convenience method to enqueue a circuit breaker alert."""
+        return await self.enqueue(
+            "circuit_breaker",
+            {"error_type": error_type, "consecutive_errors": consecutive_errors},
+            priority=priority,
+        )
+
+    def get_stats(self) -> Dict[str, int]:
+        """Get queue statistics."""
+        return {
+            **self._stats,
+            "pending": self._queue.qsize(),
+        }
+
+    @property
+    def is_running(self) -> bool:
+        """Check if the queue processor is running."""
+        return self._running
+
+    @property
+    def queue_size(self) -> int:
+        """Get current queue size."""
+        return self._queue.qsize()

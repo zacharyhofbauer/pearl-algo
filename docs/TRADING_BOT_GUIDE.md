@@ -1,36 +1,22 @@
 # Trading Bot (AutoBot) Guide
 
-This system runs **one agent per market** (NQ/ES/GC) and **one active trading bot per agent**.
+This repository keeps **trading bots** for **backtesting and analysis only**.
+Runtime signal generation is provided by the core strategy pipeline in `strategies/nq_intraday`.
 
-## Runtime model (no confusion)
+## Runtime model (clarified)
 
 - **Agent**: one running process for a single market (e.g., NQ).
-- **Trading bot (AutoBot)**: the single all-in-one decision engine selected by config.
-- **AI advisor (optional)**: observes and suggests; it does not trade.
+- **Strategy**: `nq_intraday` scanner + signal generator (runtime source of signals).
+- **Trading bots (AutoBot variants)**: **backtesting-only**, used for offline evaluation.
 
-## Configuration (single trading bot)
+## Backtesting (canonical usage)
 
-Add to `config/config.yaml` (or a per-market config under `config/markets/*.yaml`):
+Trading bots are run via the backtesting scripts:
 
-```yaml
-trading_bot:
-  enabled: true
-  selected: "PearlAutoBot"
-  available:
-    PearlAutoBot:
-      class: "PearlAutoBot"
-      enabled: true
-      parameters: {}
+```bash
+python3 scripts/backtesting/backtest_trading_bot.py --bot PearlAutoBot --data-path data/historical/<file>.parquet
+python3 scripts/backtesting/compare_trading_bots.py --data-path data/historical/<file>.parquet
 ```
-
-Rules:
-- Only `selected` is instantiated and evaluated.
-- No signal merging across bots.
-
-## Telegram UI
-
-- Use **Markets** to select the active market.
-- Use **Bots** to view the **active trading bot** (singular) and performance.
 
 ## Backtesting
 

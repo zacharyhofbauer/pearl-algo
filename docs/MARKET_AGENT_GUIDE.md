@@ -137,16 +137,6 @@ symbol: "MNQ"  # Example: Mini NQ (1/10th size of NQ, better for prop firms)
 timeframe: "5m"  # 5-minute bars for intraday swings (primary), with 1-2m for execution pinpointing
 scan_interval: 30  # Check for signals every 30 seconds
 
-# Trading Bot (single source of trade intent)
-trading_bot:
-  enabled: false
-  selected: "PearlAutoBot"
-  available:
-    PearlAutoBot:
-      class: "PearlAutoBot"
-      enabled: true
-      parameters: {}
-
 # Risk Management (Prop Firm Style)
 risk:
   max_risk_per_trade: 0.01  # 1% max risk per trade

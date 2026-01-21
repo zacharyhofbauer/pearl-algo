@@ -425,7 +425,6 @@ cat data/agent_state/NQ/state.json | jq '.signal_diagnostics_raw'
 | `trailing_stop.min_profit_before_be` | Breakeven threshold | ✅ Safe |
 | `risk.signal_type_size_multipliers` | Per-type position sizing | ✅ Safe (keeps signals) |
 | `risk.signal_type_max_contracts` | Per-type contract caps | ✅ Safe (keeps signals) |
-| `drift_guard.enabled` | Auto-throttle on poor performance | ✅ Safe |
 
 ---
 

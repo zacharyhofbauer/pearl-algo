@@ -13,7 +13,7 @@ It answers a simple question:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -64,8 +64,7 @@ class SignalPolicy:
             return SignalPolicyDecision(False, "invalid_signal")
 
         signal_type = str(signal.get("type") or "unknown")
-        # Allow callers (e.g., drift guard) to temporarily tighten/relax thresholds without
-        # mutating global config or re-initializing this policy instance.
+        # Allow callers to temporarily tighten/relax thresholds without mutating config.
         try:
             eff_min_conf = float(self._min_conf if min_confidence is None else float(min_confidence))
         except Exception:
@@ -154,5 +153,3 @@ class SignalPolicy:
         if risk <= 0:
             return None
         return float(reward / risk)
-
-

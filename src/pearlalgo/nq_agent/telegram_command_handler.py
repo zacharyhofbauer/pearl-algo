@@ -625,8 +625,6 @@ class TelegramCommandHandler:
             await self._show_performance_menu(query)
         elif action == "bots":
             await self._show_bots_menu(query)
-        elif action == "trading_bot":
-            await self._show_trading_bot_menu(query)
         elif action == "markets":
             await self._show_markets_menu(query)
         elif action == "system":
@@ -1362,18 +1360,14 @@ class TelegramCommandHandler:
         
         lines.append("")
         lines.append("*Bot Tools:*")
-        lines.append("• 💎 *PearlAutoBot* = all-in-one trading bot (recommended)")
         lines.append("• 🧪 Backtest is an advanced tool (runs offline on saved data)")
 
         keyboard = [
             [
-                InlineKeyboardButton("💎 Trading Bot", callback_data="menu:trading_bot"),
                 InlineKeyboardButton("🧪 Backtest (Advanced)", callback_data="strategy_review:backtest"),
-            ],
-            [
                 InlineKeyboardButton("📑 Reports", callback_data="strategy_review:reports"),
-                InlineKeyboardButton("🎛️ System Controls", callback_data="menu:system"),
             ],
+            [InlineKeyboardButton("🎛️ System Controls", callback_data="menu:system")],
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data="menu:bots"),
                 InlineKeyboardButton("🏠 Back to Menu", callback_data="back"),
@@ -1382,63 +1376,6 @@ class TelegramCommandHandler:
 
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
-
-    async def _show_trading_bot_menu(self, query: CallbackQuery) -> None:
-        """Show trading bot submenu with status and controls."""
-        try:
-            from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager
-
-            bot_manager = get_trading_bot_manager()
-            active_bots = bot_manager.get_active_bots()
-            bot_performance = bot_manager.get_bot_performance()
-
-            lines = ["🤖 *Trading Bot*", ""]
-            active_name = active_bots[0] if active_bots else "None"
-            lines.append(f"*Active trading bot:* {active_name}")
-            lines.append("")
-
-            if isinstance(bot_performance, dict) and bot_performance:
-                lines.append("*Bot Performance:*")
-                for bot_name, perf in bot_performance.items():
-                    if isinstance(perf, dict):
-                        total_signals = perf.get("total_signals_history", 0)
-                        win_rate = perf.get("performance", {}).get("win_rate", 0) * 100
-                        total_pnl = perf.get("performance", {}).get("total_pnl", 0)
-                        active_positions = perf.get("active_signals", 0)
-
-                        status_emoji = "🟢" if bot_name in active_bots else "🔴"
-                        pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                        pnl_sign = "+" if total_pnl >= 0 else ""
-
-                        lines.append(f"{status_emoji} *{bot_name}*")
-                        lines.append(f"  └─ Signals: {total_signals}, Win Rate: {win_rate:.1f}%")
-                        lines.append(f"  └─ P&L: {pnl_emoji} {pnl_sign}${abs(total_pnl):.2f}")
-                        lines.append(f"  └─ Active Positions: {active_positions}")
-                        lines.append("")
-            else:
-                lines.append("❌ *No trading bot configured*")
-                lines.append("Add trading_bot configuration to your config.yaml")
-                lines.append("")
-
-            lines.append("*Bot Controls:*")
-
-            keyboard = [
-                [
-                    InlineKeyboardButton("📊 Bot Performance", callback_data="action:show_bot_performance"),
-                    InlineKeyboardButton("🔄 Refresh Status", callback_data="menu:trading_bot"),
-                ],
-                [InlineKeyboardButton("🏠 Back to Bots", callback_data="menu:bots")],
-            ]
-
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text("\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
-
-        except Exception as e:
-            logger.error(f"Error showing trading bot menu: {e}", exc_info=True)
-            error_msg = "❌ *Error loading Trading Bot menu*"
-            keyboard = [[InlineKeyboardButton("🏠 Back to Bots", callback_data="menu:bots")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(error_msg, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _show_system_menu(self, query: CallbackQuery) -> None:
         """Show system control submenu with comprehensive risk warnings and status."""
@@ -1715,13 +1652,7 @@ class TelegramCommandHandler:
         """Show AI ops menu for bot selection."""
         if not await self._ensure_openai_ready(query):
             return
-        try:
-            from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager
-            bot_manager = get_trading_bot_manager()
-            bot_name = getattr(bot_manager, "selected_name", None)
-            bot_names = [bot_name] if bot_name else []
-        except Exception:
-            bot_names = []
+        bot_names: list[str] = []
 
         lines = ["🧠 *AI Ops*", "", "Select a target:"]
         keyboard = []
@@ -1773,7 +1704,6 @@ class TelegramCommandHandler:
             lines = ["Select a file:"]
             keyboard = [
                 [InlineKeyboardButton("src/pearlalgo/strategies/trading_bots/bot_template.py", callback_data="aiops:file:src/pearlalgo/strategies/trading_bots/bot_template.py")],
-                [InlineKeyboardButton("src/pearlalgo/strategies/trading_bot_manager.py", callback_data="aiops:file:src/pearlalgo/strategies/trading_bot_manager.py")],
                 [InlineKeyboardButton("src/pearlalgo/strategies/trading_bots/market_regime_detector.py", callback_data="aiops:file:src/pearlalgo/strategies/trading_bots/market_regime_detector.py")],
                 [InlineKeyboardButton("config/config.yaml", callback_data="aiops:file:config/config.yaml")],
                 [InlineKeyboardButton("Other file (type path)", callback_data="aiops:other")],
@@ -1857,16 +1787,7 @@ class TelegramCommandHandler:
 
         perf_summary = {}
         bot_config = {}
-        if bot != "nq_agent":
-            try:
-                from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager
-                bot_manager = get_trading_bot_manager()
-                bot_config = getattr(bot_manager, "bot_config", {}) or {}
-                perf = bot_manager.get_bot_performance(bot) if hasattr(bot_manager, "get_bot_performance") else {}
-                perf_summary = perf.get(bot, {}).get("performance", {}) if isinstance(perf, dict) else {}
-            except Exception:
-                perf_summary = {}
-        else:
+        if bot == "nq_agent":
             try:
                 perf_summary = self._read_latest_metrics() or {}
             except Exception:
@@ -2136,47 +2057,6 @@ class TelegramCommandHandler:
                     [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-            elif action_type == "start_all_bots":
-                text = "⚠️ Single trading bot only. Use the trading_bot config to select the active AutoBot."
-                keyboard = [[InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")]]
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-            elif action_type == "stop_all_bots":
-                text = "⚠️ Single trading bot only. Use the trading_bot config to select the active AutoBot."
-                keyboard = [[InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")]]
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-            elif action_type == "show_bot_performance":
-                try:
-                    from pearlalgo.strategies.trading_bot_manager import get_trading_bot_manager
-                    bot_manager = get_trading_bot_manager()
-                    performance = bot_manager.get_bot_performance()
-
-                    lines = ["📊 *Trading Bot Performance*", ""]
-
-                    if isinstance(performance, dict) and performance:
-                        for bot_name, perf in performance.items():
-                            if isinstance(perf, dict):
-                                total_signals = perf.get('total_signals_history', 0)
-                                win_rate = perf.get('performance', {}).get('win_rate', 0) * 100
-                                total_pnl = perf.get('performance', {}).get('total_pnl', 0)
-
-                                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                                pnl_sign = "+" if total_pnl >= 0 else ""
-
-                                lines.append(f"🤖 *{bot_name}*")
-                                lines.append(f"  • Signals: {total_signals}")
-                                lines.append(f"  • Win Rate: {win_rate:.1f}%")
-                                lines.append(f"  • P&L: {pnl_emoji} {pnl_sign}${abs(total_pnl):.2f}")
-                                lines.append("")
-                    else:
-                        lines.append("No performance data available")
-
-                    text = "\n".join(lines)
-                except Exception as e:
-                    logger.error(f"Error showing bot performance: {e}")
-                    text = "❌ Error loading trading bot performance"
-
-                keyboard = [[InlineKeyboardButton("🤖 Trading Bot", callback_data="menu:trading_bot")]]
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
             elif action_type == "restart_gateway":
                 keyboard = [
                     [InlineKeyboardButton("✅ Confirm Restart", callback_data="confirm:restart_gateway")],

@@ -132,14 +132,116 @@ def load_config_yaml(
         return {}
 
 
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Deep merge two dictionaries. Override values take precedence.
+
+    Args:
+        base: Base dictionary
+        override: Dictionary with override values
+
+    Returns:
+        Merged dictionary
+    """
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def load_config_yaml_with_includes(
+    config_path: Optional[Union[str, Path]] = None,
+    *,
+    substitute_env: bool = True,
+    validate: bool = False,
+    include_split_configs: bool = True,
+) -> Dict[str, Any]:
+    """
+    Load configuration from config.yaml with support for split config files.
+
+    This function loads the main config.yaml and optionally merges it with
+    topic-specific config files if they exist in the same directory.
+
+    Note: split config files are not part of the current repository; this helper
+    remains for backward compatibility with older layouts.
+
+    Merge order (later files override earlier):
+    1. Split config files (alphabetically)
+    2. Main config.yaml (highest priority)
+
+    Args:
+        config_path: Path to main config.yaml
+        substitute_env: Whether to substitute ${ENV_VAR} patterns
+        validate: Whether to validate and log warnings
+        include_split_configs: Whether to load and merge split config files
+
+    Returns:
+        Merged configuration dictionary
+    """
+    # Get config directory
+    if config_path is None:
+        env_path = os.getenv("PEARLALGO_CONFIG_PATH")
+        if env_path:
+            config_path = Path(env_path)
+        else:
+            project_root = Path(__file__).parent.parent.parent.parent
+            config_path = project_root / "config" / "config.yaml"
+    else:
+        config_path = Path(config_path)
+
+    config_dir = config_path.parent
+
+    # Start with empty config
+    merged_config: Dict[str, Any] = {}
+
+    # Load split config files first (they get overridden by main config)
+    if include_split_configs:
+        split_config_files = [
+            "signals.yaml",
+            "execution.yaml",
+            "learning.yaml",
+            "risk.yaml",
+            "service.yaml",
+        ]
+
+        for split_file in split_config_files:
+            split_path = config_dir / split_file
+            if split_path.exists():
+                try:
+                    import yaml
+                    with open(split_path) as f:
+                        split_data = yaml.safe_load(f) or {}
+                    if substitute_env:
+                        split_data = _substitute_env_vars(split_data)
+                    merged_config = _deep_merge(merged_config, split_data)
+                except Exception as e:
+                    try:
+                        from pearlalgo.utils.logger import logger
+                        logger.warning(f"Could not load split config {split_path}: {e}")
+                    except ImportError:
+                        pass
+
+    # Load main config (highest priority)
+    main_config = load_config_yaml(config_path, substitute_env=substitute_env, validate=False)
+    merged_config = _deep_merge(merged_config, main_config)
+
+    if validate:
+        log_config_warnings(merged_config)
+
+    return merged_config
+
+
 @lru_cache(maxsize=1)
 def get_config_yaml() -> Dict[str, Any]:
     """
     Get cached configuration data.
-    
+
     This function caches the result of load_config_yaml() for repeated calls.
     Use load_config_yaml() directly if you need to reload the config.
-    
+
     Returns:
         Cached dictionary with full configuration data.
     """
@@ -171,7 +273,6 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "sessions",
     # Strategy-level extensions
     "indicators",
-    "prop_firm",
     "strategy",
     "strategy_variants",
     "trailing_stop",
@@ -184,14 +285,7 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "adaptive_stops",
     "adaptive_sizing",
     "ml_filter",
-    "drift_guard",
-    # LLM features (signal annotation, risk checks, post-mortems, tuning)
-    # 50k challenge tracker
     "challenge",
-    # Single trading bot selection (AutoBot)
-    "trading_bot",
-    # Agentic layer (optional autonomy / reasoning)
-    "agentic",
 })
 
 # Config keys expected to be specific types after env substitution

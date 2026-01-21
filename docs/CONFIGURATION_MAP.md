@@ -61,7 +61,7 @@ Key sections and their consumers:
   - **Used by**: `pearlalgo.nq_agent.main` and `pearlalgo.nq_agent.telegram_notifier` (through DI from main and service).
 - `risk.*`
   - **Used by**: `strategies.nq_intraday.config.NQIntradayConfig` and downstream strategy components.
-- `service.*`, `circuit_breaker.*`, `data.*`, `signals.*`, `performance.*`, `prop_firm.*`
+- `service.*`, `circuit_breaker.*`, `data.*`, `signals.*`, `performance.*`
   - **Used by**: `pearlalgo.config.config_loader.load_service_config()` and then by:
     - `pearlalgo.nq_agent.service` (service intervals + alert throttles, circuit breaker thresholds)
     - `pearlalgo.nq_agent.data_fetcher` (data buffer sizes)
@@ -111,7 +111,7 @@ Notes:
   - Service intervals, circuit breaker thresholds, alert throttles
   - Data buffer sizes and history windows
   - Signal thresholds and duplicate windows
-  - Performance history limits and prop‑firm assumptions
+  - Performance history limits
 - **Settings (`pearlalgo.config.settings`)** – infrastructure and environment glue (`src/pearlalgo/config/settings.py`):
   - Normalization of env vars
   - Validation of IBKR settings

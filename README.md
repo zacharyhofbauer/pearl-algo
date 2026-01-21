@@ -66,4 +66,4 @@ python3 scripts/testing/test_all.py
 
 ## TradingView indicators
 
-TradingView Pine scripts live under `indicators/` (see `indicators/README.md`).
+TradingView Pine scripts live under `resources/pinescript/`.
