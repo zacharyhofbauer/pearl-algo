@@ -66,11 +66,7 @@ Notes:
 
 ## Local verification
 
-Generate a sample chart image:
-
-```bash
-python3 scripts/testing/test_mplfinance_chart.py
-```
+Generate a sample chart image by running the chart regression tests.
 
 ---
 
@@ -115,27 +111,8 @@ Test coverage includes:
 
 ### Updating baseline images
 
-If you intentionally change chart appearance:
-
-```bash
-# Dashboard chart baseline
-python3 scripts/testing/generate_dashboard_baseline.py
-
-# Entry/Exit chart baselines
-python3 scripts/testing/generate_entry_exit_baselines.py
-
-# Entry only
-python3 scripts/testing/generate_entry_exit_baselines.py --entry-only
-
-# Exit only
-python3 scripts/testing/generate_entry_exit_baselines.py --exit-only
-
-# Backtest chart baseline
-python3 scripts/testing/generate_backtest_baseline.py
-
-# On-demand (/chart) baseline (12h lookback)
-python3 scripts/testing/generate_on_demand_chart_baseline.py
-```
+If you intentionally change chart appearance, update the baseline images
+under `tests/fixtures/charts/` and re-run the visual regression tests.
 
 Baseline images are stored in: `tests/fixtures/charts/`
 - `dashboard_baseline.png`
@@ -160,9 +137,7 @@ pytest tests/test_chart_edge_cases.py -v
 
 ### Generating mobile baseline
 
-```bash
-python3 scripts/testing/generate_mobile_baseline.py
-```
+Mobile baselines are stored under `tests/fixtures/charts/`.
 
 ### Visual Schema Reference
 

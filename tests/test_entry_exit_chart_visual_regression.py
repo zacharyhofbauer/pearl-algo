@@ -9,15 +9,13 @@ Usage:
     pytest tests/test_entry_exit_chart_visual_regression.py -v
 
 To update baseline images after intentional changes:
-    python3 scripts/testing/generate_entry_exit_baselines.py
+    Update `tests/fixtures/charts/entry_baseline.png` and `exit_baseline.png`, then re-run this test.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Optional
-
 import numpy as np
 import pytest
 
@@ -26,7 +24,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
 # Import shared deterministic data generator
-from tests.fixtures.deterministic_data import (
+from tests.fixtures.deterministic_data import (  # noqa: E402
     generate_deterministic_ohlcv,
     generate_deterministic_entry_signal,
     generate_deterministic_exit_data,
@@ -34,7 +32,7 @@ from tests.fixtures.deterministic_data import (
 )
 
 # Import shared visual regression utilities
-from tests.fixtures.visual_regression_utils import (
+from tests.fixtures.visual_regression_utils import (  # noqa: E402
     validate_png_file,
     load_image_as_array,
     compare_images,
@@ -70,7 +68,7 @@ class TestEntryExitBaselineValidity:
         """Entry baseline file must exist for visual regression to work."""
         assert ENTRY_BASELINE_PATH.exists(), (
             f"Entry baseline not found: {ENTRY_BASELINE_PATH}\n"
-            f"Run: python3 scripts/testing/generate_entry_exit_baselines.py"
+            "Update: tests/fixtures/charts/entry_baseline.png"
         )
 
     def test_entry_baseline_is_valid_png(self):
@@ -81,14 +79,14 @@ class TestEntryExitBaselineValidity:
         is_valid, error = validate_png_file(ENTRY_BASELINE_PATH)
         assert is_valid, (
             f"Entry baseline is invalid: {error}\n"
-            f"Regenerate with: python3 scripts/testing/generate_entry_exit_baselines.py"
+            "Update baseline: tests/fixtures/charts/entry_baseline.png"
         )
 
     def test_exit_baseline_exists(self):
         """Exit baseline file must exist for visual regression to work."""
         assert EXIT_BASELINE_PATH.exists(), (
             f"Exit baseline not found: {EXIT_BASELINE_PATH}\n"
-            f"Run: python3 scripts/testing/generate_entry_exit_baselines.py"
+            "Update: tests/fixtures/charts/exit_baseline.png"
         )
 
     def test_exit_baseline_is_valid_png(self):
@@ -99,7 +97,7 @@ class TestEntryExitBaselineValidity:
         is_valid, error = validate_png_file(EXIT_BASELINE_PATH)
         assert is_valid, (
             f"Exit baseline is invalid: {error}\n"
-            f"Regenerate with: python3 scripts/testing/generate_entry_exit_baselines.py"
+            "Update baseline: tests/fixtures/charts/exit_baseline.png"
         )
 
 
@@ -149,7 +147,7 @@ class TestEntryChartVisualRegression:
         if not ENTRY_BASELINE_PATH.exists():
             pytest.skip(
                 f"Entry baseline not found: {ENTRY_BASELINE_PATH}\n"
-                f"Run: python3 scripts/testing/generate_entry_exit_baselines.py"
+                "Update baseline: tests/fixtures/charts/entry_baseline.png"
             )
         
         config = self.ChartConfig()
@@ -186,7 +184,7 @@ class TestEntryChartVisualRegression:
                         tolerance=PIXEL_TOLERANCE,
                         max_diff_pct=MAX_DIFF_PIXELS_PCT,
                         artifact_dir=artifact_dir,
-                        baseline_update_command="python3 scripts/testing/generate_entry_exit_baselines.py --entry-only",
+                        baseline_update_command="Update tests/fixtures/charts/entry_baseline.png",
                     )
                 )
         finally:
@@ -292,7 +290,7 @@ class TestExitChartVisualRegression:
         if not EXIT_BASELINE_PATH.exists():
             pytest.skip(
                 f"Exit baseline not found: {EXIT_BASELINE_PATH}\n"
-                f"Run: python3 scripts/testing/generate_entry_exit_baselines.py"
+                "Update baseline: tests/fixtures/charts/exit_baseline.png"
             )
         
         config = self.ChartConfig()
@@ -332,7 +330,7 @@ class TestExitChartVisualRegression:
                         tolerance=PIXEL_TOLERANCE,
                         max_diff_pct=MAX_DIFF_PIXELS_PCT,
                         artifact_dir=artifact_dir,
-                        baseline_update_command="python3 scripts/testing/generate_entry_exit_baselines.py --exit-only",
+                        baseline_update_command="Update tests/fixtures/charts/exit_baseline.png",
                     )
                 )
         finally:

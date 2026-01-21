@@ -70,11 +70,11 @@ except ImportError:
     spec.loader.exec_module(mock_data_provider)
     MockDataProvider = mock_data_provider.MockDataProvider
 
-from pearlalgo.nq_agent.service import NQAgentService
-from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
-from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
-from pearlalgo.utils.logging_config import setup_logging
+from pearlalgo.nq_agent.service import NQAgentService  # noqa: E402
+from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier  # noqa: E402
+from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig  # noqa: E402
+from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy  # noqa: E402
+from pearlalgo.utils.logging_config import setup_logging  # noqa: E402
 
 
 async def test_telegram_notifications():

@@ -9,11 +9,6 @@ This document standardizes the roles of all scripts under `scripts/` and identif
   - **Behavior**: Sets `PEARLALGO_MARKET`, `PEARLALGO_CONFIG_PATH`, `PEARLALGO_STATE_DIR`; manages PID/log per market in `logs/agent_<MARKET>.pid` and `logs/agent_<MARKET>.log`.
 - `check_agent_status.sh`
   - **Role**: Check process and basic state summary for a market (`--market NQ|ES|GC`).
-- `start_monitor_suite.sh`
-  - **Role**: Operator convenience script to start the full local suite (Gateway + Agent + Telegram handler + Monitor UI).
-  - **Notes**: Intended for desktop/VNC sessions; pairs with `stop_monitor_suite.sh`.
-- `stop_monitor_suite.sh`
-  - **Role**: Stop the full local suite started by `start_monitor_suite.sh`.
 
 ## Gateway (`scripts/gateway/`)
 

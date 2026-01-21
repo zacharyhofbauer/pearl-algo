@@ -9,7 +9,7 @@ Usage:
     pytest tests/test_backtest_chart_visual_regression.py -v
 
 To update the baseline image after intentional changes:
-    python3 scripts/testing/generate_backtest_baseline.py
+    Update `tests/fixtures/charts/backtest_baseline.png` and re-run this test.
 """
 
 from __future__ import annotations
@@ -25,14 +25,14 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
 # Import shared deterministic data generator
-from tests.fixtures.deterministic_data import (
+from tests.fixtures.deterministic_data import (  # noqa: E402
     generate_deterministic_ohlcv,
     generate_deterministic_backtest_signals,
     SEED,
 )
 
 # Import shared visual regression utilities
-from tests.fixtures.visual_regression_utils import (
+from tests.fixtures.visual_regression_utils import (  # noqa: E402
     validate_png_file,
     load_image_as_array,
     compare_images,
@@ -67,7 +67,7 @@ class TestBacktestBaselineValidity:
         """Backtest baseline file must exist for visual regression to work."""
         assert BACKTEST_BASELINE_PATH.exists(), (
             f"Backtest baseline not found: {BACKTEST_BASELINE_PATH}\n"
-            f"Run: python3 scripts/testing/generate_backtest_baseline.py"
+            "Update: tests/fixtures/charts/backtest_baseline.png"
         )
 
     def test_backtest_baseline_is_valid_png(self):
@@ -78,7 +78,7 @@ class TestBacktestBaselineValidity:
         is_valid, error = validate_png_file(BACKTEST_BASELINE_PATH)
         assert is_valid, (
             f"Backtest baseline is invalid: {error}\n"
-            f"Regenerate with: python3 scripts/testing/generate_backtest_baseline.py"
+            "Update baseline: tests/fixtures/charts/backtest_baseline.png"
         )
 
 
@@ -141,7 +141,7 @@ class TestBacktestChartVisualRegression:
         if not BACKTEST_BASELINE_PATH.exists():
             pytest.skip(
                 f"Backtest baseline not found: {BACKTEST_BASELINE_PATH}\n"
-                f"Run: python3 scripts/testing/generate_backtest_baseline.py"
+                "Update baseline: tests/fixtures/charts/backtest_baseline.png"
             )
         
         config = self.ChartConfig()
@@ -180,7 +180,7 @@ class TestBacktestChartVisualRegression:
                         tolerance=PIXEL_TOLERANCE,
                         max_diff_pct=MAX_DIFF_PIXELS_PCT,
                         artifact_dir=artifact_dir,
-                        baseline_update_command="python3 scripts/testing/generate_backtest_baseline.py",
+                        baseline_update_command="Update tests/fixtures/charts/backtest_baseline.png",
                     )
                 )
         finally:

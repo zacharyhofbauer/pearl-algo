@@ -8,7 +8,7 @@ Usage:
     pytest tests/test_on_demand_chart_visual_regression.py -v
 
 To update the baseline image after intentional changes:
-    python3 scripts/testing/generate_on_demand_chart_baseline.py
+    Update `tests/fixtures/charts/on_demand_chart_12h_baseline.png` and re-run this test.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 # Add project root to path
@@ -53,7 +52,7 @@ class TestBaselineValidity:
     def test_baseline_exists(self) -> None:
         assert BASELINE_PATH.exists(), (
             f"Baseline image not found: {BASELINE_PATH}\n"
-            f"Run: python3 scripts/testing/generate_on_demand_chart_baseline.py"
+            "Update: tests/fixtures/charts/on_demand_chart_12h_baseline.png"
         )
 
     def test_baseline_is_valid_png(self) -> None:
@@ -62,7 +61,7 @@ class TestBaselineValidity:
         is_valid, error = validate_png_file(BASELINE_PATH)
         assert is_valid, (
             f"Baseline image is invalid: {error}\n"
-            f"Regenerate with: python3 scripts/testing/generate_on_demand_chart_baseline.py"
+            "Update baseline: tests/fixtures/charts/on_demand_chart_12h_baseline.png"
         )
 
 
@@ -166,7 +165,7 @@ class TestOnDemandChartVisualRegression:
                     tolerance=PIXEL_TOLERANCE,
                     max_diff_pct=MAX_DIFF_PIXELS_PCT,
                     artifact_dir=artifact_dir,
-                    baseline_update_command="python3 scripts/testing/generate_on_demand_chart_baseline.py",
+                    baseline_update_command="Update tests/fixtures/charts/on_demand_chart_12h_baseline.png",
                 )
             )
 

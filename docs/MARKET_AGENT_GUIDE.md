@@ -1,6 +1,6 @@
-# MNQ Agent - Operational Guide
+# Market Agent - Operational Guide
 
-**Prop Firm Trading Strategy for Mini NQ (MNQ) Futures**
+**Market Agent operations (examples use MNQ/NQ by default)**
 
 > **Fast path:** For a one-page operational view (env, startup steps, scripts, Telegram expectations), use `CHEAT_SHEET.md`.
 > **Deep dive:** For system architecture, component details, and technical deep-dives, see `PROJECT_SUMMARY.md`.
@@ -27,7 +27,7 @@ cd /path/to/pearlalgo-dev-ai-agents
 # 1. Ensure IBKR Gateway is running
 ./scripts/gateway/gateway.sh status
 
-# 2. Start MNQ Agent Service (foreground - shows live logs in terminal)
+# 2. Start Market Agent Service (foreground - shows live logs in terminal)
 ./scripts/lifecycle/agent.sh start --market NQ
 
 # 3. Check status (in another terminal)
@@ -133,7 +133,7 @@ Edit `config/config.yaml` to customize behavior:
 
 ```yaml
 # Trading Symbol
-symbol: "MNQ"  # Mini NQ (1/10th size of NQ, better for prop firms)
+symbol: "MNQ"  # Example: Mini NQ (1/10th size of NQ, better for prop firms)
 timeframe: "5m"  # 5-minute bars for intraday swings (primary), with 1-2m for execution pinpointing
 scan_interval: 30  # Check for signals every 30 seconds
 
@@ -178,7 +178,7 @@ telegram:
 ### Key Configuration Sections
 
 **Trading Settings:**
-- `symbol`: Trading symbol (MNQ for prop firm trading)
+- `symbol`: Trading symbol (example: MNQ for prop firm trading)
 - `timeframe`: Bar timeframe (5m primary for swings; 1-2m available for execution pinpointing)
 - `scan_interval`: Scan frequency in seconds (30 for faster signals)
 
@@ -214,7 +214,7 @@ The Telegram UI provides a Markets menu to switch between NQ/ES/GC while keeping
 ### Prop Firm Trading Configuration
 
 The system is optimized for **prop firm style trading** with MNQ:
-- **MNQ Benefits:** 1/10th size of NQ ($2/point vs $20/point), better position sizing
+- **MNQ Benefits (example):** 1/10th size of NQ ($2/point vs $20/point), better position sizing
 - **Position Sizing:** Configurable via `risk.max_position_size` (default: 50, dynamic sizing enabled)
 - **Risk Management:** 1% max risk per trade, 10% max drawdown
 - **Scalping Focus:** Tighter stops (1.5x ATR), quicker profits (1.5:1 R:R), faster scanning (30s)
@@ -473,7 +473,7 @@ The status server reads from `state.json` and does not affect the trading agent.
    ./scripts/gateway/gateway.sh start
    ```
 
-4. **Restart NQ Agent Service:**
+4. **Restart Market Agent Service:**
    ```bash
    ./scripts/lifecycle/agent.sh stop --market NQ
    ./scripts/lifecycle/agent.sh start --market NQ
@@ -550,4 +550,4 @@ The status server reads from `state.json` and does not affect the trading agent.
 ---
 
 **Last Updated:** 2025-12-18  
-**Current Configuration:** MNQ (Mini NQ) - Prop Firm Style Trading
+**Current Configuration (example):** MNQ (Mini NQ) - Prop Firm Style Trading

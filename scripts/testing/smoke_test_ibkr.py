@@ -17,8 +17,8 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from pearlalgo.config.settings import get_settings
-from pearlalgo.data_providers.factory import create_data_provider
+from pearlalgo.config.settings import get_settings  # noqa: E402
+from pearlalgo.data_providers.factory import create_data_provider  # noqa: E402
 
 
 async def smoke_test():

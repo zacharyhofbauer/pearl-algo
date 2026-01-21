@@ -9,7 +9,7 @@ Usage:
     pytest tests/test_mobile_chart_visual_regression.py -v
 
 To update the baseline image after intentional changes:
-    python3 scripts/testing/generate_mobile_baseline.py
+    Update `tests/fixtures/charts/mobile_dashboard_baseline.png` and re-run this test.
 """
 
 from __future__ import annotations
@@ -25,19 +25,16 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
 # Import shared deterministic data generator
-from tests.fixtures.deterministic_data import (
+from tests.fixtures.deterministic_data import (  # noqa: E402
     generate_deterministic_ohlcv,
-    SEED,
     FIXED_TITLE_TIME,
 )
 
 # Import shared visual regression utilities
-from tests.fixtures.visual_regression_utils import (
+from tests.fixtures.visual_regression_utils import (  # noqa: E402
     validate_png_file,
     load_image_as_array,
     compare_images,
-    save_diff_artifact,
-    format_regression_failure_message,
     MOBILE_PIXEL_TOLERANCE,
     MOBILE_MAX_DIFF_PIXELS_PCT,
     DETERMINISM_PIXEL_TOLERANCE,
@@ -51,7 +48,7 @@ FIXTURES_DIR = project_root / "tests" / "fixtures" / "charts"
 MOBILE_BASELINE_PATH = FIXTURES_DIR / "mobile_dashboard_baseline.png"
 DIFF_OUTPUT_DIR = project_root / "tests" / "artifacts"
 
-# Mobile figsize (must match generate_mobile_baseline.py)
+# Mobile figsize (must match baseline artifacts)
 MOBILE_FIGSIZE = (8, 5)
 MOBILE_DPI = 150
 
@@ -67,13 +64,13 @@ class TestMobileBaselineValidity:
         """Mobile baseline image must exist."""
         assert MOBILE_BASELINE_PATH.exists(), (
             f"Mobile baseline image not found at {MOBILE_BASELINE_PATH}. "
-            "Run: python3 scripts/testing/generate_mobile_baseline.py"
+            "Update: tests/fixtures/charts/mobile_dashboard_baseline.png"
         )
     
     def test_mobile_baseline_is_valid_png(self):
         """Mobile baseline must be a valid PNG file."""
         if not MOBILE_BASELINE_PATH.exists():
-            pytest.skip("Mobile baseline image not found - run generate_mobile_baseline.py first")
+            pytest.skip("Mobile baseline image not found - update tests/fixtures/charts/mobile_dashboard_baseline.png")
         
         valid, error = validate_png_file(MOBILE_BASELINE_PATH)
         assert valid, f"Mobile baseline is invalid: {error}"
@@ -141,7 +138,7 @@ class TestMobileDashboardChartVisualRegression:
     def test_mobile_dashboard_visual_regression(self):
         """Compare generated mobile chart against baseline."""
         if not MOBILE_BASELINE_PATH.exists():
-            pytest.skip("Mobile baseline image not found - run generate_mobile_baseline.py first")
+            pytest.skip("Mobile baseline image not found - update tests/fixtures/charts/mobile_dashboard_baseline.png")
         
         data = generate_deterministic_ohlcv()
         

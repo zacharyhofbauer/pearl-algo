@@ -9,7 +9,7 @@ Usage:
     pytest tests/test_dashboard_chart_visual_regression.py -v
 
 To update the baseline image after intentional changes:
-    python3 scripts/testing/generate_dashboard_baseline.py
+    Update `tests/fixtures/charts/dashboard_baseline.png` and re-run this test.
 """
 
 from __future__ import annotations
@@ -25,14 +25,14 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
 # Import shared deterministic data generator
-from tests.fixtures.deterministic_data import (
+from tests.fixtures.deterministic_data import (  # noqa: E402
     generate_deterministic_ohlcv,
     SEED,
     FIXED_TITLE_TIME,
 )
 
 # Import shared visual regression utilities
-from tests.fixtures.visual_regression_utils import (
+from tests.fixtures.visual_regression_utils import (  # noqa: E402
     validate_png_file,
     load_image_as_array,
     compare_images,
@@ -68,7 +68,7 @@ class TestBaselineValidity:
         """Baseline file must exist for visual regression to work."""
         assert BASELINE_PATH.exists(), (
             f"Baseline image not found: {BASELINE_PATH}\n"
-            f"Run: python3 scripts/testing/generate_dashboard_baseline.py"
+            "Update: tests/fixtures/charts/dashboard_baseline.png"
         )
 
     def test_baseline_is_valid_png(self):
@@ -86,7 +86,7 @@ class TestBaselineValidity:
         is_valid, error = validate_png_file(BASELINE_PATH)
         assert is_valid, (
             f"Baseline image is invalid: {error}\n"
-            f"Regenerate with: python3 scripts/testing/generate_dashboard_baseline.py"
+            "Update baseline: tests/fixtures/charts/dashboard_baseline.png"
         )
 
     def test_baseline_has_reasonable_size(self):
@@ -150,7 +150,6 @@ class TestDashboardChartVisualRegression:
     def test_dashboard_chart_object_level_assertions(self):
         """Object-level assertions to catch structural changes."""
         config = self.ChartConfig()
-        generator = self.ChartGenerator(config)
         
         # Verify config defaults are as expected
         assert config.show_right_labels is True
@@ -173,7 +172,7 @@ class TestDashboardChartVisualRegression:
         if not BASELINE_PATH.exists():
             pytest.skip(
                 f"Baseline image not found: {BASELINE_PATH}\n"
-                f"Run: python3 scripts/testing/generate_dashboard_baseline.py"
+                "Update baseline: tests/fixtures/charts/dashboard_baseline.png"
             )
         
         # Generate chart with deterministic settings
@@ -223,7 +222,7 @@ class TestDashboardChartVisualRegression:
                         tolerance=PIXEL_TOLERANCE,
                         max_diff_pct=MAX_DIFF_PIXELS_PCT,
                         artifact_dir=artifact_dir,
-                        baseline_update_command="python3 scripts/testing/generate_dashboard_baseline.py",
+                        baseline_update_command="Update tests/fixtures/charts/dashboard_baseline.png",
                     )
                 )
         finally:

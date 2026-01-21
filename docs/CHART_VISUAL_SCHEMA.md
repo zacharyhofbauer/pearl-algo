@@ -279,17 +279,16 @@ Same structure as dashboard, plus:
 
 All chart types have dedicated visual regression tests with baseline images:
 
-| Chart Type | Test File | Baseline Image | Generator Script | Tolerance |
-|------------|-----------|----------------|------------------|-----------|
-| Dashboard | `tests/test_dashboard_chart_visual_regression.py` | `dashboard_baseline.png` | `generate_dashboard_baseline.py` | 2.0 px / 1% |
-| Mobile Dashboard | `tests/test_mobile_chart_visual_regression.py` | `mobile_dashboard_baseline.png` | `generate_mobile_baseline.py` | 2.5 px / 2% |
-| On-Demand (12h) | `tests/test_on_demand_chart_visual_regression.py` | `on_demand_chart_12h_baseline.png` | `generate_on_demand_chart_baseline.py` | 2.0 px / 1% |
-| Entry Chart | `tests/test_entry_exit_chart_visual_regression.py` | `entry_baseline.png` | `generate_entry_exit_baselines.py` | 2.0 px / 1% |
-| Exit Chart | `tests/test_entry_exit_chart_visual_regression.py` | `exit_baseline.png` | `generate_entry_exit_baselines.py` | 2.0 px / 1% |
-| Backtest Chart | `tests/test_backtest_chart_visual_regression.py` | `backtest_baseline.png` | `generate_backtest_baseline.py` | 2.0 px / 1% |
+| Chart Type | Test File | Baseline Image | Tolerance |
+|------------|-----------|----------------|-----------|
+| Dashboard | `tests/test_dashboard_chart_visual_regression.py` | `dashboard_baseline.png` | 2.0 px / 1% |
+| Mobile Dashboard | `tests/test_mobile_chart_visual_regression.py` | `mobile_dashboard_baseline.png` | 2.5 px / 2% |
+| On-Demand (12h) | `tests/test_on_demand_chart_visual_regression.py` | `on_demand_chart_12h_baseline.png` | 2.0 px / 1% |
+| Entry Chart | `tests/test_entry_exit_chart_visual_regression.py` | `entry_baseline.png` | 2.0 px / 1% |
+| Exit Chart | `tests/test_entry_exit_chart_visual_regression.py` | `exit_baseline.png` | 2.0 px / 1% |
+| Backtest Chart | `tests/test_backtest_chart_visual_regression.py` | `backtest_baseline.png` | 2.0 px / 1% |
 
-All baselines are located in: `tests/fixtures/charts/`  
-All generator scripts are located in: `scripts/testing/`
+All baselines are located in: `tests/fixtures/charts/`
 
 ### Shared Visual Regression Utilities
 
@@ -342,25 +341,8 @@ Tests chart behavior under extreme conditions:
 
 ### Baseline Update Process
 
-Only run after intentional visual changes with explicit approval:
-
-```bash
-# Update all baselines
-python3 scripts/testing/generate_dashboard_baseline.py
-python3 scripts/testing/generate_mobile_baseline.py
-python3 scripts/testing/generate_on_demand_chart_baseline.py
-python3 scripts/testing/generate_entry_exit_baselines.py
-python3 scripts/testing/generate_backtest_baseline.py
-```
-
-Individual baseline updates:
-```bash
-# Entry only
-python3 scripts/testing/generate_entry_exit_baselines.py --entry-only
-
-# Exit only
-python3 scripts/testing/generate_entry_exit_baselines.py --exit-only
-```
+Only update baselines after intentional visual changes with explicit approval,
+then re-run the visual regression tests to confirm.
 
 ---
 

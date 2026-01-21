@@ -157,7 +157,7 @@
 - **Offline quick-run** (fast sanity check):
   ```bash
   ls -1 data/historical/*.parquet
-  python scripts/backtesting/backtest_cli.py signal --data-path data/historical/<pick_one>.parquet
+  python scripts/backtesting/backtest_trading_bot.py --bot PearlAutoBot --data-path data/historical/<pick_one>.parquet
   ```
 
 - **Requires command handler running:**
@@ -388,9 +388,9 @@ Or from Telegram: `/performance 7d`
 
 For manual testing:
 ```bash
-python scripts/backtesting/backtest_cli.py signal \
-  --data-path data/historical/MNQ_1m_2w.parquet \
-  --config-override "signals.min_confidence=0.5"
+python scripts/backtesting/backtest_trading_bot.py \
+  --bot PearlAutoBot \
+  --data-path data/historical/MNQ_1m_2w.parquet
 ```
 
 ### Step 4: Apply Change
