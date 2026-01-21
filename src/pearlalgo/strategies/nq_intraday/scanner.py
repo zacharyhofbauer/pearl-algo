@@ -740,6 +740,15 @@ class NQScanner:
         ema_fast = latest.get("sma_fast", 0)  # 9 EMA (fast)
         ema_slow = latest.get("sma_slow", 0)  # 20 EMA (slow)
         vwap = vwap_data.get("vwap", current_price)
+        # VWAP bands (1σ) are used as a simple overextension guard to avoid chasing.
+        try:
+            vwap_upper_1 = float(vwap_data.get("vwap_upper_1", 0.0) or 0.0)
+        except Exception:
+            vwap_upper_1 = 0.0
+        try:
+            vwap_lower_1 = float(vwap_data.get("vwap_lower_1", 0.0) or 0.0)
+        except Exception:
+            vwap_lower_1 = 0.0
         rsi = latest.get("rsi", 50)
         macd_hist = latest.get("macd_histogram", 0)
         
@@ -760,6 +769,7 @@ class NQScanner:
         if (regime_type == "trending_bullish" and
             ema_fast > ema_slow and  # EMA crossover or trending
             current_price > vwap and  # Price above VWAP
+            (vwap_upper_1 <= 0 or current_price <= vwap_upper_1) and  # avoid buying above +1σ VWAP
             40 <= rsi <= 70 and  # RSI in bullish range
             macd_hist > 0):  # MACD bullish
             
@@ -798,6 +808,7 @@ class NQScanner:
         elif (regime_type == "trending_bearish" and
               ema_fast < ema_slow and  # EMA crossover or trending
               current_price < vwap and  # Price below VWAP
+              (vwap_lower_1 <= 0 or current_price >= vwap_lower_1) and  # avoid selling below -1σ VWAP
               30 <= rsi <= 60 and  # RSI in bearish range
               macd_hist < 0):  # MACD bearish
             
@@ -846,13 +857,41 @@ class NQScanner:
 
             # Require a meaningful VWAP deviation to avoid spam in tight chop.
             dev_min_pct = 0.05  # 0.05% (~12.5 pts on 25k)
+            # Avoid "catching a falling knife" when price is extremely extended from VWAP.
+            # Scale by ATR for invariance across volatility regimes.
+            dev_atr = None
+            try:
+                dist_pts = float(vwap_data.get("distance_from_vwap", 0.0) or 0.0)
+                if float(atr) > 0:
+                    dev_atr = abs(dist_pts) / float(atr)
+            except Exception:
+                dev_atr = None
+            max_dev_atr = 2.5
+
+            # Simple reversal confirmation: require momentum to start reverting.
+            try:
+                prev_close = float(prev.get("close", current_price))
+            except Exception:
+                prev_close = float(current_price)
+            try:
+                prev_rsi = float(prev.get("rsi", rsi))
+            except Exception:
+                prev_rsi = float(rsi)
+            try:
+                prev_macd = float(prev.get("macd_histogram", macd_hist))
+            except Exception:
+                prev_macd = float(macd_hist)
 
             # Long mean-reversion: price below VWAP + oversold RSI.
             if (
                 vwap_val > 0
                 and current_price < vwap_val
                 and dist_pct <= -dev_min_pct
+                and (dev_atr is None or dev_atr <= max_dev_atr)
                 and rsi <= 40
+                and current_price > prev_close
+                and rsi >= prev_rsi
+                and macd_hist >= prev_macd
             ):
                 signal_type = "unified_strategy"
                 direction = "long"
@@ -870,7 +909,11 @@ class NQScanner:
                 vwap_val > 0
                 and current_price > vwap_val
                 and dist_pct >= dev_min_pct
+                and (dev_atr is None or dev_atr <= max_dev_atr)
                 and rsi >= 60
+                and current_price < prev_close
+                and rsi <= prev_rsi
+                and macd_hist <= prev_macd
             ):
                 signal_type = "unified_strategy"
                 direction = "short"
@@ -885,16 +928,13 @@ class NQScanner:
         
         # Generate signal if conditions met
         if signal_type and direction:
-            # ATR-based stops (1.5x ATR stop, 2x ATR target = 1.33 R:R)
-            stop_loss_dist = atr * 1.5
-            take_profit_dist = atr * 2.0
-            
-            if direction == "long":
-                stop_loss = current_price - stop_loss_dist
-                take_profit = current_price + take_profit_dist
-            else:
-                stop_loss = current_price + stop_loss_dist
-                take_profit = current_price - take_profit_dist
+            # Use the shared stop/target calculator (adaptive stops + config-driven ATR multipliers).
+            stop_loss, take_profit = calculate_stop_take(
+                direction=direction,
+                entry=current_price,
+                atr_val=atr,
+                signal_type=str(signal_type or "unified_strategy"),
+            )
             
             # Minimum confidence threshold
             if confidence >= 0.60:
