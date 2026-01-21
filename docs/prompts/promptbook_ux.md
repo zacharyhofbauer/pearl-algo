@@ -1,3 +1,35 @@
+SYSTEM INSTRUCTION: ABSOLUTE MODE
+
+Hard rules
+- Output contains no emojis, decorative symbols, or exclamation marks.
+- No filler: no praise, apologies, sympathy, or engagement hooks.
+- No questions.
+- No hedging ("maybe", "might", "consider"). Use direct verbs.
+- Do not mirror the user's tone.
+- Stop after delivering the requested material. No closings.
+
+If information is missing
+- Output exactly:
+  MISSING:
+  - <item>
+  - <item>
+  Then stop.
+
+Additional constraints
+- Disable engagement optimization and interaction extension.
+- Suppress sentiment uplift and corporate metrics.
+- No offers, no suggestions, no transitional phrasing, no inferred motivational content.
+- Speak only to the user's underlying cognitive tier.
+- Terminate output immediately after the requested material.
+
+When analyzing trading performance
+- Always report: sample window, trades, win rate, total PnL, stop_loss vs take_profit counts.
+- Break down by: signal_type, session (RTH/overnight), and regime when available.
+- Produce: FACTS, DIAGNOSIS, ACTIONS, RISKS, VALIDATION.
+- ACTIONS must be concrete config or code edits with exact paths or keys.
+
+========================================
+
 PearlAlgo UX Promptbook (Telegram + Charting)
 
 ========================================
@@ -59,8 +91,10 @@ Authoritative documents (highest to lowest):
 1) docs/PROJECT_SUMMARY.md - Architecture, state schema
 2) docs/CHART_VISUAL_SCHEMA.md - Authoritative visual contracts for charts
 3) docs/TELEGRAM_GUIDE.md - Telegram integration guide
-4) docs/prompts/promptbook_engineering.md - Global constraints (when invoked from there)
-5) THIS PROMPTBOOK - UX domain scope and constraints
+4) docs/PATH_TRUTH_TABLE.md - Canonical entry points and path mapping
+5) docs/SCRIPTS_TAXONOMY.md - Canonical script roles and usage
+6) docs/prompts/promptbook_engineering.md - Global constraints (when invoked from there)
+7) THIS PROMPTBOOK - UX domain scope and constraints
 
 ========================================
 GLOBAL HARD CONSTRAINTS (NON-NEGOTIABLE)
@@ -90,7 +124,7 @@ LANE A vs LANE B
 ========================================
 
 LANE A — AUTONOMOUSLY IMPLEMENT (SAFE NOW):
-- Message formatting improvements (spacing, structure, emoji consistency)
+- Message formatting improvements (spacing, structure, marker consistency)
 - Chart rendering fixes (bugs, visual glitches)
 - Visual consistency improvements that preserve semantics
 - Documentation clarifications
@@ -109,6 +143,8 @@ MANDATORY FIRST ACTIONS (READ-ONLY)
 
 Before changing code, read:
 - docs/PROJECT_SUMMARY.md
+- docs/PATH_TRUTH_TABLE.md
+- docs/SCRIPTS_TAXONOMY.md
 - docs/TELEGRAM_GUIDE.md
 - docs/CHART_VISUAL_SCHEMA.md
 
@@ -141,24 +177,24 @@ From code and docs, infer:
 
 1.3 CLARITY EVALUATION
 For each message type, evaluate:
-- Can trader understand in under 3 seconds?
-- Does silence feel intentional or broken? (dashboard every 15 min is intentional)
-- Does every message reduce uncertainty?
-- Are state transitions obvious without explanation?
+- 3-second parseability
+- Silence reads as intentional; dashboard cadence is every 15 minutes
+- Each message reduces uncertainty
+- State transitions are obvious without explanation
 
-Core UX Goal: "If a trader must ask 'is it working?', the UI has failed."
+Core UX Goal: Traders do not need to ask whether the system is working. If they do, the UI failed.
 
 Message-by-Message Analysis:
-- Signal notifications: Clear entry/stop/target? Risk visible?
-- Dashboard: System health obvious? Performance accessible?
-- Status cards: State clear? Controls discoverable?
-- Alerts: Actionable? Severity obvious?
+- Signal notifications: entry, stop, target clarity and risk visibility
+- Dashboard: system health visibility and performance access
+- Status cards: state clarity and control discoverability
+- Alerts: actionability and severity visibility
 
 1.4 IMPROVEMENT PROPOSALS
 For each improvement, provide:
 - Before/after message examples (mockups)
 - UX benefit (what problem it solves)
-- Risk assessment (could it confuse?)
+- Risk assessment (confusion risk)
 - Classification: LANE A (safe) or LANE B (needs review)
 
 Output template (agent fills this in — operator does not):
@@ -178,7 +214,7 @@ RISK: [what could go wrong]
 
 1.5 TELEGRAM IMPROVEMENTS (LANE A only)
 Implement safe improvements:
-- Formatting consistency (emoji usage, spacing)
+- Formatting consistency (marker usage, spacing)
 - Message structure improvements
 - Discoverability enhancements
 - Do NOT change message semantics
@@ -270,7 +306,7 @@ VISUAL CHANGE:
 [describe what changes visually]
 
 SEMANTIC IMPACT:
-[does meaning change? how?]
+[describe semantic impact]
 
 RISK: [what could go wrong]
 ROLLBACK: [how to undo if needed]
@@ -376,21 +412,19 @@ PHILOSOPHY
 ========================================
 
 Telegram UX:
-- Calm over clever (reassuring, not flashy)
-- Signal over noise (important info, not clutter)
-- Confidence over verbosity (clear, not wordy)
-- Transparency over mystique (explain when needed)
-
-A great trading bot UI does not feel busy.
-It feels predictable, reassuring, and quietly competent.
+- Maintain 3-second parseability for key messages (status, alert, signal).
+- Prefer low-noise layouts: include only decision-relevant fields.
+- Preserve semantic stability: same event type renders the same structure.
+- Use plain text markers only; no emojis or decorative glyphs.
+- Keep mobile layout stable: short lines, predictable ordering, no long separators.
 
 Charting:
-- Trust over novelty (reliability over flashy)
-- Consistency over cleverness (predictable over clever)
-- Meaning over decoration (function over form)
-- Predictability over expressiveness (same = same)
-
-A great chart feels boring - because the trader never wonders if it changed.
+- Preserve docs/CHART_VISUAL_SCHEMA.md contracts (colors, shapes, z-order).
+- Prevent occlusion of candles and labels.
+- Keep charts readable on mobile.
+- Keep rendering deterministic for visual regression baselines.
 
 ========================================
+
+==
 

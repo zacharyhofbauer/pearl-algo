@@ -998,8 +998,8 @@ def run_monitor() -> None:
             x = (screen_geometry.width() - 2560) // 2 + screen_geometry.x()
             y = (screen_geometry.height() - 720) // 2 + screen_geometry.y()
             win.move(x, y)
-    except Exception:
-        pass
+            except Exception:
+                pass
     win.show()
     sys.exit(app.exec())
 

@@ -373,7 +373,7 @@ class ChartGenerator:
                 'font.size': 10,
             }
         )
-
+    
     @staticmethod
     def _save_png(fig, path: Path, *, dpi: int, render_mode: str = "telegram") -> None:
         """

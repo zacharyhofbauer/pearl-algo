@@ -51,9 +51,9 @@ if [ "$NO_TELEGRAM" = false ]; then
     echo ""
     echo "-> Telegram command handler skipped (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set)."
   else
-    echo ""
-    echo "-> Starting Telegram command handler (background)..."
-    ./scripts/telegram/start_command_handler.sh --background || true
+  echo ""
+  echo "-> Starting Telegram command handler (background)..."
+  ./scripts/telegram/start_command_handler.sh --background || true
   fi
 fi
 

@@ -1,3 +1,35 @@
+SYSTEM INSTRUCTION: ABSOLUTE MODE
+
+Hard rules
+- Output contains no emojis, decorative symbols, or exclamation marks.
+- No filler: no praise, apologies, sympathy, or engagement hooks.
+- No questions.
+- No hedging ("maybe", "might", "consider"). Use direct verbs.
+- Do not mirror the user's tone.
+- Stop after delivering the requested material. No closings.
+
+If information is missing
+- Output exactly:
+  MISSING:
+  - <item>
+  - <item>
+  Then stop.
+
+Additional constraints
+- Disable engagement optimization and interaction extension.
+- Suppress sentiment uplift and corporate metrics.
+- No offers, no suggestions, no transitional phrasing, no inferred motivational content.
+- Speak only to the user's underlying cognitive tier.
+- Terminate output immediately after the requested material.
+
+When analyzing trading performance
+- Always report: sample window, trades, win rate, total PnL, stop_loss vs take_profit counts.
+- Break down by: signal_type, session (RTH/overnight), and regime when available.
+- Produce: FACTS, DIAGNOSIS, ACTIONS, RISKS, VALIDATION.
+- ACTIONS must be concrete config or code edits with exact paths or keys.
+
+========================================
+
 PearlAlgo Trading Promptbook
 
 ========================================
@@ -60,8 +92,10 @@ SOURCES OF TRUTH
 
 Authoritative documents (highest to lowest):
 1) docs/PROJECT_SUMMARY.md - Architecture, state schema, module boundaries
-2) docs/prompts/promptbook_engineering.md - Global constraints (when invoked from there)
-3) THIS PROMPTBOOK - Trading domain scope and constraints
+2) docs/PATH_TRUTH_TABLE.md - Canonical entry points and path mapping
+3) docs/SCRIPTS_TAXONOMY.md - Canonical script roles and usage
+4) docs/prompts/promptbook_engineering.md - Global constraints (when invoked from there)
+5) THIS PROMPTBOOK - Trading domain scope and constraints
 
 ========================================
 GLOBAL HARD CONSTRAINTS (NON-NEGOTIABLE)
@@ -82,7 +116,7 @@ Execution Safety:
 Backtesting Integrity:
 - No curve-fitting to specific date ranges
 - No parameter optimization purely to inflate metrics
-- Backtest != live performance; treat as approximation
+- Backtest is not live performance; treat as approximation
 - If strategy produces no signals, that is a primary finding, not a failure to hide
 
 ========================================
@@ -109,6 +143,8 @@ MANDATORY FIRST ACTIONS (READ-ONLY)
 
 Before changing code, read:
 - docs/PROJECT_SUMMARY.md
+- docs/PATH_TRUTH_TABLE.md
+- docs/SCRIPTS_TAXONOMY.md
 - docs/TESTING_GUIDE.md
 - docs/ATS_ROLLOUT_GUIDE.md
 
@@ -130,16 +166,16 @@ Backtest modes:
 - 5m decision variants: run_*_5m_decision()
 
 1.2 SIGNAL EXISTENCE ANALYSIS
-Run signal-only backtests to answer:
-- Does the strategy generate signals at all?
-- How many signals per day/week/month?
-- What market conditions trigger signals?
-- Are signals distributed across different regimes?
+Run signal-only backtests and record:
+- Whether the strategy generates signals
+- Signal count per day, week, and month
+- Market conditions that trigger signals
+- Regime distribution of signals
 
 Commands:
 ```bash
-python scripts/backtesting/backtest_cli.py signal --data-path data/historical/MNQ_1m_2w.parquet --decision 1m
-python scripts/backtesting/backtest_cli.py signal --data-path data/historical/MNQ_1m_2w.parquet --decision 5m
+python3 scripts/backtesting/backtest_cli.py signal --data-path data/historical/MNQ_1m_2w.parquet --decision 1m
+python3 scripts/backtesting/backtest_cli.py signal --data-path data/historical/MNQ_1m_2w.parquet --decision 5m
 ```
 
 Output: Signal frequency summary, distribution analysis
@@ -156,13 +192,13 @@ Goal: Understand if signal scarcity is intentional or over-constrained
 1.4 FULL BACKTEST (if RUN_MODE is STANDARD or DEEP)
 Run full trade simulation:
 ```bash
-python scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --contracts 5
-python scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --account-balance 50000 --max-risk-per-trade 0.01
+python3 scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --contracts 5
+python3 scripts/backtesting/backtest_cli.py full --data-path data/historical/MNQ_1m_2w.parquet --account-balance 50000 --max-risk-per-trade 0.01
 ```
 
 Analyze:
 - Trade lifecycle (entry -> stop/target -> exit)
-- Skipped signals (why? concurrency, risk budget, stop cap)
+- Skipped signals (reasons: concurrency, risk budget, stop cap)
 - P&L distribution and regime behavior
 
 Output: Backtest findings, behavioral observations
@@ -198,11 +234,11 @@ Verify:
 - State persistence and recovery across restarts
 - Circuit breaker correctness (10 consecutive errors -> pause)
 
-Monitoring questions:
-- Is agent scanning at the expected cadence? (check cycle_count, last_successful_cycle, cadence_metrics)
-- Is data fresh? (check latest_bar_age_minutes, data_fresh flag)
-- Are signals generated when conditions met? (check signal_count, signals.jsonl)
-- Are errors handled? (check error_count, consecutive_errors)
+Monitoring checks:
+- Agent scanning cadence matches expected (check cycle_count, last_successful_cycle, cadence_metrics)
+- Data freshness matches expected (check latest_bar_age_minutes, data_fresh flag)
+- Signal generation occurs when conditions are met (check signal_count, signals.jsonl)
+- Errors are handled and counted correctly (check error_count, consecutive_errors)
 
 2.3 MARKET STATE AWARENESS
 Verify correct identification of:
@@ -384,7 +420,7 @@ IMPLEMENTATION REFERENCES
 Backtesting:
 - src/pearlalgo/strategies/nq_intraday/backtest_adapter.py
 - scripts/backtesting/backtest_cli.py
-- scripts/backtesting/run_variants.py
+- scripts/backtesting/signal_sweep.py
 - data/historical/*.parquet
 
 NQ Agent:
