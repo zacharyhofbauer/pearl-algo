@@ -112,21 +112,22 @@ System Control
 - Log viewing
 
 ### 🤖 Bots Menu
-**Purpose**: Start/stop the NQ Agent service
+**Purpose**: Bot hub (PearlBot-first). System-level controls live under **🎛️ System Control**.
 
 ```
-🤖 Pearl Bots
+🤖 Bots
 
-🚀 Start Agent      🛑 Stop Agent
-🔄 Restart Agent    🔄 Refresh
-🏠 Back to Menu
+💎 PearlBot            🧪 Backtest (Advanced)
+📑 Reports             🎛️ System Controls
+🔄 Refresh             🏠 Back to Menu
 ```
 
 **Key Actions:**
-- **Start Agent**: Starts the NQ Agent service in the background
-- **Stop Agent**: Stops the NQ Agent service
-- **Restart Agent**: Stop then start the service
-- **Refresh**: Re-checks service and gateway status
+- **PearlBot**: View/manage bots (recommended “all-in-one” composite bot)
+- **Backtest (Advanced)**: Run offline backtests on saved historical data
+- **Reports**: Browse/export saved backtest artifacts
+- **System Controls**: Jump to system-level agent/gateway controls
+- **Refresh**: Re-check service and gateway status
 
 ### ❓ Help Menu
 **Purpose**: User guidance and command reference
@@ -144,7 +145,7 @@ Menu Structure:
 📊 Performance - Performance metrics and reports
 📡 Status - System health and connection status
 ⚙️ System Control - Start/stop services and emergency controls
-🤖 Bots - Start/stop the Pearl Bot service
+🤖 Bots - PearlBot controls, backtests, reports
 
 Quick Tips:
 • Use 'Back to Menu' to return to main menu

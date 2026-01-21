@@ -119,8 +119,20 @@ class NQAgentDataFetcher:
             end = datetime.now(timezone.utc)
             start = end - timedelta(hours=self._historical_hours)
 
-            # Check if we can use cached base historical data
-            df = await self._fetch_base_historical_data(start, end)
+            # Fetch base historical data (best-effort).
+            # Historical fetch failures must not block Level 1 latest_bar retrieval.
+            try:
+                df = await self._fetch_base_historical_data(start, end)
+            except Exception as e:
+                ErrorHandler.handle_data_fetch_error(
+                    e,
+                    context={
+                        "symbol": self.config.symbol,
+                        "timeframe": self.config.timeframe,
+                        "stage": "historical_fetch",
+                    },
+                )
+                df = pd.DataFrame()
 
             if df.empty:
                 logger.warning(f"No historical data available for {self.config.symbol} (Error 162 may be blocking historical data)")

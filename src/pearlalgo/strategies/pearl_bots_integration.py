@@ -216,7 +216,7 @@ class PearlBotManager:
 
     def get_active_bots(self) -> List[str]:
         """Get list of active bot names."""
-        return list(self.bots.keys())
+        return [name for name, bot in self.bots.items() if bool(getattr(bot, "is_active", True))]
 
     def enable_bot(self, bot_name: str) -> bool:
         """Enable a specific bot."""

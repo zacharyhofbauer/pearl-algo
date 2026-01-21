@@ -47,7 +47,10 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
 - **Backtesting scripts** (`scripts/backtesting/`):
   - `backtest_cli.py` – canonical unified backtest CLI (signal + full trade modes)
-  - `run_variants.py` – run multiple strategy variants
+  - `signal_sweep.py` – sweep signal thresholds / variants (optional)
+  - `robustness_cli.py` – robustness runs (optional)
+  - `strategy_selection.py` – generates strategy selection exports (used by Telegram `/analyze`)
+  - `backtest_pearl_bot.py`, `compare_pearl_bots.py` – PEARL bot backtests (optional; see PEARL bots docs)
 - **Testing scripts** (`scripts/testing/`):
   - `run_tests.sh` – pytest unit test runner (canonical)
   - `test_all.py` – unified validation runner (telegram / signals / service / arch)

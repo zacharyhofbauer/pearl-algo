@@ -58,7 +58,7 @@ lux_algo_bots:  # TODO: Rename to pearl_bots
 ```
 
 ### 2. Telegram Control
-Use the Strategies menu in Telegram:
+Use the **🤖 Bots** menu in Telegram:
 - 🤖 **Manage Bots**: Enable/disable individual bots
 - 📊 **Bot Performance**: View real-time metrics
 - 🚀 **Start All Bots**: Bulk activation
@@ -67,9 +67,9 @@ Use the Strategies menu in Telegram:
 ### 3. Backtesting
 Run backtests from Telegram:
 
-- Open **Telegram** → **👾 Bots** → **🧪 Backtest Bots**
-- Choose the bot + historical period (1w/2w/4w/6w)
-- View saved artifacts in **Telegram** → **👾 Bots** → **📑 Backtest Reports**
+- Open **Telegram** → **🤖 Bots** → **🧪 Backtest (Advanced)**
+- Choose **💎 PearlBot (All‑in‑One)** (recommended) or a variant, then pick a historical period (1w/2w/4w/6w)
+- View saved artifacts in **Telegram** → **🤖 Bots** → **📑 Reports**
 
 ## Architecture
 

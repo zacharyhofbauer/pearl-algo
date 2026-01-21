@@ -40,8 +40,22 @@ Backtesting scripts for strategy validation on historical data.
   - **Modes**: `signal` (fast signal-only) and `full` (trade simulation with risk-based sizing).
   - **Usage**: `python scripts/backtesting/backtest_cli.py signal --data-path data.parquet`
   - **Features**: Date range slicing, chart generation, HTML reports.
-- `run_variants.py`
-  - **Role**: Run multiple strategy variants for comparison.
+- `signal_sweep.py`
+  - **Role**: Sweep signal thresholds / variants (batch experiments; outputs summaries).
+- `robustness_cli.py`
+  - **Role**: Robustness / stress-testing harness for backtests (parameter and scenario sweeps).
+- `strategy_selection.py`
+  - **Role**: Generate `strategy_selection_*.json` exports used by Telegram `/analyze` and operator dashboards.
+- `backtest_pearl_bot.py`
+  - **Role**: Backtest a single PEARL bot configuration on historical data.
+- `compare_pearl_bots.py`
+  - **Role**: Compare multiple PEARL bots across a period and produce a ranked summary.
+- `train_ml_filter.py`
+  - **Role**: Train/update the ML signal filter artifact used by `ml_filter` (offline; no production execution side effects).
+- `analyze_pearl_bot_performance.py`
+  - **Role**: Post-process PEARL bot backtest outputs into performance tables/charts.
+- `test_enhanced_pearl_bots.py`
+  - **Role**: Standalone PEARL bot validation harness (not collected by pytest; intended for manual runs).
 
 ## Testing (`scripts/testing/`)
 

@@ -219,24 +219,24 @@ class TelegramCommandHandler:
         
         # Bots button - show running status
         # Use same source of truth as main status (state file) for consistency
-        bots_label = "👾 Bots"
+        bots_label = "🤖 Bots"
         try:
             # First check state file (same as main status display)
             if state:
                 agent_running = state.get("running", False)
                 if agent_running:
-                    bots_label = "👾 Bots • Running"
+                    bots_label = "🤖 Bots • Running"
                 else:
-                    bots_label = "👾 Bots • Stopped"
+                    bots_label = "🤖 Bots • Stopped"
             else:
                 # Fallback to process check if state file not available
                 sc = getattr(self, "service_controller", None)
                 if sc is not None:
                     agent_status = sc.get_agent_status() or {}
                     if agent_status.get("running"):
-                        bots_label = "👾 Bots • Running"
+                        bots_label = "🤖 Bots • Running"
                     else:
-                        bots_label = "👾 Bots • Stopped"
+                        bots_label = "🤖 Bots • Stopped"
         except Exception:
             pass
         
@@ -383,7 +383,8 @@ class TelegramCommandHandler:
             "/menu - Show main menu\n"
             "/help - Show this help message\n"
             "/settings - Alert preferences (charts, notifications)\n\n"
-            "Use the Bots menu to start/stop the Pearl Bot service."
+            "Use 🎛️ System to start/stop the agent.\n"
+            "Use 🤖 Bots for PearlBot controls, backtests, and reports."
         )
         await update.message.reply_text(text)
 
@@ -1205,7 +1206,7 @@ class TelegramCommandHandler:
             await query.edit_message_text("💎 Performance\n\nSelect an option:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def _show_bots_menu(self, query: CallbackQuery) -> None:
-        """Show Pearl Bot control menu with comprehensive status and diagnostics."""
+        """Show bot hub menu (PearlBot-first) with status and advanced tools."""
         agent_status = {"running": False, "message": "Unknown"}
         gateway_status = {"process_running": False, "port_listening": False}
 
@@ -1247,7 +1248,7 @@ class TelegramCommandHandler:
                 trading_info = "📊 No signals today yet"
         
         # Build rich status display
-        lines = ["👾 *Pearl Bots*", ""]
+        lines = ["🤖 *Bots*", ""]
         
         # Service Status
         lines.append("*Service Status:*")
@@ -1278,11 +1279,11 @@ class TelegramCommandHandler:
             health_status.append("⚠️ *System Health:* Issues detected")
             
             if not running:
-                recommendations.append("💡 Start the agent to begin trading")
+                recommendations.append("💡 Start the agent in 🎛️ *System* to begin live trading")
             if not gateway_ready:
-                recommendations.append("💡 Check gateway connection")
+                recommendations.append("💡 Check gateway status in 🎛️ *System*")
             if state and state.get("connection_status") != "connected":
-                recommendations.append("💡 Verify market data connection")
+                recommendations.append("💡 Verify market data connection (Status menu)")
         
         if health_status:
             lines.extend(health_status)
@@ -1292,35 +1293,21 @@ class TelegramCommandHandler:
             lines.extend(recommendations)
         
         lines.append("")
-        lines.append("*Control Options:*")
-
-        # Dynamic button labels
-        start_label = "🚀 Start Agent" if not running else "🚀 Start Agent (Already Running)"
-        stop_label = "🛑 Stop Agent"
-        restart_label = "🔄 Restart Agent"
-
-        if running:
-            stop_label = "🛑 Stop Agent"
-            restart_label = "🔄 Restart Agent"
+        lines.append("*Bot Tools:*")
+        lines.append("• 💎 *PearlBot* = all-in-one composite bot (recommended)")
+        lines.append("• 🧪 Backtest is an advanced tool (runs offline on saved data)")
 
         keyboard = [
             [
-                InlineKeyboardButton(start_label, callback_data="action:start_agent"),
-                InlineKeyboardButton(stop_label, callback_data="action:stop_agent"),
+                InlineKeyboardButton("💎 PearlBot", callback_data="menu:pearl_bots"),
+                InlineKeyboardButton("🧪 Backtest (Advanced)", callback_data="strategy_review:backtest"),
             ],
             [
-                InlineKeyboardButton(restart_label, callback_data="action:restart_agent"),
-                InlineKeyboardButton("🤖 Pearl Bots", callback_data="menu:pearl_bots"),
+                InlineKeyboardButton("📑 Reports", callback_data="strategy_review:reports"),
+                InlineKeyboardButton("🎛️ System Controls", callback_data="menu:system"),
             ],
             [
-                InlineKeyboardButton("🧠 AI Ops", callback_data="action:ai_ops"),
-            ],
-            [
-                InlineKeyboardButton("🧪 Backtest Bots", callback_data="strategy_review:backtest"),
-                InlineKeyboardButton("📑 Backtest Reports", callback_data="strategy_review:reports"),
-            ],
-            [
-                InlineKeyboardButton("🔄 Refresh Status", callback_data="menu:bots"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="menu:bots"),
                 InlineKeyboardButton("🏠 Back to Menu", callback_data="back"),
             ],
         ]
@@ -1590,19 +1577,41 @@ class TelegramCommandHandler:
             ],
             [
                 InlineKeyboardButton("🧩 AI Patch Wizard", callback_data="action:ai_patch_wizard"),
+                InlineKeyboardButton("🧠 AI Ops", callback_data="action:ai_ops"),
             ],
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
         await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-    async def _ensure_openai_ready(self, target: Any) -> bool:
-        """Ensure OpenAI dependency and API key are set."""
+    async def _ensure_openai_ready(self, target: Any, context: Any | None = None) -> bool:
+        """Ensure OpenAI dependency and API key are set.
+
+        For command flows (Update + Context), prefer `_send_message_or_edit` so the
+        behavior is consistent (and unit-testable). For callback flows, fall back
+        to editing the message directly.
+        """
+        msg: str | None = None
         if not OPENAI_AVAILABLE:
             msg = "❌ OpenAI Not Available (dependency not installed).\n\nInstall with: pip install -e '.[llm]'"
-        elif not os.environ.get("OPENAI_API_KEY"):
-            msg = "❌ OPENAI_API_KEY is not set."
         else:
-            return True
+            # Validate that OpenAIClient can be constructed (covers missing API key).
+            try:
+                OpenAIClient()
+                return True
+            except OpenAIAPIKeyMissingError as e:
+                msg = f"❌ API Key missing: {e}"
+            except OpenAINotAvailableError as e:
+                msg = f"❌ Not Available: {e}\n\nInstall with: pip install -e '.[llm]'"
+            except Exception as e:
+                msg = f"❌ Error: {e}"
+
+        if context is not None:
+            try:
+                await self._send_message_or_edit(target, context, msg)
+                return False
+            except Exception:
+                # Fall back to raw telegram methods below
+                pass
 
         if hasattr(target, "edit_message_text"):
             await target.edit_message_text(msg)
@@ -1981,7 +1990,7 @@ class TelegramCommandHandler:
             "🛰️ Status - System health and connection status\n"
             "🎛️ System Control - Start/stop services and emergency controls\n"
             "⚙️ Settings - Charts + notification preferences\n"
-            "👾 Bots - Start/stop the Pearl Bot service\n\n"
+            "🤖 Bots - PearlBot controls, backtests, reports\n\n"
             "*Quick Tips:*\n"
             "• Use 'Back to Menu' to return to main menu\n"
             "• Status indicators show active positions/trades\n"
@@ -2069,7 +2078,7 @@ class TelegramCommandHandler:
                         text = f"{text}\n\n{details}"
 
                 keyboard = [
-                    [InlineKeyboardButton("👾 Bots", callback_data="menu:bots")],
+                    [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
                     [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -2354,7 +2363,7 @@ class TelegramCommandHandler:
                         text = f"{text}\n\n{details}"
 
                 keyboard = [
-                    [InlineKeyboardButton("👾 Bots", callback_data="menu:bots")],
+                    [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
                     [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -2370,7 +2379,7 @@ class TelegramCommandHandler:
                         text = f"{text}\n\n{details}"
 
                 keyboard = [
-                    [InlineKeyboardButton("👾 Bots", callback_data="menu:bots")],
+                    [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
                     [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -4037,7 +4046,7 @@ class TelegramCommandHandler:
 
     async def _run_ai_patch(self, update: Any, context: Any, *, rel_path: str, task: str) -> None:
         """Shared AI patch runner for command and wizard flows."""
-        if not await self._ensure_openai_ready(update):
+        if not await self._ensure_openai_ready(update, context):
             return
         if self._is_path_blocked(rel_path):
             await self._send_message_or_edit(update, context, f"❌ Blocked path: {rel_path}")
@@ -4081,24 +4090,28 @@ class TelegramCommandHandler:
             return
 
         lines = [
-            "🧪 *PEARL Bot Backtesting*",
+            "🧪 *Backtest (Advanced)*",
             "",
-            "Choose a bot to backtest, then pick a historical period.",
+            "Recommended: backtest 💎 *PearlBot* (all-in-one).",
+            "Variants are individual strategy bots.",
             "",
             "Data source: `data/historical/MNQ_1m_*.parquet` (resampled to 5m).",
         ]
 
         keyboard = [
             [
-                InlineKeyboardButton("📈 Trend Follower", callback_data="pb:bot:trend"),
-                InlineKeyboardButton("⚡ Breakout", callback_data="pb:bot:break"),
-            ],
-            [
-                InlineKeyboardButton("📉 Mean Reversion", callback_data="pb:bot:mean"),
+                InlineKeyboardButton("💎 PearlBot (All-in-One)", callback_data="pb:bot:pearl"),
                 InlineKeyboardButton("🏆 Compare All", callback_data="pb:bot:all"),
             ],
             [
+                InlineKeyboardButton("📈 Trend (variant)", callback_data="pb:bot:trend"),
+                InlineKeyboardButton("⚡ Breakout (variant)", callback_data="pb:bot:break"),
+            ],
+            [
+                InlineKeyboardButton("📉 MeanRev (variant)", callback_data="pb:bot:mean"),
                 InlineKeyboardButton("📑 Reports", callback_data="strategy_review:reports"),
+            ],
+            [
                 InlineKeyboardButton("🏠 Back to Menu", callback_data="back"),
             ],
         ]
@@ -4118,6 +4131,7 @@ class TelegramCommandHandler:
             return
 
         bot_label = {
+            "pearl": "PearlBot (All-in-One)",
             "trend": "Trend Follower",
             "break": "Breakout",
             "mean": "Mean Reversion",
@@ -4231,6 +4245,17 @@ class TelegramCommandHandler:
         from pearlalgo.strategies.pearl_bots import BotConfig, create_bot
 
         bot_map = {
+            "pearl": (
+                "CompositeBot",
+                {
+                    "timeframes": ["5m", "15m"],
+                    "max_candidates": 1,
+                    "require_mtf_alignment": True,
+                    "indicators": {
+                        "enabled": ["power_channel", "tbt_chartprime", "supply_demand_zones", "smart_money_divergence"]
+                    },
+                },
+            ),
             "trend": ("TrendFollowerBot", {"min_trend_strength": 25.0, "max_pullback_pct": 0.02, "momentum_threshold": 0.005}),
             "break": ("BreakoutBot", {"min_pattern_strength": 0.6, "require_volume_confirmation": True, "min_momentum_acceleration": 0.001}),
             "mean": ("MeanReversionBot", {"min_mr_strength": 0.7, "require_divergence": False, "max_hold_bars": 10}),
@@ -4261,7 +4286,12 @@ class TelegramCommandHandler:
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
 
-        bot_label = {"trend": "Trend Follower", "break": "Breakout", "mean": "Mean Reversion"}.get(bot_key, bot_key)
+        bot_label = {
+            "pearl": "PearlBot (All-in-One)",
+            "trend": "Trend Follower",
+            "break": "Breakout",
+            "mean": "Mean Reversion",
+        }.get(bot_key, bot_key)
         await self._send_message_or_edit(update, context, f"⏳ Running backtest…\n\nBot: {bot_label}\nPeriod: {period_key}")
 
         try:
@@ -4287,7 +4317,10 @@ class TelegramCommandHandler:
             run_ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             start = df_1m.index[0].strftime("%Y%m%d")
             end = df_1m.index[-1].strftime("%Y%m%d")
-            report_name = f"pearlbot_{bot_key}_{period_key}_{start}_{end}_{run_ts}"
+            if bot_key == "pearl":
+                report_name = f"pearlbot_{period_key}_{start}_{end}_{run_ts}"
+            else:
+                report_name = f"pearlbot_variant_{bot_key}_{period_key}_{start}_{end}_{run_ts}"
             report_dir = reports_dir / report_name
             report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -4347,7 +4380,11 @@ class TelegramCommandHandler:
             await self._send_message_or_edit(update, context, "❌ Unauthorized access")
             return
 
-        await self._send_message_or_edit(update, context, f"⏳ Running comparison backtest…\n\nBots: Trend/Breakout/MeanRev\nPeriod: {period_key}")
+        await self._send_message_or_edit(
+            update,
+            context,
+            f"⏳ Running comparison backtest…\n\nBots: PearlBot/Trend/Breakout/MeanRev\nPeriod: {period_key}",
+        )
 
         try:
             import pandas as pd  # noqa: F401
@@ -4356,7 +4393,7 @@ class TelegramCommandHandler:
             from pearlalgo.strategies.pearl_bots.backtest_adapter import PearlBotBacktestAdapter
 
             df_1m = self._load_historical_ohlcv(period_key)
-            bots = [("trend", "Trend"), ("break", "Breakout"), ("mean", "MeanRev")]
+            bots = [("pearl", "PearlBot"), ("trend", "Trend"), ("break", "Breakout"), ("mean", "MeanRev")]
 
             results = []
             for key, label in bots:
