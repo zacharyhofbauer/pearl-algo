@@ -249,41 +249,61 @@ def build_hud_context(
             _BOT_CFG = {}
             _calc_atr = None  # type: ignore
 
+        # Load base config/config.yaml (no overlays) for deterministic chart semantics.
+        base_cfg: Dict[str, Any] = {}
+        try:
+            from pearlalgo.config.config_file import load_config_yaml
+
+            repo_root = Path(__file__).resolve().parents[3]
+            base_cfg_path = repo_root / "config" / "config.yaml"
+            base_cfg = load_config_yaml(config_path=base_cfg_path, substitute_env=False, validate=False) or {}
+        except Exception:
+            base_cfg = {}
+
         # ----------------------------
         # Sessions (Tokyo/London/NY)
         # ----------------------------
         sessions: List[Dict[str, Any]] = []
         try:
-            et = work.index.tz_convert(ZoneInfo("America/New_York"))
+            # Session definitions come from the repo's base `config/config.yaml`
+            # (do not consult overlays for deterministic baselines).
+            try:
+                from pearlalgo.config.config_file import load_config_yaml
 
-            # Session definitions in ET (matches baseline expectations)
-            # Tokyo: 19:00 → 02:00 (next day)
-            # London: 03:00 → 08:00
-            # New York: 09:30 → 16:00
-            # IMPORTANT: These colors are part of the committed visual baselines.
-            # They are chosen so that with ALPHA_SESSION_SHADING (0.08) they
-            # produce stable blended RGB values across environments.
-            tokyo_color = "#ef8d00"   # orange
-            london_color = "#275bf4"  # blue
-            ny_color = "#028d77"      # teal
+                repo_root = Path(__file__).resolve().parents[3]
+                base_cfg_path = repo_root / "config" / "config.yaml"
+                cfg = load_config_yaml(config_path=base_cfg_path, substitute_env=False, validate=False) or {}
+                session_defs = cfg.get("sessions") or []
+            except Exception:
+                session_defs = []
 
-            start_date = et.min().date()
-            end_date = et.max().date()
-            days = pd.date_range(start=start_date, end=end_date, freq="D", tz=ZoneInfo("America/New_York"))
+            if not isinstance(session_defs, list) or not session_defs:
+                # Fallback defaults (match config.yaml committed in this repo)
+                session_defs = [
+                    {"name": "Tokyo", "session": "0000-0900", "timezone": "UTC", "color": "#2962FF"},
+                    {"name": "London", "session": "0800-1600", "timezone": "UTC", "color": "#FF9800"},
+                    {"name": "New York", "session": "1400-2100", "timezone": "UTC", "color": "#089981"},
+                ]
+
+            def _parse_hhmm(hhmm: str) -> tuple[int, int]:
+                s = str(hhmm or "").strip()
+                if len(s) != 4 or not s.isdigit():
+                    raise ValueError(f"Invalid HHMM: {hhmm!r}")
+                return int(s[:2]), int(s[2:])
 
             def _session_stats(name: str, start_dt: datetime, end_dt: datetime, color: str) -> Optional[Dict[str, Any]]:
                 # Compute stats using UTC-indexed source data for deterministic ordering.
                 start_utc = start_dt.astimezone(timezone.utc)
                 end_utc = end_dt.astimezone(timezone.utc)
-                w = work.loc[(work.index >= start_utc) & (work.index <= end_utc)]
+                # Session end is treated as exclusive (matches baselines).
+                w = work.loc[(work.index >= start_utc) & (work.index < end_utc)]
                 if w.empty:
                     return None
                 hi = float(w["high"].max())
                 lo = float(w["low"].min())
                 rt = None
                 if tick_size and tick_size > 0 and np.isfinite(hi) and np.isfinite(lo):
-                    # Use floor (not round) for deterministic labels; matches baselines.
-                    rt = int((hi - lo) / float(tick_size))
+                    rt = int(round((hi - lo) / float(tick_size)))
                 return {
                     "name": name,
                     "start": start_utc.isoformat(),
@@ -295,35 +315,48 @@ def build_hud_context(
                     "range_ticks": rt,
                 }
 
-            for d in days:
-                # London / NY are same-day windows
-                london = _session_stats(
-                    "London",
-                    datetime(d.year, d.month, d.day, 3, 0, tzinfo=d.tzinfo),
-                    datetime(d.year, d.month, d.day, 8, 0, tzinfo=d.tzinfo),
-                    london_color,
-                )
-                if london:
-                    sessions.append(london)
+            # Build per-day sessions from config definitions
+            idx_utc = work.index
+            for sdef in session_defs:
+                if not isinstance(sdef, dict):
+                    continue
+                name = str(sdef.get("name") or "").strip()
+                sess = str(sdef.get("session") or "").strip()
+                if not name or "-" not in sess:
+                    continue
+                tz_name = str(sdef.get("timezone") or "UTC").strip() or "UTC"
+                color = str(sdef.get("color") or "#444444").strip() or "#444444"
 
-                ny = _session_stats(
-                    "New York",
-                    datetime(d.year, d.month, d.day, 9, 30, tzinfo=d.tzinfo),
-                    datetime(d.year, d.month, d.day, 16, 0, tzinfo=d.tzinfo),
-                    ny_color,
-                )
-                if ny:
-                    sessions.append(ny)
+                try:
+                    tz = ZoneInfo(tz_name)
+                except Exception:
+                    tz = ZoneInfo("UTC")
 
-                # Tokyo crosses midnight: 19:00 on d → 02:00 on d+1
-                tokyo = _session_stats(
-                    "Tokyo",
-                    datetime(d.year, d.month, d.day, 19, 0, tzinfo=d.tzinfo),
-                    (datetime(d.year, d.month, d.day, 2, 0, tzinfo=d.tzinfo) + timedelta(days=1)),
-                    tokyo_color,
-                )
-                if tokyo:
-                    sessions.append(tokyo)
+                try:
+                    start_s, end_s = sess.split("-", 1)
+                    sh, sm = _parse_hhmm(start_s)
+                    eh, em = _parse_hhmm(end_s)
+                except Exception:
+                    continue
+
+                # Determine local date range spanned by the data
+                try:
+                    idx_local = idx_utc.tz_convert(tz)
+                    start_date = idx_local.min().date()
+                    end_date = idx_local.max().date()
+                except Exception:
+                    start_date = idx_utc.min().date()
+                    end_date = idx_utc.max().date()
+
+                days = pd.date_range(start=start_date, end=end_date, freq="D", tz=tz)
+                for d in days:
+                    start_dt = datetime(d.year, d.month, d.day, sh, sm, tzinfo=tz)
+                    end_dt = datetime(d.year, d.month, d.day, eh, em, tzinfo=tz)
+                    if end_dt <= start_dt:
+                        end_dt = end_dt + timedelta(days=1)
+                    stats = _session_stats(name, start_dt, end_dt, color)
+                    if stats:
+                        sessions.append(stats)
 
             # Keep chronological order by session start time
             sessions.sort(key=lambda s: str(s.get("start") or ""))
@@ -366,65 +399,129 @@ def build_hud_context(
             pass
 
         # ----------------------------
-        # Supply & Demand (LuxAlgo VR) + Volume Profile (POC)
+        # Supply & Demand (LuxAlgo VR)
         # ----------------------------
+        # Baseline contract: dashboard charts include visible-range supply/demand zones,
+        # but do NOT include a POC right-label.
         try:
-            sd_resolution = int(_BOT_CFG.get("sd_resolution", 50) or 50) if isinstance(_BOT_CFG, dict) else int(getattr(_BOT_CFG, "sd_resolution", 50))
-            sd_threshold = float(_BOT_CFG.get("sd_threshold_pct", 10.0) or 10.0) if isinstance(_BOT_CFG, dict) else float(getattr(_BOT_CFG, "sd_threshold_pct", 10.0))
+            sd_resolution = (
+                int(_BOT_CFG.get("sd_resolution", 50) or 50)
+                if isinstance(_BOT_CFG, dict)
+                else int(getattr(_BOT_CFG, "sd_resolution", 50))
+            )
 
-            lookback = work.tail(100) if len(work) > 100 else work
-            hi = float(lookback["high"].max())
-            lo = float(lookback["low"].min())
-            pr = float(hi - lo)
-            if pr > 0 and sd_resolution > 0:
-                bin_size = pr / float(sd_resolution)
+            # Use the full visible window to match "visible range" semantics.
+            lookback = work
+            if sd_resolution > 0 and not lookback.empty:
+                hi = float(lookback["high"].max())
+                lo = float(lookback["low"].min())
+                pr = float(hi - lo)
+                if pr > 0:
+                    bin_size = pr / float(sd_resolution)
 
-                # Build volume-by-price bins (close-price binning; deterministic)
-                bins: Dict[int, float] = {}
-                for _, row in lookback.iterrows():
-                    close = float(row.get("close", 0.0) or 0.0)
-                    vol = float(row.get("volume", 0.0) or 0.0)
-                    if not np.isfinite(close) or not np.isfinite(vol) or vol <= 0:
-                        continue
-                    b = int(((close - lo) / pr) * sd_resolution)
-                    b = max(0, min(sd_resolution - 1, b))
-                    bins[b] = bins.get(b, 0.0) + vol
-
-                if bins:
-                    # POC = max volume bin center
-                    poc_bin = max(bins.items(), key=lambda kv: kv[1])[0]
-                    poc = lo + (poc_bin + 0.5) * bin_size
-                    hud["volume_profile"] = {"poc": float(poc)}
-
-                    # Supply/Demand: highest-volume bins above/below last close
-                    last_close = float(lookback["close"].iloc[-1])
-                    total_vol = sum(bins.values())
-                    threshold_vol = total_vol * (sd_threshold / 100.0)
-                    supply_bin = None
-                    demand_bin = None
-                    for b, v in sorted(bins.items(), key=lambda kv: kv[1], reverse=True):
-                        if v < threshold_vol:
+                    # Accumulate per-bin volume + avg/wavg for label lines.
+                    bins: Dict[int, Dict[str, float]] = {}
+                    for _, row in lookback.iterrows():
+                        close = float(row.get("close", 0.0) or 0.0)
+                        vol = float(row.get("volume", 0.0) or 0.0)
+                        if not np.isfinite(close) or not np.isfinite(vol) or vol <= 0:
                             continue
-                        price = lo + b * bin_size
-                        if supply_bin is None and price > last_close:
-                            supply_bin = b
-                        elif demand_bin is None and price < last_close:
-                            demand_bin = b
-                        if supply_bin is not None and demand_bin is not None:
-                            break
+                        b = int(((close - lo) / pr) * sd_resolution)
+                        b = max(0, min(sd_resolution - 1, b))
+                        rec = bins.get(b) or {"vol": 0.0, "w_sum": 0.0, "p_sum": 0.0, "n": 0.0}
+                        rec["vol"] += vol
+                        rec["w_sum"] += close * vol
+                        rec["p_sum"] += close
+                        rec["n"] += 1.0
+                        bins[b] = rec
 
-                    def _zone(bin_idx: Optional[int]) -> Optional[Dict[str, float]]:
-                        if bin_idx is None:
-                            return None
-                        bottom = lo + bin_idx * bin_size
-                        top = bottom + bin_size
-                        mid = (top + bottom) / 2.0
-                        return {"top": float(top), "bottom": float(bottom), "avg": float(mid), "wavg": float(mid)}
+                    if bins:
+                        last_close = float(lookback["close"].iloc[-1])
 
-                    supply = _zone(supply_bin)
-                    demand = _zone(demand_bin)
-                    if supply or demand:
-                        hud["supply_demand_vr"] = {"supply": supply or {}, "demand": demand or {}}
+                        # Select zones from the visible-range volume profile.
+                        # Bias towards the extremes of the visible range (matches baselines).
+                        sd_cfg = (
+                            ((base_cfg.get("indicators") or {}).get("supply_demand_zones") or {})
+                            if isinstance(base_cfg, dict)
+                            else {}
+                        )
+                        zone_thr = float(sd_cfg.get("zone_threshold_pct", 0.3) or 0.3)
+                        if zone_thr > 1.0:
+                            zone_thr = zone_thr / 100.0
+                        zone_thr = max(0.0, min(0.5, zone_thr))
+                        bottom_limit = lo + zone_thr * pr
+                        top_limit = hi - zone_thr * pr
+
+                        # Expand zones to a minimum size in ATR terms (config-driven).
+                        zone_min_width = 0.0
+                        try:
+                            min_zone_atr = float(sd_cfg.get("min_zone_size_atr", 0.5) or 0.5)
+                        except Exception:
+                            min_zone_atr = 0.0
+                        if _calc_atr is not None and min_zone_atr > 0:
+                            try:
+                                atr_val = float(_calc_atr(lookback, period=14).iloc[-1])
+                            except Exception:
+                                atr_val = 0.0
+                            if np.isfinite(atr_val) and atr_val > 0:
+                                zone_min_width = float(min_zone_atr) * atr_val
+
+                        supply_bin: Optional[int] = None
+                        demand_bin: Optional[int] = None
+                        for b, rec in sorted(bins.items(), key=lambda kv: float(kv[1].get("vol", 0.0)), reverse=True):
+                            center = lo + (b + 0.5) * bin_size
+                            if demand_bin is None and center <= bottom_limit:
+                                demand_bin = b
+                            if supply_bin is None and center >= top_limit:
+                                supply_bin = b
+                            if supply_bin is not None and demand_bin is not None:
+                                break
+
+                        # Fallback to above/below last close if thresholds were too strict.
+                        if supply_bin is None or demand_bin is None:
+                            for b, rec in sorted(bins.items(), key=lambda kv: float(kv[1].get("vol", 0.0)), reverse=True):
+                                center = lo + (b + 0.5) * bin_size
+                                if supply_bin is None and center > last_close:
+                                    supply_bin = b
+                                if demand_bin is None and center < last_close:
+                                    demand_bin = b
+                                if supply_bin is not None and demand_bin is not None:
+                                    break
+
+                        def _zone(bin_idx: Optional[int]) -> Optional[Dict[str, float]]:
+                            if bin_idx is None:
+                                return None
+                            rec = bins.get(bin_idx) or {}
+                            bottom = lo + bin_idx * bin_size
+                            top = bottom + bin_size
+                            vol = float(rec.get("vol", 0.0) or 0.0)
+                            n = float(rec.get("n", 0.0) or 0.0)
+                            avg = float(rec.get("p_sum", 0.0) or 0.0) / n if n > 0 else (top + bottom) / 2.0
+                            wavg = float(rec.get("w_sum", 0.0) or 0.0) / vol if vol > 0 else avg
+                            if zone_min_width and zone_min_width > (top - bottom):
+                                # Expand around the bin center for stable zone geometry.
+                                center = lo + (bin_idx + 0.5) * bin_size
+                                half = zone_min_width / 2.0
+                                bottom = center - half
+                                top = center + half
+                            return {
+                                "top": float(top),
+                                "bottom": float(bottom),
+                                "avg": float(avg),
+                                "wavg": float(wavg),
+                            }
+
+                        supply = _zone(supply_bin)
+                        demand = _zone(demand_bin)
+                        # Match baseline visuals: zones extend to range extremes.
+                        # Demand fills from visible low → demand boundary; supply fills from
+                        # supply boundary → visible high.
+                        if isinstance(demand, dict) and demand:
+                            demand["bottom"] = float(lo)
+                        if isinstance(supply, dict) and supply:
+                            supply["top"] = float(hi)
+                        if supply or demand:
+                            hud["supply_demand_vr"] = {"supply": supply or {}, "demand": demand or {}}
         except Exception:
             pass
 
@@ -1616,7 +1713,8 @@ class ChartGenerator:
                     continue
 
                 start_x = self._ts_to_x(idx, start, side="left")
-                end_x = self._ts_to_x(idx, end, side="right")
+                # Treat session end as exclusive (aligns with baseline shading geometry).
+                end_x = self._ts_to_x(idx, end, side="left")
                 if start_x is None or end_x is None or end_x <= start_x:
                     continue
 
