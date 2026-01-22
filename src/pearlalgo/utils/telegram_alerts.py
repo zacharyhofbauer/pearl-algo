@@ -484,6 +484,21 @@ def safe_label(text: str) -> str:
     return str(text).replace("_", " ")
 
 
+def format_bot_name(bot_id: str) -> str:
+    """
+    Format a bot ID into a display name.
+    
+    Examples:
+        "pearl_bot_auto" -> "Pearl Bot Auto"
+        "scanner" -> "Scanner"
+        "my_custom_bot" -> "My Custom Bot"
+    """
+    if not bot_id:
+        return "Scanner"
+    # Replace underscores with spaces and title case
+    return str(bot_id).replace("_", " ").title()
+
+
 def escape_subprocess_output(text: str) -> str:
     """
     Escape subprocess/shell output for safe inclusion in Telegram Markdown messages.
@@ -1700,7 +1715,7 @@ def format_glanceable_card(
     """
     lines = []
     market_display = market or "NQ"
-    bot_name = trading_bot or "scanner"
+    bot_display = format_bot_name(trading_bot or "scanner")
     
     # Header: Symbol + Time
     lines.append(f"*{symbol}* • {time_str}")
@@ -1708,7 +1723,7 @@ def format_glanceable_card(
     # Status line: Bot + Services
     agent_dot = EMOJI_OK if agent_running else EMOJI_ERROR
     gw_dot = EMOJI_OK if gateway_running else EMOJI_ERROR
-    lines.append(f"{EMOJI_BOTS} {safe_label(bot_name)} | Agent {agent_dot} | Gateway {gw_dot}")
+    lines.append(f"{EMOJI_BOTS} {bot_display} | Agent {agent_dot} | Gateway {gw_dot}")
     
     # Gates line
     futures_dot = EMOJI_OK if futures_market_open else EMOJI_ERROR if futures_market_open is False else EMOJI_UNKNOWN

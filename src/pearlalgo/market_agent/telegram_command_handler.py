@@ -310,13 +310,24 @@ class TelegramCommandHandler:
         else:
             activity_label = "📊 Activity"
         
-        # System: agent + gateway status
+        # System: agent + gateway status (more accurate detection)
+        # Only show green when BOTH are actually running and functional
+        # Yellow indicates partial functionality (one running but not both)
+        # Red means neither is running or functional
         if agent_running and gateway_running:
             system_label = "🎛️ System 🟢"
-        elif agent_running or gateway_running:
+        elif gateway_running and not agent_running:
+            # Gateway running but agent not - partial functionality
+            system_label = "🎛️ System 🟡"
+        elif agent_running and not gateway_running:
+            # Agent running but gateway not - partial functionality (agent can't trade)
             system_label = "🎛️ System 🟡"
         else:
+            # Neither running - no functionality
             system_label = "🎛️ System 🔴"
+        
+        # Log status changes for debugging
+        logger.debug(f"System status: agent={agent_running}, gateway={gateway_running}, label={system_label}")
         
         # Health: connection status
         if connection_ok:
@@ -575,7 +586,12 @@ class TelegramCommandHandler:
         if not query:
             return
 
-        await query.answer()  # Acknowledge the callback
+        # Acknowledge the callback immediately to provide user feedback
+        try:
+            await query.answer()  # Acknowledge the callback
+        except Exception as e:
+            logger.warning(f"Failed to answer callback: {e}")
+        
         if not await self._check_authorized(update):
             try:
                 await query.edit_message_text("❌ Unauthorized access")
@@ -585,13 +601,31 @@ class TelegramCommandHandler:
         
         # Resolve legacy callbacks to canonical form (backward compatibility)
         raw_callback = query.data
+        if not raw_callback:
+            logger.error("Received empty callback data")
+            try:
+                await query.answer("❌ Invalid button action", show_alert=True)
+            except Exception:
+                pass
+            return
+            
         callback_data = resolve_callback(raw_callback)
         if callback_data != raw_callback:
             logger.debug(f"Resolved legacy callback: {raw_callback} -> {callback_data}")
         logger.info(f"Received callback: {callback_data}")
 
         # Parse and route callback using canonical format
-        callback_type, action, param = parse_callback(callback_data)
+        try:
+            callback_type, action, param = parse_callback(callback_data)
+        except Exception as e:
+            logger.error(f"Failed to parse callback '{callback_data}': {e}", exc_info=True)
+            try:
+                await query.answer("❌ Error parsing button action", show_alert=True)
+            except Exception:
+                pass
+            return
+        
+        logger.debug(f"Parsed callback: type={callback_type}, action={action}, param={param}")
         
         # IMPORTANT: If current message is a photo (chart dashboard), we need to
         # convert to text message before showing submenus. Delete photo and track
@@ -633,6 +667,7 @@ class TelegramCommandHandler:
                 await self._handle_action(query, callback_data)
             else:
                 # Unrecognized format - try legacy action handling
+                logger.warning(f"Unrecognized callback type '{callback_type}', trying legacy handling")
                 await self._handle_action(query, callback_data)
         except Exception as e:
             # Handle "no text in message" error by sending new message
@@ -645,11 +680,18 @@ class TelegramCommandHandler:
                         f"⚠️ Navigation error. Tap Back to return to menu.",
                         reply_markup=InlineKeyboardMarkup(keyboard)
                     )
-                except Exception:
-                    pass
+                except Exception as send_err:
+                    logger.error(f"Failed to send error message: {send_err}")
             else:
-                logger.error(f"Callback error: {e}", exc_info=True)
-                raise
+                logger.error(f"Callback error for '{callback_data}': {e}", exc_info=True)
+                # Try to show user-friendly error message
+                try:
+                    keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                    error_msg = f"❌ Error: {str(e)[:100]}"
+                    await self._safe_edit_or_send(query, error_msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                except Exception:
+                    # If we can't even send error message, at least log it
+                    logger.error(f"Failed to send error message to user: {e}")
 
     async def _safe_edit_or_send(
         self,
@@ -705,26 +747,37 @@ class TelegramCommandHandler:
 
     async def _handle_menu_action(self, query: CallbackQuery, action: str) -> None:
         """Handle menu button actions."""
-        if action == "status":
-            await self._show_status_menu(query)
-        elif action == "signals":
-            await self._show_activity_menu(query)  # Redirect to unified Activity
-        elif action == "performance":
-            await self._show_activity_menu(query)  # Redirect to unified Activity
-        elif action == "activity":
-            await self._show_activity_menu(query)
-        elif action == "bots":
-            await self._show_bots_menu(query)
-        elif action == "markets":
-            await self._show_markets_menu(query)
-        elif action == "system":
-            await self._show_system_menu(query)
-        elif action == "settings":
-            await self._show_settings_menu(query)
-        elif action == "help":
-            await self._show_help(query)
-        else:
-            await self._safe_edit_or_send(query, f"Unknown action: {action}")
+        logger.info(f"Handling menu action: {action}")
+        try:
+            if action == "status":
+                await self._show_status_menu(query)
+            elif action == "signals":
+                await self._show_activity_menu(query)  # Redirect to unified Activity
+            elif action == "performance":
+                await self._show_activity_menu(query)  # Redirect to unified Activity
+            elif action == "activity":
+                await self._show_activity_menu(query)
+            elif action == "bots":
+                await self._show_bots_menu(query)
+            elif action == "markets":
+                await self._show_markets_menu(query)
+            elif action == "system":
+                await self._show_system_menu(query)
+            elif action == "settings":
+                await self._show_settings_menu(query)
+            elif action == "help":
+                await self._show_help(query)
+            else:
+                logger.warning(f"Unknown menu action: {action}")
+                await self._safe_edit_or_send(query, f"❌ Unknown menu action: {action}\n\nPlease use the menu buttons to navigate.")
+        except Exception as e:
+            logger.error(f"Error handling menu action '{action}': {e}", exc_info=True)
+            try:
+                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                error_msg = f"❌ Error opening {action} menu: {str(e)[:100]}"
+                await self._safe_edit_or_send(query, error_msg, reply_markup=InlineKeyboardMarkup(keyboard))
+            except Exception as send_err:
+                logger.error(f"Failed to send error message: {send_err}")
 
     async def _show_main_menu(self, query: CallbackQuery) -> None:
         """Show visual dashboard with 12h chart - the primary menu view."""
@@ -2314,8 +2367,13 @@ class TelegramCommandHandler:
 
     async def _handle_action(self, query: CallbackQuery, action: str) -> None:
         """Handle action button presses."""
-        if action.startswith("action:"):
-            action_type = action[7:]  # Remove "action:" prefix
+        logger.info(f"Handling action: {action}")
+        try:
+            if action.startswith("action:"):
+                action_type = action[7:]  # Remove "action:" prefix
+            else:
+                # Legacy format or already extracted
+                action_type = action
 
             if action_type.startswith("set_market:"):
                 market = action_type.split(":", 1)[1]
@@ -2681,264 +2739,286 @@ class TelegramCommandHandler:
                 # Toggle chart display
                 await self._toggle_chart_display(query)
             else:
+                logger.warning(f"Unhandled action type: {action_type}")
                 keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text(f"Action not yet implemented: {action_type}", reply_markup=InlineKeyboardMarkup(keyboard))
-        elif action == "activity":
-            # Handle activity callback - show signals menu or activity info
-            await self._show_signals_menu(query)
-        elif action == "status":
-            # Handle status callback - show status menu
-            await self._show_status_menu(query)
-        elif action.startswith("toggle_strategy:"):
-            strategy_name = action[16:]  # Remove "toggle_strategy:" prefix
-            await self._toggle_strategy(query, strategy_name)
-        elif action.startswith("confirm:"):
-            confirm_action = action[8:]  # Remove "confirm:" prefix
-            keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
+                await self._safe_edit_or_send(query, f"❌ Action not yet implemented: {action_type}", reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception as e:
+            logger.error(f"Error in _handle_action for '{action}': {e}", exc_info=True)
+            try:
+                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                error_msg = f"❌ Error executing action: {str(e)[:100]}"
+                await self._safe_edit_or_send(query, error_msg, reply_markup=InlineKeyboardMarkup(keyboard))
+            except Exception as send_err:
+                logger.error(f"Failed to send error message: {send_err}")
+            return
+        
+        # Legacy action handling (outside the action: prefix block)
+        try:
+            if action == "activity":
+                # Handle activity callback - show signals menu or activity info
+                await self._show_signals_menu(query)
+            elif action == "status":
+                # Handle status callback - show status menu
+                await self._show_status_menu(query)
+            elif action.startswith("toggle_strategy:"):
+                strategy_name = action[16:]  # Remove "toggle_strategy:" prefix
+                await self._toggle_strategy(query, strategy_name)
+            elif action.startswith("confirm:"):
+                confirm_action = action[8:]  # Remove "confirm:" prefix
+                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
 
-            if confirm_action == "restart_agent":
-                sc = getattr(self, "service_controller", None)
-                if sc is None:
-                    text = "❌ Service controller not available."
-                else:
-                    result = await sc.restart_agent(background=True, market=self.active_market)
-                    text = result.get("message", "Restarted agent.")
-                    details = result.get("details")
-                    if details:
-                        text = f"{text}\n\n{details}"
-
-                keyboard = [
-                    [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-                ]
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-            elif confirm_action == "stop_agent":
-                sc = getattr(self, "service_controller", None)
-                if sc is None:
-                    text = "❌ Service controller not available."
-                else:
-                    result = await sc.stop_agent(market=self.active_market)
-                    text = result.get("message", "Stopped agent.")
-                    details = result.get("details")
-                    if details:
-                        text = f"{text}\n\n{details}"
-
-                keyboard = [
-                    [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-                ]
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-            elif confirm_action == "start_gateway":
-                sc = getattr(self, "service_controller", None)
-                if sc is None:
-                    text = "❌ Service controller not available."
-                else:
-                    await query.edit_message_text("🟢 Starting IBKR Gateway...\n\n⏱️ This may take 30-60 seconds...", parse_mode="Markdown")
-                    result = await sc.start_gateway()
-                    text = result.get("message", "Started gateway.")
-                    details = result.get("details")
-                    if details:
-                        text = f"{text}\n\n{details}"
-
-                keyboard = [
-                    [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-                ]
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-            elif confirm_action == "stop_gateway":
-                sc = getattr(self, "service_controller", None)
-                if sc is None:
-                    text = "❌ Service controller not available."
-                else:
-                    await query.edit_message_text("🔴 Stopping IBKR Gateway...", parse_mode="Markdown")
-                    result = await sc.stop_gateway()
-                    text = result.get("message", "Stopped gateway.")
-                    details = result.get("details")
-                    if details:
-                        text = f"{text}\n\n{details}"
-
-                keyboard = [
-                    [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-                ]
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-            elif confirm_action == "restart_gateway":
-                sc = getattr(self, "service_controller", None)
-                if sc is None:
-                    text = "❌ Service controller not available."
-                else:
-                    await query.edit_message_text("🔄 Restarting IBKR Gateway...\n\n⏱️ This may take 60+ seconds...", parse_mode="Markdown")
-                    result = await sc.restart_gateway()
-                    text = result.get("message", "Restarted gateway.")
-                    details = result.get("details")
-                    if details:
-                        text = f"{text}\n\n{details}"
-
-                keyboard = [
-                    [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-                ]
-                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-            elif confirm_action == "reset_challenge":
-                try:
-                    from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
-                    challenge_tracker = ChallengeTracker(state_dir=self.state_dir)
-                    new_attempt = challenge_tracker.manual_reset(reason="telegram_reset")
-                    
-                    keyboard = [
-                        [InlineKeyboardButton("🔄 Refresh Health", callback_data="menu:status")],
-                        [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-                    ]
-                    await query.edit_message_text(
-                        f"✅ Challenge Reset Complete\n\n"
-                        f"New attempt started: #{new_attempt.attempt_id}\n\n"
-                        f"Starting Balance: ${new_attempt.starting_balance:,.2f}\n"
-                        f"Profit Target: +$3,000\n"
-                        f"Max Drawdown: -$2,000\n\n"
-                        f"Previous attempt saved to history.",
-                        reply_markup=InlineKeyboardMarkup(keyboard)
-                    )
-                    logger.info(f"Challenge reset via Telegram: new attempt #{new_attempt.attempt_id}")
-                except Exception as e:
-                    logger.error(f"Error resetting challenge: {e}", exc_info=True)
-                    await query.edit_message_text(
-                        f"❌ Error resetting challenge: {e}\n\nPlease check logs.",
-                        reply_markup=reply_markup
-                    )
-            elif confirm_action == "emergency_stop":
-                # Emergency stop: close all positions and stop agent
-                try:
+                if confirm_action == "restart_agent":
                     sc = getattr(self, "service_controller", None)
-                    messages = ["🚨 *EMERGENCY STOP EXECUTED*\n"]
-                    
-                    # First, try to close all positions via state file signal
-                    state_file = get_state_file(self.state_dir)
-                    if state_file.exists():
-                        try:
-                            state = json.loads(state_file.read_text(encoding="utf-8"))
-                            state["emergency_stop"] = True
-                            state["emergency_stop_time"] = datetime.now(timezone.utc).isoformat()
-                            state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
-                            messages.append("✅ Emergency stop signal written to state")
-                        except Exception as e:
-                            messages.append(f"⚠️ Could not write emergency state: {e}")
-                    
-                    # Stop the agent
-                    if sc is not None:
-                        result = await sc.stop_agent(market=self.active_market)
-                        messages.append(f"✅ Agent stopped: {result.get('message', 'OK')}")
+                    if sc is None:
+                        text = "❌ Service controller not available."
                     else:
-                        messages.append("⚠️ Service controller not available")
-                    
+                        result = await sc.restart_agent(background=True, market=self.active_market)
+                        text = result.get("message", "Restarted agent.")
+                        details = result.get("details")
+                        if details:
+                            text = f"{text}\n\n{details}"
+
                     keyboard = [
-                        [InlineKeyboardButton("🤖 Check Bots", callback_data="menu:bots")],
-                        [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-                    ]
-                    await query.edit_message_text(
-                        "\n".join(messages),
-                        reply_markup=InlineKeyboardMarkup(keyboard),
-                        parse_mode="Markdown"
-                    )
-                    logger.warning("EMERGENCY STOP executed via Telegram")
-                except Exception as e:
-                    logger.error(f"Emergency stop error: {e}", exc_info=True)
-                    await query.edit_message_text(
-                        f"❌ Emergency stop error: {e}",
-                        reply_markup=reply_markup
-                    )
-            elif confirm_action == "close_all_trades":
-                try:
-                    # Signal to close all trades via state file
-                    state_file = get_state_file(self.state_dir)
-                    if state_file.exists():
-                        state = json.loads(state_file.read_text(encoding="utf-8"))
-                        state["close_all_requested"] = True
-                        state["close_all_requested_time"] = datetime.now(timezone.utc).isoformat()
-                        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
-                        
-                        keyboard = [
-                            [InlineKeyboardButton("🛡 Check Health", callback_data="menu:status")],
-                            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
-                        ]
-                        await query.edit_message_text(
-                            "✅ Close All Trades Request Sent\n\n"
-                            "The agent will close all positions at next opportunity.\n"
-                            "Check status to confirm positions are closed.",
-                            reply_markup=InlineKeyboardMarkup(keyboard)
-                        )
-                        logger.info("Close all trades requested via Telegram")
-                    else:
-                        await query.edit_message_text(
-                            "❌ State file not found.\n\nIs the agent running?",
-                            reply_markup=reply_markup
-                        )
-                except Exception as e:
-                    logger.error(f"Close all trades error: {e}", exc_info=True)
-                    await query.edit_message_text(f"❌ Error: {e}", reply_markup=reply_markup)
-            elif confirm_action == "clear_cache":
-                try:
-                    cleared = []
-                    # Clear common cache locations
-                    cache_paths = [
-                        self.state_dir / "cache",
-                        self.state_dir / "temp",
-                        self.state_dir / ".cache",
-                    ]
-                    for cache_path in cache_paths:
-                        if cache_path.exists() and cache_path.is_dir():
-                            shutil.rmtree(cache_path)
-                            cache_path.mkdir(exist_ok=True)
-                            cleared.append(str(cache_path.name))
-                    
-                    if cleared:
-                        text = f"✅ Cache Cleared\n\nCleared: {', '.join(cleared)}"
-                    else:
-                        text = "✅ Cache Clear Complete\n\nNo cache directories found."
-                    
-                    keyboard = [
+                        [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
                         [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                     ]
                     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-                    logger.info(f"Cache cleared via Telegram: {cleared}")
-                except Exception as e:
-                    logger.error(f"Clear cache error: {e}", exc_info=True)
-                    await query.edit_message_text(f"❌ Error clearing cache: {e}", reply_markup=reply_markup)
-            elif confirm_action == "reset_performance":
-                try:
-                    # Reset performance counters in state
-                    state_file = get_state_file(self.state_dir)
-                    if state_file.exists():
-                        state = json.loads(state_file.read_text(encoding="utf-8"))
-                        # Reset performance-related fields
-                        state["daily_pnl"] = 0.0
-                        state["daily_trades"] = 0
-                        state["daily_wins"] = 0
-                        state["daily_losses"] = 0
-                        state["performance_reset_time"] = datetime.now(timezone.utc).isoformat()
-                        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                elif confirm_action == "stop_agent":
+                    sc = getattr(self, "service_controller", None)
+                    if sc is None:
+                        text = "❌ Service controller not available."
+                    else:
+                        result = await sc.stop_agent(market=self.active_market)
+                        text = result.get("message", "Stopped agent.")
+                        details = result.get("details")
+                        if details:
+                            text = f"{text}\n\n{details}"
+
+                    keyboard = [
+                        [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
+                        [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    ]
+                    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+                elif confirm_action == "start_gateway":
+                    sc = getattr(self, "service_controller", None)
+                    if sc is None:
+                        text = "❌ Service controller not available."
+                    else:
+                        await query.edit_message_text("🟢 Starting IBKR Gateway...\n\n⏱️ This may take 30-60 seconds...", parse_mode="Markdown")
+                        result = await sc.start_gateway()
+                        text = result.get("message", "Started gateway.")
+                        details = result.get("details")
+                        if details:
+                            text = f"{text}\n\n{details}"
+
+                    keyboard = [
+                        [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
+                        [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    ]
+                    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+                elif confirm_action == "stop_gateway":
+                    sc = getattr(self, "service_controller", None)
+                    if sc is None:
+                        text = "❌ Service controller not available."
+                    else:
+                        await query.edit_message_text("🔴 Stopping IBKR Gateway...", parse_mode="Markdown")
+                        result = await sc.stop_gateway()
+                        text = result.get("message", "Stopped gateway.")
+                        details = result.get("details")
+                        if details:
+                            text = f"{text}\n\n{details}"
+
+                    keyboard = [
+                        [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
+                        [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    ]
+                    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+                elif confirm_action == "restart_gateway":
+                    sc = getattr(self, "service_controller", None)
+                    if sc is None:
+                        text = "❌ Service controller not available."
+                    else:
+                        await query.edit_message_text("🔄 Restarting IBKR Gateway...\n\n⏱️ This may take 60+ seconds...", parse_mode="Markdown")
+                        result = await sc.restart_gateway()
+                        text = result.get("message", "Restarted gateway.")
+                        details = result.get("details")
+                        if details:
+                            text = f"{text}\n\n{details}"
+
+                    keyboard = [
+                        [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
+                        [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    ]
+                    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+                elif confirm_action == "reset_challenge":
+                    try:
+                        from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
+                        challenge_tracker = ChallengeTracker(state_dir=self.state_dir)
+                        new_attempt = challenge_tracker.manual_reset(reason="telegram_reset")
                         
                         keyboard = [
-                            [InlineKeyboardButton("💎 Performance", callback_data="menu:performance")],
+                            [InlineKeyboardButton("🔄 Refresh Health", callback_data="menu:status")],
                             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                         ]
                         await query.edit_message_text(
-                            "✅ Performance Stats Reset\n\n"
-                            "Daily counters have been reset.\n"
-                            "Trade history is preserved.",
+                            f"✅ Challenge Reset Complete\n\n"
+                            f"New attempt started: #{new_attempt.attempt_id}\n\n"
+                            f"Starting Balance: ${new_attempt.starting_balance:,.2f}\n"
+                            f"Profit Target: +$3,000\n"
+                            f"Max Drawdown: -$2,000\n\n"
+                            f"Previous attempt saved to history.",
                             reply_markup=InlineKeyboardMarkup(keyboard)
                         )
-                        logger.info("Performance stats reset via Telegram")
-                    else:
+                        logger.info(f"Challenge reset via Telegram: new attempt #{new_attempt.attempt_id}")
+                    except Exception as e:
+                        logger.error(f"Error resetting challenge: {e}", exc_info=True)
                         await query.edit_message_text(
-                            "❌ State file not found.",
+                            f"❌ Error resetting challenge: {e}\n\nPlease check logs.",
                             reply_markup=reply_markup
                         )
-                except Exception as e:
-                    logger.error(f"Reset performance error: {e}", exc_info=True)
-                    await query.edit_message_text(f"❌ Error: {e}", reply_markup=reply_markup)
-            else:
-                await query.edit_message_text(f"Unknown confirmation action: {confirm_action}", reply_markup=reply_markup)
+                elif confirm_action == "emergency_stop":
+                    # Emergency stop: close all positions and stop agent
+                    try:
+                        sc = getattr(self, "service_controller", None)
+                        messages = ["🚨 *EMERGENCY STOP EXECUTED*\n"]
+                        
+                        # First, try to close all positions via state file signal
+                        state_file = get_state_file(self.state_dir)
+                        if state_file.exists():
+                            try:
+                                state = json.loads(state_file.read_text(encoding="utf-8"))
+                                state["emergency_stop"] = True
+                                state["emergency_stop_time"] = datetime.now(timezone.utc).isoformat()
+                                state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                                messages.append("✅ Emergency stop signal written to state")
+                            except Exception as e:
+                                messages.append(f"⚠️ Could not write emergency state: {e}")
+                        
+                        # Stop the agent
+                        if sc is not None:
+                            result = await sc.stop_agent(market=self.active_market)
+                            messages.append(f"✅ Agent stopped: {result.get('message', 'OK')}")
+                        else:
+                            messages.append("⚠️ Service controller not available")
+                        
+                        keyboard = [
+                            [InlineKeyboardButton("🤖 Check Bots", callback_data="menu:bots")],
+                            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                        ]
+                        await query.edit_message_text(
+                            "\n".join(messages),
+                            reply_markup=InlineKeyboardMarkup(keyboard),
+                            parse_mode="Markdown"
+                        )
+                        logger.warning("EMERGENCY STOP executed via Telegram")
+                    except Exception as e:
+                        logger.error(f"Emergency stop error: {e}", exc_info=True)
+                        await query.edit_message_text(
+                            f"❌ Emergency stop error: {e}",
+                            reply_markup=reply_markup
+                        )
+                elif confirm_action == "close_all_trades":
+                    try:
+                        # Signal to close all trades via state file
+                        state_file = get_state_file(self.state_dir)
+                        if state_file.exists():
+                            state = json.loads(state_file.read_text(encoding="utf-8"))
+                            state["close_all_requested"] = True
+                            state["close_all_requested_time"] = datetime.now(timezone.utc).isoformat()
+                            state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                            
+                            keyboard = [
+                                [InlineKeyboardButton("🛡 Check Health", callback_data="menu:status")],
+                                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                            ]
+                            await query.edit_message_text(
+                                "✅ Close All Trades Request Sent\n\n"
+                                "The agent will close all positions at next opportunity.\n"
+                                "Check status to confirm positions are closed.",
+                                reply_markup=InlineKeyboardMarkup(keyboard)
+                            )
+                            logger.info("Close all trades requested via Telegram")
+                        else:
+                            await query.edit_message_text(
+                                "❌ State file not found.\n\nIs the agent running?",
+                                reply_markup=reply_markup
+                            )
+                    except Exception as e:
+                        logger.error(f"Close all trades error: {e}", exc_info=True)
+                        await query.edit_message_text(f"❌ Error: {e}", reply_markup=reply_markup)
+                elif confirm_action == "clear_cache":
+                    try:
+                        cleared = []
+                        # Clear common cache locations
+                        cache_paths = [
+                            self.state_dir / "cache",
+                            self.state_dir / "temp",
+                            self.state_dir / ".cache",
+                        ]
+                        for cache_path in cache_paths:
+                            if cache_path.exists() and cache_path.is_dir():
+                                shutil.rmtree(cache_path)
+                                cache_path.mkdir(exist_ok=True)
+                                cleared.append(str(cache_path.name))
+                        
+                        if cleared:
+                            text = f"✅ Cache Cleared\n\nCleared: {', '.join(cleared)}"
+                        else:
+                            text = "✅ Cache Clear Complete\n\nNo cache directories found."
+                        
+                        keyboard = [
+                            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                        ]
+                        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+                        logger.info(f"Cache cleared via Telegram: {cleared}")
+                    except Exception as e:
+                        logger.error(f"Clear cache error: {e}", exc_info=True)
+                        await query.edit_message_text(f"❌ Error clearing cache: {e}", reply_markup=reply_markup)
+                elif confirm_action == "reset_performance":
+                    try:
+                        # Reset performance counters in state
+                        state_file = get_state_file(self.state_dir)
+                        if state_file.exists():
+                            state = json.loads(state_file.read_text(encoding="utf-8"))
+                            # Reset performance-related fields
+                            state["daily_pnl"] = 0.0
+                            state["daily_trades"] = 0
+                            state["daily_wins"] = 0
+                            state["daily_losses"] = 0
+                            state["performance_reset_time"] = datetime.now(timezone.utc).isoformat()
+                            state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+                            
+                            keyboard = [
+                                [InlineKeyboardButton("💎 Performance", callback_data="menu:performance")],
+                                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                            ]
+                            await query.edit_message_text(
+                                "✅ Performance Stats Reset\n\n"
+                                "Daily counters have been reset.\n"
+                                "Trade history is preserved.",
+                                reply_markup=InlineKeyboardMarkup(keyboard)
+                            )
+                            logger.info("Performance stats reset via Telegram")
+                        else:
+                            await query.edit_message_text(
+                                "❌ State file not found.",
+                                reply_markup=reply_markup
+                            )
+                    except Exception as e:
+                        logger.error(f"Reset performance error: {e}", exc_info=True)
+                        await query.edit_message_text(f"❌ Error: {e}", reply_markup=reply_markup)
+                else:
+                    await query.edit_message_text(f"Unknown confirmation action: {confirm_action}", reply_markup=reply_markup)
+        except Exception as e:
+            # Catch any other errors in legacy action handling
+            logger.error(f"Error in legacy action handling for '{action}': {e}", exc_info=True)
+            try:
+                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                error_msg = f"❌ Error executing action: {str(e)[:100]}"
+                await self._safe_edit_or_send(query, error_msg, reply_markup=InlineKeyboardMarkup(keyboard))
+            except Exception as send_err:
+                logger.error(f"Failed to send error message: {send_err}")
 
     async def _toggle_strategy(self, query: CallbackQuery, strategy_name: str) -> None:
         """Toggle a strategy on/off by updating config.yaml."""
