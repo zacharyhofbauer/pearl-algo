@@ -39,9 +39,7 @@ python3 scripts/telegram/set_bot_commands.py
 
 The command handler intentionally keeps slash commands minimal:
 
-- `/start` (or `/menu`): Show the main menu
-- `/help`: Help text
-- `/settings`: Preferences (charts/notifications UI toggles)
+- `/start`: Show the main dashboard (menu)
 
 Everything else is accessed via the button menus (safer and easier to operate on mobile).
 

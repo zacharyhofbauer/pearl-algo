@@ -2152,7 +2152,7 @@ class MarketAgentTelegramNotifier:
             if strategy_session_open is True:
                 message += "• Scanning for signals when conditions align\n"
                 if handler_running:
-                    message += "• No guaranteed timing—use /menu for live status\n"
+                    message += "• No guaranteed timing—use /start for live status\n"
                 else:
                     message += "• No guaranteed timing—watch for dashboard updates\n"
             elif strategy_session_open is False:
@@ -2162,13 +2162,13 @@ class MarketAgentTelegramNotifier:
                     message += f"• Session: {session_window}\n"
                 message += f"• {next_session}\n"
                 if handler_running:
-                    message += "• Use /menu for live status\n"
+                    message += "• Use /start for live status\n"
             else:
                 message += "• Checking market conditions...\n"
             
             # Add inline text links that match the message style
             if handler_running:
-                message += "\n💡 Quick access: 🏠 /menu • ⚙️ /settings"
+                message += "\n💡 Quick access: /start"
 
             # Startup message does not require inline buttons.
             reply_markup = None

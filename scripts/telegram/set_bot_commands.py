@@ -39,12 +39,10 @@ def set_bot_commands():
     
     bot = Bot(token=bot_token)
     
-    # Menu-based command surface
+    # Minimal command surface: /start is the dashboard/menu.
+    # Everything else is accessed via inline buttons inside Telegram.
     commands = [
-        BotCommand('start', 'Show main control menu'),
-        BotCommand('menu', 'Show main control menu'),
-        BotCommand('help', 'Show help information'),
-        BotCommand('settings', 'Alert preferences (charts, notifications)'),
+        BotCommand("start", "Show main dashboard"),
     ]
     
     try:

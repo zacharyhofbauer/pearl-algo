@@ -305,7 +305,12 @@ def get_key_levels(df: pd.DataFrame) -> Dict[str, Optional[float]]:
 
 
 def check_trading_session(dt: datetime, config: Dict) -> bool:
-    """Check if within trading hours - from Trading Sessions.pine"""
+    """
+    Check if within trading hours - from Trading Sessions.pine.
+    
+    Supports overnight sessions (e.g., 18:00→16:10) where start > end.
+    In that case, the session spans midnight: current >= start OR current <= end.
+    """
     try:
         et_tz = ZoneInfo("America/New_York")
         et_time = dt.astimezone(et_tz) if dt.tzinfo else dt.replace(tzinfo=timezone.utc).astimezone(et_tz)
@@ -314,7 +319,13 @@ def check_trading_session(dt: datetime, config: Dict) -> bool:
         end_time = dt_time(config["end_hour"], config["end_minute"])
         current_time = et_time.time()
         
-        return start_time <= current_time <= end_time
+        # Handle overnight sessions (start > end means session crosses midnight)
+        if start_time > end_time:
+            # Overnight: in session if current >= start OR current <= end
+            return current_time >= start_time or current_time <= end_time
+        else:
+            # Same-day: in session if start <= current <= end
+            return start_time <= current_time <= end_time
     except Exception:
         return True  # Default to allow trading if timezone conversion fails
 
@@ -474,6 +485,11 @@ def generate_signals(
     Main signal generation function - combines all Pine Script strategies.
     
     VIRTUAL BROKER: Only generates signals, no real execution.
+    
+    Indicator-robust design:
+    - Core indicators (EMA, VWAP, Volume) are required for signal generation
+    - Extended indicators (S&R, TBT, Supply/Demand, Key Levels) are conditional
+      contributors that enhance confidence when data is available
     """
     if config is None:
         config = CONFIG
@@ -483,8 +499,16 @@ def generate_signals(
     
     signals = []
     
-    # Validate data
-    if df.empty or len(df) < max(config["ema_slow"], 20, config["sr_length"]):
+    # Minimum bars for core indicators (EMA slow, VWAP window, Volume MA)
+    # Extended indicators (S&R, TBT, etc.) are optional contributors
+    min_core_bars = max(
+        config.get("ema_slow", 21),
+        config.get("volume_ma_length", 20),
+        20  # VWAP window baseline
+    )
+    
+    # Validate data - only require core indicator minimums
+    if df.empty or len(df) < min_core_bars:
         return signals
     
     required_cols = ["open", "high", "low", "close", "volume"]
@@ -496,30 +520,89 @@ def generate_signals(
     if not check_trading_session(current_time, config):
         return signals
     
-    # Calculate indicators
-    atr = calculate_atr(df, period=14).iloc[-1]
+    # Calculate core indicators with NaN guards
+    atr_series = calculate_atr(df, period=14)
+    atr = atr_series.iloc[-1] if not atr_series.empty else None
     close = df["close"].iloc[-1]
     
-    # 1. EMA Crossover signals
+    # Guard: ATR must be valid and positive for SL/TP calculation
+    if atr is None or pd.isna(atr) or atr <= 0:
+        logger.debug("ATR invalid or zero, skipping signal generation")
+        return signals
+    
+    # 1. EMA Crossover signals (core - required)
     bullish_cross, bearish_cross = detect_ema_crossover(df, config)
     
-    # 2. VWAP position
+    # 2. VWAP position (core - required)
     price_above_vwap, price_below_vwap = check_vwap_position(df, config)
     
-    # 3. Volume confirmation
+    # 3. Volume confirmation (core - required)
     volume_confirmed = check_volume_confirmation(df, config)
     
-    # 4. S&R Power Channel
-    sr_signal, sr_confidence = check_sr_signals(df, config)
+    # 4. S&R Power Channel (extended - conditional on data availability)
+    sr_signal, sr_confidence = None, 0.0
+    sr_length = config.get("sr_length", 130)
+    if len(df) >= sr_length:
+        try:
+            sr_signal, sr_confidence = check_sr_signals(df, config)
+        except Exception:
+            pass  # S&R is optional enhancement
     
-    # 5. TBT Trendlines
-    tbt_signal, tbt_confidence = check_tbt_signals(df, config)
+    # 5. TBT Trendlines (extended - conditional on data availability)
+    tbt_signal, tbt_confidence = None, 0.0
+    tbt_period = config.get("tbt_period", 10)
+    if len(df) >= tbt_period * 2:
+        try:
+            tbt_signal, tbt_confidence = check_tbt_signals(df, config)
+        except Exception:
+            pass  # TBT is optional enhancement
     
-    # 6. Supply & Demand
-    sd_signal, sd_confidence = check_supply_demand_signals(df, config)
+    # 6. Supply & Demand (extended - conditional, needs ~100 bars ideally)
+    sd_signal, sd_confidence = None, 0.0
+    if len(df) >= 20:
+        try:
+            sd_signal, sd_confidence = check_supply_demand_signals(df, config)
+        except Exception:
+            pass  # S&D is optional enhancement
     
-    # 7. Key levels
-    key_levels = get_key_levels(df)
+    # 7. Key levels (extended - conditional)
+    key_levels = {}
+    if len(df) >= 5:
+        try:
+            key_levels = get_key_levels(df) or {}
+        except Exception:
+            pass  # Key levels are optional enhancement
+    
+    # 8. VWAP bands (for extension/reversion detection)
+    vwap_band_signal = None
+    vwap_extended = False
+    try:
+        vwap, upper_bands, lower_bands = calculate_vwap_bands(
+            df, 
+            std_dev=config.get("vwap_std_dev", 1.0),
+            bands=config.get("vwap_bands", 2)
+        )
+        vwap_val = vwap.iloc[-1]
+        # Check if price is extended beyond outer band
+        if upper_bands and lower_bands:
+            outer_upper = upper_bands[-1].iloc[-1] if len(upper_bands) > 0 else None
+            outer_lower = lower_bands[-1].iloc[-1] if len(lower_bands) > 0 else None
+            if outer_upper is not None and close > outer_upper:
+                vwap_extended = True
+                vwap_band_signal = "extended_above"
+            elif outer_lower is not None and close < outer_lower:
+                vwap_extended = True
+                vwap_band_signal = "extended_below"
+            # Check for mean reversion opportunity (near inner band)
+            elif len(upper_bands) > 0 and len(lower_bands) > 0:
+                inner_upper = upper_bands[0].iloc[-1]
+                inner_lower = lower_bands[0].iloc[-1]
+                if close > vwap_val and close <= inner_upper:
+                    vwap_band_signal = "near_vwap_above"
+                elif close < vwap_val and close >= inner_lower:
+                    vwap_band_signal = "near_vwap_below"
+    except Exception:
+        pass  # VWAP bands optional - continue without
     
     # Combine signals with confidence scoring
     signal_candidates = []
@@ -536,31 +619,60 @@ def generate_signals(
         if sd_signal and "demand" in sd_signal:
             confidence = max(confidence, sd_confidence)
         
+        # VWAP band adjustments for longs
+        if vwap_band_signal == "extended_above":
+            confidence -= 0.05  # Reduce confidence when overly extended
+        elif vwap_band_signal == "near_vwap_above":
+            confidence += 0.03  # Slight boost for mean reversion setup
+        
+        # Key level adjustments for longs
+        if key_levels:
+            weekly_low = key_levels.get("weekly_low")
+            weekly_mid = key_levels.get("weekly_mid")
+            daily_open = key_levels.get("daily_open")
+            # Boost confidence if entering off support (near weekly low or daily open support)
+            if weekly_low and close > weekly_low and (close - weekly_low) / weekly_low < 0.005:
+                confidence += 0.05
+            elif daily_open and close > daily_open and (close - daily_open) / daily_open < 0.003:
+                confidence += 0.03
+            # Reduce confidence if entering into nearby resistance
+            weekly_high = key_levels.get("weekly_high")
+            if weekly_high and (weekly_high - close) / close < 0.003:
+                confidence -= 0.03
+        
         if confidence >= config["min_confidence"]:
             entry_price = close
-            stop_loss = entry_price - (atr * config["stop_loss_atr_mult"])
-            take_profit = entry_price + (atr * config["take_profit_atr_mult"])
-            risk_reward = (take_profit - entry_price) / (entry_price - stop_loss) if entry_price > stop_loss else 0
+            sl_mult = config.get("stop_loss_atr_mult", 1.5)
+            tp_mult = config.get("take_profit_atr_mult", 2.5)
+            stop_loss = entry_price - (atr * sl_mult)
+            take_profit = entry_price + (atr * tp_mult)
             
-            if risk_reward >= config["min_risk_reward"]:
-                signal_candidates.append({
-                    "direction": "long",
-                    "entry_price": float(entry_price),
-                    "stop_loss": float(stop_loss),
-                    "take_profit": float(take_profit),
-                    "confidence": float(confidence),
-                    "risk_reward": float(risk_reward),
-                    "reason": f"EMA Cross + VWAP + Volume: {sr_signal or 'N/A'} | {tbt_signal or 'N/A'} | {sd_signal or 'N/A'}",
-                    "indicators": {
-                        "ema_cross": True,
-                        "vwap_position": "above",
-                        "volume_confirmed": volume_confirmed,
-                        "sr_signal": sr_signal,
-                        "tbt_signal": tbt_signal,
-                        "sd_signal": sd_signal,
-                        "key_levels": key_levels,
-                    },
-                })
+            # NaN guards: ensure valid SL/TP before calculating R:R
+            if pd.isna(stop_loss) or pd.isna(take_profit) or stop_loss >= entry_price:
+                pass  # Skip invalid signal
+            else:
+                risk_reward = (take_profit - entry_price) / (entry_price - stop_loss)
+                
+                if risk_reward >= config["min_risk_reward"] and not pd.isna(risk_reward):
+                    signal_candidates.append({
+                        "direction": "long",
+                        "entry_price": float(entry_price),
+                        "stop_loss": float(stop_loss),
+                        "take_profit": float(take_profit),
+                        "confidence": float(confidence),
+                        "risk_reward": float(risk_reward),
+                        "reason": f"EMA Cross + VWAP + Volume: {sr_signal or 'N/A'} | {tbt_signal or 'N/A'} | {sd_signal or 'N/A'} | vwap_band:{vwap_band_signal or 'N/A'}",
+                        "indicators": {
+                            "ema_cross": True,
+                            "vwap_position": "above",
+                            "vwap_band_signal": vwap_band_signal,
+                            "volume_confirmed": volume_confirmed,
+                            "sr_signal": sr_signal,
+                            "tbt_signal": tbt_signal,
+                            "sd_signal": sd_signal,
+                            "key_levels": key_levels,
+                        },
+                    })
     
     # Short signals
     if bearish_cross and price_below_vwap:
@@ -574,31 +686,60 @@ def generate_signals(
         if sd_signal and "supply" in sd_signal:
             confidence = max(confidence, sd_confidence)
         
+        # VWAP band adjustments for shorts
+        if vwap_band_signal == "extended_below":
+            confidence -= 0.05  # Reduce confidence when overly extended
+        elif vwap_band_signal == "near_vwap_below":
+            confidence += 0.03  # Slight boost for mean reversion setup
+        
+        # Key level adjustments for shorts
+        if key_levels:
+            weekly_high = key_levels.get("weekly_high")
+            weekly_mid = key_levels.get("weekly_mid")
+            daily_open = key_levels.get("daily_open")
+            # Boost confidence if entering off resistance (near weekly high)
+            if weekly_high and close < weekly_high and (weekly_high - close) / weekly_high < 0.005:
+                confidence += 0.05
+            elif daily_open and close < daily_open and (daily_open - close) / daily_open < 0.003:
+                confidence += 0.03
+            # Reduce confidence if entering into nearby support
+            weekly_low = key_levels.get("weekly_low")
+            if weekly_low and (close - weekly_low) / close < 0.003:
+                confidence -= 0.03
+        
         if confidence >= config["min_confidence"]:
             entry_price = close
-            stop_loss = entry_price + (atr * config["stop_loss_atr_mult"])
-            take_profit = entry_price - (atr * config["take_profit_atr_mult"])
-            risk_reward = (entry_price - take_profit) / (stop_loss - entry_price) if stop_loss > entry_price else 0
+            sl_mult = config.get("stop_loss_atr_mult", 1.5)
+            tp_mult = config.get("take_profit_atr_mult", 2.5)
+            stop_loss = entry_price + (atr * sl_mult)
+            take_profit = entry_price - (atr * tp_mult)
             
-            if risk_reward >= config["min_risk_reward"]:
-                signal_candidates.append({
-                    "direction": "short",
-                    "entry_price": float(entry_price),
-                    "stop_loss": float(stop_loss),
-                    "take_profit": float(take_profit),
-                    "confidence": float(confidence),
-                    "risk_reward": float(risk_reward),
-                    "reason": f"EMA Cross + VWAP + Volume: {sr_signal or 'N/A'} | {tbt_signal or 'N/A'} | {sd_signal or 'N/A'}",
-                    "indicators": {
-                        "ema_cross": True,
-                        "vwap_position": "below",
-                        "volume_confirmed": volume_confirmed,
-                        "sr_signal": sr_signal,
-                        "tbt_signal": tbt_signal,
-                        "sd_signal": sd_signal,
-                        "key_levels": key_levels,
-                    },
-                })
+            # NaN guards: ensure valid SL/TP before calculating R:R
+            if pd.isna(stop_loss) or pd.isna(take_profit) or stop_loss <= entry_price:
+                pass  # Skip invalid signal
+            else:
+                risk_reward = (entry_price - take_profit) / (stop_loss - entry_price)
+                
+                if risk_reward >= config["min_risk_reward"] and not pd.isna(risk_reward):
+                    signal_candidates.append({
+                        "direction": "short",
+                        "entry_price": float(entry_price),
+                        "stop_loss": float(stop_loss),
+                        "take_profit": float(take_profit),
+                        "confidence": float(confidence),
+                        "risk_reward": float(risk_reward),
+                        "reason": f"EMA Cross + VWAP + Volume: {sr_signal or 'N/A'} | {tbt_signal or 'N/A'} | {sd_signal or 'N/A'} | vwap_band:{vwap_band_signal or 'N/A'}",
+                        "indicators": {
+                            "ema_cross": True,
+                            "vwap_position": "below",
+                            "vwap_band_signal": vwap_band_signal,
+                            "volume_confirmed": volume_confirmed,
+                            "sr_signal": sr_signal,
+                            "tbt_signal": tbt_signal,
+                            "sd_signal": sd_signal,
+                            "key_levels": key_levels,
+                        },
+                    })
     
     # Add metadata to signals
     for signal in signal_candidates:

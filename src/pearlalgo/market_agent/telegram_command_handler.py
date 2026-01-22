@@ -4,9 +4,7 @@ Telegram Command Handler for Market Agent.
 Provides simple button-based remote control interface for the trading system.
 
 Commands:
-  /start - Show main menu
-  /menu - Same as /start
-  /help - Show help information
+  /start - Show the main dashboard (menu)
 
 Simple and intuitive nested button menu system.
 """
@@ -128,12 +126,10 @@ class TelegramCommandHandler:
 
     async def _post_init(self, application: Application) -> None:
         """Runs once after the Telegram application initializes."""
-        # Set simple command menu (menu is the primary entry point)
+        # Keep the slash-command surface minimal: /start is the dashboard/menu.
         try:
             await application.bot.set_my_commands([
-                BotCommand('menu', 'Show main dashboard'),
-                BotCommand('help', 'Show help information'),
-                BotCommand('settings', 'Alert preferences'),
+                BotCommand("start", "Show main dashboard"),
             ])
         except Exception as e:
             logger.debug(f"Could not set bot commands: {e}")
@@ -222,10 +218,13 @@ class TelegramCommandHandler:
                 logger.warning(f"Could not send startup dashboard to chat_id={self.chat_id}: {e}")
 
     def _register_handlers(self) -> None:
-        # Main menu command (primary entry point)
+        # Minimal command surface: /start is the menu.
+        self.application.add_handler(CommandHandler("start", self.handle_menu))
+
+        # Optional aliases (kept for backwards-compatibility; not advertised).
         self.application.add_handler(CommandHandler("menu", self.handle_menu))
-        self.application.add_handler(CommandHandler("help", self.handle_help))
-        self.application.add_handler(CommandHandler("settings", self.handle_settings))
+        self.application.add_handler(CommandHandler("help", self.handle_menu))
+        self.application.add_handler(CommandHandler("settings", self.handle_menu))
 
         # Callback query handler for button presses
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
@@ -364,7 +363,10 @@ class TelegramCommandHandler:
         if not await self._check_authorized(update):
             await update.message.reply_text("❌ Unauthorized access")
             return
-        logger.info("Received /start or /menu command - sending visual dashboard")
+
+        raw = str(getattr(update.message, "text", "") or "").strip()
+        cmd = raw.split()[0] if raw else "/start"
+        logger.info(f"Received {cmd} - sending visual dashboard")
         
         # Always send visual dashboard with chart
         await self._send_visual_dashboard(update.message)
@@ -454,14 +456,10 @@ class TelegramCommandHandler:
         logger.info("Received /help command")
 
         text = (
-            "🎯 PEARLalgo Command Handler\n\n"
-            "Available commands:\n"
-            "/start - Show main menu\n"
-            "/menu - Show main menu\n"
-            "/help - Show this help message\n"
-            "/settings - Alert preferences (charts, notifications)\n\n"
-            "Use 🎛️ System to start/stop the agent.\n"
-            "Use 🤖 Bots for trading bot controls, backtests, and reports."
+            "🎯 PEARLalgo\n\n"
+            "Use /start to open the dashboard.\n\n"
+            "Everything else is accessed via the buttons:\n"
+            "📊 Activity • 🎛️ System • 🛡️ Health • ⚙️ Settings"
         )
         await update.message.reply_text(text)
 
@@ -626,21 +624,7 @@ class TelegramCommandHandler:
             return
         
         logger.debug(f"Parsed callback: type={callback_type}, action={action}, param={param}")
-        
-        # IMPORTANT: If current message is a photo (chart dashboard), we need to
-        # convert to text message before showing submenus. Delete photo and track
-        # that we need to send a new message instead of editing.
-        message = query.message
-        is_photo_message = message and message.photo
-        
-        if is_photo_message and callback_type in ("menu", "action", "confirm") and action != "main":
-            # Delete photo message so submenus can use text editing
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            # Create a fake query that will send new messages instead of editing
-            query._from_photo = True  # Mark that we came from a photo
+        message = getattr(query, "message", None)
         
         try:
             if callback_type == "menu":
@@ -676,10 +660,11 @@ class TelegramCommandHandler:
                 logger.warning(f"Edit failed (likely photo message), sending new message: {e}")
                 try:
                     keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                    await message.chat.send_message(
-                        f"⚠️ Navigation error. Tap Back to return to menu.",
-                        reply_markup=InlineKeyboardMarkup(keyboard)
-                    )
+                    if message and getattr(message, "chat", None):
+                        await message.chat.send_message(
+                            "⚠️ Navigation error. Tap Back to return to menu.",
+                            reply_markup=InlineKeyboardMarkup(keyboard),
+                        )
                 except Exception as send_err:
                     logger.error(f"Failed to send error message: {send_err}")
             else:
@@ -705,21 +690,25 @@ class TelegramCommandHandler:
         This handles the case where the main menu shows a chart (photo message)
         and buttons need to navigate to text-only screens.
         """
-        message = query.message
-        
-        # Check if message was already deleted (from photo handling in callback)
-        from_photo = getattr(query, "_from_photo", False)
-        
-        if from_photo:
-            # Message was deleted, send new
+        message = getattr(query, "message", None)
+
+        # Photo messages can't be edited via edit_message_text. For menu screens,
+        # replace the dashboard photo with a text-only message.
+        if message and getattr(message, "photo", None):
             try:
+                await message.delete()
+            except Exception:
+                pass
+            try:
+                if not getattr(message, "chat", None):
+                    raise RuntimeError("Missing chat context for photo replacement")
                 await message.chat.send_message(
                     text=text,
                     reply_markup=reply_markup,
-                    parse_mode=parse_mode
+                    parse_mode=parse_mode,
                 )
             except Exception as send_err:
-                logger.error(f"Failed to send message after photo delete: {send_err}")
+                logger.error(f"Failed to send message after replacing photo: {send_err}")
             return
         
         try:
@@ -727,13 +716,26 @@ class TelegramCommandHandler:
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
         except Exception as e:
             err_str = str(e).lower()
-            # If edit fails (e.g., photo message or deleted), send new
-            if "no text in the message" in err_str or "message to edit not found" in err_str or "message is not modified" in err_str:
+
+            # Avoid churning the chat when nothing changed.
+            if "message is not modified" in err_str:
+                return
+
+            # If edit fails (e.g., deleted/invalid), send new
+            if (
+                "no text in the message" in err_str
+                or "message to edit not found" in err_str
+                or "message_id_invalid" in err_str
+                or "message can't be edited" in err_str
+            ):
                 try:
-                    await message.delete()
+                    if message:
+                        await message.delete()
                 except Exception:
                     pass
                 try:
+                    if not message or not getattr(message, "chat", None):
+                        raise RuntimeError("Missing chat context for replacement message")
                     await message.chat.send_message(
                         text=text,
                         reply_markup=reply_markup,
@@ -741,6 +743,7 @@ class TelegramCommandHandler:
                     )
                 except Exception as send_err:
                     logger.error(f"Failed to send replacement message: {send_err}")
+                return
             else:
                 # Re-raise if it's a different error
                 raise
@@ -983,7 +986,7 @@ class TelegramCommandHandler:
             await self._show_main_menu(query)
 
     async def _send_visual_dashboard(self, message_obj) -> None:
-        """Send visual dashboard with 12h chart to a new message (for /menu command).
+        """Send visual dashboard with 12h chart to a new message (for /start).
         
         This is the primary dashboard view - always includes chart when available.
         Used for initial messages (not callback edits).
@@ -1178,24 +1181,34 @@ class TelegramCommandHandler:
         state = self._read_state()
         
         # Determine status indicators
-        gw_status = "🟢" 
-        conn_status = "🟢"
-        data_status = "🟢"
+        gw_status = "⚪"
+        conn_status = "⚪"
+        data_status = "⚪"
+
+        # Gateway = actual service (process + port), not connection state.
+        try:
+            sc = getattr(self, "service_controller", None)
+            if sc:
+                gw = sc.get_gateway_status() or {}
+                gw_ok = bool(gw.get("process_running")) and bool(gw.get("port_listening"))
+                gw_status = "🟢" if gw_ok else "🔴"
+        except Exception:
+            # keep unknown
+            pass
         
         if state:
             connection_status = state.get("connection_status", "unknown")
-            if connection_status != "connected":
-                gw_status = "🔴"
+            if connection_status == "connected":
+                conn_status = "🟢"
+            else:
                 conn_status = "🔴"
             
             # Check data freshness
             latest_bar = state.get("latest_bar", {})
             if not latest_bar:
                 data_status = "🔴"
-        else:
-            gw_status = "⚪"
-            conn_status = "⚪"
-            data_status = "⚪"
+            else:
+                data_status = "🟢"
         
         lines = [
             "🛡️ *Health*",
@@ -1205,12 +1218,12 @@ class TelegramCommandHandler:
         
         keyboard = [
             [
-                InlineKeyboardButton(f"🔌 Gateway {gw_status}", callback_data="action:gateway_status"),
-                InlineKeyboardButton(f"📡 Connection {conn_status}", callback_data="action:connection_status"),
+                InlineKeyboardButton("🔌 Gateway", callback_data="action:gateway_status"),
+                InlineKeyboardButton("📡 Connection", callback_data="action:connection_status"),
             ],
             [
-                InlineKeyboardButton(f"📊 Data Quality {data_status}", callback_data="action:data_quality"),
-                InlineKeyboardButton("📋 Full Status", callback_data="action:system_status"),
+                InlineKeyboardButton("📊 Data", callback_data="action:data_quality"),
+                InlineKeyboardButton("📋 Status", callback_data="action:system_status"),
             ],
             [InlineKeyboardButton("🏠 Menu", callback_data="back")],
         ]
@@ -1345,7 +1358,8 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🏠 Menu", callback_data="back"),
             ],
         ]
-        await query.edit_message_text(
+        await self._safe_edit_or_send(
+            query,
             "\n".join(lines),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown",
@@ -1544,7 +1558,7 @@ class TelegramCommandHandler:
                 # Row 3: Actions
                 [
                     InlineKeyboardButton("🔄 Refresh", callback_data="menu:activity"),
-                    InlineKeyboardButton("🏠 Back", callback_data="back"),
+                    InlineKeyboardButton("🏠 Menu", callback_data="back"),
                 ],
             ]
             
@@ -1564,7 +1578,7 @@ class TelegramCommandHandler:
                     InlineKeyboardButton("🎯 Signals", callback_data="action:recent_signals"),
                     InlineKeyboardButton("📋 Active", callback_data="action:active_trades"),
                 ],
-                [InlineKeyboardButton("🏠 Back", callback_data="back")],
+                [InlineKeyboardButton("🏠 Menu", callback_data="back")],
             ]
             await self._safe_edit_or_send(query, "📊 Activity\n\nSelect an option:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -1693,7 +1707,11 @@ class TelegramCommandHandler:
                 ],
                 [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
             ]
-            await query.edit_message_text("💎 Performance\n\nSelect an option:", reply_markup=InlineKeyboardMarkup(keyboard))
+            await self._safe_edit_or_send(
+                query,
+                "💎 Performance\n\nSelect an option:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
 
     async def _show_bots_menu(self, query: CallbackQuery) -> None:
         """Show bot hub menu with trading mode picker and service status."""
@@ -1779,7 +1797,7 @@ class TelegramCommandHandler:
             # Row 3: Navigation
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data="menu:bots"),
-                InlineKeyboardButton("🏠 Back", callback_data="back"),
+                InlineKeyboardButton("🏠 Menu", callback_data="back"),
             ],
         ]
 
@@ -1848,27 +1866,27 @@ class TelegramCommandHandler:
                 InlineKeyboardButton(agent_btn, callback_data=agent_action),
                 InlineKeyboardButton(gw_btn, callback_data=gw_action),
             ],
-            # Row 2: Restart & Status
+            # Row 2: Restarts
             [
-                InlineKeyboardButton("🔄 Restart All", callback_data="action:restart_gateway"),
-                InlineKeyboardButton("📊 Status", callback_data="action:gateway_status"),
+                InlineKeyboardButton("🔄 Restart Agent", callback_data="action:restart_agent"),
+                InlineKeyboardButton("🔄 Restart GW", callback_data="action:restart_gateway"),
             ],
-            # Row 3: Config & Logs
+            # Row 3: Read-only tools
             [
-                InlineKeyboardButton("⚙️ Config", callback_data="action:config"),
                 InlineKeyboardButton("📋 Logs", callback_data="action:logs"),
+                InlineKeyboardButton("⚙️ Config", callback_data="action:config"),
             ],
             # Row 4: Advanced
             [
-                InlineKeyboardButton("🔄 Reset Challenge", callback_data="action:reset_challenge"),
-                InlineKeyboardButton("🧹 Clear Cache", callback_data="action:clear_cache"),
+                InlineKeyboardButton("🏆 Challenge", callback_data="action:reset_challenge"),
+                InlineKeyboardButton("🧹 Cache", callback_data="action:clear_cache"),
             ],
         ]
         
         # Emergency stop (only if positions exist)
         if has_positions:
             keyboard.append([
-                InlineKeyboardButton(f"🚨 Emergency Close ({positions_count})", callback_data="action:emergency_stop"),
+                InlineKeyboardButton(f"🚨 Emergency ({positions_count})", callback_data="action:emergency_stop"),
             ])
         
         # Back
@@ -1927,8 +1945,8 @@ class TelegramCommandHandler:
         keyboard = [
             # Row 1: Market Selection
             [
-                InlineKeyboardButton(f"🌐 Market: {self.active_market}", callback_data="menu:markets"),
-                InlineKeyboardButton("🤖 Trading Bot", callback_data="menu:bots"),
+                InlineKeyboardButton("🌐 Markets", callback_data="menu:markets"),
+                InlineKeyboardButton("🤖 Bots", callback_data="menu:bots"),
             ],
             # Row 2: Alert Mode Presets
             [
@@ -1951,11 +1969,11 @@ class TelegramCommandHandler:
             # Row 4: Advanced toggles
             [
                 InlineKeyboardButton(
-                    f"📌 Pinned: {_onoff(pinned_dashboard)}",
+                    f"📌 Pinned{' ✅' if pinned_dashboard else ''}",
                     callback_data="action:toggle_pref:dashboard_edit_in_place",
                 ),
                 InlineKeyboardButton(
-                    f"🔕 Snooze: {_onoff(snooze_on)}",
+                    f"🔕 Snooze{' ✅' if snooze_on else ''}",
                     callback_data="action:toggle_pref:snooze_noncritical_alerts",
                 ),
             ],
@@ -2344,19 +2362,14 @@ class TelegramCommandHandler:
         help_text = (
             "🎯 PEARLalgo Command Handler\n\n"
             "*Quick Commands:*\n"
-            "/start - Show main menu\n"
-            "/menu - Show main menu\n"
-            "/help - Show this help\n\n"
-            "/settings - Alert preferences (charts, notifications)\n\n"
+            "/start - Show the dashboard\n\n"
             "*Menu Structure:*\n"
-            "⚡ Signals & Trades - View and manage trading activity\n"
-            "💎 Performance - Performance metrics and reports\n"
-            "🛡 Health - System health and connection status\n"
-            "🎛️ System Control - Start/stop services and emergency controls\n"
-            "⚙️ Settings - Charts + notification preferences\n"
-            "🤖 Bots - trading bot controls, backtests, reports\n\n"
+            "📊 Activity - Trades, signals, P&L, history\n"
+            "🎛️ System - Start/stop agent + gateway, logs, config\n"
+            "🛡️ Health - Connectivity, data, diagnostics\n"
+            "⚙️ Settings - Markets + alert preferences\n\n"
             "*Quick Tips:*\n"
-            "• Use 'Back to Menu' to return to main menu\n"
+            "• Use '🏠 Menu' to return to the dashboard\n"
             "• Status indicators show active positions/trades\n"
             "• Emergency Stop closes all positions immediately\n"
             "• All actions are logged for audit trail"
@@ -4494,7 +4507,7 @@ class TelegramCommandHandler:
         logger.info("Starting PEARLalgo Telegram Command Handler")
         logger.info(f"Bot token: {'***' + self.bot_token[-4:] if len(self.bot_token) > 4 else '***'}")
         logger.info(f"Chat ID: {self.chat_id}")
-        logger.info("Button-based interface: use /start or /menu to see the menu")
+        logger.info("Button-based interface: use /start to open the dashboard")
         logger.info("Press Ctrl+C to stop")
         logger.info("Connecting to Telegram...")
         self.application.run_polling(allowed_updates=Update.ALL_TYPES)

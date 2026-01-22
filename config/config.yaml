@@ -52,10 +52,12 @@ circuit_breaker:
   max_connection_failures: 10
   max_data_fetch_errors: 5
 data:
-  buffer_size: 100
+  # Buffer sizes: sr_length=130, ATR(200) needs ~200 bars + margin
+  # With timeframe=1m, need ~4+ hours / 250+ bars for all indicators
+  buffer_size: 300
   buffer_size_5m: 300
   buffer_size_15m: 100
-  historical_hours: 2
+  historical_hours: 5
   multitimeframe_5m_hours: 25
   multitimeframe_15m_hours: 25
   performance_history_limit: 1000

@@ -54,7 +54,7 @@
    ```
 
 2. **From Telegram, use the menu:**
-   - Send `/start` or `/menu` to access the main control panel
+   - Send `/start` to access the main control panel
    - Tap buttons for: Start/Stop Agent, Gateway Status, System Status, Signals & Trades, Performance, Tools, AI Features
 
 ### Option B: From Terminal (Traditional)
@@ -97,7 +97,7 @@
 - **AI Strategy Report:**
   ```
   /analyze           # Performance summary + strategy recommendation
-  /help              # List available commands
+  /start             # Open dashboard + menu buttons
   ```
 
 ### From Terminal (Traditional)
@@ -162,9 +162,7 @@
 
 - **Requires command handler running:**
   - **Commands (minimal by design):**
-    - `/start` (or `/menu`) – Main dashboard + button menus
-    - `/settings` – Telegram UI preferences (charts, dashboards, buttons, snooze)
-    - `/help` – Help text
+    - `/start` – Main dashboard + button menus
   - **Everything else is via buttons (recommended on mobile):**
     - **Signals & Trades** → recent signals, active trades, details, close-all
     - **Performance** → daily/weekly summaries and metrics
@@ -177,7 +175,7 @@
 
 ## 5. Quick Troubleshooting
 
-- **No Telegram responses to `/menu` (or `/start`):**
+- **No Telegram responses to `/start`:**
   ```bash
   ./scripts/telegram/check_command_handler.sh
   ./scripts/lifecycle/check_agent_status.sh --market NQ
@@ -192,7 +190,7 @@
 - **Dashboard looks “weird” (e.g., cycles >> bars, signals generated but no alerts):**
   - `buffer_size` is a **rolling window** capped by config (often 100 bars). It will not grow with time.
   - `cycle_count` can be **total since first run** (persisted), while uptime is per-process.
-  - Use Telegram **Dashboard** (`/menu`) to see **session/total scans** and **signals generated vs sent vs failed**.
+  - Use Telegram **Dashboard** (`/start`) to see **session/total scans** and **signals generated vs sent vs failed**.
 - **Service looks stuck / weird:**
   ```bash
   ./scripts/lifecycle/check_agent_status.sh --market NQ
