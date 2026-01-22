@@ -56,6 +56,8 @@
 2. **From Telegram, use the menu:**
    - Send `/start` to access the main control panel
    - Tap buttons for: Start/Stop Agent, Gateway Status, System Status, Signals & Trades, Performance, Tools, AI Features
+   - **UI policy (don’t drift):** keep `/start` as the only slash command; keep ops behind buttons. If Telegram shows extra commands, run `python3 scripts/telegram/set_bot_commands.py` and restart the handler.
+   - **Status semantics:** Agent/Gateway dots = services; Health dot = data/connection (grey when agent is off). Footer shows `Agent: <uptime> | Gateway: OK/DOWN | Data: <age>`.
 
 ### Option B: From Terminal (Traditional)
 

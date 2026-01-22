@@ -43,6 +43,28 @@ The command handler intentionally keeps slash commands minimal:
 
 Everything else is accessed via the button menus (safer and easier to operate on mobile).
 
+## UI policy (do not drift)
+
+- **Single entrypoint**: `/start` is the dashboard and the menu.
+- **No additional slash commands**: keep operations behind inline buttons (mobile-first + safer).
+- **BotFather command list**: should only show `/start`. If other commands appear, re-run `python3 scripts/telegram/set_bot_commands.py` and restart the handler.
+
+## Status semantics (how to read the dashboard)
+
+The dashboard is intentionally compact. These indicators should **never contradict** each other:
+
+- **Agent (dot)**: green when the market agent process is running (scanner/trading logic).
+- **Gateway (dot)**: green when the IBKR gateway process is running and the API port is listening.
+- **Health (dot)**: green when the agent is running and data/connection look healthy; grey when the agent is off.
+- **Footer (`Agent: … | Gateway: … | Data: …`)**:
+  - **Agent**: uptime since the agent’s `start_time`
+  - **Gateway**: service controller gateway status
+  - **Data**: age of the latest bar (freshness)
+
+If something looks off, use **🎛️ System** (services) and **🛡️ Health** (data/connection) to confirm, then restart the agent/gateway from **System**.
+
+Tip: Use **🛡️ Health → 🩺 Doctor** for a one-screen diagnostic rollup (agent/gateway/data + key prefs).
+
 ## Menu map (operator-facing)
 
 - **Signals & Trades**: recent signals, active trades, signal details

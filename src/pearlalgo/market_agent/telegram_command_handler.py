@@ -273,7 +273,8 @@ class TelegramCommandHandler:
         daily_pnl = 0.0
         agent_running = False
         gateway_running = False
-        connection_ok = False
+        # Connection can be absent from state.json; treat it as best-effort.
+        connection_ok: bool | None = None
         
         if state:
             positions = (state.get("execution", {}).get("positions", 0) or 0)
@@ -282,7 +283,38 @@ class TelegramCommandHandler:
             total_active = positions + active_trades + challenge_positions
             daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
             agent_running = bool(self._is_agent_process_running())
-            connection_ok = state.get("connection_status") == "connected"
+
+            # Prefer explicit connection status when available; fall back to data freshness.
+            if "connection_status" in state:
+                connection_ok = state.get("connection_status") == "connected"
+            elif "data_fresh" in state:
+                connection_ok = bool(state.get("data_fresh"))
+
+            # Staleness override: treat missing or stale bars as unhealthy.
+            # (We compute from latest_bar.timestamp, not cached "latest_bar_age_minutes".)
+            data_age_minutes = None
+            try:
+                thr = float(state.get("data_stale_threshold_minutes") or 10.0)
+            except Exception:
+                thr = 10.0
+            try:
+                latest_bar = state.get("latest_bar") if isinstance(state.get("latest_bar"), dict) else {}
+                ts = (latest_bar or {}).get("timestamp") or state.get("latest_bar_timestamp")
+                if ts:
+                    dt = parse_utc_timestamp(str(ts))
+                    if dt and dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt:
+                        data_age_minutes = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
+            except Exception:
+                data_age_minutes = None
+
+            if agent_running and thr > 0 and data_age_minutes is not None:
+                is_stale = data_age_minutes > thr
+                if connection_ok is None:
+                    connection_ok = not is_stale
+                elif is_stale:
+                    connection_ok = False
         
         # Check gateway status
         try:
@@ -328,13 +360,15 @@ class TelegramCommandHandler:
         # Log status changes for debugging
         logger.debug(f"System status: agent={agent_running}, gateway={gateway_running}, label={system_label}")
         
-        # Health: connection status
-        if connection_ok:
+        # Health: only meaningful when agent is running.
+        if not state or not agent_running:
+            health_label = "🛡️ Health ⚪"
+        elif connection_ok is True:
             health_label = "🛡️ Health 🟢"
-        elif state:
+        elif connection_ok is False:
             health_label = "🛡️ Health 🔴"
         else:
-            health_label = "🛡️ Health ⚪"
+            health_label = "🛡️ Health 🟡"
         
         # Settings: static
         settings_label = "⚙️ Settings"
@@ -1180,6 +1214,12 @@ class TelegramCommandHandler:
         """Show health & diagnostics submenu."""
         state = self._read_state()
         
+        # Agent running (best-effort). When agent is off, connection/data are not meaningful.
+        try:
+            agent_running = bool(self._is_agent_process_running())
+        except Exception:
+            agent_running = False
+
         # Determine status indicators
         gw_status = "⚪"
         conn_status = "⚪"
@@ -1196,19 +1236,41 @@ class TelegramCommandHandler:
             # keep unknown
             pass
         
-        if state:
-            connection_status = state.get("connection_status", "unknown")
-            if connection_status == "connected":
-                conn_status = "🟢"
+        if state and agent_running:
+            # Connection: prefer explicit state when present; fall back to data_fresh.
+            if "connection_status" in state:
+                conn_status = "🟢" if state.get("connection_status") == "connected" else "🔴"
+            elif "data_fresh" in state:
+                conn_status = "🟢" if bool(state.get("data_fresh")) else "🔴"
             else:
-                conn_status = "🔴"
+                conn_status = "⚪"
             
-            # Check data freshness
+            # Data: consider latest_bar presence and/or explicit data_fresh.
             latest_bar = state.get("latest_bar", {})
-            if not latest_bar:
-                data_status = "🔴"
+            if "data_fresh" in state:
+                data_status = "🟢" if bool(state.get("data_fresh")) else "🔴"
             else:
-                data_status = "🟢"
+                data_status = "🟢" if bool(latest_bar) else "🔴"
+
+            # Staleness override: mark Data degraded if latest bar is older than the threshold.
+            try:
+                thr = float(state.get("data_stale_threshold_minutes") or 10.0)
+            except Exception:
+                thr = 10.0
+            try:
+                ts = None
+                if isinstance(latest_bar, dict):
+                    ts = latest_bar.get("timestamp") or state.get("latest_bar_timestamp")
+                if ts:
+                    dt = parse_utc_timestamp(str(ts))
+                    if dt and dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt:
+                        age_min = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
+                        if thr > 0 and age_min > thr:
+                            data_status = "🔴"
+            except Exception:
+                pass
         
         lines = [
             "🛡️ *Health*",
@@ -1225,6 +1287,7 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("📊 Data", callback_data="action:data_quality"),
                 InlineKeyboardButton("📋 Status", callback_data="action:system_status"),
             ],
+            [InlineKeyboardButton("🩺 Doctor", callback_data="action:ui_doctor")],
             [InlineKeyboardButton("🏠 Menu", callback_data="back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -2467,9 +2530,13 @@ class TelegramCommandHandler:
                 await self._handle_connection_status(query, reply_markup)
             elif action_type == "data_quality":
                 await self._handle_data_quality(query, reply_markup)
-            elif action_type.startswith("ui_doctor"):
-                # UI Doctor removed from menus; keep old buttons from breaking.
-                await self._show_status_menu(query)
+            elif action_type == "ui_doctor":
+                await self._show_ui_doctor(query)
+                return
+            elif action_type.startswith("ui_doctor:"):
+                sub_action = action_type.split(":", 1)[1]
+                await self._handle_ui_doctor_action(query, sub_action)
+                return
             elif action_type == "recent_signals":
                 await self._handle_recent_signals(query, reply_markup)
             elif action_type == "active_trades":
@@ -3165,16 +3232,31 @@ class TelegramCommandHandler:
             agent_running = bool(self._is_agent_process_running())
             paused = state.get("paused", False)
             pause_reason = state.get("pause_reason")
+
+            # Uptime (seconds) for glanceable footer (avoid "Agent: OFF" when running).
+            agent_uptime_seconds = None
+            try:
+                start_ts = state.get("start_time")
+                if agent_running and start_ts:
+                    dt = parse_utc_timestamp(str(start_ts))
+                    if dt and dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt:
+                        agent_uptime_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
+            except Exception:
+                agent_uptime_seconds = None
             
             # Gateway status
-            gateway_running = True
-            gateway_unknown = False
+            # Prefer the service controller; fall back to state-derived freshness (better than defaulting to green).
+            gateway_running = bool(state.get("data_fresh", False))
+            gateway_unknown = True
             sc = getattr(self, "service_controller", None)
             try:
                 fn = getattr(sc, "get_gateway_status", None)
                 if callable(fn):
                     gs = fn() or {}
                     gateway_running = bool(gs.get("process_running", True)) and bool(gs.get("port_listening", True))
+                    gateway_unknown = False
                 else:
                     gateway_unknown = True
             except Exception:
@@ -3210,6 +3292,15 @@ class TelegramCommandHandler:
             # Data quality
             latest_bar = state.get("latest_bar", {})
             data_level = latest_bar.get("_data_level") if isinstance(latest_bar, dict) else None
+
+            # Raw data age (seconds) for footer (even if we suppress stale warnings elsewhere).
+            data_age_seconds = None
+            try:
+                m = state.get("latest_bar_age_minutes")
+                if m is not None:
+                    data_age_seconds = float(m) * 60.0
+            except Exception:
+                data_age_seconds = None
             
             # Data age (read threshold from config)
             data_stale_threshold_minutes = 10.0  # Default
@@ -3238,6 +3329,7 @@ class TelegramCommandHandler:
                             if hasattr(bar_time, 'tzinfo') and bar_time.tzinfo is None:
                                 bar_time = bar_time.replace(tzinfo=timezone.utc)
                             age_seconds = (now - bar_time).total_seconds()
+                            data_age_seconds = age_seconds
                             data_age_minutes = age_seconds / 60
                             
                             # Only show stale warning if:
@@ -3343,6 +3435,8 @@ class TelegramCommandHandler:
                 market=market_label,
                 trading_bot=tb_selected if tb_enabled else "scanner",
                 ai_ready=ai_ready,
+                agent_uptime_seconds=agent_uptime_seconds,
+                data_age_seconds=data_age_seconds,
             )
             
             # Add challenge metrics if available (before recent exits)
