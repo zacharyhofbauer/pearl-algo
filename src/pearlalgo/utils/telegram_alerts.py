@@ -1381,7 +1381,9 @@ def format_home_card(
     if signal_diagnostics and agent_running and not paused and not is_data_stale:
         # Only show if not a simple "no patterns" or "session closed" message
         if signal_diagnostics not in ("Session closed", "No patterns detected"):
-            lines.append(f"{_SUBLINE_PREFIX}🔍 {signal_diagnostics}")
+            # Keep derived diagnostics Markdown-safe (these often contain underscores/ratios).
+            diag_safe = escape_markdown(safe_label(str(signal_diagnostics)))
+            lines.append(f"{_SUBLINE_PREFIX}🔍 {diag_safe}")
 
     # CONDITIONAL: Buy/Sell pressure (show only when agent running and not paused)
     # V2 spec: Suppress when data is stale to avoid misleading derived context
@@ -1497,9 +1499,16 @@ class TelegramPrefs:
     calm-minimal behavior so existing users see no change until they opt-in.
     """
     
-    # Default values (calm-minimal by default)
+    # Default values
+    #
+    # Design policy (operator UX):
+    # - Keep navigation buttons ON by default so operators can always jump back to Menu/Health.
+    # - Keep pinned/edit-in-place dashboards OFF by default (optional; reduces chat spam).
     DEFAULTS = {
-        "dashboard_buttons": False,         # Show inline buttons on push dashboards
+        "dashboard_buttons": True,          # Show inline buttons on push dashboards + trade alerts
+        "dashboard_edit_in_place": False,   # Keep a single dashboard message updated (optional)
+        "dashboard_message_id": None,       # Internal: message_id used for edit-in-place dashboards
+        "last_dashboard_sent_at": None,     # Internal: ISO timestamp of last dashboard delivery
         "signal_detail_expanded": False,    # Show expanded context in signal details
         "auto_chart_on_signal": False,      # Automatically generate chart with signal push
         "snooze_noncritical_alerts": False, # Temporarily suppress non-critical data alerts
@@ -1510,6 +1519,7 @@ class TelegramPrefs:
     # Human-readable labels for settings UI
     LABELS = {
         "dashboard_buttons": "Dashboard Buttons",
+        "dashboard_edit_in_place": "Pinned Dashboard (Edit-in-Place)",
         "signal_detail_expanded": "Expanded Signal Details",
         "auto_chart_on_signal": "Auto-Chart on Signal",
         "snooze_noncritical_alerts": "Snooze Non-Critical Alerts",
@@ -1518,7 +1528,8 @@ class TelegramPrefs:
     
     # Descriptions for settings UI
     DESCRIPTIONS = {
-        "dashboard_buttons": "Add quick nav buttons to dashboards & signal/trade alerts",
+        "dashboard_buttons": "Always show Menu navigation buttons on dashboards & alerts",
+        "dashboard_edit_in_place": "Reduce chat spam by updating one dashboard message instead of sending new ones",
         "signal_detail_expanded": "Show full context (regime, MTF, VWAP) in signal details by default",
         "auto_chart_on_signal": "Automatically generate and send chart with each signal alert",
         "snooze_noncritical_alerts": "Temporarily suppress non-critical data quality alerts (1 hour)",
@@ -1559,6 +1570,15 @@ class TelegramPrefs:
                         self._prefs[key] = stored[key]
             except Exception as e:
                 logger.warning(f"Could not load Telegram prefs: {e}")
+
+        # Operator policy: navigation buttons must always be available.
+        # Enforce this even if older prefs files explicitly disabled them.
+        try:
+            if self._prefs.get("dashboard_buttons") is not True:
+                self._prefs["dashboard_buttons"] = True
+                self._save()
+        except Exception:
+            pass
     
     def _save(self):
         """Save preferences to file."""
@@ -1606,7 +1626,11 @@ class TelegramPrefs:
     # Convenience properties for common checks
     @property
     def dashboard_buttons(self) -> bool:
-        return self._prefs.get("dashboard_buttons", False)
+        return self._prefs.get("dashboard_buttons", True)
+
+    @property
+    def dashboard_edit_in_place(self) -> bool:
+        return self._prefs.get("dashboard_edit_in_place", False)
     
     @property
     def signal_detail_expanded(self) -> bool:

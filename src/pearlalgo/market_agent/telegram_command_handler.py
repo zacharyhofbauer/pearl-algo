@@ -138,41 +138,88 @@ class TelegramCommandHandler:
         except Exception as e:
             logger.debug(f"Could not set bot commands: {e}")
 
-        # Send a startup ping so users can confirm connectivity immediately.
+        # Send visual dashboard with 12h chart on startup
         if self._startup_ping:
             try:
-                logger.info(f"Sending startup ping to chat_id={self.chat_id}")
+                logger.info(f"Sending visual dashboard to chat_id={self.chat_id}")
                 keyboard = self._get_main_menu_keyboard()
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
-                # Try to send comprehensive status, fallback to simple message
                 state = self._read_state()
                 if state:
                     try:
-                        message = await self._build_status_dashboard_message(state)
-                        await application.bot.send_message(
-                            chat_id=self.chat_id,
-                            text=message,
-                            reply_markup=reply_markup,
-                            parse_mode="Markdown"
-                        )
+                        # Build full dashboard message
+                        dashboard_text = await self._build_status_dashboard_message(state)
+                        
+                        # Generate 12h chart
+                        chart_path = await self._generate_or_get_chart(state)
+                        
+                        if chart_path and chart_path.exists():
+                            # Send visual dashboard with chart
+                            with open(chart_path, 'rb') as f:
+                                await application.bot.send_photo(
+                                    chat_id=self.chat_id,
+                                    photo=f,
+                                    caption=dashboard_text,
+                                    reply_markup=reply_markup,
+                                    parse_mode="Markdown"
+                                )
+                            logger.info("Visual dashboard with chart sent")
+                        else:
+                            # Fallback to text-only dashboard
+                            await application.bot.send_message(
+                                chat_id=self.chat_id,
+                                text=dashboard_text,
+                                reply_markup=reply_markup,
+                                parse_mode="Markdown"
+                            )
+                            logger.info("Text-only dashboard sent (no chart available)")
                     except Exception as e:
-                        logger.warning(f"Could not send status dashboard in startup: {e}")
+                        logger.warning(f"Could not send visual dashboard: {e}")
                         await application.bot.send_message(
                             chat_id=self.chat_id,
-                            text="✅ PEARLalgo command handler is online!\n\nTap the buttons below to control the system:",
+                            text="✅ PEARLalgo online\n\nTap 🔄 Refresh for visual dashboard:",
                             reply_markup=reply_markup
                         )
                 else:
+                    # No state yet - show system health overview
+                    agent_running = bool(self._is_agent_process_running())
+                    gateway_status = None
+                    try:
+                        sc = getattr(self, "service_controller", None)
+                        if sc:
+                            gateway_status = sc.get_gateway_status() or {}
+                    except Exception:
+                        gateway_status = {}
+                    
+                    gw_proc = bool(gateway_status.get("process_running", False)) if gateway_status else False
+                    gw_port = bool(gateway_status.get("port_listening", False)) if gateway_status else False
+                    gw_ok = gw_proc and gw_port
+                    
+                    # Build system health dashboard
+                    lines = [
+                        f"📊 *{self.active_market} Dashboard*",
+                        "",
+                        "━━━━━ *System Health* ━━━━━",
+                        f"🤖 Agent: {'🟢 RUNNING' if agent_running else '🔴 STOPPED'}",
+                        f"🔌 Gateway: {'🟢 ONLINE' if gw_ok else '🔴 OFFLINE'}",
+                        f"📡 Handler: 🟢 ONLINE",
+                        "",
+                        "━━━━━ *Status* ━━━━━",
+                        "⚠️ No trading data yet.",
+                        "",
+                        "_Start the agent to see live dashboard._",
+                        "_Tap 🔄 Refresh after agent starts._",
+                    ]
                     await application.bot.send_message(
                         chat_id=self.chat_id,
-                        text="✅ PEARLalgo command handler is online!\n\nTap the buttons below to control the system:",
-                        reply_markup=reply_markup
+                        text="\n".join(lines),
+                        reply_markup=reply_markup,
+                        parse_mode="Markdown"
                     )
-                logger.info("Startup ping sent")
+                logger.info("Startup complete")
             except Exception as e:
-                # Do not crash the handler; reply_text() still works in any chat that sends commands.
-                logger.warning(f"Could not send startup ping to chat_id={self.chat_id}: {e}")
+                logger.warning(f"Could not send startup dashboard to chat_id={self.chat_id}: {e}")
 
     def _register_handlers(self) -> None:
         # Main menu commands
@@ -211,138 +258,91 @@ class TelegramCommandHandler:
             return 0
 
     def _get_main_menu_keyboard(self) -> list:
-        """Get the main menu keyboard layout with dynamic status indicators."""
-        # Show quick preview of positions if available
+        """Get the compact visual dashboard menu keyboard.
+        
+        Design: Clean 2-column layout optimized for mobile with status indicators.
+        The main menu is a visual dashboard - chart + status text + compact nav.
+        """
         state = self._read_state()
-        has_active = False
-        positions = 0
-        active_trades = 0
         total_active = 0
         daily_pnl = 0.0
+        agent_running = False
+        connection_ok = False
         
         if state:
             positions = (state.get("execution", {}).get("positions", 0) or 0)
             active_trades = state.get("active_trades_count", 0) or 0
-            # Also count open challenge positions
             challenge_positions = self._count_open_challenge_positions()
             total_active = positions + active_trades + challenge_positions
-            has_active = total_active > 0
             daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
+            agent_running = bool(self._is_agent_process_running())
+            connection_ok = state.get("connection_status") == "connected"
 
-        # Build dynamic button labels
-        # Signals button - show count if active
-        signals_label = "📡 Signals & Trades"
-        if has_active:
-            signals_label = f"⚡ Trades • {total_active} Open"
+        # ─────────────────────────────────────────────────────────────────
+        # Dynamic labels with inline status badges
+        # ─────────────────────────────────────────────────────────────────
         
-        # Performance button - show daily P&L
-        performance_label = "📈 Performance"
+        # Trades - show count badge if active
+        trades_label = "⚡ Trades"
+        if total_active > 0:
+            trades_label = f"⚡ Trades ({total_active})"
+        
+        # P&L with value
+        perf_label = "📈 P&L"
         if daily_pnl != 0:
-            pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
-            pnl_sign = "+" if daily_pnl >= 0 else ""
+            sign = "+" if daily_pnl >= 0 else ""
+            dot = "🟢" if daily_pnl >= 0 else "🔴"
             if abs(daily_pnl) >= 1000:
-                pnl_display = f"{pnl_sign}${abs(daily_pnl)/1000:.1f}k"
+                perf_label = f"📈 {dot}{sign}${abs(daily_pnl)/1000:.1f}k"
             else:
-                pnl_display = f"{pnl_sign}${abs(daily_pnl):.0f}"
-            performance_label = f"📈 Performance {pnl_emoji}{pnl_display}"
+                perf_label = f"📈 {dot}{sign}${abs(daily_pnl):.0f}"
         
-        # Status button - show contextual info
-        status_label = "🛡 Health"
-        if has_active:
-            # Show position count when active
-            status_label = f"🛡 Health • {total_active} Active"
-        elif state:
-            # Show connection status when no positions
-            connection_status = state.get("connection_status", "unknown")
-            if connection_status == "connected":
-                status_label = "🛡 Health • Online"
-            elif connection_status == "disconnected":
-                status_label = "🛡 Health • Offline"
+        # System with status dot
+        sys_dot = "🟢" if agent_running else "🔴"
+        system_label = f"🎛️ System {sys_dot}"
         
-        # Market button
-        market_label = f"🌐 Market • {self.active_market}"
+        # Health with connection dot
+        health_dot = "🟢" if connection_ok else ("🔴" if state else "⚪")
+        health_label = f"🛡 Health {health_dot}"
 
-        # Bots button - show running status
-        # Use same source of truth as main status (state file) for consistency
-        bots_label = "🤖 Bots"
-        try:
-            # First check state file (same as main status display)
-            if state:
-                agent_running = state.get("running", False)
-                if agent_running:
-                    bots_label = "🤖 Bots • Running"
-                else:
-                    bots_label = "🤖 Bots • Stopped"
-            else:
-                # Fallback to process check if state file not available
-                sc = getattr(self, "service_controller", None)
-                if sc is not None:
-                    agent_status = sc.get_agent_status(market=self.active_market) or {}
-                    if agent_status.get("running"):
-                        bots_label = "🤖 Bots • Running"
-                    else:
-                        bots_label = "🤖 Bots • Stopped"
-        except Exception:
-            pass
-        
+        # ─────────────────────────────────────────────────────────────────
+        # Compact 2-column layout (mobile-first)
+        # ─────────────────────────────────────────────────────────────────
         return [
-            # Row 0: Market selector
+            # Row 1: Primary actions
             [
-                InlineKeyboardButton(market_label, callback_data="menu:markets"),
+                InlineKeyboardButton(trades_label, callback_data="menu:signals"),
+                InlineKeyboardButton(perf_label, callback_data="menu:performance"),
             ],
-            # Row 1: Signals + Performance
+            # Row 2: System & Health
             [
-                InlineKeyboardButton(signals_label, callback_data="menu:signals"),
-                InlineKeyboardButton(performance_label, callback_data="menu:performance"),
+                InlineKeyboardButton(system_label, callback_data="menu:system"),
+                InlineKeyboardButton(health_label, callback_data="menu:status"),
             ],
-            # Row 2: Health + System
+            # Row 3: Markets & Bots
             [
-                InlineKeyboardButton(status_label, callback_data="menu:status"),
-                InlineKeyboardButton("🎛️ System", callback_data="menu:system"),
+                InlineKeyboardButton(f"🌐 {self.active_market}", callback_data="menu:markets"),
+                InlineKeyboardButton("🤖 Bots", callback_data="menu:bots"),
             ],
-            # Row 3: Quick actions (avoid icon-only buttons)
+            # Row 4: Refresh (regenerates 12h chart) + Settings + Help
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data="action:refresh_dashboard"),
-                InlineKeyboardButton("📊 Chart", callback_data="action:toggle_chart"),
-            ],
-            # Row 4: Bots
-            [
-                InlineKeyboardButton(bots_label, callback_data="menu:bots"),
-            ],
-            # Row 5: Settings + Help
-            [
-                InlineKeyboardButton("⚙️ Settings", callback_data="menu:settings"),
-                InlineKeyboardButton("💡 Help", callback_data="menu:help"),
+                InlineKeyboardButton("⚙️", callback_data="menu:settings"),
+                InlineKeyboardButton("❓", callback_data="menu:help"),
             ],
         ]
 
     async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Send the comprehensive status dashboard with menu buttons."""
+        """Send visual dashboard with 12h chart and compact navigation menu."""
         if not update.message:
             return
         if not await self._check_authorized(update):
             await update.message.reply_text("❌ Unauthorized access")
             return
-        logger.info("Received /start or /menu command - showing status dashboard")
+        logger.info("Received /start or /menu command - sending visual dashboard")
         
-        # Get comprehensive status
-        state = self._read_state()
-        keyboard = self._get_main_menu_keyboard()
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        if state:
-            # Show comprehensive status dashboard
-            try:
-                await self._send_status_dashboard(update.message, reply_markup)
-                return
-            except Exception as e:
-                logger.error(f"Error sending status dashboard: {e}", exc_info=True)
-                # Fallback to simple menu
-                text = "🎯 Pearl Algo Bot's\n\nSelect an option:"
-        else:
-            # No state available, show simple menu
-            text = "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:"
-        await update.message.reply_text(text, reply_markup=reply_markup)
+        # Always send visual dashboard with chart
+        await self._send_visual_dashboard(update.message)
 
     async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle plain text messages for AI patch wizard."""
@@ -579,31 +579,115 @@ class TelegramCommandHandler:
         # Parse and route callback using canonical format
         callback_type, action, param = parse_callback(callback_data)
         
-        if callback_type == "menu":
-            # Handle "menu:main" as return to main menu
-            if action == "main":
+        # IMPORTANT: If current message is a photo (chart dashboard), we need to
+        # convert to text message before showing submenus. Delete photo and track
+        # that we need to send a new message instead of editing.
+        message = query.message
+        is_photo_message = message and message.photo
+        
+        if is_photo_message and callback_type in ("menu", "action", "confirm") and action != "main":
+            # Delete photo message so submenus can use text editing
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            # Create a fake query that will send new messages instead of editing
+            query._from_photo = True  # Mark that we came from a photo
+        
+        try:
+            if callback_type == "menu":
+                # Handle "menu:main" as return to main menu
+                if action == "main":
+                    await self._show_main_menu(query)
+                else:
+                    await self._handle_menu_action(query, action)
+            elif callback_type == "back":
+                # Return to main menu
                 await self._show_main_menu(query)
+            elif callback_type == "signal_detail":
+                # Signal detail drill-down (action = signal_id_prefix)
+                await self._handle_signal_detail(query, action)
+            elif callback_type == "patch":
+                await self._handle_patch_callback(query, callback_data)
+            elif callback_type == "aiops":
+                await self._handle_ai_ops_callback(query, callback_data)
+            elif callback_type == "confirm":
+                # Confirmations are handled inside _handle_action
+                await self._handle_action(query, callback_data)
+            elif callback_type == "action":
+                # Route to action handler with canonical format
+                await self._handle_action(query, callback_data)
             else:
-                await self._handle_menu_action(query, action)
-        elif callback_type == "back":
-            # Return to main menu
-            await self._show_main_menu(query)
-        elif callback_type == "signal_detail":
-            # Signal detail drill-down (action = signal_id_prefix)
-            await self._handle_signal_detail(query, action)
-        elif callback_type == "patch":
-            await self._handle_patch_callback(query, callback_data)
-        elif callback_type == "aiops":
-            await self._handle_ai_ops_callback(query, callback_data)
-        elif callback_type == "confirm":
-            # Confirmations are handled inside _handle_action
-            await self._handle_action(query, callback_data)
-        elif callback_type == "action":
-            # Route to action handler with canonical format
-            await self._handle_action(query, callback_data)
-        else:
-            # Unrecognized format - try legacy action handling
-            await self._handle_action(query, callback_data)
+                # Unrecognized format - try legacy action handling
+                await self._handle_action(query, callback_data)
+        except Exception as e:
+            # Handle "no text in message" error by sending new message
+            err_str = str(e).lower()
+            if "no text in the message" in err_str or "message to edit not found" in err_str:
+                logger.warning(f"Edit failed (likely photo message), sending new message: {e}")
+                try:
+                    keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                    await message.chat.send_message(
+                        f"⚠️ Navigation error. Tap Back to return to menu.",
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                except Exception:
+                    pass
+            else:
+                logger.error(f"Callback error: {e}", exc_info=True)
+                raise
+
+    async def _safe_edit_or_send(
+        self,
+        query: CallbackQuery,
+        text: str,
+        reply_markup: InlineKeyboardMarkup = None,
+        parse_mode: str = "Markdown"
+    ) -> None:
+        """Safely edit message text or send new message if current is photo/deleted.
+        
+        This handles the case where the main menu shows a chart (photo message)
+        and buttons need to navigate to text-only screens.
+        """
+        message = query.message
+        
+        # Check if message was already deleted (from photo handling in callback)
+        from_photo = getattr(query, "_from_photo", False)
+        
+        if from_photo:
+            # Message was deleted, send new
+            try:
+                await message.chat.send_message(
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+            except Exception as send_err:
+                logger.error(f"Failed to send message after photo delete: {send_err}")
+            return
+        
+        try:
+            # Try to edit text first (works for text messages)
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        except Exception as e:
+            err_str = str(e).lower()
+            # If edit fails (e.g., photo message or deleted), send new
+            if "no text in the message" in err_str or "message to edit not found" in err_str or "message is not modified" in err_str:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                try:
+                    await message.chat.send_message(
+                        text=text,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode
+                    )
+                except Exception as send_err:
+                    logger.error(f"Failed to send replacement message: {send_err}")
+            else:
+                # Re-raise if it's a different error
+                raise
 
     async def _handle_menu_action(self, query: CallbackQuery, action: str) -> None:
         """Handle menu button actions."""
@@ -624,25 +708,12 @@ class TelegramCommandHandler:
         elif action == "help":
             await self._show_help(query)
         else:
-            await query.edit_message_text(f"Unknown action: {action}")
+            await self._safe_edit_or_send(query, f"Unknown action: {action}")
 
     async def _show_main_menu(self, query: CallbackQuery) -> None:
-        """Show the comprehensive status dashboard with menu buttons."""
-        keyboard = self._get_main_menu_keyboard()
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        state = self._read_state()
-        if state:
-            try:
-                message_text = await self._build_status_dashboard_message(state)
-                await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
-            except Exception as e:
-                logger.error(f"Error showing main menu status: {e}", exc_info=True)
-                text = "🎯 Pearl Algo Bot's\n\nSelect an option:"
-                await query.edit_message_text(text, reply_markup=reply_markup)
-        else:
-            text = "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:"
-            await query.edit_message_text(text, reply_markup=reply_markup)
+        """Show visual dashboard with 12h chart - the primary menu view."""
+        # Visual dashboard = chart + status text + compact nav (always)
+        await self._show_main_menu_with_chart(query)
 
     async def _show_markets_menu(self, query: CallbackQuery) -> None:
         """Show market selector menu with per-market status overview."""
@@ -708,7 +779,7 @@ class TelegramCommandHandler:
             label = f"✅ {market}" if market == self.active_market else market
             keyboard.append([InlineKeyboardButton(label, callback_data=f"action:set_market:{market}")])
         keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
-        await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await self._safe_edit_or_send(query, "\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     async def _show_main_menu_with_chart(self, query: CallbackQuery) -> None:
         """Show the main menu with chart displayed above the menu text."""
@@ -842,6 +913,51 @@ class TelegramCommandHandler:
             logger.error(f"Error toggling chart: {e}", exc_info=True)
             await self._show_main_menu(query)
 
+    async def _send_visual_dashboard(self, message_obj) -> None:
+        """Send visual dashboard with 12h chart to a new message (for /menu command).
+        
+        This is the primary dashboard view - always includes chart when available.
+        Used for initial messages (not callback edits).
+        """
+        keyboard = self._get_main_menu_keyboard()
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        state = self._read_state()
+        if not state:
+            await message_obj.reply_text(
+                "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:",
+                reply_markup=reply_markup
+            )
+            return
+        
+        try:
+            message_text = await self._build_status_dashboard_message(state)
+            chart_path = await self._generate_or_get_chart(state)
+            
+            if chart_path and chart_path.exists():
+                # Send photo with caption
+                with open(chart_path, 'rb') as f:
+                    await message_obj.reply_photo(
+                        photo=f,
+                        caption=message_text,
+                        reply_markup=reply_markup,
+                        parse_mode="Markdown"
+                    )
+            else:
+                # Fallback to text-only if chart unavailable
+                await message_obj.reply_text(
+                    message_text,
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
+        except Exception as e:
+            logger.error(f"Error sending visual dashboard: {e}", exc_info=True)
+            # Fallback to simple menu
+            await message_obj.reply_text(
+                "🎯 Pearl Algo Bot's\n\nSelect an option:",
+                reply_markup=reply_markup
+            )
+
     async def _generate_or_get_chart(self, state: dict) -> Optional[Path]:
         """Generate chart on-demand using IBKR data."""
         import asyncio
@@ -864,11 +980,12 @@ class TelegramCommandHandler:
             symbol = state.get("symbol") or "MNQ"
             
             # Read chart settings from config.yaml (same source as the service chart push)
+            # Default: 12h lookback for comprehensive visual dashboard
             svc_cfg = load_service_config()
             service_cfg = (svc_cfg.get("service", {}) or {}) if isinstance(svc_cfg, dict) else {}
             min_lookback_hours = 6.0
             max_lookback_hours = 24.0
-            lookback_hours = float(service_cfg.get("dashboard_chart_lookback_hours", 8) or 8)
+            lookback_hours = float(service_cfg.get("dashboard_chart_lookback_hours", 12) or 12)
             if lookback_hours < min_lookback_hours:
                 lookback_hours = min_lookback_hours
             if lookback_hours > max_lookback_hours:
@@ -1037,12 +1154,279 @@ class TelegramCommandHandler:
             ],
             [
                 InlineKeyboardButton(connection_label, callback_data="action:connection_status"),
-                InlineKeyboardButton("💾 Data Quality", callback_data="action:data_quality"),
+                InlineKeyboardButton("🛡 Data Quality", callback_data="action:data_quality"),
             ],
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(f"🛡 Health & Monitoring{preview}\nSelect an option:", reply_markup=reply_markup)
+
+    async def _show_ui_doctor(self, query: CallbackQuery) -> None:
+        """Self-serve Telegram UI diagnostics and safe test sends."""
+        from datetime import datetime, timezone
+
+        prefs = TelegramPrefs(state_dir=self.state_dir)
+        state = None
+        try:
+            state = self._read_state()
+        except Exception:
+            state = None
+        if not isinstance(state, dict):
+            state = {}
+
+        # Prefs (operator-facing)
+        auto_chart = bool(prefs.get("auto_chart_on_signal", False))
+        interval_notifications = bool(prefs.get("interval_notifications", True))
+        expanded_details = bool(prefs.get("signal_detail_expanded", False))
+        pinned_dashboard = bool(prefs.get("dashboard_edit_in_place", False))
+        snooze_on = bool(getattr(prefs, "snooze_noncritical_alerts", False))
+        pinned_id = prefs.get("dashboard_message_id")
+
+        # Last dashboard time (persisted by notifier)
+        last_dash = prefs.get("last_dashboard_sent_at")
+        last_dash_age = format_time_ago(str(last_dash)) if last_dash else ""
+
+        # Data freshness (from latest_bar)
+        latest_bar = state.get("latest_bar") if isinstance(state.get("latest_bar"), dict) else {}
+        data_level = (latest_bar or {}).get("_data_level")
+        data_age_min = None
+        try:
+            ts = (latest_bar or {}).get("timestamp")
+            if ts:
+                dt = parse_utc_timestamp(str(ts))
+                if dt and dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if dt:
+                    data_age_min = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
+        except Exception:
+            data_age_min = None
+
+        # Service status (best-effort)
+        agent_running = False
+        try:
+            agent_running = bool(self._is_agent_process_running())
+        except Exception:
+            agent_running = False
+
+        gateway_status = None
+        try:
+            sc = getattr(self, "service_controller", None)
+            fn = getattr(sc, "get_gateway_status", None)
+            if callable(fn):
+                gateway_status = fn() or {}
+        except Exception:
+            gateway_status = None
+
+        symbol = str(state.get("symbol") or "MNQ")
+        market = str(state.get("market") or self.active_market)
+
+        lines: list[str] = []
+        lines.append("🩺 *UI Doctor*")
+        lines.append("")
+        lines.append(f"🌐 Market: *{safe_label(market)}* | 📈 Symbol: *{safe_label(symbol)}*")
+        lines.append(f"🤖 Agent: {'🟢 RUNNING' if agent_running else '🔴 STOPPED'}")
+        if isinstance(gateway_status, dict) and gateway_status:
+            proc = bool(gateway_status.get("process_running", False))
+            port = bool(gateway_status.get("port_listening", False))
+            gw_ok = proc and port
+            lines.append(f"🔌 Gateway: {'🟢 Online' if gw_ok else '🔴 Offline'} (proc={proc}, port={port})")
+        else:
+            lines.append("🔌 Gateway: ⚪ Unknown")
+
+        # Freshness line
+        if data_age_min is None:
+            lines.append("📡 Data: ⚪ Unknown")
+        else:
+            lvl = safe_label(str(data_level or "unknown"))
+            lines.append(f"📡 Data: *{lvl}* • Age: *{data_age_min:.1f}m*")
+
+        # Prefs summary
+        def _onoff(v: bool) -> str:
+            return "🟢 ON" if v else "🔴 OFF"
+
+        lines.append("")
+        lines.append("*Prefs:*")
+        lines.append(f"- 🔘 Menu navigation: 🟢 ON (always)")
+        lines.append(f"- 📌 Pinned dashboard: {_onoff(pinned_dashboard)}")
+        lines.append(f"- 🕐 Interval dashboards: {_onoff(interval_notifications)}")
+        lines.append(f"- 📈 Auto-chart on signal: {_onoff(auto_chart)}")
+        lines.append(f"- 🔍 Expanded details: {_onoff(expanded_details)}")
+        if snooze_on:
+            until = prefs.get("snooze_until")
+            until_age = format_time_ago(str(until)) if until else ""
+            lines.append(f"- 🔕 Snooze (non-critical): 🟢 ON {('(' + until_age + ')') if until_age else ''}".rstrip())
+        else:
+            lines.append(f"- 🔕 Snooze (non-critical): {_onoff(False)}")
+
+        if last_dash:
+            lines.append(f"- 🧾 Last dashboard: {safe_label(str(last_dash_age or last_dash))}")
+        else:
+            lines.append("- 🧾 Last dashboard: N/A")
+        if pinned_id:
+            try:
+                lines.append(f"- 🆔 Pinned msg id: `{int(pinned_id)}`")
+            except Exception:
+                lines.append("- 🆔 Pinned msg id: (invalid)")
+
+        lines.append("")
+        lines.append("*Safe tests (UI-only):*")
+
+        keyboard = [
+            [
+                InlineKeyboardButton("🧪 Test Dashboard", callback_data="action:ui_doctor:test_dashboard"),
+                InlineKeyboardButton("⚠️ Test Risk Alert", callback_data="action:ui_doctor:test_risk"),
+            ],
+            [
+                InlineKeyboardButton("🧪 Test Signal", callback_data="action:ui_doctor:test_signal"),
+                InlineKeyboardButton("🔕 Toggle Snooze", callback_data="action:ui_doctor:toggle_snooze"),
+            ],
+            [
+                InlineKeyboardButton("📌 Toggle Pinned", callback_data="action:ui_doctor:toggle_pinned"),
+                InlineKeyboardButton("🧹 Reset Pinned ID", callback_data="action:ui_doctor:reset_pinned"),
+            ],
+            [
+                InlineKeyboardButton("🛡 Back to Health", callback_data="menu:status"),
+                InlineKeyboardButton("🏠 Menu", callback_data="back"),
+            ],
+        ]
+        await query.edit_message_text(
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+
+    async def _handle_ui_doctor_action(self, query: CallbackQuery, action: str) -> None:
+        """Handle UI Doctor actions (test sends + preference toggles)."""
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+        prefs = TelegramPrefs(state_dir=self.state_dir)
+
+        # Local helper to build a notifier instance (UI-only sends).
+        def _build_notifier():
+            try:
+                from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
+                return MarketAgentTelegramNotifier(
+                    bot_token=self.bot_token,
+                    chat_id=str(self.chat_id),
+                    state_dir=Path(self.state_dir),
+                    enabled=True,
+                )
+            except Exception:
+                return None
+
+        if action == "toggle_snooze":
+            try:
+                if bool(getattr(prefs, "snooze_noncritical_alerts", False)):
+                    prefs.disable_snooze()
+                else:
+                    prefs.enable_snooze(hours=1.0)
+            except Exception:
+                pass
+            await self._show_ui_doctor(query)
+            return
+
+        if action == "toggle_pinned":
+            try:
+                cur = bool(prefs.get("dashboard_edit_in_place", False))
+                prefs.set("dashboard_edit_in_place", not cur)
+                prefs.set("dashboard_message_id", None)
+            except Exception:
+                pass
+            await self._show_ui_doctor(query)
+            return
+
+        if action == "reset_pinned":
+            try:
+                prefs.set("dashboard_message_id", None)
+            except Exception:
+                pass
+            await self._show_ui_doctor(query)
+            return
+
+        notifier = _build_notifier()
+        if notifier is None:
+            await query.edit_message_text(
+                "❌ UI Doctor could not initialize Telegram notifier.\n\nCheck TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛡 Back to Health", callback_data="menu:status")]]),
+            )
+            return
+
+        # Real state (if available) for tests.
+        try:
+            state = self._read_state()
+        except Exception:
+            state = None
+        if not isinstance(state, dict):
+            state = {}
+
+        now = datetime.now(timezone.utc)
+
+        if action == "test_dashboard":
+            # Build a safe, synthetic dashboard payload (no trading side effects).
+            latest_bar = state.get("latest_bar") if isinstance(state.get("latest_bar"), dict) else {}
+            latest_price = state.get("latest_price")
+            if latest_price is None and isinstance(latest_bar, dict):
+                latest_price = latest_bar.get("close")
+            status = {
+                "symbol": state.get("symbol", "MNQ"),
+                "current_time": now,
+                "latest_price": latest_price,
+                "latest_bar": latest_bar or {"timestamp": now.isoformat(), "close": latest_price or 0.0, "_data_level": "unknown"},
+                "cycle_count": int(state.get("cycle_count", 0) or 0),
+                "cycle_count_session": state.get("cycle_count_session"),
+                "signal_count": int(state.get("signal_count", 0) or 0),
+                "signals_sent": int(state.get("signals_sent", 0) or 0),
+                "signals_send_failures": int(state.get("signals_send_failures", 0) or 0),
+                "error_count": int(state.get("error_count", 0) or 0),
+                "buffer_size": int(state.get("buffer_size", 0) or 0),
+                "buffer_size_target": state.get("buffer_size_target"),
+                "paused": bool(state.get("paused", False)),
+                "pause_reason": state.get("pause_reason"),
+                "strategy_session_open": state.get("strategy_session_open"),
+                "futures_market_open": state.get("futures_market_open"),
+                "execution": state.get("execution") or {},
+                "active_trades_count": int(state.get("active_trades_count", 0) or 0),
+                "active_trades_unrealized_pnl": state.get("active_trades_unrealized_pnl"),
+                "latest_price_source": state.get("latest_price_source"),
+                "quiet_reason": state.get("quiet_reason") or "NoOpportunity",
+                # Unique marker to avoid dedupe and make it obvious this is a test.
+                "signal_diagnostics": f"UI Doctor test dashboard @ {now.strftime('%H:%M:%S')} UTC",
+            }
+            await notifier.send_dashboard(status)
+            await self._show_ui_doctor(query)
+            return
+
+        if action == "test_risk":
+            await notifier.send_data_quality_alert(
+                alert_type="data_gap",
+                message=f"🧪 UI Doctor test risk alert ({now.strftime('%H:%M:%S')} UTC)",
+                details={"severity": "low", "suggestion": "Tap Snooze 1h to suppress non-critical alerts"},
+            )
+            await self._show_ui_doctor(query)
+            return
+
+        if action == "test_signal":
+            test_signal = {
+                "_is_test": True,
+                "signal_id": f"ui_doctor_test_{int(now.timestamp())}",
+                "symbol": state.get("symbol", "MNQ") or "MNQ",
+                "type": "ui_doctor_test",
+                "direction": "long",
+                "status": "generated",
+                "entry_price": float(state.get("latest_price") or 25000.0),
+                "stop_loss": float(state.get("latest_price") or 25000.0) - 20.0,
+                "take_profit": float(state.get("latest_price") or 25000.0) + 40.0,
+                "confidence": 0.70,
+                "timestamp": now.isoformat(),
+                "reason": "test ui doctor",
+            }
+            await notifier.send_signal(test_signal, buffer_data=None)
+            await self._show_ui_doctor(query)
+            return
+
+        # Unknown sub-action → just re-render.
+        await self._show_ui_doctor(query)
 
     async def _show_signals_menu(self, query: CallbackQuery) -> None:
         """Show signals & trades submenu with rich context and smart suggestions."""
@@ -1263,7 +1647,7 @@ class TelegramCommandHandler:
             await query.edit_message_text("💎 Performance\n\nSelect an option:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def _show_bots_menu(self, query: CallbackQuery) -> None:
-        """Show bot hub menu (trading-bot-first) with status and advanced tools."""
+        """Show bot hub menu with trading mode picker and service status."""
         agent_status = {"running": False, "message": "Unknown"}
         gateway_status = {"process_running": False, "port_listening": False}
 
@@ -1278,89 +1662,76 @@ class TelegramCommandHandler:
         running = bool(agent_status.get("running"))
         gateway_ready = bool(gateway_status.get("process_running")) and bool(gateway_status.get("port_listening"))
         
-        # Get additional context
+        # Get trading mode from state
         state = self._read_state()
-        connection_info = ""
-        trading_info = ""
+        trading_bot_enabled = False
+        trading_bot_selected = "pearl_bot_auto"
         
         if state:
-            # Connection status
-            connection_status = state.get("connection_status", "unknown")
-            if connection_status == "connected":
-                connection_info = "🟢 Connected to market data"
-            else:
-                connection_info = "🔴 Not connected to market"
-            
-            # Trading activity
-            positions = (state.get("execution", {}).get("positions", 0) or 0)
-            active_trades = state.get("active_trades_count", 0) or 0
-            daily_signals = state.get("daily_signals", 0) or 0
-            
-            if positions + active_trades > 0:
-                trading_info = f"📊 {positions + active_trades} active position(s), {daily_signals} signals today"
-            elif daily_signals > 0:
-                trading_info = f"📊 {daily_signals} signal(s) generated today"
-            else:
-                trading_info = "📊 No signals today yet"
+            tb_state = state.get("trading_bot") or {}
+            trading_bot_enabled = bool(tb_state.get("enabled", False))
+            trading_bot_selected = tb_state.get("selected") or "pearl_bot_auto"
+        
+        # Determine current mode
+        if trading_bot_enabled:
+            mode_label = "🟢 Pearl Bot Auto"
+            mode_desc = "Active trading enabled"
+        else:
+            mode_label = "🔴 Scanner Only"
+            mode_desc = "Scan signals, no execution"
         
         # Build rich status display
-        lines = ["🤖 *Bots*", f"*Market:* {self.active_market}", ""]
+        lines = ["🤖 *Trading Bots*", f"*Market:* {self.active_market}", ""]
+        
+        # Trading Mode Section
+        lines.append("━━━━━ *Trading Mode* ━━━━━")
+        lines.append(f"Current: *{mode_label}*")
+        lines.append(f"_{mode_desc}_")
+        lines.append("")
         
         # Service Status
-        lines.append("*Service Status:*")
+        lines.append("━━━━━ *Services* ━━━━━")
         agent_emoji = "🟢" if running else "🔴"
-        agent_line = "RUNNING" if running else "STOPPED"
-        lines.append(f"{agent_emoji} Agent: {agent_line}")
-        
+        lines.append(f"🤖 Agent: {agent_emoji} {'RUNNING' if running else 'STOPPED'}")
         gateway_emoji = "🟢" if gateway_ready else "🔴"
-        gateway_line = "READY" if gateway_ready else "NOT READY"
-        lines.append(f"{gateway_emoji} Gateway: {gateway_line}")
+        lines.append(f"🔌 Gateway: {gateway_emoji} {'ONLINE' if gateway_ready else 'OFFLINE'}")
         lines.append("")
         
-        # Diagnostics
-        lines.append("*Diagnostics:*")
-        if connection_info:
-            lines.append(f"• {connection_info}")
-        if trading_info:
-            lines.append(f"• {trading_info}")
-        lines.append("")
-        
-        # Health Check & Recommendations
-        health_status = []
-        recommendations = []
-        
-        if running and gateway_ready and state and state.get("connection_status") == "connected":
-            health_status.append("✅ *System Health:* All systems operational")
-        else:
-            health_status.append("⚠️ *System Health:* Issues detected")
-            
-            if not running:
-                recommendations.append("💡 Start the agent in 🎛️ *System* to begin live trading")
+        # Startup Sequence Guidance
+        if not gateway_ready or not running:
+            lines.append("━━━━━ *Quick Start* ━━━━━")
             if not gateway_ready:
-                recommendations.append("💡 Check gateway status in 🎛️ *System*")
-            if state and state.get("connection_status") != "connected":
-                recommendations.append("💡 Verify market data connection (Status menu)")
-        
-        if health_status:
-            lines.extend(health_status)
-        
-        if recommendations:
+                lines.append("1️⃣ Start Gateway first")
+            if not running:
+                step = "2️⃣" if not gateway_ready else "1️⃣"
+                lines.append(f"{step} Then start Agent")
+            lines.append("_Use 🎛️ System for controls_")
             lines.append("")
-            lines.extend(recommendations)
         
-        lines.append("")
-        lines.append("*Bot Tools:*")
-        lines.append("• 🧪 Backtest is an advanced tool (runs offline on saved data)")
+        # Mode buttons
+        if trading_bot_enabled:
+            mode_btn_label = "🔴 Switch to Scanner"
+            mode_btn_callback = "action:set_trading_mode:scanner"
+        else:
+            mode_btn_label = "🟢 Enable Pearl Bot"
+            mode_btn_callback = "action:set_trading_mode:pearl_bot_auto"
 
         keyboard = [
+            # Row 1: Trading Mode Toggle
+            [InlineKeyboardButton(mode_btn_label, callback_data=mode_btn_callback)],
+            # Row 2: Quick Service Controls
             [
-                InlineKeyboardButton("🧪 Backtest (Advanced)", callback_data="strategy_review:backtest"),
+                InlineKeyboardButton("🎛️ System Controls", callback_data="menu:system"),
+            ],
+            # Row 3: Tools
+            [
+                InlineKeyboardButton("🧪 Backtest", callback_data="strategy_review:backtest"),
                 InlineKeyboardButton("📑 Reports", callback_data="strategy_review:reports"),
             ],
-            [InlineKeyboardButton("🎛️ System Controls", callback_data="menu:system")],
+            # Row 4: Navigation
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data="menu:bots"),
-                InlineKeyboardButton("🏠 Back to Menu", callback_data="back"),
+                InlineKeyboardButton("🏠 Back", callback_data="back"),
             ],
         ]
 
@@ -1391,20 +1762,50 @@ class TelegramCommandHandler:
             has_positions = positions_count > 0
             daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
         
+        # Check gateway status
+        gateway_running = False
+        gateway_port = False
+        try:
+            sc = getattr(self, "service_controller", None)
+            if sc:
+                gw_status = sc.get_gateway_status() or {}
+                gateway_running = bool(gw_status.get("process_running"))
+                gateway_port = bool(gw_status.get("port_listening"))
+        except Exception:
+            pass
+        
         # Build comprehensive context
         lines = ["🎛️ *System Control Panel*", ""]
         
-        # Current Status
-        lines.append("*System Status:*")
+        # Service Status Dashboard
+        lines.append("━━━━━ *Services* ━━━━━")
+        
+        # Gateway status
+        if gateway_running and gateway_port:
+            lines.append("🔌 Gateway: 🟢 ONLINE")
+        elif gateway_running:
+            lines.append("🔌 Gateway: 🟡 STARTING (no port)")
+        else:
+            lines.append("🔌 Gateway: 🔴 OFFLINE")
+        
+        # Agent status
         agent_emoji = "🟢" if agent_running else "🔴"
-        lines.append(f"{agent_emoji} Agent: {'Running' if agent_running else 'Stopped'}")
-        if has_positions:
-            lines.append(f"⚠️ Active Positions: {positions_count}")
+        lines.append(f"🤖 Agent: {agent_emoji} {'RUNNING' if agent_running else 'STOPPED'}")
+        
+        # Handler status (always running if you can see this)
+        lines.append("📡 Handler: 🟢 ONLINE")
+        lines.append("")
+        
+        # Positions & P&L (if any)
+        if has_positions or daily_pnl != 0:
+            lines.append("━━━━━ *Positions* ━━━━━")
+            if has_positions:
+                lines.append(f"📊 Open: {positions_count}")
             if daily_pnl != 0:
                 pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
                 pnl_sign = "+" if daily_pnl >= 0 else ""
-                lines.append(f"{pnl_emoji} Today's P&L: {pnl_sign}${abs(daily_pnl):.2f}")
-        lines.append("")
+                lines.append(f"{pnl_emoji} P&L: {pnl_sign}${abs(daily_pnl):.2f}")
+            lines.append("")
         
         # Risk Warnings
         warnings = []
@@ -1449,36 +1850,54 @@ class TelegramCommandHandler:
         if has_positions:
             emergency_label = f"🚨 Emergency Stop ({positions_count})"
         
+        # Check gateway status for dynamic labels
+        gateway_running = False
+        try:
+            sc = getattr(self, "service_controller", None)
+            if sc:
+                gw_status = sc.get_gateway_status() or {}
+                gateway_running = bool(gw_status.get("process_running")) and bool(gw_status.get("port_listening"))
+        except Exception:
+            pass
+        
+        gw_start_label = "🟢 Start Gateway" if not gateway_running else "🔌 Gateway Running"
+        gw_stop_label = "🔴 Stop Gateway" if gateway_running else "🔌 Gateway Stopped"
+        
         keyboard = [
-            # Row 1: Trading Agent Control
+            # Row 1: Agent Control
             [
                 InlineKeyboardButton(start_label, callback_data="action:start_agent"),
                 InlineKeyboardButton(stop_label, callback_data="action:stop_agent"),
             ],
-            # Row 2: Gateway Control
+            # Row 2: Gateway Start/Stop
             [
-                InlineKeyboardButton("🔌 Restart Gateway", callback_data="action:restart_gateway"),
-                InlineKeyboardButton("🔍 Gateway Status", callback_data="action:gateway_status"),
+                InlineKeyboardButton(gw_start_label, callback_data="action:start_gateway"),
+                InlineKeyboardButton(gw_stop_label, callback_data="action:stop_gateway"),
             ],
-            # Row 3: System Management
+            # Row 3: Gateway Status & Restart
+            [
+                InlineKeyboardButton("🔄 Restart Gateway", callback_data="action:restart_gateway"),
+                InlineKeyboardButton("🔍 Status", callback_data="action:gateway_status"),
+            ],
+            # Row 4: System Management
             [
                 InlineKeyboardButton("🔄 Reset Challenge", callback_data="action:reset_challenge"),
                 InlineKeyboardButton("🧹 Clear Cache", callback_data="action:clear_cache"),
             ],
-            # Row 4: Configuration & Logs
+            # Row 5: Configuration & Logs
             [
-                InlineKeyboardButton("⚙️ Configuration", callback_data="action:config"),
+                InlineKeyboardButton("⚙️ Config", callback_data="action:config"),
                 InlineKeyboardButton("📋 Logs", callback_data="action:logs"),
             ],
         ]
         
-        # Row 5: Emergency (only show if positions exist OR agent is running)
+        # Row 6: Emergency (only show if positions exist OR agent is running)
         if has_positions or agent_running:
             keyboard.append([
                 InlineKeyboardButton(emergency_label, callback_data="action:emergency_stop"),
             ])
         
-        # Row 6: Navigation
+        # Row 7: Navigation
         keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1490,8 +1909,8 @@ class TelegramCommandHandler:
         prefs = TelegramPrefs(state_dir=self.state_dir)
         auto_chart = bool(prefs.get("auto_chart_on_signal", False))
         interval_notifications = bool(prefs.get("interval_notifications", True))
-        dashboard_buttons = bool(prefs.get("dashboard_buttons", False))
         signal_detail_expanded = bool(prefs.get("signal_detail_expanded", False))
+        pinned_dashboard = bool(prefs.get("dashboard_edit_in_place", False))
         snooze_on = bool(getattr(prefs, "snooze_noncritical_alerts", False))
         snooze_until_str: str | None = None
         if snooze_on:
@@ -1518,8 +1937,9 @@ class TelegramCommandHandler:
         lines.append("*Current Settings:*")
         lines.append(f"📈 Auto-Chart: {_onoff(auto_chart)}")
         lines.append(f"🕐 Interval Notifications: {_onoff(interval_notifications)}")
-        lines.append(f"🔘 Dashboard Buttons: {_onoff(dashboard_buttons)}")
         lines.append(f"🔍 Signal Details: {_onoff(signal_detail_expanded)}")
+        lines.append("🔘 Menu navigation: 🟢 ON (always)")
+        lines.append(f"📌 Pinned Dashboard: {_onoff(pinned_dashboard)}")
         if snooze_on and snooze_until_str:
             lines.append(f"🔕 Snooze (non-critical): 🟢 ON until {snooze_until_str}")
         else:
@@ -1530,8 +1950,8 @@ class TelegramCommandHandler:
         lines.append("*What These Do:*")
         lines.append("📈 *Auto-Chart:* Send chart image with each signal")
         lines.append("🕐 *Interval:* Periodic dashboards (chart + status)")
-        lines.append("🔘 *Buttons:* Show action buttons in notifications")
         lines.append("🔍 *Details:* Show full technical details in signals")
+        lines.append("📌 *Pinned:* Keep one dashboard message updated (reduces chat spam)")
         lines.append("🔕 *Snooze:* Mute non-critical risk warnings (1h)")
         lines.append("")
         
@@ -1543,6 +1963,8 @@ class TelegramCommandHandler:
             recommendations.append("💡 *Notice:* Interval notifications are off - you'll only get signal alerts")
         if snooze_on:
             recommendations.append("ℹ️ *Snooze:* Non-critical alerts are muted")
+        if pinned_dashboard:
+            recommendations.append("ℹ️ *Pinned:* Dashboard updates will edit one message")
         if auto_chart and interval_notifications:
             recommendations.append("✅ *Optimal:* Recommended settings enabled")
         
@@ -1565,12 +1987,12 @@ class TelegramCommandHandler:
             ],
             [
                 InlineKeyboardButton(
-                    f"🔘 Buttons: {_onoff(dashboard_buttons)}",
-                    callback_data="action:toggle_pref:dashboard_buttons",
-                ),
-                InlineKeyboardButton(
                     f"🔍 Details: {_onoff(signal_detail_expanded)}",
                     callback_data="action:toggle_pref:signal_detail_expanded",
+                ),
+                InlineKeyboardButton(
+                    f"📌 Pinned: {_onoff(pinned_dashboard)}",
+                    callback_data="action:toggle_pref:dashboard_edit_in_place",
                 ),
             ],
             [
@@ -1969,7 +2391,7 @@ class TelegramCommandHandler:
             "*Menu Structure:*\n"
             "⚡ Signals & Trades - View and manage trading activity\n"
             "💎 Performance - Performance metrics and reports\n"
-            "🛰️ Health - System health and connection status\n"
+            "🛡 Health - System health and connection status\n"
             "🎛️ System Control - Start/stop services and emergency controls\n"
             "⚙️ Settings - Charts + notification preferences\n"
             "🤖 Bots - trading bot controls, backtests, reports\n\n"
@@ -2008,6 +2430,21 @@ class TelegramCommandHandler:
                         await self._show_settings_menu(query)
                         return
 
+                    # Operator policy: navigation buttons are always on.
+                    if pref_key == "dashboard_buttons":
+                        prefs.set("dashboard_buttons", True)
+                        await self._show_settings_menu(query)
+                        return
+
+                    # Pinned dashboards: when toggling, reset the stored message_id so the
+                    # next dashboard creates (or stops using) a pinned message cleanly.
+                    if pref_key == "dashboard_edit_in_place":
+                        cur = bool(prefs.get(pref_key, False))
+                        prefs.set(pref_key, not cur)
+                        prefs.set("dashboard_message_id", None)
+                        await self._show_settings_menu(query)
+                        return
+
                     current = prefs.get(pref_key)
                     if isinstance(current, bool):
                         prefs.set(pref_key, not current)
@@ -2027,6 +2464,9 @@ class TelegramCommandHandler:
                 await self._handle_connection_status(query, reply_markup)
             elif action_type == "data_quality":
                 await self._handle_data_quality(query, reply_markup)
+            elif action_type.startswith("ui_doctor"):
+                # UI Doctor removed from menus; keep old buttons from breaking.
+                await self._show_status_menu(query)
             elif action_type == "recent_signals":
                 await self._handle_recent_signals(query, reply_markup)
             elif action_type == "active_trades":
@@ -2089,12 +2529,49 @@ class TelegramCommandHandler:
                     [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            elif action_type == "start_gateway":
+                keyboard = [
+                    [InlineKeyboardButton("✅ Confirm Start", callback_data="confirm:start_gateway")],
+                    [InlineKeyboardButton("❌ Cancel", callback_data="menu:system")],
+                ]
+                await query.edit_message_text(
+                    "🟢 *Start IBKR Gateway*\n\n"
+                    "This will start the IBKR Gateway service.\n\n"
+                    "⏱️ Startup takes ~30-60 seconds.\n\n"
+                    "Are you sure?",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+            elif action_type == "stop_gateway":
+                keyboard = [
+                    [InlineKeyboardButton("✅ Confirm Stop", callback_data="confirm:stop_gateway")],
+                    [InlineKeyboardButton("❌ Cancel", callback_data="menu:system")],
+                ]
+                await query.edit_message_text(
+                    "🔴 *Stop IBKR Gateway*\n\n"
+                    "⚠️ *WARNING:* This will disconnect from IBKR.\n"
+                    "• Chart generation will fail\n"
+                    "• Trading will be disabled\n\n"
+                    "Are you sure?",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
             elif action_type == "restart_gateway":
                 keyboard = [
                     [InlineKeyboardButton("✅ Confirm Restart", callback_data="confirm:restart_gateway")],
-                    [InlineKeyboardButton("❌ Cancel", callback_data="back")],
+                    [InlineKeyboardButton("❌ Cancel", callback_data="menu:system")],
                 ]
-                await query.edit_message_text("🔌 Restart Gateway\n\n⚠️ This will restart the IBKR Gateway.\n\nAre you sure?", reply_markup=InlineKeyboardMarkup(keyboard))
+                await query.edit_message_text(
+                    "🔄 *Restart IBKR Gateway*\n\n"
+                    "⚠️ This will restart the IBKR Gateway.\n"
+                    "⏱️ Takes ~60 seconds.\n\n"
+                    "Are you sure?",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown"
+                )
+            elif action_type.startswith("set_trading_mode:"):
+                mode = action_type.split(":", 1)[1]
+                await self._handle_set_trading_mode(query, mode)
             elif action_type == "config":
                 await self._handle_config_view(query, reply_markup)
             elif action_type == "logs":
@@ -2259,17 +2736,15 @@ class TelegramCommandHandler:
             elif action_type == "export_performance":
                 await self._handle_export_performance(query)
             elif action_type == "refresh_dashboard":
-                # Refresh the main dashboard
-                # Check if chart is currently showing (message has photo)
+                # Refresh visual dashboard with fresh 12h chart
+                # Delete cached chart to force regeneration
                 try:
-                    message = query.message
-                    if message and message.photo:
-                        # Chart is showing, refresh it too
-                        await self._show_main_menu_with_chart(query)
-                    else:
-                        await self._show_main_menu(query)
+                    cached_chart = self.exports_dir / "dashboard_latest.png"
+                    if cached_chart.exists():
+                        cached_chart.unlink()
                 except Exception:
-                    await self._show_main_menu(query)
+                    pass
+                await self._show_main_menu_with_chart(query)
             elif action_type == "toggle_chart":
                 # Toggle chart display
                 await self._toggle_chart_display(query)
@@ -2322,9 +2797,57 @@ class TelegramCommandHandler:
                     [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            elif confirm_action == "start_gateway":
+                sc = getattr(self, "service_controller", None)
+                if sc is None:
+                    text = "❌ Service controller not available."
+                else:
+                    await query.edit_message_text("🟢 Starting IBKR Gateway...\n\n⏱️ This may take 30-60 seconds...", parse_mode="Markdown")
+                    result = await sc.start_gateway()
+                    text = result.get("message", "Started gateway.")
+                    details = result.get("details")
+                    if details:
+                        text = f"{text}\n\n{details}"
+
+                keyboard = [
+                    [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
+                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                ]
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            elif confirm_action == "stop_gateway":
+                sc = getattr(self, "service_controller", None)
+                if sc is None:
+                    text = "❌ Service controller not available."
+                else:
+                    await query.edit_message_text("🔴 Stopping IBKR Gateway...", parse_mode="Markdown")
+                    result = await sc.stop_gateway()
+                    text = result.get("message", "Stopped gateway.")
+                    details = result.get("details")
+                    if details:
+                        text = f"{text}\n\n{details}"
+
+                keyboard = [
+                    [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
+                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                ]
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             elif confirm_action == "restart_gateway":
-                # TODO: Implement actual gateway restart
-                await query.edit_message_text("🔌 Restarting IBKR Gateway...\n\nPlease check status.", reply_markup=reply_markup)
+                sc = getattr(self, "service_controller", None)
+                if sc is None:
+                    text = "❌ Service controller not available."
+                else:
+                    await query.edit_message_text("🔄 Restarting IBKR Gateway...\n\n⏱️ This may take 60+ seconds...", parse_mode="Markdown")
+                    result = await sc.restart_gateway()
+                    text = result.get("message", "Restarted gateway.")
+                    details = result.get("details")
+                    if details:
+                        text = f"{text}\n\n{details}"
+
+                keyboard = [
+                    [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
+                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                ]
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             elif confirm_action == "reset_challenge":
                 try:
                     from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
@@ -2332,7 +2855,7 @@ class TelegramCommandHandler:
                     new_attempt = challenge_tracker.manual_reset(reason="telegram_reset")
                     
                     keyboard = [
-                        [InlineKeyboardButton("🔄 Refresh Status", callback_data="menu:status")],
+                        [InlineKeyboardButton("🔄 Refresh Health", callback_data="menu:status")],
                         [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                     ]
                     await query.edit_message_text(
@@ -2403,7 +2926,7 @@ class TelegramCommandHandler:
                         state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
                         
                         keyboard = [
-                            [InlineKeyboardButton("📡 Check Status", callback_data="menu:status")],
+                            [InlineKeyboardButton("🛡 Check Health", callback_data="menu:status")],
                             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
                         ]
                         await query.edit_message_text(
@@ -3658,6 +4181,62 @@ class TelegramCommandHandler:
             text += "\n💡 P&L data is calculated from exited signals in your trading history."
         
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_set_trading_mode(self, query: CallbackQuery, mode: str) -> None:
+        """Set trading mode (scanner or pearl_bot_auto)."""
+        try:
+            state_file = self.state_dir / "state.json"
+            state = {}
+            
+            # Load existing state
+            if state_file.exists():
+                try:
+                    state = json.loads(state_file.read_text(encoding="utf-8"))
+                except Exception:
+                    state = {}
+            
+            # Update trading_bot settings
+            if "trading_bot" not in state:
+                state["trading_bot"] = {}
+            
+            if mode == "scanner":
+                state["trading_bot"]["enabled"] = False
+                state["trading_bot"]["selected"] = "scanner"
+                mode_label = "🔴 Scanner Only"
+                mode_desc = "Scanning signals only - no execution"
+            else:
+                state["trading_bot"]["enabled"] = True
+                state["trading_bot"]["selected"] = "pearl_bot_auto"
+                mode_label = "🟢 Pearl Bot Auto"
+                mode_desc = "Active trading enabled"
+            
+            # Save state
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            state_file.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+            
+            keyboard = [
+                [InlineKeyboardButton("🤖 Back to Bots", callback_data="menu:bots")],
+                [InlineKeyboardButton("🏠 Menu", callback_data="back")],
+            ]
+            
+            await query.edit_message_text(
+                f"✅ *Trading Mode Updated*\n\n"
+                f"New mode: *{mode_label}*\n"
+                f"_{mode_desc}_\n\n"
+                f"⚠️ *Note:* Changes take effect on next agent restart.\n"
+                f"Use 🎛️ System to restart the agent.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
+            logger.info(f"Trading mode changed to: {mode}")
+            
+        except Exception as e:
+            logger.error(f"Error setting trading mode: {e}", exc_info=True)
+            keyboard = [[InlineKeyboardButton("🤖 Back to Bots", callback_data="menu:bots")]]
+            await query.edit_message_text(
+                f"❌ Error setting trading mode: {e}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
     async def _handle_config_view(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display current configuration."""

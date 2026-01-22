@@ -568,9 +568,7 @@ class MarketAgentTelegramNotifier:
             
             # Build navigation buttons directly on chart (no separate nav message)
             reply_markup = None
-            prefs = self._get_prefs()
-            show_buttons = prefs.dashboard_buttons if prefs else False
-            if show_buttons and _is_command_handler_running():
+            if _is_command_handler_running():
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     
@@ -914,14 +912,13 @@ class MarketAgentTelegramNotifier:
             
             # Build inline buttons (no chart, so include nav here)
             reply_markup = None
-            prefs = self._get_prefs()
-            show_buttons = prefs.dashboard_buttons if prefs else False
-            if show_buttons and _is_command_handler_running():
+            if _is_command_handler_running():
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     keyboard = [
                         [
                             InlineKeyboardButton("ℹ️ Details", callback_data=callback_signal_detail(signal_id[:16])),
+                            InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1022,14 +1019,13 @@ class MarketAgentTelegramNotifier:
             
             # Build inline buttons (consistent with entry notification)
             reply_markup = None
-            prefs = self._get_prefs()
-            show_buttons = prefs.dashboard_buttons if prefs else False
-            if show_buttons and handler_running:
+            if handler_running:
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     keyboard = [
                         [
                             InlineKeyboardButton("ℹ️ Details", callback_data=callback_signal_detail(signal_id[:16])),
+                            InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1691,13 +1687,13 @@ class MarketAgentTelegramNotifier:
                 except Exception:
                     pass
             
-            # Build optional inline buttons when dashboard_buttons pref is enabled AND
-            # the command handler is running. Default is off (calm-minimal).
+            # Build navigation buttons (always on when the command handler is running).
             reply_markup = None
-            show_buttons = self.prefs.dashboard_buttons if self.prefs else False
-            if show_buttons and _is_command_handler_running():
+            handler_running = _is_command_handler_running()
+            if handler_running:
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
                     keyboard = [
                         [
                             InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
@@ -1708,9 +1704,86 @@ class MarketAgentTelegramNotifier:
                 except Exception as e:
                     logger.debug(f"Could not build dashboard buttons: {e}")
                     reply_markup = None
-            
-            await self.telegram.send_message(message, reply_markup=reply_markup)
-            return True
+
+            # Persist last dashboard time (used by UI Doctor).
+            try:
+                prefs_live = self._get_prefs()
+            except Exception:
+                prefs_live = self.prefs
+
+            edit_in_place = bool(getattr(prefs_live, "dashboard_edit_in_place", False)) if prefs_live else False
+            message_id = None
+            try:
+                message_id = prefs_live.get("dashboard_message_id") if prefs_live else None
+            except Exception:
+                message_id = None
+
+            sent_at = datetime.now(timezone.utc).isoformat()
+
+            # If pinned mode is enabled, try to edit the existing message first.
+            if edit_in_place and message_id and getattr(self.telegram, "bot", None) is not None:
+                try:
+                    mid = int(message_id)
+                    try:
+                        await self.telegram.bot.edit_message_text(
+                            chat_id=self.chat_id,
+                            message_id=mid,
+                            text=message,
+                            parse_mode="Markdown",
+                            reply_markup=reply_markup,
+                        )
+                    except Exception:
+                        # Fallback to plain text if Markdown parsing fails.
+                        await self.telegram.bot.edit_message_text(
+                            chat_id=self.chat_id,
+                            message_id=mid,
+                            text=message,
+                            parse_mode=None,
+                            reply_markup=reply_markup,
+                        )
+                    try:
+                        if prefs_live:
+                            prefs_live.set("last_dashboard_sent_at", sent_at)
+                    except Exception:
+                        pass
+                    return True
+                except Exception:
+                    # If edit fails (message deleted/too old), fall back to sending new.
+                    try:
+                        if prefs_live:
+                            prefs_live.set("dashboard_message_id", None)
+                    except Exception:
+                        pass
+
+            # Default: send a new dashboard message (store message_id if pinned mode is enabled).
+            if getattr(self.telegram, "bot", None) is None:
+                return False
+
+            msg_obj = None
+            try:
+                msg_obj = await self.telegram.bot.send_message(
+                    chat_id=self.chat_id,
+                    text=message,
+                    parse_mode="Markdown",
+                    reply_markup=reply_markup,
+                )
+            except Exception:
+                msg_obj = await self.telegram.bot.send_message(
+                    chat_id=self.chat_id,
+                    text=message,
+                    parse_mode=None,
+                    reply_markup=reply_markup,
+                )
+
+            try:
+                if prefs_live:
+                    prefs_live.set("last_dashboard_sent_at", sent_at)
+                    if edit_in_place and msg_obj is not None and getattr(msg_obj, "message_id", None) is not None:
+                        prefs_live.set("dashboard_message_id", int(msg_obj.message_id))
+            except Exception:
+                pass
+
+            return msg_obj is not None
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_dashboard")
             return False
@@ -1743,7 +1816,12 @@ class MarketAgentTelegramNotifier:
             critical_types = {"recovery", "circuit_breaker"}
             is_critical = alert_type in critical_types
             
-            if not is_critical and self.prefs and self.prefs.snooze_noncritical_alerts:
+            # Reload prefs from disk so snooze set via Telegram UI is respected immediately.
+            try:
+                prefs = self._get_prefs()
+            except Exception:
+                prefs = self.prefs
+            if not is_critical and prefs and prefs.snooze_noncritical_alerts:
                 logger.info(f"Data quality alert '{alert_type}' suppressed (snoozed)")
                 return True  # Return True to indicate "handled" (just suppressed)
 
@@ -1851,7 +1929,7 @@ class MarketAgentTelegramNotifier:
                     if is_recovery:
                         keyboard.append([
                             InlineKeyboardButton("🛡 Data Quality", callback_data=callback_action(ACTION_DATA_QUALITY)),
-                            InlineKeyboardButton("📊 Status", callback_data=callback_menu(MENU_STATUS)),
+                            InlineKeyboardButton("🛡 Health", callback_data=callback_menu(MENU_STATUS)),
                         ])
                     else:
                         keyboard.append([

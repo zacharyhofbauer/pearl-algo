@@ -49,7 +49,7 @@ Everything else is accessed via the button menus (safer and easier to operate on
 
 - **Signals & Trades**: recent signals, active trades, signal details
 - **Performance**: rollups, exports, diagnostics
-- **Status**: agent + gateway connectivity, state freshness, data quality
+- **Health**: agent + gateway connectivity, state freshness, data quality
 - **System**: start/stop/restart agent, gateway controls, logs (read-only)
 - **Bots**: backtests and report browsing
 - **Markets**: select NQ/ES/GC (one UI controlling one market at a time)
