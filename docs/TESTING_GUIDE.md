@@ -44,6 +44,12 @@ PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 python3 scripts/testing/smoke_multi_market.py
 ```
 
+## ✅ Testing Principles (non-negotiable)
+
+1. **No code duplication**: tests import production code from `src/pearlalgo/` directly.
+2. **Development mode required**: install with `pip install -e .` so imports resolve.
+3. **Mock external services**: IBKR/Telegram mocked; internal logic uses real code.
+
 ### Option 3: Automated Test Script
 ```bash
 # Run unit tests (pytest)

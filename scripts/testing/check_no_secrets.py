@@ -44,6 +44,12 @@ SKIP_PATTERNS = [
     r"\.venv/",
 ]
 
+# Line-level allowlist patterns to prevent false positives.
+ALLOWLIST_PATTERNS = [
+    r"_SERVICE_CONFIG_OVERRIDE",
+    r"\bContextVar\b",
+]
+
 
 def get_tracked_files() -> list[str]:
     """Return list of Git-tracked files."""
@@ -80,6 +86,8 @@ def scan_file(filepath: str, verbose: bool = False) -> list[tuple[int, str, str]
         return findings
 
     for line_num, line in enumerate(text.splitlines(), 1):
+        if any(re.search(pat, line) for pat in ALLOWLIST_PATTERNS):
+            continue
         for pattern, name in SECRET_PATTERNS:
             if re.search(pattern, line, re.IGNORECASE):
                 findings.append((line_num, line.strip()[:80], name))

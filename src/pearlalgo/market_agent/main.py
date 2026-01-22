@@ -29,6 +29,8 @@ except Exception as e:
     logger.warning(f"Could not load .env file: {e}")
 
 from pearlalgo.config.config_file import load_config_yaml
+from pearlalgo.config.config_loader import build_strategy_config
+from pearlalgo.config.config_view import ConfigView
 from pearlalgo.data_providers.factory import create_data_provider
 from pearlalgo.market_agent.service import MarketAgentService
 from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
@@ -56,21 +58,24 @@ async def main():
 
     import os
 
+    # Load config.yaml (base + optional overlay) once for this run.
+    config_data = load_config_yaml()
+
     # Load Telegram configuration from environment or config.yaml
     # Precedence: env vars > config.yaml (unified loader handles ${ENV} substitution)
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
     if not telegram_bot_token or not telegram_chat_id:
-        config_data = load_config_yaml()
         telegram_config = config_data.get("telegram", {})
         if telegram_config.get("enabled", True):
             # Unified loader already substitutes ${ENV} patterns
             telegram_bot_token = telegram_bot_token or telegram_config.get("bot_token")
             telegram_chat_id = telegram_chat_id or telegram_config.get("chat_id")
 
-    # Use PearlBot Auto config
-    config = PEARL_BOT_CONFIG.copy()
+    # Build strategy config from base + config.yaml overrides.
+    strategy_config = build_strategy_config(PEARL_BOT_CONFIG.copy(), config_data)
+    config = ConfigView(strategy_config)
 
     # Create data provider (use factory to get appropriate provider)
     # Default to IBKR if no provider specified via env var

@@ -23,6 +23,7 @@ from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
 
 from pearlalgo.config.config_loader import load_service_config, parse_market_hours_overrides
+from pearlalgo.config.config_view import ConfigView
 from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
 from pearlalgo.market_agent.health_monitor import HealthMonitor
@@ -39,6 +40,19 @@ from pearlalgo.utils.volume_pressure import (
     format_volume_pressure,
     timeframe_to_minutes,
 )
+
+# Small helper to allow attribute access on dict-backed configs.
+class ConfigView(dict):
+    """Dict wrapper that supports attribute access (config.key)."""
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        self[name] = value
 
 # Execution layer imports (optional - only used if execution.enabled)
 try:
@@ -111,15 +125,18 @@ class MarketAgentService:
             telegram_chat_id: Telegram chat ID (optional)
         """
         # Use PearlBot Auto config (from Pine Scripts)
-        self.config = config or PEARL_BOT_CONFIG.copy()
+        self.config = ConfigView(config or PEARL_BOT_CONFIG.copy())
+        self.symbol = str(self.config.get("symbol", "MNQ"))
+        self.timeframe = str(self.config.get("timeframe", "5m"))
+        self.scan_interval = float(self.config.get("scan_interval", 30))
         
         # No strategy object needed - we'll call generate_signals directly
         self.strategy = None  # Will use generate_signals function
         
         # Create a simple config dict for data_fetcher compatibility
         nq_config_dict = {
-            "symbol": self.config.get("symbol", "MNQ"),
-            "timeframe": self.config.get("timeframe", "5m"),
+            "symbol": self.symbol,
+            "timeframe": self.timeframe,
         }
         self.data_fetcher = MarketAgentDataFetcher(data_provider, config=nq_config_dict)
         
@@ -436,7 +453,7 @@ class MarketAgentService:
         self._scan_interval_idle = float(service_settings.get("scan_interval_idle_seconds", 30))
         self._scan_interval_market_closed = float(service_settings.get("scan_interval_market_closed_seconds", 300))
         self._scan_interval_paused = float(service_settings.get("scan_interval_paused_seconds", 60))
-        self._effective_interval: float = float(self.config.scan_interval)  # Current effective interval
+        self._effective_interval: float = float(self.scan_interval)  # Current effective interval
         self._last_effective_interval: float = self._effective_interval  # For detecting changes
         
         # Velocity mode: ultra-fast scans during ATR expansion or volume spikes (catch fast moves)
@@ -1101,98 +1118,7 @@ class MarketAgentService:
                 else:
                     logger.debug(f"No signals generated in cycle {self.cycle_count}")
 
-                # Update active trades with trailing stops (NO LIMITS - can handle 100+ trades)
-                try:
-                    # TradeManager removed - no trailing stop management needed
-                    df = market_data.get("df", pd.DataFrame())
-                    latest_bar = market_data.get("latest_bar", {})
-                    current_price = float(latest_bar.get("close", 0)) if latest_bar else (float(df["close"].iloc[-1]) if not df.empty else 0)
-                    previous_price = float(df["close"].iloc[-2]) if len(df) >= 2 else current_price
-                    
-                    # Get ATR using pearl_bot_auto
-                    atr = 10.0  # Default
-                    if not df.empty:
-                        try:
-                            from pearlalgo.trading_bots.pearl_bot_auto import calculate_atr
-                            atr_series = calculate_atr(df, period=14)
-                            atr = float(atr_series.iloc[-1]) if not atr_series.empty else 10.0
-                        except Exception:
-                            pass
-                    
-                    # Update trades with current market data
-                    trade_market_data = {
-                        "current_price": current_price,
-                        "previous_price": previous_price,
-                        "atr": atr,
-                        "rolling_atr": atr,  # Could calculate rolling ATR if needed
-                        "market_open": market_data.get("market_open", True),
-                    }
-                    
-                    # TradeManager removed - no trailing stop management
-                    active_trades_before = 0
-                    exit_signals = []
-                    
-                    # No trade manager - virtual broker handles exits
-                    # Persist stop changes so virtual exit grading uses the latest stop_loss.
-                    # (Virtual exits read stop_loss from the nested `signal` in signals.jsonl.)
-                    try:
-                        if (
-                            getattr(trade, "last_stop_update", None)
-                            and str(getattr(trade, "signal_id", "") or "")
-                            and float(getattr(trade, "stop_loss", 0.0) or 0.0) > 0
-                        ):
-                            current_stop = float(trade.stop_loss)
-                            prev_stop = getattr(trade, "last_persisted_stop_loss", None)
-                            if (prev_stop is None) or (abs(current_stop - float(prev_stop)) > 1e-9):
-                                self.performance_tracker.update_signal_prices(
-                                    signal_id=str(trade.signal_id),
-                                    stop_loss=current_stop,
-                                    updated_at=trade.last_stop_update,
-                                    source="trailing_stop",
-                                )
-                                trade.last_persisted_stop_loss = current_stop
-                    except Exception:
-                        pass
-
-                    if trade.breakeven_moved and trade.last_stop_update:
-                            # Check if this is a recent breakeven move (within last cycle)
-                            time_since_update = (datetime.now(timezone.utc) - trade.last_stop_update).total_seconds()
-                            if time_since_update < 120:  # Within 2 minutes
-                                try:
-                                    await self.telegram_notifier.send_message(
-                                        f"🛡️ Stop to Breakeven: {trade.signal_id[:8]}\n"
-                                        f"Entry: ${trade.entry_price:.2f}\n"
-                                        f"Stop: ${trade.stop_loss:.2f}"
-                                    )
-                                except Exception:
-                                    pass  # Non-fatal
-                    
-                    # Process exit signals (could trigger notifications, execution, etc.)
-                    for exit_signal in exit_signals:
-                        signal_id = exit_signal.get("signal_id")
-                        exit_reason = exit_signal.get("exit_reason")
-                        exit_price = exit_signal.get("exit_price")
-                        
-                        logger.info(
-                            "Trade exit detected: signal_id=%s, reason=%s, price=%.2f",
-                            signal_id,
-                            exit_reason,
-                            exit_price,
-                        )
-                        
-                        # Send Telegram notification for trade exit
-                        try:
-                            await self.telegram_notifier.send_message(
-                                f"🔄 Trade Exit: {signal_id[:8]}\n"
-                                f"Reason: {exit_reason}\n"
-                                f"Exit Price: ${exit_price:.2f}"
-                            )
-                        except Exception as e:
-                            logger.debug(f"Failed to send exit notification (non-fatal): {e}")
-                        
-                        # TODO: Update virtual PnL tracking
-                except Exception as e:
-                    logger.debug(f"Trade manager update failed (non-fatal): {e}")
+                # TradeManager removed: trailing stop management handled via virtual exits.
                 
                 # Virtual PnL lifecycle: exit signals when TP/SL is touched (no Telegram spam).
                 # This grades signal quality without auto-trading.

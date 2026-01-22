@@ -56,11 +56,11 @@ No other environment variables are required by the running agent; keep any addit
 Key sections and their consumers:
 
 - `symbol`, `timeframe`, `scan_interval`
-  - **Used by**: `trading_bots.pearl_bot_auto.CONFIG` and `pearlalgo.market_agent.service` via strategy config.
+  - **Used by**: `pearlalgo.market_agent.main` (strategy config builder) and `pearlalgo.market_agent.service`.
 - `telegram.*`
   - **Used by**: `pearlalgo.market_agent.main` and `pearlalgo.market_agent.telegram_notifier` (through DI from main and service).
 - `risk.*`
-  - **Used by**: `trading_bots.pearl_bot_auto.CONFIG` and downstream strategy components.
+  - **Used by**: `pearlalgo.market_agent.main` to derive strategy parameters (see mapping below).
 - `service.*`, `circuit_breaker.*`, `data.*`, `signals.*`, `performance.*`
   - **Used by**: `pearlalgo.config.config_loader.load_service_config()` and then by:
     - `pearlalgo.market_agent.service` (service intervals + alert throttles, circuit breaker thresholds)
@@ -83,8 +83,19 @@ Key sections and their consumers:
   - **Defaults**: `enabled: true`, `mode: shadow`
 
 Notes:
-- `data.enable_mtf_cache`, `data.mtf_refresh_seconds_5m`, `data.mtf_refresh_seconds_15m` (default OFF) control how often 5m/15m history is refreshed.
+- Base config `config/config.yaml` is merged with optional overlays from `PEARLALGO_CONFIG_PATH`
+  (e.g., `config/markets/nq.yaml`). Overlay values override base values.
+- `data.enable_mtf_cache`, `data.mtf_refresh_seconds_5m`, `data.mtf_refresh_seconds_15m` (default OFF)
+  control how often 5m/15m history is refreshed.
   This reduces repeated IBKR historical requests when the service runs with a fast scan interval.
+
+#### Strategy mapping (config.yaml → pearl_bot_auto)
+
+- `signals.min_confidence` → `pearl_bot_auto.CONFIG.min_confidence`
+- `signals.min_risk_reward` → `pearl_bot_auto.CONFIG.min_risk_reward`
+- `session.start_time/end_time` → `start_hour/start_minute/end_hour/end_minute`
+- `risk.stop_loss_atr_multiplier` → `stop_loss_atr_mult`
+- `risk.take_profit_risk_reward` → `take_profit_atr_mult` (derived: stop_loss_atr_mult × risk_reward)
 
 ### 1.3 Settings module (`pearlalgo.config.settings`)
 

@@ -173,6 +173,18 @@ class TestLoadConfigYaml:
         result = load_config_yaml()
         assert result["symbol"] == "ES"
 
+    def test_load_merges_base_and_overlay(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Overlay config should override base while keeping base sections."""
+        overlay = tmp_path / "overlay.yaml"
+        overlay.write_text("symbol: ES\ntimeframe: 15m\n")
+        monkeypatch.setenv("PEARLALGO_CONFIG_PATH", str(overlay))
+
+        result = load_config_yaml()
+        assert result["symbol"] == "ES"
+        assert result["timeframe"] == "15m"
+        # Base config should still be present for service defaults.
+        assert "service" in result
+
     def test_load_nonexistent_returns_empty(self, tmp_path: Path) -> None:
         """Test that loading a nonexistent file returns empty dict."""
         result = load_config_yaml(tmp_path / "does_not_exist.yaml")

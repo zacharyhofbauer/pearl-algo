@@ -118,6 +118,92 @@ def _get_env_str(name: str) -> Optional[str]:
     return v if v else None
 
 
+def _parse_hhmm(value: str) -> Optional[tuple[int, int]]:
+    try:
+        parts = value.strip().split(":")
+        if len(parts) != 2:
+            return None
+        hour = int(parts[0])
+        minute = int(parts[1])
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+        return hour, minute
+    except Exception:
+        return None
+
+
+def build_strategy_config(
+    base_strategy: Dict[str, Any],
+    config_data: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build a strategy config dict from base + config.yaml overrides.
+
+    This maps config.yaml sections into the keys expected by
+    `pearlalgo.trading_bots.pearl_bot_auto`.
+    """
+    strategy = dict(base_strategy or {})
+
+    # Top-level overrides
+    for key in ("symbol", "timeframe", "scan_interval"):
+        if key in config_data and config_data.get(key) is not None:
+            strategy[key] = config_data.get(key)
+
+    # Session window (HH:MM strings -> hour/minute ints)
+    session_cfg = config_data.get("session", {}) or {}
+    start = session_cfg.get("start_time")
+    end = session_cfg.get("end_time")
+    if isinstance(start, str):
+        parsed = _parse_hhmm(start)
+        if parsed:
+            strategy["start_hour"], strategy["start_minute"] = parsed
+    if isinstance(end, str):
+        parsed = _parse_hhmm(end)
+        if parsed:
+            strategy["end_hour"], strategy["end_minute"] = parsed
+
+    # Signal thresholds
+    signals_cfg = config_data.get("signals", {}) or {}
+    if "min_confidence" in signals_cfg:
+        try:
+            strategy["min_confidence"] = float(signals_cfg["min_confidence"])
+        except Exception:
+            pass
+    if "min_risk_reward" in signals_cfg:
+        try:
+            strategy["min_risk_reward"] = float(signals_cfg["min_risk_reward"])
+        except Exception:
+            pass
+
+    # Risk mapping: keep telemetry keys + derive ATR target multiplier
+    risk_cfg = config_data.get("risk", {}) or {}
+    stop_mult = risk_cfg.get("stop_loss_atr_multiplier")
+    if stop_mult is not None:
+        try:
+            stop_mult_f = float(stop_mult)
+            strategy["stop_loss_atr_mult"] = stop_mult_f
+            strategy["stop_loss_atr_multiplier"] = stop_mult_f
+        except Exception:
+            pass
+    rr = risk_cfg.get("take_profit_risk_reward")
+    if rr is not None:
+        try:
+            rr_f = float(rr)
+            strategy["take_profit_risk_reward"] = rr_f
+            if "stop_loss_atr_mult" in strategy:
+                strategy["take_profit_atr_mult"] = float(strategy["stop_loss_atr_mult"]) * rr_f
+        except Exception:
+            pass
+
+    if "max_risk_per_trade" in risk_cfg:
+        try:
+            strategy["max_risk_per_trade"] = float(risk_cfg["max_risk_per_trade"])
+        except Exception:
+            pass
+
+    return strategy
+
+
 def _apply_execution_env_overrides(execution_cfg: Dict[str, Any]) -> None:
     """
     Apply safe, typed environment overrides for execution rollout.
@@ -213,42 +299,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "db_path": "data/agent_state/NQ/trades.db",
         "dual_write_files": True,
     },
-    # ==========================================================================
-    # ADAPTIVE RISK MANAGEMENT (v2.0)
-    # ==========================================================================
-    "adaptive_stops": {
-        "enabled": False,
-        "use_structure_stops": True,
-        "use_level2_zones": True,  # approximated zones when only L1 is available
-        "min_stop_points": 5.0,
-        "regime_multipliers": {
-            "ranging": 1.0,
-            "trending_bullish": 1.2,
-            "trending_bearish": 1.2,
-        },
-        "session_multipliers": {
-            "tokyo": 0.8,
-            "london": 0.9,
-            "new_york": 1.0,
-        },
-        "volatility_multipliers": {
-            "low": 0.9,
-            "normal": 1.0,
-            "high": 1.3,
-        },
-        "performance_adjustment": True,
-    },
-    "adaptive_sizing": {
-        "enabled": False,
-        "method": "kelly_criterion",
-        "kelly_fraction": 0.25,
-        "min_contracts": 1,
-        "max_contracts": 25,
-        "confidence_scaling": True,
-        "regime_scaling": True,
-        "session_scaling": True,
-        "streak_adjustment": True,
-    },
     "ml_filter": {
         "enabled": False,
         "model_path": None,
@@ -280,23 +330,6 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         #   signal_type_max_contracts: { sr_bounce: 2 }
         "signal_type_size_multipliers": {},
         "signal_type_max_contracts": {},
-    },
-    # ==========================================================================
-    # TRAILING STOP LOSS (Profit Protection)
-    # ==========================================================================
-    # Enables breakeven + dynamic trailing stop management in TradeManager.
-    # NOTE: This section MUST be present here so `trailing_stop:` in config.yaml
-    # actually affects the running agent (otherwise it is silently ignored).
-    "trailing_stop": {
-        "enabled": False,
-        "breakeven_immediate": True,
-        "trail_method": "dynamic",
-        "early_profit_trail_atr": 0.5,
-        "medium_profit_trail_atr": 1.0,
-        "large_profit_trail_atr": 1.5,
-        "update_frequency_bars": 1,
-        "never_widen": True,
-        "min_profit_before_be": 2.0,
     },
     "signals": {
         "duplicate_window_seconds": 300,

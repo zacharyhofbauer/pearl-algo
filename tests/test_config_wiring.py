@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 
-from pearlalgo.config.config_loader import load_service_config
+from pearlalgo.config.config_loader import load_service_config, build_strategy_config
 from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
 from pearlalgo.market_agent.service import MarketAgentService
 from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
@@ -64,6 +64,34 @@ class TestConfigLoaderDefaults:
         assert "stale_data_threshold_minutes" in data
         assert "enable_base_cache" in data
         assert "enable_mtf_cache" in data
+
+
+class TestStrategyConfigBuilder:
+    """Tests for mapping config.yaml into strategy config."""
+
+    def test_build_strategy_config_maps_session_and_risk(self):
+        base = PEARL_BOT_CONFIG.copy()
+        cfg = {
+            "symbol": "ES",
+            "timeframe": "1m",
+            "scan_interval": 15,
+            "session": {"start_time": "18:00", "end_time": "16:10"},
+            "signals": {"min_confidence": 0.5, "min_risk_reward": 1.4},
+            "risk": {"stop_loss_atr_multiplier": 2.0, "take_profit_risk_reward": 1.5},
+        }
+
+        result = build_strategy_config(base, cfg)
+        assert result["symbol"] == "ES"
+        assert result["timeframe"] == "1m"
+        assert result["scan_interval"] == 15
+        assert result["start_hour"] == 18
+        assert result["start_minute"] == 0
+        assert result["end_hour"] == 16
+        assert result["end_minute"] == 10
+        assert result["min_confidence"] == 0.5
+        assert result["min_risk_reward"] == 1.4
+        assert result["stop_loss_atr_mult"] == 2.0
+        assert result["take_profit_atr_mult"] == 3.0
 
 
 class TestServiceReceivesConfig:

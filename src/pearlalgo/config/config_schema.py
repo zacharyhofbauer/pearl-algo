@@ -341,20 +341,6 @@ class LearningConfig(BaseModel):
     contextual: ContextualLearningConfig = Field(default_factory=ContextualLearningConfig)
 
 
-class AdaptiveStopsConfig(BaseModel):
-    """Adaptive stop loss configuration."""
-    enabled: bool = True
-    use_structure_stops: bool = True
-    use_level2_zones: bool = True
-    min_stop_points: float = Field(default=12.0, ge=1)
-    anti_hunt_jitter: bool = True
-    jitter_range_points: float = Field(default=3.0, ge=0)
-    regime_multipliers: Dict[str, float] = Field(default_factory=dict)
-    session_multipliers: Dict[str, float] = Field(default_factory=dict)
-    volatility_multipliers: Dict[str, float] = Field(default_factory=dict)
-    performance_adjustment: bool = True
-
-
 class SwingTradingConfig(BaseModel):
     """Swing trading configuration."""
     enabled: bool = True
@@ -364,36 +350,6 @@ class SwingTradingConfig(BaseModel):
     min_volume_ratio: float = Field(default=1.2, ge=0)
     max_hold_hours: int = Field(default=24, ge=1)
     position_size_multiplier: float = Field(default=2.5, ge=0.1)
-
-
-class TrailingStopConfig(BaseModel):
-    """Trailing stop configuration."""
-    enabled: bool = True
-    breakeven_immediate: bool = False
-    trail_method: Literal["dynamic", "fixed", "atr"] = "dynamic"
-    early_profit_trail_atr: float = Field(default=0.5, ge=0)
-    medium_profit_trail_atr: float = Field(default=1.0, ge=0)
-    large_profit_trail_atr: float = Field(default=2.0, ge=0)
-    update_frequency_bars: int = Field(default=1, ge=1)
-    never_widen: bool = True
-    min_profit_before_be: float = Field(default=18.0, ge=0)
-
-
-class AdaptiveSizingConfig(BaseModel):
-    """Adaptive position sizing configuration."""
-    enabled: bool = True
-    method: Literal["kelly_criterion", "fixed", "volatility_scaled"] = "kelly_criterion"
-    kelly_fraction: float = Field(default=0.25, ge=0, le=1)
-    min_contracts: int = Field(default=1, ge=1)
-    max_contracts: int = Field(default=25, ge=1)
-    confidence_scaling: bool = True
-    regime_scaling: bool = True
-    session_scaling: bool = True
-    streak_adjustment: bool = True
-    losing_streak_threshold: int = Field(default=3, ge=1)
-    max_losing_streak_reduction: float = Field(default=0.5, ge=0, le=1)
-    winning_streak_threshold: int = Field(default=3, ge=1)
-    winning_streak_boost: float = Field(default=1.2, ge=1.0)
 
 
 class MLFilterConfig(BaseModel):
@@ -444,10 +400,7 @@ class FullServiceConfig(BaseModel):
     indicators: IndicatorsConfig = Field(default_factory=IndicatorsConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     learning: LearningConfig = Field(default_factory=LearningConfig)
-    adaptive_stops: AdaptiveStopsConfig = Field(default_factory=AdaptiveStopsConfig)
     swing_trading: SwingTradingConfig = Field(default_factory=SwingTradingConfig)
-    trailing_stop: TrailingStopConfig = Field(default_factory=TrailingStopConfig)
-    adaptive_sizing: AdaptiveSizingConfig = Field(default_factory=AdaptiveSizingConfig)
     ml_filter: MLFilterConfig = Field(default_factory=MLFilterConfig)
 
     @model_validator(mode="after")
@@ -458,13 +411,6 @@ class FullServiceConfig(BaseModel):
             raise ValueError(
                 f"strategy.high_conf_threshold ({self.strategy.high_conf_threshold}) "
                 f"must be less than strategy.max_conf_threshold ({self.strategy.max_conf_threshold})"
-            )
-
-        # Ensure min_contracts <= max_contracts in adaptive_sizing
-        if self.adaptive_sizing.min_contracts > self.adaptive_sizing.max_contracts:
-            raise ValueError(
-                f"adaptive_sizing.min_contracts ({self.adaptive_sizing.min_contracts}) "
-                f"cannot exceed adaptive_sizing.max_contracts ({self.adaptive_sizing.max_contracts})"
             )
 
         # Ensure risk settings are coherent

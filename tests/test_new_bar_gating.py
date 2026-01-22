@@ -78,7 +78,10 @@ def mock_service_gating_enabled():
         }
         
         provider = MockDataProvider()
-        config = NQIntradayConfig(symbol="MNQ", timeframe="5m", scan_interval=30)
+        config = PEARL_BOT_CONFIG.copy()
+        config["symbol"] = "MNQ"
+        config["timeframe"] = "5m"
+        config["scan_interval"] = 30
         
         service = MarketAgentService(
             data_provider=provider,
@@ -114,7 +117,10 @@ def mock_service_gating_disabled():
         }
         
         provider = MockDataProvider()
-        config = NQIntradayConfig(symbol="MNQ", timeframe="5m", scan_interval=30)
+        config = PEARL_BOT_CONFIG.copy()
+        config["symbol"] = "MNQ"
+        config["timeframe"] = "5m"
+        config["scan_interval"] = 30
         
         service = MarketAgentService(
             data_provider=provider,

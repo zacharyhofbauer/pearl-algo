@@ -421,8 +421,6 @@ cat data/agent_state/NQ/state.json | jq '.signal_diagnostics_raw'
 | `signals.min_confidence` | Filters low-confidence signals | ⚠️ Backtest first |
 | `signals.min_risk_reward` | Filters poor R:R signals | ⚠️ Backtest first |
 | `signals.quality_score.enabled` | Quality scorer on/off | ⚠️ Can block all signals |
-| `trailing_stop.enabled` | In-trade stop management | ✅ Safe |
-| `trailing_stop.min_profit_before_be` | Breakeven threshold | ✅ Safe |
 | `risk.signal_type_size_multipliers` | Per-type position sizing | ✅ Safe (keeps signals) |
 | `risk.signal_type_max_contracts` | Per-type contract caps | ✅ Safe (keeps signals) |
 

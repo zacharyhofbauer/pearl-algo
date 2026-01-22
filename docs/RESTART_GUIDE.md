@@ -26,8 +26,6 @@ The **trading agent** needs restart when you change `config/config.yaml`:
 - `strategy.enabled_signals`
 - `strategy.disabled_signals`
 - `strategy.base_contracts`
-- `adaptive_stops.*`
-- `adaptive_sizing.*`
 
 **How to Restart:**
 ```bash

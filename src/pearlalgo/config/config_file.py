@@ -84,6 +84,11 @@ def load_config_yaml(
 ) -> Dict[str, Any]:
     """
     Load configuration from config.yaml with optional environment variable substitution.
+
+    Resolution order:
+    1) Base config at project_root/config/config.yaml (if present)
+    2) Optional overlay from PEARLALGO_CONFIG_PATH or explicit config_path (if present)
+       Overlay values override base values.
     
     Args:
         config_path: Path to config.yaml. Defaults to config/config.yaml relative to project root.
@@ -95,38 +100,52 @@ def load_config_yaml(
         Dictionary with full configuration data.
         Returns empty dict if file doesn't exist or fails to load.
     """
+    # Find project root (4 levels up from this file: config_file.py -> config -> pearlalgo -> src -> project)
+    project_root = Path(__file__).parent.parent.parent.parent
+    base_path = project_root / "config" / "config.yaml"
+
+    overlay_path: Optional[Path] = None
     if config_path is None:
         env_path = os.getenv("PEARLALGO_CONFIG_PATH")
         if env_path:
-            config_path = Path(env_path)
-        else:
-            # Find project root (4 levels up from this file: config_file.py -> config -> pearlalgo -> src -> project)
-            project_root = Path(__file__).parent.parent.parent.parent
-            config_path = project_root / "config" / "config.yaml"
+            overlay_path = Path(env_path)
     else:
-        config_path = Path(config_path)
-    
-    if not config_path.exists():
-        return {}
-    
-    try:
+        overlay_path = Path(config_path)
+
+    def _load_yaml(path: Path) -> Dict[str, Any]:
         import yaml
-        with open(config_path) as f:
-            config_data = yaml.safe_load(f) or {}
-        
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
         if substitute_env:
-            config_data = _substitute_env_vars(config_data)
-        
+            data = _substitute_env_vars(data)
+        return data
+
+    try:
+        base_config: Dict[str, Any] = {}
+        if base_path.exists():
+            base_config = _load_yaml(base_path)
+
+        overlay_config: Dict[str, Any] = {}
+        if overlay_path and overlay_path.exists():
+            if base_path.resolve() != overlay_path.resolve():
+                overlay_config = _load_yaml(overlay_path)
+            else:
+                overlay_config = {}
+
+        if not base_config and not overlay_config:
+            return {}
+
+        config_data = _deep_merge(base_config, overlay_config)
+
         if validate:
             log_config_warnings(config_data)
-        
+
         return config_data
-    
     except Exception as e:
         # Use logger if available, otherwise just return empty
         try:
             from pearlalgo.utils.logger import logger
-            logger.warning(f"Could not load config from {config_path}: {e}")
+            logger.warning(f"Could not load config: {e}")
         except ImportError:
             pass
         return {}
@@ -275,15 +294,12 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "indicators",
     "strategy",
     "strategy_variants",
-    "trailing_stop",
     "swing_trading",
     "market_hours",
     # ATS execution + learning layers (kept separate from strategy logic)
     "execution",
     "learning",
-    # Adaptive risk management (stops/sizing/ML filter)
-    "adaptive_stops",
-    "adaptive_sizing",
+    # ML filter / drift guard (observability + gating)
     "ml_filter",
     "challenge",
 })

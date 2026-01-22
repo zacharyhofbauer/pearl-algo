@@ -135,7 +135,10 @@ class MarketAgentDataFetcher:
                 df = pd.DataFrame()
 
             if df.empty:
-                logger.warning(f"No historical data available for {self.config.get("symbol", "MNQ")} (Error 162 may be blocking historical data)")
+                logger.warning(
+                    f'No historical data available for {self.config.get("symbol", "MNQ")} '
+                    "(Error 162 may be blocking historical data)"
+                )
                 # Don't return early - still try to get latest bar (Level 1 real-time data might work)
                 # Set df to empty DataFrame but continue to try get_latest_bar
                 df = pd.DataFrame()
@@ -164,7 +167,9 @@ class MarketAgentDataFetcher:
             if not df.empty:
                 # Log data freshness status
                 if not data_freshness_warning:
-                    logger.debug(f"Data is fresh: {len(df)} bars retrieved for {self.config.get("symbol", "MNQ")}")
+                    logger.debug(
+                        f'Data is fresh: {len(df)} bars retrieved for {self.config.get("symbol", "MNQ")}'
+                    )
                     # Use centralized normalization to avoid double-reset_index issues
                     self._data_buffer = self._normalize_to_strategy_buffer(df, self._buffer_size)
                 
@@ -219,24 +224,30 @@ class MarketAgentDataFetcher:
                             # If data is very fresh (< 30 seconds), likely real-time
                             if age_seconds < 30:
                                 data_source = "real-time"
-                                logger.debug(f"Latest bar for {self.config.get("symbol", "MNQ")} from real-time data (age: {age_seconds:.1f}s)")
+                                logger.debug(
+                                    f'Latest bar for {self.config.get("symbol", "MNQ")} '
+                                    f"from real-time data (age: {age_seconds:.1f}s)"
+                                )
                             else:
                                 data_source = "historical"
                                 logger.info(
-                                    f"Latest bar for {self.config.get("symbol", "MNQ")} from historical data "
+                                    f'Latest bar for {self.config.get("symbol", "MNQ")} from historical data '
                                     f"(age: {age_minutes:.1f} minutes, price: ${latest_bar.get('close', 0):.2f})"
                                 )
                                 
                                 # Warn if data is stale
                                 if age_minutes > self.stale_data_threshold_minutes:
                                     logger.warning(
-                                        f"⚠️  Stale data detected for {self.config.get("symbol", "MNQ")}: "
+                                        f'⚠️  Stale data detected for {self.config.get("symbol", "MNQ")}: '
                                         f"{age_minutes:.1f} minutes old (threshold: {self.stale_data_threshold_minutes} min). "
                                         f"Price may not match current market."
                                     )
                         else:
                             data_source = "provider"
-                            logger.debug(f"Latest bar for {self.config.get("symbol", "MNQ")} from provider (timestamp not available)")
+                            logger.debug(
+                                f'Latest bar for {self.config.get("symbol", "MNQ")} '
+                                "from provider (timestamp not available)"
+                            )
                 except Exception as e:
                     logger.error(f"❌ Could not fetch latest bar from provider: {e}. Will use historical data fallback.", exc_info=True)
                     data_source = "fallback"
@@ -306,34 +317,36 @@ class MarketAgentDataFetcher:
                         age_minutes = age_seconds / 60
                         
                         logger.debug(
-                            f"Using last bar from historical data as latest_bar for {self.config.get("symbol", "MNQ")} "
+                            f'Using last bar from historical data as latest_bar for {self.config.get("symbol", "MNQ")} '
                             f"(age: {age_minutes:.1f} minutes, price: ${close_val:.2f})"
                         )
                         
                         # Warn if historical fallback is stale
                         if age_minutes > self.stale_data_threshold_minutes:
                             logger.warning(
-                                f"⚠️  Historical fallback data for {self.config.get("symbol", "MNQ")} is stale: "
+                                f'⚠️  Historical fallback data for {self.config.get("symbol", "MNQ")} is stale: '
                                 f"{age_minutes:.1f} minutes old (threshold: {self.stale_data_threshold_minutes} min). "
                                 f"Price ${close_val:.2f} may not match current market."
                             )
                 else:
                     # No historical data AND no real-time data - this is a problem
                     logger.error(
-                        f"❌ CRITICAL: No data available for {self.config.get("symbol", "MNQ")}\n"
-                        f"   - Historical data blocked by Error 162 (TWS conflict)\n"
-                        f"   - Level 1 real-time data not available (Error 354 or subscription issue)\n"
-                        f"   \n"
-                        f"   📋 Actions:\n"
-                        f"   1. Resolve Error 162: Close any TWS sessions, wait 60s, restart Gateway\n"
-                        f"   2. Verify Level 1 subscription is active and paid\n"
-                        f"   3. Ensure 'Market Data API Acknowledgement' is signed in Client Portal\n"
-                        f"   4. Check if market is open (CME futures: ETH Sun 6PM ET - Fri 5PM ET)"
+                        f'❌ CRITICAL: No data available for {self.config.get("symbol", "MNQ")}\n'
+                        "   - Historical data blocked by Error 162 (TWS conflict)\n"
+                        "   - Level 1 real-time data not available (Error 354 or subscription issue)\n"
+                        "   \n"
+                        "   📋 Actions:\n"
+                        "   1. Resolve Error 162: Close any TWS sessions, wait 60s, restart Gateway\n"
+                        "   2. Verify Level 1 subscription is active and paid\n"
+                        "   3. Ensure 'Market Data API Acknowledgement' is signed in Client Portal\n"
+                        "   4. Check if market is open (CME futures: ETH Sun 6PM ET - Fri 5PM ET)"
                     )
                     latest_bar = None
 
             if latest_bar is None:
-                logger.warning(f"No latest bar available for {self.config.get("symbol", "MNQ")}")
+                logger.warning(
+                    f'No latest bar available for {self.config.get("symbol", "MNQ")}'
+                )
                 market_data = {"df": pd.DataFrame(), "latest_bar": None}
                 self._last_market_data = market_data
                 return market_data

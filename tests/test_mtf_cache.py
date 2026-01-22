@@ -17,7 +17,7 @@ class CountingProvider(DataProvider):
     """Provider that returns deterministic frames and counts fetches per timeframe."""
 
     def __init__(self) -> None:
-        # Default timeframe is "5m" from NQIntradayConfig, also track 1m/15m for MTF
+        # Default timeframe is "5m" from PEARL_BOT_CONFIG, also track 1m/15m for MTF
         self.calls: dict[str, int] = {"1m": 0, "5m": 0, "15m": 0}
 
     def fetch_historical(
@@ -86,7 +86,7 @@ async def test_mtf_cache_disabled_fetches_every_time(monkeypatch: pytest.MonkeyP
 
     # Primary timeframe (5m from config) is always fetched; 1m/15m are MTF fetches.
     # When MTF cache is disabled, all timeframes should be fetched on each cycle.
-    assert provider.calls["5m"] >= 2  # Primary timeframe (from NQIntradayConfig.timeframe)
+    assert provider.calls["5m"] >= 2  # Primary timeframe (from PEARL_BOT_CONFIG.timeframe)
     # Note: MTF fetches (1m, 15m) may or may not happen depending on implementation details
 
 

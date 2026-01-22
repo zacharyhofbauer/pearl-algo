@@ -504,20 +504,20 @@ These boundaries prevent accidental coupling, keep strategies portable, and make
 
 | Source Layer     | May Import                                      | Must NOT Import              |
 |------------------|-------------------------------------------------|------------------------------|
-| `utils`          | `pearlalgo.utils.*`, stdlib, third-party        | `config`, `data_providers`, `strategies`, `market_agent` |
-| `config`         | `pearlalgo.config.*`, `pearlalgo.utils.*`       | `data_providers`, `strategies`, `market_agent` |
-| `data_providers` | `pearlalgo.data_providers.*`, `config`, `utils` | `strategies`, `market_agent`     |
-| `strategies`     | `pearlalgo.strategies.*`, `config`, `utils`, `learning` | `data_providers`, `market_agent` |
-| `execution`      | `pearlalgo.execution.*`, `config`, `utils`      | `data_providers`, `strategies`, `learning`, `market_agent` |
-| `learning`       | `pearlalgo.learning.*`, `config`, `utils`       | `data_providers`, `strategies`, `execution`, `market_agent` |
+| `utils`          | `pearlalgo.utils.*`, stdlib, third-party        | `config`, `data_providers`, `trading_bots`, `market_agent` |
+| `config`         | `pearlalgo.config.*`, `pearlalgo.utils.*`       | `data_providers`, `trading_bots`, `market_agent` |
+| `data_providers` | `pearlalgo.data_providers.*`, `config`, `utils` | `trading_bots`, `market_agent`     |
+| `trading_bots`   | `pearlalgo.trading_bots.*`, `config`, `utils`, `learning` | `data_providers`, `market_agent` |
+| `execution`      | `pearlalgo.execution.*`, `config`, `utils`      | `data_providers`, `trading_bots`, `learning`, `market_agent` |
+| `learning`       | `pearlalgo.learning.*`, `config`, `utils`       | `data_providers`, `trading_bots`, `execution`, `market_agent` |
 | `market_agent`   | Any internal layer (orchestration layer)        | —                            |
 
 #### Rationale
 
 - **`utils`** is the lowest layer: pure helpers with no domain awareness.
 - **`config`** provides settings and loaders; it may use utils for logging but must stay agnostic to higher layers.
-- **`data_providers`** abstract market data sources; they must not know about strategies or the agent orchestration.
-- **`strategies`** contain trading logic; they must remain independent of specific data providers and the orchestrating agent so they can be tested in isolation or reused elsewhere. Strategies may optionally import from `learning` for ML signal filtering (guarded with try/except for graceful degradation).
+- **`data_providers`** abstract market data sources; they must not know about trading bots or the agent orchestration.
+- **`trading_bots`** contain trading logic; they must remain independent of specific data providers and the orchestrating agent so they can be tested in isolation or reused elsewhere. Trading bots may optionally import from `learning` for ML signal filtering (guarded with try/except for graceful degradation).
 - **`execution`** contains ATS execution logic (IBKR bracket orders, safety guards); independent of strategy and agent orchestration.
 - **`learning`** contains adaptive policy logic (Thompson sampling bandit); independent of strategy and agent orchestration.
 - **`market_agent`** is the top-level orchestration layer that wires everything together.
@@ -651,10 +651,10 @@ Configuration is resolved using the following precedence rules:
    - IBKR connection (`IBKR_HOST`, `IBKR_PORT`, `IBKR_CLIENT_ID`, `IBKR_DATA_CLIENT_ID`)
    - Telegram bot token and chat ID (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`)
    - Provider selection (`PEARLALGO_DATA_PROVIDER`)
-2. **`config/config.yaml`** provides the **default behavior** for the MNQ agent:
-   - Trading symbol, timeframe, scan interval
-   - Risk/position sizing and prop‑firm assumptions
-   - Service intervals, data buffers, and signal thresholds
+2. **Base config + optional overlay**:
+   - Base: `config/config.yaml`
+   - Optional overlay: `PEARLALGO_CONFIG_PATH` (e.g., `config/markets/nq.yaml`)
+   - Overlay values override base values (used by `scripts/lifecycle/agent.sh`)
 3. **Code defaults** in:
    - `src/pearlalgo/trading_bots/pearl_bot_auto.py` (`CONFIG` dictionary)
    - `pearlalgo.config.config_loader.load_service_config`
@@ -664,10 +664,15 @@ Configuration is resolved using the following precedence rules:
    snippets above but should be treated as **fallbacks**, not the primary place to change behavior.
 
 In practice:
-- **Change behavior** (symbol, risk, scan intervals, thresholds) by editing `config/config.yaml`.
+- **Change behavior** (symbol, session, thresholds) in `config/config.yaml`, and use `config/markets/<market>.yaml`
+  for per-market overrides.
 - **Change infrastructure or secrets** (IBKR, Telegram, provider selection) by editing `.env`.
-- The agent entrypoint (`pearlalgo.market_agent.main`) reads from the environment and uses `config/config.yaml`
-  for service/strategy defaults (and Telegram enablement when env vars are missing).
+- The agent entrypoint (`pearlalgo.market_agent.main`) reads the resolved config (base + overlay) and maps:
+  - `signals.min_confidence` → `pearl_bot_auto.CONFIG.min_confidence`
+  - `signals.min_risk_reward` → `pearl_bot_auto.CONFIG.min_risk_reward`
+  - `session.start_time/end_time` → `start_hour/start_minute/end_hour/end_minute`
+  - `risk.stop_loss_atr_multiplier` → `stop_loss_atr_mult`
+  - `risk.take_profit_risk_reward` → `take_profit_atr_mult` (derived: stop_loss_atr_mult × risk_reward)
 - The Telegram command handler (`pearlalgo.market_agent.telegram_command_handler`) requires Telegram credentials
   in `.env` / environment variables.
 
