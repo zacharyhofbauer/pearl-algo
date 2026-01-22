@@ -43,7 +43,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 - **Logical component**: Strategy logic and automated tests
 - **Python modules**:
-  - Strategy config/logic: `pearlalgo.strategies.trading_bots.pearl_bot_auto`
+  - Strategy config/logic: `pearlalgo.trading_bots.pearl_bot_auto`
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
 - **Backtesting scripts** (`scripts/backtesting/`):
   - `strategy_selection.py` – generates strategy selection exports (used by Telegram `/analyze`)

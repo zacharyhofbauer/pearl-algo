@@ -349,7 +349,7 @@ async def test_service_loop_with_cadence_scheduler(tmp_path) -> None:
     Verifies that the service integrates with the cadence scheduler correctly.
     """
     from pearlalgo.market_agent.service import MarketAgentService
-    from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+    from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
     from tests.mock_data_provider import MockDataProvider
     
     # Create mock provider

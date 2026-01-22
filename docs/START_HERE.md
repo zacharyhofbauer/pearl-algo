@@ -10,7 +10,7 @@ This repo is a **trading platform** with three hard requirements:
 
 - **Service**: `src/pearlalgo/market_agent/service.py` (orchestrator)
 - **Market data**: `src/pearlalgo/data_providers/` (IBKR provider + executor)
-- **Strategy**: `src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py` (single-file strategy from Pine Scripts)
+- **Strategy**: `src/pearlalgo/trading_bots/pearl_bot_auto.py` (single-file strategy from Pine Scripts)
 - **Execution**: `src/pearlalgo/execution/` (adapters; guarded by config + arming)
 - **State/metrics**: `src/pearlalgo/market_agent/state_manager.py`, `performance_tracker.py`
 - **Ops/UI**: Telegram notifier + command handler
@@ -47,8 +47,8 @@ for compatibility with existing Telegram/mobile views.
 
 ### How to extend (future-proof path)
 
-- **Add an indicator**: Add functions to `src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py` or create new trading bot files
-- **Add a strategy**: Create a new file in `src/pearlalgo/strategies/trading_bots/` following the single-file pattern, or extend `pearl_bot_auto.py`
+- **Add an indicator**: Add functions to `src/pearlalgo/trading_bots/pearl_bot_auto.py` or create new trading bot files
+- **Add a strategy**: Create a new file in `src/pearlalgo/trading_bots/` following the single-file pattern, or extend `pearl_bot_auto.py`
 - **Add a data provider**: implement `src/pearlalgo/data_providers/base.py` and register in `factory.py`.
 - **Add an execution adapter**: implement `src/pearlalgo/execution/base.py` and register in the execution factory.
 

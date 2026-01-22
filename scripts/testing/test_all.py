@@ -73,7 +73,7 @@ except ImportError:
 from pearlalgo.market_agent.service import MarketAgentService  # noqa: E402
 from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier  # noqa: E402
 # nq_intraday removed - using pearl_bot_auto now
-from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG  # noqa: E402
+from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG  # noqa: E402
 from pearlalgo.utils.logging_config import setup_logging  # noqa: E402
 
 
@@ -203,7 +203,7 @@ async def test_signal_generation():
     print()
     
     print("Generating signals...")
-    from pearlalgo.strategies.trading_bots.pearl_bot_auto import generate_signals
+    from pearlalgo.trading_bots.pearl_bot_auto import generate_signals
     signals = generate_signals(df, config=config)
     print(f"✅ Generated {len(signals)} signal(s)")
     print()

@@ -24,7 +24,7 @@ class TestVirtualPnLTiebreak:
         """Create a service with a specific tiebreak configuration."""
         def _create_service(tiebreak: str = "stop_loss"):
             from pearlalgo.market_agent.service import MarketAgentService
-            from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+            from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
             from tests.mock_data_provider import MockDataProvider
 
             with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
@@ -336,7 +336,7 @@ class TestVirtualPnLConfig:
 
     def test_config_loads_tiebreak_from_yaml(self, tmp_path) -> None:
         """Verify tiebreak is loaded from config.yaml."""
-        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+        from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         
         # Default config should have stop_loss as default
         config = PEARL_BOT_CONFIG.copy()

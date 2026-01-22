@@ -14,7 +14,7 @@ Layers and allowed dependencies:
 - utils:          may import utils, stdlib, third-party only
 - config:         may import config, utils
 - data_providers: may import data_providers, config, utils
-- strategies:     may import strategies, config, utils, learning (for optional ML signal filtering)
+- trading_bots:   may import trading_bots, config, utils, learning (for optional ML signal filtering)
 - execution:      may import execution, config, utils (ATS execution layer)
 - learning:       may import learning, config, utils (adaptive learning layer)
 - market_agent:   may import any internal layer (orchestration)
@@ -38,7 +38,7 @@ from typing import Dict, List, Optional, Set, Tuple
 # ---------------------------------------------------------------------------
 
 # Layers under src/pearlalgo/
-LAYERS = {"utils", "config", "data_providers", "strategies", "execution", "learning", "market_agent"}
+LAYERS = {"utils", "config", "data_providers", "trading_bots", "execution", "learning", "market_agent"}
 
 # For each layer, which other pearlalgo.* layers it MAY import.
 # Imports of stdlib and third-party packages are always allowed.
@@ -46,7 +46,7 @@ ALLOWED_IMPORTS: Dict[str, Set[str]] = {
     "utils": {"utils"},  # utils is self-contained
     "config": {"config", "utils"},
     "data_providers": {"data_providers", "config", "utils"},
-    "strategies": {"strategies", "config", "utils", "learning"},  # learning for optional ML signal filtering
+    "trading_bots": {"trading_bots", "config", "utils", "learning"},  # learning for optional ML signal filtering
     "execution": {"execution", "config", "utils"},  # ATS execution layer
     "learning": {"learning", "config", "utils"},  # Adaptive learning layer
     "market_agent": LAYERS,  # orchestration layer can import anything
@@ -85,7 +85,7 @@ def get_layer(module_path: str) -> Optional[str]:
 
     Examples:
         pearlalgo.utils.logger         -> utils
-        pearlalgo.strategies.trading_bots.pearl_bot_auto -> strategies
+        pearlalgo.trading_bots.pearl_bot_auto -> trading_bots
         pearlalgo.market_agent.service  -> market_agent
         pandas                          -> None (external)
     """

@@ -17,7 +17,7 @@ data settings, signals, performance tracking, execution (ATS), and learning.
 - For deployment-specific settings (hosts, ports, API keys)
 - For Pydantic-validated environment-based configuration
 
-**When to use strategy config (`strategies/trading_bots/pearl_bot_auto.py` CONFIG):**
+**When to use strategy config (`trading_bots/pearl_bot_auto.py` CONFIG):**
 - For strategy-specific parameters (symbol, timeframe, risk parameters)
 - For strategy behavior configuration (ATR multipliers, R:R ratios)
 

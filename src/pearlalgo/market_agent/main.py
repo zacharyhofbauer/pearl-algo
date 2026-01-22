@@ -1,7 +1,7 @@
 """
-NQ Agent Main Entry Point
+Market Agent Main Entry Point
 
-Main entry point for running the NQ agent service.
+Main entry point for running the market agent service.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ except Exception as e:
 from pearlalgo.config.config_file import load_config_yaml
 from pearlalgo.data_providers.factory import create_data_provider
 from pearlalgo.market_agent.service import MarketAgentService
-from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.utils.logging_config import set_run_id, setup_logging
 from pearlalgo.utils.paths import ensure_state_dir
 

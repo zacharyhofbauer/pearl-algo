@@ -14,7 +14,7 @@ import pytest
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
 from pearlalgo.market_agent.service import MarketAgentService
-from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.config.config_loader import load_service_config
 
 

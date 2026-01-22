@@ -19,8 +19,8 @@ Purpose: File-by-file keep/delete decisions grounded in the current tree.
 | `config/*` | KEEP | Config loading + schema + settings |
 | `data_providers/*` | KEEP | IBKR data provider + executor |
 | `market_agent/*` | KEEP | Main service loop + Telegram UI + state |
-| `strategies/trading_bots/pearl_bot_auto.py` | KEEP | Main runtime strategy (single-file, from Pine Scripts) |
-| `strategies/trading_bots/*` | KEEP | Additional trading bot variants |
+| `trading_bots/pearl_bot_auto.py` | KEEP | Main runtime strategy (single-file, from Pine Scripts) |
+| `trading_bots/*` | KEEP | Additional trading bot variants |
 | `execution/base.py` | KEEP | Execution interfaces |
 | `execution/ibkr/*` | KEEP | IBKR execution adapter |
 | `learning/*` | KEEP | Bandit + contextual learning + ML filter + trade DB |

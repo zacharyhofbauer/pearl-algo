@@ -171,7 +171,7 @@ The MNQ Trading Agent is designed to:
 - Creates data provider via factory
 - Handles graceful shutdown
 
-### 2. Trading Strategy (`src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py`)
+### 2. Trading Strategy (`src/pearlalgo/trading_bots/pearl_bot_auto.py`)
 
 **PearlBot Auto** (`pearl_bot_auto.py`):
 - Single-file, self-contained strategy derived from Pine Script indicators
@@ -261,7 +261,7 @@ The MNQ Trading Agent is designed to:
 - Loads from environment variables
 - Type validation
 
-**Symbols**: Symbol definitions are in the strategy configuration (`src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py` CONFIG). The system supports multiple markets (MNQ, ES, GC, etc.) via market-aware configuration.
+**Symbols**: Symbol definitions are in the strategy configuration (`src/pearlalgo/trading_bots/pearl_bot_auto.py` CONFIG). The system supports multiple markets (MNQ, ES, GC, etc.) via market-aware configuration.
 
 ---
 
@@ -386,7 +386,7 @@ pearlalgo-dev-ai-agents/
 │   │   ├── chart_generator.py    # mplfinance chart generation (optional, Telegram)
 │   │   ├── health_monitor.py       # Health monitoring
 │   │   └── challenge_tracker.py    # Challenge tracking
-│   ├── strategies/trading_bots/ # Trading Bot Strategies
+│   ├── trading_bots/ # Trading Bot Strategies
 │   │   └── pearl_bot_auto.py   # Single-file strategy (only bot)
 │   ├── execution/              # ATS Execution Layer (disabled by default)
 │   │   ├── base.py             # ExecutionAdapter interface, ExecutionConfig
@@ -656,7 +656,7 @@ Configuration is resolved using the following precedence rules:
    - Risk/position sizing and prop‑firm assumptions
    - Service intervals, data buffers, and signal thresholds
 3. **Code defaults** in:
-   - `src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py` (`CONFIG` dictionary)
+   - `src/pearlalgo/trading_bots/pearl_bot_auto.py` (`CONFIG` dictionary)
    - `pearlalgo.config.config_loader.load_service_config`
    - `pearlalgo.config.settings.Settings`
 

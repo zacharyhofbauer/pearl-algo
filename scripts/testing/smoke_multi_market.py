@@ -45,7 +45,7 @@ def main() -> None:
                 "import os; "
                 "from pearlalgo.config.config_file import load_config_yaml; "
                 "from pearlalgo.config.config_loader import load_service_config; "
-                "from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG; "
+                "from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG; "
                 "from pearlalgo.utils.paths import ensure_state_dir; "
                 "cfg = load_config_yaml(); "
                 "svc = load_service_config(validate=False); "

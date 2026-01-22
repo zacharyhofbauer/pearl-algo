@@ -29,7 +29,7 @@ from pearlalgo.market_agent.health_monitor import HealthMonitor
 from pearlalgo.market_agent.performance_tracker import PerformanceTracker
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
-from pearlalgo.strategies.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.utils.cadence import CadenceMetrics, CadenceScheduler
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
@@ -610,7 +610,7 @@ class MarketAgentService:
                 config_dict["futures_market_open"] = None
             try:
                 # Check trading session using pearl_bot_auto time filter
-                from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+                from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
                 config_dict["strategy_session_open"] = check_trading_session(datetime.now(timezone.utc), self.config)
             except Exception:
                 config_dict["strategy_session_open"] = None
@@ -1027,7 +1027,7 @@ class MarketAgentService:
                 
                 # Prefer latest_bar timestamp for session check (reduces wall-clock drift issues).
                 # Fall back to wall-clock time if no latest_bar available.
-                from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+                from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
                 check_time = latest_bar_time if latest_bar_time else datetime.now(timezone.utc)
                 strategy_session_open = check_trading_session(check_time, self.config)
                 futures_market_open = False
@@ -1113,7 +1113,7 @@ class MarketAgentService:
                     atr = 10.0  # Default
                     if not df.empty:
                         try:
-                            from pearlalgo.strategies.trading_bots.pearl_bot_auto import calculate_atr
+                            from pearlalgo.trading_bots.pearl_bot_auto import calculate_atr
                             atr_series = calculate_atr(df, period=14)
                             atr = float(atr_series.iloc[-1]) if not atr_series.empty else 10.0
                         except Exception:
@@ -1133,28 +1133,28 @@ class MarketAgentService:
                     exit_signals = []
                     
                     # No trade manager - virtual broker handles exits
-                        # Persist stop changes so virtual exit grading uses the latest stop_loss.
-                        # (Virtual exits read stop_loss from the nested `signal` in signals.jsonl.)
-                        try:
-                            if (
-                                getattr(trade, "last_stop_update", None)
-                                and str(getattr(trade, "signal_id", "") or "")
-                                and float(getattr(trade, "stop_loss", 0.0) or 0.0) > 0
-                            ):
-                                current_stop = float(trade.stop_loss)
-                                prev_stop = getattr(trade, "last_persisted_stop_loss", None)
-                                if (prev_stop is None) or (abs(current_stop - float(prev_stop)) > 1e-9):
-                                    self.performance_tracker.update_signal_prices(
-                                        signal_id=str(trade.signal_id),
-                                        stop_loss=current_stop,
-                                        updated_at=trade.last_stop_update,
-                                        source="trailing_stop",
-                                    )
-                                    trade.last_persisted_stop_loss = current_stop
-                        except Exception:
-                            pass
+                    # Persist stop changes so virtual exit grading uses the latest stop_loss.
+                    # (Virtual exits read stop_loss from the nested `signal` in signals.jsonl.)
+                    try:
+                        if (
+                            getattr(trade, "last_stop_update", None)
+                            and str(getattr(trade, "signal_id", "") or "")
+                            and float(getattr(trade, "stop_loss", 0.0) or 0.0) > 0
+                        ):
+                            current_stop = float(trade.stop_loss)
+                            prev_stop = getattr(trade, "last_persisted_stop_loss", None)
+                            if (prev_stop is None) or (abs(current_stop - float(prev_stop)) > 1e-9):
+                                self.performance_tracker.update_signal_prices(
+                                    signal_id=str(trade.signal_id),
+                                    stop_loss=current_stop,
+                                    updated_at=trade.last_stop_update,
+                                    source="trailing_stop",
+                                )
+                                trade.last_persisted_stop_loss = current_stop
+                    except Exception:
+                        pass
 
-                        if trade.breakeven_moved and trade.last_stop_update:
+                    if trade.breakeven_moved and trade.last_stop_update:
                             # Check if this is a recent breakeven move (within last cycle)
                             time_since_update = (datetime.now(timezone.utc) - trade.last_stop_update).total_seconds()
                             if time_since_update < 120:  # Within 2 minutes
@@ -1803,10 +1803,6 @@ class MarketAgentService:
                         exit_time=exit_bar_ts,
                     )
                     exited_this_cycle.add(sig_id)
-
-                    # TradeManager removed - virtual broker handles exits
-                    except Exception:
-                        pass
 
                     if perf:
                         pnl_value = float(perf.get('pnl', 0.0))
@@ -2873,7 +2869,7 @@ class MarketAgentService:
         
         session_open = False
         try:
-            from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+            from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
             session_open = check_trading_session(bar_time, self.config) if bar_time else False
         except Exception:
             # If session check fails, assume closed (conservative)
@@ -3004,7 +3000,7 @@ class MarketAgentService:
                         bar_time = bar_time.replace(tzinfo=timezone.utc)
             
             # Check strategy session first (more specific)
-            from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+            from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
             strategy_session_open = check_trading_session(bar_time, self.config) if bar_time else False
             if not strategy_session_open:
                 return "StrategySessionClosed"
@@ -3579,7 +3575,7 @@ class MarketAgentService:
 
         strategy_session_open = None
         try:
-            from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+            from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
             strategy_session_open = check_trading_session(datetime.now(timezone.utc), self.config)
         except Exception:
             strategy_session_open = None
@@ -4065,7 +4061,7 @@ class MarketAgentService:
         # Reuse futures_market_open from earlier check (avoid duplicate API call)
         state["futures_market_open"] = futures_market_open
         try:
-            from pearlalgo.strategies.trading_bots.pearl_bot_auto import check_trading_session
+            from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
             state["strategy_session_open"] = check_trading_session(datetime.now(timezone.utc), self.config)
         except Exception:
             state["strategy_session_open"] = None

@@ -11,7 +11,7 @@ import pytest
 from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.market_agent.service import MarketAgentService
 from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
-from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.utils.telegram_alerts import format_home_card
 

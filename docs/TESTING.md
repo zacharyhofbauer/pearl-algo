@@ -57,7 +57,7 @@ Tests import directly from the installed package:
 ```python
 # ✅ Correct - imports actual production code
 from pearlalgo.config.config_loader import load_service_config
-from pearlalgo.strategies.trading_bots.pearl_bot_auto import generate_signals
+from pearlalgo.trading_bots.pearl_bot_auto import generate_signals
 from pearlalgo.market_agent.service import MarketAgentService
 
 # ❌ Wrong - don't duplicate code in tests/

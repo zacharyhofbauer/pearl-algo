@@ -1,7 +1,7 @@
 # Trading Bot (AutoBot) Guide
 
 This repository keeps **trading bots** for **backtesting and analysis only**.
-Runtime signal generation is provided by the core strategy in `strategies/trading_bots/pearl_bot_auto.py`.
+Runtime signal generation is provided by the core strategy in `trading_bots/pearl_bot_auto.py`.
 
 ## Runtime model (clarified)
 

@@ -171,7 +171,7 @@ class TestQuietReasonDetermination:
     def service(self, tmp_path):
         """Create a minimal MarketAgentService for testing."""
         from pearlalgo.market_agent.service import MarketAgentService
-        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+        from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from tests.mock_data_provider import MockDataProvider
 
         with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
@@ -318,7 +318,7 @@ async def test_dashboard_emits_when_data_empty(tmp_path) -> None:
     continues to show its status even when no data is available.
     """
     from pearlalgo.market_agent.service import MarketAgentService
-    from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+    from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
     from tests.mock_data_provider import MockDataProvider
 
     with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:

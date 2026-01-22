@@ -56,19 +56,19 @@ No other environment variables are required by the running agent; keep any addit
 Key sections and their consumers:
 
 - `symbol`, `timeframe`, `scan_interval`
-  - **Used by**: `strategies.trading_bots.pearl_bot_auto.CONFIG` and `pearlalgo.market_agent.service` via strategy config.
+  - **Used by**: `trading_bots.pearl_bot_auto.CONFIG` and `pearlalgo.market_agent.service` via strategy config.
 - `telegram.*`
   - **Used by**: `pearlalgo.market_agent.main` and `pearlalgo.market_agent.telegram_notifier` (through DI from main and service).
 - `risk.*`
-  - **Used by**: `strategies.trading_bots.pearl_bot_auto.CONFIG` and downstream strategy components.
+  - **Used by**: `trading_bots.pearl_bot_auto.CONFIG` and downstream strategy components.
 - `service.*`, `circuit_breaker.*`, `data.*`, `signals.*`, `performance.*`
   - **Used by**: `pearlalgo.config.config_loader.load_service_config()` and then by:
     - `pearlalgo.market_agent.service` (service intervals + alert throttles, circuit breaker thresholds)
     - `pearlalgo.market_agent.data_fetcher` (data buffer sizes)
     - `pearlalgo.market_agent.performance_tracker` (performance history limits)
-    - `strategies.trading_bots.pearl_bot_auto` (signal thresholds, where applicable).
+    - `trading_bots.pearl_bot_auto` (signal thresholds, where applicable).
 - `strategy`, `strategy_variants`
-  - **Used by**: `strategies.trading_bots.pearl_bot_auto.CONFIG` for advanced strategy configuration.
+  - **Used by**: `trading_bots.pearl_bot_auto.CONFIG` for advanced strategy configuration.
   - **Purpose**: Allow runtime strategy parameter overrides and define strategy variants for backtesting/experimentation.
 - `market_hours`
   - **Used by**: `pearlalgo.utils.market_hours` and strategy session logic.
@@ -93,7 +93,7 @@ Notes:
 - Intended for **infrastructure** and **deployment** configuration:
   - IBKR host/port/client IDs
 
-### 1.4 Strategy config (`pearlalgo.strategies.trading_bots.pearl_bot_auto`)
+### 1.4 Strategy config (`pearlalgo.trading_bots.pearl_bot_auto`)
 
 - Strategy‑specific parameters such as symbol, timeframe, risk parameters, ATR multipliers, R:R ratios.
 - May read environment overrides (via `os.getenv` helper) but is primarily driven by `config/config.yaml`.
@@ -115,7 +115,7 @@ Notes:
 - **Settings (`pearlalgo.config.settings`)** – infrastructure and environment glue (`src/pearlalgo/config/settings.py`):
   - Normalization of env vars
   - Validation of IBKR settings
-- **Strategy config (`pearlalgo.strategies.trading_bots.pearl_bot_auto`)** – trading logic parameters (`src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py`):
+- **Strategy config (`pearlalgo.trading_bots.pearl_bot_auto`)** – trading logic parameters (`src/pearlalgo/trading_bots/pearl_bot_auto.py`):
   - ATR multipliers, risk/reward thresholds
   - Session definitions and regime parameters
 
@@ -126,7 +126,7 @@ Notes:
 2. **New service behavior toggle or threshold?**
    - Add to `config/config.yaml` and load via `load_service_config()` or strategy config; avoid hard‑coding in multiple modules.
 3. **New strategy‑specific parameter?**
-   - Add to `src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py` CONFIG dictionary and reference from strategy functions.
+   - Add to `src/pearlalgo/trading_bots/pearl_bot_auto.py` CONFIG dictionary and reference from strategy functions.
 4. **Avoid magic numbers** when they influence trading or service behavior; prefer a named config key with a documented default.
 
 This document is descriptive and does not alter runtime behavior, but it should be kept up to date when configuration wiring changes.

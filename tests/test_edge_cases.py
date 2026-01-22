@@ -13,7 +13,7 @@ import pytest
 
 from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
 from pearlalgo.market_agent.service import MarketAgentService
-from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.config.config_loader import load_service_config
 from tests.mock_data_provider import MockDataProvider
 
@@ -163,7 +163,7 @@ class TestVirtualPnLExitGrading:
         """Virtual PnL grading should be skipped when virtual_pnl_enabled is False."""
         from datetime import datetime, timedelta, timezone
         import pandas as pd
-        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+        from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from pearlalgo.market_agent.service import MarketAgentService
         from tests.mock_data_provider import MockDataProvider
         
@@ -203,7 +203,7 @@ class TestVirtualPnLExitGrading:
         """
         from datetime import datetime, timedelta, timezone
         import pandas as pd
-        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+        from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from pearlalgo.market_agent.service import MarketAgentService
         from tests.mock_data_provider import MockDataProvider
         
@@ -254,7 +254,7 @@ class TestVirtualPnLExitGrading:
         """Virtual PnL should only evaluate bars AFTER entry time (strict after)."""
         from datetime import datetime, timedelta, timezone
         import pandas as pd
-        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+        from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from pearlalgo.market_agent.service import MarketAgentService
         from tests.mock_data_provider import MockDataProvider
         
