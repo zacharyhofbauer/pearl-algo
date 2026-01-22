@@ -605,7 +605,7 @@ def generate_timeframe_ohlcv(
 
 
 
-_high_volatility_data(
+def _high_volatility_data(
     num_bars: int = 100,
     base_price: float = 25000.0,
     seed: int = SEED,

@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 from pearlalgo.config.config_file import load_config_yaml, log_config_warnings
+from pearlalgo.config.config_view import ConfigView
 from pearlalgo.utils.logger import logger
 
 # Schema validation (optional - only validates if explicitly requested)
@@ -340,6 +341,12 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "max_records": 1000,
         "default_lookback_days": 7,
     },
+    "virtual_pnl": {
+        "enabled": True,
+        "intrabar_tiebreak": "stop_loss",
+        "notify_entry": False,
+        "notify_exit": False,
+    },
     # Market hours configuration (for holiday/early-close overrides)
     # Disabled by default to preserve current behavior.
     # Enable by setting enable_config_overrides: true and providing dates.
@@ -457,7 +464,13 @@ def load_service_config(
     except Exception as e:
         logger.warning(f"Could not apply execution env overrides: {e}")
     
-    return result
+    # Flatten virtual_pnl fields for legacy attribute access
+    vp_cfg = result.get("virtual_pnl", {}) or {}
+    result["virtual_pnl_enabled"] = bool(vp_cfg.get("enabled", True))
+    result["virtual_pnl_notify_entry"] = bool(vp_cfg.get("notify_entry", False))
+    result["virtual_pnl_notify_exit"] = bool(vp_cfg.get("notify_exit", False))
+    result["virtual_pnl_tiebreak"] = vp_cfg.get("intrabar_tiebreak", "stop_loss")
+    return ConfigView(result)
 
 
 def parse_market_hours_overrides(

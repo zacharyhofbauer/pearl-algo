@@ -18,6 +18,8 @@ Perfect for testing live without using real money.
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
+
+from pearlalgo.config.config_view import ConfigView
 from datetime import datetime, timezone, time as dt_time
 from zoneinfo import ZoneInfo
 import pandas as pd
@@ -30,9 +32,10 @@ from pearlalgo.utils.logger import logger
 # CONFIGURATION
 # ============================================================================
 
-CONFIG = {
+CONFIG = ConfigView({
     "symbol": "MNQ",
     "timeframe": "5m",
+    "scan_interval": 30,
     
     # EMA Crossover (from EMA_Crossover.pine)
     "ema_fast": 9,
@@ -70,7 +73,7 @@ CONFIG = {
     "start_minute": 30,
     "end_hour": 16,
     "end_minute": 0,
-}
+})
 
 
 # ============================================================================

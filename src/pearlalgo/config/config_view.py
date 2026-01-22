@@ -16,3 +16,6 @@ class ConfigView(dict):
 
     def __setattr__(self, name: str, value: Any) -> None:
         self[name] = value
+
+    def copy(self) -> "ConfigView":
+        return ConfigView(super().copy())

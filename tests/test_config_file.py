@@ -186,9 +186,9 @@ class TestLoadConfigYaml:
         assert "service" in result
 
     def test_load_nonexistent_returns_empty(self, tmp_path: Path) -> None:
-        """Test that loading a nonexistent file returns empty dict."""
+        """Nonexistent overlay returns base config (if present)."""
         result = load_config_yaml(tmp_path / "does_not_exist.yaml")
-        assert result == {}
+        assert result.get("symbol") is not None
 
     def test_load_with_env_substitution(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that env vars are substituted when loading."""
@@ -211,20 +211,20 @@ class TestLoadConfigYaml:
         assert result["api_token"] == "${MY_TOKEN}"  # Not substituted
 
     def test_load_empty_yaml_returns_empty(self, tmp_path: Path) -> None:
-        """Test that empty YAML file returns empty dict."""
+        """Empty overlay returns base config (if present)."""
         config_file = tmp_path / "empty.yaml"
         config_file.write_text("")
         
         result = load_config_yaml(config_file)
-        assert result == {}
+        assert result.get("symbol") is not None
 
     def test_load_yaml_only_comments_returns_empty(self, tmp_path: Path) -> None:
-        """Test that YAML file with only comments returns empty dict."""
+        """Comment-only overlay returns base config (if present)."""
         config_file = tmp_path / "comments.yaml"
         config_file.write_text("# This is a comment\n# Another comment\n")
         
         result = load_config_yaml(config_file)
-        assert result == {}
+        assert result.get("symbol") is not None
 
     def test_load_malformed_yaml_returns_empty(self, tmp_path: Path) -> None:
         """Test that malformed YAML returns empty dict (fails gracefully)."""

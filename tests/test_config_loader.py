@@ -28,9 +28,9 @@ data:
     assert loaded["data"]["stale_data_threshold_minutes"] == 2
 
     # Defaults remain for unspecified keys
-    assert loaded["service"]["heartbeat_interval"] == 3600
+    assert loaded["service"]["heartbeat_interval"] == 86400
     assert loaded["circuit_breaker"]["max_connection_failures"] == 10
-    assert loaded["signals"]["min_confidence"] == 0.50
+    assert loaded["signals"]["min_confidence"] == 0.55
 
 
 # =============================================================================

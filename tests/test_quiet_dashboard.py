@@ -207,106 +207,103 @@ class TestQuietReasonDetermination:
 
     def test_quiet_reason_strategy_session_closed(self, service) -> None:
         """Returns StrategySessionClosed when strategy session is closed."""
-        # Mock strategy session to be closed
-        service.strategy.scanner.is_market_hours = MagicMock(return_value=False)
-        
-        reason = service._get_quiet_reason({}, has_data=True, no_signals=True)
-        assert reason == "StrategySessionClosed"
+        with patch("pearlalgo.trading_bots.pearl_bot_auto.check_trading_session", return_value=False):
+            reason = service._get_quiet_reason({}, has_data=True, no_signals=True)
+            assert reason == "StrategySessionClosed"
 
     def test_quiet_reason_no_opportunity(self, service) -> None:
         """Returns NoOpportunity when session is open but no signals."""
-        # Mock both gates as open
-        service.strategy.scanner.is_market_hours = MagicMock(return_value=True)
-        with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
-            mock_mh.return_value.is_market_open.return_value = True
-            
-            # Provide fresh market data
-            market_data = {
-                "df": MagicMock(empty=False),
-                "latest_bar": {
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                },
-            }
-            
-            reason = service._get_quiet_reason(market_data, has_data=True, no_signals=True)
-            assert reason == "NoOpportunity"
+        with patch("pearlalgo.trading_bots.pearl_bot_auto.check_trading_session", return_value=True):
+            with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
+                mock_mh.return_value.is_market_open.return_value = True
+
+                # Provide fresh market data
+                market_data = {
+                    "df": MagicMock(empty=False),
+                    "latest_bar": {
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                }
+
+                reason = service._get_quiet_reason(market_data, has_data=True, no_signals=True)
+                assert reason == "NoOpportunity"
 
     def test_quiet_reason_no_data(self, service) -> None:
         """Returns NoData when no data is available."""
-        # Mock both gates as open
-        service.strategy.scanner.is_market_hours = MagicMock(return_value=True)
-        with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
-            mock_mh.return_value.is_market_open.return_value = True
-            
-            reason = service._get_quiet_reason(None, has_data=False)
-            assert reason == "NoData"
+        with patch("pearlalgo.trading_bots.pearl_bot_auto.check_trading_session", return_value=True):
+            with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
+                mock_mh.return_value.is_market_open.return_value = True
+
+                market_data = {
+                    "df": MagicMock(empty=True),
+                    "latest_bar": {"timestamp": datetime.now(timezone.utc).isoformat()},
+                }
+                reason = service._get_quiet_reason(market_data, has_data=False)
+                assert reason == "NoData"
 
     def test_quiet_reason_fresh_data_with_timezone_aware_timestamp(self, service) -> None:
         """Fresh data with timezone-aware timestamp (e.g., CST -06:00) returns NoOpportunity, not StaleData."""
-        # Mock both gates as open
-        service.strategy.scanner.is_market_hours = MagicMock(return_value=True)
-        with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
-            mock_mh.return_value.is_market_open.return_value = True
-            
-            # Create a fresh timestamp in a non-UTC timezone (e.g., CST = UTC-6)
-            # This simulates IBKR returning exchange-local timestamps
-            from datetime import timezone as tz
-            cst = tz(timedelta(hours=-6))
-            fresh_time = datetime.now(cst) - timedelta(minutes=2)  # 2 minutes ago (fresh)
-            
-            market_data = {
-                "df": MagicMock(empty=False),
-                "latest_bar": {
-                    "timestamp": fresh_time.isoformat(),  # e.g., "2025-12-23T12:48:00-06:00"
-                },
-            }
-            
-            reason = service._get_quiet_reason(market_data, has_data=True, no_signals=True)
-            # Should be NoOpportunity, NOT StaleData (data is fresh)
-            assert reason == "NoOpportunity", f"Expected NoOpportunity for fresh data, got {reason}"
+        with patch("pearlalgo.trading_bots.pearl_bot_auto.check_trading_session", return_value=True):
+            with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
+                mock_mh.return_value.is_market_open.return_value = True
+
+                # Create a fresh timestamp in a non-UTC timezone (e.g., CST = UTC-6)
+                # This simulates IBKR returning exchange-local timestamps
+                from datetime import timezone as tz
+                cst = tz(timedelta(hours=-6))
+                fresh_time = datetime.now(cst) - timedelta(minutes=2)  # 2 minutes ago (fresh)
+
+                market_data = {
+                    "df": MagicMock(empty=False),
+                    "latest_bar": {
+                        "timestamp": fresh_time.isoformat(),  # e.g., "2025-12-23T12:48:00-06:00"
+                    },
+                }
+
+                reason = service._get_quiet_reason(market_data, has_data=True, no_signals=True)
+                # Should be NoOpportunity, NOT StaleData (data is fresh)
+                assert reason == "NoOpportunity", f"Expected NoOpportunity for fresh data, got {reason}"
 
     def test_quiet_reason_stale_data_with_timezone_aware_timestamp(self, service) -> None:
         """Actually stale data with timezone-aware timestamp returns StaleData."""
-        # Mock both gates as open
-        service.strategy.scanner.is_market_hours = MagicMock(return_value=True)
-        with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
-            mock_mh.return_value.is_market_open.return_value = True
-            
-            # Create a stale timestamp in a non-UTC timezone (e.g., CST = UTC-6)
-            from datetime import timezone as tz
-            cst = tz(timedelta(hours=-6))
-            stale_time = datetime.now(cst) - timedelta(minutes=15)  # 15 minutes ago (stale)
-            
-            market_data = {
-                "df": MagicMock(empty=False),
-                "latest_bar": {
-                    "timestamp": stale_time.isoformat(),
-                },
-            }
-            
-            reason = service._get_quiet_reason(market_data, has_data=True, no_signals=True)
-            # Should be StaleData (data is actually old)
-            assert reason == "StaleData", f"Expected StaleData for stale data, got {reason}"
+        with patch("pearlalgo.trading_bots.pearl_bot_auto.check_trading_session", return_value=True):
+            with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
+                mock_mh.return_value.is_market_open.return_value = True
+
+                # Create a stale timestamp in a non-UTC timezone (e.g., CST = UTC-6)
+                from datetime import timezone as tz
+                cst = tz(timedelta(hours=-6))
+                stale_time = datetime.now(cst) - timedelta(minutes=15)  # 15 minutes ago (stale)
+
+                market_data = {
+                    "df": MagicMock(empty=False),
+                    "latest_bar": {
+                        "timestamp": stale_time.isoformat(),
+                    },
+                }
+
+                reason = service._get_quiet_reason(market_data, has_data=True, no_signals=True)
+                # Should be StaleData (data is actually old)
+                assert reason == "StaleData", f"Expected StaleData for stale data, got {reason}"
 
     def test_quiet_reason_fresh_naive_utc_timestamp(self, service) -> None:
         """Fresh data with naive (no timezone) timestamp assumed as UTC returns NoOpportunity."""
-        # Mock both gates as open
-        service.strategy.scanner.is_market_hours = MagicMock(return_value=True)
-        with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
-            mock_mh.return_value.is_market_open.return_value = True
-            
-            # Create a fresh naive timestamp (no timezone info) - use UTC-aware then strip timezone
-            fresh_time = (datetime.now(timezone.utc) - timedelta(minutes=2)).replace(tzinfo=None)  # 2 minutes ago, naive
-            
-            market_data = {
-                "df": MagicMock(empty=False),
-                "latest_bar": {
-                    "timestamp": fresh_time.isoformat(),  # No timezone suffix
-                },
-            }
-            
-            reason = service._get_quiet_reason(market_data, has_data=True, no_signals=True)
-            assert reason == "NoOpportunity", f"Expected NoOpportunity for fresh naive timestamp, got {reason}"
+        with patch("pearlalgo.trading_bots.pearl_bot_auto.check_trading_session", return_value=True):
+            with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
+                mock_mh.return_value.is_market_open.return_value = True
+
+                # Create a fresh naive timestamp (no timezone info) - use UTC-aware then strip timezone
+                fresh_time = (datetime.now(timezone.utc) - timedelta(minutes=2)).replace(tzinfo=None)  # 2 minutes ago, naive
+
+                market_data = {
+                    "df": MagicMock(empty=False),
+                    "latest_bar": {
+                        "timestamp": fresh_time.isoformat(),  # No timezone suffix
+                    },
+                }
+
+                reason = service._get_quiet_reason(market_data, has_data=True, no_signals=True)
+                assert reason == "NoOpportunity", f"Expected NoOpportunity for fresh naive timestamp, got {reason}"
 
 
 @pytest.mark.asyncio
