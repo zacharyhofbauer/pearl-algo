@@ -67,6 +67,14 @@ CONFIG = ConfigView({
     "take_profit_atr_mult": 2.5,
     "min_confidence": 0.6,
     "min_risk_reward": 1.2,
+
+    # Virtual PnL grading (signal-only; no live execution)
+    # Used by MarketAgentService virtual trade exits and tests.
+    "virtual_pnl_enabled": True,
+    "virtual_pnl_notify_entry": False,
+    "virtual_pnl_notify_exit": False,
+    # When both SL and TP are crossed intrabar, decide conservatively by default.
+    "virtual_pnl_tiebreak": "stop_loss",
     
     # Trading Hours (ET)
     "start_hour": 9,

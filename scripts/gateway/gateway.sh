@@ -38,6 +38,18 @@ JTS_DIR="$PROJECT_DIR/ibkr/Jts"
 API_PORT=4002
 
 
+_pick_python() {
+  # Prefer the project venv when present so dependencies (ib_insync) resolve.
+  if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
+    echo "$PROJECT_DIR/.venv/bin/python"
+  elif [ -x "$PROJECT_DIR/.venv/bin/python3" ]; then
+    echo "$PROJECT_DIR/.venv/bin/python3"
+  else
+    echo "python3"
+  fi
+}
+
+
 _gateway_pid() {
   pgrep -f "java.*IBC.jar" 2>/dev/null | head -1 || true
 }
@@ -136,9 +148,8 @@ cmd_start() {
       echo "To stop Gateway: ./scripts/gateway/gateway.sh stop"
       echo "To view logs: tail -f $IBC_DIR/$LOG_FILE"
       echo ""
-      echo "Test connection:"
-      echo "  cd $PROJECT_DIR"
-      echo "  python3 scripts/testing/smoke_test_ibkr.py"
+      echo "Test API handshake:"
+      echo "  ./scripts/gateway/gateway.sh test-api"
       exit 0
     fi
     echo "  Still waiting... ($i/12)"
@@ -446,13 +457,25 @@ cmd_test_api() {
   echo "Attempting API connection to trigger any pending dialogs..."
   echo ""
 
-  python3 << 'EOF'
-from ib_insync import IB
+  PY="$(_pick_python)"
+  API_PORT="$API_PORT" "$PY" << 'EOF'
+import os
+import sys
+
+try:
+    from ib_insync import IB
+except ModuleNotFoundError:
+    print("❌ ib_insync is not installed in this Python environment.")
+    print(f"   Python: {sys.executable}")
+    print("   Fix: install project deps (e.g. `pip install -e .`).")
+    raise SystemExit(2)
 
 ib = IB()
+port = int(os.environ.get("API_PORT", "4002"))
 try:
-    print("Connecting to Gateway at 127.0.0.1:4002...")
-    ib.connect("127.0.0.1", 4002, clientId=99, timeout=5)
+    print(f"Python: {sys.executable}")
+    print(f"Connecting to Gateway at 127.0.0.1:{port}...")
+    ib.connect("127.0.0.1", port, clientId=99, timeout=10)
     if ib.isConnected():
         print("✅✅✅ SUCCESS! API connection established!")
         print("   Gateway is ready for connections")
@@ -938,8 +961,8 @@ EOF
   echo "     ./scripts/gateway/gateway.sh start"
   echo "  2. Check status:"
   echo "     ./scripts/gateway/gateway.sh status"
-  echo "  3. Test connection:"
-  echo "     python3 scripts/testing/smoke_test_ibkr.py"
+  echo "  3. Test API handshake:"
+  echo "     ./scripts/gateway/gateway.sh test-api"
 }
 
 

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
@@ -116,6 +117,381 @@ def _stabilize_matplotlib_rcparams() -> None:
 
 # Apply rcParams stabilization at module load
 _stabilize_matplotlib_rcparams()
+
+
+def compute_spaceman_key_levels(levels_df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Compute SpacemanBTC-style higher-timeframe key levels.
+
+    The visual regression baselines in this repo rely on the **4H** subset only.
+    This helper returns a dict shaped like:
+
+    {
+      "intra_4h": {
+        "current": {"open": ..., "high": ..., "low": ..., "mid": ...},
+        "previous": {"open": ..., "high": ..., "low": ..., "mid": ...},
+      }
+    }
+
+    Args:
+        levels_df: UTC-indexed OHLC dataframe with lowercase columns (`open/high/low/close`).
+    """
+    try:
+        if levels_df is None or levels_df.empty:
+            return {}
+        if not isinstance(levels_df.index, pd.DatetimeIndex):
+            return {}
+
+        df = levels_df.copy()
+        try:
+            if df.index.tz is None:
+                df.index = df.index.tz_localize(timezone.utc)
+            else:
+                df.index = df.index.tz_convert(timezone.utc)
+        except Exception:
+            return {}
+
+        # Normalize column casing defensively
+        cols = {str(c).lower(): str(c) for c in df.columns}
+        if not all(k in cols for k in ("open", "high", "low", "close")):
+            return {}
+        ohlc = df.rename(
+            columns={
+                cols["open"]: "open",
+                cols["high"]: "high",
+                cols["low"]: "low",
+                cols["close"]: "close",
+            }
+        )[["open", "high", "low", "close"]]
+        ohlc = ohlc.dropna(subset=["open", "high", "low", "close"])
+        if ohlc.empty:
+            return {}
+
+        resampled = (
+            ohlc.resample("4H")
+            .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+            .dropna(subset=["open", "high", "low", "close"])
+        )
+        if len(resampled) < 2:
+            return {}
+
+        cur = resampled.iloc[-1]
+        prev = resampled.iloc[-2]
+
+        def _pack(row: pd.Series) -> Dict[str, float]:
+            hi = float(row["high"])
+            lo = float(row["low"])
+            return {
+                "open": float(row["open"]),
+                "high": hi,
+                "low": lo,
+                "mid": float((hi + lo) / 2.0),
+            }
+
+        return {"intra_4h": {"current": _pack(cur), "previous": _pack(prev)}}
+    except Exception:
+        # Best-effort feature: never fail charting if this computation breaks.
+        return {}
+
+
+def build_hud_context(
+    df: pd.DataFrame,
+    *,
+    symbol: str = "MNQ",
+    tick_size: float = 0.25,
+) -> Dict[str, Any]:
+    """
+    Build the HUD context dict used by TradingView-style overlays.
+
+    This is intentionally **self-contained and deterministic**: it only uses the provided
+    dataframe window, and never reaches out to live services.
+
+    Expected input:
+      - a dataframe with `timestamp` column (ISO string or datetime), and lowercase
+        `open/high/low/close/volume` columns.
+    """
+    hud: Dict[str, Any] = {"symbol": str(symbol), "tick_size": float(tick_size)}
+    try:
+        if df is None or df.empty:
+            return hud
+
+        work = df.copy()
+
+        # Normalize timestamp → UTC DatetimeIndex
+        if "timestamp" in work.columns:
+            ts = pd.to_datetime(work["timestamp"], errors="coerce", utc=True)
+            work = work.assign(timestamp=ts).dropna(subset=["timestamp"]).sort_values("timestamp").set_index("timestamp")
+        else:
+            if not isinstance(work.index, pd.DatetimeIndex):
+                return hud
+            idx = work.index
+            if idx.tz is None:
+                idx = idx.tz_localize(timezone.utc)
+            else:
+                idx = idx.tz_convert(timezone.utc)
+            work = work.copy()
+            work.index = idx
+            work = work.sort_index()
+
+        # Coerce numeric columns
+        for col in ("open", "high", "low", "close", "volume"):
+            if col in work.columns:
+                work[col] = pd.to_numeric(work[col], errors="coerce")
+        work = work.dropna(subset=["open", "high", "low", "close"])
+        if work.empty:
+            return hud
+
+        # Use PearlBot config defaults for HUD computations (keeps charts aligned with strategy defaults).
+        try:
+            from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as _BOT_CFG
+            from pearlalgo.trading_bots.pearl_bot_auto import calculate_atr as _calc_atr
+        except Exception:
+            _BOT_CFG = {}
+            _calc_atr = None  # type: ignore
+
+        # ----------------------------
+        # Sessions (Tokyo/London/NY)
+        # ----------------------------
+        sessions: List[Dict[str, Any]] = []
+        try:
+            et = work.index.tz_convert(ZoneInfo("America/New_York"))
+
+            # Session definitions in ET (matches baseline expectations)
+            # Tokyo: 19:00 → 02:00 (next day)
+            # London: 03:00 → 08:00
+            # New York: 09:30 → 16:00
+            tokyo_color = "#ff9800"
+            london_color = "#2196f3"
+            ny_color = "#26a69a"
+
+            start_date = et.min().date()
+            end_date = et.max().date()
+            days = pd.date_range(start=start_date, end=end_date, freq="D", tz=ZoneInfo("America/New_York"))
+
+            def _session_stats(name: str, start_dt: datetime, end_dt: datetime, color: str) -> Optional[Dict[str, Any]]:
+                # Compute stats using UTC-indexed source data for deterministic ordering.
+                start_utc = start_dt.astimezone(timezone.utc)
+                end_utc = end_dt.astimezone(timezone.utc)
+                w = work.loc[(work.index >= start_utc) & (work.index <= end_utc)]
+                if w.empty:
+                    return None
+                hi = float(w["high"].max())
+                lo = float(w["low"].min())
+                rt = None
+                if tick_size and tick_size > 0 and np.isfinite(hi) and np.isfinite(lo):
+                    rt = int(round((hi - lo) / float(tick_size)))
+                return {
+                    "name": name,
+                    "start": start_utc.isoformat(),
+                    "end": end_utc.isoformat(),
+                    "color": str(color),
+                    "open": float(w["open"].iloc[0]),
+                    "close": float(w["close"].iloc[-1]),
+                    "avg": float(w["close"].mean()),
+                    "range_ticks": rt,
+                }
+
+            for d in days:
+                # London / NY are same-day windows
+                london = _session_stats(
+                    "London",
+                    datetime(d.year, d.month, d.day, 3, 0, tzinfo=d.tzinfo),
+                    datetime(d.year, d.month, d.day, 8, 0, tzinfo=d.tzinfo),
+                    london_color,
+                )
+                if london:
+                    sessions.append(london)
+
+                ny = _session_stats(
+                    "New York",
+                    datetime(d.year, d.month, d.day, 9, 30, tzinfo=d.tzinfo),
+                    datetime(d.year, d.month, d.day, 16, 0, tzinfo=d.tzinfo),
+                    ny_color,
+                )
+                if ny:
+                    sessions.append(ny)
+
+                # Tokyo crosses midnight: 19:00 on d → 02:00 on d+1
+                tokyo = _session_stats(
+                    "Tokyo",
+                    datetime(d.year, d.month, d.day, 19, 0, tzinfo=d.tzinfo),
+                    (datetime(d.year, d.month, d.day, 2, 0, tzinfo=d.tzinfo) + timedelta(days=1)),
+                    tokyo_color,
+                )
+                if tokyo:
+                    sessions.append(tokyo)
+
+            # Keep chronological order by session start time
+            sessions.sort(key=lambda s: str(s.get("start") or ""))
+        except Exception:
+            sessions = []
+        if sessions:
+            hud["sessions"] = sessions
+
+        # ----------------------------
+        # Power Channel (ChartPrime)
+        # ----------------------------
+        try:
+            sr_len = int(_BOT_CFG.get("sr_length", 130) or 130) if isinstance(_BOT_CFG, dict) else int(getattr(_BOT_CFG, "sr_length", 130))
+            atr_mult = float(_BOT_CFG.get("sr_atr_mult", 0.5) or 0.5) if isinstance(_BOT_CFG, dict) else float(getattr(_BOT_CFG, "sr_atr_mult", 0.5))
+
+            lookback = work.tail(sr_len) if len(work) >= sr_len else work
+            max_price = float(lookback["high"].max())
+            min_price = float(lookback["low"].min())
+
+            atr_width = 0.0
+            if _calc_atr is not None and len(work) >= 20:
+                try:
+                    atr_width = float(_calc_atr(work, period=200).iloc[-1]) * atr_mult
+                except Exception:
+                    atr_width = 0.0
+
+            buy_power = int((lookback["close"] > lookback["open"]).sum())
+            sell_power = int((lookback["close"] < lookback["open"]).sum())
+
+            hud["power_channel"] = {
+                "res_area_top": max_price + atr_width,
+                "res_area_bottom": max_price,
+                "sup_area_top": min_price,
+                "sup_area_bottom": min_price - atr_width,
+                "mid": (max_price + min_price) / 2.0,
+                "buy_power": buy_power,
+                "sell_power": sell_power,
+            }
+        except Exception:
+            pass
+
+        # ----------------------------
+        # Supply & Demand (LuxAlgo VR) + Volume Profile (POC)
+        # ----------------------------
+        try:
+            sd_resolution = int(_BOT_CFG.get("sd_resolution", 50) or 50) if isinstance(_BOT_CFG, dict) else int(getattr(_BOT_CFG, "sd_resolution", 50))
+            sd_threshold = float(_BOT_CFG.get("sd_threshold_pct", 10.0) or 10.0) if isinstance(_BOT_CFG, dict) else float(getattr(_BOT_CFG, "sd_threshold_pct", 10.0))
+
+            lookback = work.tail(100) if len(work) > 100 else work
+            hi = float(lookback["high"].max())
+            lo = float(lookback["low"].min())
+            pr = float(hi - lo)
+            if pr > 0 and sd_resolution > 0:
+                bin_size = pr / float(sd_resolution)
+
+                # Build volume-by-price bins (close-price binning; deterministic)
+                bins: Dict[int, float] = {}
+                for _, row in lookback.iterrows():
+                    close = float(row.get("close", 0.0) or 0.0)
+                    vol = float(row.get("volume", 0.0) or 0.0)
+                    if not np.isfinite(close) or not np.isfinite(vol) or vol <= 0:
+                        continue
+                    b = int(((close - lo) / pr) * sd_resolution)
+                    b = max(0, min(sd_resolution - 1, b))
+                    bins[b] = bins.get(b, 0.0) + vol
+
+                if bins:
+                    # POC = max volume bin center
+                    poc_bin = max(bins.items(), key=lambda kv: kv[1])[0]
+                    poc = lo + (poc_bin + 0.5) * bin_size
+                    hud["volume_profile"] = {"poc": float(poc)}
+
+                    # Supply/Demand: highest-volume bins above/below last close
+                    last_close = float(lookback["close"].iloc[-1])
+                    total_vol = sum(bins.values())
+                    threshold_vol = total_vol * (sd_threshold / 100.0)
+                    supply_bin = None
+                    demand_bin = None
+                    for b, v in sorted(bins.items(), key=lambda kv: kv[1], reverse=True):
+                        if v < threshold_vol:
+                            continue
+                        price = lo + b * bin_size
+                        if supply_bin is None and price > last_close:
+                            supply_bin = b
+                        elif demand_bin is None and price < last_close:
+                            demand_bin = b
+                        if supply_bin is not None and demand_bin is not None:
+                            break
+
+                    def _zone(bin_idx: Optional[int]) -> Optional[Dict[str, float]]:
+                        if bin_idx is None:
+                            return None
+                        bottom = lo + bin_idx * bin_size
+                        top = bottom + bin_size
+                        mid = (top + bottom) / 2.0
+                        return {"top": float(top), "bottom": float(bottom), "avg": float(mid), "wavg": float(mid)}
+
+                    supply = _zone(supply_bin)
+                    demand = _zone(demand_bin)
+                    if supply or demand:
+                        hud["supply_demand_vr"] = {"supply": supply or {}, "demand": demand or {}}
+        except Exception:
+            pass
+
+        # ----------------------------
+        # Key Levels (RTH + ETH daily)
+        # ----------------------------
+        try:
+            et_idx = work.index.tz_convert(ZoneInfo("America/New_York"))
+            et_time = et_idx.time
+
+            # ETH session = 18:00 → 17:00 ET (maintenance break 17:00–18:00 excluded)
+            in_eth = [(t >= datetime(2000, 1, 1, 18, 0).time()) or (t < datetime(2000, 1, 1, 17, 0).time()) for t in et_time]
+            eth_work = work.loc[in_eth]
+            eth_et = et_idx[in_eth]
+            eth_id = []
+            for ts in eth_et:
+                d = ts.date()
+                if ts.time() >= datetime(2000, 1, 1, 18, 0).time():
+                    eth_id.append(d)
+                else:
+                    eth_id.append((ts - timedelta(days=1)).date())
+            eth_work = eth_work.copy()
+            eth_work["__eth_id"] = eth_id
+            eth_groups = (
+                eth_work.groupby("__eth_id", sort=True)
+                .agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last"))
+            )
+
+            # RTH = 09:30 → 16:00 ET
+            rth_mask = [
+                (t >= datetime(2000, 1, 1, 9, 30).time()) and (t <= datetime(2000, 1, 1, 16, 0).time())
+                for t in et_time
+            ]
+            rth_work = work.loc[rth_mask].copy()
+            rth_et = et_idx[rth_mask]
+            rth_work["__rth_id"] = [ts.date() for ts in rth_et]
+            rth_groups = (
+                rth_work.groupby("__rth_id", sort=True)
+                .agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last"))
+            )
+
+            def _pack_levels(df_levels: pd.DataFrame) -> Dict[str, Any]:
+                out: Dict[str, Any] = {"current": {}, "previous": {}}
+                if df_levels is None or df_levels.empty:
+                    return out
+                df_levels = df_levels.sort_index()
+                cur = df_levels.iloc[-1]
+                prev = df_levels.iloc[-2] if len(df_levels) >= 2 else None
+
+                def _one(row) -> Dict[str, float]:
+                    hi = float(row["high"])
+                    lo = float(row["low"])
+                    return {
+                        "open": float(row["open"]),
+                        "high": hi,
+                        "low": lo,
+                        "mid": float((hi + lo) / 2.0),
+                    }
+
+                out["current"] = _one(cur)
+                if prev is not None:
+                    out["previous"] = _one(prev)
+                return out
+
+            hud["key_levels"] = {"eth": _pack_levels(eth_groups), "rth": _pack_levels(rth_groups)}
+        except Exception:
+            pass
+
+        return hud
+    except Exception:
+        return hud
 
 
 @dataclass
@@ -948,10 +1324,6 @@ class ChartGenerator:
         # SpacemanBTC-style higher-timeframe levels (Weekly/Monthly/Quarterly/Yearly/4H/Monday).
         # Compute at chart-render time using the candle window + optional local parquet history.
         try:
-            # nq_intraday removed - hud_context functions disabled
-            # from pearlalgo.strategies.nq_intraday.hud_context import compute_spaceman_key_levels
-            compute_spaceman_key_levels = None
-
             symbol = str(signal.get("symbol") or hud.get("symbol") or "MNQ")
             hist = self._load_key_level_history(symbol)
             base = self._df_to_levels_ohlc(df)
@@ -2770,10 +3142,6 @@ class ChartGenerator:
             # Build HUD context for overlays
             hud: Dict[str, Any] = {}
             try:
-                # nq_intraday removed - hud_context functions disabled
-                # from pearlalgo.strategies.nq_intraday.hud_context import build_hud_context
-                build_hud_context = None
-
                 # Convert back to lowercase for hud_context (it expects lowercase OHLCV)
                 hud_df = df.reset_index().copy()
                 hud_df = hud_df.rename(columns={

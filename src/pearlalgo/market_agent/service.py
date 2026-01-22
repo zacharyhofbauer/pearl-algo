@@ -41,19 +41,6 @@ from pearlalgo.utils.volume_pressure import (
     timeframe_to_minutes,
 )
 
-# Small helper to allow attribute access on dict-backed configs.
-class ConfigView(dict):
-    """Dict wrapper that supports attribute access (config.key)."""
-
-    def __getattr__(self, name: str) -> Any:
-        try:
-            return self[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        self[name] = value
-
 # Execution layer imports (optional - only used if execution.enabled)
 try:
     from pearlalgo.execution.base import ExecutionAdapter, ExecutionConfig
@@ -130,8 +117,16 @@ class MarketAgentService:
         self.timeframe = str(self.config.get("timeframe", "5m"))
         self.scan_interval = float(self.config.get("scan_interval", 30))
         
-        # No strategy object needed - we'll call generate_signals directly
-        self.strategy = None  # Will use generate_signals function
+        # Strategy adapter (kept so tests can monkeypatch `service.strategy.analyze`).
+        # Internally it delegates to `pearlalgo.trading_bots.pearl_bot_auto.generate_signals`.
+        class _StrategyAdapter:
+            def __init__(self, config: ConfigView):
+                self.config = config
+
+            def analyze(self, df: pd.DataFrame, *, current_time: Optional[datetime] = None) -> list[dict]:
+                return generate_signals(df, config=self.config, current_time=current_time)
+
+        self.strategy = _StrategyAdapter(self.config)
         
         # Create a simple config dict for data_fetcher compatibility
         nq_config_dict = {
@@ -1015,7 +1010,7 @@ class MarketAgentService:
                     # Full analysis: new bar arrived - use pearl_bot_auto
                     df = market_data.get("df")
                     if df is not None and not df.empty:
-                        signals = generate_signals(df, config=self.config, current_time=datetime.now(timezone.utc))
+                        signals = self.strategy.analyze(df, current_time=datetime.now(timezone.utc))
                     else:
                         signals = []
                     self._analysis_run_count += 1
@@ -2927,7 +2922,8 @@ class MarketAgentService:
             
             # Check strategy session first (more specific)
             from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
-            strategy_session_open = check_trading_session(bar_time, self.config) if bar_time else False
+            check_time = bar_time if bar_time else datetime.now(timezone.utc)
+            strategy_session_open = check_trading_session(check_time, self.config)
             if not strategy_session_open:
                 return "StrategySessionClosed"
             
