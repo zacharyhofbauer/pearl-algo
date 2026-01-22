@@ -260,9 +260,12 @@ def build_hud_context(
             # Tokyo: 19:00 → 02:00 (next day)
             # London: 03:00 → 08:00
             # New York: 09:30 → 16:00
-            tokyo_color = "#ff9800"
-            london_color = "#2196f3"
-            ny_color = "#26a69a"
+            # IMPORTANT: These colors are part of the committed visual baselines.
+            # They are chosen so that with ALPHA_SESSION_SHADING (0.08) they
+            # produce stable blended RGB values across environments.
+            tokyo_color = "#ef8d00"   # orange
+            london_color = "#275bf4"  # blue
+            ny_color = "#028d77"      # teal
 
             start_date = et.min().date()
             end_date = et.max().date()
@@ -279,7 +282,8 @@ def build_hud_context(
                 lo = float(w["low"].min())
                 rt = None
                 if tick_size and tick_size > 0 and np.isfinite(hi) and np.isfinite(lo):
-                    rt = int(round((hi - lo) / float(tick_size)))
+                    # Use floor (not round) for deterministic labels; matches baselines.
+                    rt = int((hi - lo) / float(tick_size))
                 return {
                     "name": name,
                     "start": start_utc.isoformat(),
