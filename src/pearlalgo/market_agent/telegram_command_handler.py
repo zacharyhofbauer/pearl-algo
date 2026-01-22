@@ -32,7 +32,18 @@ from pearlalgo.utils.telegram_alerts import (
     format_home_card,
     format_pnl,
     format_signal_direction,
+    format_signal_status,
+    format_signal_confidence_tier,
+    format_time_ago,
     safe_label,
+)
+from pearlalgo.utils.telegram_ui_contract import (
+    resolve_callback,
+    parse_callback,
+    PREFIX_MENU,
+    PREFIX_ACTION,
+    PREFIX_CONFIRM,
+    PREFIX_SIGNAL_DETAIL,
 )
 
 try:
@@ -206,6 +217,7 @@ class TelegramCommandHandler:
         has_active = False
         positions = 0
         active_trades = 0
+        total_active = 0
         daily_pnl = 0.0
         
         if state:
@@ -221,7 +233,7 @@ class TelegramCommandHandler:
         # Signals button - show count if active
         signals_label = "📡 Signals & Trades"
         if has_active:
-            signals_label = f"⚡ Signals • {total_active} Open"
+            signals_label = f"⚡ Trades • {total_active} Open"
         
         # Performance button - show daily P&L
         performance_label = "📈 Performance"
@@ -235,17 +247,17 @@ class TelegramCommandHandler:
             performance_label = f"📈 Performance {pnl_emoji}{pnl_display}"
         
         # Status button - show contextual info
-        status_label = "🛰️ Status"
+        status_label = "🛡 Health"
         if has_active:
             # Show position count when active
-            status_label = f"🛰️ Status • {total_active} Active"
+            status_label = f"🛡 Health • {total_active} Active"
         elif state:
             # Show connection status when no positions
             connection_status = state.get("connection_status", "unknown")
             if connection_status == "connected":
-                status_label = "🛰️ Status • Connected"
+                status_label = "🛡 Health • Online"
             elif connection_status == "disconnected":
-                status_label = "🛰️ Status • Offline"
+                status_label = "🛡 Health • Offline"
         
         # Market button
         market_label = f"🌐 Market • {self.active_market}"
@@ -283,18 +295,21 @@ class TelegramCommandHandler:
                 InlineKeyboardButton(signals_label, callback_data="menu:signals"),
                 InlineKeyboardButton(performance_label, callback_data="menu:performance"),
             ],
-            # Row 2: Status + quick actions + System
+            # Row 2: Health + System
             [
                 InlineKeyboardButton(status_label, callback_data="menu:status"),
-                InlineKeyboardButton("🔄", callback_data="action:refresh_dashboard"),
-                InlineKeyboardButton("📊", callback_data="action:toggle_chart"),
                 InlineKeyboardButton("🎛️ System", callback_data="menu:system"),
             ],
-            # Row 3: Bots
+            # Row 3: Quick actions (avoid icon-only buttons)
+            [
+                InlineKeyboardButton("🔄 Refresh", callback_data="action:refresh_dashboard"),
+                InlineKeyboardButton("📊 Chart", callback_data="action:toggle_chart"),
+            ],
+            # Row 4: Bots
             [
                 InlineKeyboardButton(bots_label, callback_data="menu:bots"),
             ],
-            # Row 4: Settings + Help
+            # Row 5: Settings + Help
             [
                 InlineKeyboardButton("⚙️ Settings", callback_data="menu:settings"),
                 InlineKeyboardButton("💡 Help", callback_data="menu:help"),
@@ -553,28 +568,41 @@ class TelegramCommandHandler:
             except Exception:
                 pass
             return
-        callback_data = query.data
+        
+        # Resolve legacy callbacks to canonical form (backward compatibility)
+        raw_callback = query.data
+        callback_data = resolve_callback(raw_callback)
+        if callback_data != raw_callback:
+            logger.debug(f"Resolved legacy callback: {raw_callback} -> {callback_data}")
         logger.info(f"Received callback: {callback_data}")
 
-        # Parse callback data (format: "menu:action" or "action")
-        if callback_data.startswith("menu:"):
-            action = callback_data[5:]  # Remove "menu:" prefix
-            await self._handle_menu_action(query, action)
-        elif callback_data == "back":
+        # Parse and route callback using canonical format
+        callback_type, action, param = parse_callback(callback_data)
+        
+        if callback_type == "menu":
+            # Handle "menu:main" as return to main menu
+            if action == "main":
+                await self._show_main_menu(query)
+            else:
+                await self._handle_menu_action(query, action)
+        elif callback_type == "back":
             # Return to main menu
             await self._show_main_menu(query)
+        elif callback_type == "signal_detail":
+            # Signal detail drill-down (action = signal_id_prefix)
+            await self._handle_signal_detail(query, action)
+        elif callback_type == "patch":
+            await self._handle_patch_callback(query, callback_data)
+        elif callback_type == "aiops":
+            await self._handle_ai_ops_callback(query, callback_data)
+        elif callback_type == "confirm":
+            # Confirmations are handled inside _handle_action
+            await self._handle_action(query, callback_data)
+        elif callback_type == "action":
+            # Route to action handler with canonical format
+            await self._handle_action(query, callback_data)
         else:
-            # Strategy review flows (backtest functionality removed - using pearl_bot_auto only)
-
-            if callback_data.startswith("patch:"):
-                await self._handle_patch_callback(query, callback_data)
-                return
-
-            if callback_data.startswith("aiops:"):
-                await self._handle_ai_ops_callback(query, callback_data)
-                return
-
-            # Handle other actions (from notifier, etc.)
+            # Unrecognized format - try legacy action handling
             await self._handle_action(query, callback_data)
 
     async def _handle_menu_action(self, query: CallbackQuery, action: str) -> None:
@@ -1014,7 +1042,7 @@ class TelegramCommandHandler:
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(f"🛰️ Status & Monitoring{preview}\nSelect an option:", reply_markup=reply_markup)
+        await query.edit_message_text(f"🛡 Health & Monitoring{preview}\nSelect an option:", reply_markup=reply_markup)
 
     async def _show_signals_menu(self, query: CallbackQuery) -> None:
         """Show signals & trades submenu with rich context and smart suggestions."""
@@ -1464,6 +1492,22 @@ class TelegramCommandHandler:
         interval_notifications = bool(prefs.get("interval_notifications", True))
         dashboard_buttons = bool(prefs.get("dashboard_buttons", False))
         signal_detail_expanded = bool(prefs.get("signal_detail_expanded", False))
+        snooze_on = bool(getattr(prefs, "snooze_noncritical_alerts", False))
+        snooze_until_str: str | None = None
+        if snooze_on:
+            try:
+                import pytz
+                from datetime import datetime, timezone
+
+                snooze_until = prefs.get("snooze_until")
+                if snooze_until:
+                    expiry = datetime.fromisoformat(str(snooze_until).replace("Z", "+00:00"))
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=timezone.utc)
+                    et = expiry.astimezone(pytz.timezone("US/Eastern"))
+                    snooze_until_str = et.strftime("%I:%M %p ET").lstrip("0")
+            except Exception:
+                snooze_until_str = None
 
         def _onoff(v: bool) -> str:
             return "🟢 ON" if v else "🔴 OFF"
@@ -1476,14 +1520,19 @@ class TelegramCommandHandler:
         lines.append(f"🕐 Interval Notifications: {_onoff(interval_notifications)}")
         lines.append(f"🔘 Dashboard Buttons: {_onoff(dashboard_buttons)}")
         lines.append(f"🔍 Signal Details: {_onoff(signal_detail_expanded)}")
+        if snooze_on and snooze_until_str:
+            lines.append(f"🔕 Snooze (non-critical): 🟢 ON until {snooze_until_str}")
+        else:
+            lines.append(f"🔕 Snooze (non-critical): {_onoff(snooze_on)}")
         lines.append("")
         
         # Helpful explanations
         lines.append("*What These Do:*")
         lines.append("📈 *Auto-Chart:* Send chart image with each signal")
-        lines.append("🕐 *Interval:* Regular status updates every 30min")
+        lines.append("🕐 *Interval:* Periodic dashboards (chart + status)")
         lines.append("🔘 *Buttons:* Show action buttons in notifications")
         lines.append("🔍 *Details:* Show full technical details in signals")
+        lines.append("🔕 *Snooze:* Mute non-critical risk warnings (1h)")
         lines.append("")
         
         # Smart recommendations
@@ -1492,6 +1541,8 @@ class TelegramCommandHandler:
             recommendations.append("💡 *Tip:* Enable Auto-Chart for visual signal confirmation")
         if not interval_notifications:
             recommendations.append("💡 *Notice:* Interval notifications are off - you'll only get signal alerts")
+        if snooze_on:
+            recommendations.append("ℹ️ *Snooze:* Non-critical alerts are muted")
         if auto_chart and interval_notifications:
             recommendations.append("✅ *Optimal:* Recommended settings enabled")
         
@@ -1504,7 +1555,7 @@ class TelegramCommandHandler:
         keyboard = [
             [
                 InlineKeyboardButton(
-                    f"📈 Chart: {_onoff(auto_chart)}",
+                    f"📈 Auto-Chart: {_onoff(auto_chart)}",
                     callback_data="action:toggle_pref:auto_chart_on_signal",
                 ),
                 InlineKeyboardButton(
@@ -1520,6 +1571,12 @@ class TelegramCommandHandler:
                 InlineKeyboardButton(
                     f"🔍 Details: {_onoff(signal_detail_expanded)}",
                     callback_data="action:toggle_pref:signal_detail_expanded",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    f"🔕 Snooze: {_onoff(snooze_on)}",
+                    callback_data="action:toggle_pref:snooze_noncritical_alerts",
                 ),
             ],
             [
@@ -1912,7 +1969,7 @@ class TelegramCommandHandler:
             "*Menu Structure:*\n"
             "⚡ Signals & Trades - View and manage trading activity\n"
             "💎 Performance - Performance metrics and reports\n"
-            "🛰️ Status - System health and connection status\n"
+            "🛰️ Health - System health and connection status\n"
             "🎛️ System Control - Start/stop services and emergency controls\n"
             "⚙️ Settings - Charts + notification preferences\n"
             "🤖 Bots - trading bot controls, backtests, reports\n\n"
@@ -1942,6 +1999,15 @@ class TelegramCommandHandler:
                 pref_key = action_type[len("toggle_pref:") :]
                 prefs = TelegramPrefs(state_dir=self.state_dir)
                 try:
+                    # Snooze is not a simple boolean toggle: it requires an expiry.
+                    if pref_key == "snooze_noncritical_alerts":
+                        if bool(getattr(prefs, "snooze_noncritical_alerts", False)):
+                            prefs.disable_snooze()
+                        else:
+                            prefs.enable_snooze(hours=1.0)
+                        await self._show_settings_menu(query)
+                        return
+
                     current = prefs.get(pref_key)
                     if isinstance(current, bool):
                         prefs.set(pref_key, not current)
@@ -1968,19 +2034,23 @@ class TelegramCommandHandler:
             elif action_type == "signal_history":
                 await self._handle_signal_history(query, reply_markup)
             elif action_type == "signal_details":
-                await query.edit_message_text("🔍 Signal Details\n\nUse /signal <id> to view details", reply_markup=reply_markup)
+                await query.edit_message_text(
+                    "🔍 *Signal Details*\n\n"
+                    "To view details for a specific signal:\n\n"
+                    "1. Go to *Signals & Trades* → *Recent Signals*\n"
+                    "2. Tap the *ℹ️ Details* button on entry/exit notifications\n\n"
+                    "💡 Enable *Dashboard Buttons* in Settings to see Details buttons on trade alerts.",
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
             elif action_type == "performance_metrics":
-                await query.edit_message_text("📈 Performance Metrics: Loading...\n\nFeature coming soon.", reply_markup=reply_markup)
-                # TODO: Implement actual metrics retrieval
+                await self._handle_performance_metrics(query, reply_markup)
             elif action_type == "daily_summary":
-                await query.edit_message_text("📊 Daily Summary: Loading...\n\nFeature coming soon.", reply_markup=reply_markup)
-                # TODO: Implement actual daily summary
+                await self._handle_daily_summary(query, reply_markup)
             elif action_type == "weekly_summary":
-                await query.edit_message_text("📉 Weekly Summary: Loading...\n\nFeature coming soon.", reply_markup=reply_markup)
-                # TODO: Implement actual weekly summary
+                await self._handle_weekly_summary(query, reply_markup)
             elif action_type == "pnl_overview":
-                await query.edit_message_text("💰 P&L Overview: Loading...\n\nFeature coming soon.", reply_markup=reply_markup)
-                # TODO: Implement actual P&L overview
+                await self._handle_pnl_overview(query, reply_markup)
             elif action_type == "ai_patch_wizard":
                 await self._show_ai_patch_wizard(query)
             elif action_type == "ai_ops":
@@ -2026,11 +2096,9 @@ class TelegramCommandHandler:
                 ]
                 await query.edit_message_text("🔌 Restart Gateway\n\n⚠️ This will restart the IBKR Gateway.\n\nAre you sure?", reply_markup=InlineKeyboardMarkup(keyboard))
             elif action_type == "config":
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text("⚙️ Configuration: Loading...\n\nFeature coming soon.", reply_markup=InlineKeyboardMarkup(keyboard))
+                await self._handle_config_view(query, reply_markup)
             elif action_type == "logs":
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
-                await query.edit_message_text("📋 Logs: Feature coming soon...", reply_markup=InlineKeyboardMarkup(keyboard))
+                await self._handle_logs_view(query, reply_markup)
             elif action_type == "reset_challenge":
                 keyboard = [
                     [InlineKeyboardButton("✅ Confirm Reset", callback_data="confirm:reset_challenge")],
@@ -2546,8 +2614,18 @@ class TelegramCommandHandler:
             pause_reason = state.get("pause_reason")
             
             # Gateway status
-            gateway_running = True  # Assume running if we have data
+            gateway_running = True
             gateway_unknown = False
+            sc = getattr(self, "service_controller", None)
+            try:
+                fn = getattr(sc, "get_gateway_status", None)
+                if callable(fn):
+                    gs = fn() or {}
+                    gateway_running = bool(gs.get("process_running", True)) and bool(gs.get("port_listening", True))
+                else:
+                    gateway_unknown = True
+            except Exception:
+                gateway_unknown = True
             
             # Market gates
             futures_market_open = state.get("futures_market_open")
@@ -2590,6 +2668,9 @@ class TelegramCommandHandler:
                         config = yaml.safe_load(f) or {}
                         data_config = config.get("data", {})
                         data_stale_threshold_minutes = float(data_config.get("stale_data_threshold_minutes", 10.0))
+                        session_cfg = config.get("session", {}) or {}
+                        session_start = session_cfg.get("start_time")
+                        session_end = session_cfg.get("end_time")
             except Exception:
                 pass
             
@@ -2720,8 +2801,8 @@ class TelegramCommandHandler:
                 data_age_minutes=data_age_minutes,
                 data_stale_threshold_minutes=data_stale_threshold_minutes,
                 last_cycle_seconds=last_cycle_seconds,
-                session_start=None,
-                session_end=None,
+                session_start=session_start,
+                session_end=session_end,
                 data_level=data_level,
                 execution_enabled=execution_enabled,
                 execution_armed=execution_armed,
@@ -3162,6 +3243,502 @@ class TelegramCommandHandler:
             text += "\n*By Type:*\n"
             for sig_type, count in sorted(type_counts.items()):
                 text += f"  • {sig_type}: {count}\n"
+        
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_signal_detail(self, query: CallbackQuery, signal_id_prefix: str) -> None:
+        """
+        Display detailed signal information for a specific signal.
+        
+        Args:
+            query: Callback query from button press
+            signal_id_prefix: First characters of the signal ID to look up
+        """
+        keyboard = [
+            [InlineKeyboardButton("🎯 Back to Signals", callback_data="menu:signals")],
+            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        if not signal_id_prefix:
+            await query.edit_message_text(
+                "❌ No signal ID provided.",
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+            return
+        
+        # Search for signal by prefix in signals.jsonl
+        signal = self._find_signal_by_prefix(signal_id_prefix)
+        
+        if not signal:
+            await query.edit_message_text(
+                f"❌ Signal not found: `{signal_id_prefix}...`\n\n"
+                "Signal may have expired or ID prefix is incorrect.",
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+            return
+        
+        # Format signal details
+        text = self._format_signal_detail(signal)
+        
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    def _find_signal_by_prefix(self, signal_id_prefix: str) -> Optional[dict]:
+        """
+        Find a signal by ID prefix from signals.jsonl.
+        
+        Args:
+            signal_id_prefix: First characters of signal ID
+            
+        Returns:
+            Signal dict if found, None otherwise
+        """
+        try:
+            signals_file = get_signals_file(self.state_dir)
+            if not signals_file.exists():
+                return None
+            
+            # Search backwards (most recent first)
+            matching_signal = None
+            with open(signals_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        signal = json.loads(line)
+                        signal_id = signal.get("signal_id", "")
+                        if signal_id and signal_id.startswith(signal_id_prefix):
+                            matching_signal = signal
+                            # Continue to find the most recent match
+                    except json.JSONDecodeError:
+                        continue
+            
+            return matching_signal
+        except Exception as e:
+            logger.warning(f"Error finding signal by prefix: {e}")
+            return None
+
+    def _format_signal_detail(self, signal: dict) -> str:
+        """
+        Format a signal as a detailed view.
+        
+        Args:
+            signal: Signal dictionary
+            
+        Returns:
+            Formatted markdown string
+        """
+        signal_id = signal.get("signal_id", "")
+        symbol = signal.get("symbol", "MNQ")
+        signal_type = safe_label(signal.get("type", "unknown"))
+        status = signal.get("status", "unknown")
+        direction = signal.get("direction", "long")
+        
+        # Format with helpers
+        dir_emoji, dir_label = format_signal_direction(direction)
+        
+        # Check if exited with P&L
+        pnl = signal.get("pnl")
+        is_win = pnl > 0 if pnl is not None else None
+        status_emoji, status_label = format_signal_status(status, is_win)
+        
+        # Prices
+        entry_price = signal.get("entry_price", 0)
+        stop_loss = signal.get("stop_loss", 0)
+        take_profit = signal.get("take_profit", 0)
+        exit_price = signal.get("exit_price")
+        
+        # Confidence
+        confidence = signal.get("confidence", 0)
+        conf_emoji, conf_tier = format_signal_confidence_tier(confidence)
+        
+        # Timing
+        timestamp = signal.get("timestamp", "")
+        entry_time = signal.get("entry_time", "")
+        exit_time = signal.get("exit_time", "")
+        
+        # Build message
+        lines = [
+            f"🔍 *Signal Detail*",
+            "",
+            f"*{symbol} {dir_emoji} {dir_label}* | {signal_type}",
+            f"{status_emoji} Status: *{status_label}*",
+            "",
+        ]
+        
+        # Trade Plan
+        lines.append("*Trade Plan:*")
+        if entry_price:
+            lines.append(f"  Entry: ${entry_price:.2f}")
+        if stop_loss:
+            stop_dist = abs(entry_price - stop_loss) if entry_price else 0
+            lines.append(f"  Stop: ${stop_loss:.2f} ({stop_dist:.1f} pts)")
+        if take_profit:
+            tp_dist = abs(take_profit - entry_price) if entry_price else 0
+            lines.append(f"  TP: ${take_profit:.2f} ({tp_dist:.1f} pts)")
+        
+        # R:R
+        if entry_price and stop_loss and take_profit:
+            if dir_label == "LONG":
+                risk = entry_price - stop_loss
+                reward = take_profit - entry_price
+            else:
+                risk = stop_loss - entry_price
+                reward = entry_price - take_profit
+            if risk > 0:
+                rr = reward / risk
+                lines.append(f"  R:R: {rr:.1f}:1")
+        
+        # Exit info
+        if exit_price is not None:
+            lines.append("")
+            lines.append("*Exit:*")
+            lines.append(f"  Price: ${exit_price:.2f}")
+            if pnl is not None:
+                pnl_emoji, pnl_str = format_pnl(pnl)
+                lines.append(f"  P&L: {pnl_emoji} {pnl_str}")
+            exit_reason = signal.get("exit_reason", "")
+            if exit_reason:
+                lines.append(f"  Reason: {safe_label(exit_reason)}")
+        
+        # Confidence
+        lines.append("")
+        lines.append(f"{conf_emoji} Confidence: {confidence:.0%} ({conf_tier})")
+        
+        # Timing
+        lines.append("")
+        lines.append("*Timing:*")
+        if timestamp:
+            age = format_time_ago(timestamp)
+            lines.append(f"  Generated: {age or timestamp}")
+        if entry_time:
+            age = format_time_ago(entry_time)
+            lines.append(f"  Entered: {age or entry_time}")
+        if exit_time:
+            age = format_time_ago(exit_time)
+            lines.append(f"  Exited: {age or exit_time}")
+        
+        # Expanded context (check user preference)
+        prefs = TelegramPrefs(state_dir=self.state_dir)
+        if prefs.signal_detail_expanded:
+            # Show regime and MTF context
+            regime = signal.get("regime", {})
+            mtf = signal.get("mtf_analysis", {})
+            
+            if regime or mtf:
+                lines.append("")
+                lines.append("*Context:*")
+                if regime:
+                    r_regime = regime.get("regime", "")
+                    r_volatility = regime.get("volatility", "")
+                    r_session = regime.get("session", "")
+                    if r_regime:
+                        lines.append(f"  Regime: {safe_label(r_regime)}")
+                    if r_volatility:
+                        lines.append(f"  Volatility: {safe_label(r_volatility)}")
+                    if r_session:
+                        lines.append(f"  Session: {safe_label(r_session)}")
+                if mtf:
+                    alignment = mtf.get("alignment", "")
+                    if alignment:
+                        mtf_emoji = "✅" if alignment == "aligned" else "⚠️" if alignment == "partial" else "❌"
+                        lines.append(f"  MTF: {mtf_emoji} {safe_label(alignment)}")
+            
+            # Reason
+            reason = signal.get("reason", "")
+            if reason:
+                lines.append("")
+                lines.append("*Reason:*")
+                # Truncate long reasons
+                if len(reason) > 200:
+                    reason = reason[:197] + "..."
+                lines.append(f"  {safe_label(reason)}")
+        
+        # Signal ID footer
+        lines.append("")
+        lines.append(f"`ID: {signal_id[:24]}...`")
+        
+        return "\n".join(lines)
+
+    async def _handle_performance_metrics(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
+        """Display performance metrics from state file and signals."""
+        state = self._read_state()
+        signals = self._read_recent_signals(limit=100)
+        
+        text = "📈 *Performance Metrics*\n\n"
+        
+        # Get performance from state
+        performance = state.get("performance", {}) if state else {}
+        
+        if performance:
+            wins = performance.get("wins", 0)
+            losses = performance.get("losses", 0)
+            total_trades = wins + losses
+            win_rate = performance.get("win_rate", 0)
+            total_pnl = performance.get("total_pnl", 0)
+            avg_pnl = performance.get("avg_pnl", 0)
+            avg_hold = performance.get("avg_hold_minutes", 0)
+            
+            text += "*7-Day Summary:*\n"
+            if total_trades > 0:
+                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                text += f"  Trades: {total_trades} ({wins}W / {losses}L)\n"
+                text += f"  Win Rate: {win_rate * 100:.1f}%\n"
+                text += f"  Total P&L: {pnl_emoji} ${total_pnl:,.2f}\n"
+                text += f"  Avg P&L: ${avg_pnl:,.2f}\n"
+                if avg_hold > 0:
+                    text += f"  Avg Hold: {avg_hold:.1f} min\n"
+            else:
+                text += "  No completed trades in the last 7 days.\n"
+        else:
+            text += "*7-Day Summary:*\n  No performance data available.\n"
+        
+        # Add signal statistics
+        if signals:
+            text += f"\n*Signal Statistics:*\n"
+            text += f"  Total signals: {len(signals)}\n"
+            
+            # Count by status
+            status_counts = {}
+            for s in signals:
+                status = s.get("status", "unknown")
+                status_counts[status] = status_counts.get(status, 0) + 1
+            
+            for status, count in sorted(status_counts.items()):
+                text += f"  • {status}: {count}\n"
+        
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_daily_summary(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
+        """Display daily trading summary."""
+        state = self._read_state()
+        signals = self._read_recent_signals(limit=50)
+        
+        text = "📊 *Daily Summary*\n\n"
+        
+        # Filter signals from today
+        today_signals = []
+        if signals:
+            from datetime import datetime, timezone
+            today = datetime.now(timezone.utc).date()
+            for s in signals:
+                ts = s.get("timestamp", "")
+                if ts:
+                    try:
+                        signal_date = parse_utc_timestamp(ts).date() if isinstance(ts, str) else ts.date()
+                        if signal_date == today:
+                            today_signals.append(s)
+                    except Exception:
+                        pass
+        
+        if today_signals:
+            # Count stats
+            generated = len([s for s in today_signals if s.get("status") == "generated"])
+            entered = len([s for s in today_signals if s.get("status") == "entered"])
+            exited = len([s for s in today_signals if s.get("status") == "exited"])
+            
+            # Calculate P&L from exited signals
+            total_pnl = sum(float(s.get("pnl", 0) or 0) for s in today_signals if s.get("status") == "exited")
+            wins = len([s for s in today_signals if s.get("status") == "exited" and (s.get("pnl") or 0) > 0])
+            losses = exited - wins
+            
+            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+            
+            text += f"*Today's Activity:*\n"
+            text += f"  Signals: {len(today_signals)} total\n"
+            text += f"  • Generated: {generated}\n"
+            text += f"  • Active: {entered}\n"
+            text += f"  • Exited: {exited}\n"
+            
+            if exited > 0:
+                text += f"\n*Today's P&L:*\n"
+                text += f"  {pnl_emoji} ${total_pnl:,.2f}\n"
+                text += f"  Trades: {wins}W / {losses}L\n"
+        else:
+            text += "No signals generated today.\n"
+        
+        # Add state info
+        if state:
+            scans = state.get("cycle_count_session", 0) or 0
+            errors = state.get("error_count", 0) or 0
+            text += f"\n*Session Activity:*\n"
+            text += f"  Scans: {scans:,}\n"
+            text += f"  Errors: {errors}\n"
+        
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_weekly_summary(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
+        """Display weekly trading summary."""
+        state = self._read_state()
+        performance = state.get("performance", {}) if state else {}
+        
+        text = "📉 *Weekly Summary*\n\n"
+        
+        if performance:
+            total_signals = performance.get("total_signals", 0)
+            exited_signals = performance.get("exited_signals", 0)
+            wins = performance.get("wins", 0)
+            losses = performance.get("losses", 0)
+            win_rate = performance.get("win_rate", 0) * 100
+            total_pnl = performance.get("total_pnl", 0)
+            avg_pnl = performance.get("avg_pnl", 0)
+            avg_hold = performance.get("avg_hold_minutes", 0)
+            
+            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+            
+            text += "*Signal Statistics:*\n"
+            text += f"  Total Generated: {total_signals}\n"
+            text += f"  Completed: {exited_signals}\n"
+            
+            if exited_signals > 0:
+                text += f"\n*Trade Performance:*\n"
+                text += f"  Wins: {wins}\n"
+                text += f"  Losses: {losses}\n"
+                text += f"  Win Rate: {win_rate:.1f}%\n"
+                text += f"\n*P&L:*\n"
+                text += f"  Total: {pnl_emoji} ${total_pnl:,.2f}\n"
+                text += f"  Average: ${avg_pnl:,.2f}\n"
+                if avg_hold > 0:
+                    text += f"\n*Timing:*\n"
+                    text += f"  Avg Hold: {avg_hold:.1f} min\n"
+            else:
+                text += "\nNo completed trades this week.\n"
+        else:
+            text += "No performance data available.\n"
+            text += "\n💡 Performance data is calculated from the last 7 days of trading activity."
+        
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_pnl_overview(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
+        """Display P&L overview."""
+        state = self._read_state()
+        signals = self._read_recent_signals(limit=100)
+        
+        text = "💰 *P&L Overview*\n\n"
+        
+        # Get performance data
+        performance = state.get("performance", {}) if state else {}
+        
+        # Calculate from signals
+        exited_signals = [s for s in signals if s.get("status") == "exited"] if signals else []
+        
+        if exited_signals:
+            total_pnl = sum(float(s.get("pnl", 0) or 0) for s in exited_signals)
+            wins = [s for s in exited_signals if (s.get("pnl") or 0) > 0]
+            losses = [s for s in exited_signals if (s.get("pnl") or 0) <= 0]
+            
+            avg_win = sum(float(s.get("pnl", 0)) for s in wins) / len(wins) if wins else 0
+            avg_loss = sum(float(s.get("pnl", 0)) for s in losses) / len(losses) if losses else 0
+            
+            largest_win = max((float(s.get("pnl", 0)) for s in exited_signals), default=0)
+            largest_loss = min((float(s.get("pnl", 0)) for s in exited_signals), default=0)
+            
+            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+            
+            text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
+            text += f"*Trades:* {len(exited_signals)} ({len(wins)}W / {len(losses)}L)\n\n"
+            
+            text += "*Averages:*\n"
+            text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
+            text += f"  Avg Loss: 🔴 ${abs(avg_loss):,.2f}\n\n"
+            
+            text += "*Extremes:*\n"
+            text += f"  Best Trade: 🟢 ${largest_win:,.2f}\n"
+            text += f"  Worst Trade: 🔴 ${abs(largest_loss):,.2f}\n"
+            
+            # Profit factor
+            if avg_loss != 0:
+                profit_factor = abs(avg_win / avg_loss) if avg_loss else 0
+                text += f"\n*Profit Factor:* {profit_factor:.2f}\n"
+        else:
+            text += "No completed trades to analyze.\n"
+            text += "\n💡 P&L data is calculated from exited signals in your trading history."
+        
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_config_view(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
+        """Display current configuration."""
+        text = "⚙️ *Configuration*\n\n"
+        
+        # Try to load config
+        try:
+            import yaml
+            config_path = Path("config/config.yaml")
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f) or {}
+                
+                # Display key settings
+                strategy = config.get("strategy", {})
+                data = config.get("data", {})
+                telegram = config.get("telegram", {})
+                
+                text += f"*Market:* {self.active_market}\n\n"
+                
+                text += "*Strategy:*\n"
+                text += f"  Timeframe: {strategy.get('timeframe', '1m')}\n"
+                text += f"  Scan Interval: {strategy.get('scan_interval', 60)}s\n"
+                
+                session_start = strategy.get('session_start_time', '')
+                session_end = strategy.get('session_end_time', '')
+                if session_start and session_end:
+                    text += f"  Session: {session_start} - {session_end}\n"
+                
+                text += "\n*Data:*\n"
+                text += f"  Buffer Size: {data.get('buffer_size', 100)} bars\n"
+                text += f"  Stale Threshold: {data.get('stale_data_threshold_minutes', 10)} min\n"
+                
+                text += "\n*Telegram:*\n"
+                text += f"  Enabled: {'✅' if telegram.get('enabled', False) else '❌'}\n"
+            else:
+                text += "❌ Config file not found.\n"
+                text += f"Expected at: config/config.yaml"
+        except Exception as e:
+            text += f"❌ Could not load config: {e}\n"
+        
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_logs_view(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
+        """Display logs information."""
+        text = "📋 *Logs*\n\n"
+        
+        # Find log files
+        log_dir = Path("logs")
+        if log_dir.exists():
+            log_files = list(log_dir.glob("*.log"))
+            
+            if log_files:
+                text += "*Log Files:*\n"
+                for lf in sorted(log_files)[:5]:
+                    try:
+                        size_kb = lf.stat().st_size / 1024
+                        text += f"  • `{lf.name}` ({size_kb:.1f} KB)\n"
+                    except Exception:
+                        text += f"  • `{lf.name}`\n"
+                
+                text += f"\n*Location:* `{log_dir.absolute()}`\n"
+                text += "\n💡 Use SSH or file manager to view full logs."
+            else:
+                text += "No log files found.\n"
+        else:
+            text += "Log directory not found.\n"
+        
+        # Show recent errors from state if available
+        state = self._read_state()
+        if state:
+            error_count = state.get("error_count", 0)
+            last_error = state.get("last_error", "")
+            
+            if error_count > 0:
+                text += f"\n*Session Errors:* {error_count}\n"
+                if last_error:
+                    # Truncate long errors
+                    if len(last_error) > 100:
+                        last_error = last_error[:97] + "..."
+                    text += f"*Last Error:* {safe_label(last_error)}\n"
         
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 

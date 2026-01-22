@@ -545,7 +545,7 @@ def format_signal_action_cue(
     dir_action = "BUY" if dir_lower == "long" else "SELL"
     
     if status_lower == "generated":
-        return f"⏳ Monitor for {dir_action} entry at target price"
+        return f"⏳ Monitor for {dir_action} entry at entry price"
     elif status_lower == "entered":
         return "🎯 Position ACTIVE - Watch stop/TP levels"
     elif status_lower == "exited":

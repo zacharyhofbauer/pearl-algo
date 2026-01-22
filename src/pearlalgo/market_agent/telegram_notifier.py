@@ -56,6 +56,18 @@ from pearlalgo.utils.telegram_alerts import (
     STATE_RUNNING,
     STATE_STOPPED,
 )
+from pearlalgo.utils.telegram_ui_contract import (
+    callback_menu,
+    callback_action,
+    callback_signal_detail,
+    callback_confirm,
+    callback_back,
+    MENU_MAIN,
+    MENU_SIGNALS,
+    MENU_STATUS,
+    ACTION_DATA_QUALITY,
+    ACTION_GATEWAY_STATUS,
+)
 
 try:
     from pearlalgo.market_agent.chart_generator import ChartGenerator
@@ -510,8 +522,8 @@ class MarketAgentTelegramNotifier:
             from telegram import InlineKeyboardButton, InlineKeyboardMarkup
             keyboard = InlineKeyboardMarkup([
                 [
-                    InlineKeyboardButton("🏠 Menu", callback_data="start"),
-                    InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
+                    InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
+                    InlineKeyboardButton("🎯 Signals & Trades", callback_data=callback_menu(MENU_SIGNALS)),
                 ],
             ])
             # Keep the follow-up message minimal; buttons provide the actions.
@@ -565,7 +577,7 @@ class MarketAgentTelegramNotifier:
                     # Single row with Menu navigation (keep dashboards calm-minimal)
                     keyboard = [
                         [
-                            InlineKeyboardButton("🏠 Menu", callback_data="start"),
+                            InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -909,7 +921,7 @@ class MarketAgentTelegramNotifier:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     keyboard = [
                         [
-                            InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
+                            InlineKeyboardButton("ℹ️ Details", callback_data=callback_signal_detail(signal_id[:16])),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1017,7 +1029,7 @@ class MarketAgentTelegramNotifier:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     keyboard = [
                         [
-                            InlineKeyboardButton("ℹ️ Details", callback_data=f"signal_detail_{signal_id[:16]}"),
+                            InlineKeyboardButton("ℹ️ Details", callback_data=callback_signal_detail(signal_id[:16])),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1688,8 +1700,8 @@ class MarketAgentTelegramNotifier:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     keyboard = [
                         [
-                            InlineKeyboardButton("🏠 Menu", callback_data="start"),
-                            InlineKeyboardButton("🎯 Signals & Trades", callback_data="signals"),
+                            InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
+                            InlineKeyboardButton("🎯 Signals & Trades", callback_data=callback_menu(MENU_SIGNALS)),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1838,21 +1850,29 @@ class MarketAgentTelegramNotifier:
                     keyboard = []
                     if is_recovery:
                         keyboard.append([
-                            InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
-                            InlineKeyboardButton("📊 Status", callback_data="status"),
+                            InlineKeyboardButton("🛡 Data Quality", callback_data=callback_action(ACTION_DATA_QUALITY)),
+                            InlineKeyboardButton("📊 Status", callback_data=callback_menu(MENU_STATUS)),
                         ])
                     else:
                         keyboard.append([
-                            InlineKeyboardButton("🛡 Data Quality", callback_data="data_quality"),
-                            InlineKeyboardButton("🔁 Restart Agent", callback_data="confirm:restart_agent"),
+                            InlineKeyboardButton("🛡 Data Quality", callback_data=callback_action(ACTION_DATA_QUALITY)),
+                            InlineKeyboardButton("🔁 Restart Agent", callback_data=callback_confirm("restart_agent")),
                         ])
                         if alert_type in ("stale_data", "fetch_failure", "data_gap"):
                             keyboard.append([
-                                InlineKeyboardButton("🔁 Restart Gateway", callback_data="confirm:restart_gateway"),
-                                InlineKeyboardButton("🔌 Gateway Status", callback_data="gateway_status"),
+                                InlineKeyboardButton("🔁 Restart Gateway", callback_data=callback_confirm("restart_gateway")),
+                                InlineKeyboardButton("🔌 Gateway Status", callback_data=callback_action(ACTION_GATEWAY_STATUS)),
+                            ])
+                        # Allow one-tap snooze for non-critical alerts (prevents alert fatigue).
+                        if not is_critical:
+                            keyboard.append([
+                                InlineKeyboardButton(
+                                    "🔕 Snooze 1h",
+                                    callback_data=callback_action("toggle_pref", "snooze_noncritical_alerts"),
+                                ),
                             ])
 
-                    keyboard.append([InlineKeyboardButton("🏠 Menu", callback_data="start")])
+                    keyboard.append([InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN))])
                     reply_markup = InlineKeyboardMarkup(keyboard)
             except Exception:
                 reply_markup = None
@@ -1951,24 +1971,27 @@ class MarketAgentTelegramNotifier:
             session_end = config.get("end_time")
             
             message += "\n*What's next:*\n"
+            handler_running = _is_command_handler_running()
             if strategy_session_open is True:
                 message += "• Scanning for signals when conditions align\n"
-                message += "• No guaranteed timing—watch /activity for updates\n"
+                if handler_running:
+                    message += "• No guaranteed timing—use /menu for live status\n"
+                else:
+                    message += "• No guaranteed timing—watch for dashboard updates\n"
             elif strategy_session_open is False:
                 next_session = format_next_session_time(session_start, session_end)
                 if session_start and session_end:
                     session_window = format_session_window(session_start, session_end)
                     message += f"• Session: {session_window}\n"
                 message += f"• {next_session}\n"
-                message += "• Use /activity to check status\n"
+                if handler_running:
+                    message += "• Use /menu for live status\n"
             else:
                 message += "• Checking market conditions...\n"
             
             # Add inline text links that match the message style
-            if _is_command_handler_running():
-                message += "\n💡 Quick access: 📈 /activity • 🏠 /status"
-            else:
-                message += "\n💡 Use /status or /activity to monitor"
+            if handler_running:
+                message += "\n💡 Quick access: 🏠 /menu • ⚙️ /settings"
 
             # Startup message does not require inline buttons.
             reply_markup = None

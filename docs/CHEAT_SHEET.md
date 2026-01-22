@@ -161,31 +161,23 @@
   ```
 
 - **Requires command handler running:**
-  - **Service Control:**
-    - `/start_gateway` – Start IBKR Gateway
-    - `/stop_gateway` – Stop IBKR Gateway
-    - `/gateway_status` – Check Gateway status
-    - `/start_agent` – Start NQ Agent Service
-    - `/stop_agent` – Stop NQ Agent Service
-    - `/restart_agent` – Restart NQ Agent Service
-  - **Monitoring:**
-    - `/status` – Agent Status card with inline buttons (includes Start/Stop controls)
-    - `/signals` – Recent signals list
-    - `/signal <id>` – Detailed view of specific signal (entry/SL/TP/exit/P&L)
-    - `/performance` – 7‑day performance summary with export buttons
-    - `/performance <lookback>` – Custom lookback: `24h`, `7d`, `30d`
-    - `/config` – Show key configuration values
-    - `/health` – Basic health check
-    - `/settings` – UI preferences (dashboard buttons, auto-chart, snooze alerts)
-    - `/help` – Command help
-  - **Feedback & Learning:**
-    - `/grade <signal_id> win|loss [pnl] [note]` – Record manual outcome for learning
+  - **Commands (minimal by design):**
+    - `/start` (or `/menu`) – Main dashboard + button menus
+    - `/settings` – Telegram UI preferences (charts, dashboards, buttons, snooze)
+    - `/help` – Help text
+  - **Everything else is via buttons (recommended on mobile):**
+    - **Signals & Trades** → recent signals, active trades, details, close-all
+    - **Performance** → daily/weekly summaries and metrics
+    - **Health** → system status, gateway status, connection, data quality
+    - **System** → start/stop/restart agent, emergency stop
+    - **Markets** → switch NQ/ES/GC context
+    - **Bots** → bot selection/backtests/reports (if enabled)
 
 ---
 
 ## 5. Quick Troubleshooting
 
-- **No Telegram responses to `/status`:**
+- **No Telegram responses to `/menu` (or `/start`):**
   ```bash
   ./scripts/telegram/check_command_handler.sh
   ./scripts/lifecycle/check_agent_status.sh --market NQ
@@ -197,10 +189,10 @@
   cat data/agent_state/NQ/state.json | jq .buffer_size
   ```
 
-- **Status looks “weird” (e.g., cycles >> bars, signals generated but no alerts):**
+- **Dashboard looks “weird” (e.g., cycles >> bars, signals generated but no alerts):**
   - `buffer_size` is a **rolling window** capped by config (often 100 bars). It will not grow with time.
   - `cycle_count` can be **total since first run** (persisted), while uptime is per-process.
-  - Use Telegram `/status` to see **session/total cycles** and **signals generated vs delivered vs failed**.
+  - Use Telegram **Dashboard** (`/menu`) to see **session/total scans** and **signals generated vs sent vs failed**.
 - **Service looks stuck / weird:**
   ```bash
   ./scripts/lifecycle/check_agent_status.sh --market NQ

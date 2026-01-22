@@ -44,6 +44,7 @@ def set_bot_commands():
         BotCommand('start', 'Show main control menu'),
         BotCommand('menu', 'Show main control menu'),
         BotCommand('help', 'Show help information'),
+        BotCommand('settings', 'Alert preferences (charts, notifications)'),
     ]
     
     try:
