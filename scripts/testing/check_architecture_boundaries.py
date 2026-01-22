@@ -85,8 +85,8 @@ def get_layer(module_path: str) -> Optional[str]:
 
     Examples:
         pearlalgo.utils.logger         -> utils
-        pearlalgo.strategies.nq_intraday.scanner -> strategies
-        pearlalgo.nq_agent.service      -> nq_agent
+        pearlalgo.strategies.trading_bots.pearl_bot_auto -> strategies
+        pearlalgo.market_agent.service  -> market_agent
         pandas                          -> None (external)
     """
     if not module_path.startswith("pearlalgo."):

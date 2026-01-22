@@ -36,10 +36,7 @@ Backtesting scripts for strategy validation on historical data.
 
 - `strategy_selection.py`
   - **Role**: Generate `strategy_selection_*.json` exports used by Telegram `/analyze` and operator dashboards.
-- `backtest_trading_bot.py`
-  - **Role**: Backtest a single trading bot variant (including `PearlAutoBot`) on historical data.
-- `compare_trading_bots.py`
-  - **Role**: Compare trading bot variants across the same period and produce a ranked summary.
+- Backtesting scripts removed - using pearl_bot_auto only
 - `train_ml_filter.py`
   - **Role**: Train/update the ML signal filter artifact used by `ml_filter` (offline; no production execution side effects).
 

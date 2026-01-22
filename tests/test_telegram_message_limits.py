@@ -136,7 +136,7 @@ def test_format_time_ago_empty() -> None:
 
 def test_compact_signal_template_under_limit() -> None:
     """Test that the compact signal template stays under Telegram's 4096 char limit."""
-    from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
+    from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
     
     # Create a signal with maximum reasonable content
     signal = {
@@ -161,7 +161,7 @@ def test_compact_signal_template_under_limit() -> None:
     }
     
     # Create notifier instance (won't actually send)
-    notifier = NQAgentTelegramNotifier.__new__(NQAgentTelegramNotifier)
+    notifier = MarketAgentTelegramNotifier.__new__(MarketAgentTelegramNotifier)
     message = notifier._format_compact_signal(signal)
     
     # Assert under limit with comfortable margin
@@ -171,7 +171,7 @@ def test_compact_signal_template_under_limit() -> None:
 
 def test_minimal_signal_template_under_limit() -> None:
     """Test that the minimal signal template stays well under Telegram's limit."""
-    from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
+    from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
     
     signal = {
         "symbol": "MNQ",
@@ -184,7 +184,7 @@ def test_minimal_signal_template_under_limit() -> None:
         "signal_id": "momentum_breakout_1703347200.123456",
     }
     
-    notifier = NQAgentTelegramNotifier.__new__(NQAgentTelegramNotifier)
+    notifier = MarketAgentTelegramNotifier.__new__(MarketAgentTelegramNotifier)
     message = notifier._format_minimal_signal(signal)
     
     # Minimal should be very short
@@ -193,7 +193,7 @@ def test_minimal_signal_template_under_limit() -> None:
 
 def test_professional_signal_template_under_limit() -> None:
     """Test that the professional signal template stays under Telegram's limit."""
-    from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
+    from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
     
     # Create a signal with maximum content (all optional fields populated)
     signal = {
@@ -231,7 +231,7 @@ def test_professional_signal_template_under_limit() -> None:
         },
     }
     
-    notifier = NQAgentTelegramNotifier.__new__(NQAgentTelegramNotifier)
+    notifier = MarketAgentTelegramNotifier.__new__(MarketAgentTelegramNotifier)
     message = notifier._format_professional_signal(signal)
     
     # Should stay under limit
@@ -884,7 +884,7 @@ def test_home_card_last_cycle_seconds_pulse() -> None:
 
 def test_compact_signal_calm_minimal_layout() -> None:
     """Test that compact signal uses decision-first calm-minimal layout."""
-    from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
+    from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
     
     signal = {
         "symbol": "MNQ",
@@ -899,7 +899,7 @@ def test_compact_signal_calm_minimal_layout() -> None:
         "mtf_analysis": {"alignment": "aligned"},
     }
     
-    notifier = NQAgentTelegramNotifier.__new__(NQAgentTelegramNotifier)
+    notifier = MarketAgentTelegramNotifier.__new__(MarketAgentTelegramNotifier)
     message = notifier._format_compact_signal(signal)
     
     # Should have decision-first layout
@@ -928,7 +928,7 @@ def test_compact_signal_calm_minimal_layout() -> None:
 
 def test_compact_signal_under_telegram_limit() -> None:
     """Test that calm-minimal signal stays well under Telegram limit."""
-    from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
+    from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
     
     # Maximum content signal
     signal = {
@@ -949,7 +949,7 @@ def test_compact_signal_under_telegram_limit() -> None:
         },
     }
     
-    notifier = NQAgentTelegramNotifier.__new__(NQAgentTelegramNotifier)
+    notifier = MarketAgentTelegramNotifier.__new__(MarketAgentTelegramNotifier)
     message = notifier._format_compact_signal(signal)
     
     assert len(message) < TELEGRAM_TEXT_LIMIT, f"Signal too long: {len(message)} chars"

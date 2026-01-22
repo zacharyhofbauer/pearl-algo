@@ -2,7 +2,7 @@
 """
 Set Telegram Bot Commands via BotFather API
 
-This script sets up bot commands for the NQ Agent Telegram bot.
+This script sets up bot commands for the Market Agent Telegram bot.
 You can run this script to programmatically set commands, or set them manually via BotFather.
 """
 

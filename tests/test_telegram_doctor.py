@@ -55,7 +55,7 @@ class MockContext:
 
 @pytest.mark.asyncio
 async def test_doctor_uses_sqlite_when_trade_db_present():
-    from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+    from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "trades.db"

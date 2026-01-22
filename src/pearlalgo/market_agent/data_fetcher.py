@@ -1,7 +1,7 @@
 """
-NQ Agent Data Fetcher
+Market Agent Data Fetcher
 
-Fetches market data from data providers for NQ strategy.
+Fetches market data from data providers for trading strategies.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from pearlalgo.utils.retry import async_retry_with_backoff
 
 class MarketAgentDataFetcher:
     """
-    Data fetcher for NQ agent.
+    Data fetcher for market agent.
     
     Fetches market data from data providers for strategy analysis.
     """

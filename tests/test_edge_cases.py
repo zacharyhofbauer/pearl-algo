@@ -11,9 +11,10 @@ import asyncio
 import pandas as pd
 import pytest
 
-from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
-from pearlalgo.nq_agent.service import NQAgentService
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
+from pearlalgo.market_agent.service import MarketAgentService
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 from tests.mock_data_provider import MockDataProvider
 
 
@@ -30,7 +31,7 @@ async def test_data_fetcher_no_data_returns_empty() -> None:
 
     provider.get_latest_bar = _no_latest_bar  # type: ignore[assignment]
 
-    fetcher = NQAgentDataFetcher(provider, config=NQIntradayConfig())
+    fetcher = MarketAgentDataFetcher(provider, config=PEARL_BOT_CONFIG.copy())
     result = await fetcher.fetch_latest_data()
 
     # In a hard no-data scenario the fetcher may return the minimal shape.
@@ -43,7 +44,7 @@ async def test_data_fetcher_no_data_returns_empty() -> None:
 async def test_data_fetcher_schema_contains_ohlcv_columns_when_present() -> None:
     """When historical data exists, the OHLCV contract should be present."""
     provider = MockDataProvider(base_price=17500.0, volatility=50.0, trend=0.0)
-    fetcher = NQAgentDataFetcher(provider, config=NQIntradayConfig())
+    fetcher = MarketAgentDataFetcher(provider, config=PEARL_BOT_CONFIG.copy())
 
     result = await fetcher.fetch_latest_data()
     assert set(result.keys()) >= {"df", "latest_bar", "df_5m", "df_15m"}
@@ -58,11 +59,11 @@ async def test_service_start_stop_short_run(tmp_path) -> None:
     """Service should start and stop cleanly when run for a short time."""
     provider = MockDataProvider(base_price=17500.0, volatility=50.0, trend=0.0)
 
-    config = NQIntradayConfig()
+    config = PEARL_BOT_CONFIG.copy()
     # Keep the test tight: faster loop cadence and short overall runtime.
     config.scan_interval = 0.05  # type: ignore[assignment]
 
-    service = NQAgentService(data_provider=provider, config=config, state_dir=tmp_path)
+    service = MarketAgentService(data_provider=provider, config=config, state_dir=tmp_path)
 
     task = asyncio.create_task(service.start())
     await asyncio.sleep(0.2)
@@ -88,7 +89,7 @@ async def test_data_fetcher_bars_only_no_synthetic_rows() -> None:
         simulate_timeouts=False,
         simulate_connection_issues=False,
     )
-    fetcher = NQAgentDataFetcher(provider, config=NQIntradayConfig())
+    fetcher = MarketAgentDataFetcher(provider, config=PEARL_BOT_CONFIG.copy())
 
     # First fetch - establishes buffer from historical data
     result1 = await fetcher.fetch_latest_data()
@@ -136,7 +137,7 @@ async def test_data_fetcher_df_has_timestamp_column() -> None:
         simulate_timeouts=False,
         simulate_connection_issues=False,
     )
-    fetcher = NQAgentDataFetcher(provider, config=NQIntradayConfig())
+    fetcher = MarketAgentDataFetcher(provider, config=PEARL_BOT_CONFIG.copy())
 
     result = await fetcher.fetch_latest_data()
     
@@ -162,15 +163,15 @@ class TestVirtualPnLExitGrading:
         """Virtual PnL grading should be skipped when virtual_pnl_enabled is False."""
         from datetime import datetime, timedelta, timezone
         import pandas as pd
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
-        from pearlalgo.nq_agent.service import NQAgentService
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+        from pearlalgo.market_agent.service import MarketAgentService
         from tests.mock_data_provider import MockDataProvider
         
         provider = MockDataProvider(base_price=17500.0, volatility=50.0, trend=0.0)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.virtual_pnl_enabled = False
         
-        service = NQAgentService(
+        service = MarketAgentService(
             data_provider=provider,
             config=config,
             state_dir=tmp_path,
@@ -202,15 +203,15 @@ class TestVirtualPnLExitGrading:
         """
         from datetime import datetime, timedelta, timezone
         import pandas as pd
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
-        from pearlalgo.nq_agent.service import NQAgentService
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+        from pearlalgo.market_agent.service import MarketAgentService
         from tests.mock_data_provider import MockDataProvider
         
         provider = MockDataProvider(base_price=17500.0, volatility=50.0, trend=0.0)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.virtual_pnl_enabled = True
         
-        service = NQAgentService(
+        service = MarketAgentService(
             data_provider=provider,
             config=config,
             state_dir=tmp_path,
@@ -253,15 +254,15 @@ class TestVirtualPnLExitGrading:
         """Virtual PnL should only evaluate bars AFTER entry time (strict after)."""
         from datetime import datetime, timedelta, timezone
         import pandas as pd
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
-        from pearlalgo.nq_agent.service import NQAgentService
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+        from pearlalgo.market_agent.service import MarketAgentService
         from tests.mock_data_provider import MockDataProvider
         
         provider = MockDataProvider(base_price=17500.0, volatility=50.0, trend=0.0)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.virtual_pnl_enabled = True
         
-        service = NQAgentService(
+        service = MarketAgentService(
             data_provider=provider,
             config=config,
             state_dir=tmp_path,

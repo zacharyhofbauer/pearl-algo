@@ -105,7 +105,7 @@ class TestBacktestChartVisualRegression:
         
         # Skip if mplfinance not available
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.ChartGenerator = ChartGenerator
             self.ChartConfig = ChartConfig
         except ImportError as e:
@@ -245,7 +245,7 @@ class TestBacktestChartEdgeCases:
     def setup(self):
         """Set up test fixtures."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.ChartGenerator = ChartGenerator
             self.ChartConfig = ChartConfig
         except ImportError as e:

@@ -4,7 +4,7 @@ import types
 
 import pytest
 
-from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
 
 class _AsyncCallbackQuery:

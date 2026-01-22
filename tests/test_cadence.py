@@ -344,23 +344,23 @@ async def test_cadence_scheduler_integration_drift_bounded() -> None:
 @pytest.mark.asyncio
 async def test_service_loop_with_cadence_scheduler(tmp_path) -> None:
     """
-    Integration test with the actual NQAgentService using cadence scheduler.
+    Integration test with the actual MarketAgentService using cadence scheduler.
     
     Verifies that the service integrates with the cadence scheduler correctly.
     """
-    from pearlalgo.nq_agent.service import NQAgentService
-    from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+    from pearlalgo.market_agent.service import MarketAgentService
+    from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
     from tests.mock_data_provider import MockDataProvider
     
     # Create mock provider
     provider = MockDataProvider(base_price=17500.0, volatility=50.0)
     
     # Create config with short scan interval
-    config = NQIntradayConfig()
+    config = PEARL_BOT_CONFIG.copy()
     config.scan_interval = 0.1  # 100ms for fast test
     
     # Create service with fixed cadence mode
-    with patch("pearlalgo.nq_agent.service.load_service_config") as mock_config:
+    with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
         mock_config.return_value = {
             "service": {
                 "status_update_interval": 3600,  # Don't send dashboards during test
@@ -380,7 +380,7 @@ async def test_service_loop_with_cadence_scheduler(tmp_path) -> None:
             },
         }
         
-        service = NQAgentService(
+        service = MarketAgentService(
             data_provider=provider,
             config=config,
             state_dir=tmp_path,

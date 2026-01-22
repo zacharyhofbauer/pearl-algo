@@ -139,7 +139,7 @@ class TestCrossTimeframeConsistency:
     def setup(self):
         """Set up chart generator and test data."""
         try:
-            from pearlalgo.nq_agent.chart_generator import (
+            from pearlalgo.market_agent.chart_generator import (
                 ChartGenerator,
                 ChartConfig,
                 ENTRY_COLOR,
@@ -210,7 +210,7 @@ class TestCrossTimeframeConsistency:
     
     def test_zorder_constants_are_consistent(self):
         """Verify z-order layering is preserved (visual hierarchy contract)."""
-        from pearlalgo.nq_agent.chart_generator import (
+        from pearlalgo.market_agent.chart_generator import (
             ZORDER_SESSION_SHADING,
             ZORDER_ZONES,
             ZORDER_LEVEL_LINES,
@@ -233,7 +233,7 @@ class TestCrossTimeframeConsistency:
     
     def test_font_size_constants_are_consistent(self):
         """Verify font size constants exist and are reasonable."""
-        from pearlalgo.nq_agent.chart_generator import (
+        from pearlalgo.market_agent.chart_generator import (
             FONT_SIZE_LABEL,
             FONT_SIZE_SESSION,
             FONT_SIZE_RR_BOX,
@@ -248,7 +248,7 @@ class TestCrossTimeframeConsistency:
     
     def test_alpha_constants_preserve_candle_visibility(self):
         """Verify alpha values are low enough to not obscure candles."""
-        from pearlalgo.nq_agent.chart_generator import (
+        from pearlalgo.market_agent.chart_generator import (
             ALPHA_ZONE_SUPPLY_DEMAND,
             ALPHA_ZONE_POWER_CHANNEL,
             ALPHA_SESSION_SHADING,
@@ -267,7 +267,7 @@ class TestCrossTimeframeDeterminism:
     def setup(self):
         """Set up chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.generator = ChartGenerator(ChartConfig())
         except ImportError as e:
             pytest.skip(f"Chart generator not available: {e}")
@@ -318,7 +318,7 @@ class TestCrossTimeframeEdgeCases:
     def setup(self):
         """Set up chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.generator = ChartGenerator(ChartConfig())
         except ImportError as e:
             pytest.skip(f"Chart generator not available: {e}")

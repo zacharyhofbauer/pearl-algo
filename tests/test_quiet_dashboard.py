@@ -165,16 +165,16 @@ class TestQuietReasonFormatting:
 
 
 class TestQuietReasonDetermination:
-    """Tests for _get_quiet_reason method in NQAgentService."""
+    """Tests for _get_quiet_reason method in MarketAgentService."""
 
     @pytest.fixture
     def service(self, tmp_path):
-        """Create a minimal NQAgentService for testing."""
-        from pearlalgo.nq_agent.service import NQAgentService
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        """Create a minimal MarketAgentService for testing."""
+        from pearlalgo.market_agent.service import MarketAgentService
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from tests.mock_data_provider import MockDataProvider
 
-        with patch("pearlalgo.nq_agent.service.load_service_config") as mock_config:
+        with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
             mock_config.return_value = {
                 "service": {
                     "status_update_interval": 3600,
@@ -195,10 +195,10 @@ class TestQuietReasonDetermination:
             }
 
             provider = MockDataProvider(base_price=17500.0, volatility=50.0)
-            config = NQIntradayConfig()
+            config = PEARL_BOT_CONFIG.copy()
             config.scan_interval = 30
 
-            service = NQAgentService(
+            service = MarketAgentService(
                 data_provider=provider,
                 config=config,
                 state_dir=tmp_path,
@@ -217,7 +217,7 @@ class TestQuietReasonDetermination:
         """Returns NoOpportunity when session is open but no signals."""
         # Mock both gates as open
         service.strategy.scanner.is_market_hours = MagicMock(return_value=True)
-        with patch("pearlalgo.nq_agent.service.get_market_hours") as mock_mh:
+        with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
             mock_mh.return_value.is_market_open.return_value = True
             
             # Provide fresh market data
@@ -235,7 +235,7 @@ class TestQuietReasonDetermination:
         """Returns NoData when no data is available."""
         # Mock both gates as open
         service.strategy.scanner.is_market_hours = MagicMock(return_value=True)
-        with patch("pearlalgo.nq_agent.service.get_market_hours") as mock_mh:
+        with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
             mock_mh.return_value.is_market_open.return_value = True
             
             reason = service._get_quiet_reason(None, has_data=False)
@@ -245,7 +245,7 @@ class TestQuietReasonDetermination:
         """Fresh data with timezone-aware timestamp (e.g., CST -06:00) returns NoOpportunity, not StaleData."""
         # Mock both gates as open
         service.strategy.scanner.is_market_hours = MagicMock(return_value=True)
-        with patch("pearlalgo.nq_agent.service.get_market_hours") as mock_mh:
+        with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
             mock_mh.return_value.is_market_open.return_value = True
             
             # Create a fresh timestamp in a non-UTC timezone (e.g., CST = UTC-6)
@@ -269,7 +269,7 @@ class TestQuietReasonDetermination:
         """Actually stale data with timezone-aware timestamp returns StaleData."""
         # Mock both gates as open
         service.strategy.scanner.is_market_hours = MagicMock(return_value=True)
-        with patch("pearlalgo.nq_agent.service.get_market_hours") as mock_mh:
+        with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
             mock_mh.return_value.is_market_open.return_value = True
             
             # Create a stale timestamp in a non-UTC timezone (e.g., CST = UTC-6)
@@ -292,7 +292,7 @@ class TestQuietReasonDetermination:
         """Fresh data with naive (no timezone) timestamp assumed as UTC returns NoOpportunity."""
         # Mock both gates as open
         service.strategy.scanner.is_market_hours = MagicMock(return_value=True)
-        with patch("pearlalgo.nq_agent.service.get_market_hours") as mock_mh:
+        with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
             mock_mh.return_value.is_market_open.return_value = True
             
             # Create a fresh naive timestamp (no timezone info) - use UTC-aware then strip timezone
@@ -317,11 +317,11 @@ async def test_dashboard_emits_when_data_empty(tmp_path) -> None:
     This validates the quiet dashboard feature where the agent
     continues to show its status even when no data is available.
     """
-    from pearlalgo.nq_agent.service import NQAgentService
-    from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+    from pearlalgo.market_agent.service import MarketAgentService
+    from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
     from tests.mock_data_provider import MockDataProvider
 
-    with patch("pearlalgo.nq_agent.service.load_service_config") as mock_config:
+    with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
         mock_config.return_value = {
             "service": {
                 "status_update_interval": 0.1,  # Very short for testing
@@ -346,10 +346,10 @@ async def test_dashboard_emits_when_data_empty(tmp_path) -> None:
         provider = MockDataProvider(base_price=17500.0, volatility=50.0)
         provider.get_historical_bars = AsyncMock(return_value=pd.DataFrame())
         
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.scan_interval = 0.1  # Fast cycles for testing
 
-        service = NQAgentService(
+        service = MarketAgentService(
             data_provider=provider,
             config=config,
             state_dir=tmp_path,

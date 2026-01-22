@@ -85,7 +85,7 @@ def temp_state_dir():
 @pytest.fixture
 def handler_with_mocks(temp_state_dir):
     """Create a TelegramCommandHandler with mocked dependencies."""
-    from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+    from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
     
     # Create handler without initializing the Telegram application
     handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
@@ -150,7 +150,7 @@ class TestStatusCommand:
             sent_messages.append(msg)
         
         with patch.object(handler, '_send_message_or_edit', side_effect=mock_send):
-            from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
             await TelegramCommandHandler._handle_status(handler, update, context)
         
         assert len(sent_messages) == 1
@@ -174,7 +174,7 @@ class TestStatusCommand:
         with patch.object(handler, '_is_agent_process_running', return_value=False):
             with patch.object(handler, '_get_current_time_str', return_value="08:30 ET"):
                 with patch.object(handler, '_send_message_or_edit', side_effect=mock_send):
-                    from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+                    from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
                     await TelegramCommandHandler._handle_status(handler, update, context)
         
         assert len(sent_messages) == 1
@@ -226,7 +226,7 @@ class TestStatusCommand:
                     with patch.object(handler, '_extract_latest_price', return_value=17500.0):
                         with patch.object(handler, '_extract_data_age_minutes', return_value=0.5):
                             with patch.object(handler, '_compute_state_stale_threshold', return_value=120):
-                                from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+                                from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
                                 await TelegramCommandHandler._handle_status(handler, update, context)
         
         assert len(sent_messages) == 1
@@ -252,7 +252,7 @@ class TestSignalsCommand:
         update = MockUpdate(chat_id=999)  # Unauthorized
         context = MockContext()
         
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
         await TelegramCommandHandler._handle_signals(handler, update, context)
         
         # Should have called reply_text with unauthorized message
@@ -268,7 +268,7 @@ class TestSignalsCommand:
         update = MockUpdate(chat_id=123)
         context = MockContext()
         
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
         await TelegramCommandHandler._handle_signals(handler, update, context)
         
         # Check that some reply was sent
@@ -288,7 +288,7 @@ class TestSignalsCommand:
         update = MockUpdate(chat_id=123)
         context = MockContext()
         
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
         await TelegramCommandHandler._handle_signals(handler, update, context)
         
         # Check that reply was sent
@@ -312,7 +312,7 @@ class TestSignalsCommand:
         context = MockContext()
         
         # Should not raise
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
         await TelegramCommandHandler._handle_signals(handler, update, context)
         
         # Should have sent some response
@@ -336,7 +336,7 @@ class TestPerformanceCommand:
             sent_messages.append(msg)
         
         with patch.object(handler, '_send_message_or_edit', side_effect=mock_send):
-            from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
             await TelegramCommandHandler._handle_performance(handler, update, context)
         
         assert len(sent_messages) == 1
@@ -370,7 +370,7 @@ class TestPerformanceCommand:
             sent_messages.append(msg)
         
         with patch.object(handler, '_send_message_or_edit', side_effect=mock_send):
-            from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
             await TelegramCommandHandler._handle_performance(handler, update, context)
         
         assert len(sent_messages) == 1
@@ -413,7 +413,7 @@ class TestPerformanceCommand:
             sent_messages.append(msg)
         
         with patch.object(handler, '_send_message_or_edit', side_effect=mock_send):
-            from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
             await TelegramCommandHandler._handle_performance(handler, update, context)
         
         assert len(sent_messages) == 1
@@ -472,7 +472,7 @@ class TestMessageLimits:
                     with patch.object(handler, '_extract_latest_price', return_value=99999.99):
                         with patch.object(handler, '_extract_data_age_minutes', return_value=0.5):
                             with patch.object(handler, '_compute_state_stale_threshold', return_value=120):
-                                from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+                                from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
                                 await TelegramCommandHandler._handle_status(handler, update, context)
         
         if sent_messages:
@@ -599,7 +599,7 @@ class TestStrategyReviewVariantWeeks:
             captured["msg"] = msg
 
         with patch.object(handler, "_send_message_or_edit", side_effect=mock_send):
-            from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
             await TelegramCommandHandler._render_strategy_review_more_menu(handler, update, context)
 
         rm = captured.get("reply_markup")
@@ -631,7 +631,7 @@ class TestStrategyReviewVariantWeeks:
         render_mock = AsyncMock()
         with patch.object(handler, "_check_authorized", new=AsyncMock(return_value=True)):
             with patch.object(handler, "_render_strategy_review_cached", new=render_mock):
-                from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+                from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
                 await TelegramCommandHandler._handle_callback(handler, update, context)
 
         assert context.user_data.get("strategy_review_variant_weeks") == 1
@@ -666,7 +666,7 @@ class TestReportsCallbackDataSafety:
             captured["reply_markup"] = kwargs.get("reply_markup")
 
         with patch.object(handler, "_send_message_or_edit", side_effect=mock_send):
-            from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
             await TelegramCommandHandler._handle_backtest_reports(handler, update, context, page=0)
 
         rm = captured.get("reply_markup")
@@ -716,7 +716,7 @@ class TestReportsCallbackDataSafety:
             captured["reply_markup"] = kwargs.get("reply_markup")
 
         with patch.object(handler, "_send_message_or_edit", side_effect=mock_send):
-            from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
             await TelegramCommandHandler._handle_report_detail(handler, update, context, report_name)
 
         rm = captured.get("reply_markup")

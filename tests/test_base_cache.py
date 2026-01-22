@@ -1,5 +1,5 @@
 """
-Tests for base historical data caching in NQAgentDataFetcher.
+Tests for base historical data caching in MarketAgentDataFetcher.
 
 Validates that:
 1. Base cache reduces provider fetch calls when enabled
@@ -16,8 +16,9 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.data_providers.base import DataProvider
 
 
@@ -71,10 +72,10 @@ async def test_base_cache_reduces_fetch_calls(monkeypatch: pytest.MonkeyPatch) -
     When base cache is enabled with a long TTL, repeated fetch_latest_data()
     calls should result in only one provider fetch (cache hits on subsequent calls).
     """
-    import pearlalgo.nq_agent.data_fetcher as fetcher_mod
+    import pearlalgo.market_agent.data_fetcher as fetcher_mod
 
     provider = CountingProviderNoLatestBar()
-    cfg = NQIntradayConfig()
+    cfg = PEARL_BOT_CONFIG.copy()
 
     monkeypatch.setattr(
         fetcher_mod,
@@ -95,7 +96,7 @@ async def test_base_cache_reduces_fetch_calls(monkeypatch: pytest.MonkeyPatch) -
         },
     )
 
-    fetcher = NQAgentDataFetcher(provider, config=cfg)
+    fetcher = MarketAgentDataFetcher(provider, config=cfg)
 
     # First fetch - cache miss
     result1 = await fetcher.fetch_latest_data()
@@ -122,10 +123,10 @@ async def test_base_cache_no_column_accumulation(monkeypatch: pytest.MonkeyPatch
     Repeated cache hits should not accumulate 'index' columns in the strategy buffer.
     The strategy buffer should have 'timestamp' as a column (not 'index').
     """
-    import pearlalgo.nq_agent.data_fetcher as fetcher_mod
+    import pearlalgo.market_agent.data_fetcher as fetcher_mod
 
     provider = CountingProviderNoLatestBar()
-    cfg = NQIntradayConfig()
+    cfg = PEARL_BOT_CONFIG.copy()
 
     monkeypatch.setattr(
         fetcher_mod,
@@ -146,7 +147,7 @@ async def test_base_cache_no_column_accumulation(monkeypatch: pytest.MonkeyPatch
         },
     )
 
-    fetcher = NQAgentDataFetcher(provider, config=cfg)
+    fetcher = MarketAgentDataFetcher(provider, config=cfg)
 
     # Multiple fetches - each should normalize buffer correctly
     for i in range(3):
@@ -170,10 +171,10 @@ async def test_historical_fallback_extracts_timestamp_from_index(monkeypatch: py
     When get_latest_bar returns None and we fall back to historical data,
     the timestamp should be correctly extracted from the DatetimeIndex.
     """
-    import pearlalgo.nq_agent.data_fetcher as fetcher_mod
+    import pearlalgo.market_agent.data_fetcher as fetcher_mod
 
     provider = CountingProviderNoLatestBar()
-    cfg = NQIntradayConfig()
+    cfg = PEARL_BOT_CONFIG.copy()
 
     monkeypatch.setattr(
         fetcher_mod,
@@ -193,7 +194,7 @@ async def test_historical_fallback_extracts_timestamp_from_index(monkeypatch: py
         },
     )
 
-    fetcher = NQAgentDataFetcher(provider, config=cfg)
+    fetcher = MarketAgentDataFetcher(provider, config=cfg)
     result = await fetcher.fetch_latest_data()
 
     latest_bar = result["latest_bar"]
@@ -210,7 +211,7 @@ async def test_historical_fallback_extracts_timestamp_from_column(monkeypatch: p
     When dataframe has timestamp as a column (strategy buffer shape),
     the historical fallback should still correctly extract the timestamp.
     """
-    import pearlalgo.nq_agent.data_fetcher as fetcher_mod
+    import pearlalgo.market_agent.data_fetcher as fetcher_mod
 
     class ColumnBasedProvider(DataProvider):
         """Provider that returns data with timestamp as column, not index."""
@@ -247,7 +248,7 @@ async def test_historical_fallback_extracts_timestamp_from_column(monkeypatch: p
             return None
 
     provider = ColumnBasedProvider()
-    cfg = NQIntradayConfig()
+    cfg = PEARL_BOT_CONFIG.copy()
 
     monkeypatch.setattr(
         fetcher_mod,
@@ -267,7 +268,7 @@ async def test_historical_fallback_extracts_timestamp_from_column(monkeypatch: p
         },
     )
 
-    fetcher = NQAgentDataFetcher(provider, config=cfg)
+    fetcher = MarketAgentDataFetcher(provider, config=cfg)
     result = await fetcher.fetch_latest_data()
 
     latest_bar = result["latest_bar"]

@@ -7,8 +7,9 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.data_providers.base import DataProvider
 
 
@@ -60,10 +61,10 @@ class CountingProvider(DataProvider):
 
 @pytest.mark.asyncio
 async def test_mtf_cache_disabled_fetches_every_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    import pearlalgo.nq_agent.data_fetcher as fetcher_mod
+    import pearlalgo.market_agent.data_fetcher as fetcher_mod
 
     provider = CountingProvider()
-    cfg = NQIntradayConfig()
+    cfg = PEARL_BOT_CONFIG.copy()
 
     monkeypatch.setattr(
         fetcher_mod,
@@ -78,7 +79,7 @@ async def test_mtf_cache_disabled_fetches_every_time(monkeypatch: pytest.MonkeyP
         },
     )
 
-    fetcher = NQAgentDataFetcher(provider, config=cfg)
+    fetcher = MarketAgentDataFetcher(provider, config=cfg)
 
     await fetcher.fetch_latest_data()
     await fetcher.fetch_latest_data()
@@ -91,10 +92,10 @@ async def test_mtf_cache_disabled_fetches_every_time(monkeypatch: pytest.MonkeyP
 
 @pytest.mark.asyncio
 async def test_mtf_cache_enabled_reuses_5m_15m_within_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
-    import pearlalgo.nq_agent.data_fetcher as fetcher_mod
+    import pearlalgo.market_agent.data_fetcher as fetcher_mod
 
     provider = CountingProvider()
-    cfg = NQIntradayConfig()
+    cfg = PEARL_BOT_CONFIG.copy()
 
     monkeypatch.setattr(
         fetcher_mod,
@@ -111,7 +112,7 @@ async def test_mtf_cache_enabled_reuses_5m_15m_within_ttl(monkeypatch: pytest.Mo
         },
     )
 
-    fetcher = NQAgentDataFetcher(provider, config=cfg)
+    fetcher = MarketAgentDataFetcher(provider, config=cfg)
 
     await fetcher.fetch_latest_data()
     calls_after_first = dict(provider.calls)

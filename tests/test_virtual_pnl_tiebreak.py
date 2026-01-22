@@ -23,11 +23,11 @@ class TestVirtualPnLTiebreak:
     def service_with_tiebreak(self, tmp_path):
         """Create a service with a specific tiebreak configuration."""
         def _create_service(tiebreak: str = "stop_loss"):
-            from pearlalgo.nq_agent.service import NQAgentService
-            from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+            from pearlalgo.market_agent.service import MarketAgentService
+            from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
             from tests.mock_data_provider import MockDataProvider
 
-            with patch("pearlalgo.nq_agent.service.load_service_config") as mock_config:
+            with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
                 mock_config.return_value = {
                     "service": {
                         "status_update_interval": 3600,
@@ -48,10 +48,10 @@ class TestVirtualPnLTiebreak:
                 }
 
                 provider = MockDataProvider(base_price=17500.0, volatility=50.0)
-                config = NQIntradayConfig()
+                config = PEARL_BOT_CONFIG.copy()
                 config.virtual_pnl_tiebreak = tiebreak
 
-                service = NQAgentService(
+                service = MarketAgentService(
                     data_provider=provider,
                     config=config,
                     state_dir=tmp_path,
@@ -336,10 +336,10 @@ class TestVirtualPnLConfig:
 
     def test_config_loads_tiebreak_from_yaml(self, tmp_path) -> None:
         """Verify tiebreak is loaded from config.yaml."""
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         
         # Default config should have stop_loss as default
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         assert config.virtual_pnl_tiebreak == "stop_loss"
         
         # Can be set to take_profit

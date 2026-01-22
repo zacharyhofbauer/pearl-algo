@@ -45,18 +45,18 @@ def main() -> None:
                 "import os; "
                 "from pearlalgo.config.config_file import load_config_yaml; "
                 "from pearlalgo.config.config_loader import load_service_config; "
-                "from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig; "
+                "from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG; "
                 "from pearlalgo.utils.paths import ensure_state_dir; "
                 "cfg = load_config_yaml(); "
                 "svc = load_service_config(validate=False); "
                 "state = ensure_state_dir(); "
-                "intr = NQIntradayConfig.from_config_file(); "
+                "config = PEARL_BOT_CONFIG.copy(); "
                 "print('symbol', cfg.get('symbol')); "
                 "print('timeframe', cfg.get('timeframe')); "
                 "print('market', os.getenv('PEARLALGO_MARKET')); "
                 "print('state_dir', str(state)); "
                 "print('trading_bot_enabled', bool((svc.get('trading_bot') or {}).get('enabled', False))); "
-                "print('intraday_symbol', intr.symbol)"
+                "print('strategy_symbol', config.get('symbol'))"
             )
 
             subprocess.run(

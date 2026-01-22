@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pandas as pd
 import pytest
 
-from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
+from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
 
 
 class TestDisabledNotifier:
@@ -32,7 +32,7 @@ class TestDisabledNotifier:
 
     def test_disabled_notifier_creation(self) -> None:
         """Test that disabled notifier can be created without credentials."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         assert notifier.enabled is False
         assert notifier.telegram is None
@@ -40,21 +40,21 @@ class TestDisabledNotifier:
     def test_missing_credentials_disables_notifier(self) -> None:
         """Test that missing credentials disable the notifier."""
         # Missing bot_token
-        notifier = NQAgentTelegramNotifier(bot_token=None, chat_id="123456")
+        notifier = MarketAgentTelegramNotifier(bot_token=None, chat_id="123456")
         assert notifier.enabled is False
         
         # Missing chat_id
-        notifier = NQAgentTelegramNotifier(bot_token="fake_token", chat_id=None)
+        notifier = MarketAgentTelegramNotifier(bot_token="fake_token", chat_id=None)
         assert notifier.enabled is False
         
         # Both missing
-        notifier = NQAgentTelegramNotifier()
+        notifier = MarketAgentTelegramNotifier()
         assert notifier.enabled is False
 
     @pytest.mark.asyncio
     async def test_send_signal_returns_false_when_disabled(self) -> None:
         """Test that send_signal returns False when disabled."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {
             "signal_id": "test_signal",
@@ -70,7 +70,7 @@ class TestDisabledNotifier:
     @pytest.mark.asyncio
     async def test_send_status_returns_false_when_disabled(self) -> None:
         """Test that send_status returns False when disabled."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         status = {
             "running": True,
@@ -87,7 +87,7 @@ class TestSignalFormatting:
 
     def test_format_minimal_signal_with_valid_data(self) -> None:
         """Test minimal signal formatting with valid data."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {
             "symbol": "MNQ",
@@ -107,7 +107,7 @@ class TestSignalFormatting:
 
     def test_format_minimal_signal_with_missing_fields(self) -> None:
         """Test minimal signal formatting with missing fields."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {}  # Empty signal
         
@@ -119,7 +119,7 @@ class TestSignalFormatting:
 
     def test_format_minimal_signal_with_none_values(self) -> None:
         """Test minimal signal formatting with None values."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {
             "symbol": None,
@@ -138,7 +138,7 @@ class TestSignalFormatting:
 
     def test_format_minimal_signal_with_invalid_types(self) -> None:
         """Test minimal signal formatting with invalid types."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {
             "symbol": 12345,  # Should be string
@@ -157,7 +157,7 @@ class TestCompactSignalFormatting:
 
     def test_format_compact_signal_basic(self) -> None:
         """Test compact signal formatting with basic data."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {
             "symbol": "MNQ",
@@ -177,7 +177,7 @@ class TestCompactSignalFormatting:
 
     def test_format_compact_signal_with_regime_context(self) -> None:
         """Test compact signal with regime and MTF context (dict format)."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         # The _format_compact_signal expects 'regime' as a dict, not a string
         signal = {
@@ -202,7 +202,7 @@ class TestCompactSignalFormatting:
 
     def test_format_compact_signal_with_empty_signal(self) -> None:
         """Test compact signal with empty signal dict."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {}
         
@@ -217,7 +217,7 @@ class TestCircuitBreakerAlerts:
 
     def test_send_circuit_breaker_alert_when_disabled(self) -> None:
         """Test that circuit breaker alerts handle disabled notifier."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         # Should not raise
         asyncio.run(notifier.send_circuit_breaker_alert(
@@ -227,7 +227,7 @@ class TestCircuitBreakerAlerts:
 
     def test_circuit_breaker_alert_format(self) -> None:
         """Test circuit breaker alert message formatting."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         # We can't easily test the actual message without mocking,
         # but we can verify the method exists and is callable
@@ -240,7 +240,7 @@ class TestDataQualityAlerts:
 
     def test_send_data_quality_alert_when_disabled(self) -> None:
         """Test that data quality alerts handle disabled notifier."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         # Should not raise
         asyncio.run(notifier.send_data_quality_alert(
@@ -255,7 +255,7 @@ class TestRecoveryNotifications:
 
     def test_send_recovery_notification_when_disabled(self) -> None:
         """Test that recovery notifications handle disabled notifier."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         # Should not raise
         asyncio.run(notifier.send_recovery_notification({
@@ -270,7 +270,7 @@ class TestStatusFormatting:
     @pytest.mark.asyncio
     async def test_send_status_handles_empty_status(self) -> None:
         """Test that send_status handles empty status dict."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         result = await notifier.send_status({})
         
@@ -279,7 +279,7 @@ class TestStatusFormatting:
     @pytest.mark.asyncio
     async def test_send_status_handles_none_values(self) -> None:
         """Test that send_status handles None values in status."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         status = {
             "running": None,
@@ -299,7 +299,7 @@ class TestChartGeneration:
     @pytest.mark.asyncio
     async def test_send_signal_handles_empty_buffer_data(self) -> None:
         """Test that send_signal handles empty buffer data."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {
             "signal_id": "test",
@@ -317,7 +317,7 @@ class TestChartGeneration:
     @pytest.mark.asyncio
     async def test_send_signal_handles_none_buffer_data(self) -> None:
         """Test that send_signal handles None buffer data."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {
             "signal_id": "test",
@@ -498,7 +498,7 @@ class TestErrorResilience:
     async def test_send_signal_catches_exceptions(self) -> None:
         """Test that send_signal catches and handles exceptions."""
         # Create a notifier that would be enabled but with mock that raises
-        notifier = NQAgentTelegramNotifier(
+        notifier = MarketAgentTelegramNotifier(
             bot_token="fake_token",
             chat_id="123456",
             enabled=True,
@@ -522,7 +522,7 @@ class TestErrorResilience:
 
     def test_format_methods_never_raise(self) -> None:
         """Test that format methods handle all edge cases without raising."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         test_cases = [
             {},
@@ -547,7 +547,7 @@ class TestTelegramMessageLimits:
 
     def test_message_length_reasonable(self) -> None:
         """Test that generated messages have reasonable length."""
-        notifier = NQAgentTelegramNotifier(enabled=False)
+        notifier = MarketAgentTelegramNotifier(enabled=False)
         
         # Test minimal signal stays under limit
         signal = {

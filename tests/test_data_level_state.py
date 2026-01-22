@@ -18,14 +18,14 @@ class TestDataLevelField:
     @pytest.mark.asyncio
     async def test_data_level_level1_for_realtime_data(self):
         """Test that real-time data (<30s old) gets _data_level='level1'."""
-        from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
+        from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
         from tests.mock_data_provider import MockDataProvider
 
         # Create mock provider
         mock_provider = MockDataProvider(base_price=17500.0)
 
         # Create data fetcher
-        fetcher = NQAgentDataFetcher(mock_provider)
+        fetcher = MarketAgentDataFetcher(mock_provider)
 
         # Override get_latest_bar to return very fresh data
         now = datetime.now(timezone.utc)
@@ -51,14 +51,14 @@ class TestDataLevelField:
     @pytest.mark.asyncio
     async def test_data_level_historical_for_old_data(self):
         """Test that older data (>30s) gets _data_level='historical'."""
-        from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
+        from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
         from tests.mock_data_provider import MockDataProvider
 
         # Create mock provider
         mock_provider = MockDataProvider(base_price=17500.0)
 
         # Create data fetcher
-        fetcher = NQAgentDataFetcher(mock_provider)
+        fetcher = MarketAgentDataFetcher(mock_provider)
 
         # Override get_latest_bar to return stale data
         now = datetime.now(timezone.utc)
@@ -84,7 +84,7 @@ class TestDataLevelField:
     @pytest.mark.asyncio
     async def test_data_level_historical_fallback(self):
         """Test that fallback to historical data gets _data_level='historical'."""
-        from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
+        from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
         from tests.mock_data_provider import MockDataProvider
 
         # Create mock provider that returns None for get_latest_bar.
@@ -96,7 +96,7 @@ class TestDataLevelField:
         )
 
         # Create data fetcher
-        fetcher = NQAgentDataFetcher(mock_provider)
+        fetcher = MarketAgentDataFetcher(mock_provider)
 
         # Override get_latest_bar to return None (triggers historical fallback)
         mock_provider.get_latest_bar = MagicMock(return_value=None)

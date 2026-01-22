@@ -33,7 +33,7 @@ class TestColorContracts:
     def setup(self):
         """Import color constants from chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import (
+            from pearlalgo.market_agent.chart_generator import (
                 DARK_BG,
                 GRID_COLOR,
                 TEXT_PRIMARY,
@@ -131,7 +131,7 @@ class TestZOrderContracts:
     def setup(self):
         """Import z-order constants from chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import (
+            from pearlalgo.market_agent.chart_generator import (
                 ZORDER_SESSION_SHADING,
                 ZORDER_ZONES,
                 ZORDER_LEVEL_LINES,
@@ -191,7 +191,7 @@ class TestAlphaContracts:
     def setup(self):
         """Import alpha constants from chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import (
+            from pearlalgo.market_agent.chart_generator import (
                 ALPHA_ZONE_SUPPLY_DEMAND,
                 ALPHA_ZONE_POWER_CHANNEL,
                 ALPHA_ZONE_RR_BOX_PROFIT,
@@ -260,7 +260,7 @@ class TestFontSizeContracts:
     def setup(self):
         """Import font size constants from chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import (
+            from pearlalgo.market_agent.chart_generator import (
                 FONT_SIZE_LABEL,
                 FONT_SIZE_SESSION,
                 FONT_SIZE_POWER_READOUT,
@@ -297,7 +297,7 @@ class TestMarkerSemanticContracts:
     def test_ema_crossover_colors_distinct_from_trade_colors(self):
         """EMA crossover markers must use distinct colors from trade markers."""
         try:
-            from pearlalgo.nq_agent.chart_generator import SIGNAL_LONG, SIGNAL_SHORT
+            from pearlalgo.market_agent.chart_generator import SIGNAL_LONG, SIGNAL_SHORT
         except ImportError:
             pytest.skip("Chart generator not available")
         
@@ -332,7 +332,7 @@ class TestMergeLevelsContract:
     def setup(self):
         """Import chart generator and create instance."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.generator = ChartGenerator(ChartConfig())
         except ImportError as e:
             pytest.skip(f"Chart generator not available: {e}")
@@ -455,7 +455,7 @@ class TestChartConfigContracts:
     def setup(self):
         """Import ChartConfig."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartConfig
             self.ChartConfig = ChartConfig
         except ImportError as e:
             pytest.skip(f"Chart generator not available: {e}")
@@ -503,7 +503,7 @@ class TestRenderManifest:
     def setup(self):
         """Import RenderManifest."""
         try:
-            from pearlalgo.nq_agent.chart_generator import RenderManifest
+            from pearlalgo.market_agent.chart_generator import RenderManifest
             self.RenderManifest = RenderManifest
         except ImportError as e:
             pytest.skip(f"Chart generator not available: {e}")

@@ -448,7 +448,7 @@ class TestDecisionTimeframeOverride:
     def test_5m_decision_uses_correct_timeframe(self) -> None:
         """Test that run_signal_backtest_5m_decision uses 5m timeframe for scanner scaling."""
         from pearlalgo.strategies.nq_intraday.backtest_adapter import run_signal_backtest_5m_decision
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         
         # Create minimal test data
         start = datetime(2025, 12, 22, 9, 30, tzinfo=timezone.utc)
@@ -463,7 +463,7 @@ class TestDecisionTimeframeOverride:
         }, index=timestamps)
         
         # Create config with 1m timeframe (to verify override)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.timeframe = "1m"
         
         # Run 5m decision backtest - should internally override to 5m
@@ -482,7 +482,7 @@ class TestDecisionTimeframeOverride:
     def test_full_5m_decision_uses_correct_timeframe(self) -> None:
         """Test that run_full_backtest_5m_decision uses 5m timeframe."""
         from pearlalgo.strategies.nq_intraday.backtest_adapter import run_full_backtest_5m_decision
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         
         # Create minimal test data
         start = datetime(2025, 12, 22, 9, 30, tzinfo=timezone.utc)
@@ -496,7 +496,7 @@ class TestDecisionTimeframeOverride:
             "volume": [1000] * 300,
         }, index=timestamps)
         
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.timeframe = "1m"  # Will be overridden to 5m
         
         result = run_full_backtest_5m_decision(
@@ -524,7 +524,7 @@ class TestCLIRiskSizingIntegration:
     def test_run_full_backtest_accepts_risk_params(self) -> None:
         """Test that run_full_backtest accepts and uses risk sizing parameters."""
         from pearlalgo.strategies.nq_intraday.backtest_adapter import run_full_backtest
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         
         # Create minimal test data
         start = datetime(2025, 12, 22, 9, 30, tzinfo=timezone.utc)
@@ -538,7 +538,7 @@ class TestCLIRiskSizingIntegration:
             "volume": [1000] * 100,
         }, index=timestamps)
         
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         
         # Call with all risk sizing parameters (as CLI would pass them)
         result = run_full_backtest(
@@ -567,7 +567,7 @@ class TestCLIRiskSizingIntegration:
     def test_run_full_backtest_5m_decision_accepts_risk_params(self) -> None:
         """Test that run_full_backtest_5m_decision accepts risk sizing parameters."""
         from pearlalgo.strategies.nq_intraday.backtest_adapter import run_full_backtest_5m_decision
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         
         # Create minimal test data
         start = datetime(2025, 12, 22, 9, 30, tzinfo=timezone.utc)
@@ -581,7 +581,7 @@ class TestCLIRiskSizingIntegration:
             "volume": [1000] * 300,
         }, index=timestamps)
         
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         
         # Call with all risk sizing parameters
         result = run_full_backtest_5m_decision(

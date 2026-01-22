@@ -9,9 +9,10 @@ import pandas as pd
 import pytest
 
 from pearlalgo.data_providers.base import DataProvider
-from pearlalgo.nq_agent.service import NQAgentService
-from pearlalgo.nq_agent.telegram_notifier import NQAgentTelegramNotifier
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.market_agent.service import MarketAgentService
+from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.utils.telegram_alerts import format_home_card
 
 
@@ -39,7 +40,12 @@ def test_config_loads_virtual_pnl_notify_flags(tmp_path: Path) -> None:
         )
     )
 
-    cfg = NQIntradayConfig.from_config_file(cfg_path)
+    cfg = load_service_config()
+    # Load config from file path if needed
+    if cfg_path:
+        from pearlalgo.config.config_file import load_config_yaml
+        file_config = load_config_yaml(cfg_path)
+        cfg.update(file_config)
     assert cfg.virtual_pnl_enabled is True
     assert cfg.virtual_pnl_notify_entry is True
     assert cfg.virtual_pnl_notify_exit is True
@@ -93,7 +99,7 @@ def test_home_card_active_trades_appends_unrealized_pnl_suffix() -> None:
 
 @pytest.mark.asyncio
 async def test_entry_exit_notifications_disable_dedupe() -> None:
-    notifier = NQAgentTelegramNotifier(enabled=False)
+    notifier = MarketAgentTelegramNotifier(enabled=False)
     notifier.enabled = True
     notifier.chart_generator = None  # avoid chart generation in this unit test
     notifier.telegram = MagicMock()
@@ -125,11 +131,11 @@ async def test_entry_exit_notifications_disable_dedupe() -> None:
 
 def test_virtual_exit_schedules_telegram_exit_notification(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Build service with virtual exit notifications enabled
-    cfg = NQIntradayConfig()
+    cfg = PEARL_BOT_CONFIG.copy()
     cfg.virtual_pnl_enabled = True
     cfg.virtual_pnl_notify_exit = True
 
-    svc = NQAgentService(
+    svc = MarketAgentService(
         data_provider=_DummyProvider(),
         config=cfg,
         state_dir=tmp_path,
@@ -174,7 +180,7 @@ def test_virtual_exit_schedules_telegram_exit_notification(monkeypatch: pytest.M
         # Return a dummy object; the service doesn't interact with the task after scheduling.
         return MagicMock()
 
-    monkeypatch.setattr("pearlalgo.nq_agent.service.asyncio.create_task", _fake_create_task)
+    monkeypatch.setattr("pearlalgo.market_agent.service.asyncio.create_task", _fake_create_task)
 
     # Market data bars: second bar hits TP for a short after entry_time.
     df = pd.DataFrame(

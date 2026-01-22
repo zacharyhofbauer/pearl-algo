@@ -21,7 +21,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from pearlalgo.utils.market_hours import MarketHours
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner
 
 
@@ -164,7 +165,7 @@ class TestStrategySessionDST:
     @pytest.fixture
     def scanner(self) -> NQScanner:
         """Create scanner with prop-firm session times."""
-        cfg = NQIntradayConfig()
+        cfg = PEARL_BOT_CONFIG.copy()
         cfg.start_time = "18:00"  # type: ignore[assignment]
         cfg.end_time = "16:10"  # type: ignore[assignment]
         return NQScanner(config=cfg)

@@ -28,7 +28,7 @@ class TestPathBlocking:
 
     def test_blocks_data_directory(self):
         """Paths starting with data/ should be blocked."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
@@ -37,7 +37,7 @@ class TestPathBlocking:
 
     def test_blocks_logs_directory(self):
         """Paths starting with logs/ should be blocked."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
@@ -46,7 +46,7 @@ class TestPathBlocking:
 
     def test_blocks_env_file(self):
         """.env file should be blocked."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
@@ -55,7 +55,7 @@ class TestPathBlocking:
 
     def test_blocks_venv_directory(self):
         """Paths containing .venv/ should be blocked."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
@@ -63,7 +63,7 @@ class TestPathBlocking:
 
     def test_blocks_git_directory(self):
         """Paths containing .git/ should be blocked."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
@@ -72,7 +72,7 @@ class TestPathBlocking:
 
     def test_blocks_ibkr_directory(self):
         """Paths starting with ibkr/ should be blocked."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
@@ -80,7 +80,7 @@ class TestPathBlocking:
 
     def test_blocks_pyc_files(self):
         """*.pyc files should be blocked."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
@@ -89,7 +89,7 @@ class TestPathBlocking:
 
     def test_blocks_json_files(self):
         """*.json files should be blocked by default."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
@@ -98,17 +98,17 @@ class TestPathBlocking:
 
     def test_allows_source_files(self):
         """Normal source files should be allowed."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
         assert handler._is_path_blocked("src/pearlalgo/utils/retry.py") is False
-        assert handler._is_path_blocked("src/pearlalgo/nq_agent/main.py") is False
+        assert handler._is_path_blocked("src/pearlalgo/market_agent/main.py") is False
         assert handler._is_path_blocked("tests/test_something.py") is False
 
     def test_allows_docs(self):
         """Documentation files should be allowed."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
@@ -117,7 +117,7 @@ class TestPathBlocking:
 
     def test_allows_yaml_configs(self):
         """YAML config files should be allowed."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
@@ -125,7 +125,7 @@ class TestPathBlocking:
 
     def test_case_insensitive(self):
         """Path blocking should be case-insensitive."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
 
@@ -144,7 +144,7 @@ class TestAIPatchAuthorization:
     @pytest.mark.asyncio
     async def test_ai_patch_blocks_unauthorized_chat_id(self):
         """Unauthorized chat IDs should be blocked from /ai_patch."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
         handler.chat_id = "123"
@@ -185,7 +185,7 @@ class TestAIPatchMissingAPIKey:
     @pytest.mark.asyncio
     async def test_ai_patch_reports_missing_api_key(self):
         """Missing OPENAI_API_KEY should produce a clear error."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
         handler.chat_id = "123"
@@ -217,11 +217,11 @@ class TestAIPatchMissingAPIKey:
             test_file = src_dir / "retry.py"
             test_file.write_text("def retry(): pass\n")
 
-            fake_module_path = project_root / "src" / "pearlalgo" / "nq_agent" / "telegram_command_handler.py"
+            fake_module_path = project_root / "src" / "pearlalgo" / "market_agent" / "telegram_command_handler.py"
             with patch.object(handler, '_send_message_or_edit', side_effect=mock_send):
                 with patch.object(Path, 'resolve', return_value=fake_module_path):
-                    with patch('pearlalgo.nq_agent.telegram_command_handler.OPENAI_AVAILABLE', True):
-                        with patch('pearlalgo.nq_agent.telegram_command_handler.OpenAIClient') as mock_client:
+                    with patch('pearlalgo.market_agent.telegram_command_handler.OPENAI_AVAILABLE', True):
+                        with patch('pearlalgo.market_agent.telegram_command_handler.OpenAIClient') as mock_client:
                             from pearlalgo.utils.openai_client import OpenAIAPIKeyMissingError
                             mock_client.side_effect = OpenAIAPIKeyMissingError("OPENAI_API_KEY not set")
                             await TelegramCommandHandler._handle_ai_patch(handler, update, context)
@@ -239,7 +239,7 @@ class TestAIPatchNotAvailable:
     @pytest.mark.asyncio
     async def test_ai_patch_reports_not_available(self):
         """When OpenAI is not installed, should show installation instructions."""
-        from pearlalgo.nq_agent.telegram_command_handler import TelegramCommandHandler
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
 
         handler = TelegramCommandHandler.__new__(TelegramCommandHandler)
         handler.chat_id = "123"
@@ -265,7 +265,7 @@ class TestAIPatchNotAvailable:
 
         with patch.object(handler, '_send_message_or_edit', side_effect=mock_send):
             with patch.object(handler, '_get_back_to_menu_button', return_value=None):
-                with patch('pearlalgo.nq_agent.telegram_command_handler.OPENAI_AVAILABLE', False):
+                with patch('pearlalgo.market_agent.telegram_command_handler.OPENAI_AVAILABLE', False):
                     await TelegramCommandHandler._handle_ai_patch(handler, update, context)
 
         assert len(sent_messages) == 1

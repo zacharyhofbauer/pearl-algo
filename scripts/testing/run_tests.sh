@@ -50,10 +50,27 @@ echo "============================================================"
 echo "Running Unit Tests (pytest)"
 echo "============================================================"
 echo ""
+echo "All tests use actual production code from src/pearlalgo/"
+echo "No code duplication - tests import directly from installed package"
+echo ""
 echo "Tip: For integration-style validation (Telegram/signals/service/arch), use:"
 echo "  python3 scripts/testing/test_all.py [mode]"
 echo ""
 
+# Ensure package is installed in development mode so tests can import actual code
+if ! python3 -c "import pearlalgo" 2>/dev/null; then
+    echo "📦 Installing package in development mode for tests..."
+    pip install -e . > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo "✅ Package installed - tests will use actual code"
+        echo ""
+    fi
+fi
+
+# Run pytest with proper configuration
+# - Uses conftest.py for shared fixtures
+# - Tests import actual code from src/pearlalgo/
+# - No file duplication needed
 python3 -m pytest "$@"
 
 

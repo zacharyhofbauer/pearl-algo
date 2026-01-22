@@ -14,8 +14,9 @@ import pandas as pd
 import pytest
 
 from pearlalgo.data_providers.base import DataProvider
-from pearlalgo.nq_agent.service import NQAgentService
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.market_agent.service import MarketAgentService
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 
 
 class _DisconnectedExecutor:
@@ -46,10 +47,10 @@ class StubIBKRProvider(DataProvider):
 async def test_connection_failure_circuit_breaker_pauses_service(tmp_path) -> None:
     provider = StubIBKRProvider()
 
-    config = NQIntradayConfig()
+    config = PEARL_BOT_CONFIG.copy()
     config.scan_interval = 0.05  # type: ignore[assignment]
 
-    service = NQAgentService(data_provider=provider, config=config, state_dir=tmp_path)
+    service = MarketAgentService(data_provider=provider, config=config, state_dir=tmp_path)
     service.max_connection_failures = 1  # trigger immediately
 
     task = asyncio.create_task(service.start())

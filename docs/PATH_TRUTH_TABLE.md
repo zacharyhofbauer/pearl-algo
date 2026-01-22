@@ -47,7 +47,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - Data quality helpers: `pearlalgo.utils.data_quality`, `pearlalgo.utils.vwap`, `pearlalgo.utils.market_hours`
 - **Backtesting scripts** (`scripts/backtesting/`):
   - `strategy_selection.py` – generates strategy selection exports (used by Telegram `/analyze`)
-  - `backtest_trading_bot.py`, `compare_trading_bots.py` – trading bot variant backtests (see `docs/TRADING_BOT_GUIDE.md`)
+  - Backtesting scripts removed - using pearl_bot_auto only
   - `train_ml_filter.py` – offline training for ML signal filter artifacts
 - **Testing scripts** (`scripts/testing/`):
   - `run_tests.sh` – pytest unit test runner (canonical)

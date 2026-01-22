@@ -21,7 +21,8 @@ from pearlalgo.strategies.nq_intraday.signal_generator import (
     SignalDiagnostics,
 )
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 
 
 class TestSignalDiagnostics:
@@ -113,8 +114,8 @@ class TestSignalGeneratorDiagnostics:
                     "min_risk_reward": 1.5,
                 }
             }
-            from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
-            config = NQIntradayConfig()
+            from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+            config = PEARL_BOT_CONFIG.copy()
             return NQSignalGenerator(config=config)
 
     def test_diagnostics_initialized(self, generator) -> None:

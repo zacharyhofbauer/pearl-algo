@@ -120,7 +120,7 @@ class TestDashboardChartVisualRegression:
         
         # Skip if mplfinance not available
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.ChartGenerator = ChartGenerator
             self.ChartConfig = ChartConfig
         except ImportError as e:
@@ -158,7 +158,7 @@ class TestDashboardChartVisualRegression:
         assert config.show_rsi is True
         
         # Verify MA colors are defined
-        from pearlalgo.nq_agent.chart_generator import MA_COLORS, VWAP_COLOR
+        from pearlalgo.market_agent.chart_generator import MA_COLORS, VWAP_COLOR
         assert len(MA_COLORS) >= 3, "Should have at least 3 MA colors"
         assert VWAP_COLOR is not None
 
@@ -335,7 +335,7 @@ class TestDashboardChartStressScenarios:
     def setup(self):
         """Set up test fixtures."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.ChartGenerator = ChartGenerator
             self.ChartConfig = ChartConfig
         except ImportError as e:

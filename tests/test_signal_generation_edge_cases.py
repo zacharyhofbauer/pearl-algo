@@ -24,7 +24,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.strategies.nq_intraday.signal_generator import NQSignalGenerator
 from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
 
@@ -70,7 +71,7 @@ class TestEmptyData:
         Failure signal: Exception raised or non-empty result
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         market_data = {"df": pd.DataFrame()}
@@ -87,7 +88,7 @@ class TestEmptyData:
         Failure signal: Exception raised or non-empty result
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         market_data = {"df": None}
@@ -102,7 +103,7 @@ class TestEmptyData:
         Failure signal: Exception raised (KeyError) or non-empty result
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         market_data = {}  # No 'df' key
@@ -121,7 +122,7 @@ class TestNaNHandling:
         Failure signal: Exception raised
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=50)
@@ -143,7 +144,7 @@ class TestNaNHandling:
         Failure signal: Exception raised
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=50)
@@ -168,7 +169,7 @@ class TestNaNHandling:
         
         Fix: VolumeProfile now sanitizes non-finite values before computing buckets.
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=50)
@@ -191,7 +192,7 @@ class TestExtremePrices:
         Failure signal: Exception or overflow error
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=50, base_price=1_000_000.0)
@@ -206,7 +207,7 @@ class TestExtremePrices:
         Failure signal: ZeroDivisionError or similar
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=50, base_price=0.01, volatility=0.001)
@@ -221,7 +222,7 @@ class TestExtremePrices:
         Failure signal: ZeroDivisionError
         Test type: Deterministic (edge case)
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=50)
@@ -240,7 +241,7 @@ class TestExtremePrices:
         Failure signal: Exception or invalid signals generated
         Test type: Deterministic (edge case)
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=50, base_price=-100.0)
@@ -263,7 +264,7 @@ class TestDataGaps:
         Failure signal: KeyError or AttributeError
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         # DataFrame missing 'volume' column
@@ -287,7 +288,7 @@ class TestDataGaps:
         Failure signal: Exception raised
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         # Create data with a 1-hour gap in the middle
@@ -319,7 +320,7 @@ class TestMinimumDataRequirements:
         Failure signal: Exception raised
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=1)
@@ -336,7 +337,7 @@ class TestMinimumDataRequirements:
         
         Note: Most indicators require 14-20 bars minimum (RSI=14, EMA=20).
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         # 5 bars - less than most indicator periods
@@ -356,7 +357,7 @@ class TestMalformedMarketData:
         Failure signal: TypeError or AttributeError
         Test type: Deterministic (edge case)
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         # This may raise TypeError - that's okay, we're testing crash safety
@@ -374,7 +375,7 @@ class TestMalformedMarketData:
         Failure signal: Unhandled exception
         Test type: Deterministic (edge case)
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         try:
@@ -390,7 +391,7 @@ class TestMalformedMarketData:
         Failure signal: ValueError or TypeError in timestamp parsing
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=50)
@@ -416,7 +417,7 @@ class TestDiagnosticsOutput:
         Failure signal: last_diagnostics is None after generate()
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         market_data = {"df": pd.DataFrame()}
@@ -431,7 +432,7 @@ class TestDiagnosticsOutput:
         Failure signal: timestamp is None
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=50)
@@ -447,7 +448,7 @@ class TestDiagnosticsOutput:
         Failure signal: Exception or empty string
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         generator = NQSignalGenerator(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=50)
@@ -468,7 +469,7 @@ class TestStrategyIntegration:
         Failure signal: Exception raised
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         strategy = NQIntradayStrategy(config=config)
         
         market_data = {"df": pd.DataFrame(), "latest_bar": None}
@@ -485,7 +486,7 @@ class TestStrategyIntegration:
         Failure signal: Wrong type or exception
         Test type: Deterministic
         """
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         strategy = NQIntradayStrategy(config=config)
         
         df = _create_ohlcv_dataframe(n_bars=100)

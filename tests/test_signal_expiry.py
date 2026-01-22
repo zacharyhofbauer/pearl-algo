@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from pearlalgo.nq_agent.performance_tracker import PerformanceTracker
-from pearlalgo.nq_agent.state_manager import NQAgentStateManager
+from pearlalgo.market_agent.performance_tracker import PerformanceTracker
+from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 
 
 class TestSignalExpiry:
@@ -23,7 +23,7 @@ class TestSignalExpiry:
 
     def test_signal_expires_with_reason(self, tmp_path: Path) -> None:
         """Expired signal should have status='expired' and reason recorded."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         tracker = PerformanceTracker(state_dir=tmp_path, state_manager=manager)
 
         # Generate a signal
@@ -56,7 +56,7 @@ class TestSignalExpiry:
 
     def test_signal_expires_without_entry(self, tmp_path: Path) -> None:
         """Signal can expire without ever being entered (e.g., price never reached)."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         tracker = PerformanceTracker(state_dir=tmp_path, state_manager=manager)
 
         signal = {
@@ -84,7 +84,7 @@ class TestSignalExpiry:
 
     def test_expired_signal_preserves_original_data(self, tmp_path: Path) -> None:
         """Expiring a signal should preserve original signal data."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         tracker = PerformanceTracker(state_dir=tmp_path, state_manager=manager)
 
         signal = {
@@ -112,7 +112,7 @@ class TestSignalExpiry:
 
     def test_multiple_signals_with_different_expiry_reasons(self, tmp_path: Path) -> None:
         """Multiple signals can have different expiry reasons."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         tracker = PerformanceTracker(state_dir=tmp_path, state_manager=manager)
 
         # Create and expire multiple signals
@@ -143,7 +143,7 @@ class TestSignalExpiry:
 
     def test_default_expiry_reason(self, tmp_path: Path) -> None:
         """When no reason is provided, default reason should be 'expired'."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         tracker = PerformanceTracker(state_dir=tmp_path, state_manager=manager)
 
         signal = {
@@ -167,7 +167,7 @@ class TestSignalExpiry:
 
     def test_expired_signal_not_counted_as_exited(self, tmp_path: Path) -> None:
         """Expired signals should not appear in exited_signals metrics."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         tracker = PerformanceTracker(state_dir=tmp_path, state_manager=manager)
 
         # Create one expired signal

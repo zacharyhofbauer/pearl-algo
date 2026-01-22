@@ -328,7 +328,7 @@ class TestHighVolatilityCharts:
     def setup(self):
         """Set up chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.generator = ChartGenerator(ChartConfig())
         except ImportError as e:
             pytest.skip(f"Chart generator not available: {e}")
@@ -376,7 +376,7 @@ class TestDataGapCharts:
     def setup(self):
         """Set up chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.generator = ChartGenerator(ChartConfig())
         except ImportError as e:
             pytest.skip(f"Chart generator not available: {e}")
@@ -425,7 +425,7 @@ class TestZeroVolumeCharts:
     def setup(self):
         """Set up chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.generator = ChartGenerator(ChartConfig())
         except ImportError as e:
             pytest.skip(f"Chart generator not available: {e}")
@@ -483,7 +483,7 @@ class TestExtremePriceCharts:
     def setup(self):
         """Set up chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.generator = ChartGenerator(ChartConfig())
         except ImportError as e:
             pytest.skip(f"Chart generator not available: {e}")
@@ -530,7 +530,7 @@ class TestFlatMarketCharts:
     def setup(self):
         """Set up chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.generator = ChartGenerator(ChartConfig())
         except ImportError as e:
             pytest.skip(f"Chart generator not available: {e}")
@@ -577,7 +577,7 @@ class TestChartGeneratorRobustness:
     def setup(self):
         """Set up chart generator."""
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartGenerator, ChartConfig
+            from pearlalgo.market_agent.chart_generator import ChartGenerator, ChartConfig
             self.generator = ChartGenerator(ChartConfig())
         except ImportError as e:
             pytest.skip(f"Chart generator not available: {e}")

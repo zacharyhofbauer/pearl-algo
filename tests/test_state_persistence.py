@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pearlalgo.nq_agent.state_manager import NQAgentStateManager, _to_json_safe
+from pearlalgo.market_agent.state_manager import MarketAgentStateManager, _to_json_safe
 
 
 class TestToJsonSafe:
@@ -102,21 +102,21 @@ class TestToJsonSafe:
 
 
 class TestStateManagerBasics:
-    """Basic functionality tests for NQAgentStateManager."""
+    """Basic functionality tests for MarketAgentStateManager."""
 
     def test_init_creates_state_dir(self, tmp_path: Path) -> None:
         """Test that initialization creates the state directory."""
         state_dir = tmp_path / "new_state_dir"
         assert not state_dir.exists()
         
-        manager = NQAgentStateManager(state_dir=state_dir)
+        manager = MarketAgentStateManager(state_dir=state_dir)
         
         assert state_dir.exists()
         assert manager.state_dir == state_dir
 
     def test_save_and_load_state(self, tmp_path: Path) -> None:
         """Test that state can be saved and loaded."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         state = {
             "cycle_count": 100,
@@ -134,7 +134,7 @@ class TestStateManagerBasics:
 
     def test_load_nonexistent_state_returns_empty(self, tmp_path: Path) -> None:
         """Test that loading non-existent state returns empty dict."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         loaded = manager.load_state()
         
@@ -142,7 +142,7 @@ class TestStateManagerBasics:
 
     def test_save_signal(self, tmp_path: Path) -> None:
         """Test that signals are saved correctly."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         signal = {
             "signal_id": "test_signal_1",
@@ -164,7 +164,7 @@ class TestStateManagerBasics:
 
     def test_get_recent_signals_limit(self, tmp_path: Path) -> None:
         """Test that get_recent_signals respects limit."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         # Save 10 signals
         for i in range(10):
@@ -190,7 +190,7 @@ class TestCorruptionRecovery:
         Failure signal: Exception raised or non-empty corrupted data returned
         Test type: Deterministic
         """
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         # Write corrupted JSON
         with open(manager.state_file, "w") as f:
@@ -206,7 +206,7 @@ class TestCorruptionRecovery:
         Failure signal: Exception or corrupted signals returned
         Test type: Deterministic
         """
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         # Write valid signal
         manager.save_signal({"signal_id": "valid_1", "type": "test"})
@@ -227,7 +227,7 @@ class TestCorruptionRecovery:
 
     def test_empty_signals_file_returns_empty(self, tmp_path: Path) -> None:
         """Test that empty signals file returns empty list."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         # Create empty file
         manager.signals_file.touch()
@@ -238,7 +238,7 @@ class TestCorruptionRecovery:
 
     def test_overwrite_corrupted_state(self, tmp_path: Path) -> None:
         """Test that saving state overwrites corrupted state."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         # Write corrupted state
         with open(manager.state_file, "w") as f:
@@ -257,7 +257,7 @@ class TestEdgeCaseSerialization:
 
     def test_signal_with_numpy_types(self, tmp_path: Path) -> None:
         """Test that signals with numpy types are serialized correctly."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         signal = {
             "signal_id": "numpy_signal",
@@ -275,7 +275,7 @@ class TestEdgeCaseSerialization:
 
     def test_signal_with_pandas_timestamp(self, tmp_path: Path) -> None:
         """Test that signals with pandas timestamps are serialized correctly."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         signal = {
             "signal_id": "timestamp_signal",
@@ -291,7 +291,7 @@ class TestEdgeCaseSerialization:
 
     def test_signal_with_nested_numpy_array(self, tmp_path: Path) -> None:
         """Test that signals with nested numpy arrays are serialized."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         signal = {
             "signal_id": "array_signal",
@@ -309,7 +309,7 @@ class TestEdgeCaseSerialization:
 
     def test_signal_with_nan_values(self, tmp_path: Path) -> None:
         """Test that signals with NaN values don't crash serialization."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         signal = {
             "signal_id": "nan_signal",
@@ -325,7 +325,7 @@ class TestEdgeCaseSerialization:
 
     def test_signal_with_inf_values(self, tmp_path: Path) -> None:
         """Test that signals with inf values don't crash serialization."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         signal = {
             "signal_id": "inf_signal",
@@ -350,7 +350,7 @@ class TestFilePermissions:
         Failure signal: Unhandled PermissionError
         Test type: Deterministic
         """
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         # Create signals file and make it read-only
         manager.signals_file.touch()
@@ -369,7 +369,7 @@ class TestFilePermissions:
         Failure signal: Unhandled PermissionError
         Test type: Deterministic
         """
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         # Create state file and make it read-only
         manager.save_state({"initial": True})
@@ -395,7 +395,7 @@ class TestConcurrentAccess:
         Note: This is a basic test. True concurrent access would require
         multiprocessing or threading, which is out of scope for unit tests.
         """
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         # Save many signals in sequence
         for i in range(100):
@@ -419,7 +419,7 @@ class TestStateIntegrity:
 
     def test_state_preserves_all_fields(self, tmp_path: Path) -> None:
         """Test that all state fields are preserved across save/load."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         state = {
             "cycle_count": 12345,
@@ -449,7 +449,7 @@ class TestStateIntegrity:
 
     def test_signal_record_format(self, tmp_path: Path) -> None:
         """Test that signal records have expected format for /signals command."""
-        manager = NQAgentStateManager(state_dir=tmp_path)
+        manager = MarketAgentStateManager(state_dir=tmp_path)
         
         signal = {
             "signal_id": "format_test",

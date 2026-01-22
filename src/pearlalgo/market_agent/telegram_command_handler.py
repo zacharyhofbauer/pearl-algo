@@ -660,7 +660,7 @@ class TelegramCommandHandler:
                 symbol = str(state.get("symbol") or symbol)
                 tb = state.get("trading_bot") or {}
                 tb_enabled = bool(tb.get("enabled", False))
-                tb_selected = tb.get("selected") or "PearlAutoBot"
+                tb_selected = tb.get("selected") or "pearl_bot_auto"
                 bot_status = tb_selected if tb_enabled else "OFF (scanner)"
             else:
                 bot_status = "no state"
@@ -977,7 +977,7 @@ class TelegramCommandHandler:
             symbol = state.get("symbol")
             tb = state.get("trading_bot") or {}
             tb_enabled = bool(tb.get("enabled", False))
-            tb_selected = tb.get("selected") or "PearlAutoBot"
+            tb_selected = tb.get("selected") or "pearl_bot_auto"
             
             preview = "\n"
             preview += f"🌐 Market: {market_label}\n"
@@ -1665,8 +1665,8 @@ class TelegramCommandHandler:
 
             lines = ["Select a file:"]
             keyboard = [
-                [InlineKeyboardButton("src/pearlalgo/strategies/trading_bots/bot_template.py", callback_data="aiops:file:src/pearlalgo/strategies/trading_bots/bot_template.py")],
-                [InlineKeyboardButton("src/pearlalgo/strategies/trading_bots/market_regime_detector.py", callback_data="aiops:file:src/pearlalgo/strategies/trading_bots/market_regime_detector.py")],
+                [InlineKeyboardButton("src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py", callback_data="aiops:file:src/pearlalgo/strategies/trading_bots/pearl_bot_auto.py")],
+                # market_regime_detector.py removed
                 [InlineKeyboardButton("config/config.yaml", callback_data="aiops:file:config/config.yaml")],
                 [InlineKeyboardButton("Other file (type path)", callback_data="aiops:other")],
                 [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
@@ -1691,7 +1691,7 @@ class TelegramCommandHandler:
             self._ai_ops_state["state"] = "awaiting_aiops_file_text"
             self._ai_ops_state.pop("file", None)
             await query.edit_message_text(
-                "Send the file path now.\n\nExample:\nsrc/pearlalgo/strategies/trading_bots/bot_template.py"
+                "Send the file path now.\n\nExample:\nsrc/pearlalgo/strategies/trading_bots/pearl_bot_auto.py"
             )
             return
 
@@ -2518,7 +2518,7 @@ class TelegramCommandHandler:
             # Trading bot identity (single source of truth) - surfaced in UI for clarity.
             tb_state = state.get("trading_bot") or {}
             tb_enabled = bool(tb_state.get("enabled", False))
-            tb_selected = tb_state.get("selected") or "PearlAutoBot"
+            tb_selected = tb_state.get("selected") or "pearl_bot_auto"
             trading_bot_status = tb_selected if tb_enabled else "OFF (scanner)"
             trading_bot_label = tb_selected if tb_enabled else "Scanner"
             
@@ -3986,7 +3986,7 @@ class TelegramCommandHandler:
         lines = [
             "🧪 *Backtest (Advanced)*",
             "",
-            "Recommended: backtest 💎 *PearlAutoBot* (all-in-one).",
+            "Backtesting functionality removed - using pearl_bot_auto only.",
             "Variants are individual strategy bots.",
             "",
             f"Data source: `data/historical/{hist_symbol}_1m_*.parquet` (resampled to 5m).",
@@ -3994,7 +3994,7 @@ class TelegramCommandHandler:
 
         keyboard = [
             [
-                InlineKeyboardButton("💎 PearlAutoBot (All-in-One)", callback_data="pb:bot:pearl"),
+                # Backtesting removed
                 InlineKeyboardButton("🏆 Compare All", callback_data="pb:bot:all"),
             ],
             [

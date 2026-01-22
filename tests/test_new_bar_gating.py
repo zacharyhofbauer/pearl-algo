@@ -1,5 +1,5 @@
 """
-Tests for NQAgentService new-bar gating behavior.
+Tests for MarketAgentService new-bar gating behavior.
 
 Verifies that:
 - Analysis is skipped only when bar timestamp is unchanged
@@ -16,8 +16,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pandas as pd
 import pytest
 
-from pearlalgo.nq_agent.service import NQAgentService
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.market_agent.service import MarketAgentService
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 
 
 class MockDataProvider:
@@ -55,8 +56,8 @@ def create_test_df(timestamp: datetime, num_bars: int = 20) -> pd.DataFrame:
 
 @pytest.fixture
 def mock_service_gating_enabled():
-    """Create NQAgentService with new-bar gating enabled."""
-    with patch('pearlalgo.nq_agent.service.load_service_config') as mock_config:
+    """Create MarketAgentService with new-bar gating enabled."""
+    with patch('pearlalgo.market_agent.service.load_service_config') as mock_config:
         mock_config.return_value = {
             "service": {
                 "status_update_interval": 900,
@@ -79,7 +80,7 @@ def mock_service_gating_enabled():
         provider = MockDataProvider()
         config = NQIntradayConfig(symbol="MNQ", timeframe="5m", scan_interval=30)
         
-        service = NQAgentService(
+        service = MarketAgentService(
             data_provider=provider,
             config=config,
             telegram_bot_token=None,
@@ -91,8 +92,8 @@ def mock_service_gating_enabled():
 
 @pytest.fixture
 def mock_service_gating_disabled():
-    """Create NQAgentService with new-bar gating disabled."""
-    with patch('pearlalgo.nq_agent.service.load_service_config') as mock_config:
+    """Create MarketAgentService with new-bar gating disabled."""
+    with patch('pearlalgo.market_agent.service.load_service_config') as mock_config:
         mock_config.return_value = {
             "service": {
                 "status_update_interval": 900,
@@ -115,7 +116,7 @@ def mock_service_gating_disabled():
         provider = MockDataProvider()
         config = NQIntradayConfig(symbol="MNQ", timeframe="5m", scan_interval=30)
         
-        service = NQAgentService(
+        service = MarketAgentService(
             data_provider=provider,
             config=config,
             telegram_bot_token=None,

@@ -1,5 +1,5 @@
 """
-Tests for configuration propagation from config.yaml to NQAgentService and NQAgentDataFetcher.
+Tests for configuration propagation from config.yaml to MarketAgentService and MarketAgentDataFetcher.
 
 Verifies that config values actually reach the service and data fetcher components,
 preventing silent drift when config values are changed but not respected.
@@ -12,9 +12,10 @@ from unittest.mock import patch
 import pytest
 
 from pearlalgo.config.config_loader import load_service_config
-from pearlalgo.nq_agent.data_fetcher import NQAgentDataFetcher
-from pearlalgo.nq_agent.service import NQAgentService
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
+from pearlalgo.market_agent.service import MarketAgentService
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 
 
 class MockDataProvider:
@@ -66,13 +67,13 @@ class TestConfigLoaderDefaults:
 
 
 class TestServiceReceivesConfig:
-    """Tests verifying NQAgentService receives config values."""
+    """Tests verifying MarketAgentService receives config values."""
     
     def test_service_receives_status_update_interval(self):
         """Service should receive status_update_interval from config."""
         custom_interval = 1200  # 20 minutes
         
-        with patch('pearlalgo.nq_agent.service.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.service.load_service_config') as mock_config:
             mock_config.return_value = {
                 "service": {
                     "status_update_interval": custom_interval,
@@ -93,9 +94,11 @@ class TestServiceReceivesConfig:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            service = NQAgentService(
+            service = MarketAgentService(
                 data_provider=provider,
                 config=config,
                 telegram_bot_token=None,
@@ -108,7 +111,7 @@ class TestServiceReceivesConfig:
         """Service should receive heartbeat_interval from config."""
         custom_interval = 7200  # 2 hours
         
-        with patch('pearlalgo.nq_agent.service.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.service.load_service_config') as mock_config:
             mock_config.return_value = {
                 "service": {
                     "status_update_interval": 900,
@@ -129,9 +132,11 @@ class TestServiceReceivesConfig:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            service = NQAgentService(
+            service = MarketAgentService(
                 data_provider=provider,
                 config=config,
                 telegram_bot_token=None,
@@ -142,7 +147,7 @@ class TestServiceReceivesConfig:
     
     def test_service_receives_new_bar_gating_flag(self):
         """Service should receive enable_new_bar_gating from config."""
-        with patch('pearlalgo.nq_agent.service.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.service.load_service_config') as mock_config:
             mock_config.return_value = {
                 "service": {
                     "status_update_interval": 900,
@@ -163,9 +168,11 @@ class TestServiceReceivesConfig:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            service = NQAgentService(
+            service = MarketAgentService(
                 data_provider=provider,
                 config=config,
                 telegram_bot_token=None,
@@ -179,7 +186,7 @@ class TestServiceReceivesConfig:
         custom_max_errors = 5
         custom_max_failures = 8
         
-        with patch('pearlalgo.nq_agent.service.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.service.load_service_config') as mock_config:
             mock_config.return_value = {
                 "service": {
                     "status_update_interval": 900,
@@ -200,9 +207,11 @@ class TestServiceReceivesConfig:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            service = NQAgentService(
+            service = MarketAgentService(
                 data_provider=provider,
                 config=config,
                 telegram_bot_token=None,
@@ -216,7 +225,7 @@ class TestServiceReceivesConfig:
         """Service should receive stale_data_threshold_minutes from config."""
         custom_threshold = 15
         
-        with patch('pearlalgo.nq_agent.service.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.service.load_service_config') as mock_config:
             mock_config.return_value = {
                 "service": {
                     "status_update_interval": 900,
@@ -237,9 +246,11 @@ class TestServiceReceivesConfig:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            service = NQAgentService(
+            service = MarketAgentService(
                 data_provider=provider,
                 config=config,
                 telegram_bot_token=None,
@@ -252,7 +263,7 @@ class TestServiceReceivesConfig:
         """Service should receive buffer_size from config as buffer_size_target."""
         custom_buffer = 200
         
-        with patch('pearlalgo.nq_agent.service.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.service.load_service_config') as mock_config:
             mock_config.return_value = {
                 "service": {
                     "status_update_interval": 900,
@@ -273,9 +284,11 @@ class TestServiceReceivesConfig:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            service = NQAgentService(
+            service = MarketAgentService(
                 data_provider=provider,
                 config=config,
                 telegram_bot_token=None,
@@ -286,13 +299,13 @@ class TestServiceReceivesConfig:
 
 
 class TestDataFetcherReceivesConfig:
-    """Tests verifying NQAgentDataFetcher receives config values."""
+    """Tests verifying MarketAgentDataFetcher receives config values."""
     
     def test_data_fetcher_receives_buffer_size(self):
         """Data fetcher should receive buffer_size from config."""
         custom_buffer = 150
         
-        with patch('pearlalgo.nq_agent.data_fetcher.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.data_fetcher.load_service_config') as mock_config:
             mock_config.return_value = {
                 "data": {
                     "buffer_size": custom_buffer,
@@ -308,9 +321,11 @@ class TestDataFetcherReceivesConfig:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            fetcher = NQAgentDataFetcher(
+            fetcher = MarketAgentDataFetcher(
                 data_provider=provider,
                 config=config,
             )
@@ -321,7 +336,7 @@ class TestDataFetcherReceivesConfig:
         """Data fetcher should receive stale_data_threshold_minutes from config."""
         custom_threshold = 20
         
-        with patch('pearlalgo.nq_agent.data_fetcher.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.data_fetcher.load_service_config') as mock_config:
             mock_config.return_value = {
                 "data": {
                     "buffer_size": 100,
@@ -337,9 +352,11 @@ class TestDataFetcherReceivesConfig:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            fetcher = NQAgentDataFetcher(
+            fetcher = MarketAgentDataFetcher(
                 data_provider=provider,
                 config=config,
             )
@@ -348,7 +365,7 @@ class TestDataFetcherReceivesConfig:
     
     def test_data_fetcher_receives_cache_flags(self):
         """Data fetcher should receive cache enable flags from config."""
-        with patch('pearlalgo.nq_agent.data_fetcher.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.data_fetcher.load_service_config') as mock_config:
             mock_config.return_value = {
                 "data": {
                     "buffer_size": 100,
@@ -367,9 +384,11 @@ class TestDataFetcherReceivesConfig:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            fetcher = NQAgentDataFetcher(
+            fetcher = MarketAgentDataFetcher(
                 data_provider=provider,
                 config=config,
             )
@@ -385,7 +404,7 @@ class TestDataFetcherReceivesConfig:
         custom_5m_hours = 8
         custom_15m_hours = 24
         
-        with patch('pearlalgo.nq_agent.data_fetcher.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.data_fetcher.load_service_config') as mock_config:
             mock_config.return_value = {
                 "data": {
                     "buffer_size": 100,
@@ -401,9 +420,11 @@ class TestDataFetcherReceivesConfig:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            fetcher = NQAgentDataFetcher(
+            fetcher = MarketAgentDataFetcher(
                 data_provider=provider,
                 config=config,
             )
@@ -416,10 +437,12 @@ class TestStrategyConfigFromFile:
     """Tests verifying strategy config loads from config.yaml."""
     
     def test_strategy_config_from_file_includes_session_times(self):
-        """NQIntradayConfig.from_config_file() should include session times."""
+        """Config from config.yaml should include session times."""
         # This test uses the real config file
         try:
-            config = NQIntradayConfig.from_config_file()
+            from pearlalgo.config.config_loader import load_service_config
+            from pearlalgo.config.config_loader import load_service_config
+            config = load_service_config()
             
             # Verify session times are loaded (from config.yaml session section)
             assert hasattr(config, 'start_time')
@@ -433,9 +456,11 @@ class TestStrategyConfigFromFile:
             pytest.skip(f"Config file not available: {e}")
     
     def test_strategy_config_from_file_includes_scan_interval(self):
-        """NQIntradayConfig.from_config_file() should include scan_interval."""
+        """Config from config.yaml should include scan_interval."""
         try:
-            config = NQIntradayConfig.from_config_file()
+            from pearlalgo.config.config_loader import load_service_config
+            from pearlalgo.config.config_loader import load_service_config
+            config = load_service_config()
             
             # Verify scan_interval is loaded
             assert hasattr(config, 'scan_interval')
@@ -449,7 +474,7 @@ class TestConfigValueTypes:
     
     def test_boolean_flags_are_bool(self):
         """Boolean config values should be actual bools, not truthy values."""
-        with patch('pearlalgo.nq_agent.service.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.service.load_service_config') as mock_config:
             mock_config.return_value = {
                 "service": {
                     "status_update_interval": 900,
@@ -470,9 +495,11 @@ class TestConfigValueTypes:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            service = NQAgentService(
+            service = MarketAgentService(
                 data_provider=provider,
                 config=config,
                 telegram_bot_token=None,
@@ -484,7 +511,7 @@ class TestConfigValueTypes:
     
     def test_numeric_values_are_correct_type(self):
         """Numeric config values should have correct numeric types."""
-        with patch('pearlalgo.nq_agent.service.load_service_config') as mock_config:
+        with patch('pearlalgo.market_agent.service.load_service_config') as mock_config:
             mock_config.return_value = {
                 "service": {
                     "status_update_interval": 900,
@@ -505,9 +532,11 @@ class TestConfigValueTypes:
             }
             
             provider = MockDataProvider()
-            config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
+            config = PEARL_BOT_CONFIG.copy()
+            config["symbol"] = "MNQ"
+            config["timeframe"] = "5m"
             
-            service = NQAgentService(
+            service = MarketAgentService(
                 data_provider=provider,
                 config=config,
                 telegram_bot_token=None,

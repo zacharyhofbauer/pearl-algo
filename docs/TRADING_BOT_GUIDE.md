@@ -14,8 +14,7 @@ Runtime signal generation is provided by the core strategy in `strategies/tradin
 Trading bots are run via the backtesting scripts:
 
 ```bash
-python3 scripts/backtesting/backtest_trading_bot.py --bot PearlAutoBot --data-path data/historical/<file>.parquet
-python3 scripts/backtesting/compare_trading_bots.py --data-path data/historical/<file>.parquet
+# Backtesting scripts removed - using pearl_bot_auto only
 ```
 
 ## Backtesting

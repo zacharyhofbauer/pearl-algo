@@ -387,13 +387,7 @@ pearlalgo-dev-ai-agents/
 │   │   ├── health_monitor.py       # Health monitoring
 │   │   └── challenge_tracker.py    # Challenge tracking
 │   ├── strategies/trading_bots/ # Trading Bot Strategies
-│   │   ├── pearl_bot_auto.py   # Main strategy (single-file, from Pine Scripts)
-│   │   ├── composite_bot.py    # Multi-strategy bot
-│   │   ├── trend_follower_bot.py  # Trend following bot
-│   │   ├── breakout_bot.py     # Breakout bot
-│   │   ├── mean_reversion_bot.py  # Mean reversion bot
-│   │   ├── backtest_adapter.py # Backtesting adapter
-│   │   └── market_regime_detector.py  # Market regime detection
+│   │   └── pearl_bot_auto.py   # Single-file strategy (only bot)
 │   ├── execution/              # ATS Execution Layer (disabled by default)
 │   │   ├── base.py             # ExecutionAdapter interface, ExecutionConfig
 │   │   └── ibkr/               # IBKR execution implementation
@@ -451,10 +445,9 @@ pearlalgo-dev-ai-agents/
 │   ├── maintenance/                # Maintenance/hygiene scripts
 │   │   └── purge_runtime_artifacts.sh   # Safe cleanup (requires --yes)
 │   ├── backtesting/               # Backtesting scripts
-│   │   ├── backtest_trading_bot.py     # Single trading bot backtest
-│   │   ├── compare_trading_bots.py     # Trading bot comparison
 │   │   ├── strategy_selection.py       # Strategy selection exports
 │   │   └── train_ml_filter.py          # Offline ML filter training
+│   │   # backtest_trading_bot.py and compare_trading_bots.py removed - using pearl_bot_auto only
 │   └── testing/                    # Testing and validation scripts
 │       ├── test_all.py                  # Unified test runner
 │       ├── run_tests.sh                 # Run pytest unit tests

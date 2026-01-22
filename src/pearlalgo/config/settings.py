@@ -18,7 +18,7 @@ for infrastructure and deployment wiring (IBKR connectivity).
 - For signal generation settings (duplicate windows, thresholds)
 - For performance tracking configuration
 
-**When to use strategy config (`strategies/nq_intraday/config.py`):**
+**When to use strategy config (`strategies/trading_bots/pearl_bot_auto.py` CONFIG):**
 - For strategy-specific parameters (symbol, timeframe, risk parameters)
 - For strategy behavior configuration (ATR multipliers, R:R ratios)
 
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     This module is intentionally small. Trading/service behavior belongs in:
     - `config/config.yaml` (service + strategy defaults)
-    - `pearlalgo.config.config_loader` and `pearlalgo.strategies.nq_intraday.config`
+    - `pearlalgo.config.config_loader` and `pearlalgo.strategies.trading_bots.pearl_bot_auto.CONFIG`
 
     Precedence (highest → lowest) for IBKR connectivity:
     1) `IBKR_*` (compat)

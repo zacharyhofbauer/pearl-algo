@@ -18,7 +18,8 @@ import pytest
 from pearlalgo.strategies.nq_intraday.regime_detector import RegimeDetector
 from pearlalgo.strategies.nq_intraday.signal_generator import NQSignalGenerator
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.strategies.nq_intraday.strategy import NQIntradayStrategy
 from pearlalgo.strategies.nq_intraday.backtest_adapter import (
     TradeSimulator,
@@ -127,7 +128,7 @@ class TestSignalGeneratorBacktestTimestamp:
                     "min_risk_reward": 0.5,
                 }
             }
-            config = NQIntradayConfig()
+            config = PEARL_BOT_CONFIG.copy()
             return NQSignalGenerator(config=config)
 
     def test_backtest_signal_uses_bar_timestamp(self, generator) -> None:
@@ -225,7 +226,7 @@ class TestScannerDtWiring:
 
     def test_scanner_extracts_bar_dt_from_latest_bar(self) -> None:
         """Scanner should extract bar timestamp from market_data.latest_bar."""
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         scanner = NQScanner(config=config)
         
         # Create test data with enough bars for indicators

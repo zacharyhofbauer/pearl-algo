@@ -1,5 +1,5 @@
 """
-Tests for NQAgentService._get_quiet_reason() method.
+Tests for MarketAgentService._get_quiet_reason() method.
 
 Verifies that the quiet reason is correctly determined for all expected scenarios,
 ensuring "correctly quiet" behavior remains stable across refactors.
@@ -12,8 +12,9 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from pearlalgo.nq_agent.service import NQAgentService
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.market_agent.service import MarketAgentService
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 
 
 class MockDataProvider:
@@ -28,8 +29,8 @@ class MockDataProvider:
 
 @pytest.fixture
 def mock_service():
-    """Create a minimal NQAgentService for testing quiet reason logic."""
-    with patch('pearlalgo.nq_agent.service.load_service_config') as mock_config:
+    """Create a minimal MarketAgentService for testing quiet reason logic."""
+    with patch('pearlalgo.market_agent.service.load_service_config') as mock_config:
         mock_config.return_value = {
             "service": {
                 "status_update_interval": 900,
@@ -53,7 +54,7 @@ def mock_service():
         config = NQIntradayConfig(symbol="MNQ", timeframe="5m")
         
         # Create service without Telegram to avoid network calls
-        service = NQAgentService(
+        service = MarketAgentService(
             data_provider=provider,
             config=config,
             telegram_bot_token=None,
@@ -75,7 +76,7 @@ class TestQuietReasonStrategySession:
     def test_strategy_session_checked_first(self, mock_service):
         """Strategy session is checked before futures market hours."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=False):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True  # Futures open
                 
                 reason = mock_service._get_quiet_reason(market_data=None, has_data=True, no_signals=True)
@@ -88,7 +89,7 @@ class TestQuietReasonFuturesMarket:
     def test_returns_futures_market_closed_when_market_closed(self, mock_service):
         """When futures market is closed, should return FuturesMarketClosed."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=True):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = False
                 
                 reason = mock_service._get_quiet_reason(market_data=None, has_data=True, no_signals=True)
@@ -101,7 +102,7 @@ class TestQuietReasonNoData:
     def test_returns_no_data_when_has_data_false(self, mock_service):
         """When has_data=False, should return NoData."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=True):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 mock_service.last_successful_cycle = None  # No prior cycle
@@ -111,7 +112,7 @@ class TestQuietReasonNoData:
     def test_returns_no_data_when_df_is_empty(self, mock_service):
         """When df is empty, should return NoData."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=True):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 mock_service.last_successful_cycle = None
@@ -126,7 +127,7 @@ class TestQuietReasonDataGap:
     def test_returns_data_gap_when_recent_gap(self, mock_service):
         """When last_successful_cycle is between 60s and stale threshold, should return DataGap."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=True):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 # Set last_successful_cycle to 2 minutes ago (between 60s and 10min threshold)
@@ -143,7 +144,7 @@ class TestQuietReasonStaleData:
     def test_returns_stale_data_when_no_data_and_past_threshold(self, mock_service):
         """When no data and last cycle exceeds stale threshold, should return StaleData."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=True):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 # Set last_successful_cycle to 15 minutes ago (past 10min threshold)
@@ -156,7 +157,7 @@ class TestQuietReasonStaleData:
     def test_returns_stale_data_when_latest_bar_old(self, mock_service):
         """When latest_bar timestamp exceeds stale threshold, should return StaleData."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=True):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 mock_service.stale_data_threshold_minutes = 10
@@ -177,7 +178,7 @@ class TestQuietReasonNoOpportunity:
     def test_returns_no_opportunity_when_data_fresh_no_signals(self, mock_service):
         """When data is fresh but no signals generated, should return NoOpportunity."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=True):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 mock_service.stale_data_threshold_minutes = 10
@@ -194,7 +195,7 @@ class TestQuietReasonNoOpportunity:
     def test_returns_no_opportunity_when_no_latest_bar_but_df_present(self, mock_service):
         """When df is present but no latest_bar, should return NoOpportunity."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=True):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 market_data = {
@@ -212,7 +213,7 @@ class TestQuietReasonActive:
     def test_returns_active_when_not_quiet(self, mock_service):
         """When conditions are normal and signals could be generated, should return Active."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=True):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 market_data = {
@@ -241,7 +242,7 @@ class TestQuietReasonTimestampFormats:
     def test_handles_datetime_timestamp(self, mock_service):
         """Should handle datetime object timestamps."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=True):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 mock_service.stale_data_threshold_minutes = 10
@@ -258,7 +259,7 @@ class TestQuietReasonTimestampFormats:
     def test_handles_naive_datetime_timestamp(self, mock_service):
         """Should handle naive datetime (assumes UTC)."""
         with patch.object(mock_service.strategy.scanner, 'is_market_hours', return_value=True):
-            with patch('pearlalgo.nq_agent.service.get_market_hours') as mock_mh:
+            with patch('pearlalgo.market_agent.service.get_market_hours') as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 mock_service.stale_data_threshold_minutes = 10

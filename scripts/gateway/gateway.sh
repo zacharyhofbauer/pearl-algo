@@ -314,7 +314,7 @@ cmd_api_ready() {
     echo ""
     echo "Gateway is ready for connections!"
     echo ""
-    echo "You can now start the NQ Agent service:"
+    echo "You can now start the Market Agent service:"
     echo "   ./scripts/lifecycle/agent.sh start --market NQ --background"
     exit 0
   fi
@@ -349,7 +349,7 @@ cmd_monitor() {
       echo ""
       echo "Gateway is ready for connections!"
       echo ""
-      echo "You can now start the NQ Agent service:"
+      echo "You can now start the Market Agent service:"
       echo "   ./scripts/lifecycle/agent.sh start --market NQ --background"
       exit 0
     fi
@@ -493,7 +493,7 @@ cmd_2fa_status() {
   if _api_listening; then
     echo "✅ API port ${API_PORT} is LISTENING - Gateway is ready!"
     echo ""
-    echo "You can now start the NQ Agent service:"
+    echo "You can now start the Market Agent service:"
     echo "   ./scripts/lifecycle/agent.sh start --market NQ --background"
     exit 0
   fi
@@ -569,7 +569,7 @@ cmd_wait_2fa() {
       echo ""
       echo "✅✅✅ SUCCESS! Gateway is authenticated and API is ready!"
       echo ""
-      echo "You can now start the NQ Agent service:"
+      echo "You can now start the Market Agent service:"
       echo "   ./scripts/lifecycle/agent.sh start --market NQ --background"
       exit 0
     fi
@@ -972,7 +972,7 @@ cmd_disable_sleep() {
 
   $SUDO tee -a "$LOGIND_CONF" > /dev/null <<EOF
 
-# Disable auto-sleep for NQ Agent (added by gateway.sh disable-sleep)
+# Disable auto-sleep for Market Agent (added by gateway.sh disable-sleep)
 HandleLidSwitch=ignore
 HandleLidSwitchExternalPower=ignore
 HandleLidSwitchDocked=ignore

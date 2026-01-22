@@ -70,7 +70,7 @@ class TestOnDemandChartVisualRegression:
     def setup(self) -> None:
         self.data = generate_deterministic_ohlcv()
         try:
-            from pearlalgo.nq_agent.chart_generator import ChartConfig, ChartGenerator
+            from pearlalgo.market_agent.chart_generator import ChartConfig, ChartGenerator
 
             self.ChartConfig = ChartConfig
             self.ChartGenerator = ChartGenerator

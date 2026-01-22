@@ -67,7 +67,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "data_providers does not depend on strategies or nq_agent"
+name = "data_providers does not depend on strategies or market_agent"
 type = "forbidden"
 source_modules = ["pearlalgo.data_providers"]
 forbidden_modules = [
@@ -76,7 +76,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "strategies does not depend on data_providers or nq_agent"
+name = "strategies does not depend on data_providers or market_agent"
 type = "forbidden"
 source_modules = ["pearlalgo.strategies"]
 forbidden_modules = [

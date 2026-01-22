@@ -252,10 +252,10 @@ class ChartConfig:
 
     @classmethod
     def from_strategy_config(cls, strategy_config) -> "ChartConfig":
-        """Create ChartConfig from NQIntradayConfig (or any object with hud_* attrs)."""
+        """Create ChartConfig from config dict (or any object with hud_* attrs)."""
         config = cls()
         
-        # Map NQIntradayConfig.hud_* attributes to ChartConfig
+        # Map config dict hud_* attributes to ChartConfig
         attr_map = {
             "hud_enabled": "show_hud",
             "hud_show_rr_box": "show_rr_box",

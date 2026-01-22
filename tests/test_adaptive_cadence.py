@@ -31,14 +31,14 @@ class TestAdaptiveCadenceIntervalComputation:
 
     def test_paused_returns_paused_interval(self) -> None:
         """When service is paused, should return paused interval regardless of market state."""
-        from pearlalgo.nq_agent.service import NQAgentService
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.market_agent.service import MarketAgentService
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from tests.mock_data_provider import MockDataProvider
         
         provider = MockDataProvider(base_price=17500.0, volatility=50.0)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         
-        with patch("pearlalgo.nq_agent.service.load_service_config") as mock_config:
+        with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
             mock_config.return_value = {
                 "service": {
                     "adaptive_cadence_enabled": True,
@@ -54,7 +54,7 @@ class TestAdaptiveCadenceIntervalComputation:
                 "data": {"buffer_size": 100},
             }
             
-            service = NQAgentService(data_provider=provider, config=config)
+            service = MarketAgentService(data_provider=provider, config=config)
             service.paused = True
             
             effective = service._compute_effective_interval()
@@ -62,14 +62,14 @@ class TestAdaptiveCadenceIntervalComputation:
 
     def test_market_closed_returns_market_closed_interval(self) -> None:
         """When futures market is closed, should return market_closed interval."""
-        from pearlalgo.nq_agent.service import NQAgentService
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.market_agent.service import MarketAgentService
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from tests.mock_data_provider import MockDataProvider
         
         provider = MockDataProvider(base_price=17500.0, volatility=50.0)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         
-        with patch("pearlalgo.nq_agent.service.load_service_config") as mock_config:
+        with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
             mock_config.return_value = {
                 "service": {
                     "adaptive_cadence_enabled": True,
@@ -85,10 +85,10 @@ class TestAdaptiveCadenceIntervalComputation:
                 "data": {"buffer_size": 100},
             }
             
-            service = NQAgentService(data_provider=provider, config=config)
+            service = MarketAgentService(data_provider=provider, config=config)
             
             # Mock market hours to return closed
-            with patch("pearlalgo.nq_agent.service.get_market_hours") as mock_mh:
+            with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = False
                 
                 effective = service._compute_effective_interval()
@@ -96,16 +96,16 @@ class TestAdaptiveCadenceIntervalComputation:
 
     def test_session_open_returns_active_interval(self) -> None:
         """When strategy session is open, should return active interval."""
-        from pearlalgo.nq_agent.service import NQAgentService
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.market_agent.service import MarketAgentService
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from tests.mock_data_provider import MockDataProvider
         
         provider = MockDataProvider(base_price=17500.0, volatility=50.0)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.start_time = "18:00"  # type: ignore[assignment]
         config.end_time = "16:10"  # type: ignore[assignment]
         
-        with patch("pearlalgo.nq_agent.service.load_service_config") as mock_config:
+        with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
             mock_config.return_value = {
                 "service": {
                     "adaptive_cadence_enabled": True,
@@ -121,10 +121,10 @@ class TestAdaptiveCadenceIntervalComputation:
                 "data": {"buffer_size": 100},
             }
             
-            service = NQAgentService(data_provider=provider, config=config)
+            service = MarketAgentService(data_provider=provider, config=config)
             
             # Mock market hours to return open
-            with patch("pearlalgo.nq_agent.service.get_market_hours") as mock_mh:
+            with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 # Mock scanner.is_market_hours to return True (session open)
@@ -135,14 +135,14 @@ class TestAdaptiveCadenceIntervalComputation:
 
     def test_session_closed_returns_idle_interval(self) -> None:
         """When futures open but session closed, should return idle interval."""
-        from pearlalgo.nq_agent.service import NQAgentService
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.market_agent.service import MarketAgentService
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from tests.mock_data_provider import MockDataProvider
         
         provider = MockDataProvider(base_price=17500.0, volatility=50.0)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         
-        with patch("pearlalgo.nq_agent.service.load_service_config") as mock_config:
+        with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
             mock_config.return_value = {
                 "service": {
                     "adaptive_cadence_enabled": True,
@@ -158,10 +158,10 @@ class TestAdaptiveCadenceIntervalComputation:
                 "data": {"buffer_size": 100},
             }
             
-            service = NQAgentService(data_provider=provider, config=config)
+            service = MarketAgentService(data_provider=provider, config=config)
             
             # Mock market hours to return open
-            with patch("pearlalgo.nq_agent.service.get_market_hours") as mock_mh:
+            with patch("pearlalgo.market_agent.service.get_market_hours") as mock_mh:
                 mock_mh.return_value.is_market_open.return_value = True
                 
                 # Mock scanner.is_market_hours to return False (session closed)
@@ -172,15 +172,15 @@ class TestAdaptiveCadenceIntervalComputation:
 
     def test_adaptive_disabled_returns_base_interval(self) -> None:
         """When adaptive cadence is disabled, should return base config interval."""
-        from pearlalgo.nq_agent.service import NQAgentService
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.market_agent.service import MarketAgentService
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from tests.mock_data_provider import MockDataProvider
         
         provider = MockDataProvider(base_price=17500.0, volatility=50.0)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.scan_interval = 30
         
-        with patch("pearlalgo.nq_agent.service.load_service_config") as mock_config:
+        with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
             mock_config.return_value = {
                 "service": {
                     "adaptive_cadence_enabled": False,  # Disabled
@@ -196,7 +196,7 @@ class TestAdaptiveCadenceIntervalComputation:
                 "data": {"buffer_size": 100},
             }
             
-            service = NQAgentService(data_provider=provider, config=config)
+            service = MarketAgentService(data_provider=provider, config=config)
             
             effective = service._compute_effective_interval()
             assert effective == 30.0, f"Expected 30s base interval, got {effective}s"
@@ -212,10 +212,10 @@ class TestSessionBoundaryTransitions:
         Before 16:10: strategy session open -> active interval (5s)
         After 16:10: strategy session closed, futures open -> idle interval (30s)
         """
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from pearlalgo.strategies.nq_intraday.scanner import NQScanner
         
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.start_time = "18:00"  # type: ignore[assignment]
         config.end_time = "16:10"  # type: ignore[assignment]
         
@@ -245,10 +245,10 @@ class TestSessionBoundaryTransitions:
         Before 18:00: strategy session closed, futures may be open -> idle interval (30s)
         After 18:00: strategy session open -> active interval (5s)
         """
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from pearlalgo.strategies.nq_intraday.scanner import NQScanner
         
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.start_time = "18:00"  # type: ignore[assignment]
         config.end_time = "16:10"  # type: ignore[assignment]
         
@@ -318,15 +318,15 @@ class TestStatePersistence:
         """
         Test that effective interval is persisted in state.json.
         """
-        from pearlalgo.nq_agent.service import NQAgentService
-        from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+        from pearlalgo.market_agent.service import MarketAgentService
+        from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
         from tests.mock_data_provider import MockDataProvider
         import json
         
         provider = MockDataProvider(base_price=17500.0, volatility=50.0)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         
-        with patch("pearlalgo.nq_agent.service.load_service_config") as mock_config:
+        with patch("pearlalgo.market_agent.service.load_service_config") as mock_config:
             mock_config.return_value = {
                 "service": {
                     "adaptive_cadence_enabled": True,
@@ -342,7 +342,7 @@ class TestStatePersistence:
                 "data": {"buffer_size": 100},
             }
             
-            service = NQAgentService(
+            service = MarketAgentService(
                 data_provider=provider,
                 config=config,
                 state_dir=tmp_path,

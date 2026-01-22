@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # ============================================================================
 # Category: Testing
-# Purpose: Unified test runner for NQ Agent (canonical entry point)
+# Purpose: Unified test runner for Market Agent (canonical entry point)
 # Usage: python3 scripts/testing/test_all.py [mode]
 # Modes: all (default), telegram, signals, service, arch
 # ============================================================================
 """
-Unified Test Runner for NQ Agent
+Unified Test Runner for Market Agent
 
 Runs the canonical test/validation modes for this repo:
 - Telegram notification formatting + send
@@ -110,7 +110,7 @@ async def test_telegram_notifications():
         ("Signal", lambda: notifier.send_signal({
             "symbol": "MNQ", "direction": "long", "entry_price": 17500.0,
             "stop_loss": 17450.0, "take_profit": 17600.0, "confidence": 0.75,
-            "reason": "Test signal", "strategy": "nq_intraday", "type": "breakout",
+            "reason": "Test signal", "strategy": "pearl_bot_auto", "type": "breakout",
         })),
         ("Heartbeat", lambda: notifier.send_heartbeat({
             "running": True, "uptime": {"hours": 1, "minutes": 30},
@@ -375,7 +375,7 @@ async def main():
     # Setup logging for consistent console output (matches production)
     setup_logging(level="INFO")
     
-    parser = argparse.ArgumentParser(description="Unified test runner for NQ Agent")
+    parser = argparse.ArgumentParser(description="Unified test runner for Market Agent")
     parser.add_argument(
         "mode",
         nargs="?",
@@ -387,7 +387,7 @@ async def main():
     
     print()
     print("=" * 60)
-    print("NQ Agent Test Suite")
+    print("Market Agent Test Suite")
     print("=" * 60)
     print()
     

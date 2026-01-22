@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 from pearlalgo.strategies.nq_intraday.scanner import NQScanner
 
 
@@ -15,7 +16,7 @@ def _to_utc(year: int, month: int, day: int, hour: int, minute: int) -> datetime
 
 def test_prop_firm_session_cross_midnight_rules() -> None:
     # Prop-firm session: open 18:00 ET, close 16:10 ET (cross-midnight).
-    cfg = NQIntradayConfig()
+    cfg = PEARL_BOT_CONFIG.copy()
     cfg.start_time = "18:00"  # type: ignore[assignment]
     cfg.end_time = "16:10"  # type: ignore[assignment]
 
@@ -50,7 +51,7 @@ def test_session_open_from_bar_timestamp() -> None:
     This validates the session-open-from-bar-time behavior where we prefer
     the latest_bar timestamp over wall-clock time to reduce drift issues.
     """
-    cfg = NQIntradayConfig()
+    cfg = PEARL_BOT_CONFIG.copy()
     cfg.start_time = "18:00"  # type: ignore[assignment]
     cfg.end_time = "16:10"  # type: ignore[assignment]
 
@@ -74,7 +75,7 @@ def test_session_open_timezone_handling() -> None:
     """
     Test that is_market_hours handles various timezone inputs correctly.
     """
-    cfg = NQIntradayConfig()
+    cfg = PEARL_BOT_CONFIG.copy()
     cfg.start_time = "18:00"  # type: ignore[assignment]
     cfg.end_time = "16:10"  # type: ignore[assignment]
 

@@ -24,8 +24,9 @@ import pandas as pd
 import pytest
 
 from pearlalgo.data_providers.base import DataProvider
-from pearlalgo.nq_agent.service import NQAgentService
-from pearlalgo.strategies.nq_intraday.config import NQIntradayConfig
+from pearlalgo.market_agent.service import MarketAgentService
+from pearlalgo.strategies.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.config.config_loader import load_service_config
 
 
 class _DisconnectedExecutor:
@@ -181,10 +182,10 @@ async def test_connection_failure_triggers_pause(tmp_path) -> None:
     Test type: Deterministic
     """
     provider = FailingProvider(simulate_disconnect=True, fail_fetch=True)
-    config = NQIntradayConfig()
+    config = PEARL_BOT_CONFIG.copy()
     config.scan_interval = 0.02  # Fast cycles for test
 
-    service = NQAgentService(
+    service = MarketAgentService(
         data_provider=provider,
         config=config,
         state_dir=tmp_path,
@@ -232,10 +233,10 @@ async def test_consecutive_errors_triggers_pause(tmp_path, monkeypatch) -> None:
         simulate_timeouts=False,
         simulate_connection_issues=False,
     )
-    config = NQIntradayConfig()
+    config = PEARL_BOT_CONFIG.copy()
     config.scan_interval = 0.02
 
-    service = NQAgentService(
+    service = MarketAgentService(
         data_provider=provider,
         config=config,
         state_dir=tmp_path,
@@ -282,10 +283,10 @@ async def test_data_fetch_errors_trigger_backoff_not_pause(tmp_path) -> None:
     """
     # Provider that returns empty data (fetch failure) but is "connected"
     provider = FailingProvider(fail_fetch=False, fail_latest=True, simulate_disconnect=False)
-    config = NQIntradayConfig()
+    config = PEARL_BOT_CONFIG.copy()
     config.scan_interval = 0.02
 
-    service = NQAgentService(
+    service = MarketAgentService(
         data_provider=provider,
         config=config,
         state_dir=tmp_path,
@@ -320,10 +321,10 @@ async def test_counters_reset_on_successful_cycle(tmp_path) -> None:
     Test type: Deterministic
     """
     provider = RecoverableProvider(fail_for_n_calls=2)
-    config = NQIntradayConfig()
+    config = PEARL_BOT_CONFIG.copy()
     config.scan_interval = 0.02
 
-    service = NQAgentService(
+    service = MarketAgentService(
         data_provider=provider,
         config=config,
         state_dir=tmp_path,
@@ -366,10 +367,10 @@ async def test_manual_pause_and_resume(tmp_path) -> None:
         simulate_timeouts=False,
         simulate_connection_issues=False,
     )
-    config = NQIntradayConfig()
+    config = PEARL_BOT_CONFIG.copy()
     config.scan_interval = 0.02
 
-    service = NQAgentService(
+    service = MarketAgentService(
         data_provider=provider,
         config=config,
         state_dir=tmp_path,
@@ -404,10 +405,10 @@ async def test_status_reflects_circuit_breaker_state(tmp_path) -> None:
     Test type: Deterministic
     """
     provider = FailingProvider(simulate_disconnect=True, fail_fetch=True)
-    config = NQIntradayConfig()
+    config = PEARL_BOT_CONFIG.copy()
     config.scan_interval = 0.02
 
-    service = NQAgentService(
+    service = MarketAgentService(
         data_provider=provider,
         config=config,
         state_dir=tmp_path,
@@ -448,10 +449,10 @@ class TestCircuitBreakerThresholdEdgeCases:
         Test type: Deterministic
         """
         provider = FailingProvider(simulate_disconnect=True, fail_fetch=True)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.scan_interval = 0.02
 
-        service = NQAgentService(
+        service = MarketAgentService(
             data_provider=provider,
             config=config,
             state_dir=tmp_path,
@@ -492,10 +493,10 @@ class TestCircuitBreakerThresholdEdgeCases:
         Test type: Deterministic (edge case)
         """
         provider = FailingProvider(simulate_disconnect=True, fail_fetch=True)
-        config = NQIntradayConfig()
+        config = PEARL_BOT_CONFIG.copy()
         config.scan_interval = 0.02
 
-        service = NQAgentService(
+        service = MarketAgentService(
             data_provider=provider,
             config=config,
             state_dir=tmp_path,
