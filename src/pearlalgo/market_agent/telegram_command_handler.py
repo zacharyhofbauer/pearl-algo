@@ -146,6 +146,10 @@ class TelegramCommandHandler:
                     try:
                         # Build full dashboard message
                         dashboard_text = await self._build_status_dashboard_message(state)
+
+                        # Always include a compact support footer on dashboards so any share is diagnostic.
+                        caption_text = self._with_support_footer(dashboard_text, state=state, max_chars=900)
+                        text_only = self._with_support_footer(dashboard_text, state=state, max_chars=4096)
                         
                         # Generate 12h chart
                         chart_path = await self._generate_or_get_chart(state)
@@ -156,7 +160,7 @@ class TelegramCommandHandler:
                                 await application.bot.send_photo(
                                     chat_id=self.chat_id,
                                     photo=f,
-                                    caption=dashboard_text,
+                                    caption=caption_text,
                                     reply_markup=reply_markup,
                                     parse_mode="Markdown"
                                 )
@@ -165,7 +169,7 @@ class TelegramCommandHandler:
                             # Fallback to text-only dashboard
                             await application.bot.send_message(
                                 chat_id=self.chat_id,
-                                text=dashboard_text,
+                                text=text_only,
                                 reply_markup=reply_markup,
                                 parse_mode="Markdown"
                             )
@@ -209,7 +213,7 @@ class TelegramCommandHandler:
                     ]
                     await application.bot.send_message(
                         chat_id=self.chat_id,
-                        text="\n".join(lines),
+                        text=self._with_support_footer("\n".join(lines), state=None, max_chars=4096),
                         reply_markup=reply_markup,
                         parse_mode="Markdown"
                     )
@@ -726,6 +730,14 @@ class TelegramCommandHandler:
         """
         message = getattr(query, "message", None)
 
+        # Always attach a compact support footer (when using Markdown) so ANY screen
+        # can be copy/pasted to debug issues without extra back-and-forth.
+        try:
+            if parse_mode and "markdown" in str(parse_mode).lower():
+                text = self._with_support_footer(text)
+        except Exception:
+            pass
+
         # Photo messages can't be edited via edit_message_text. For menu screens,
         # replace the dashboard photo with a text-only message.
         if message and getattr(message, "photo", None):
@@ -885,7 +897,8 @@ class TelegramCommandHandler:
             label = f"✅ {market}" if market == self.active_market else market
             keyboard.append([InlineKeyboardButton(label, callback_data=f"action:set_market:{market}")])
         keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
-        await self._safe_edit_or_send(query, "\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        text = self._with_support_footer("\n".join(lines), state=active_state if isinstance(active_state, dict) else None)
+        await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     async def _show_main_menu_with_chart(self, query: CallbackQuery) -> None:
         """Show the main menu with chart displayed above the menu text."""
@@ -897,6 +910,10 @@ class TelegramCommandHandler:
             try:
                 message_text = await self._build_status_dashboard_message(state)
                 chart_path = await self._generate_or_get_chart(state)
+
+                # Add a compact support footer to make any screenshot/share self-diagnostic.
+                caption_text = self._with_support_footer(message_text, state=state, max_chars=900)
+                text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
                 
                 if chart_path and chart_path.exists():
                     try:
@@ -909,7 +926,7 @@ class TelegramCommandHandler:
                                 await query.edit_message_media(
                                     media=InputMediaPhoto(
                                         media=f,
-                                        caption=message_text,
+                                        caption=caption_text,
                                         parse_mode="Markdown"
                                     ),
                                     reply_markup=reply_markup
@@ -924,7 +941,7 @@ class TelegramCommandHandler:
                             with open(chart_path, 'rb') as f:
                                 await query.message.chat.send_photo(
                                     photo=f,
-                                    caption=message_text,
+                                    caption=caption_text,
                                     reply_markup=reply_markup,
                                     parse_mode="Markdown"
                                 )
@@ -940,13 +957,13 @@ class TelegramCommandHandler:
                             except Exception:
                                 pass
                             await message.chat.send_message(
-                                text=message_text,
+                                text=text_only,
                                 reply_markup=reply_markup,
                                 parse_mode="Markdown"
                             )
                             await query.answer()
                         else:
-                            await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
+                            await query.edit_message_text(text_only, reply_markup=reply_markup, parse_mode="Markdown")
                 else:
                     # No chart available - just show text menu quickly
                     message = query.message
@@ -957,18 +974,22 @@ class TelegramCommandHandler:
                         except Exception:
                             pass
                         await message.chat.send_message(
-                            text=message_text,
+                            text=text_only,
                             reply_markup=reply_markup,
                             parse_mode="Markdown"
                         )
                         await query.answer()
                     else:
-                        await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
+                        await query.edit_message_text(text_only, reply_markup=reply_markup, parse_mode="Markdown")
             except Exception as e:
                 logger.error(f"Error showing main menu with chart: {e}", exc_info=True)
                 await self._show_main_menu(query)
         else:
-            text = "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:"
+            text = self._with_support_footer(
+                "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:",
+                state=None,
+                max_chars=4096,
+            )
             message = query.message
             if message and message.photo:
                 try:
@@ -1000,7 +1021,7 @@ class TelegramCommandHandler:
                     try:
                         message_text = await self._build_status_dashboard_message(state)
                         await message.chat.send_message(
-                            text=message_text,
+                            text=self._with_support_footer(message_text, state=state, max_chars=4096),
                             reply_markup=reply_markup,
                             parse_mode="Markdown"
                         )
@@ -1039,20 +1060,24 @@ class TelegramCommandHandler:
         try:
             message_text = await self._build_status_dashboard_message(state)
             chart_path = await self._generate_or_get_chart(state)
+
+            # Always include the support footer on the primary dashboard.
+            caption_text = self._with_support_footer(message_text, state=state, max_chars=900)
+            text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
             
             if chart_path and chart_path.exists():
                 # Send photo with caption
                 with open(chart_path, 'rb') as f:
                     await message_obj.reply_photo(
                         photo=f,
-                        caption=message_text,
+                        caption=caption_text,
                         reply_markup=reply_markup,
                         parse_mode="Markdown"
                     )
             else:
                 # Fallback to text-only if chart unavailable
                 await message_obj.reply_text(
-                    message_text,
+                    text_only,
                     reply_markup=reply_markup,
                     parse_mode="Markdown"
                 )
@@ -1277,6 +1302,7 @@ class TelegramCommandHandler:
             "",
             f"Gateway: {gw_status} | Connection: {conn_status} | Data: {data_status}",
         ]
+        text = self._with_support_footer("\n".join(lines), state=state)
         
         keyboard = [
             [
@@ -1291,7 +1317,7 @@ class TelegramCommandHandler:
             [InlineKeyboardButton("🏠 Menu", callback_data="back")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await self._safe_edit_or_send(query, "\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
+        await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _show_ui_doctor(self, query: CallbackQuery) -> None:
         """Self-serve Telegram UI diagnostics and safe test sends."""
@@ -1333,6 +1359,12 @@ class TelegramCommandHandler:
         except Exception:
             data_age_min = None
 
+        # Threshold (minutes) for marking data stale.
+        try:
+            data_stale_threshold_min = float(state.get("data_stale_threshold_minutes") or 10.0)
+        except Exception:
+            data_stale_threshold_min = 10.0
+
         # Service status (best-effort)
         agent_running = False
         try:
@@ -1370,56 +1402,43 @@ class TelegramCommandHandler:
             lines.append("📡 Data: ⚪ Unknown")
         else:
             lvl = safe_label(str(data_level or "unknown"))
-            lines.append(f"📡 Data: *{lvl}* • Age: *{data_age_min:.1f}m*")
+            is_stale = (
+                data_stale_threshold_min > 0
+                and data_age_min is not None
+                and data_age_min > data_stale_threshold_min
+            )
+            if is_stale:
+                lines.append(
+                    f"📡 Data: *{lvl}* • Age: *{data_age_min:.1f}m* 🔴 (thr={data_stale_threshold_min:.0f}m)"
+                )
+            else:
+                lines.append(f"📡 Data: *{lvl}* • Age: *{data_age_min:.1f}m*")
 
         # Prefs summary
-        def _onoff(v: bool) -> str:
-            return "🟢 ON" if v else "🔴 OFF"
-
         lines.append("")
-        lines.append("*Prefs:*")
-        lines.append(f"- 🔘 Menu navigation: 🟢 ON (always)")
-        lines.append(f"- 📌 Pinned dashboard: {_onoff(pinned_dashboard)}")
-        lines.append(f"- 🕐 Interval dashboards: {_onoff(interval_notifications)}")
-        lines.append(f"- 📈 Auto-chart on signal: {_onoff(auto_chart)}")
-        lines.append(f"- 🔍 Expanded details: {_onoff(expanded_details)}")
-        if snooze_on:
-            until = prefs.get("snooze_until")
-            until_age = format_time_ago(str(until)) if until else ""
-            lines.append(f"- 🔕 Snooze (non-critical): 🟢 ON {('(' + until_age + ')') if until_age else ''}".rstrip())
-        else:
-            lines.append(f"- 🔕 Snooze (non-critical): {_onoff(False)}")
+        prefs_bits: list[str] = []
+        prefs_bits.append(f"Interval {'🟢' if interval_notifications else '🔴'}")
+        prefs_bits.append(f"Auto-chart {'🟢' if auto_chart else '🔴'}")
+        prefs_bits.append(f"Snooze {'🟢' if snooze_on else '🔴'}")
+        if expanded_details:
+            prefs_bits.append("Details 🟢")
+        if pinned_dashboard:
+            prefs_bits.append("Pinned 🟢")
+        lines.append(f"*Prefs:* {' | '.join(prefs_bits)}")
 
         if last_dash:
-            lines.append(f"- 🧾 Last dashboard: {safe_label(str(last_dash_age or last_dash))}")
-        else:
-            lines.append("- 🧾 Last dashboard: N/A")
-        if pinned_id:
-            try:
-                lines.append(f"- 🆔 Pinned msg id: `{int(pinned_id)}`")
-            except Exception:
-                lines.append("- 🆔 Pinned msg id: (invalid)")
-
-        lines.append("")
-        lines.append("*Safe tests (UI-only):*")
+            lines.append(f"🧾 Last dashboard: {safe_label(str(last_dash_age or last_dash))}")
 
         keyboard = [
             [
-                InlineKeyboardButton("🧪 Test Dashboard", callback_data="action:ui_doctor:test_dashboard"),
-                InlineKeyboardButton("⚠️ Test Risk Alert", callback_data="action:ui_doctor:test_risk"),
+                InlineKeyboardButton("🎛 System", callback_data="menu:system"),
+                InlineKeyboardButton("⚙️ Settings", callback_data="menu:settings"),
             ],
             [
-                InlineKeyboardButton("🧪 Test Signal", callback_data="action:ui_doctor:test_signal"),
-                InlineKeyboardButton("🔕 Toggle Snooze", callback_data="action:ui_doctor:toggle_snooze"),
+                InlineKeyboardButton("🧪 Tests", callback_data="action:ui_doctor:tests"),
+                InlineKeyboardButton("🛡 Back", callback_data="menu:status"),
             ],
-            [
-                InlineKeyboardButton("📌 Toggle Pinned", callback_data="action:ui_doctor:toggle_pinned"),
-                InlineKeyboardButton("🧹 Reset Pinned ID", callback_data="action:ui_doctor:reset_pinned"),
-            ],
-            [
-                InlineKeyboardButton("🛡 Back to Health", callback_data="menu:status"),
-                InlineKeyboardButton("🏠 Menu", callback_data="back"),
-            ],
+            [InlineKeyboardButton("🏠 Menu", callback_data="back")],
         ]
         await self._safe_edit_or_send(
             query,
@@ -1447,6 +1466,31 @@ class TelegramCommandHandler:
                 )
             except Exception:
                 return None
+
+        if action == "tests":
+            lines = [
+                "🧪 *UI Doctor Tests*",
+                "",
+                "_UI-only test sends (no trading side effects)._",
+            ]
+            keyboard = [
+                [
+                    InlineKeyboardButton("🧪 Dashboard", callback_data="action:ui_doctor:test_dashboard"),
+                    InlineKeyboardButton("⚠️ Risk Alert", callback_data="action:ui_doctor:test_risk"),
+                ],
+                [InlineKeyboardButton("🧪 Signal", callback_data="action:ui_doctor:test_signal")],
+                [
+                    InlineKeyboardButton("🩺 Doctor", callback_data="action:ui_doctor"),
+                    InlineKeyboardButton("🏠 Menu", callback_data="back"),
+                ],
+            ]
+            await self._safe_edit_or_send(
+                query,
+                "\n".join(lines),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown",
+            )
+            return
 
         if action == "toggle_snooze":
             try:
@@ -1632,8 +1676,9 @@ class TelegramCommandHandler:
                     InlineKeyboardButton("💰 P&L Detail", callback_data="action:pnl_overview"),
                 ])
             
+            text = self._with_support_footer("\n".join(lines), state=state)
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await self._safe_edit_or_send(query, "\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
+            await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Error in _show_activity_menu: {e}", exc_info=True)
             keyboard = [
@@ -1864,8 +1909,9 @@ class TelegramCommandHandler:
             ],
         ]
 
+        text = self._with_support_footer("\n".join(lines), state=state)
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await self._safe_edit_or_send(query, "\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
+        await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _show_system_menu(self, query: CallbackQuery) -> None:
         """Show system control submenu with comprehensive risk warnings and status."""
@@ -1955,8 +2001,9 @@ class TelegramCommandHandler:
         # Back
         keyboard.append([InlineKeyboardButton("🏠 Menu", callback_data="back")])
         
+        text = self._with_support_footer("\n".join(lines), state=state)
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await self._safe_edit_or_send(query, "\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
+        await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
     async def _show_settings_menu(self, query: CallbackQuery) -> None:
@@ -2048,7 +2095,8 @@ class TelegramCommandHandler:
             # Row 6: Back
             [InlineKeyboardButton("🏠 Menu", callback_data="back")],
         ]
-        await self._safe_edit_or_send(query, "\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        text = self._with_support_footer("\n".join(lines))
+        await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     async def _ensure_openai_ready(self, target: Any, context: Any | None = None) -> bool:
         """Ensure OpenAI dependency and API key are set.
@@ -4403,37 +4451,58 @@ class TelegramCommandHandler:
                         last_error = last_error[:97] + "..."
                     text += f"*Last Error:* {safe_label(last_error)}\n"
         
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _handle_gateway_status(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display gateway status."""
         state = self._read_state()
         if not state:
-            await query.edit_message_text("❌ Could not read system state.", reply_markup=reply_markup)
+            await self._safe_edit_or_send(query, "❌ Could not read system state.", reply_markup=reply_markup)
             return
         
-        text = "🔌 *Gateway Status*\n\n"
-        
-        connection_status = state.get("connection_status", "unknown")
-        connection_failures = state.get("connection_failures", 0)
-        
-        if connection_status == "connected":
-            text += "🟢 *Status:* CONNECTED\n"
-        elif connection_status == "disconnected":
-            text += "🔴 *Status:* DISCONNECTED\n"
-        else:
-            text += f"⚪ *Status:* {connection_status.upper()}\n"
-        
-        if connection_failures > 0:
-            text += f"⚠️ *Failures:* {connection_failures}\n"
-        
+        # Gateway service status (process + port)
+        gw_status = {"process_running": False, "port_listening": False}
+        try:
+            sc = getattr(self, "service_controller", None)
+            if sc:
+                gw_status = sc.get_gateway_status() or gw_status
+        except Exception:
+            pass
+
+        gw_proc = bool(gw_status.get("process_running", False))
+        gw_port = bool(gw_status.get("port_listening", False))
+        gw_ok = gw_proc and gw_port
+
+        # Agent-reported connection status (when available)
+        raw_conn = state.get("connection_status", None)
+        conn_failures = int(state.get("connection_failures", 0) or 0)
+
+        conn_label = "UNKNOWN"
+        try:
+            if raw_conn in (True, "connected", "CONNECTED", "ok", "OK"):
+                conn_label = "CONNECTED"
+            elif raw_conn in (False, "disconnected", "DISCONNECTED", "down", "DOWN"):
+                conn_label = "DISCONNECTED"
+            elif raw_conn is None:
+                conn_label = "UNKNOWN"
+            else:
+                conn_label = str(raw_conn).upper()
+        except Exception:
+            conn_label = "UNKNOWN"
+
+        text = "🔌 *Gateway*\n\n"
+        text += f"{'🟢' if gw_ok else '🔴'} *Service:* {'ONLINE' if gw_ok else 'OFFLINE'} (proc={gw_proc}, port={gw_port})\n"
+        text += f"{'🟢' if conn_label == 'CONNECTED' else ('🔴' if conn_label == 'DISCONNECTED' else '⚪')} *Connection:* {conn_label}\n"
+        if conn_failures > 0:
+            text += f"⚠️ *Conn failures:* {conn_failures}\n"
+
         # Data source info
-        latest_bar = state.get("latest_bar", {})
-        if latest_bar:
-            data_level = latest_bar.get("_data_level", "unknown")
+        latest_bar = state.get("latest_bar", {}) or {}
+        data_level = latest_bar.get("_data_level", None)
+        if data_level:
             text += f"\n📊 *Data Level:* {data_level}\n"
-        
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+        await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _handle_connection_status(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display connection status."""
@@ -4443,7 +4512,7 @@ class TelegramCommandHandler:
         """Display data quality information."""
         state = self._read_state()
         if not state:
-            await query.edit_message_text("❌ Could not read system state.", reply_markup=reply_markup)
+            await self._safe_edit_or_send(query, "❌ Could not read system state.", reply_markup=reply_markup)
             return
         
         text = "💾 *Data Quality*\n\n"
@@ -4461,9 +4530,9 @@ class TelegramCommandHandler:
         except Exception:
             pass
         
-        latest_bar = state.get("latest_bar", {})
-        agent_running = state.get("running", False)
-        paused = state.get("paused", False)
+        latest_bar = state.get("latest_bar", {}) or {}
+        agent_running = bool(self._is_agent_process_running())
+        paused = bool(state.get("paused", False))
         futures_market_open = state.get("futures_market_open")
         strategy_session_open = state.get("strategy_session_open")
         
@@ -4521,11 +4590,29 @@ class TelegramCommandHandler:
             # Diagnostic info for stale data
             if age_minutes is not None and age_minutes > data_stale_threshold_minutes and agent_running and not paused:
                 data_fetch_errors = state.get("data_fetch_errors", 0)
-                connection_status = state.get("connection_status", "unknown")
-                connection_failures = state.get("connection_failures", 0)
+                raw_conn = state.get("connection_status", None)
+                connection_failures = int(state.get("connection_failures", 0) or 0)
+
+                conn_diag = "unknown"
+                try:
+                    if raw_conn in (True, "connected", "CONNECTED", "ok", "OK"):
+                        conn_diag = "connected"
+                    elif raw_conn in (False, "disconnected", "DISCONNECTED", "down", "DOWN"):
+                        conn_diag = "disconnected"
+                    elif raw_conn is None:
+                        conn_diag = "unknown"
+                    else:
+                        conn_diag = str(raw_conn)
+                except Exception:
+                    conn_diag = "unknown"
                 
                 text += "\n🔍 *Diagnostics:*\n"
-                text += f"• Connection: {connection_status}\n"
+                # If the agent isn't explicitly reporting connection status, infer from staleness.
+                if conn_diag == "unknown":
+                    text += "• Connection: unknown (agent not reporting)\n"
+                    text += "• Inference: data is stale → likely feed/connection issue\n"
+                else:
+                    text += f"• Connection: {conn_diag}\n"
                 if data_fetch_errors > 0:
                     text += f"• Data fetch errors: {data_fetch_errors}\n"
                 if connection_failures > 0:
@@ -4537,7 +4624,7 @@ class TelegramCommandHandler:
             text += "• Data fetcher not initialized\n"
             text += "• No market data received yet\n"
         
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _handle_export_performance(self, query: CallbackQuery) -> None:
         """Export performance report."""
@@ -4606,6 +4693,143 @@ class TelegramCommandHandler:
         logger.info("Connecting to Telegram...")
         self.application.run_polling(allowed_updates=Update.ALL_TYPES)
 
+    # ---------------------------------------------------------------------
+    # Support footer (copy/paste diagnostics)
+    # ---------------------------------------------------------------------
+
+    def _format_support_duration(self, seconds: float | None) -> str:
+        """Compact duration like 12s / 3m / 1h43m."""
+        try:
+            if seconds is None:
+                return "?"
+            s = float(seconds)
+            if s < 0:
+                return "?"
+        except Exception:
+            return "?"
+
+        if s < 60:
+            return f"{int(s)}s"
+        if s < 3600:
+            return f"{int(s // 60)}m"
+        hours = int(s // 3600)
+        mins = int((s % 3600) // 60)
+        return f"{hours}h{mins}m"
+
+    def _build_support_footer(self, state: dict | None = None) -> str:
+        """One-line, copy/paste-friendly support footer for debugging."""
+        try:
+            if not isinstance(state, dict):
+                state = self._read_state()
+            if not isinstance(state, dict):
+                state = {}
+        except Exception:
+            state = {}
+
+        # Market + symbol (best-effort)
+        market = str(state.get("market") or getattr(self, "active_market", "NQ") or "NQ").strip().upper()
+        symbol = str(state.get("symbol") or (state.get("config") or {}).get("symbol") or "MNQ").strip()
+        run_id = str(state.get("run_id") or "?").strip()
+        ver = str(state.get("version") or "").strip()
+
+        # Agent running (process check)
+        try:
+            agent_running = bool(self._is_agent_process_running())
+        except Exception:
+            agent_running = False
+
+        # Gateway status (process + port)
+        gw = "?"
+        try:
+            sc = getattr(self, "service_controller", None)
+            if sc is not None:
+                gs = sc.get_gateway_status() or {}
+                proc = bool(gs.get("process_running"))
+                port = bool(gs.get("port_listening"))
+                gw = "OK" if (proc and port) else "OFF"
+        except Exception:
+            gw = "?"
+
+        # Data age + level
+        data_lvl = None
+        age_sec = None
+        try:
+            thr_min = float(state.get("data_stale_threshold_minutes") or 10.0)
+        except Exception:
+            thr_min = None
+        try:
+            latest_bar = state.get("latest_bar") if isinstance(state.get("latest_bar"), dict) else {}
+            data_lvl = (latest_bar or {}).get("_data_level")
+            ts = (latest_bar or {}).get("timestamp") or state.get("latest_bar_timestamp")
+            if ts:
+                dt = parse_utc_timestamp(str(ts))
+                if dt and dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if dt:
+                    age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
+        except Exception:
+            age_sec = None
+
+        # Last cycle age
+        cycle_sec = None
+        try:
+            ts = state.get("last_successful_cycle")
+            if ts:
+                dt = parse_utc_timestamp(str(ts))
+                if dt and dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if dt:
+                    cycle_sec = (datetime.now(timezone.utc) - dt).total_seconds()
+        except Exception:
+            cycle_sec = None
+
+        lvl_map = {
+            "level1": "L1",
+            "level2": "L2",
+            "historical": "HIST",
+            "historical_fallback": "HIST",
+            "error": "ERR",
+            "unknown": "?",
+        }
+        lvl_short = lvl_map.get(str(data_lvl).strip().lower(), None)
+        if not lvl_short:
+            lvl_short = "?" if data_lvl is None else str(data_lvl)[:4].upper()
+
+        age_str = self._format_support_duration(age_sec)
+        thr_str = "?" if thr_min is None else f"{thr_min:.0f}m"
+        stale_flag = ""
+        try:
+            if thr_min and age_sec is not None and float(age_sec) / 60.0 > float(thr_min):
+                stale_flag = "!"
+        except Exception:
+            stale_flag = ""
+
+        a = "ON" if agent_running else "OFF"
+        c = self._format_support_duration(cycle_sec)
+        v = f" v{ver}" if ver else ""
+        # Keep this short; it's intended to be pasted into chat for support.
+        return f"`🩺 {market}/{symbol}{v} | A:{a} | G:{gw} | D:{lvl_short} {age_str}/{thr_str}{stale_flag} | C:{c} | run:{run_id}`"
+
+    def _with_support_footer(self, text: str, *, state: dict | None = None, max_chars: int = 4096) -> str:
+        """Append the support footer when there is room (never breaks messages)."""
+        base = (text or "").rstrip()
+        footer = ""
+        try:
+            footer = self._build_support_footer(state)
+        except Exception:
+            footer = ""
+        if not footer:
+            return base
+        # Idempotency: if a support footer is already present (even if values differ),
+        # do not append another one.
+        if "`🩺 " in base:
+            return base
+        if footer in base:
+            return base
+        candidate = f"{base}\n\n{footer}"
+        if max_chars and len(candidate) > int(max_chars):
+            return base
+        return candidate
 
 
     # ---------------------------------------------------------------------
@@ -4614,6 +4838,12 @@ class TelegramCommandHandler:
 
     async def _send_message_or_edit(self, update: Any, context: Any, msg: str, **kwargs) -> None:
         """Send a message or edit an existing one (test-friendly helper)."""
+        try:
+            parse_mode = kwargs.get("parse_mode")
+            if parse_mode and "markdown" in str(parse_mode).lower():
+                msg = self._with_support_footer(msg)
+        except Exception:
+            pass
         try:
             query = getattr(update, "callback_query", None)
             if query is not None and callable(getattr(query, "edit_message_text", None)):

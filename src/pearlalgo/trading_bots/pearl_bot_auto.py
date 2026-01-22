@@ -62,11 +62,20 @@ CONFIG = ConfigView({
     "sd_threshold_pct": 10.0,
     "sd_resolution": 50,
     
-    # Risk Management
-    "stop_loss_atr_mult": 1.5,
-    "take_profit_atr_mult": 2.5,
-    "min_confidence": 0.6,
-    "min_risk_reward": 1.2,
+    # SpacemanBTC Key Levels (from SpacemanBTC Key Level V13.1.pine)
+    # These are critical reversal/breakout zones
+    "key_level_proximity_pct": 0.15,  # Within 0.15% = "near" a level
+    "key_level_breakout_pct": 0.05,   # Price crossed level by this % = breakout
+    "key_level_bounce_confidence": 0.12,  # Confidence boost for bounce signals
+    "key_level_breakout_confidence": 0.10,  # Confidence boost for breakout signals
+    "key_level_rejection_penalty": 0.08,  # Confidence penalty for entering into resistance/support
+    
+    # Risk Management - WIDE STOPS to avoid wicks
+    # Tight stops get hunted - use structure-based wide stops
+    "stop_loss_atr_mult": 3.5,      # WIDE: 3.5x ATR to survive wicks
+    "take_profit_atr_mult": 5.0,    # Let winners run: 5x ATR targets
+    "min_confidence": 0.55,         # Allow trades with strong confluence
+    "min_risk_reward": 1.3,         # Maintain decent R:R with wide stops
 
     # Virtual PnL grading (signal-only; no live execution)
     # Used by MarketAgentService virtual trade exits and tests.
@@ -282,26 +291,304 @@ def calculate_supply_demand_zones(
 
 def get_key_levels(df: pd.DataFrame) -> Dict[str, Optional[float]]:
     """
-    Key Levels - simplified from SpacemanBTC Key Level.pine
+    SpacemanBTC Key Levels - comprehensive implementation.
     
-    Returns dict with daily, weekly, monthly key levels
+    Computes multi-timeframe key levels that act as reversal/breakout zones:
+    - Daily: DO (Daily Open), PDH (Previous Day High), PDL (Previous Day Low), PDM (Previous Day Mid)
+    - Weekly: WO (Weekly Open), PWH (Previous Week High), PWL (Previous Week Low), PWM (Previous Week Mid)
+    - Monthly: MO (Monthly Open), PMH (Previous Month High), PML (Previous Month Low)
+    - Session: Session High/Low for current trading day
+    
+    Returns dict with all computed levels and their types (support/resistance).
     """
-    levels = {}
+    levels: Dict[str, Optional[float]] = {}
     
-    # Daily levels
-    if len(df) >= 1:
-        daily_open = df["open"].iloc[-1] if len(df) == 1 else df["open"].iloc[-2]
-        levels["daily_open"] = float(daily_open)
+    if df.empty or len(df) < 2:
+        return levels
     
-    # Weekly levels (simplified - would need resampling for full implementation)
-    if len(df) >= 5:
-        weekly_high = df["high"].tail(5).max()
-        weekly_low = df["low"].tail(5).min()
-        levels["weekly_high"] = float(weekly_high)
-        levels["weekly_low"] = float(weekly_low)
-        levels["weekly_mid"] = float((weekly_high + weekly_low) / 2)
+    # Ensure we have a timestamp column or index
+    if "timestamp" in df.columns:
+        df_ts = df.copy()
+        if not isinstance(df_ts["timestamp"].iloc[0], pd.Timestamp):
+            df_ts["timestamp"] = pd.to_datetime(df_ts["timestamp"])
+        df_ts = df_ts.set_index("timestamp")
+    elif isinstance(df.index, pd.DatetimeIndex):
+        df_ts = df.copy()
+    else:
+        # Fallback: use simple calculations without proper resampling
+        return _get_key_levels_simple(df)
+    
+    try:
+        # Current bar info
+        current_close = float(df["close"].iloc[-1])
+        levels["current_close"] = current_close
+        
+        # =====================================================================
+        # DAILY LEVELS (most important for intraday trading)
+        # =====================================================================
+        daily_df = df_ts.resample("D").agg({
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last"
+        }).dropna()
+        
+        if len(daily_df) >= 1:
+            # Daily Open (DO) - today's open
+            levels["daily_open"] = float(daily_df["open"].iloc[-1])
+            
+            if len(daily_df) >= 2:
+                # Previous Day High (PDH), Low (PDL), Mid (PDM)
+                prev_day = daily_df.iloc[-2]
+                levels["prev_day_high"] = float(prev_day["high"])
+                levels["prev_day_low"] = float(prev_day["low"])
+                levels["prev_day_mid"] = float((prev_day["high"] + prev_day["low"]) / 2)
+                
+                # Current Day High/Low (for session range)
+                curr_day = daily_df.iloc[-1]
+                levels["curr_day_high"] = float(curr_day["high"])
+                levels["curr_day_low"] = float(curr_day["low"])
+        
+        # =====================================================================
+        # WEEKLY LEVELS
+        # =====================================================================
+        weekly_df = df_ts.resample("W").agg({
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last"
+        }).dropna()
+        
+        if len(weekly_df) >= 1:
+            # Weekly Open (WO)
+            levels["weekly_open"] = float(weekly_df["open"].iloc[-1])
+            
+            if len(weekly_df) >= 2:
+                # Previous Week High (PWH), Low (PWL), Mid (PWM)
+                prev_week = weekly_df.iloc[-2]
+                levels["prev_week_high"] = float(prev_week["high"])
+                levels["prev_week_low"] = float(prev_week["low"])
+                levels["prev_week_mid"] = float((prev_week["high"] + prev_week["low"]) / 2)
+        
+        # =====================================================================
+        # MONTHLY LEVELS
+        # =====================================================================
+        monthly_df = df_ts.resample("ME").agg({
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last"
+        }).dropna()
+        
+        if len(monthly_df) >= 1:
+            # Monthly Open (MO)
+            levels["monthly_open"] = float(monthly_df["open"].iloc[-1])
+            
+            if len(monthly_df) >= 2:
+                # Previous Month High (PMH), Low (PML), Mid (PMM)
+                prev_month = monthly_df.iloc[-2]
+                levels["prev_month_high"] = float(prev_month["high"])
+                levels["prev_month_low"] = float(prev_month["low"])
+                levels["prev_month_mid"] = float((prev_month["high"] + prev_month["low"]) / 2)
+        
+        # =====================================================================
+        # CLASSIFY LEVELS AS SUPPORT OR RESISTANCE
+        # =====================================================================
+        levels["support_levels"] = []
+        levels["resistance_levels"] = []
+        
+        for key, value in levels.items():
+            if value is None or key in ("current_close", "support_levels", "resistance_levels"):
+                continue
+            if isinstance(value, (int, float)):
+                if value < current_close:
+                    levels["support_levels"].append((key, value))
+                elif value > current_close:
+                    levels["resistance_levels"].append((key, value))
+        
+        # Sort by proximity to current price
+        levels["support_levels"] = sorted(levels["support_levels"], key=lambda x: x[1], reverse=True)
+        levels["resistance_levels"] = sorted(levels["resistance_levels"], key=lambda x: x[1])
+        
+    except Exception as e:
+        logger.debug(f"Error computing key levels with resampling: {e}")
+        return _get_key_levels_simple(df)
     
     return levels
+
+
+def _get_key_levels_simple(df: pd.DataFrame) -> Dict[str, Optional[float]]:
+    """Fallback simple key levels when resampling isn't available."""
+    levels: Dict[str, Optional[float]] = {}
+    
+    if len(df) < 2:
+        return levels
+    
+    current_close = float(df["close"].iloc[-1])
+    levels["current_close"] = current_close
+    
+    # Use lookback windows as approximations
+    # ~390 1m bars = 1 trading day, ~1950 = 1 week
+    
+    # Daily approximation (last ~390 bars or available)
+    daily_lookback = min(390, len(df) - 1)
+    if daily_lookback > 10:
+        daily_slice = df.tail(daily_lookback)
+        levels["daily_open"] = float(daily_slice["open"].iloc[0])
+        levels["prev_day_high"] = float(daily_slice["high"].max())
+        levels["prev_day_low"] = float(daily_slice["low"].min())
+        levels["prev_day_mid"] = float((levels["prev_day_high"] + levels["prev_day_low"]) / 2)
+    
+    # Weekly approximation (last ~1950 bars or available)
+    weekly_lookback = min(1950, len(df))
+    if weekly_lookback > 50:
+        weekly_slice = df.tail(weekly_lookback)
+        levels["weekly_open"] = float(weekly_slice["open"].iloc[0])
+        levels["prev_week_high"] = float(weekly_slice["high"].max())
+        levels["prev_week_low"] = float(weekly_slice["low"].min())
+        levels["prev_week_mid"] = float((levels["prev_week_high"] + levels["prev_week_low"]) / 2)
+    
+    # Classify as support/resistance
+    levels["support_levels"] = []
+    levels["resistance_levels"] = []
+    
+    for key, value in levels.items():
+        if value is None or key in ("current_close", "support_levels", "resistance_levels"):
+            continue
+        if isinstance(value, (int, float)):
+            if value < current_close:
+                levels["support_levels"].append((key, value))
+            elif value > current_close:
+                levels["resistance_levels"].append((key, value))
+    
+    levels["support_levels"] = sorted(levels["support_levels"], key=lambda x: x[1], reverse=True)
+    levels["resistance_levels"] = sorted(levels["resistance_levels"], key=lambda x: x[1])
+    
+    return levels
+
+
+def check_key_level_signals(
+    df: pd.DataFrame,
+    key_levels: Dict[str, Optional[float]],
+    config: Dict
+) -> Tuple[Optional[str], float, Dict]:
+    """
+    Check for key level bounce or breakout signals - core SpacemanBTC logic.
+    
+    Key levels are where reversals and breakouts happen. This function detects:
+    - BOUNCE: Price approaching a level and showing rejection (reversal opportunity)
+    - BREAKOUT: Price decisively crossing a level (continuation opportunity)
+    
+    Returns: (signal_type, confidence_adjustment, level_info)
+    
+    Signal types:
+    - "bounce_support_long": Bouncing off support level (buy signal)
+    - "bounce_resistance_short": Bouncing off resistance level (sell signal)
+    - "breakout_resistance_long": Breaking above resistance (buy signal)
+    - "breakout_support_short": Breaking below support (sell signal)
+    - "near_resistance_caution": Approaching resistance (reduce long confidence)
+    - "near_support_caution": Approaching support (reduce short confidence)
+    - None: No significant key level interaction
+    """
+    if df.empty or len(df) < 3 or not key_levels:
+        return None, 0.0, {}
+    
+    current_close = float(df["close"].iloc[-1])
+    prev_close = float(df["close"].iloc[-2])
+    current_high = float(df["high"].iloc[-1])
+    current_low = float(df["low"].iloc[-1])
+    
+    proximity_pct = config.get("key_level_proximity_pct", 0.15) / 100.0
+    breakout_pct = config.get("key_level_breakout_pct", 0.05) / 100.0
+    bounce_conf = config.get("key_level_bounce_confidence", 0.12)
+    breakout_conf = config.get("key_level_breakout_confidence", 0.10)
+    rejection_penalty = config.get("key_level_rejection_penalty", 0.08)
+    
+    level_info = {
+        "nearest_support": None,
+        "nearest_resistance": None,
+        "support_distance_pct": None,
+        "resistance_distance_pct": None,
+        "level_interaction": None,
+    }
+    
+    # Find nearest support and resistance
+    support_levels = key_levels.get("support_levels", [])
+    resistance_levels = key_levels.get("resistance_levels", [])
+    
+    nearest_support = None
+    nearest_support_name = None
+    if support_levels:
+        nearest_support_name, nearest_support = support_levels[0]
+        level_info["nearest_support"] = nearest_support
+        level_info["nearest_support_name"] = nearest_support_name
+        level_info["support_distance_pct"] = abs(current_close - nearest_support) / current_close * 100
+    
+    nearest_resistance = None
+    nearest_resistance_name = None
+    if resistance_levels:
+        nearest_resistance_name, nearest_resistance = resistance_levels[0]
+        level_info["nearest_resistance"] = nearest_resistance
+        level_info["nearest_resistance_name"] = nearest_resistance_name
+        level_info["resistance_distance_pct"] = abs(nearest_resistance - current_close) / current_close * 100
+    
+    # =========================================================================
+    # BOUNCE DETECTION (Reversal Signals)
+    # =========================================================================
+    
+    # Support bounce: price dropped to support level and is now bouncing up
+    if nearest_support is not None:
+        support_proximity = abs(current_low - nearest_support) / current_close
+        
+        # Check if we touched/near support and closed higher (bounce)
+        if support_proximity <= proximity_pct:
+            # Touched support zone
+            if current_close > current_low and current_close > prev_close:
+                # Bouncing up from support - bullish reversal signal
+                level_info["level_interaction"] = f"bounce_support:{nearest_support_name}"
+                return "bounce_support_long", bounce_conf, level_info
+            elif current_close < prev_close:
+                # Breaking down through support - bearish continuation
+                if (prev_close - current_close) / current_close > breakout_pct:
+                    level_info["level_interaction"] = f"breakout_support:{nearest_support_name}"
+                    return "breakout_support_short", breakout_conf, level_info
+    
+    # Resistance bounce: price rose to resistance level and is now rejecting down
+    if nearest_resistance is not None:
+        resistance_proximity = abs(current_high - nearest_resistance) / current_close
+        
+        # Check if we touched/near resistance and closed lower (rejection)
+        if resistance_proximity <= proximity_pct:
+            # Touched resistance zone
+            if current_close < current_high and current_close < prev_close:
+                # Rejecting from resistance - bearish reversal signal
+                level_info["level_interaction"] = f"bounce_resistance:{nearest_resistance_name}"
+                return "bounce_resistance_short", bounce_conf, level_info
+            elif current_close > prev_close:
+                # Breaking up through resistance - bullish continuation
+                if (current_close - prev_close) / current_close > breakout_pct:
+                    level_info["level_interaction"] = f"breakout_resistance:{nearest_resistance_name}"
+                    return "breakout_resistance_long", breakout_conf, level_info
+    
+    # =========================================================================
+    # CAUTION SIGNALS (Reduce confidence when entering into levels)
+    # =========================================================================
+    
+    # Approaching resistance from below - caution for longs
+    if nearest_resistance is not None:
+        resistance_distance = (nearest_resistance - current_close) / current_close
+        if resistance_distance <= proximity_pct * 2 and current_close > prev_close:
+            level_info["level_interaction"] = f"approaching_resistance:{nearest_resistance_name}"
+            return "near_resistance_caution", -rejection_penalty, level_info
+    
+    # Approaching support from above - caution for shorts
+    if nearest_support is not None:
+        support_distance = (current_close - nearest_support) / current_close
+        if support_distance <= proximity_pct * 2 and current_close < prev_close:
+            level_info["level_interaction"] = f"approaching_support:{nearest_support_name}"
+            return "near_support_caution", -rejection_penalty, level_info
+    
+    return None, 0.0, level_info
 
 
 def check_trading_session(dt: datetime, config: Dict) -> bool:
@@ -565,11 +852,19 @@ def generate_signals(
         except Exception:
             pass  # S&D is optional enhancement
     
-    # 7. Key levels (extended - conditional)
+    # 7. SpacemanBTC Key Levels (extended - conditional)
+    # These are CRITICAL for reversal/breakout detection
     key_levels = {}
+    key_level_signal = None
+    key_level_conf_adj = 0.0
+    key_level_info = {}
     if len(df) >= 5:
         try:
             key_levels = get_key_levels(df) or {}
+            # Check for bounce/breakout signals at key levels
+            key_level_signal, key_level_conf_adj, key_level_info = check_key_level_signals(
+                df, key_levels, config
+            )
         except Exception:
             pass  # Key levels are optional enhancement
     
@@ -607,38 +902,94 @@ def generate_signals(
     # Combine signals with confidence scoring
     signal_candidates = []
     
-    # Long signals
+    # Long signals - ALL 8 INDICATORS CONTRIBUTE
     if bullish_cross and price_above_vwap:
-        confidence = 0.7
+        # Base confidence: EMA cross (1) + VWAP position (2) = 0.5
+        confidence = 0.50
+        active_indicators = ["EMA_CROSS", "VWAP_ABOVE"]
+        
+        # (3) Volume confirmation - additive
         if volume_confirmed:
-            confidence += 0.1
+            confidence += 0.12
+            active_indicators.append("VOL_CONFIRM")
+        
+        # (4) S&R Power Channel - additive for alignment
         if sr_signal and "long" in sr_signal:
-            confidence = max(confidence, sr_confidence)
+            confidence += 0.08 + (sr_confidence * 0.05)  # Base + scaled
+            active_indicators.append(f"SR:{sr_signal}")
+        
+        # (5) TBT Trendlines - additive for breakouts
         if tbt_signal and "long" in tbt_signal:
-            confidence = max(confidence, tbt_confidence)
+            confidence += 0.08 + (tbt_confidence * 0.05)
+            active_indicators.append(f"TBT:{tbt_signal}")
+        
+        # (6) Supply & Demand zones - additive
         if sd_signal and "demand" in sd_signal:
-            confidence = max(confidence, sd_confidence)
+            confidence += 0.10  # Strong boost for demand zone entry
+            active_indicators.append(f"SD:{sd_signal}")
         
-        # VWAP band adjustments for longs
+        # (7) VWAP band adjustments
         if vwap_band_signal == "extended_above":
-            confidence -= 0.05  # Reduce confidence when overly extended
+            confidence -= 0.08  # CAUTION: Overly extended, reduce confidence
+            active_indicators.append("VWAP_EXTENDED_CAUTION")
         elif vwap_band_signal == "near_vwap_above":
-            confidence += 0.03  # Slight boost for mean reversion setup
+            confidence += 0.05  # Good: Near VWAP, room to run
+            active_indicators.append("VWAP_NEAR")
         
-        # Key level adjustments for longs
+        # =====================================================================
+        # (8) SPACEMAN KEY LEVEL ADJUSTMENTS FOR LONGS (CRITICAL)
+        # Key levels are where reversals and breakouts happen - HIGHEST IMPACT
+        # =====================================================================
+        if key_level_signal:
+            if key_level_signal == "bounce_support_long":
+                # STRONG: Bouncing off support level - high probability reversal
+                confidence += key_level_conf_adj + 0.05  # Extra boost for bounces
+                active_indicators.append(f"KEY_BOUNCE:{key_level_info.get('nearest_support_name', 'support')}")
+            elif key_level_signal == "breakout_resistance_long":
+                # STRONG: Breaking above resistance - continuation signal
+                confidence += key_level_conf_adj + 0.03
+                active_indicators.append(f"KEY_BREAKOUT:{key_level_info.get('nearest_resistance_name', 'resistance')}")
+            elif key_level_signal == "near_resistance_caution":
+                # CAUTION: Approaching resistance - reduce confidence for longs
+                confidence += key_level_conf_adj  # This is negative
+                active_indicators.append(f"CAUTION_RESIST")
+        
+        # Additional key level proximity checks using enhanced levels
         if key_levels:
-            weekly_low = key_levels.get("weekly_low")
-            weekly_mid = key_levels.get("weekly_mid")
-            daily_open = key_levels.get("daily_open")
-            # Boost confidence if entering off support (near weekly low or daily open support)
-            if weekly_low and close > weekly_low and (close - weekly_low) / weekly_low < 0.005:
-                confidence += 0.05
-            elif daily_open and close > daily_open and (close - daily_open) / daily_open < 0.003:
-                confidence += 0.03
+            # Check support levels (PDL, PWL, PML are major support)
+            prev_day_low = key_levels.get("prev_day_low")
+            prev_week_low = key_levels.get("prev_week_low")
+            
+            # Big boost if bouncing off previous day low (PDL)
+            if prev_day_low and close > prev_day_low:
+                distance_pct = (close - prev_day_low) / prev_day_low * 100
+                if distance_pct < 0.3:  # Very close to PDL
+                    confidence += 0.10
+                    active_indicators.append("PDL_BOUNCE")
+            
+            # Big boost if bouncing off previous week low (PWL)
+            if prev_week_low and close > prev_week_low:
+                distance_pct = (close - prev_week_low) / prev_week_low * 100
+                if distance_pct < 0.5:  # Close to PWL
+                    confidence += 0.12
+                    active_indicators.append("PWL_BOUNCE")
+            
+            # Check resistance levels (PDH, PWH, PMH are major resistance)
+            prev_day_high = key_levels.get("prev_day_high")
+            prev_week_high = key_levels.get("prev_week_high")
+            
             # Reduce confidence if entering into nearby resistance
-            weekly_high = key_levels.get("weekly_high")
-            if weekly_high and (weekly_high - close) / close < 0.003:
-                confidence -= 0.03
+            if prev_day_high and close < prev_day_high:
+                distance_pct = (prev_day_high - close) / close * 100
+                if distance_pct < 0.3:  # Very close to PDH
+                    confidence -= 0.05
+                    active_indicators.append("PDH_CAUTION")
+            
+            if prev_week_high and close < prev_week_high:
+                distance_pct = (prev_week_high - close) / close * 100
+                if distance_pct < 0.5:  # Close to PWH
+                    confidence -= 0.07
+                    active_indicators.append("PWH_CAUTION")
         
         if confidence >= config["min_confidence"]:
             entry_price = close
@@ -654,6 +1005,19 @@ def generate_signals(
                 risk_reward = (take_profit - entry_price) / (entry_price - stop_loss)
                 
                 if risk_reward >= config["min_risk_reward"] and not pd.isna(risk_reward):
+                    # Build comprehensive reason string including key levels
+                    reason_parts = ["EMA Cross + VWAP + Volume"]
+                    if sr_signal:
+                        reason_parts.append(sr_signal)
+                    if tbt_signal:
+                        reason_parts.append(tbt_signal)
+                    if sd_signal:
+                        reason_parts.append(sd_signal)
+                    if key_level_reason:
+                        reason_parts.append(key_level_reason)
+                    if vwap_band_signal:
+                        reason_parts.append(f"vwap:{vwap_band_signal}")
+                    
                     signal_candidates.append({
                         "direction": "long",
                         "entry_price": float(entry_price),
@@ -661,7 +1025,7 @@ def generate_signals(
                         "take_profit": float(take_profit),
                         "confidence": float(confidence),
                         "risk_reward": float(risk_reward),
-                        "reason": f"EMA Cross + VWAP + Volume: {sr_signal or 'N/A'} | {tbt_signal or 'N/A'} | {sd_signal or 'N/A'} | vwap_band:{vwap_band_signal or 'N/A'}",
+                        "reason": " | ".join(reason_parts),
                         "indicators": {
                             "ema_cross": True,
                             "vwap_position": "above",
@@ -670,6 +1034,8 @@ def generate_signals(
                             "sr_signal": sr_signal,
                             "tbt_signal": tbt_signal,
                             "sd_signal": sd_signal,
+                            "key_level_signal": key_level_signal,
+                            "key_level_info": key_level_info,
                             "key_levels": key_levels,
                         },
                     })
@@ -692,20 +1058,61 @@ def generate_signals(
         elif vwap_band_signal == "near_vwap_below":
             confidence += 0.03  # Slight boost for mean reversion setup
         
-        # Key level adjustments for shorts
+        # =====================================================================
+        # SPACEMAN KEY LEVEL ADJUSTMENTS FOR SHORTS (CRITICAL)
+        # Key levels are where reversals and breakouts happen
+        # =====================================================================
+        key_level_reason = ""
+        if key_level_signal:
+            if key_level_signal == "bounce_resistance_short":
+                # STRONG: Bouncing off resistance level - high probability reversal
+                confidence += key_level_conf_adj
+                key_level_reason = f"KEY_BOUNCE:{key_level_info.get('nearest_resistance_name', 'resistance')}"
+            elif key_level_signal == "breakout_support_short":
+                # STRONG: Breaking below support - continuation signal
+                confidence += key_level_conf_adj
+                key_level_reason = f"KEY_BREAKOUT:{key_level_info.get('nearest_support_name', 'support')}"
+            elif key_level_signal == "near_support_caution":
+                # CAUTION: Approaching support - reduce confidence for shorts
+                confidence += key_level_conf_adj  # This is negative
+                key_level_reason = f"CAUTION:near_{key_level_info.get('nearest_support_name', 'support')}"
+        
+        # Additional key level proximity checks using enhanced levels
         if key_levels:
-            weekly_high = key_levels.get("weekly_high")
-            weekly_mid = key_levels.get("weekly_mid")
-            daily_open = key_levels.get("daily_open")
-            # Boost confidence if entering off resistance (near weekly high)
-            if weekly_high and close < weekly_high and (weekly_high - close) / weekly_high < 0.005:
-                confidence += 0.05
-            elif daily_open and close < daily_open and (daily_open - close) / daily_open < 0.003:
-                confidence += 0.03
+            # Check resistance levels (PDH, PWH, PMH are major resistance)
+            prev_day_high = key_levels.get("prev_day_high")
+            prev_week_high = key_levels.get("prev_week_high")
+            
+            # Big boost if bouncing off previous day high (PDH)
+            if prev_day_high and close < prev_day_high:
+                distance_pct = (prev_day_high - close) / prev_day_high * 100
+                if distance_pct < 0.3:  # Very close to PDH
+                    confidence += 0.08
+                    key_level_reason = key_level_reason or "near_PDH"
+            
+            # Big boost if bouncing off previous week high (PWH)
+            if prev_week_high and close < prev_week_high:
+                distance_pct = (prev_week_high - close) / prev_week_high * 100
+                if distance_pct < 0.5:  # Close to PWH
+                    confidence += 0.10
+                    key_level_reason = key_level_reason or "near_PWH"
+            
+            # Check support levels (PDL, PWL are major support)
+            prev_day_low = key_levels.get("prev_day_low")
+            prev_week_low = key_levels.get("prev_week_low")
+            
             # Reduce confidence if entering into nearby support
-            weekly_low = key_levels.get("weekly_low")
-            if weekly_low and (close - weekly_low) / close < 0.003:
-                confidence -= 0.03
+            if prev_day_low and close > prev_day_low:
+                distance_pct = (close - prev_day_low) / close * 100
+                if distance_pct < 0.3:  # Very close to PDL
+                    confidence -= 0.05
+                    key_level_reason = key_level_reason or "approaching_PDL"
+            
+            if prev_week_low and close > prev_week_low:
+                distance_pct = (close - prev_week_low) / close * 100
+                if distance_pct < 0.5:  # Close to PWL
+                    confidence -= 0.07
+                    key_level_reason = key_level_reason or "approaching_PWL"
         
         if confidence >= config["min_confidence"]:
             entry_price = close
@@ -721,6 +1128,19 @@ def generate_signals(
                 risk_reward = (entry_price - take_profit) / (stop_loss - entry_price)
                 
                 if risk_reward >= config["min_risk_reward"] and not pd.isna(risk_reward):
+                    # Build comprehensive reason string including key levels
+                    reason_parts = ["EMA Cross + VWAP + Volume"]
+                    if sr_signal:
+                        reason_parts.append(sr_signal)
+                    if tbt_signal:
+                        reason_parts.append(tbt_signal)
+                    if sd_signal:
+                        reason_parts.append(sd_signal)
+                    if key_level_reason:
+                        reason_parts.append(key_level_reason)
+                    if vwap_band_signal:
+                        reason_parts.append(f"vwap:{vwap_band_signal}")
+                    
                     signal_candidates.append({
                         "direction": "short",
                         "entry_price": float(entry_price),
@@ -728,7 +1148,7 @@ def generate_signals(
                         "take_profit": float(take_profit),
                         "confidence": float(confidence),
                         "risk_reward": float(risk_reward),
-                        "reason": f"EMA Cross + VWAP + Volume: {sr_signal or 'N/A'} | {tbt_signal or 'N/A'} | {sd_signal or 'N/A'} | vwap_band:{vwap_band_signal or 'N/A'}",
+                        "reason": " | ".join(reason_parts),
                         "indicators": {
                             "ema_cross": True,
                             "vwap_position": "below",
@@ -737,6 +1157,8 @@ def generate_signals(
                             "sr_signal": sr_signal,
                             "tbt_signal": tbt_signal,
                             "sd_signal": sd_signal,
+                            "key_level_signal": key_level_signal,
+                            "key_level_info": key_level_info,
                             "key_levels": key_levels,
                         },
                     })
