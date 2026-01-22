@@ -13,11 +13,40 @@ import asyncio
 import sys
 import json
 import time
+import os
+import socket
 from pathlib import Path
 
 # Add project root to path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
+
+
+def _load_env_file(env_path: Path) -> None:
+    """Load simple KEY=VALUE pairs from .env into os.environ if missing."""
+    if not env_path.exists():
+        return
+    try:
+        for line in env_path.read_text().splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip("'").strip('"')
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except Exception:
+        # Best-effort: don't fail smoke test on env parsing issues.
+        return
+
+
+def _is_port_open(host: str, port: int, timeout: float = 0.5) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
 
 from pearlalgo.config.settings import get_settings  # noqa: E402
 from pearlalgo.data_providers.factory import create_data_provider  # noqa: E402
@@ -51,6 +80,26 @@ async def smoke_test():
     print("=" * 60)
     print()
 
+    # Load .env so IBKR_* is honored even without PEARLALGO_ prefix.
+    _load_env_file(project_root / ".env")
+    
+    # Auto-detect port by probing which one is actually open.
+    # This overrides .env if the configured port isn't reachable.
+    configured_port = os.getenv("IBKR_PORT") or os.getenv("PEARLALGO_IB_PORT") or "4002"
+    if not _is_port_open("127.0.0.1", int(configured_port)):
+        # Configured port not open - try common alternatives
+        if _is_port_open("127.0.0.1", 4001):
+            os.environ["IBKR_PORT"] = "4001"
+            print(f"[Auto-detect] Port {configured_port} not open, using 4001")
+        elif _is_port_open("127.0.0.1", 4002):
+            os.environ["IBKR_PORT"] = "4002"
+            print(f"[Auto-detect] Port {configured_port} not open, using 4002")
+        elif _is_port_open("127.0.0.1", 7496):
+            os.environ["IBKR_PORT"] = "7496"
+            print(f"[Auto-detect] Port {configured_port} not open, using 7496 (TWS live)")
+        elif _is_port_open("127.0.0.1", 7497):
+            os.environ["IBKR_PORT"] = "7497"
+            print(f"[Auto-detect] Port {configured_port} not open, using 7497 (TWS paper)")
     # Load settings
     settings = get_settings()
     # #region agent log
