@@ -3194,6 +3194,9 @@ class ChartGenerator:
         right_pad_bars: Optional[int] = None,
         trades: Optional[List[Dict[str, Any]]] = None,
         manifest_path: Optional[Path] = None,
+        # UX overlay options (mobile-first)
+        pnl_overlay: Optional[Dict[str, Any]] = None,  # {"daily_pnl": float, "trades": int, "win_rate": float}
+        session_label: Optional[str] = None,  # e.g., "NY Session"
     ) -> Optional[Path]:
         """
         Generate a TradingView-style dashboard chart.
@@ -3840,6 +3843,64 @@ class ChartGenerator:
                         show_ma=show_ma,
                         ma_periods=ma_periods_list if show_ma else None,
                     )
+                    
+                    # Session label overlay (top-left corner)
+                    if session_label:
+                        try:
+                            ax_price.text(
+                                0.02, 0.97,
+                                session_label,
+                                transform=ax_price.transAxes,
+                                fontsize=FONT_SIZE_SESSION,
+                                color=TEXT_PRIMARY,
+                                alpha=0.9,
+                                verticalalignment='top',
+                                horizontalalignment='left',
+                                bbox=dict(
+                                    boxstyle='round,pad=0.3',
+                                    facecolor=DARK_BG,
+                                    edgecolor=GRID_COLOR,
+                                    alpha=ALPHA_LEGEND_BG,
+                                ),
+                                zorder=ZORDER_TEXT_LABELS,
+                            )
+                        except Exception as e:
+                            logger.debug(f"Error adding session label: {e}")
+                    
+                    # P&L overlay (bottom-right corner)
+                    if pnl_overlay and isinstance(pnl_overlay, dict):
+                        try:
+                            daily_pnl = pnl_overlay.get("daily_pnl", 0.0)
+                            trades_count = pnl_overlay.get("trades", 0)
+                            win_rate = pnl_overlay.get("win_rate", 0.0)
+                            
+                            pnl_color = CANDLE_UP if daily_pnl >= 0 else CANDLE_DOWN
+                            pnl_sign = "+" if daily_pnl >= 0 else ""
+                            
+                            pnl_lines = [f"{pnl_sign}${daily_pnl:,.2f}"]
+                            if trades_count > 0:
+                                pnl_lines.append(f"{trades_count} trades | {win_rate:.0f}% WR")
+                            
+                            ax_price.text(
+                                0.98, 0.03,
+                                "\n".join(pnl_lines),
+                                transform=ax_price.transAxes,
+                                fontsize=FONT_SIZE_SUMMARY,
+                                color=pnl_color,
+                                alpha=0.9,
+                                verticalalignment='bottom',
+                                horizontalalignment='right',
+                                bbox=dict(
+                                    boxstyle='round,pad=0.3',
+                                    facecolor=DARK_BG,
+                                    edgecolor=pnl_color,
+                                    alpha=ALPHA_LEGEND_BG,
+                                ),
+                                zorder=ZORDER_TEXT_LABELS,
+                            )
+                        except Exception as e:
+                            logger.debug(f"Error adding P&L overlay: {e}")
+                    
             except Exception as e:
                 logger.debug(f"Error applying HUD to dashboard chart: {e}")
 

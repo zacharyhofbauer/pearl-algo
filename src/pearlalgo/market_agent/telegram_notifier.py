@@ -198,9 +198,31 @@ class MarketAgentTelegramNotifier:
             return False
 
         try:
-            # Always use minimal signal format for the simplified Telegram surface.
-            message = self._format_minimal_signal(signal)
-            success = await self.telegram.send_message(message, dedupe=False)
+            # Use ultra-compact 3-line format for mobile-first glanceability
+            message = self._format_ultra_compact_signal(signal)
+            
+            # Add drill-down buttons when command handler is running
+            reply_markup = None
+            signal_id = str(signal.get("signal_id") or "")
+            if _is_command_handler_running() and signal_id:
+                try:
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("🔍 Details", callback_data=f"signal_detail:{signal_id[:8]}"),
+                            InlineKeyboardButton("🏠 Menu", callback_data="back"),
+                        ]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                except ImportError:
+                    pass
+            
+            success = await self.telegram.send_message(
+                message,
+                parse_mode="Markdown",
+                dedupe=False,
+                reply_markup=reply_markup,
+            )
 
             # Optional: send entry chart with signal (preference-gated).
             # Fire-and-forget so chart rendering doesn't block the scan loop.
@@ -222,7 +244,6 @@ class MarketAgentTelegramNotifier:
                 return True
 
             # Fallback: send a minimal, guaranteed-short signal summary.
-            # This ensures operators get *some* alert even if rich formatting fails.
             fallback = self._format_minimal_signal(signal)
             fallback_ok = await self.telegram.send_message(
                 fallback,
@@ -484,6 +505,84 @@ class MarketAgentTelegramNotifier:
             message += f"\n`{signal_id[:12]}`"
 
         return message
+
+    def _format_ultra_compact_signal(self, signal: Dict) -> str:
+        """
+        Format signal as ultra-compact 3-line notification.
+        
+        Layout (mobile-first, glanceable):
+        Line 1: DIRECTION SYMBOL @ PRICE
+        Line 2: SL | TP | R:R
+        Line 3: Confidence | Session
+        
+        Full details accessible via drill-down button.
+        
+        Args:
+            signal: Signal dictionary
+            
+        Returns:
+            Formatted 3-line message string
+        """
+        symbol = str(signal.get("symbol") or "MNQ")
+        try:
+            entry_price = float(signal.get("entry_price") or 0.0)
+        except Exception:
+            entry_price = 0.0
+        try:
+            stop_loss = float(signal.get("stop_loss") or 0.0)
+        except Exception:
+            stop_loss = 0.0
+        try:
+            take_profit = float(signal.get("take_profit") or 0.0)
+        except Exception:
+            take_profit = 0.0
+        try:
+            confidence = float(signal.get("confidence") or 0.0)
+        except Exception:
+            confidence = 0.0
+
+        # Direction
+        dir_emoji, dir_label = format_signal_direction(signal.get("direction", "long"))
+        
+        # Calculate R:R
+        rr_str = ""
+        if entry_price > 0 and stop_loss > 0 and take_profit > 0:
+            if dir_label == "LONG":
+                risk = entry_price - stop_loss
+                reward = take_profit - entry_price
+            else:
+                risk = stop_loss - entry_price
+                reward = entry_price - take_profit
+            if risk > 0:
+                rr = reward / risk
+                rr_str = f"{rr:.1f}R"
+
+        # Confidence tier
+        conf_emoji, conf_tier = format_signal_confidence_tier(confidence)
+        
+        # Session from regime
+        regime = signal.get("regime", {}) or {}
+        session = str(regime.get("session", "")).replace("_", " ").title() if regime.get("session") else ""
+
+        # Build compact message
+        lines = []
+        
+        # Line 1: Direction + Symbol @ Price
+        lines.append(f"{dir_emoji} *{dir_label} {symbol}* @ ${entry_price:,.2f}")
+        
+        # Line 2: SL | TP | R:R
+        sl_str = f"SL ${stop_loss:,.2f}" if stop_loss else ""
+        tp_str = f"TP ${take_profit:,.2f}" if take_profit else ""
+        line2_parts = [p for p in [sl_str, tp_str, rr_str] if p]
+        lines.append(" | ".join(line2_parts))
+        
+        # Line 3: Confidence | Session
+        line3_parts = [f"{conf_emoji} {confidence:.0%} {conf_tier}"]
+        if session:
+            line3_parts.append(session)
+        lines.append(" | ".join(line3_parts))
+
+        return "\n".join(lines)
     
     async def _send_photo(
         self,

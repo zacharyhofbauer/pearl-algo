@@ -21,6 +21,124 @@ except ImportError:
 TELEGRAM_TEXT_LIMIT = 4096
 _TRUNC_SUFFIX = "\n\n…(truncated)"
 
+# ---------------------------------------------------------------------------
+# Mobile-first character limits (UX optimization)
+# ---------------------------------------------------------------------------
+# These limits ensure text fits on mobile screens without wrapping/truncation.
+CHAR_LIMIT_HEADER = 40      # Dashboard headers (one line on mobile)
+CHAR_LIMIT_BUTTON = 16      # Inline button labels (avoids truncation)
+CHAR_LIMIT_ALERT = 60       # Alert headlines (two lines max)
+CHAR_LIMIT_MENU_ITEM = 24   # Menu item text
+
+
+def truncate_for_mobile(text: str, limit: int, suffix: str = "…") -> str:
+    """
+    Truncate text to fit mobile character limits.
+    
+    Args:
+        text: Input text to truncate
+        limit: Maximum character count
+        suffix: Suffix to add when truncated (default: …)
+        
+    Returns:
+        Truncated text with suffix if over limit, original if under
+    """
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return text[:limit - len(suffix)] + suffix
+
+
+def format_button_label(text: str, count: int | None = None) -> str:
+    """
+    Format a button label to fit mobile limits (16 chars max).
+    
+    Args:
+        text: Base button text
+        count: Optional count to append (e.g., "Trades (3)")
+        
+    Returns:
+        Formatted label under 16 chars
+    """
+    if count is not None and count > 0:
+        # Try to fit count in parentheses
+        full = f"{text} ({count})"
+        if len(full) <= CHAR_LIMIT_BUTTON:
+            return full
+        # Truncate text to make room for count
+        max_text = CHAR_LIMIT_BUTTON - len(f" ({count})") - 1
+        return f"{text[:max_text]}… ({count})"
+    
+    return truncate_for_mobile(text, CHAR_LIMIT_BUTTON)
+
+
+def format_header(text: str) -> str:
+    """Format a header to fit mobile limits (40 chars)."""
+    return truncate_for_mobile(text, CHAR_LIMIT_HEADER)
+
+
+def format_alert_headline(text: str) -> str:
+    """Format an alert headline to fit mobile limits (60 chars)."""
+    return truncate_for_mobile(text, CHAR_LIMIT_ALERT)
+
+
+def format_transparency_footer(
+    agent_uptime_seconds: float | None = None,
+    gateway_ok: bool | None = None,
+    data_age_seconds: float | None = None,
+) -> str:
+    """
+    Format always-visible system state footer for dashboard.
+    
+    Shows: Agent uptime | Gateway status | Data age
+    
+    Args:
+        agent_uptime_seconds: Agent service uptime in seconds
+        gateway_ok: Whether gateway is responding
+        data_age_seconds: Age of market data in seconds
+        
+    Returns:
+        Formatted footer string like "Agent: 3h | Gateway: OK | Data: 2s"
+    """
+    parts = []
+    
+    # Agent uptime
+    if agent_uptime_seconds is not None:
+        if agent_uptime_seconds < 60:
+            uptime_str = f"{int(agent_uptime_seconds)}s"
+        elif agent_uptime_seconds < 3600:
+            uptime_str = f"{int(agent_uptime_seconds // 60)}m"
+        else:
+            hours = int(agent_uptime_seconds // 3600)
+            mins = int((agent_uptime_seconds % 3600) // 60)
+            uptime_str = f"{hours}h{mins}m"
+        parts.append(f"Agent: {uptime_str}")
+    else:
+        parts.append("Agent: OFF")
+    
+    # Gateway status
+    if gateway_ok is True:
+        parts.append("Gateway: OK")
+    elif gateway_ok is False:
+        parts.append("Gateway: DOWN")
+    else:
+        parts.append("Gateway: ?")
+    
+    # Data freshness
+    if data_age_seconds is not None:
+        if data_age_seconds < 60:
+            age_str = f"{int(data_age_seconds)}s"
+        elif data_age_seconds < 3600:
+            age_str = f"{int(data_age_seconds // 60)}m"
+        else:
+            age_str = f"{int(data_age_seconds // 3600)}h"
+        parts.append(f"Data: {age_str}")
+    else:
+        parts.append("Data: N/A")
+    
+    return " | ".join(parts)
+
 # Visual formatting constants (Telegram clients can render multiple leading spaces inconsistently)
 _BULLET_SEP = " • "
 _SUBLINE_PREFIX = "↳ "
@@ -51,6 +169,47 @@ _SUBLINE_PREFIX = "↳ "
 #   RUNNING / STOPPED / PAUSED = service states
 #   OPEN / CLOSED = gate states
 #   Active / Slow / Stale = activity pulse states
+
+# ---------------------------------------------------------------------------
+# Standardized Emoji System (UI consistency)
+# ---------------------------------------------------------------------------
+# Use these constants for consistent visual language across all Telegram UI.
+#
+# STATUS INDICATORS (traffic-light pattern):
+EMOJI_OK = "🟢"       # Online, running, healthy, positive
+EMOJI_ERROR = "🔴"    # Offline, stopped, error, negative
+EMOJI_WARN = "🟡"     # Warning, degraded, pending
+EMOJI_UNKNOWN = "⚪"  # Unknown, N/A, neutral
+
+# DIRECTION INDICATORS:
+EMOJI_LONG = "📈"     # Long position, price up
+EMOJI_SHORT = "📉"    # Short position, price down
+EMOJI_UP = "↗️"       # Trend up
+EMOJI_DOWN = "↘️"     # Trend down
+
+# CATEGORY ICONS (menu items):
+EMOJI_ACTIVITY = "📊"   # Activity, trades, performance
+EMOJI_SYSTEM = "🎛️"    # System controls
+EMOJI_HEALTH = "🛡"     # Health, status, monitoring
+EMOJI_MARKETS = "🌐"    # Markets
+EMOJI_BOTS = "🤖"       # Trading bots
+EMOJI_SETTINGS = "⚙️"   # Settings
+EMOJI_REFRESH = "🔄"    # Refresh
+EMOJI_BACK = "🏠"       # Back to menu/home
+
+# ACTION ICONS:
+EMOJI_START = "🚀"    # Start action
+EMOJI_STOP = "🛑"     # Stop action
+EMOJI_ALERT = "⚠️"    # Alert, warning
+EMOJI_ERROR_X = "❌"  # Error, failure
+EMOJI_SUCCESS = "✅"  # Success, confirmed
+EMOJI_INFO = "ℹ️"     # Information
+
+# FINANCIAL ICONS:
+EMOJI_MONEY = "💰"    # Price, money
+EMOJI_PROFIT = "🟢"   # Profit (same as OK)
+EMOJI_LOSS = "🔴"     # Loss (same as ERROR)
+EMOJI_TARGET = "🎯"   # Target, active trade
 
 # Service labels
 LABEL_AGENT = "Agent"
@@ -1484,6 +1643,95 @@ def format_home_card(
         lines.append("")
         lines.append("💡 *Start agent to begin*")
 
+    return "\n".join(lines)
+
+
+def format_glanceable_card(
+    symbol: str,
+    time_str: str,
+    agent_running: bool,
+    gateway_running: bool,
+    latest_price: float | None = None,
+    daily_pnl: float | None = None,
+    active_trades_count: int = 0,
+    futures_market_open: bool | None = None,
+    strategy_session_open: bool | None = None,
+    market: str | None = None,
+    trading_bot: str | None = None,
+    ai_ready: bool = True,
+    agent_uptime_seconds: float | None = None,
+    data_age_seconds: float | None = None,
+) -> str:
+    """
+    Build ultra-compact glanceable dashboard (5-7 lines max).
+    
+    DESIGN: Mobile-first, one-screen-no-scroll format.
+    
+    Layout:
+    ```
+    MNQ • 6:17 AM ET | 📈 Symbol: MNQ
+    🤖 Trading Bot: pearl_bot_auto | 🧠 AI: Ready
+    
+    🔴 Agent: STOPPED • 🟢 Gateway: RUNNING
+    🚫 Execution: OFF
+    ⚪ Futures: ? • ⚪ Session: ?
+    
+    📊 0 scans • 0 gen / 0 sent • 0 bars • 0 errors
+    
+    💡 Start agent to begin
+    ```
+    
+    Args:
+        symbol: Trading symbol (e.g., "MNQ")
+        time_str: Current time string (e.g., "6:17 AM ET")
+        agent_running: Whether agent service is running
+        gateway_running: Whether gateway is running
+        latest_price: Latest price (optional)
+        daily_pnl: Today's P&L (optional)
+        active_trades_count: Number of active trades
+        futures_market_open: Futures market gate status
+        strategy_session_open: Strategy session gate status
+        market: Market code (e.g., "NQ")
+        trading_bot: Trading bot name (e.g., "pearl_bot_auto")
+        ai_ready: Whether AI/model is ready
+        
+    Returns:
+        Formatted glanceable card message string
+    """
+    lines = []
+    market_display = market or "NQ"
+    bot_name = trading_bot or "scanner"
+    
+    # Header: Symbol + Time
+    lines.append(f"*{symbol}* • {time_str}")
+    
+    # Status line: Bot + Services
+    agent_dot = EMOJI_OK if agent_running else EMOJI_ERROR
+    gw_dot = EMOJI_OK if gateway_running else EMOJI_ERROR
+    lines.append(f"{EMOJI_BOTS} {safe_label(bot_name)} | Agent {agent_dot} | Gateway {gw_dot}")
+    
+    # Gates line
+    futures_dot = EMOJI_OK if futures_market_open else EMOJI_ERROR if futures_market_open is False else EMOJI_UNKNOWN
+    session_dot = EMOJI_OK if strategy_session_open else EMOJI_ERROR if strategy_session_open is False else EMOJI_UNKNOWN
+    lines.append(f"Futures {futures_dot} | Session {session_dot}")
+    
+    # Active trades with P&L (if any)
+    if active_trades_count > 0:
+        pnl_part = ""
+        if daily_pnl is not None:
+            pnl_emoji = EMOJI_PROFIT if daily_pnl >= 0 else EMOJI_LOSS
+            pnl_sign = "+" if daily_pnl >= 0 else ""
+            pnl_part = f" | {pnl_emoji}{pnl_sign}${abs(daily_pnl):.2f}"
+        lines.append(f"{EMOJI_TARGET} *{active_trades_count} Active*{pnl_part}")
+    
+    # Footer: system state
+    footer = format_transparency_footer(
+        agent_uptime_seconds=agent_uptime_seconds if agent_running else None,
+        gateway_ok=gateway_running,
+        data_age_seconds=data_age_seconds,
+    )
+    lines.append(f"`{footer}`")
+    
     return "\n".join(lines)
 
 
