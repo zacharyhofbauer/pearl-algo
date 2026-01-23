@@ -659,7 +659,11 @@ class MarketAgentService:
             await self._send_dashboard(market_data or {}, quiet_reason=None, signal_diagnostics=None, chart_path=chart_path)
             # Clean up any temp chart file returned on export failure.
             try:
-                if chart_path and getattr(chart_path, "name", "") != "dashboard_latest.png" and chart_path.exists():
+                if (
+                    chart_path
+                    and getattr(chart_path, "name", "") not in {"dashboard_latest.png", "dashboard_telegram_latest.png"}
+                    and chart_path.exists()
+                ):
                     chart_path.unlink()
             except Exception:
                 pass
@@ -1861,30 +1865,71 @@ class MarketAgentService:
                         # Optional: send Telegram EXIT notification (with chart) for virtual trades.
                         # This is config-gated to preserve default "no Telegram spam" behavior.
                         try:
-                            if (
-                                bool(getattr(self.config, "virtual_pnl_enabled", True))
-                                and bool(getattr(self.config, "virtual_pnl_notify_exit", False))
-                            ):
+                            virtual_pnl_enabled = bool(getattr(self.config, "virtual_pnl_enabled", True))
+                            virtual_pnl_notify_exit = bool(getattr(self.config, "virtual_pnl_notify_exit", False))
+                            
+                            # Check if Telegram notifier is available and enabled
+                            notifier_available = (
+                                self.telegram_notifier is not None
+                                and self.telegram_notifier.enabled
+                                and self.telegram_notifier.telegram is not None
+                            )
+                            
+                            if virtual_pnl_enabled and virtual_pnl_notify_exit and notifier_available:
                                 hold_mins = perf.get("hold_duration_minutes")
                                 try:
                                     hold_mins = float(hold_mins) if hold_mins is not None else None
                                 except Exception:
                                     hold_mins = None
 
-                                # Fire-and-forget: chart generation + Telegram send can take time.
-                                asyncio.create_task(
-                                    self.telegram_notifier.send_exit_notification(
-                                        signal_id=str(sig_id),
-                                        exit_price=float(exit_price),
-                                        exit_reason=str(exit_reason),
-                                        pnl=float(pnl_value),
-                                        signal=sig,
-                                        hold_duration_minutes=hold_mins,
-                                        buffer_data=df,
-                                    )
+                                logger.info(
+                                    f"📤 Scheduling exit notification for {sig_id[:16]}: "
+                                    f"exit={exit_price:.2f} | reason={exit_reason} | pnl=${pnl_value:.2f}"
                                 )
+                                
+                                # Fire-and-forget: chart generation + Telegram send can take time.
+                                async def _send_exit_notification_task():
+                                    try:
+                                        success = await self.telegram_notifier.send_exit_notification(
+                                            signal_id=str(sig_id),
+                                            exit_price=float(exit_price),
+                                            exit_reason=str(exit_reason),
+                                            pnl=float(pnl_value),
+                                            signal=sig,
+                                            hold_duration_minutes=hold_mins,
+                                            buffer_data=df,
+                                        )
+                                        if success:
+                                            logger.info(f"✅ Exit notification sent successfully for {sig_id[:16]}")
+                                        else:
+                                            logger.warning(
+                                                f"⚠️ Exit notification returned False for {sig_id[:16]} "
+                                                f"(notifier.enabled={self.telegram_notifier.enabled}, "
+                                                f"telegram={self.telegram_notifier.telegram is not None})"
+                                            )
+                                    except Exception as notify_err:
+                                        logger.error(
+                                            f"❌ Failed to send exit notification for {sig_id[:16]}: {notify_err}",
+                                            exc_info=True
+                                        )
+                                
+                                asyncio.create_task(_send_exit_notification_task())
+                            else:
+                                if not virtual_pnl_enabled:
+                                    logger.debug(f"Exit notification skipped for {sig_id[:16]}: virtual_pnl_enabled=False")
+                                elif not virtual_pnl_notify_exit:
+                                    logger.debug(f"Exit notification skipped for {sig_id[:16]}: virtual_pnl_notify_exit=False")
+                                elif not notifier_available:
+                                    logger.warning(
+                                        f"Exit notification skipped for {sig_id[:16]}: Telegram notifier not available "
+                                        f"(enabled={self.telegram_notifier.enabled if self.telegram_notifier else 'N/A'}, "
+                                        f"telegram={self.telegram_notifier.telegram is not None if self.telegram_notifier else 'N/A'})"
+                                    )
                         except Exception as e:
-                            logger.debug(f"Could not schedule exit notification for {sig_id[:16]}: {e}")
+                            logger.error(
+                                f"Could not schedule exit notification for {sig_id[:16]}: {e}",
+                                exc_info=True
+                            )
             except Exception:
                 continue
 
@@ -1945,7 +1990,11 @@ class MarketAgentService:
             )
             # Clean up any temp chart file returned on export failure.
             try:
-                if chart_path and getattr(chart_path, "name", "") != "dashboard_latest.png" and chart_path.exists():
+                if (
+                    chart_path
+                    and getattr(chart_path, "name", "") not in {"dashboard_latest.png", "dashboard_telegram_latest.png"}
+                    and chart_path.exists()
+                ):
                     chart_path.unlink()
             except Exception:
                 pass
@@ -1965,7 +2014,7 @@ class MarketAgentService:
         Generate the dashboard chart and export it for Telegram/UI use.
 
         Returns:
-            Path to a PNG chart file (preferably `data/agent_state/<MARKET>/exports/dashboard_latest.png`)
+            Path to a PNG chart file (preferably `data/agent_state/<MARKET>/exports/dashboard_telegram_latest.png`)
             or None if chart generation fails.
         """
         try:
@@ -2195,7 +2244,7 @@ class MarketAgentService:
                 try:
                     exports_dir = self.state_dir / "exports"
                     exports_dir.mkdir(parents=True, exist_ok=True)
-                    export_path = exports_dir / "dashboard_latest.png"
+                    export_path = exports_dir / "dashboard_telegram_latest.png"
                     import shutil
                     shutil.copy2(chart_path, export_path)
                     logger.debug(f"Dashboard chart exported to {export_path}")

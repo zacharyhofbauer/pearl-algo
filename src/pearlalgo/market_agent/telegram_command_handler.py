@@ -17,7 +17,7 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Any, TYPE_CHECKING, List
+from typing import Optional, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
@@ -1012,72 +1012,74 @@ class TelegramCommandHandler:
         await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     async def _show_main_menu_with_chart(self, query: CallbackQuery) -> None:
-        """Show the main menu with dynamic compact charts (no wide chart)."""
+        """Show the main menu with chart displayed above the menu text."""
         keyboard = self._get_main_menu_keyboard()
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         state = self._read_state()
         if state:
             try:
-                # Generate compact dynamic charts for each dashboard section
-                chart_paths = await self._generate_dynamic_dashboard_charts(state)
-                
-                # Build minimal header text (status only, no performance details)
-                message_text = await self._build_status_dashboard_message(state, compact=True)
+                message_text = await self._build_status_dashboard_message(state)
+                chart_path = await self._generate_or_get_chart(state)
+
+                # Add a compact support footer to make any screenshot/share self-diagnostic.
                 caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
+                text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
                 
-                if chart_paths and len(chart_paths) > 0:
-                    # Send charts as media group
-                    from telegram import InputMediaPhoto
-                    media_group = []
-                    
-                    # First chart gets the caption with status info
-                    with open(chart_paths[0], 'rb') as f:
-                        media_group.append(
-                            InputMediaPhoto(
-                                media=f,
-                                caption=caption_text,
+                if chart_path and chart_path.exists():
+                    try:
+                        message = query.message
+                        # Check if message already has a photo
+                        if message and message.photo:
+                            # Message has photo, edit it
+                            from telegram import InputMediaPhoto
+                            with open(chart_path, 'rb') as f:
+                                await query.edit_message_media(
+                                    media=InputMediaPhoto(
+                                        media=f,
+                                        caption=caption_text,
+                                        parse_mode="Markdown"
+                                    ),
+                                    reply_markup=reply_markup
+                                )
+                        else:
+                            # Message doesn't have photo, delete and send new one with photo
+                            try:
+                                await query.message.delete()
+                            except Exception:
+                                pass
+                            # Send new message with photo
+                            with open(chart_path, 'rb') as f:
+                                await query.message.chat.send_photo(
+                                    photo=f,
+                                    caption=caption_text,
+                                    reply_markup=reply_markup,
+                                    parse_mode="Markdown"
+                                )
+                            await query.answer()  # Acknowledge the callback
+                    except Exception as e:
+                        logger.error(f"Error showing chart: {e}", exc_info=True)
+                        # Fallback to text only
+                        message = query.message
+                        if message and message.photo:
+                            # If we have a photo message, delete it first
+                            try:
+                                await message.delete()
+                            except Exception:
+                                pass
+                            await message.chat.send_message(
+                                text=text_only,
+                                reply_markup=reply_markup,
                                 parse_mode="Markdown"
                             )
-                        )
-                    
-                    # Remaining charts without captions
-                    for chart_path in chart_paths[1:]:
-                        if chart_path.exists():
-                            with open(chart_path, 'rb') as f:
-                                media_group.append(InputMediaPhoto(media=f))
-                    
-                    # Delete old message if it exists
-                    try:
-                        await query.message.delete()
-                    except Exception:
-                        pass
-                    
-                    # Send media group (max 10 photos per group)
-                    if len(media_group) <= 10:
-                        await query.message.chat.send_media_group(media=media_group)
-                        # Send navigation buttons as separate message
-                        await query.message.chat.send_message(
-                            "Select an option:",
-                            reply_markup=reply_markup
-                        )
-                    else:
-                        # If more than 10 charts, send first 10 as group, then rest individually
-                        await query.message.chat.send_media_group(media=media_group[:10])
-                        for chart_path in chart_paths[10:]:
-                            if chart_path.exists():
-                                with open(chart_path, 'rb') as f:
-                                    await query.message.chat.send_photo(photo=f)
-                        await query.message.chat.send_message(
-                            "Select an option:",
-                            reply_markup=reply_markup
-                        )
-                    await query.answer()
+                            await query.answer()
+                        else:
+                            await query.edit_message_text(text_only, reply_markup=reply_markup, parse_mode="Markdown")
                 else:
-                    # Fallback to text-only if charts unavailable
-                    text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
+                    # No chart available - just show text menu quickly
                     message = query.message
                     if message and message.photo:
+                        # If we have a photo message, delete it first
                         try:
                             await message.delete()
                         except Exception:
@@ -1091,7 +1093,7 @@ class TelegramCommandHandler:
                     else:
                         await query.edit_message_text(text_only, reply_markup=reply_markup, parse_mode="Markdown")
             except Exception as e:
-                logger.error(f"Error showing main menu with charts: {e}", exc_info=True)
+                logger.error(f"Error showing main menu with chart: {e}", exc_info=True)
                 await self._show_main_menu(query)
         else:
             text = self._with_support_footer(
@@ -1150,9 +1152,9 @@ class TelegramCommandHandler:
             await self._show_main_menu(query)
 
     async def _send_visual_dashboard(self, message_obj) -> None:
-        """Send visual dashboard with dynamic compact charts (no wide chart).
-        
-        This is the primary dashboard view - sends multiple compact charts for each section.
+        """Send visual dashboard with 12h chart to a new message (for /start).
+
+        This is the primary dashboard view - always includes chart when available.
         Used for initial messages (not callback edits).
         """
         keyboard = self._get_main_menu_keyboard()
@@ -1167,58 +1169,24 @@ class TelegramCommandHandler:
             return
         
         try:
-            # Generate compact dynamic charts for each dashboard section
-            chart_paths = await self._generate_dynamic_dashboard_charts(state)
-            
-            # Build minimal header text (status only, no performance details)
-            message_text = await self._build_status_dashboard_message(state, compact=True)
+            message_text = await self._build_status_dashboard_message(state)
+            chart_path = await self._generate_or_get_chart(state)
+
+            # Always include the support footer on the primary dashboard.
             caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
+            text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
             
-            if chart_paths and len(chart_paths) > 0:
-                # Send charts as media group
-                from telegram import InputMediaPhoto
-                media_group = []
-                
-                # First chart gets the caption with status info
-                with open(chart_paths[0], 'rb') as f:
-                    media_group.append(
-                        InputMediaPhoto(
-                            media=f,
-                            caption=caption_text,
-                            parse_mode="Markdown"
-                        )
-                    )
-                
-                # Remaining charts without captions (to avoid clutter)
-                for chart_path in chart_paths[1:]:
-                    if chart_path.exists():
-                        with open(chart_path, 'rb') as f:
-                            media_group.append(InputMediaPhoto(media=f))
-                
-                # Send media group (max 10 photos per group)
-                if len(media_group) <= 10:
-                    await message_obj.reply_media_group(
-                        media=media_group
-                    )
-                    # Send navigation buttons as separate message
-                    await message_obj.reply_text(
-                        "Select an option:",
-                        reply_markup=reply_markup
-                    )
-                else:
-                    # If more than 10 charts, send first 10 as group, then rest individually
-                    await message_obj.reply_media_group(media=media_group[:10])
-                    for chart_path in chart_paths[10:]:
-                        if chart_path.exists():
-                            with open(chart_path, 'rb') as f:
-                                await message_obj.reply_photo(photo=f)
-                    await message_obj.reply_text(
-                        "Select an option:",
-                        reply_markup=reply_markup
+            if chart_path and chart_path.exists():
+                # Send photo with caption
+                with open(chart_path, 'rb') as f:
+                    await message_obj.reply_photo(
+                        photo=f,
+                        caption=caption_text,
+                        reply_markup=reply_markup,
+                        parse_mode="Markdown"
                     )
             else:
-                # Fallback to text-only if charts unavailable
-                text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
+                # Fallback to text-only if chart unavailable
                 await message_obj.reply_text(
                     text_only,
                     reply_markup=reply_markup,
@@ -1233,292 +1201,18 @@ class TelegramCommandHandler:
             )
 
     async def _generate_or_get_chart(self, state: dict) -> Optional[Path]:
-        """Generate chart on-demand using IBKR data."""
-        import asyncio
-        try:
-            # First check if there's a recent exported chart (faster)
-            chart_path = self.exports_dir / "dashboard_latest.png"
-            if chart_path.exists():
-                import time
-                age = time.time() - chart_path.stat().st_mtime
-                if age < 300:  # Use cached chart if < 5 minutes old
-                    return chart_path
-            
-            # Generate fresh chart
-            from datetime import timedelta
-            from pearlalgo.market_agent.chart_generator import ChartGenerator
-            from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
-            from pearlalgo.config.config_loader import load_service_config
-            from pearlalgo.utils.volume_pressure import timeframe_to_minutes
-            
-            symbol = state.get("symbol") or "MNQ"
-            
-            # Read chart settings from config.yaml (same source as the service chart push)
-            # Default: 12h lookback for comprehensive visual dashboard
-            svc_cfg = load_service_config()
-            service_cfg = (svc_cfg.get("service", {}) or {}) if isinstance(svc_cfg, dict) else {}
-            min_lookback_hours = 6.0
-            max_lookback_hours = 24.0
-            lookback_hours = float(service_cfg.get("dashboard_chart_lookback_hours", 8) or 8)
-            if lookback_hours < min_lookback_hours:
-                lookback_hours = min_lookback_hours
-            if lookback_hours > max_lookback_hours:
-                lookback_hours = max_lookback_hours
-
-            chart_tf_pref = str(service_cfg.get("dashboard_chart_timeframe", "auto") or "auto").strip().lower()
-            max_bars = int(service_cfg.get("dashboard_chart_max_bars", 420) or 420)
-
-            def _choose_timeframe(hours: float, max_bars_local: int) -> str:
-                # Keep candle count under max_bars for readability (same candidates as service).
-                candidates = ["5m", "15m", "30m", "1h"]
-                if chart_tf_pref in candidates:
-                    return chart_tf_pref
-                for tf in candidates:
-                    mins = timeframe_to_minutes(tf) or 0
-                    if mins <= 0:
-                        continue
-                    bars = int((hours * 60.0) / float(mins))
-                    if bars <= max_bars_local:
-                        return tf
-                return "1h"
-
-            chosen_tf = _choose_timeframe(lookback_hours, max_bars)
-            tf_mins = float(timeframe_to_minutes(chosen_tf) or 5)
-            bars_target = int((lookback_hours * 60.0) / tf_mins)
-            bars_target = max(20, min(max_bars, bars_target))  # keep sane bounds
-            
-            # Create provider (executor manages connection automatically)
-            provider = IBKRProvider(client_id=99)  # Use different client ID
-            try:
-                # Validate connection (this ensures executor is connected)
-                connected = await provider.validate_connection()
-                if not connected:
-                    logger.warning("Could not connect to IBKR for chart generation")
-                    # Fallback to cached chart
-                    if chart_path.exists():
-                        return chart_path
-                    return None
-                
-                end = datetime.now(timezone.utc)
-                start = end - timedelta(hours=lookback_hours)
-                
-                # fetch_historical is synchronous but handles its own event loop
-                # Run in thread to avoid blocking
-                df = await asyncio.to_thread(
-                    provider.fetch_historical,
-                    symbol,
-                    start,
-                    end,
-                    chosen_tf,
-                )
-                
-                if df is None or df.empty or len(df) < 20:
-                    logger.debug(f"Not enough data for chart: {len(df) if df is not None else 0} bars")
-                    # Fallback to cached chart
-                    if chart_path.exists():
-                        return chart_path
-                    return None
-                
-                # Generate chart
-                chart_gen = ChartGenerator()
-                try:
-                    right_pad_bars = int(service_cfg.get("dashboard_chart_right_pad_bars", 40) or 40)
-                except Exception:
-                    right_pad_bars = 40
-                chart_gen.config.right_pad_bars = max(0, right_pad_bars)
-                
-                # Get recent trades for markers
-                trades = self._get_trades_for_chart(df, symbol)
-                
-                # Label range (best-effort, compact)
-                try:
-                    hrs = float(lookback_hours)
-                    range_label = f"{int(round(hrs))}h" if hrs < 72 else f"{int(round(hrs / 24.0))}d"
-                except Exception:
-                    range_label = None
-
-                chart_path = chart_gen.generate_dashboard_chart(
-                    data=df,
-                    symbol=symbol,
-                    timeframe=chosen_tf,
-                    lookback_bars=min(int(bars_target), len(df)),
-                    range_label=range_label or "Dashboard",
-                    figsize=(14, 6),
-                    dpi=120,
-                    show_sessions=True,  # Show Tokyo/London/NY session shading
-                    show_key_levels=True,  # Show RTH/ETH PDH/PDL/Open levels
-                    show_vwap=True,  # Show VWAP line + bands
-                    show_ma=True,  # Show moving averages
-                    ma_periods=[20, 50, 200],  # MA20, MA50, MA200
-                    show_rsi=True,  # Show RSI panel
-                    show_pressure=True,  # Always show buy/sell pressure in menu chart
-                    trades=trades,  # Overlay trade markers
-                )
-                
-                # Save to exports for caching
-                if chart_path and chart_path.exists():
-                    self.exports_dir.mkdir(parents=True, exist_ok=True)
-                    import shutil
-                    export_path = self.exports_dir / "dashboard_latest.png"
-                    shutil.copy2(chart_path, export_path)
-                    return export_path
-                
-                return chart_path
-            finally:
-                try:
-                    await provider.close()
-                except Exception:
-                    pass
-                    
-        except Exception as e:
-            logger.error(f"Error generating chart: {e}", exc_info=True)
-            # Fallback to cached chart if available
-            chart_path = self.exports_dir / "dashboard_latest.png"
-            if chart_path.exists():
-                return chart_path
-            return None
-
-    async def _generate_dynamic_dashboard_charts(self, state: dict) -> List[Path]:
-        """Generate compact dynamic charts for each dashboard section.
-        
-        Returns a list of chart paths for: Challenge, Performance, Recent exits, etc.
-        Each chart is compact and focused on a specific metric.
         """
-        chart_paths = []
-        try:
-            import asyncio
-            from datetime import timedelta
-            from pearlalgo.market_agent.chart_generator import ChartGenerator
-            from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
-            from pearlalgo.config.config_loader import load_service_config
-            from pearlalgo.utils.volume_pressure import timeframe_to_minutes
-            
-            symbol = state.get("symbol") or "MNQ"
-            
-            # Use shorter lookback for compact charts (4h instead of 8h)
-            lookback_hours = 4.0
-            chosen_tf = "5m"  # Fixed 5m for compact charts
-            tf_mins = 5.0
-            bars_target = int((lookback_hours * 60.0) / tf_mins)
-            bars_target = max(20, min(200, bars_target))  # Limit for compact charts
-            
-            # Create provider
-            provider = IBKRProvider(client_id=99)
-            try:
-                connected = await provider.validate_connection()
-                if not connected:
-                    logger.warning("Could not connect to IBKR for dynamic chart generation")
-                    return chart_paths
-                
-                end = datetime.now(timezone.utc)
-                start = end - timedelta(hours=lookback_hours)
-                
-                # Fetch data
-                df = await asyncio.to_thread(
-                    provider.fetch_historical,
-                    symbol,
-                    start,
-                    end,
-                    chosen_tf,
-                )
-                
-                if df is None or df.empty or len(df) < 20:
-                    logger.debug(f"Not enough data for dynamic charts: {len(df) if df is not None else 0} bars")
-                    return chart_paths
-                
-                chart_gen = ChartGenerator()
-                chart_gen.config.right_pad_bars = 20  # Less padding for compact charts
-                
-                # Get trades for markers
-                trades = self._get_trades_for_chart(df, symbol)
-                
-                # Generate compact charts for each section
-                # 1. Challenge chart (compact, shows recent price action with challenge context)
-                try:
-                    challenge_chart = chart_gen.generate_dashboard_chart(
-                        data=df,
-                        symbol=symbol,
-                        timeframe=chosen_tf,
-                        lookback_bars=min(int(bars_target), len(df)),
-                        range_label="4h",
-                        figsize=(10, 4),  # Compact size
-                        dpi=120,
-                        show_sessions=True,
-                        show_key_levels=True,
-                        show_vwap=True,
-                        show_ma=True,
-                        ma_periods=[20, 50],  # Fewer MAs for compact
-                        show_rsi=False,  # No RSI for compact
-                        show_pressure=False,  # No pressure for compact
-                        trades=trades,
-                    )
-                    if challenge_chart and challenge_chart.exists():
-                        chart_paths.append(challenge_chart)
-                except Exception as e:
-                    logger.debug(f"Error generating challenge chart: {e}")
-                
-                # 2. Performance chart (similar compact view)
-                try:
-                    perf_chart = chart_gen.generate_dashboard_chart(
-                        data=df,
-                        symbol=symbol,
-                        timeframe=chosen_tf,
-                        lookback_bars=min(int(bars_target), len(df)),
-                        range_label="4h",
-                        figsize=(10, 4),
-                        dpi=120,
-                        show_sessions=True,
-                        show_key_levels=False,  # Less clutter
-                        show_vwap=True,
-                        show_ma=True,
-                        ma_periods=[20],
-                        show_rsi=False,
-                        show_pressure=False,
-                        trades=trades,
-                    )
-                    if perf_chart and perf_chart.exists():
-                        chart_paths.append(perf_chart)
-                except Exception as e:
-                    logger.debug(f"Error generating performance chart: {e}")
-                
-                # 3. Recent exits chart (focused on recent trades)
-                try:
-                    # Filter trades to only recent exits
-                    recent_trades = [t for t in (trades or []) if t.get("exit_time")] if trades else []
-                    recent_trades = sorted(recent_trades, key=lambda x: x.get("exit_time", ""), reverse=True)[:5]
-                    
-                    exits_chart = chart_gen.generate_dashboard_chart(
-                        data=df,
-                        symbol=symbol,
-                        timeframe=chosen_tf,
-                        lookback_bars=min(int(bars_target), len(df)),
-                        range_label="4h",
-                        figsize=(10, 4),
-                        dpi=120,
-                        show_sessions=True,
-                        show_key_levels=False,
-                        show_vwap=True,
-                        show_ma=False,  # Minimal for exits view
-                        ma_periods=[],
-                        show_rsi=False,
-                        show_pressure=False,
-                        trades=recent_trades,  # Only recent exits
-                    )
-                    if exits_chart and exits_chart.exists():
-                        chart_paths.append(exits_chart)
-                except Exception as e:
-                    logger.debug(f"Error generating exits chart: {e}")
-                
-            finally:
-                try:
-                    await provider.close()
-                except Exception:
-                    pass
-                    
-        except Exception as e:
-            logger.error(f"Error generating dynamic dashboard charts: {e}", exc_info=True)
-        
-        return chart_paths
+        Use the latest exported dashboard chart (no generation—service owns it).
+
+        Prefer the Telegram-optimized chart (`dashboard_telegram_latest.png`) so the mobile UI
+        isn't affected by the monitor export cadence. Fallback to `dashboard_latest.png`
+        if the Telegram-specific export is not present.
+        """
+        telegram_chart = self.exports_dir / "dashboard_telegram_latest.png"
+        if telegram_chart.exists():
+            return telegram_chart
+        fallback = self.exports_dir / "dashboard_latest.png"
+        return fallback if fallback.exists() else None
 
     async def _show_status_menu(self, query: CallbackQuery) -> None:
         """Show health & diagnostics submenu."""
@@ -3153,14 +2847,7 @@ class TelegramCommandHandler:
             elif action_type == "export_performance":
                 await self._handle_export_performance(query)
             elif action_type == "refresh_dashboard":
-                # Refresh visual dashboard with fresh 12h chart
-                # Delete cached chart to force regeneration
-                try:
-                    cached_chart = self.exports_dir / "dashboard_latest.png"
-                    if cached_chart.exists():
-                        cached_chart.unlink()
-                except Exception:
-                    pass
+                # Refresh visual dashboard—reuse same chart as agent start (dashboard_latest.png).
                 await self._show_main_menu_with_chart(query)
             elif action_type == "toggle_chart":
                 # Toggle chart display
@@ -3544,13 +3231,8 @@ class TelegramCommandHandler:
         message_text = self._with_support_footer(message_text, state=state, max_chars=4096)
         await message_obj.reply_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
 
-    async def _build_status_dashboard_message(self, state: dict, compact: bool = False) -> str:
-        """Build the comprehensive status dashboard message from state.
-        
-        Args:
-            state: State dictionary
-            compact: If True, only include status info (no performance sections - those become charts)
-        """
+    async def _build_status_dashboard_message(self, state: dict) -> str:
+        """Build the comprehensive status dashboard message from state."""
         try:
             # Canonical dashboard text builder (glanceable + ops/perf blocks).
             symbol = state.get("symbol", "MNQ")
@@ -3979,10 +3661,6 @@ class TelegramCommandHandler:
             
             if not challenge_displayed:
                 logger.warning("Challenge status could not be displayed despite file existing")
-            
-            # Skip performance sections in compact mode (they become charts)
-            if compact:
-                return message
             
             # Always show 7d all-time performance if available (matches screenshot format)
             # Show it even if challenge_status exists, as it's separate historical data
@@ -5656,99 +5334,6 @@ class TelegramCommandHandler:
             msg = msg[:4093] + "..."
 
         await self._send_message_or_edit(update, context, msg, reply_markup=self._get_back_to_menu_button())
-
-    def _get_trades_for_chart(self, chart_data: Any, symbol: str = "MNQ") -> list[dict]:
-        """Convert recent entered signals to trade markers within chart time window."""
-        if chart_data is None:
-            return []
-
-        # Pandas-friendly guards
-        try:
-            import pandas as pd  # type: ignore
-
-            if isinstance(chart_data, pd.DataFrame) and chart_data.empty:
-                return []
-            if not isinstance(chart_data, pd.DataFrame):
-                return []
-            if "timestamp" not in chart_data.columns:
-                return []
-            ts = chart_data["timestamp"]
-            if ts.empty:
-                return []
-            start = ts.min()
-            end = ts.max()
-        except Exception:
-            return []
-
-        # Prefer StateManager (testable + consistent), fallback to direct file read.
-        recent: list[dict] = []
-        try:
-            if getattr(self, "state_manager", None) is not None and hasattr(self.state_manager, "get_recent_signals"):
-                recent = self.state_manager.get_recent_signals(limit=100)  # type: ignore[assignment]
-            else:
-                recent = self._read_recent_signals(limit=100)
-        except Exception:
-            recent = self._read_recent_signals(limit=100)
-
-        trades: list[dict] = []
-        sym = str(symbol or "").upper()
-
-        for item in (recent or []):
-            if not isinstance(item, dict):
-                continue
-            sig = item.get("signal") or {}
-            if not isinstance(sig, dict):
-                sig = {}
-            if str(sig.get("symbol", "")).upper() != sym:
-                continue
-
-            # Get entry time - check multiple fields
-            entry_time = item.get("entry_time") or item.get("timestamp") or sig.get("timestamp")
-            if not entry_time:
-                continue
-
-            try:
-                dt = parse_utc_timestamp(str(entry_time))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-            except Exception:
-                continue
-
-            # Compare against pandas timestamps
-            try:
-                if dt < start.to_pydatetime() or dt > end.to_pydatetime():
-                    continue
-            except Exception:
-                # If conversion fails, best-effort compare
-                try:
-                    if dt < start or dt > end:
-                        continue
-                except Exception:
-                    pass
-
-            # Get entry price, stop loss, take profit
-            entry_price = item.get("entry_price") or sig.get("entry_price")
-            stop_loss = item.get("stop_loss") or sig.get("stop_loss")
-            take_profit = item.get("take_profit") or sig.get("take_profit")
-            status = item.get("status") or sig.get("status", "unknown")
-            
-            # Only include trades that have been entered
-            if status not in ["entered", "exited", "stopped", "target"]:
-                continue
-
-            trades.append(
-                {
-                    "signal_id": item.get("signal_id") or sig.get("signal_id") or "",
-                    "direction": sig.get("direction") or item.get("direction") or "",
-                    "entry_time": dt.isoformat(),
-                    "entry_price": entry_price,
-                    "stop_loss": stop_loss,
-                    "take_profit": take_profit,
-                    "status": status,
-                }
-            )
-
-        return trades
 
     def _get_back_to_menu_button(self):
         """Return a minimal 'Back to Menu' InlineKeyboardMarkup."""
