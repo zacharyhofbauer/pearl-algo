@@ -27,7 +27,6 @@ from pearlalgo.utils.paths import ensure_state_dir, get_state_file, get_signals_
 from pearlalgo.utils.service_controller import ServiceController
 from pearlalgo.utils.telegram_alerts import (
     TelegramPrefs,
-    format_home_card,
     format_glanceable_card,
     format_pnl,
     format_signal_direction,
@@ -148,7 +147,7 @@ class TelegramCommandHandler:
                         dashboard_text = await self._build_status_dashboard_message(state)
 
                         # Always include a compact support footer on dashboards so any share is diagnostic.
-                        caption_text = self._with_support_footer(dashboard_text, state=state, max_chars=900)
+                        caption_text = self._with_support_footer(dashboard_text, state=state, max_chars=1024)
                         text_only = self._with_support_footer(dashboard_text, state=state, max_chars=4096)
                         
                         # Generate 12h chart
@@ -276,6 +275,7 @@ class TelegramCommandHandler:
         total_active = 0
         daily_pnl = 0.0
         agent_running = False
+        agent_healthy: bool | None = None
         gateway_running = False
         # Connection can be absent from state.json; treat it as best-effort.
         connection_ok: bool | None = None
@@ -287,10 +287,19 @@ class TelegramCommandHandler:
             total_active = positions + active_trades + challenge_positions
             daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
             agent_running = bool(self._is_agent_process_running())
+            paused = bool(state.get("paused", False))
+            futures_market_open = state.get("futures_market_open")
+            strategy_session_open = state.get("strategy_session_open")
 
             # Prefer explicit connection status when available; fall back to data freshness.
             if "connection_status" in state:
-                connection_ok = state.get("connection_status") == "connected"
+                cs = state.get("connection_status")
+                if cs == "connected":
+                    connection_ok = True
+                elif cs == "disconnected":
+                    connection_ok = False
+                else:
+                    connection_ok = None
             elif "data_fresh" in state:
                 connection_ok = bool(state.get("data_fresh"))
 
@@ -313,12 +322,39 @@ class TelegramCommandHandler:
             except Exception:
                 data_age_minutes = None
 
-            if agent_running and thr > 0 and data_age_minutes is not None:
+            should_check_data = not (futures_market_open is False and strategy_session_open is False)
+            if agent_running and (not paused) and should_check_data and thr > 0 and data_age_minutes is not None:
                 is_stale = data_age_minutes > thr
-                if connection_ok is None:
-                    connection_ok = not is_stale
-                elif is_stale:
+                if is_stale:
                     connection_ok = False
+                elif connection_ok is None:
+                    # If we have fresh bars, the end-to-end path is OK.
+                    connection_ok = True
+
+            # Agent health (process may be up but not cycling).
+            cycle_age_sec = None
+            try:
+                ts = state.get("last_successful_cycle")
+                if ts:
+                    dt = parse_utc_timestamp(str(ts))
+                    if dt and dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt:
+                        cycle_age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
+            except Exception:
+                cycle_age_sec = None
+
+            cycle_thr = 120.0
+            try:
+                cm = state.get("cadence_metrics") or {}
+                interval = cm.get("current_interval_seconds")
+                if interval:
+                    cycle_thr = max(120.0, float(interval) * 4.0)
+            except Exception:
+                cycle_thr = 120.0
+
+            if agent_running and cycle_age_sec is not None:
+                agent_healthy = float(cycle_age_sec) <= float(cycle_thr)
         
         # Check gateway status
         try:
@@ -349,7 +385,7 @@ class TelegramCommandHandler:
         # Only show green when BOTH are actually running and functional
         # Yellow indicates partial functionality (one running but not both)
         # Red means neither is running or functional
-        if agent_running and gateway_running:
+        if agent_running and gateway_running and (agent_healthy is True):
             system_label = "🎛️ System 🟢"
         elif gateway_running and not agent_running:
             # Gateway running but agent not - partial functionality
@@ -357,12 +393,18 @@ class TelegramCommandHandler:
         elif agent_running and not gateway_running:
             # Agent running but gateway not - partial functionality (agent can't trade)
             system_label = "🎛️ System 🟡"
+        elif agent_running and gateway_running and agent_healthy is None:
+            # Both processes are up but we can't confirm the agent is cycling.
+            system_label = "🎛️ System 🟡"
+        elif agent_running and gateway_running and agent_healthy is False:
+            # Both processes are up but the agent isn't cycling (hung / stalled).
+            system_label = "🎛️ System 🟡"
         else:
             # Neither running - no functionality
             system_label = "🎛️ System 🔴"
         
         # Log status changes for debugging
-        logger.debug(f"System status: agent={agent_running}, gateway={gateway_running}, label={system_label}")
+        logger.debug(f"System status: agent={agent_running}, healthy={agent_healthy}, gateway={gateway_running}, label={system_label}")
         
         # Health: only meaningful when agent is running.
         if not state or not agent_running:
@@ -393,6 +435,75 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🔄 Refresh", callback_data="action:refresh_dashboard"),
             ],
         ]
+
+    # =========================================================================
+    # CENTRALIZED NAVIGATION HELPERS - Single source of truth for all menus
+    # =========================================================================
+    
+    def _nav_back_row(self) -> list:
+        """
+        Single source of truth for 'Back to Menu' navigation.
+        Use this everywhere instead of creating buttons manually.
+        """
+        return self._nav_back_row()
+    
+    def _nav_footer(self, extra_buttons: list = None) -> list:
+        """
+        Standard navigation footer for all sub-menus.
+        
+        Args:
+            extra_buttons: Optional list of additional buttons to add before Menu
+        
+        Returns:
+            List containing a single row with Menu button (and extras if provided)
+        """
+        if extra_buttons:
+            return [*extra_buttons, InlineKeyboardButton("🏠 Menu", callback_data="back")]
+        return self._nav_back_row()
+    
+    def _with_nav_footer(self, keyboard: list, extra_buttons: list = None) -> list:
+        """
+        Append standard navigation footer to any keyboard.
+        
+        Args:
+            keyboard: Existing keyboard rows
+            extra_buttons: Optional buttons to add alongside Menu button
+        
+        Returns:
+            Keyboard with navigation footer appended
+        """
+        result = list(keyboard) if keyboard else []
+        result.append(self._nav_footer(extra_buttons))
+        return result
+    
+    def _quick_keyboard(self, *rows, include_nav: bool = True) -> InlineKeyboardMarkup:
+        """
+        Quick keyboard builder with automatic navigation footer.
+        
+        Args:
+            *rows: Button rows (each row is a list of InlineKeyboardButtons or tuples of (label, callback))
+            include_nav: Whether to include the navigation footer (default True)
+        
+        Returns:
+            InlineKeyboardMarkup ready to use
+        """
+        keyboard = []
+        for row in rows:
+            if not row:
+                continue
+            # Convert tuples to buttons if needed
+            processed_row = []
+            for item in row:
+                if isinstance(item, tuple) and len(item) == 2:
+                    processed_row.append(InlineKeyboardButton(item[0], callback_data=item[1]))
+                else:
+                    processed_row.append(item)
+            keyboard.append(processed_row)
+        
+        if include_nav:
+            keyboard.append(self._nav_back_row())
+        
+        return InlineKeyboardMarkup(keyboard)
 
     async def handle_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Send visual dashboard with 12h chart and compact navigation menu."""
@@ -549,7 +660,7 @@ class TelegramCommandHandler:
                     callback_data="action:toggle_pref:signal_detail_expanded",
                 ),
             ],
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            self._nav_back_row(),
         ]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -697,7 +808,7 @@ class TelegramCommandHandler:
             if "no text in the message" in err_str or "message to edit not found" in err_str:
                 logger.warning(f"Edit failed (likely photo message), sending new message: {e}")
                 try:
-                    keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                    keyboard = [self._nav_back_row()]
                     if message and getattr(message, "chat", None):
                         await message.chat.send_message(
                             "⚠️ Navigation error. Tap Back to return to menu.",
@@ -709,7 +820,7 @@ class TelegramCommandHandler:
                 logger.error(f"Callback error for '{callback_data}': {e}", exc_info=True)
                 # Try to show user-friendly error message
                 try:
-                    keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                    keyboard = [self._nav_back_row()]
                     error_msg = f"❌ Error: {str(e)[:100]}"
                     await self._safe_edit_or_send(query, error_msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 except Exception:
@@ -822,7 +933,7 @@ class TelegramCommandHandler:
         except Exception as e:
             logger.error(f"Error handling menu action '{action}': {e}", exc_info=True)
             try:
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                keyboard = [self._nav_back_row()]
                 error_msg = f"❌ Error opening {action} menu: {str(e)[:100]}"
                 await self._safe_edit_or_send(query, error_msg, reply_markup=InlineKeyboardMarkup(keyboard))
             except Exception as send_err:
@@ -896,7 +1007,7 @@ class TelegramCommandHandler:
         for market in self._available_markets:
             label = f"✅ {market}" if market == self.active_market else market
             keyboard.append([InlineKeyboardButton(label, callback_data=f"action:set_market:{market}")])
-        keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+        keyboard.append(self._nav_back_row())
         text = self._with_support_footer("\n".join(lines), state=active_state if isinstance(active_state, dict) else None)
         await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
@@ -912,7 +1023,7 @@ class TelegramCommandHandler:
                 chart_path = await self._generate_or_get_chart(state)
 
                 # Add a compact support footer to make any screenshot/share self-diagnostic.
-                caption_text = self._with_support_footer(message_text, state=state, max_chars=900)
+                caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
                 text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
                 
                 if chart_path and chart_path.exists():
@@ -1062,7 +1173,7 @@ class TelegramCommandHandler:
             chart_path = await self._generate_or_get_chart(state)
 
             # Always include the support footer on the primary dashboard.
-            caption_text = self._with_support_footer(message_text, state=state, max_chars=900)
+            caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
             text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
             
             if chart_path and chart_path.exists():
@@ -1262,16 +1373,27 @@ class TelegramCommandHandler:
             pass
         
         if state and agent_running:
+            paused = bool(state.get("paused", False))
+            futures_market_open = state.get("futures_market_open")
+            strategy_session_open = state.get("strategy_session_open")
+            should_check_data = (not paused) and not (futures_market_open is False and strategy_session_open is False)
+
             # Connection: prefer explicit state when present; fall back to data_fresh.
             if "connection_status" in state:
-                conn_status = "🟢" if state.get("connection_status") == "connected" else "🔴"
+                cs = state.get("connection_status")
+                if cs == "connected":
+                    conn_status = "🟢"
+                elif cs == "disconnected":
+                    conn_status = "🔴"
+                else:
+                    conn_status = "⚪"
             elif "data_fresh" in state:
                 conn_status = "🟢" if bool(state.get("data_fresh")) else "🔴"
             else:
                 conn_status = "⚪"
             
             # Data: consider latest_bar presence and/or explicit data_fresh.
-            latest_bar = state.get("latest_bar", {})
+            latest_bar = state.get("latest_bar", {}) or {}
             if "data_fresh" in state:
                 data_status = "🟢" if bool(state.get("data_fresh")) else "🔴"
             else:
@@ -1292,8 +1414,11 @@ class TelegramCommandHandler:
                         dt = dt.replace(tzinfo=timezone.utc)
                     if dt:
                         age_min = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
-                        if thr > 0 and age_min > thr:
+                        if should_check_data and thr > 0 and age_min > thr:
                             data_status = "🔴"
+                            # If we don't have an explicit connection state, don't show green when data is stale.
+                            if "connection_status" not in state and conn_status == "🟢":
+                                conn_status = "🟡"
             except Exception:
                 pass
         
@@ -1314,7 +1439,7 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("📋 Status", callback_data="action:system_status"),
             ],
             [InlineKeyboardButton("🩺 Doctor", callback_data="action:ui_doctor")],
-            [InlineKeyboardButton("🏠 Menu", callback_data="back")],
+            self._nav_back_row(),
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
@@ -1438,7 +1563,7 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🧪 Tests", callback_data="action:ui_doctor:tests"),
                 InlineKeyboardButton("🛡 Back", callback_data="menu:status"),
             ],
-            [InlineKeyboardButton("🏠 Menu", callback_data="back")],
+            self._nav_back_row(),
         ]
         await self._safe_edit_or_send(
             query,
@@ -1481,7 +1606,7 @@ class TelegramCommandHandler:
                 [InlineKeyboardButton("🧪 Signal", callback_data="action:ui_doctor:test_signal")],
                 [
                     InlineKeyboardButton("🩺 Doctor", callback_data="action:ui_doctor"),
-                    InlineKeyboardButton("🏠 Menu", callback_data="back"),
+                    self._nav_back_row()[0],
                 ],
             ]
             await self._safe_edit_or_send(
@@ -1665,7 +1790,7 @@ class TelegramCommandHandler:
                 # Row 3: Actions
                 [
                     InlineKeyboardButton("🔄 Refresh", callback_data="menu:activity"),
-                    InlineKeyboardButton("🏠 Menu", callback_data="back"),
+                    self._nav_back_row()[0],
                 ],
             ]
             
@@ -1686,7 +1811,7 @@ class TelegramCommandHandler:
                     InlineKeyboardButton("🎯 Signals", callback_data="action:recent_signals"),
                     InlineKeyboardButton("📋 Active", callback_data="action:active_trades"),
                 ],
-                [InlineKeyboardButton("🏠 Menu", callback_data="back")],
+                self._nav_back_row(),
             ]
             await self._safe_edit_or_send(query, "📊 Activity\n\nSelect an option:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -1801,7 +1926,7 @@ class TelegramCommandHandler:
                     InlineKeyboardButton("📋 Export Report", callback_data="action:export_performance"),
                 ],
                 # Row 4: Navigation
-                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                self._nav_back_row(),
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await self._safe_edit_or_send(query, "\n".join(lines), reply_markup=reply_markup, parse_mode="Markdown")
@@ -1813,7 +1938,7 @@ class TelegramCommandHandler:
                     InlineKeyboardButton("📈 Performance Metrics", callback_data="action:performance_metrics"),
                     InlineKeyboardButton("💰 P&L Overview", callback_data="action:pnl_overview"),
                 ],
-                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                self._nav_back_row(),
             ]
             await self._safe_edit_or_send(
                 query,
@@ -1905,7 +2030,7 @@ class TelegramCommandHandler:
             # Row 3: Navigation
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data="menu:bots"),
-                InlineKeyboardButton("🏠 Menu", callback_data="back"),
+                self._nav_back_row()[0],
             ],
         ]
 
@@ -1999,7 +2124,7 @@ class TelegramCommandHandler:
             ])
         
         # Back
-        keyboard.append([InlineKeyboardButton("🏠 Menu", callback_data="back")])
+        keyboard.append(self._nav_back_row())
         
         text = self._with_support_footer("\n".join(lines), state=state)
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -2093,7 +2218,7 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🧠 AI Ops", callback_data="action:ai_ops"),
             ],
             # Row 6: Back
-            [InlineKeyboardButton("🏠 Menu", callback_data="back")],
+            self._nav_back_row(),
         ]
         text = self._with_support_footer("\n".join(lines))
         await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -2157,7 +2282,7 @@ class TelegramCommandHandler:
             [InlineKeyboardButton("config/config.yaml", callback_data="patch:file:config/config.yaml")],
             [InlineKeyboardButton("docs/AI_PATCH_GUIDE.md", callback_data="patch:file:docs/AI_PATCH_GUIDE.md")],
             [InlineKeyboardButton("Other file (type path)", callback_data="patch:other")],
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            self._nav_back_row(),
         ]
         await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
@@ -2189,7 +2314,7 @@ class TelegramCommandHandler:
         for name in bot_names[:8]:
             keyboard.append([InlineKeyboardButton(name, callback_data=f"aiops:bot:{name}")])
         keyboard.append([InlineKeyboardButton("Market Agent", callback_data="aiops:bot:market_agent")])
-        keyboard.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+        keyboard.append(self._nav_back_row())
 
         if not hasattr(self, "_ai_ops_state"):
             self._ai_ops_state = {}
@@ -2211,7 +2336,7 @@ class TelegramCommandHandler:
                 [InlineKeyboardButton("Config change", callback_data="aiops:scope:config")],
                 [InlineKeyboardButton("Code change", callback_data="aiops:scope:code")],
                 [InlineKeyboardButton("Both (config+code)", callback_data="aiops:scope:both")],
-                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                self._nav_back_row(),
             ]
             await query.edit_message_text(
                 f"Bot: `{bot}`\n\nSelect change scope:",
@@ -2237,7 +2362,7 @@ class TelegramCommandHandler:
                 # market_regime_detector.py removed
                 [InlineKeyboardButton("config/config.yaml", callback_data="aiops:file:config/config.yaml")],
                 [InlineKeyboardButton("Other file (type path)", callback_data="aiops:other")],
-                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                self._nav_back_row(),
             ]
             self._ai_ops_state["state"] = "awaiting_aiops_file"
             await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -2384,7 +2509,7 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("✅ Accept", callback_data="aiops:accept"),
                 InlineKeyboardButton("❌ Decline", callback_data="aiops:decline"),
             ],
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            self._nav_back_row(),
         ]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
@@ -2415,7 +2540,7 @@ class TelegramCommandHandler:
             [InlineKeyboardButton("Restart Telegram", callback_data="aiops:restart:telegram")],
             [InlineKeyboardButton("Restart Gateway", callback_data="aiops:restart:gateway")],
             [InlineKeyboardButton("Restart All", callback_data="aiops:restart:all")],
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            self._nav_back_row(),
         ]
         await query.edit_message_text(
             "✅ Patch applied. Select a restart option:",
@@ -2485,7 +2610,7 @@ class TelegramCommandHandler:
             "• Emergency Stop closes all positions immediately\n"
             "• All actions are logged for audit trail"
         )
-        keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+        keyboard = [self._nav_back_row()]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await self._safe_edit_or_send(query, help_text, reply_markup=reply_markup, parse_mode="Markdown")
 
@@ -2550,8 +2675,8 @@ class TelegramCommandHandler:
                         await self._show_settings_menu(query)
                         return
 
-                    # Pinned dashboards: when toggling, reset the stored message_id so the
-                    # next dashboard creates (or stops using) a pinned message cleanly.
+                    # Pinned dashboards: when toggling, reset the stored message_ids so the
+                    # next dashboard creates (or stops using) pinned messages cleanly.
                     if pref_key == "dashboard_edit_in_place":
                         cur = bool(prefs.get(pref_key, False))
                         prefs.set(pref_key, not cur)
@@ -2567,7 +2692,7 @@ class TelegramCommandHandler:
                 await self._show_settings_menu(query)
                 return
             
-            keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+            keyboard = [self._nav_back_row()]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             if action_type == "system_status":
@@ -2644,7 +2769,7 @@ class TelegramCommandHandler:
 
                 keyboard = [
                     [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    self._nav_back_row(),
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             elif action_type == "start_gateway":
@@ -2781,7 +2906,7 @@ class TelegramCommandHandler:
                         "",
                         "There are currently no trades to close.",
                     ])
-                    keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                    keyboard = [self._nav_back_row()]
                 else:
                     lines.extend([
                         "📊 *Position Summary:*",
@@ -2886,13 +3011,13 @@ class TelegramCommandHandler:
                 return
             else:
                 logger.warning(f"Unhandled action type: {action_type}")
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                keyboard = [self._nav_back_row()]
                 await self._safe_edit_or_send(query, f"❌ Action not yet implemented: {action_type}", reply_markup=InlineKeyboardMarkup(keyboard))
                 return
         except Exception as e:
             logger.error(f"Error in _handle_action for '{action}': {e}", exc_info=True)
             try:
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                keyboard = [self._nav_back_row()]
                 error_msg = f"❌ Error executing action: {str(e)[:100]}"
                 await self._safe_edit_or_send(query, error_msg, reply_markup=InlineKeyboardMarkup(keyboard))
             except Exception as send_err:
@@ -2901,7 +3026,7 @@ class TelegramCommandHandler:
     async def _handle_confirm_action(self, query: CallbackQuery, confirm_action: str) -> None:
         """Handle confirmed action button presses."""
         logger.info(f"Handling confirm action: {confirm_action}")
-        keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+        keyboard = [self._nav_back_row()]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         try:
@@ -2917,7 +3042,7 @@ class TelegramCommandHandler:
                         text = f"{text}\n\n{details}"
                 keyboard = [
                     [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    self._nav_back_row(),
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             elif confirm_action == "stop_agent":
@@ -2932,7 +3057,7 @@ class TelegramCommandHandler:
                         text = f"{text}\n\n{details}"
                 keyboard = [
                     [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    self._nav_back_row(),
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             elif confirm_action == "start_gateway":
@@ -2948,7 +3073,7 @@ class TelegramCommandHandler:
                         text = f"{text}\n\n{details}"
                 keyboard = [
                     [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    self._nav_back_row(),
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             elif confirm_action == "stop_gateway":
@@ -2964,7 +3089,7 @@ class TelegramCommandHandler:
                         text = f"{text}\n\n{details}"
                 keyboard = [
                     [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    self._nav_back_row(),
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -2981,7 +3106,7 @@ class TelegramCommandHandler:
                         text = f"{text}\n\n{details}"
                 keyboard = [
                     [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
-                    [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                    self._nav_back_row(),
                 ]
                 await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -2992,7 +3117,7 @@ class TelegramCommandHandler:
                     new_attempt = challenge_tracker.manual_reset(reason="telegram_reset")
                     keyboard = [
                         [InlineKeyboardButton("🔄 Refresh Health", callback_data="menu:status")],
-                        [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                        self._nav_back_row(),
                     ]
                     await query.edit_message_text(
                         f"✅ Challenge Reset Complete\n\n"
@@ -3038,7 +3163,7 @@ class TelegramCommandHandler:
 
                     keyboard = [
                         [InlineKeyboardButton("🤖 Check Bots", callback_data="menu:bots")],
-                        [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                        self._nav_back_row(),
                     ]
                     await query.edit_message_text(
                         "\n".join(messages),
@@ -3064,7 +3189,7 @@ class TelegramCommandHandler:
 
                         keyboard = [
                             [InlineKeyboardButton("🛡 Check Health", callback_data="menu:status")],
-                            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                            self._nav_back_row(),
                         ]
                         await query.edit_message_text(
                             "✅ Close All Trades Request Sent\n\n"
@@ -3102,7 +3227,7 @@ class TelegramCommandHandler:
                         text = "✅ Cache Clear Complete\n\nNo cache directories found."
 
                     keyboard = [
-                        [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                        self._nav_back_row(),
                     ]
                     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
                     logger.info(f"Cache cleared via Telegram: {cleared}")
@@ -3125,7 +3250,7 @@ class TelegramCommandHandler:
 
                         keyboard = [
                             [InlineKeyboardButton("💎 Performance", callback_data="menu:performance")],
-                            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                            self._nav_back_row(),
                         ]
                         await query.edit_message_text(
                             "✅ Performance Stats Reset\n\n"
@@ -3147,7 +3272,7 @@ class TelegramCommandHandler:
         except Exception as e:
             logger.error(f"Error in _handle_confirm_action for '{confirm_action}': {e}", exc_info=True)
             try:
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                keyboard = [self._nav_back_row()]
                 error_msg = f"❌ Error executing action: {str(e)[:100]}"
                 await self._safe_edit_or_send(query, error_msg, reply_markup=InlineKeyboardMarkup(keyboard))
             except Exception as send_err:
@@ -3157,7 +3282,7 @@ class TelegramCommandHandler:
         """Toggle a strategy on/off by updating config.yaml."""
         config_path = Path("config/config.yaml")
         if not config_path.exists():
-            keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+            keyboard = [self._nav_back_row()]
             await query.edit_message_text(
                 f"❌ Config file not found: {config_path}\n\nCannot modify strategies.",
                 reply_markup=InlineKeyboardMarkup(keyboard)
@@ -3215,7 +3340,7 @@ class TelegramCommandHandler:
             status_emoji = "🟢" if action == "enabled" else "🔴"
             keyboard = [
                 [InlineKeyboardButton("🔄 Refresh Bots", callback_data="menu:bots")],
-                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                self._nav_back_row(),
             ]
             message = (
                 f"{status_emoji} *Bot {action.title()}*\n\n"
@@ -3228,7 +3353,7 @@ class TelegramCommandHandler:
             
         except Exception as e:
             logger.error(f"Error toggling strategy: {e}", exc_info=True)
-            keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+            keyboard = [self._nav_back_row()]
             await query.edit_message_text(
                 f"❌ Error updating bot: {e}\n\nPlease check config file manually.",
                 reply_markup=InlineKeyboardMarkup(keyboard)
@@ -3242,12 +3367,13 @@ class TelegramCommandHandler:
             return
         
         message_text = await self._build_status_dashboard_message(state)
+        message_text = self._with_support_footer(message_text, state=state, max_chars=4096)
         await message_obj.reply_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _build_status_dashboard_message(self, state: dict) -> str:
         """Build the comprehensive status dashboard message from state."""
         try:
-            # Extract data for format_home_card
+            # Canonical dashboard text builder (glanceable + ops/perf blocks).
             symbol = state.get("symbol", "MNQ")
             market_label = state.get("market") or self.active_market
 
@@ -3303,8 +3429,10 @@ class TelegramCommandHandler:
                 fn = getattr(sc, "get_gateway_status", None)
                 if callable(fn):
                     gs = fn() or {}
-                    gateway_running = bool(gs.get("process_running", True)) and bool(gs.get("port_listening", True))
-                    gateway_unknown = False
+                    # Only override the fallback when the controller returns explicit keys.
+                    if "process_running" in gs or "port_listening" in gs:
+                        gateway_running = bool(gs.get("process_running", False)) and bool(gs.get("port_listening", False))
+                        gateway_unknown = False
                 else:
                     gateway_unknown = True
             except Exception:
@@ -3396,6 +3524,21 @@ class TelegramCommandHandler:
                     except Exception as e:
                         logger.debug(f"Could not calculate data age: {e}")
                         pass
+
+            # Data stale flag (used for top-line indicators).
+            data_stale: bool | None = None
+            try:
+                if data_age_seconds is None:
+                    data_stale = None
+                elif not agent_running or paused:
+                    data_stale = None
+                elif futures_market_open is False and strategy_session_open is False:
+                    # Off-hours: stale data is expected.
+                    data_stale = None
+                else:
+                    data_stale = (float(data_age_seconds) / 60.0) > float(data_stale_threshold_minutes)
+            except Exception:
+                data_stale = None
             
             # Buy/Sell pressure
             buy_sell_pressure = state.get("buy_sell_pressure")
@@ -3425,6 +3568,26 @@ class TelegramCommandHandler:
                         last_cycle_seconds = (datetime.now(timezone.utc) - last_cycle_dt).total_seconds()
                 except Exception:
                     pass
+
+            # Agent health (process may be up, but we also want to know if it's cycling).
+            agent_healthy: bool | None = None
+            try:
+                if not agent_running:
+                    agent_healthy = None
+                elif last_cycle_seconds is None:
+                    agent_healthy = None
+                else:
+                    cycle_thr = 120.0
+                    try:
+                        cm = state.get("cadence_metrics") or {}
+                        interval = cm.get("current_interval_seconds")
+                        if interval:
+                            cycle_thr = max(120.0, float(interval) * 4.0)
+                    except Exception:
+                        cycle_thr = 120.0
+                    agent_healthy = float(last_cycle_seconds) <= float(cycle_thr)
+            except Exception:
+                agent_healthy = None
             
             # Check for challenge mode and load challenge data if available
             challenge_status = None
@@ -3474,7 +3637,7 @@ class TelegramCommandHandler:
                 symbol=symbol,
                 time_str=time_str,
                 agent_running=agent_running,
-                gateway_running=gateway_running,
+                gateway_running=(None if gateway_unknown else gateway_running),
                 latest_price=latest_price,
                 daily_pnl=float(state.get("daily_pnl", 0.0) or 0.0),
                 active_trades_count=active_trades_count,
@@ -3485,6 +3648,8 @@ class TelegramCommandHandler:
                 ai_ready=ai_ready,
                 agent_uptime_seconds=agent_uptime_seconds,
                 data_age_seconds=data_age_seconds,
+                agent_healthy=agent_healthy,
+                data_stale=data_stale,
             )
             
             # Add challenge metrics if available (before recent exits)
@@ -3911,7 +4076,7 @@ class TelegramCommandHandler:
         """
         keyboard = [
             [InlineKeyboardButton("🎯 Back to Signals", callback_data="menu:signals")],
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            self._nav_back_row(),
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -4348,7 +4513,7 @@ class TelegramCommandHandler:
             
             keyboard = [
                 [InlineKeyboardButton("🤖 Back to Bots", callback_data="menu:bots")],
-                [InlineKeyboardButton("🏠 Menu", callback_data="back")],
+                self._nav_back_row(),
             ]
             
             await query.edit_message_text(
@@ -4633,7 +4798,7 @@ class TelegramCommandHandler:
             state = self._read_state()
             
             if not metrics and not state:
-                keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+                keyboard = [self._nav_back_row()]
                 await query.edit_message_text(
                     "❌ No performance data available to export.",
                     reply_markup=InlineKeyboardMarkup(keyboard)
@@ -4669,7 +4834,7 @@ class TelegramCommandHandler:
             
             keyboard = [
                 [InlineKeyboardButton("💎 Performance", callback_data="menu:performance")],
-                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                self._nav_back_row(),
             ]
             await query.edit_message_text(
                 "\n".join(lines),
@@ -4678,7 +4843,7 @@ class TelegramCommandHandler:
             )
         except Exception as e:
             logger.error(f"Export performance error: {e}", exc_info=True)
-            keyboard = [[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]]
+            keyboard = [self._nav_back_row()]
             await query.edit_message_text(
                 f"❌ Error exporting performance: {e}",
                 reply_markup=InlineKeyboardMarkup(keyboard)
@@ -4799,7 +4964,11 @@ class TelegramCommandHandler:
         thr_str = "?" if thr_min is None else f"{thr_min:.0f}m"
         stale_flag = ""
         try:
-            if thr_min and age_sec is not None and float(age_sec) / 60.0 > float(thr_min):
+            paused = bool(state.get("paused", False))
+            futures_open = state.get("futures_market_open")
+            session_open = state.get("strategy_session_open")
+            should_check_data = (not paused) and not (futures_open is False and session_open is False)
+            if should_check_data and thr_min and age_sec is not None and float(age_sec) / 60.0 > float(thr_min):
                 stale_flag = "!"
         except Exception:
             stale_flag = ""
@@ -4811,7 +4980,7 @@ class TelegramCommandHandler:
         return f"`🩺 {market}/{symbol}{v} | A:{a} | G:{gw} | D:{lvl_short} {age_str}/{thr_str}{stale_flag} | C:{c} | run:{run_id}`"
 
     def _with_support_footer(self, text: str, *, state: dict | None = None, max_chars: int = 4096) -> str:
-        """Append the support footer when there is room (never breaks messages)."""
+        """Append the support footer (always, by trimming when needed)."""
         base = (text or "").rstrip()
         footer = ""
         try:
@@ -4827,9 +4996,47 @@ class TelegramCommandHandler:
         if footer in base:
             return base
         candidate = f"{base}\n\n{footer}"
-        if max_chars and len(candidate) > int(max_chars):
-            return base
-        return candidate
+        if not max_chars:
+            return candidate
+
+        try:
+            max_len = int(max_chars)
+        except Exception:
+            max_len = 0
+
+        if max_len <= 0 or len(candidate) <= max_len:
+            return candidate
+
+        # Ensure the footer is always present by trimming from the end.
+        if len(footer) >= max_len:
+            return footer[:max_len]
+
+        # Keep room for "\n\n" + footer.
+        avail = max_len - len(footer) - 2
+        if avail <= 0:
+            return footer
+
+        # Prefer dropping whole lines (safer for Markdown than hard truncation).
+        lines = base.splitlines()
+        trimmed_base = ""
+        while lines:
+            trimmed_base = "\n".join(lines).rstrip()
+            if len(trimmed_base) <= avail:
+                break
+            lines.pop()
+
+        trimmed_base = trimmed_base.rstrip()
+        if not trimmed_base:
+            return footer
+
+        # Last resort: hard truncate (very unlikely).
+        if len(trimmed_base) > avail:
+            cut = max(0, avail - 1)
+            trimmed_base = (trimmed_base[:cut].rstrip() + "…") if cut else "…"
+            # Avoid ending with an unmatched code tick.
+            trimmed_base = trimmed_base.rstrip("`").rstrip()
+
+        return f"{trimmed_base}\n\n{footer}"
 
 
     # ---------------------------------------------------------------------
@@ -5001,7 +5208,8 @@ class TelegramCommandHandler:
         time_str = self._get_current_time_str()
 
         if not state:
-            msg = f"📊 *{symbol}* • {time_str}\n\n❌ No state file found.\n\nStart the agent service to begin."
+            # Keep /status aligned with the canonical /start dashboard: no legacy Home Card.
+            msg = f"📊 *{symbol}* • {time_str}\n\n❌ No state file found.\n\nUse `/start` for the dashboard."
             if len(msg) > 4096:
                 msg = msg[:4093] + "..."
             await self._send_message_or_edit(update, context, msg, parse_mode="Markdown")
@@ -5045,26 +5253,9 @@ class TelegramCommandHandler:
         except Exception:
             state_age_seconds = None
 
-        stale_threshold = float(self._compute_state_stale_threshold(state))
-
-        msg = format_home_card(
-            symbol=symbol,
-            time_str=time_str,
-            agent_running=agent_running,
-            gateway_running=gateway_running,
-            futures_market_open=futures_market_open,
-            strategy_session_open=strategy_session_open,
-            paused=paused,
-            pause_reason=pause_reason,
-            cycles_total=cycles_total,
-            signals_generated=signals_generated,
-            errors=errors,
-            buffer_size=buffer_size,
-            latest_price=latest_price,
-            state_age_seconds=state_age_seconds,
-            state_stale_threshold=stale_threshold,
-            data_age_minutes=data_age_minutes,
-        )
+        # Legacy /status is deprecated: redirect to the canonical visual dashboard.
+        msg = await self._build_status_dashboard_message(state)
+        msg = self._with_support_footer(msg, state=state, max_chars=4096)
 
         if len(msg) > 4096:
             msg = msg[:4093] + "..."
@@ -5314,7 +5505,7 @@ class TelegramCommandHandler:
     def _get_back_to_menu_button(self):
         """Return a minimal 'Back to Menu' InlineKeyboardMarkup."""
         try:
-            return InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Back to Menu", callback_data="back")]])
+            return InlineKeyboardMarkup([self._nav_back_row()])
         except Exception:
             return None
 
@@ -5475,9 +5666,7 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("📉 MeanRev (variant)", callback_data="pb:bot:mean"),
                 InlineKeyboardButton("📑 Reports", callback_data="strategy_review:reports"),
             ],
-            [
-                InlineKeyboardButton("🏠 Back to Menu", callback_data="back"),
-            ],
+            self._nav_back_row(),
         ]
 
         await self._send_message_or_edit(
@@ -5532,7 +5721,7 @@ class TelegramCommandHandler:
         for i, name in enumerate(artifacts[:12]):
             rows.append([InlineKeyboardButton(name[:28], callback_data=f"artifact:{report_idx}:{i}")])
         rows.append([InlineKeyboardButton("⬅️ Reports", callback_data="strategy_review:reports")])
-        rows.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+        rows.append(self._nav_back_row())
 
         await self._send_message_or_edit(update, context, f"Report: {report_name}", reply_markup=InlineKeyboardMarkup(rows))
 
@@ -5573,7 +5762,7 @@ class TelegramCommandHandler:
         keyboard = [
             [InlineKeyboardButton("⬅️ Report", callback_data=f"report:{report_idx}")],
             [InlineKeyboardButton("📑 Reports", callback_data="strategy_review:reports")],
-            [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+            self._nav_back_row(),
         ]
         await self._send_message_or_edit(
             update,
@@ -5596,7 +5785,7 @@ class TelegramCommandHandler:
                     InlineKeyboardButton("📑 Reports", callback_data="strategy_review:reports"),
                 ],
                 [InlineKeyboardButton("📤 Export", callback_data="strategy_review:export")],
-                [InlineKeyboardButton("🏠 Back to Menu", callback_data="back")],
+                self._nav_back_row(),
             ]
         )
         await self._send_message_or_edit(update, context, "Bot Review • More", reply_markup=rm)
@@ -5640,7 +5829,7 @@ class TelegramCommandHandler:
             nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"reports:page:{page+1}"))
         if nav:
             rows.append(nav)
-        rows.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+        rows.append(self._nav_back_row())
 
         await self._send_message_or_edit(update, context, "📑 Backtest Reports", reply_markup=InlineKeyboardMarkup(rows))
 
@@ -5664,7 +5853,7 @@ class TelegramCommandHandler:
         rows = []
         for i, name in enumerate(sorted(artifacts)[:12]):
             rows.append([InlineKeyboardButton(name[:28], callback_data=f"artifact:{i}")])
-        rows.append([InlineKeyboardButton("🏠 Back to Menu", callback_data="back")])
+        rows.append(self._nav_back_row())
 
         await self._send_message_or_edit(update, context, f"Report: {report_name}", reply_markup=InlineKeyboardMarkup(rows))
 

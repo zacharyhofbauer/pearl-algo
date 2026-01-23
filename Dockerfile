@@ -21,4 +21,4 @@ ENV PYTHONUNBUFFERED=1 \
 
 # The container expects IBKR Gateway to be reachable via host networking or another container.
 # Entrypoint runs the NQ agent service in the foreground.
-CMD ["python", "-m", "pearlalgo.nq_agent.main"]
+CMD ["python", "-m", "pearlalgo.market_agent.main"]

@@ -602,49 +602,71 @@ class MarketAgentService:
 
         logger.info("NQ Agent Service starting...")
 
-        # Send startup notification immediately (before connection attempts)
-        # This ensures user gets notified even if connection fails
+        # Startup flow:
+        # 1) Rich startup notification (stable)
+        # 2) Immediately follow with the /start-style visual dashboard (chart + caption + buttons)
+        market_data = {}
         try:
+            # Try to fetch a bar quickly so startup can include price.
+            try:
+                market_data = await asyncio.wait_for(self.data_fetcher.fetch_latest_data(), timeout=5.0) or {}
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"Could not fetch market data for startup: {e}")
+                market_data = {}
+
             config_dict = {
                 "symbol": self.config.symbol,
                 "timeframe": self.config.timeframe,
                 "scan_interval": self.config.scan_interval,
-                "stop_loss_atr_multiplier": self.config.stop_loss_atr_multiplier,
-                "take_profit_risk_reward": self.config.take_profit_risk_reward,
-                "max_risk_per_trade": self.config.max_risk_per_trade,
                 "current_time": get_utc_timestamp(),
             }
 
-            # Include explicit market/session gates so startup never shows UNKNOWN in Telegram UI.
+            # Gates (explicit so startup never shows UNKNOWN).
             try:
                 config_dict["futures_market_open"] = bool(get_market_hours().is_market_open())
             except Exception:
                 config_dict["futures_market_open"] = None
             try:
-                # Check trading session using pearl_bot_auto time filter
                 from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
                 config_dict["strategy_session_open"] = check_trading_session(datetime.now(timezone.utc), self.config)
             except Exception:
                 config_dict["strategy_session_open"] = None
-            
-            # Try to get latest price for startup message (non-blocking, timeout quickly)
+
             try:
-                market_data = await asyncio.wait_for(
-                    self.data_fetcher.fetch_latest_data(),
-                    timeout=5.0
-                )
-                if market_data.get("latest_bar"):
-                    latest_bar = market_data["latest_bar"]
-                    if isinstance(latest_bar, dict) and "close" in latest_bar:
-                        config_dict["latest_price"] = latest_bar["close"]
-            except (asyncio.TimeoutError, Exception) as e:
-                logger.debug(f"Could not fetch price for startup notification: {e}")
-                # Continue without price - service will still start
-            
+                lb = (market_data or {}).get("latest_bar")
+                if isinstance(lb, dict) and "close" in lb:
+                    config_dict["latest_price"] = lb.get("close")
+            except Exception:
+                pass
+
             await self.telegram_notifier.send_startup_notification(config_dict)
             logger.info("Startup notification sent to Telegram")
         except Exception as e:
-            logger.error(f"Could not send startup notification: {e}", exc_info=True)
+            logger.debug(f"Could not send startup notification: {e}")
+
+        # Now send the visual dashboard (best-effort; do not block service start).
+        try:
+            chart_path = None
+            try:
+                if self.dashboard_chart_enabled:
+                    chart_path = await asyncio.wait_for(self._generate_dashboard_chart(), timeout=30.0)
+                    if chart_path:
+                        self.last_dashboard_chart_sent = datetime.now(timezone.utc)
+            except Exception as e:
+                logger.debug(f"Could not generate initial dashboard chart: {e}")
+                chart_path = None
+
+            await self._send_dashboard(market_data or {}, quiet_reason=None, signal_diagnostics=None, chart_path=chart_path)
+            # Clean up any temp chart file returned on export failure.
+            try:
+                if chart_path and getattr(chart_path, "name", "") != "dashboard_latest.png" and chart_path.exists():
+                    chart_path.unlink()
+            except Exception:
+                pass
+            self.last_status_update = datetime.now(timezone.utc)
+            logger.info("Initial dashboard sent to Telegram")
+        except Exception as e:
+            logger.debug(f"Could not send initial dashboard: {e}")
 
         # Connect execution adapter if enabled
         if self.execution_adapter is not None:
@@ -1905,29 +1927,52 @@ class MarketAgentService:
             or (now - self.last_status_update).total_seconds() >= self.status_update_interval
         )
 
-        # When chart is due, send BOTH together (chart first, then text) as a combined notification
+        # Canonical dashboard: one message (visual when chart is available).
         if chart_due:
-            await self._send_dashboard_chart()
+            chart_path = None
+            try:
+                # Bound chart generation time so the service loop cannot stall indefinitely.
+                chart_path = await asyncio.wait_for(self._generate_dashboard_chart(), timeout=30.0)
+            except Exception as e:
+                logger.debug(f"Could not generate dashboard chart: {e}")
+                chart_path = None
             self.last_dashboard_chart_sent = now
-            # Always send text immediately after chart so they appear together
-            await self._send_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
+            await self._send_dashboard(
+                market_data,
+                quiet_reason=quiet_reason,
+                signal_diagnostics=signal_diagnostics,
+                chart_path=chart_path,
+            )
+            # Clean up any temp chart file returned on export failure.
+            try:
+                if chart_path and getattr(chart_path, "name", "") != "dashboard_latest.png" and chart_path.exists():
+                    chart_path.unlink()
+            except Exception:
+                pass
             self.last_status_update = now
         elif text_due:
-            # Text-only update (between chart intervals)
-            await self._send_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
+            # Text-only update (no chart refresh); keep layout identical.
+            await self._send_dashboard(
+                market_data,
+                quiet_reason=quiet_reason,
+                signal_diagnostics=signal_diagnostics,
+                chart_path=None,
+            )
             self.last_status_update = now
 
-    async def _send_dashboard_chart(self) -> None:
+    async def _generate_dashboard_chart(self) -> Optional[Path]:
         """
-        Generate and send a 24h/5m mplfinance dashboard chart.
-        
-        Fetches 24h of 5m historical data and generates a TradingView-style chart.
+        Generate the dashboard chart and export it for Telegram/UI use.
+
+        Returns:
+            Path to a PNG chart file (preferably `data/agent_state/<MARKET>/exports/dashboard_latest.png`)
+            or None if chart generation fails.
         """
         try:
             # Check if chart generator is available
             if not self.telegram_notifier.chart_generator:
                 logger.debug("Chart generator not available for dashboard chart")
-                return
+                return None
 
             # Fetch lookback window for chart (prefer direct historical fetch; fallback to buffers)
             # Ensure we always show at least a useful minimum window (operator request: >= 6h),
@@ -2146,7 +2191,7 @@ class MarketAgentService:
             )
             
             if chart_path and chart_path.exists():
-                # Save chart to exports for on-demand access (Telegram menu chart button)
+                # Export chart for on-demand access (Telegram command handler reuses this).
                 try:
                     exports_dir = self.state_dir / "exports"
                     exports_dir.mkdir(parents=True, exist_ok=True)
@@ -2154,33 +2199,25 @@ class MarketAgentService:
                     import shutil
                     shutil.copy2(chart_path, export_path)
                     logger.debug(f"Dashboard chart exported to {export_path}")
+
+                    # Clean up temp file after export (the exported copy persists).
+                    try:
+                        chart_path.unlink()
+                    except Exception:
+                        pass
+
+                    return export_path if export_path.exists() else None
                 except Exception as e:
+                    # If export fails, keep the temp file for the caller to send and clean up.
                     logger.debug(f"Could not export dashboard chart: {e}")
-                
-                # Send the chart with current lookback for toggle button highlighting
-                success = await self.telegram_notifier.send_dashboard_chart(
-                    chart_path=chart_path,
-                    symbol=self.config.symbol,
-                    timeframe=chosen_tf,
-                    range_label=range_label,
-                    current_hours=lookback_hours,
-                )
-                
-                # Clean up temp file
-                try:
-                    chart_path.unlink()
-                except Exception:
-                    pass
-                
-                if success:
-                    logger.info("Dashboard chart sent to Telegram")
-                else:
-                    logger.warning("Failed to send dashboard chart")
-            else:
-                logger.debug("Dashboard chart generation returned no path")
+                    return chart_path
+
+            logger.debug("Dashboard chart generation returned no path")
+            return None
                 
         except Exception as e:
-            logger.error(f"Error generating/sending dashboard chart: {e}", exc_info=True)
+            logger.error(f"Error generating dashboard chart: {e}", exc_info=True)
+            return None
 
     async def _check_monitor_export(self, market_data: Optional[Dict] = None) -> None:
         """
@@ -2382,6 +2419,7 @@ class MarketAgentService:
         market_data: Optional[Dict] = None,
         quiet_reason: Optional[str] = None,
         signal_diagnostics=None,
+        chart_path: Optional[Path] = None,
     ) -> None:
         """
         Send consolidated dashboard to Telegram.
@@ -2390,6 +2428,7 @@ class MarketAgentService:
             market_data: Current market data (may be empty)
             quiet_reason: Why the agent is quiet (for observability)
             signal_diagnostics: SignalDiagnostics from the signal generator
+            chart_path: Optional path to chart PNG for a visual dashboard message
         """
         try:
             # Get base status
@@ -2542,7 +2581,7 @@ class MarketAgentService:
                 # Never let optional observability break the dashboard.
                 pass
             
-            await self.telegram_notifier.send_dashboard(status)
+            await self.telegram_notifier.send_dashboard(status, chart_path=chart_path)
         except Exception as e:
             logger.error(f"Error sending dashboard: {e}", exc_info=True)
     

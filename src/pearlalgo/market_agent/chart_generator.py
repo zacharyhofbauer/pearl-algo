@@ -64,11 +64,12 @@ ZORDER_CANDLES = 3
 ZORDER_TEXT_LABELS = 4
 
 # Font size constants (in points) - for consistent text sizing across chart elements
-FONT_SIZE_LABEL = 9           # Right-side level labels
-FONT_SIZE_SESSION = 8         # Session names (Tokyo/London/NY)
-FONT_SIZE_POWER_READOUT = 10  # Power channel buy/sell readout
+# Tuned for Telegram/mobile readability.
+FONT_SIZE_LABEL = 10          # Right-side level labels
+FONT_SIZE_SESSION = 9         # Session names (Tokyo/London/NY)
+FONT_SIZE_POWER_READOUT = 11  # Power channel buy/sell readout
 FONT_SIZE_RR_BOX = 9          # Risk/reward box USD labels
-FONT_SIZE_LEGEND = 8          # Dashboard legend text
+FONT_SIZE_LEGEND = 9          # Dashboard legend text
 FONT_SIZE_TITLE = 14          # Equity curve chart title
 FONT_SIZE_SUMMARY = 10        # Performance summary text
 
@@ -526,6 +527,173 @@ def build_hud_context(
             pass
 
         # ----------------------------
+        # TBT Trendlines (ChartPrime)
+        # ----------------------------
+        # Adds the missing "trendlines" geometry to match the TradingView indicator set.
+        # This is best-effort and intentionally does not affect chart scaling.
+        try:
+            # Pull defaults from PearlBot config (keeps semantics aligned with strategy defaults).
+            if isinstance(_BOT_CFG, dict):
+                tbt_period = int(_BOT_CFG.get("tbt_period", 10) or 10)
+                tbt_trend_type = str(_BOT_CFG.get("tbt_trend_type", "wicks") or "wicks")
+                tbt_extend = int(_BOT_CFG.get("tbt_extend", 25) or 25)
+            else:
+                tbt_period = int(getattr(_BOT_CFG, "tbt_period", 10) or 10)
+                tbt_trend_type = str(getattr(_BOT_CFG, "tbt_trend_type", "wicks") or "wicks")
+                tbt_extend = int(getattr(_BOT_CFG, "tbt_extend", 25) or 25)
+
+            tbt_period = max(4, min(50, int(tbt_period)))
+            # Pine uses rightBars = period/2; keep at least 1 bar.
+            right_bars = max(1, int(round(float(tbt_period) / 2.0)))
+            # Extension options in the Pine script are 25/50/75 bars.
+            tbt_extend = int(max(10, min(200, tbt_extend)))
+
+            if len(work) >= (tbt_period + right_bars + 2):
+                trend_type = tbt_trend_type.strip().lower()
+                if trend_type not in ("wicks", "wick", "body"):
+                    trend_type = "wicks"
+
+                if trend_type == "body":
+                    src_high = work[["open", "close"]].max(axis=1).to_numpy(dtype=float)
+                    src_low = work[["open", "close"]].min(axis=1).to_numpy(dtype=float)
+                else:
+                    src_high = work["high"].to_numpy(dtype=float)
+                    src_low = work["low"].to_numpy(dtype=float)
+
+                close_arr = work["close"].to_numpy(dtype=float)
+                high_arr = work["high"].to_numpy(dtype=float)
+                low_arr = work["low"].to_numpy(dtype=float)
+
+                n = int(len(work))
+
+                def _pivot_indices(arr: np.ndarray, *, kind: str) -> List[int]:
+                    out: List[int] = []
+                    for i in range(tbt_period, n - right_bars):
+                        v = float(arr[i])
+                        if not np.isfinite(v):
+                            continue
+                        win = arr[(i - tbt_period):(i + right_bars + 1)]
+                        if win.size == 0:
+                            continue
+                        if kind == "high":
+                            m = float(np.nanmax(win))
+                            if np.isfinite(m) and v == m:
+                                out.append(i)
+                        else:
+                            m = float(np.nanmin(win))
+                            if np.isfinite(m) and v == m:
+                                out.append(i)
+                    return out
+
+                piv_hi = _pivot_indices(src_high, kind="high")
+                piv_lo = _pivot_indices(src_low, kind="low")
+
+                # Z-band (volatility band) from Pine reference:
+                # min(ATR(30)*0.3, close*0.3%) shifted 20 bars, then /2
+                zband = 0.0
+                try:
+                    if _calc_atr is not None and n >= 35:
+                        atr30 = _calc_atr(work, period=30)
+                        if atr30 is not None and not atr30.empty:
+                            vol_adj = np.minimum(
+                                pd.to_numeric(atr30, errors="coerce") * 0.3,
+                                pd.to_numeric(work["close"], errors="coerce") * 0.003,
+                            )
+                            zb = float(pd.Series(vol_adj).shift(20).iloc[-1])
+                            if np.isfinite(zb) and zb > 0:
+                                zband = float(zb) / 2.0
+                except Exception:
+                    zband = 0.0
+
+                tbt_lines: List[Dict[str, Any]] = []
+
+                def _add_line(pivots: List[int], src: np.ndarray, *, kind: str) -> Optional[Dict[str, Any]]:
+                    if len(pivots) < 2:
+                        return None
+                    i1, i2 = int(pivots[-2]), int(pivots[-1])
+                    if i2 <= i1:
+                        return None
+                    y1 = float(src[i1])
+                    y2 = float(src[i2])
+                    if not (np.isfinite(y1) and np.isfinite(y2)):
+                        return None
+                    slope = (y2 - y1) / float(i2 - i1)
+
+                    # NOTE: The Pine script conditionally draws trendlines based on slope sign.
+                    # For chart readability and "always-on" indicator parity, we keep the latest
+                    # pivot-high (resistance) and pivot-low (support) trendlines regardless of slope.
+
+                    x1 = float(i1)
+                    x2 = float(i2 + tbt_extend)
+                    y_end = y2 + slope * float(tbt_extend)
+                    return {
+                        "kind": kind,
+                        "x1": x1,
+                        "y1": y1,
+                        "x2": x2,
+                        "y2": float(y_end),
+                        "pivot_x": float(i2),
+                        "pivot_y": float(y2),
+                        "slope": float(slope),
+                    }
+
+                res_line = _add_line(piv_hi, src_high, kind="resistance")
+                sup_line = _add_line(piv_lo, src_low, kind="support")
+                if res_line:
+                    tbt_lines.append(res_line)
+                if sup_line:
+                    tbt_lines.append(sup_line)
+
+                # Optional breakout target (TP) for the most recent bar.
+                tp: Optional[float] = None
+                tp_dir: Optional[str] = None
+                try:
+                    if n >= 2 and zband > 0:
+                        c0 = float(close_arr[-2])
+                        c1 = float(close_arr[-1])
+                        if res_line and tp is None:
+                            # Break above descending resistance
+                            slope = float(res_line["slope"])
+                            x1 = float(res_line["x1"])
+                            y1 = float(res_line["y1"])
+                            prev_line = y1 + (float(n - 2) - x1) * slope
+                            cur_line = y1 + (float(n - 1) - x1) * slope
+                            if np.isfinite(c0) and np.isfinite(c1) and (c0 < prev_line) and (c1 > cur_line):
+                                hi = float(high_arr[-1])
+                                if np.isfinite(hi) and hi > 0:
+                                    tp = hi + (zband * 20.0)
+                                    tp_dir = "long"
+                        if sup_line and tp is None:
+                            # Break below ascending support
+                            slope = float(sup_line["slope"])
+                            x1 = float(sup_line["x1"])
+                            y1 = float(sup_line["y1"])
+                            prev_line = y1 + (float(n - 2) - x1) * slope
+                            cur_line = y1 + (float(n - 1) - x1) * slope
+                            if np.isfinite(c0) and np.isfinite(c1) and (c0 > prev_line) and (c1 < cur_line):
+                                lo_v = float(low_arr[-1])
+                                if np.isfinite(lo_v) and lo_v > 0:
+                                    tp = lo_v - (zband * 20.0)
+                                    tp_dir = "short"
+                except Exception:
+                    tp = None
+                    tp_dir = None
+
+                if tbt_lines:
+                    hud["tbt"] = {
+                        "period": int(tbt_period),
+                        "trend_type": trend_type,
+                        "extend_bars": int(tbt_extend),
+                        "zband": float(zband),
+                        "lines": tbt_lines,
+                    }
+                    if tp is not None and np.isfinite(tp) and float(tp) > 0:
+                        hud["tbt"]["tp"] = float(tp)
+                        hud["tbt"]["direction"] = str(tp_dir or "")
+        except Exception:
+            pass
+
+        # ----------------------------
         # Key Levels (RTH + ETH daily)
         # ----------------------------
         try:
@@ -777,7 +945,8 @@ class ChartGenerator:
             raise ImportError("mplfinance required. Install with: pip install mplfinance")
         
         self.config = config or ChartConfig()
-        self.dpi = 150
+        # Default export DPI tuned for Telegram clarity while keeping file sizes reasonable.
+        self.dpi = 200
 
         # Optional historical cache for computing higher-timeframe key levels (SpacemanBTC-style)
         # without requiring long candle windows in the rendered chart.
@@ -957,7 +1126,7 @@ class ChartGenerator:
             facecolor=DARK_BG,
             edgecolor="none",
             bbox_inches="tight",
-            pad_inches=0.35,
+            pad_inches=0.25,
         )
     
     def _limit_yaxis_ticks(self, ax, max_ticks: int = 8) -> None:
@@ -1626,7 +1795,7 @@ class ChartGenerator:
 
         # Create extra right margin so labels aren't clipped (wider for safety)
         try:
-            fig.subplots_adjust(right=0.82)
+            fig.subplots_adjust(right=0.80)
         except Exception:
             pass
 
@@ -1876,7 +2045,7 @@ class ChartGenerator:
             return
 
     def _draw_tbt_overlay(self, ax, hud: Dict) -> None:
-        """Draw trendline breakout target with explicit z-order."""
+        """Draw TBT (ChartPrime) trendlines + optional breakout target."""
         if not self.config.show_tbt_targets:
             return
         tbt = hud.get("tbt") if isinstance(hud, dict) else None
@@ -1884,6 +2053,68 @@ class ChartGenerator:
             return
 
         try:
+            # Trendlines (optional). Stored in bar-index x-space (0..N) so we can draw
+            # directly on mplfinance axes without datetime conversion.
+            lines = tbt.get("lines")
+            try:
+                zband = float(tbt.get("zband") or 0.0)
+            except Exception:
+                zband = 0.0
+            if isinstance(lines, list) and lines:
+                for ln in lines[:4]:  # hard cap to avoid clutter
+                    if not isinstance(ln, dict):
+                        continue
+                    try:
+                        x1 = float(ln.get("x1"))
+                        y1 = float(ln.get("y1"))
+                        x2 = float(ln.get("x2"))
+                        y2 = float(ln.get("y2"))
+                    except Exception:
+                        continue
+                    if not (np.isfinite(x1) and np.isfinite(x2) and np.isfinite(y1) and np.isfinite(y2)):
+                        continue
+
+                    kind = str(ln.get("kind") or "").strip().lower()
+                    # Use high-contrast colors so trendlines remain visible over dense candles.
+                    col = "#ffeb3b" if kind == "resistance" else ("#ff9800" if kind == "support" else TEXT_PRIMARY)
+                    ls = "--" if kind in ("resistance", "support") else ":"
+                    ax.plot(
+                        [x1, x2],
+                        [y1, y2],
+                        color=col,
+                        linewidth=2.0,
+                        alpha=0.75,
+                        linestyle=ls,
+                        zorder=(ZORDER_CANDLES + 0.05),
+                    )
+                    # Optional filled "channel" (ChartPrime style) to make trendlines readable
+                    # without overpowering candles.
+                    if np.isfinite(zband) and float(zband) > 0:
+                        try:
+                            zb = float(zband)
+                            y1a, y2a = (y1 - zb), (y2 - zb)
+                            y1b, y2b = (y1 - (zb * 2.0)), (y2 - (zb * 2.0))
+                            # Neutral band + directional overlay
+                            ax.fill_between(
+                                [x1, x2],
+                                [y1a, y2a],
+                                [y1b, y2b],
+                                color=GRID_COLOR,
+                                alpha=0.10,
+                                zorder=ZORDER_ZONES,
+                            )
+                            ax.fill_between(
+                                [x1, x2],
+                                [y1a, y2a],
+                                [y1, y2],
+                                color=col,
+                                alpha=0.08,
+                                zorder=ZORDER_ZONES,
+                            )
+                        except Exception:
+                            pass
+
+            # Optional: breakout target (TP)
             tp = tbt.get("tp")
             if tp is None:
                 return
@@ -2245,7 +2476,7 @@ class ChartGenerator:
                 facecolor=DARK_BG,
                 edgecolor="none",
                 bbox_inches="tight",
-                pad_inches=0.25,
+                pad_inches=0.20,
             )
             plt.close(fig)
             
@@ -2423,7 +2654,7 @@ class ChartGenerator:
                 facecolor=DARK_BG,
                 edgecolor="none",
                 bbox_inches="tight",
-                pad_inches=0.25,
+                pad_inches=0.20,
             )
             plt.close(fig)
             
@@ -2729,7 +2960,7 @@ class ChartGenerator:
                 facecolor=DARK_BG,
                 edgecolor="none",
                 bbox_inches="tight",
-                pad_inches=0.25,
+                pad_inches=0.20,
             )
             plt.close(fig)
 
@@ -2748,7 +2979,7 @@ class ChartGenerator:
         performance_data: Optional[Dict] = None,
         *,
         figsize: Tuple[float, float] = (16, 9),
-        dpi: int = 150,
+        dpi: int = 200,
     ) -> Optional[Path]:
         """Generate equity curve chart from trades.
         
@@ -2891,7 +3122,7 @@ class ChartGenerator:
                 facecolor=DARK_BG,
                 edgecolor="none",
                 bbox_inches="tight",
-                pad_inches=0.25,
+                pad_inches=0.20,
             )
             plt.close(fig)
             
@@ -3161,7 +3392,8 @@ class ChartGenerator:
                 dpi=effective_dpi,
                 facecolor=DARK_BG,
                 edgecolor='none',
-                bbox_inches='tight'
+                bbox_inches='tight',
+                pad_inches=0.20,
             )
             plt.close(fig)
             
@@ -3181,7 +3413,7 @@ class ChartGenerator:
         lookback_bars: int = 288,
         range_label: Optional[str] = None,
         figsize: Tuple[float, float] = (16, 7),
-        dpi: int = 150,
+        dpi: int = 200,
         render_mode: str = "telegram",
         show_sessions: bool = True,
         show_key_levels: bool = True,

@@ -87,6 +87,9 @@ def format_transparency_footer(
     agent_uptime_seconds: float | None = None,
     gateway_ok: bool | None = None,
     data_age_seconds: float | None = None,
+    *,
+    agent_running: bool | None = None,
+    data_stale: bool | None = None,
 ) -> str:
     """
     Format always-visible system state footer for dashboard.
@@ -103,19 +106,36 @@ def format_transparency_footer(
     """
     parts = []
     
-    # Agent uptime
-    if agent_uptime_seconds is not None:
-        if agent_uptime_seconds < 60:
-            uptime_str = f"{int(agent_uptime_seconds)}s"
-        elif agent_uptime_seconds < 3600:
-            uptime_str = f"{int(agent_uptime_seconds // 60)}m"
+    # Agent uptime / state
+    if agent_running is True:
+        if agent_uptime_seconds is not None:
+            if agent_uptime_seconds < 60:
+                uptime_str = f"{int(agent_uptime_seconds)}s"
+            elif agent_uptime_seconds < 3600:
+                uptime_str = f"{int(agent_uptime_seconds // 60)}m"
+            else:
+                hours = int(agent_uptime_seconds // 3600)
+                mins = int((agent_uptime_seconds % 3600) // 60)
+                uptime_str = f"{hours}h{mins}m"
+            parts.append(f"Agent: {uptime_str}")
         else:
-            hours = int(agent_uptime_seconds // 3600)
-            mins = int((agent_uptime_seconds % 3600) // 60)
-            uptime_str = f"{hours}h{mins}m"
-        parts.append(f"Agent: {uptime_str}")
-    else:
+            parts.append("Agent: ON")
+    elif agent_running is False:
         parts.append("Agent: OFF")
+    else:
+        # Unknown. If we still have an uptime value, show it; otherwise be explicit.
+        if agent_uptime_seconds is not None:
+            if agent_uptime_seconds < 60:
+                uptime_str = f"{int(agent_uptime_seconds)}s"
+            elif agent_uptime_seconds < 3600:
+                uptime_str = f"{int(agent_uptime_seconds // 60)}m"
+            else:
+                hours = int(agent_uptime_seconds // 3600)
+                mins = int((agent_uptime_seconds % 3600) // 60)
+                uptime_str = f"{hours}h{mins}m"
+            parts.append(f"Agent: {uptime_str}")
+        else:
+            parts.append("Agent: ?")
     
     # Gateway status
     if gateway_ok is True:
@@ -133,7 +153,10 @@ def format_transparency_footer(
             age_str = f"{int(data_age_seconds // 60)}m"
         else:
             age_str = f"{int(data_age_seconds // 3600)}h"
-        parts.append(f"Data: {age_str}")
+        if data_stale is True:
+            parts.append(f"Data: {EMOJI_ERROR} {age_str}")
+        else:
+            parts.append(f"Data: {age_str}")
     else:
         parts.append("Data: N/A")
     
@@ -1665,7 +1688,7 @@ def format_glanceable_card(
     symbol: str,
     time_str: str,
     agent_running: bool,
-    gateway_running: bool,
+    gateway_running: bool | None,
     latest_price: float | None = None,
     daily_pnl: float | None = None,
     active_trades_count: int = 0,
@@ -1676,6 +1699,8 @@ def format_glanceable_card(
     ai_ready: bool = True,
     agent_uptime_seconds: float | None = None,
     data_age_seconds: float | None = None,
+    agent_healthy: bool | None = None,
+    data_stale: bool | None = None,
 ) -> str:
     """
     Build ultra-compact glanceable dashboard (5-7 lines max).
@@ -1721,9 +1746,29 @@ def format_glanceable_card(
     lines.append(f"*{symbol}* • {time_str}")
     
     # Status line: Bot + Services
-    agent_dot = EMOJI_OK if agent_running else EMOJI_ERROR
-    gw_dot = EMOJI_OK if gateway_running else EMOJI_ERROR
-    lines.append(f"{EMOJI_BOTS} {bot_display} | Agent {agent_dot} | Gateway {gw_dot}")
+    if not agent_running:
+        agent_dot = EMOJI_ERROR
+    elif agent_healthy is False:
+        agent_dot = EMOJI_WARN
+    elif agent_healthy is None:
+        agent_dot = EMOJI_WARN
+    else:
+        agent_dot = EMOJI_OK
+
+    if gateway_running is True:
+        gw_dot = EMOJI_OK
+    elif gateway_running is False:
+        gw_dot = EMOJI_ERROR
+    else:
+        gw_dot = EMOJI_UNKNOWN
+    if data_stale is True:
+        data_dot = EMOJI_ERROR
+    elif data_stale is False:
+        data_dot = EMOJI_OK
+    else:
+        data_dot = EMOJI_UNKNOWN
+
+    lines.append(f"{EMOJI_BOTS} {bot_display} | Agent {agent_dot} | Gateway {gw_dot} | Data {data_dot}")
     
     # Gates line
     futures_dot = EMOJI_OK if futures_market_open else EMOJI_ERROR if futures_market_open is False else EMOJI_UNKNOWN
@@ -1741,9 +1786,11 @@ def format_glanceable_card(
     
     # Footer: system state
     footer = format_transparency_footer(
-        agent_uptime_seconds=agent_uptime_seconds if agent_running else None,
+        agent_uptime_seconds=agent_uptime_seconds,
         gateway_ok=gateway_running,
         data_age_seconds=data_age_seconds,
+        agent_running=agent_running,
+        data_stale=data_stale,
     )
     lines.append(f"`{footer}`")
     

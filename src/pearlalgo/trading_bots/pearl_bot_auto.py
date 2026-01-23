@@ -993,8 +993,8 @@ def generate_signals(
         
         if confidence >= config["min_confidence"]:
             entry_price = close
-            sl_mult = config.get("stop_loss_atr_mult", 1.5)
-            tp_mult = config.get("take_profit_atr_mult", 2.5)
+            sl_mult = config.get("stop_loss_atr_mult", 3.5)  # WIDE stops
+            tp_mult = config.get("take_profit_atr_mult", 5.0)  # Let winners run
             stop_loss = entry_price - (atr * sl_mult)
             take_profit = entry_price + (atr * tp_mult)
             
@@ -1005,28 +1005,18 @@ def generate_signals(
                 risk_reward = (take_profit - entry_price) / (entry_price - stop_loss)
                 
                 if risk_reward >= config["min_risk_reward"] and not pd.isna(risk_reward):
-                    # Build comprehensive reason string including key levels
-                    reason_parts = ["EMA Cross + VWAP + Volume"]
-                    if sr_signal:
-                        reason_parts.append(sr_signal)
-                    if tbt_signal:
-                        reason_parts.append(tbt_signal)
-                    if sd_signal:
-                        reason_parts.append(sd_signal)
-                    if key_level_reason:
-                        reason_parts.append(key_level_reason)
-                    if vwap_band_signal:
-                        reason_parts.append(f"vwap:{vwap_band_signal}")
-                    
+                    # Use active_indicators for comprehensive reason
                     signal_candidates.append({
                         "direction": "long",
                         "entry_price": float(entry_price),
                         "stop_loss": float(stop_loss),
                         "take_profit": float(take_profit),
-                        "confidence": float(confidence),
+                        "confidence": float(min(confidence, 0.99)),  # Cap at 0.99
                         "risk_reward": float(risk_reward),
-                        "reason": " | ".join(reason_parts),
+                        "reason": f"LONG[{len(active_indicators)}]: " + " | ".join(active_indicators),
                         "indicators": {
+                            "active_count": len(active_indicators),
+                            "active_list": active_indicators,
                             "ema_cross": True,
                             "vwap_position": "above",
                             "vwap_band_signal": vwap_band_signal,
@@ -1040,42 +1030,57 @@ def generate_signals(
                         },
                     })
     
-    # Short signals
+    # Short signals - ALL 8 INDICATORS CONTRIBUTE
     if bearish_cross and price_below_vwap:
-        confidence = 0.7
+        # Base confidence: EMA cross (1) + VWAP position (2) = 0.5
+        confidence = 0.50
+        active_indicators = ["EMA_CROSS", "VWAP_BELOW"]
+        
+        # (3) Volume confirmation - additive
         if volume_confirmed:
-            confidence += 0.1
+            confidence += 0.12
+            active_indicators.append("VOL_CONFIRM")
+        
+        # (4) S&R Power Channel - additive for alignment
         if sr_signal and "short" in sr_signal:
-            confidence = max(confidence, sr_confidence)
+            confidence += 0.08 + (sr_confidence * 0.05)
+            active_indicators.append(f"SR:{sr_signal}")
+        
+        # (5) TBT Trendlines - additive for breakdowns
         if tbt_signal and "short" in tbt_signal:
-            confidence = max(confidence, tbt_confidence)
+            confidence += 0.08 + (tbt_confidence * 0.05)
+            active_indicators.append(f"TBT:{tbt_signal}")
+        
+        # (6) Supply & Demand zones - additive
         if sd_signal and "supply" in sd_signal:
-            confidence = max(confidence, sd_confidence)
+            confidence += 0.10  # Strong boost for supply zone entry
+            active_indicators.append(f"SD:{sd_signal}")
         
-        # VWAP band adjustments for shorts
+        # (7) VWAP band adjustments for shorts
         if vwap_band_signal == "extended_below":
-            confidence -= 0.05  # Reduce confidence when overly extended
+            confidence -= 0.08  # CAUTION: Overly extended, reduce confidence
+            active_indicators.append("VWAP_EXTENDED_CAUTION")
         elif vwap_band_signal == "near_vwap_below":
-            confidence += 0.03  # Slight boost for mean reversion setup
+            confidence += 0.05  # Good: Near VWAP, room to run
+            active_indicators.append("VWAP_NEAR")
         
         # =====================================================================
-        # SPACEMAN KEY LEVEL ADJUSTMENTS FOR SHORTS (CRITICAL)
-        # Key levels are where reversals and breakouts happen
+        # (8) SPACEMAN KEY LEVEL ADJUSTMENTS FOR SHORTS (CRITICAL)
+        # Key levels are where reversals and breakouts happen - HIGHEST IMPACT
         # =====================================================================
-        key_level_reason = ""
         if key_level_signal:
             if key_level_signal == "bounce_resistance_short":
                 # STRONG: Bouncing off resistance level - high probability reversal
-                confidence += key_level_conf_adj
-                key_level_reason = f"KEY_BOUNCE:{key_level_info.get('nearest_resistance_name', 'resistance')}"
+                confidence += key_level_conf_adj + 0.05  # Extra boost for bounces
+                active_indicators.append(f"KEY_BOUNCE:{key_level_info.get('nearest_resistance_name', 'resistance')}")
             elif key_level_signal == "breakout_support_short":
                 # STRONG: Breaking below support - continuation signal
-                confidence += key_level_conf_adj
-                key_level_reason = f"KEY_BREAKOUT:{key_level_info.get('nearest_support_name', 'support')}"
+                confidence += key_level_conf_adj + 0.03
+                active_indicators.append(f"KEY_BREAKOUT:{key_level_info.get('nearest_support_name', 'support')}")
             elif key_level_signal == "near_support_caution":
                 # CAUTION: Approaching support - reduce confidence for shorts
                 confidence += key_level_conf_adj  # This is negative
-                key_level_reason = f"CAUTION:near_{key_level_info.get('nearest_support_name', 'support')}"
+                active_indicators.append("CAUTION_SUPPORT")
         
         # Additional key level proximity checks using enhanced levels
         if key_levels:
@@ -1087,15 +1092,15 @@ def generate_signals(
             if prev_day_high and close < prev_day_high:
                 distance_pct = (prev_day_high - close) / prev_day_high * 100
                 if distance_pct < 0.3:  # Very close to PDH
-                    confidence += 0.08
-                    key_level_reason = key_level_reason or "near_PDH"
+                    confidence += 0.10
+                    active_indicators.append("PDH_BOUNCE")
             
             # Big boost if bouncing off previous week high (PWH)
             if prev_week_high and close < prev_week_high:
                 distance_pct = (prev_week_high - close) / prev_week_high * 100
                 if distance_pct < 0.5:  # Close to PWH
-                    confidence += 0.10
-                    key_level_reason = key_level_reason or "near_PWH"
+                    confidence += 0.12
+                    active_indicators.append("PWH_BOUNCE")
             
             # Check support levels (PDL, PWL are major support)
             prev_day_low = key_levels.get("prev_day_low")
@@ -1106,18 +1111,18 @@ def generate_signals(
                 distance_pct = (close - prev_day_low) / close * 100
                 if distance_pct < 0.3:  # Very close to PDL
                     confidence -= 0.05
-                    key_level_reason = key_level_reason or "approaching_PDL"
+                    active_indicators.append("PDL_CAUTION")
             
             if prev_week_low and close > prev_week_low:
                 distance_pct = (close - prev_week_low) / close * 100
                 if distance_pct < 0.5:  # Close to PWL
                     confidence -= 0.07
-                    key_level_reason = key_level_reason or "approaching_PWL"
+                    active_indicators.append("PWL_CAUTION")
         
         if confidence >= config["min_confidence"]:
             entry_price = close
-            sl_mult = config.get("stop_loss_atr_mult", 1.5)
-            tp_mult = config.get("take_profit_atr_mult", 2.5)
+            sl_mult = config.get("stop_loss_atr_mult", 3.5)  # WIDE stops
+            tp_mult = config.get("take_profit_atr_mult", 5.0)  # Let winners run
             stop_loss = entry_price + (atr * sl_mult)
             take_profit = entry_price - (atr * tp_mult)
             
@@ -1128,28 +1133,18 @@ def generate_signals(
                 risk_reward = (entry_price - take_profit) / (stop_loss - entry_price)
                 
                 if risk_reward >= config["min_risk_reward"] and not pd.isna(risk_reward):
-                    # Build comprehensive reason string including key levels
-                    reason_parts = ["EMA Cross + VWAP + Volume"]
-                    if sr_signal:
-                        reason_parts.append(sr_signal)
-                    if tbt_signal:
-                        reason_parts.append(tbt_signal)
-                    if sd_signal:
-                        reason_parts.append(sd_signal)
-                    if key_level_reason:
-                        reason_parts.append(key_level_reason)
-                    if vwap_band_signal:
-                        reason_parts.append(f"vwap:{vwap_band_signal}")
-                    
+                    # Use active_indicators for comprehensive reason
                     signal_candidates.append({
                         "direction": "short",
                         "entry_price": float(entry_price),
                         "stop_loss": float(stop_loss),
                         "take_profit": float(take_profit),
-                        "confidence": float(confidence),
+                        "confidence": float(min(confidence, 0.99)),  # Cap at 0.99
                         "risk_reward": float(risk_reward),
-                        "reason": " | ".join(reason_parts),
+                        "reason": f"SHORT[{len(active_indicators)}]: " + " | ".join(active_indicators),
                         "indicators": {
+                            "active_count": len(active_indicators),
+                            "active_list": active_indicators,
                             "ema_cross": True,
                             "vwap_position": "below",
                             "vwap_band_signal": vwap_band_signal,

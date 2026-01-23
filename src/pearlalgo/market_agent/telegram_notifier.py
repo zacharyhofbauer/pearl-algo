@@ -31,6 +31,7 @@ from pearlalgo.utils.telegram_alerts import (
     TelegramAlerts,
     TelegramPrefs,
     _format_separator,
+    _truncate_telegram_text,
     _format_uptime,
     _format_currency,
     _format_percentage,
@@ -38,17 +39,18 @@ from pearlalgo.utils.telegram_alerts import (
     format_signal_direction,
     format_signal_confidence_tier,
     format_pnl,
-    format_home_card,
     format_gate_status,
     format_service_status,
     format_session_window,
     safe_label,
+    format_glanceable_card,
     # New UX improvement helpers
     format_activity_pulse,
     format_next_session_time,
     format_signal_action_cue,
     format_signal_timing,
     format_performance_trend,
+    sanitize_telegram_markdown,
     # Standardized terminology constants
     LABEL_AGENT,
     LABEL_GATEWAY,
@@ -65,6 +67,9 @@ from pearlalgo.utils.telegram_ui_contract import (
     MENU_MAIN,
     MENU_SIGNALS,
     MENU_STATUS,
+    MENU_SYSTEM,
+    MENU_SETTINGS,
+    ACTION_REFRESH_DASHBOARD,
     ACTION_DATA_QUALITY,
     ACTION_GATEWAY_STATUS,
 )
@@ -589,110 +594,35 @@ class MarketAgentTelegramNotifier:
         photo_path: Path,
         caption: Optional[str] = None,
         reply_markup=None,
-    ) -> bool:
-        """Send photo to Telegram with optional inline buttons."""
+        return_message: bool = False,
+    ):
+        """Send photo to Telegram with optional inline buttons.
+        
+        Args:
+            photo_path: Path to the photo file
+            caption: Optional caption text
+            reply_markup: Optional inline keyboard markup
+            return_message: If True, return the Message object; otherwise return bool
+            
+        Returns:
+            Message object if return_message=True, else True on success, False on failure
+        """
         if not self.enabled or not self.telegram or not self.telegram.bot:
-            return False
+            return None if return_message else False
         
         try:
             with open(photo_path, 'rb') as photo:
-                await self.telegram.bot.send_photo(
+                msg = await self.telegram.bot.send_photo(
                     chat_id=self.chat_id,
                     photo=photo,
                     caption=caption,
                     parse_mode="Markdown" if caption else None,
                     reply_markup=reply_markup,
                 )
-            return True
+            return msg if return_message else True
         except Exception as e:
             logger.warning(f"Error sending photo: {e}")
-            return False
-
-    async def _send_post_chart_nav(self) -> None:
-        """
-        Send a follow-up navigation message after a chart image.
-        
-        Provides Menu + Signals & Trades buttons so the user can navigate
-        from below the chart without scrolling up.
-        """
-        if not _is_command_handler_running() or not self.telegram:
-            return
-        try:
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-            keyboard = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
-                    InlineKeyboardButton("🎯 Signals & Trades", callback_data=callback_menu(MENU_SIGNALS)),
-                ],
-            ])
-            # Keep the follow-up message minimal; buttons provide the actions.
-            await self.telegram.send_message("Menu", parse_mode=None, reply_markup=keyboard, dedupe=False)
-        except Exception as e:
-            logger.debug(f"Could not send post-chart nav: {e}")
-
-    async def send_dashboard_chart(
-        self,
-        chart_path: Path,
-        symbol: str = "MNQ",
-        timeframe: str = "5m",
-        range_label: str | None = None,
-        current_hours: float | None = None,
-    ) -> bool:
-        """
-        Send dashboard chart to Telegram with minimal caption and timeframe toggle buttons.
-        
-        Args:
-            chart_path: Path to the generated chart image
-            symbol: Symbol for caption
-            timeframe: Timeframe for caption
-            range_label: Optional range label (e.g., "24h")
-            current_hours: Current lookback hours (for highlighting active toggle)
-            
-        Returns:
-            True if sent successfully
-        """
-        if not self.enabled or not self.telegram:
-            return False
-        
-        if not chart_path or not chart_path.exists():
-            logger.warning("Dashboard chart path does not exist")
-            return False
-        
-        try:
-            # Minimal caption (dashboard text message already has full details)
-            if range_label:
-                caption = f"📊 *{symbol}* {range_label} ({timeframe})"
-            else:
-                caption = f"📊 *{symbol}* ({timeframe})"
-            
-            # Build navigation buttons directly on chart (no separate nav message)
-            reply_markup = None
-            if _is_command_handler_running():
-                try:
-                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                    
-                    # Single row with Menu navigation (keep dashboards calm-minimal)
-                    keyboard = [
-                        [
-                            InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
-                        ],
-                    ]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                except Exception as e:
-                    logger.debug(f"Could not build chart nav buttons: {e}")
-                    reply_markup = None
-            
-            success = await self._send_photo(chart_path, caption=caption, reply_markup=reply_markup)
-            
-            if success:
-                logger.debug(f"Dashboard chart sent to Telegram: {chart_path}")
-            else:
-                logger.warning("Failed to send dashboard chart to Telegram")
-            
-            return success
-        except Exception as e:
-            logger.error(f"Error sending dashboard chart: {e}", exc_info=True)
-            return False
+            return None if return_message else False
 
     def _format_professional_signal(self, signal: Dict) -> str:
         """
@@ -1524,15 +1454,18 @@ class MarketAgentTelegramNotifier:
             ErrorHandler.handle_telegram_error(e, "send_heartbeat")
             return False
 
-    async def send_dashboard(self, status: Dict) -> bool:
+    async def send_dashboard(self, status: Dict, chart_path: Optional[Path] = None) -> bool:
         """
-        Send consolidated dashboard message (replaces Status + Heartbeat).
-        
-        Uses the unified Home Card layout for consistency with interactive /status.
-        Adds push-specific enhancements: sparkline, MTF snapshot.
+        Send the main dashboard (canonical).
+
+        - **Visual dashboard** (preferred): chart image + caption + the same 2x2 menu + Refresh buttons.
+        - **Text-only fallback**: same caption text, no image (when chart generation is unavailable).
+
+        This intentionally avoids the old Home Card / sparkline dashboard to prevent UI drift.
         
         Args:
             status: Status dictionary with service information
+            chart_path: Optional path to chart image to embed as visual dashboard
             
         Returns:
             True if sent successfully
@@ -1541,21 +1474,12 @@ class MarketAgentTelegramNotifier:
             return False
 
         try:
-            from pearlalgo.utils.sparkline import (
-                generate_sparkline,
-                format_price_change,
-                format_mtf_snapshot,
-            )
-        except ImportError:
-            # Fallback if sparkline module not available
-            generate_sparkline = lambda x, w=20: "─" * w
-            format_price_change = lambda c, p: f"{((c-p)/p*100) if p else 0:.2f}%"
-            format_mtf_snapshot = lambda t, **kw: "N/A"
-
-        try:
             # Extract values from status dict
-            symbol = status.get('symbol', 'MNQ')
-            current_time = status.get('current_time') or datetime.now(timezone.utc)
+            import os
+            symbol = str(status.get("symbol") or "MNQ")
+            market_label = str(os.getenv("PEARLALGO_MARKET") or "NQ").strip().upper()
+
+            current_time = status.get("current_time") or datetime.now(timezone.utc)
             
             # Format ET time
             time_str = ""
@@ -1567,14 +1491,12 @@ class MarketAgentTelegramNotifier:
                     current_time = current_time.replace(tzinfo=timezone.utc)
                 et_tz = pytz.timezone('US/Eastern')
                 et_time = current_time.astimezone(et_tz)
-                time_str = et_time.strftime("%I:%M %p ET")
+                time_str = et_time.strftime("%I:%M %p ET").lstrip("0")
             except Exception:
                 time_str = current_time.strftime("%H:%M UTC") if hasattr(current_time, 'strftime') else ""
             
-            # Extract all metrics
-            latest_price = status.get('latest_price')
-            paused = status.get("paused", False)
-            pause_reason = status.get("pause_reason")
+            latest_price = status.get("latest_price")
+            paused = bool(status.get("paused", False))
             
             # Gates
             futures_market_open = status.get("futures_market_open")
@@ -1585,218 +1507,247 @@ class MarketAgentTelegramNotifier:
                     futures_market_open = None
             strategy_session_open = status.get("strategy_session_open")
             
-            # Activity metrics
-            cycles_total = int(status.get("cycle_count", 0) or 0)
-            cycles_session = status.get("cycle_count_session")
-            try:
-                cycles_session = int(cycles_session) if cycles_session is not None else None
-            except Exception:
-                cycles_session = None
-            
-            signals_generated = int(status.get("signal_count", 0) or 0)
-            try:
-                signals_sent = int(status.get("signals_sent", 0) or 0)
-            except Exception:
-                signals_sent = 0
-            
-            errors = int(status.get("error_count", 0) or 0)
+            # Buffer size only used for confidence cues (buttons).
             buffer_size = int(status.get("buffer_size", 0) or 0)
-            buffer_target = status.get("buffer_size_target")
-            try:
-                buffer_target = int(buffer_target) if buffer_target is not None else None
-            except Exception:
-                buffer_target = None
-            
-            # Performance
-            performance = status.get("performance", {})
-            
-            # Price change and sparkline
-            price_change_str = None
-            sparkline = None
-            recent_closes = status.get("recent_closes", [])
-            if recent_closes and len(recent_closes) >= 2 and latest_price:
-                first_close = recent_closes[0]
-                price_change_str = format_price_change(latest_price, first_close)
-            if recent_closes and len(recent_closes) >= 5:
-                sparkline = generate_sparkline(recent_closes, width=20)
-            
-            # Build Home Card using unified format
-            # Note: Push dashboard context cannot directly measure gateway status.
-            # Mark gateway_unknown=True to avoid false confidence in UI.
-            # Agent is running if sending dashboards; gateway status is inferred from data flow.
-            
-            # Extract signal send failures from status for error cue
-            signal_send_failures = 0
-            try:
-                signal_send_failures = int(status.get("signals_send_failures", 0) or 0)
-            except Exception:
-                signal_send_failures = 0
-            
-            # Extract quiet_reason and signal_diagnostics for observability
-            quiet_reason = status.get("quiet_reason")
-            signal_diagnostics = status.get("signal_diagnostics")
-            buy_sell_pressure = status.get("buy_sell_pressure")
-            
-            # Compute data age in minutes for v2 staleness callout
-            data_age_minutes = None
-            latest_bar = status.get('latest_bar')
-            if latest_bar and 'timestamp' in latest_bar and latest_bar['timestamp']:
-                try:
-                    bar_time = parse_utc_timestamp(latest_bar['timestamp'])
-                    if bar_time:
-                        if bar_time.tzinfo is None:
-                            bar_time = bar_time.replace(tzinfo=timezone.utc)
-                        age_delta = datetime.now(timezone.utc) - bar_time
-                        data_age_minutes = age_delta.total_seconds() / 60.0
-                except Exception:
-                    pass
-            
-            # Get stale threshold from status or use default
-            data_stale_threshold_minutes = float(status.get("data_stale_threshold_minutes", 10.0))
-            is_data_stale = data_age_minutes is not None and data_age_minutes > data_stale_threshold_minutes
-            
-            # Determine if we can infer gateway status from data flow.
-            # If data is stale or buffer is empty, we can't be confident gateway is working.
-            gateway_uncertain = is_data_stale or buffer_size < 1
-            
-            # Compute activity pulse from last_successful_cycle (same semantics as /activity)
-            last_cycle_seconds = None
-            last_successful_cycle = status.get("last_successful_cycle")
-            if last_successful_cycle:
-                try:
-                    last_cycle_dt = parse_utc_timestamp(str(last_successful_cycle))
-                    if last_cycle_dt:
-                        if last_cycle_dt.tzinfo is None:
-                            last_cycle_dt = last_cycle_dt.replace(tzinfo=timezone.utc)
-                        last_cycle_seconds = (datetime.now(timezone.utc) - last_cycle_dt).total_seconds()
-                except Exception:
-                    pass
-            
-            # Get session times from config for config-driven messaging
-            config_block = status.get("config", {})
-            if isinstance(config_block, dict):
-                session_start = config_block.get("start_time") or config_block.get("session_start_time")
-                session_end = config_block.get("end_time") or config_block.get("session_end_time")
-            else:
-                session_start = None
-                session_end = None
 
-            # Telegram UI formatting options (optional)
-            telegram_ui = status.get("telegram_ui", {})
-            if not isinstance(telegram_ui, dict):
-                telegram_ui = {}
-            compact_metrics_enabled = bool(telegram_ui.get("compact_metrics_enabled", True))
-            show_progress_bars = bool(telegram_ui.get("show_progress_bars", False))
-            show_volume_metrics = bool(telegram_ui.get("show_volume_metrics", True))
+            # Data freshness / level
+            latest_bar = status.get("latest_bar") if isinstance(status.get("latest_bar"), dict) else {}
+            data_level = (latest_bar or {}).get("_data_level")
+            data_age_seconds = None
             try:
-                compact_metric_width = int(telegram_ui.get("compact_metric_width", 10) or 10)
+                ts = (latest_bar or {}).get("timestamp")
+                if ts:
+                    dt = parse_utc_timestamp(str(ts))
+                    if dt and dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt:
+                        data_age_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
             except Exception:
-                compact_metric_width = 10
-            
-            # Extract data level from latest_bar for IBKR data quality visibility
-            data_level = None
-            if latest_bar and isinstance(latest_bar, dict):
-                data_level = latest_bar.get('_data_level')
-            
-            message = format_home_card(
+                data_age_seconds = None
+
+            try:
+                data_stale_threshold_minutes = float(status.get("data_stale_threshold_minutes", 10.0))
+            except Exception:
+                data_stale_threshold_minutes = 10.0
+
+            is_data_stale = False
+            if data_age_seconds is not None:
+                # Only treat as stale when the agent is expected to have fresh data.
+                off_hours = (futures_market_open is False and strategy_session_open is False)
+                if (not paused) and (not off_hours):
+                    is_data_stale = (float(data_age_seconds) / 60.0) > float(data_stale_threshold_minutes)
+
+            # Agent health (glanceable)
+            agent_running = bool(status.get("running", True))
+            last_cycle_seconds = None
+            try:
+                ts = status.get("last_successful_cycle")
+                if ts:
+                    dt = parse_utc_timestamp(str(ts))
+                    if dt and dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt:
+                        last_cycle_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
+            except Exception:
+                last_cycle_seconds = None
+
+            agent_uptime_seconds = None
+            try:
+                st = status.get("start_time")
+                if st:
+                    dt = parse_utc_timestamp(str(st))
+                    if dt and dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if dt:
+                        agent_uptime_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
+            except Exception:
+                agent_uptime_seconds = None
+
+            # Grace period: treat missing last_successful_cycle as healthy during initial startup.
+            agent_healthy: bool | None = None
+            try:
+                if not agent_running:
+                    agent_healthy = None
+                elif last_cycle_seconds is None:
+                    agent_healthy = True if (agent_uptime_seconds is not None and agent_uptime_seconds < 60) else None
+                else:
+                    try:
+                        scan_interval = float((status.get("config") or {}).get("scan_interval") or 30.0)
+                    except Exception:
+                        scan_interval = 30.0
+                    thresh = max(90.0, scan_interval * 2.0)
+                    agent_healthy = bool(last_cycle_seconds <= thresh)
+            except Exception:
+                agent_healthy = None
+
+            # Gateway status: prefer explicit connection status when present.
+            conn = str(status.get("connection_status") or "").lower().strip()
+            if conn == "connected":
+                gateway_running = True
+            elif conn == "disconnected":
+                gateway_running = False
+            else:
+                gateway_running = None
+
+            gateway_uncertain = (gateway_running is None) or (gateway_running is False) or is_data_stale or (buffer_size < 1)
+
+            # Build the /start-style dashboard caption (glanceable card + challenge/perf blocks).
+            message = format_glanceable_card(
                 symbol=symbol,
                 time_str=time_str,
-                agent_running=True,  # If sending dashboard, agent is running
-                gateway_running=not gateway_uncertain,  # Infer from data flow health
+                agent_running=agent_running,
+                gateway_running=gateway_running,
+                latest_price=latest_price,
+                daily_pnl=float(status.get("daily_pnl", 0.0) or 0.0),
+                active_trades_count=int(status.get("active_trades_count", 0) or 0),
                 futures_market_open=futures_market_open,
                 strategy_session_open=strategy_session_open,
-                paused=paused,
-                pause_reason=pause_reason,
-                cycles_session=cycles_session,
-                cycles_total=cycles_total,
-                signals_generated=signals_generated,
-                signals_sent=signals_sent,
-                errors=errors,
-                buffer_size=buffer_size,
-                buffer_target=buffer_target,
-                latest_price=latest_price,
-                performance=performance,
-                sparkline=sparkline,
-                price_change_str=price_change_str,
-                # v2 fields for enhanced confidence/clarity
-                signal_send_failures=signal_send_failures,
-                # Mark gateway as unknown when we can't infer status from data flow
-                gateway_unknown=gateway_uncertain,
-                # v4 fields for quiet reason and signal diagnostics
-                quiet_reason=quiet_reason,
-                signal_diagnostics=signal_diagnostics,
-                buy_sell_pressure=buy_sell_pressure,
-                buy_sell_pressure_raw=status.get("buy_sell_pressure_raw"),
-                # v5 fields: active trades + unrealized PnL (push dashboards)
-                active_trades_count=int(status.get("active_trades_count", 0) or 0),
-                active_trades_unrealized_pnl=status.get("active_trades_unrealized_pnl"),
-                active_trades_price_source=status.get("latest_price_source"),
-                # v6 fields for data staleness
-                data_age_minutes=data_age_minutes,
-                data_stale_threshold_minutes=data_stale_threshold_minutes,
-                # v7 field: activity pulse for push dashboards
-                last_cycle_seconds=last_cycle_seconds,
-                # v8 fields: config-driven session messaging
-                session_start=session_start,
-                session_end=session_end,
-                # v9 field: IBKR data level indicator
-                data_level=data_level,
-                # v10 fields: execution status (make trading state obvious)
-                # Extract from nested execution dict if present
-                execution_enabled=(status.get("execution") or {}).get("enabled", False),
-                execution_armed=(status.get("execution") or {}).get("armed", False),
-                execution_mode=(status.get("execution") or {}).get("mode"),
-                # Config-driven telegram UI formatting
-                compact_metrics_enabled=compact_metrics_enabled,
-                show_progress_bars=show_progress_bars,
-                show_volume_metrics=show_volume_metrics,
-                compact_metric_width=compact_metric_width,
+                market=market_label,
+                trading_bot="scanner",
+                ai_ready=False,
+                agent_uptime_seconds=agent_uptime_seconds,
+                data_age_seconds=data_age_seconds,
+                agent_healthy=agent_healthy,
+                data_stale=(None if data_age_seconds is None else bool(is_data_stale)),
             )
 
-            # Optional: recent exits (compact transparency for push dashboards).
+            # Challenge + performance (best-effort; never block dashboard).
             try:
-                recent_exits = status.get("recent_exits")
-                if isinstance(recent_exits, list) and recent_exits:
-                    message += "\n\n*Recent exits:*"
-                    for t in recent_exits[:3]:
-                        try:
-                            pnl_val = float(t.get("pnl") or 0.0)
-                        except Exception:
-                            pnl_val = 0.0
-                        pnl_emoji, pnl_str = format_pnl(pnl_val)
-                        dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
-                        sig_type = safe_label(str(t.get("type") or "unknown"))
-                        reason = safe_label(str(t.get("exit_reason") or "")).strip()
-                        # Keep each line compact for mobile.
-                        line = f"\n{pnl_emoji} *{pnl_str}* • {dir_emoji} {dir_label} • {sig_type}"
-                        if reason:
-                            line += f" • {reason}"
-                        message += line
+                from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
+                ct = ChallengeTracker(state_dir=self.state_dir)
+                try:
+                    ct.refresh()
+                except Exception:
+                    pass
+
+                message += "\n\n" + ct.get_status_summary(bot_label="Scanner")
+
+                # 30d performance (from SQLite if available)
+                try:
+                    from pearlalgo.learning.trade_database import TradeDatabase
+                    db_path = self.state_dir / "trades.db"
+                    if db_path.exists():
+                        trade_db = TradeDatabase(db_path)
+                        strategy_perf = trade_db.get_performance_by_signal_type(days=30)
+                        if strategy_perf:
+                            total_pnl_all = sum(perf.get("total_pnl", 0.0) for perf in strategy_perf.values())
+                            total_wins = sum(perf.get("wins", 0) for perf in strategy_perf.values())
+                            total_losses = sum(perf.get("losses", 0) for perf in strategy_perf.values())
+                            total_trades = total_wins + total_losses
+                            total_wr = (total_wins / total_trades * 100.0) if total_trades > 0 else 0.0
+                            total_emoji = "🟢" if total_pnl_all >= 0 else "🔴"
+                            message += "\n\n*30d Performance:*"
+                            message += (
+                                f"\n{total_emoji} *Total:* ${total_pnl_all:,.2f} "
+                                f"({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
+                            )
+                except Exception:
+                    pass
+
+                # Challenge (current run) — match screenshot format.
+                try:
+                    ap = ct.get_attempt_performance() or {}
+                    pnl = float(ap.get("total_pnl", 0.0) or 0.0)
+                    balance = float(ap.get("current_balance", 50_000.0) or 50_000.0)
+                    wins = int(ap.get("wins", 0) or 0)
+                    losses = int(ap.get("losses", 0) or 0)
+                    wr = float(ap.get("win_rate", 0.0) or 0.0) * 100.0
+                    pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+                    message += "\n\n*Challenge (current run):*"
+                    message += (
+                        f"\n{pnl_emoji} *Scanner:* ${balance:,.2f} | ${pnl:+,.2f} "
+                        f"({wins}W/{losses}L • {wr:.0f}% WR)"
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            # Support footer (🩺 …) for debugging/sharing (best-effort).
+            try:
+                from importlib.metadata import version as get_version
+                from pearlalgo.utils.logging_config import get_run_id
+
+                ver = None
+                try:
+                    ver = get_version("pearlalgo-dev-ai-agents")
+                except Exception:
+                    ver = "0.2.2"
+                run_id = None
+                try:
+                    run_id = get_run_id()
+                except Exception:
+                    run_id = None
+
+                lvl_map = {
+                    "level1": "L1",
+                    "level2": "L2",
+                    "historical": "HIST",
+                    "historical_fallback": "HIST",
+                    "error": "ERR",
+                    "unknown": "?",
+                }
+                lvl_short = lvl_map.get(str(data_level).strip().lower(), "?")
+
+                def _fmt_dur(sec: float | None) -> str:
+                    if sec is None:
+                        return "?"
+                    try:
+                        s = float(sec)
+                    except Exception:
+                        return "?"
+                    if s < 60:
+                        return f"{int(s)}s"
+                    if s < 3600:
+                        return f"{int(s // 60)}m"
+                    hours = int(s // 3600)
+                    mins = int((s % 3600) // 60)
+                    return f"{hours}h{mins}m"
+
+                age_str = _fmt_dur(data_age_seconds)
+                thr_str = f"{float(data_stale_threshold_minutes):.0f}m"
+                cycle_str = _fmt_dur(last_cycle_seconds)
+                gw = "OK" if gateway_running is True else "OFF" if gateway_running is False else "?"
+                a = "ON" if agent_running else "OFF"
+                v = f" v{ver}" if ver else ""
+                rid = str(run_id or "?").strip()
+                stale_flag = "!" if is_data_stale else ""
+                support = f"`🩺 {market_label}/{symbol}{v} | A:{a} | G:{gw} | D:{lvl_short} {age_str}/{thr_str}{stale_flag} | C:{cycle_str} | run:{rid}`"
+                message += "\n" + support
             except Exception:
                 pass
             
-            # Add MTF snapshot (push-specific enhancement)
-            # V2 spec: Suppress MTF when data is stale to avoid misleading derived context
-            mtf_trends = status.get("mtf_trends", {})
-            if mtf_trends and not is_data_stale:
-                try:
-                    mtf_str = format_mtf_snapshot(mtf_trends, timeframes=["5m", "15m", "1h", "4h", "1D"])
-                    if mtf_str and mtf_str != "N/A":
-                        message += f"\n*MTF:* {mtf_str}"
-                except Exception:
-                    pass
-            
-            # Build navigation buttons (always on when the command handler is running).
+            # Build main menu buttons (only useful when the command handler is running).
             reply_markup = None
             handler_running = _is_command_handler_running()
             if handler_running:
                 try:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+                    # Activity label: include active count when meaningful.
+                    try:
+                        active_cnt = int(status.get("active_trades_count", 0) or 0)
+                    except Exception:
+                        active_cnt = 0
+                    activity_label = f"📊 Activity ({active_cnt})" if active_cnt > 0 else "📊 Activity"
+
+                    # System/Health dots (quick-glance; the card itself remains authoritative).
+                    system_dot = "🟢" if not gateway_uncertain else "🟡"
+                    system_label = f"🎛️ System {system_dot}"
+                    health_label = "🛡️ Health 🔴" if is_data_stale else "🛡️ Health 🟢"
+                    settings_label = "⚙️ Settings"
+
                     keyboard = [
                         [
-                            InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
-                            InlineKeyboardButton("🎯 Signals & Trades", callback_data=callback_menu(MENU_SIGNALS)),
+                            InlineKeyboardButton(activity_label, callback_data=callback_menu("activity")),
+                            InlineKeyboardButton(system_label, callback_data=callback_menu(MENU_SYSTEM)),
+                        ],
+                        [
+                            InlineKeyboardButton(health_label, callback_data=callback_menu(MENU_STATUS)),
+                            InlineKeyboardButton(settings_label, callback_data=callback_menu(MENU_SETTINGS)),
+                        ],
+                        [
+                            InlineKeyboardButton("🔄 Refresh", callback_data=callback_action(ACTION_REFRESH_DASHBOARD)),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1804,14 +1755,17 @@ class MarketAgentTelegramNotifier:
                     logger.debug(f"Could not build dashboard buttons: {e}")
                     reply_markup = None
 
-            # Persist last dashboard time (used by UI Doctor).
+            # Dashboard persistence + pinned behavior.
             try:
                 prefs_live = self._get_prefs()
             except Exception:
                 prefs_live = self.prefs
 
+            bot = getattr(self.telegram, "bot", None)
+            if bot is None:
+                return False
+
             edit_in_place = bool(getattr(prefs_live, "dashboard_edit_in_place", False)) if prefs_live else False
-            message_id = None
             try:
                 message_id = prefs_live.get("dashboard_message_id") if prefs_live else None
             except Exception:
@@ -1819,69 +1773,126 @@ class MarketAgentTelegramNotifier:
 
             sent_at = datetime.now(timezone.utc).isoformat()
 
-            # If pinned mode is enabled, try to edit the existing message first.
-            if edit_in_place and message_id and getattr(self.telegram, "bot", None) is not None:
+            # For visual dashboards, Telegram captions are capped at 1024 chars.
+            caption_md = _truncate_telegram_text(sanitize_telegram_markdown(message), limit=1024)
+            has_chart = bool(chart_path and isinstance(chart_path, Path) and chart_path.exists())
+
+            def _persist(mid: int | None) -> None:
+                try:
+                    if prefs_live:
+                        prefs_live.set("last_dashboard_sent_at", sent_at)
+                        if mid is not None:
+                            prefs_live.set("dashboard_message_id", int(mid))
+                except Exception:
+                    pass
+
+            # If pinned mode is enabled, attempt to update the prior dashboard message in place.
+            if edit_in_place and message_id:
                 try:
                     mid = int(message_id)
-                    try:
-                        await self.telegram.bot.edit_message_text(
-                            chat_id=self.chat_id,
-                            message_id=mid,
-                            text=message,
-                            parse_mode="Markdown",
-                            reply_markup=reply_markup,
-                        )
-                    except Exception:
-                        # Fallback to plain text if Markdown parsing fails.
-                        await self.telegram.bot.edit_message_text(
-                            chat_id=self.chat_id,
-                            message_id=mid,
-                            text=message,
-                            parse_mode=None,
-                            reply_markup=reply_markup,
-                        )
-                    try:
-                        if prefs_live:
-                            prefs_live.set("last_dashboard_sent_at", sent_at)
-                    except Exception:
-                        pass
+                    if has_chart:
+                        # Preferred: update photo + caption together.
+                        try:
+                            from telegram import InputMediaPhoto
+                            with open(chart_path, "rb") as photo:
+                                media = InputMediaPhoto(media=photo, caption=caption_md, parse_mode="Markdown")
+                                await bot.edit_message_media(
+                                    chat_id=self.chat_id,
+                                    message_id=mid,
+                                    media=media,
+                                    reply_markup=reply_markup,
+                                )
+                        except Exception:
+                            # Fallback: update caption only (keeps previous chart media).
+                            try:
+                                await bot.edit_message_caption(
+                                    chat_id=self.chat_id,
+                                    message_id=mid,
+                                    caption=caption_md,
+                                    parse_mode="Markdown",
+                                    reply_markup=reply_markup,
+                                )
+                            except Exception:
+                                # If we can't update media/caption, fall back to sending a new visual dashboard.
+                                raise
+                    else:
+                        # No chart update: prefer caption edit if the message is a photo; fall back to text.
+                        try:
+                            await bot.edit_message_caption(
+                                chat_id=self.chat_id,
+                                message_id=mid,
+                                caption=caption_md,
+                                parse_mode="Markdown",
+                                reply_markup=reply_markup,
+                            )
+                        except Exception:
+                            await bot.edit_message_text(
+                                chat_id=self.chat_id,
+                                message_id=mid,
+                                text=message,
+                                parse_mode="Markdown",
+                                reply_markup=reply_markup,
+                            )
+
+                    _persist(mid)
                     return True
                 except Exception:
-                    # If edit fails (message deleted/too old), fall back to sending new.
+                    # If edit fails (message deleted/too old), fall back to sending a new dashboard.
                     try:
                         if prefs_live:
                             prefs_live.set("dashboard_message_id", None)
                     except Exception:
                         pass
+                    # Keep message_id so we can best-effort delete it below.
 
-            # Default: send a new dashboard message (store message_id if pinned mode is enabled).
-            if getattr(self.telegram, "bot", None) is None:
-                return False
+            # Not pinned (or pinned edit failed): keep chat clean by deleting the previous dashboard, if any.
+            if message_id:
+                try:
+                    await bot.delete_message(chat_id=self.chat_id, message_id=int(message_id))
+                except Exception:
+                    pass
 
+            # Send new dashboard message (photo+caption when chart is provided, otherwise text-only).
             msg_obj = None
-            try:
-                msg_obj = await self.telegram.bot.send_message(
-                    chat_id=self.chat_id,
-                    text=message,
-                    parse_mode="Markdown",
-                    reply_markup=reply_markup,
-                )
-            except Exception:
-                msg_obj = await self.telegram.bot.send_message(
-                    chat_id=self.chat_id,
-                    text=message,
-                    parse_mode=None,
-                    reply_markup=reply_markup,
-                )
+            if has_chart:
+                try:
+                    with open(chart_path, "rb") as photo:
+                        msg_obj = await bot.send_photo(
+                            chat_id=self.chat_id,
+                            photo=photo,
+                            caption=caption_md,
+                            parse_mode="Markdown",
+                            reply_markup=reply_markup,
+                        )
+                except Exception:
+                    # Plain-text fallback if Markdown caption fails.
+                    caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
+                    with open(chart_path, "rb") as photo:
+                        msg_obj = await bot.send_photo(
+                            chat_id=self.chat_id,
+                            photo=photo,
+                            caption=caption_plain,
+                            parse_mode=None,
+                            reply_markup=reply_markup,
+                        )
+            else:
+                try:
+                    msg_obj = await bot.send_message(
+                        chat_id=self.chat_id,
+                        text=message,
+                        parse_mode="Markdown",
+                        reply_markup=reply_markup,
+                    )
+                except Exception:
+                    msg_obj = await bot.send_message(
+                        chat_id=self.chat_id,
+                        text=message,
+                        parse_mode=None,
+                        reply_markup=reply_markup,
+                    )
 
-            try:
-                if prefs_live:
-                    prefs_live.set("last_dashboard_sent_at", sent_at)
-                    if edit_in_place and msg_obj is not None and getattr(msg_obj, "message_id", None) is not None:
-                        prefs_live.set("dashboard_message_id", int(msg_obj.message_id))
-            except Exception:
-                pass
-
+            msg_id = int(getattr(msg_obj, "message_id", 0) or 0) if msg_obj is not None else None
+            _persist(msg_id if msg_id else None)
             return msg_obj is not None
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_dashboard")
@@ -2063,116 +2074,69 @@ class MarketAgentTelegramNotifier:
 
     async def send_startup_notification(self, config: Dict) -> bool:
         """
-        Send service startup notification with configuration, current price, and time.
-        
-        Uses standardized terminology and aligns with Home Card layout.
-        Avoids false confidence in timing claims.
-        
-        Args:
-            config: Configuration dictionary (may include latest_price and current_time)
-            
-        Returns:
-            True if sent successfully
+        Send the rich startup notification (kept intentionally stable).
+
+        This is the **only** non-dashboard startup message. It is followed immediately by
+        the visual dashboard (/start-style) from the running agent.
         """
         if not self.enabled or not self.telegram:
             return False
 
         try:
             from datetime import datetime, timezone
-            from pearlalgo.utils.telegram_alerts import (
-                LABEL_FUTURES, LABEL_SESSION, GATE_OPEN, GATE_CLOSED, GATE_UNKNOWN
-            )
-            
-            message = f"🚀 *NQ {LABEL_AGENT} Started*\n\n"
 
-            # Show current price and time
-            current_time = config.get('current_time')
-            if not current_time:
-                current_time = datetime.now(timezone.utc)
+            # Market label (operator-facing) vs trading symbol (data symbol).
+            market = "NQ"
+            try:
+                import os
+                market = str(os.getenv("PEARLALGO_MARKET") or "NQ").strip().upper()
+            except Exception:
+                market = "NQ"
+
+            symbol = str(config.get("symbol") or "MNQ")
+            latest_price = config.get("latest_price")
+
+            # Current time (format: 06:50:47 PM ET)
+            current_time = config.get("current_time") or datetime.now(timezone.utc)
             if isinstance(current_time, str):
-                # Parse if string
-                try:
-                    current_time = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
-                except:
-                    current_time = datetime.now(timezone.utc)
-            
-            # Format time (ET for US market)
+                parsed = parse_utc_timestamp(current_time)
+                current_time = parsed if parsed else datetime.now(timezone.utc)
+            if getattr(current_time, "tzinfo", None) is None:
+                current_time = current_time.replace(tzinfo=timezone.utc)
             try:
                 import pytz
-                et_tz = pytz.timezone('US/Eastern')
-                if hasattr(current_time, 'astimezone'):
-                    et_time = current_time.astimezone(et_tz)
-                else:
-                    # If timezone-naive, assume UTC
-                    from datetime import timezone as tz
-                    if current_time.tzinfo is None:
-                        current_time = current_time.replace(tzinfo=tz.utc)
-                    et_time = current_time.astimezone(et_tz)
+                et_time = current_time.astimezone(pytz.timezone("US/Eastern"))
                 time_str = et_time.strftime("%I:%M:%S %p ET")
             except Exception:
-                # Fallback to UTC if pytz not available or timezone conversion fails
-                if hasattr(current_time, 'strftime'):
-                    time_str = current_time.strftime("%H:%M:%S UTC")
-                else:
-                    time_str = str(current_time)
-            
-            latest_price = config.get('latest_price')
-            symbol = config.get('symbol', 'NQ')
-            
-            if latest_price:
-                message += f"💰 *Price:* ${latest_price:,.2f} ({symbol})\n"
-            else:
-                message += f"📊 *Symbol:* {symbol}\n"
-            message += f"🕐 *Time:* {time_str}\n"
+                time_str = current_time.strftime("%H:%M:%S UTC")
 
-            # Compact config (single line)
-            timeframe = config.get('timeframe', '1m')
-            scan_interval = config.get('scan_interval', 60)
-            message += f"⚙️ *Config:* {timeframe} timeframe, {scan_interval}s scan\n"
+            timeframe = str(config.get("timeframe") or "5m")
+            scan_interval = int(config.get("scan_interval", 30) or 30)
 
-            # Market gates (using standardized terminology matching Home Card)
             futures_market_open = config.get("futures_market_open")
-            if futures_market_open is None:
-                try:
-                    futures_market_open = bool(get_market_hours().is_market_open())
-                except Exception:
-                    futures_market_open = None
             strategy_session_open = config.get("strategy_session_open")
+            fut_dot = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪️"
+            ses_dot = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪️"
+            fut_txt = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "?"
+            ses_txt = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "?"
 
-            # Use standardized gate status format (matches Home Card)
-            message += format_gate_status(futures_market_open, strategy_session_open) + "\n"
-
-            # What to expect (reduced false confidence in timing)
-            # Get session times from config for config-driven messaging
-            session_start = config.get("start_time")
-            session_end = config.get("end_time")
-            
-            message += "\n*What's next:*\n"
-            handler_running = _is_command_handler_running()
-            if strategy_session_open is True:
-                message += "• Scanning for signals when conditions align\n"
-                if handler_running:
-                    message += "• No guaranteed timing—use /start for live status\n"
-                else:
-                    message += "• No guaranteed timing—watch for dashboard updates\n"
-            elif strategy_session_open is False:
-                next_session = format_next_session_time(session_start, session_end)
-                if session_start and session_end:
-                    session_window = format_session_window(session_start, session_end)
-                    message += f"• Session: {session_window}\n"
-                message += f"• {next_session}\n"
-                if handler_running:
-                    message += "• Use /start for live status\n"
+            msg = f"🚀 {market} Agent Started\n\n"
+            if latest_price is not None:
+                try:
+                    msg += f"💰 Price: ${float(latest_price):,.2f} ({symbol})\n"
+                except Exception:
+                    msg += f"💰 Price: {latest_price} ({symbol})\n"
             else:
-                message += "• Checking market conditions...\n"
-            
-            # Add inline text links that match the message style
-            if handler_running:
-                message += "\n💡 Quick access: /start"
+                msg += f"💰 Price: N/A ({symbol})\n"
+            msg += f"🕐 Time: {time_str}\n"
+            msg += f"⚙️ Config: {timeframe} timeframe, {scan_interval}s scan\n"
+            msg += f"{fut_dot} Futures: {fut_txt} • {ses_dot} Session: {ses_txt}\n\n"
+            msg += "What's next:\n"
+            msg += "• Scanning for signals when conditions align\n"
+            msg += "• No guaranteed timing—watch for dashboard updates"
 
-            # Startup message does not require inline buttons.
-            reply_markup = None
-            await self.telegram.send_message(message, reply_markup=reply_markup)
+            # Startup should always send (no dedupe).
+            await self.telegram.send_message(msg, parse_mode=None, dedupe=False)
             return True
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_startup_notification")

@@ -125,8 +125,18 @@ async def test_telegram_notifications():
         ("Data Quality Alert", lambda: notifier.send_data_quality_alert(
             "stale_data", "Data is 15.3 minutes old (test)", {"age_minutes": 15.3}
         )),
-        ("Startup", lambda: notifier.send_startup_notification({
-            "symbol": "MNQ", "timeframe": "1m", "scan_interval": 30,
+        ("Dashboard", lambda: notifier.send_dashboard({
+            "symbol": "MNQ",
+            "current_time": datetime.now(timezone.utc).isoformat(),
+            "futures_market_open": True,
+            "strategy_session_open": True,
+            "cycle_count": 0,
+            "signal_count": 0,
+            "signals_sent": 0,
+            "signals_send_failures": 0,
+            "error_count": 0,
+            "buffer_size": 0,
+            "buffer_size_target": 300,
         })),
         ("Daily Summary", lambda: notifier.send_daily_summary({
             "total_pnl": 150.0, "wins": 5, "losses": 3, "win_rate": 0.625,
