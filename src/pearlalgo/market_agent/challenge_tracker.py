@@ -333,9 +333,12 @@ class ChallengeTracker:
         logger.info(f"Manual reset: new attempt #{self.current_attempt.attempt_id}")
         return self.current_attempt
 
-    def get_attempt_performance(self) -> Dict[str, Any]:
+    def get_attempt_performance(self, *, unrealized_pnl: Optional[float] = None) -> Dict[str, Any]:
         """
         Get current attempt performance metrics (for Telegram display).
+
+        Args:
+            unrealized_pnl: Optional unrealized PNL from open positions to include in total
 
         Returns:
             Dict with attempt-specific metrics that can replace all-time PnL
@@ -343,28 +346,35 @@ class ChallengeTracker:
         attempt = self.current_attempt
         win_rate = (attempt.wins / attempt.trades * 100) if attempt.trades > 0 else 0.0
 
+        # Include unrealized PNL in total if provided
+        total_pnl = attempt.pnl
+        if unrealized_pnl is not None:
+            total_pnl = attempt.pnl + float(unrealized_pnl)
+
         # Progress towards target (0-100%)
-        if attempt.pnl >= 0:
-            progress_pct = min(100.0, (attempt.pnl / self.config.profit_target) * 100)
+        if total_pnl >= 0:
+            progress_pct = min(100.0, (total_pnl / self.config.profit_target) * 100)
         else:
             progress_pct = 0.0
 
-        # Drawdown risk (0-100%)
-        drawdown_risk_pct = min(100.0, (abs(min(0.0, attempt.pnl)) / self.config.max_drawdown) * 100)
+        # Drawdown risk (0-100%) - use total PNL including unrealized
+        drawdown_risk_pct = min(100.0, (abs(min(0.0, total_pnl)) / self.config.max_drawdown) * 100)
 
         return {
             # Core metrics (replaces all-time performance)
             "wins": attempt.wins,
             "losses": attempt.losses,
             "win_rate": win_rate / 100.0,  # 0-1 scale for compatibility
-            "total_pnl": attempt.pnl,
+            "total_pnl": total_pnl,  # Includes unrealized if provided
+            "realized_pnl": attempt.pnl,  # Realized PNL only
+            "unrealized_pnl": unrealized_pnl if unrealized_pnl is not None else 0.0,
             "exited_signals": attempt.trades,
             # Challenge-specific
             "attempt_id": attempt.attempt_id,
             "attempt_started_at": attempt.started_at,
             "attempt_outcome": attempt.outcome,
             "starting_balance": attempt.starting_balance,
-            "current_balance": attempt.starting_balance + attempt.pnl,
+            "current_balance": attempt.starting_balance + total_pnl,  # Includes unrealized
             "profit_target": self.config.profit_target,
             "max_drawdown": self.config.max_drawdown,
             "progress_pct": progress_pct,
@@ -386,14 +396,18 @@ class ChallengeTracker:
         # Return most recent first
         return list(reversed(history[-limit:]))
 
-    def get_status_summary(self, *, bot_label: Optional[str] = None) -> str:
+    def get_status_summary(self, *, bot_label: Optional[str] = None, unrealized_pnl: Optional[float] = None) -> str:
         """
         Get challenge status as a formatted string for Telegram.
+
+        Args:
+            bot_label: Optional bot label to include in header
+            unrealized_pnl: Optional unrealized PNL from open positions to include in total
 
         Returns:
             Compact summary string for Home Card
         """
-        p = self.get_attempt_performance()
+        p = self.get_attempt_performance(unrealized_pnl=unrealized_pnl)
         pnl = p["total_pnl"]
         pnl_emoji = "🟢" if pnl >= 0 else "🔴"
         pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"

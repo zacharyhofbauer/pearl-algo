@@ -418,4 +418,33 @@ cat data/agent_state/NQ/state.json | jq '.signal_diagnostics_raw'
 
 ---
 
+## 13. Troubleshooting & Maintenance
+
+### Clearing Telegram Chat History
+
+If you need to clear the Telegram chat history with the bot to start fresh:
+
+**On Mobile (iOS/Android):**
+1. Open the Telegram app
+2. Navigate to the chat with your bot (e.g., "PEARLalgo" or "NQ Agent")
+3. Tap on the bot's name/header at the top
+4. Tap "Clear History" or "Delete Chat" (exact wording varies by platform)
+5. Confirm the action
+
+**On Desktop (Telegram Desktop):**
+1. Right-click on the bot chat in the chat list
+2. Select "Clear History" or "Delete Chat"
+3. Confirm the action
+
+**Note:** This only clears the chat history on your device. The bot's state and data (positions, PNL, signals) are stored server-side and are not affected by clearing chat history.
+
+### PNL Not Updating on Refresh
+
+If PNL doesn't update when you tap the Refresh button:
+- **Open positions:** The PNL now includes unrealized PNL from open positions. If positions are shown but PNL is stale, the refresh should now recalculate unrealized PNL automatically.
+- **Virtual positions:** If using virtual PNL mode, positions shown are from signals.jsonl with status="entered". These are tracked positions, not necessarily broker-executed positions.
+- **State file:** The agent service updates the state file with unrealized PNL. If refresh still shows stale data, check that the agent service is running and cycling properly.
+
+---
+
 This cheat sheet is the **primary quick-reference** for PEARLalgo operations. Keep it updated as workflows evolve.

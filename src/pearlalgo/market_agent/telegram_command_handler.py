@@ -17,7 +17,7 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Any, TYPE_CHECKING
+from typing import Optional, Any, TYPE_CHECKING, List
 
 if TYPE_CHECKING:  # pragma: no cover
     import pandas as pd
@@ -445,7 +445,7 @@ class TelegramCommandHandler:
         Single source of truth for 'Back to Menu' navigation.
         Use this everywhere instead of creating buttons manually.
         """
-        return self._nav_back_row()
+        return [InlineKeyboardButton("🏠 Menu", callback_data="back")]
     
     def _nav_footer(self, extra_buttons: list = None) -> list:
         """
@@ -1012,74 +1012,72 @@ class TelegramCommandHandler:
         await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     async def _show_main_menu_with_chart(self, query: CallbackQuery) -> None:
-        """Show the main menu with chart displayed above the menu text."""
+        """Show the main menu with dynamic compact charts (no wide chart)."""
         keyboard = self._get_main_menu_keyboard()
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         state = self._read_state()
         if state:
             try:
-                message_text = await self._build_status_dashboard_message(state)
-                chart_path = await self._generate_or_get_chart(state)
-
-                # Add a compact support footer to make any screenshot/share self-diagnostic.
-                caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
-                text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
+                # Generate compact dynamic charts for each dashboard section
+                chart_paths = await self._generate_dynamic_dashboard_charts(state)
                 
-                if chart_path and chart_path.exists():
-                    try:
-                        message = query.message
-                        # Check if message already has a photo
-                        if message and message.photo:
-                            # Message has photo, edit it
-                            from telegram import InputMediaPhoto
-                            with open(chart_path, 'rb') as f:
-                                await query.edit_message_media(
-                                    media=InputMediaPhoto(
-                                        media=f,
-                                        caption=caption_text,
-                                        parse_mode="Markdown"
-                                    ),
-                                    reply_markup=reply_markup
-                                )
-                        else:
-                            # Message doesn't have photo, delete and send new one with photo
-                            try:
-                                await query.message.delete()
-                            except Exception:
-                                pass
-                            # Send new message with photo
-                            with open(chart_path, 'rb') as f:
-                                await query.message.chat.send_photo(
-                                    photo=f,
-                                    caption=caption_text,
-                                    reply_markup=reply_markup,
-                                    parse_mode="Markdown"
-                                )
-                            await query.answer()  # Acknowledge the callback
-                    except Exception as e:
-                        logger.error(f"Error showing chart: {e}", exc_info=True)
-                        # Fallback to text only
-                        message = query.message
-                        if message and message.photo:
-                            # If we have a photo message, delete it first
-                            try:
-                                await message.delete()
-                            except Exception:
-                                pass
-                            await message.chat.send_message(
-                                text=text_only,
-                                reply_markup=reply_markup,
+                # Build minimal header text (status only, no performance details)
+                message_text = await self._build_status_dashboard_message(state, compact=True)
+                caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
+                
+                if chart_paths and len(chart_paths) > 0:
+                    # Send charts as media group
+                    from telegram import InputMediaPhoto
+                    media_group = []
+                    
+                    # First chart gets the caption with status info
+                    with open(chart_paths[0], 'rb') as f:
+                        media_group.append(
+                            InputMediaPhoto(
+                                media=f,
+                                caption=caption_text,
                                 parse_mode="Markdown"
                             )
-                            await query.answer()
-                        else:
-                            await query.edit_message_text(text_only, reply_markup=reply_markup, parse_mode="Markdown")
+                        )
+                    
+                    # Remaining charts without captions
+                    for chart_path in chart_paths[1:]:
+                        if chart_path.exists():
+                            with open(chart_path, 'rb') as f:
+                                media_group.append(InputMediaPhoto(media=f))
+                    
+                    # Delete old message if it exists
+                    try:
+                        await query.message.delete()
+                    except Exception:
+                        pass
+                    
+                    # Send media group (max 10 photos per group)
+                    if len(media_group) <= 10:
+                        await query.message.chat.send_media_group(media=media_group)
+                        # Send navigation buttons as separate message
+                        await query.message.chat.send_message(
+                            "Select an option:",
+                            reply_markup=reply_markup
+                        )
+                    else:
+                        # If more than 10 charts, send first 10 as group, then rest individually
+                        await query.message.chat.send_media_group(media=media_group[:10])
+                        for chart_path in chart_paths[10:]:
+                            if chart_path.exists():
+                                with open(chart_path, 'rb') as f:
+                                    await query.message.chat.send_photo(photo=f)
+                        await query.message.chat.send_message(
+                            "Select an option:",
+                            reply_markup=reply_markup
+                        )
+                    await query.answer()
                 else:
-                    # No chart available - just show text menu quickly
+                    # Fallback to text-only if charts unavailable
+                    text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
                     message = query.message
                     if message and message.photo:
-                        # If we have a photo message, delete it first
                         try:
                             await message.delete()
                         except Exception:
@@ -1093,7 +1091,7 @@ class TelegramCommandHandler:
                     else:
                         await query.edit_message_text(text_only, reply_markup=reply_markup, parse_mode="Markdown")
             except Exception as e:
-                logger.error(f"Error showing main menu with chart: {e}", exc_info=True)
+                logger.error(f"Error showing main menu with charts: {e}", exc_info=True)
                 await self._show_main_menu(query)
         else:
             text = self._with_support_footer(
@@ -1152,9 +1150,9 @@ class TelegramCommandHandler:
             await self._show_main_menu(query)
 
     async def _send_visual_dashboard(self, message_obj) -> None:
-        """Send visual dashboard with 12h chart to a new message (for /start).
+        """Send visual dashboard with dynamic compact charts (no wide chart).
         
-        This is the primary dashboard view - always includes chart when available.
+        This is the primary dashboard view - sends multiple compact charts for each section.
         Used for initial messages (not callback edits).
         """
         keyboard = self._get_main_menu_keyboard()
@@ -1169,24 +1167,58 @@ class TelegramCommandHandler:
             return
         
         try:
-            message_text = await self._build_status_dashboard_message(state)
-            chart_path = await self._generate_or_get_chart(state)
-
-            # Always include the support footer on the primary dashboard.
-            caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
-            text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
+            # Generate compact dynamic charts for each dashboard section
+            chart_paths = await self._generate_dynamic_dashboard_charts(state)
             
-            if chart_path and chart_path.exists():
-                # Send photo with caption
-                with open(chart_path, 'rb') as f:
-                    await message_obj.reply_photo(
-                        photo=f,
-                        caption=caption_text,
-                        reply_markup=reply_markup,
-                        parse_mode="Markdown"
+            # Build minimal header text (status only, no performance details)
+            message_text = await self._build_status_dashboard_message(state, compact=True)
+            caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
+            
+            if chart_paths and len(chart_paths) > 0:
+                # Send charts as media group
+                from telegram import InputMediaPhoto
+                media_group = []
+                
+                # First chart gets the caption with status info
+                with open(chart_paths[0], 'rb') as f:
+                    media_group.append(
+                        InputMediaPhoto(
+                            media=f,
+                            caption=caption_text,
+                            parse_mode="Markdown"
+                        )
+                    )
+                
+                # Remaining charts without captions (to avoid clutter)
+                for chart_path in chart_paths[1:]:
+                    if chart_path.exists():
+                        with open(chart_path, 'rb') as f:
+                            media_group.append(InputMediaPhoto(media=f))
+                
+                # Send media group (max 10 photos per group)
+                if len(media_group) <= 10:
+                    await message_obj.reply_media_group(
+                        media=media_group
+                    )
+                    # Send navigation buttons as separate message
+                    await message_obj.reply_text(
+                        "Select an option:",
+                        reply_markup=reply_markup
+                    )
+                else:
+                    # If more than 10 charts, send first 10 as group, then rest individually
+                    await message_obj.reply_media_group(media=media_group[:10])
+                    for chart_path in chart_paths[10:]:
+                        if chart_path.exists():
+                            with open(chart_path, 'rb') as f:
+                                await message_obj.reply_photo(photo=f)
+                    await message_obj.reply_text(
+                        "Select an option:",
+                        reply_markup=reply_markup
                     )
             else:
-                # Fallback to text-only if chart unavailable
+                # Fallback to text-only if charts unavailable
+                text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
                 await message_obj.reply_text(
                     text_only,
                     reply_markup=reply_markup,
@@ -1227,7 +1259,7 @@ class TelegramCommandHandler:
             service_cfg = (svc_cfg.get("service", {}) or {}) if isinstance(svc_cfg, dict) else {}
             min_lookback_hours = 6.0
             max_lookback_hours = 24.0
-            lookback_hours = float(service_cfg.get("dashboard_chart_lookback_hours", 12) or 12)
+            lookback_hours = float(service_cfg.get("dashboard_chart_lookback_hours", 8) or 8)
             if lookback_hours < min_lookback_hours:
                 lookback_hours = min_lookback_hours
             if lookback_hours > max_lookback_hours:
@@ -1345,6 +1377,148 @@ class TelegramCommandHandler:
             if chart_path.exists():
                 return chart_path
             return None
+
+    async def _generate_dynamic_dashboard_charts(self, state: dict) -> List[Path]:
+        """Generate compact dynamic charts for each dashboard section.
+        
+        Returns a list of chart paths for: Challenge, Performance, Recent exits, etc.
+        Each chart is compact and focused on a specific metric.
+        """
+        chart_paths = []
+        try:
+            import asyncio
+            from datetime import timedelta
+            from pearlalgo.market_agent.chart_generator import ChartGenerator
+            from pearlalgo.data_providers.ibkr.ibkr_provider import IBKRProvider
+            from pearlalgo.config.config_loader import load_service_config
+            from pearlalgo.utils.volume_pressure import timeframe_to_minutes
+            
+            symbol = state.get("symbol") or "MNQ"
+            
+            # Use shorter lookback for compact charts (4h instead of 8h)
+            lookback_hours = 4.0
+            chosen_tf = "5m"  # Fixed 5m for compact charts
+            tf_mins = 5.0
+            bars_target = int((lookback_hours * 60.0) / tf_mins)
+            bars_target = max(20, min(200, bars_target))  # Limit for compact charts
+            
+            # Create provider
+            provider = IBKRProvider(client_id=99)
+            try:
+                connected = await provider.validate_connection()
+                if not connected:
+                    logger.warning("Could not connect to IBKR for dynamic chart generation")
+                    return chart_paths
+                
+                end = datetime.now(timezone.utc)
+                start = end - timedelta(hours=lookback_hours)
+                
+                # Fetch data
+                df = await asyncio.to_thread(
+                    provider.fetch_historical,
+                    symbol,
+                    start,
+                    end,
+                    chosen_tf,
+                )
+                
+                if df is None or df.empty or len(df) < 20:
+                    logger.debug(f"Not enough data for dynamic charts: {len(df) if df is not None else 0} bars")
+                    return chart_paths
+                
+                chart_gen = ChartGenerator()
+                chart_gen.config.right_pad_bars = 20  # Less padding for compact charts
+                
+                # Get trades for markers
+                trades = self._get_trades_for_chart(df, symbol)
+                
+                # Generate compact charts for each section
+                # 1. Challenge chart (compact, shows recent price action with challenge context)
+                try:
+                    challenge_chart = chart_gen.generate_dashboard_chart(
+                        data=df,
+                        symbol=symbol,
+                        timeframe=chosen_tf,
+                        lookback_bars=min(int(bars_target), len(df)),
+                        range_label="4h",
+                        figsize=(10, 4),  # Compact size
+                        dpi=120,
+                        show_sessions=True,
+                        show_key_levels=True,
+                        show_vwap=True,
+                        show_ma=True,
+                        ma_periods=[20, 50],  # Fewer MAs for compact
+                        show_rsi=False,  # No RSI for compact
+                        show_pressure=False,  # No pressure for compact
+                        trades=trades,
+                    )
+                    if challenge_chart and challenge_chart.exists():
+                        chart_paths.append(challenge_chart)
+                except Exception as e:
+                    logger.debug(f"Error generating challenge chart: {e}")
+                
+                # 2. Performance chart (similar compact view)
+                try:
+                    perf_chart = chart_gen.generate_dashboard_chart(
+                        data=df,
+                        symbol=symbol,
+                        timeframe=chosen_tf,
+                        lookback_bars=min(int(bars_target), len(df)),
+                        range_label="4h",
+                        figsize=(10, 4),
+                        dpi=120,
+                        show_sessions=True,
+                        show_key_levels=False,  # Less clutter
+                        show_vwap=True,
+                        show_ma=True,
+                        ma_periods=[20],
+                        show_rsi=False,
+                        show_pressure=False,
+                        trades=trades,
+                    )
+                    if perf_chart and perf_chart.exists():
+                        chart_paths.append(perf_chart)
+                except Exception as e:
+                    logger.debug(f"Error generating performance chart: {e}")
+                
+                # 3. Recent exits chart (focused on recent trades)
+                try:
+                    # Filter trades to only recent exits
+                    recent_trades = [t for t in (trades or []) if t.get("exit_time")] if trades else []
+                    recent_trades = sorted(recent_trades, key=lambda x: x.get("exit_time", ""), reverse=True)[:5]
+                    
+                    exits_chart = chart_gen.generate_dashboard_chart(
+                        data=df,
+                        symbol=symbol,
+                        timeframe=chosen_tf,
+                        lookback_bars=min(int(bars_target), len(df)),
+                        range_label="4h",
+                        figsize=(10, 4),
+                        dpi=120,
+                        show_sessions=True,
+                        show_key_levels=False,
+                        show_vwap=True,
+                        show_ma=False,  # Minimal for exits view
+                        ma_periods=[],
+                        show_rsi=False,
+                        show_pressure=False,
+                        trades=recent_trades,  # Only recent exits
+                    )
+                    if exits_chart and exits_chart.exists():
+                        chart_paths.append(exits_chart)
+                except Exception as e:
+                    logger.debug(f"Error generating exits chart: {e}")
+                
+            finally:
+                try:
+                    await provider.close()
+                except Exception:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Error generating dynamic dashboard charts: {e}", exc_info=True)
+        
+        return chart_paths
 
     async def _show_status_menu(self, query: CallbackQuery) -> None:
         """Show health & diagnostics submenu."""
@@ -3370,8 +3544,13 @@ class TelegramCommandHandler:
         message_text = self._with_support_footer(message_text, state=state, max_chars=4096)
         await message_obj.reply_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
 
-    async def _build_status_dashboard_message(self, state: dict) -> str:
-        """Build the comprehensive status dashboard message from state."""
+    async def _build_status_dashboard_message(self, state: dict, compact: bool = False) -> str:
+        """Build the comprehensive status dashboard message from state.
+        
+        Args:
+            state: State dictionary
+            compact: If True, only include status info (no performance sections - those become charts)
+        """
         try:
             # Canonical dashboard text builder (glanceable + ops/perf blocks).
             symbol = state.get("symbol", "MNQ")
@@ -3601,7 +3780,19 @@ class TelegramCommandHandler:
                 try:
                     challenge_tracker_instance = ChallengeTracker(state_dir=self.state_dir)
                     challenge_tracker_instance.refresh()  # Reload from file
-                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label=trading_bot_label)
+                    
+                    # Get unrealized PNL from state if available
+                    unrealized_pnl = active_trades_unrealized_pnl
+                    if unrealized_pnl is not None:
+                        try:
+                            unrealized_pnl = float(unrealized_pnl)
+                        except (ValueError, TypeError):
+                            unrealized_pnl = None
+                    
+                    challenge_status = challenge_tracker_instance.get_status_summary(
+                        bot_label=trading_bot_label, 
+                        unrealized_pnl=unrealized_pnl
+                    )
                     if not challenge_status:
                         logger.warning("Challenge tracker returned empty status summary")
                     else:
@@ -3613,7 +3804,14 @@ class TelegramCommandHandler:
                 
                 # Also check if performance should include attempt_id
                 if challenge_status and not performance.get("attempt_id"):
-                    attempt_perf = challenge_tracker_instance.get_attempt_performance()
+                    # Use same unrealized_pnl for attempt performance
+                    unrealized_pnl = active_trades_unrealized_pnl
+                    if unrealized_pnl is not None:
+                        try:
+                            unrealized_pnl = float(unrealized_pnl)
+                        except (ValueError, TypeError):
+                            unrealized_pnl = None
+                    attempt_perf = challenge_tracker_instance.get_attempt_performance(unrealized_pnl=unrealized_pnl)
                     if attempt_perf:
                         performance = dict(performance) if performance else {}
                         performance["attempt_id"] = attempt_perf.get("attempt_id")
@@ -3657,7 +3855,17 @@ class TelegramCommandHandler:
             if not challenge_status and challenge_tracker_instance:
                 try:
                     challenge_tracker_instance.refresh()
-                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label=trading_bot_label)
+                    # Get unrealized PNL from state if available
+                    unrealized_pnl = active_trades_unrealized_pnl
+                    if unrealized_pnl is not None:
+                        try:
+                            unrealized_pnl = float(unrealized_pnl)
+                        except (ValueError, TypeError):
+                            unrealized_pnl = None
+                    challenge_status = challenge_tracker_instance.get_status_summary(
+                        bot_label=trading_bot_label, 
+                        unrealized_pnl=unrealized_pnl
+                    )
                 except Exception as e:
                     logger.error(f"Could not reload challenge status: {e}", exc_info=True)
             
@@ -3667,7 +3875,17 @@ class TelegramCommandHandler:
                     from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
                     challenge_tracker_instance = ChallengeTracker(state_dir=self.state_dir)
                     challenge_tracker_instance.refresh()
-                    challenge_status = challenge_tracker_instance.get_status_summary(bot_label=trading_bot_label)
+                    # Get unrealized PNL from state if available
+                    unrealized_pnl = active_trades_unrealized_pnl
+                    if unrealized_pnl is not None:
+                        try:
+                            unrealized_pnl = float(unrealized_pnl)
+                        except (ValueError, TypeError):
+                            unrealized_pnl = None
+                    challenge_status = challenge_tracker_instance.get_status_summary(
+                        bot_label=trading_bot_label,
+                        unrealized_pnl=unrealized_pnl
+                    )
                     logger.info(f"Challenge status loaded: {challenge_status[:50] if challenge_status else 'None'}...")
                 except Exception as e:
                     logger.error(f"Could not load challenge at all: {e}", exc_info=True)
@@ -3681,7 +3899,14 @@ class TelegramCommandHandler:
             elif challenge_tracker_instance:
                 # If we have tracker but no status, try to get it directly
                 try:
-                    attempt_perf = challenge_tracker_instance.get_attempt_performance()
+                    # Get unrealized PNL from state if available
+                    unrealized_pnl = active_trades_unrealized_pnl
+                    if unrealized_pnl is not None:
+                        try:
+                            unrealized_pnl = float(unrealized_pnl)
+                        except (ValueError, TypeError):
+                            unrealized_pnl = None
+                    attempt_perf = challenge_tracker_instance.get_attempt_performance(unrealized_pnl=unrealized_pnl)
                     if attempt_perf:
                         pnl = attempt_perf.get("total_pnl", 0.0)
                         pnl_emoji = "🟢" if pnl >= 0 else "🔴"
@@ -3717,7 +3942,17 @@ class TelegramCommandHandler:
                         config = challenge_data.get("config", {})
                         
                         # attempt_id intentionally not shown in UI (we label by bot instead)
-                        pnl = current_attempt.get("pnl", 0.0)
+                        # Include unrealized PNL if available
+                        realized_pnl = current_attempt.get("pnl", 0.0)
+                        unrealized_pnl_val = active_trades_unrealized_pnl
+                        if unrealized_pnl_val is not None:
+                            try:
+                                unrealized_pnl_val = float(unrealized_pnl_val)
+                            except (ValueError, TypeError):
+                                unrealized_pnl_val = 0.0
+                        else:
+                            unrealized_pnl_val = 0.0
+                        pnl = realized_pnl + unrealized_pnl_val
                         balance = config.get("start_balance", 50000.0) + pnl
                         trades = current_attempt.get("trades", 0)
                         wins = current_attempt.get("wins", 0)
@@ -3744,6 +3979,10 @@ class TelegramCommandHandler:
             
             if not challenge_displayed:
                 logger.warning("Challenge status could not be displayed despite file existing")
+            
+            # Skip performance sections in compact mode (they become charts)
+            if compact:
+                return message
             
             # Always show 7d all-time performance if available (matches screenshot format)
             # Show it even if challenge_status exists, as it's separate historical data
@@ -3789,7 +4028,16 @@ class TelegramCommandHandler:
             # Challenge (current run)
             if challenge_tracker_instance:
                 try:
-                    attempt_perf = challenge_tracker_instance.get_attempt_performance() or {}
+                    # Get unrealized PNL from state if available
+                    active_trades_unrealized_pnl = state.get("active_trades_unrealized_pnl")
+                    unrealized_pnl = None
+                    if active_trades_unrealized_pnl is not None:
+                        try:
+                            unrealized_pnl = float(active_trades_unrealized_pnl)
+                        except (ValueError, TypeError):
+                            unrealized_pnl = None
+                    
+                    attempt_perf = challenge_tracker_instance.get_attempt_performance(unrealized_pnl=unrealized_pnl) or {}
                     pnl = float(attempt_perf.get("total_pnl", 0.0) or 0.0)
                     balance = float(
                         attempt_perf.get(

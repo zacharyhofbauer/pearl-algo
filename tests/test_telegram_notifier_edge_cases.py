@@ -346,6 +346,7 @@ class TestHomeCardFormatting:
             gateway_running=True,
             futures_market_open=True,
             strategy_session_open=True,
+            legacy=True,
         )
         
         assert isinstance(result, str)
@@ -370,6 +371,7 @@ class TestHomeCardFormatting:
             signal_send_failures=2,
             errors=5,
             buffer_size=100,
+            legacy=True,
         )
         
         assert isinstance(result, str)
@@ -388,6 +390,7 @@ class TestHomeCardFormatting:
             strategy_session_open=True,
             paused=True,
             pause_reason="connection_failures",
+            legacy=True,
         )
         
         assert isinstance(result, str)

@@ -23,6 +23,7 @@ class TestDataLevelDashboard:
             strategy_session_open=True,
             latest_price=17500.0,
             data_level="level1",
+            legacy=True,
         )
 
         # Level 1 should not add extra noise when healthy
@@ -41,6 +42,7 @@ class TestDataLevelDashboard:
             strategy_session_open=True,
             latest_price=17500.0,
             data_level="historical",
+            legacy=True,
         )
 
         assert "📡 *Data:*" in message
@@ -59,6 +61,7 @@ class TestDataLevelDashboard:
             strategy_session_open=True,
             latest_price=17500.0,
             data_level="historical_fallback",
+            legacy=True,
         )
 
         assert "📡 *Data:*" in message
@@ -77,6 +80,7 @@ class TestDataLevelDashboard:
             strategy_session_open=True,
             latest_price=17500.0,
             data_level="error",
+            legacy=True,
         )
 
         assert "📡 *Data:*" in message
@@ -95,6 +99,7 @@ class TestDataLevelDashboard:
             strategy_session_open=True,
             latest_price=17500.0,
             data_level="unknown",
+            legacy=True,
         )
 
         assert "📡 *Data:*" in message
@@ -113,6 +118,7 @@ class TestDataLevelDashboard:
             strategy_session_open=True,
             latest_price=17500.0,
             data_level=None,
+            legacy=True,
         )
 
         # Should not show data line when healthy/unknown
@@ -132,6 +138,7 @@ class TestDataLevelDashboard:
             strategy_session_open=True,
             latest_price=17500.0,
             data_level="HISTORICAL",
+            legacy=True,
         )
 
         assert "📜 Hist" in message_upper
@@ -146,6 +153,7 @@ class TestDataLevelDashboard:
             strategy_session_open=True,
             latest_price=17500.0,
             data_level="Level1",
+            legacy=True,
         )
 
         # Level1 (any case) should not show extra indicator

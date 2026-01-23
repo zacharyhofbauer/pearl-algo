@@ -77,6 +77,15 @@ CONFIG = ConfigView({
     "min_confidence": 0.55,         # Allow trades with strong confluence
     "min_risk_reward": 1.3,         # Maintain decent R:R with wide stops
 
+    # Aggressive mode knobs (OFF by default; enable via config overrides)
+    # When enabled, allows additional entry triggers beyond EMA crossover.
+    "allow_vwap_cross_entries": False,
+    "allow_vwap_retest_entries": False,
+    "allow_trend_momentum_entries": False,
+    "trend_momentum_atr_mult": 0.5,
+    "allow_trend_breakout_entries": False,
+    "trend_breakout_lookback_bars": 5,
+
     # Virtual PnL grading (signal-only; no live execution)
     # Used by MarketAgentService virtual trade exits and tests.
     "virtual_pnl_enabled": True,
@@ -659,6 +668,33 @@ def check_vwap_position(df: pd.DataFrame, config: Dict) -> Tuple[bool, bool]:
     return price_above_vwap, price_below_vwap
 
 
+def detect_vwap_cross(df: pd.DataFrame) -> Tuple[bool, bool]:
+    """
+    Detect VWAP cross on the latest bar.
+
+    Returns: (bullish_vwap_cross, bearish_vwap_cross)
+    """
+    if df.empty or len(df) < 2 or "close" not in df.columns:
+        return False, False
+
+    try:
+        vwap = calculate_vwap(df)
+        close_prev = float(df["close"].iloc[-2])
+        close_curr = float(df["close"].iloc[-1])
+        vwap_prev = float(vwap.iloc[-2])
+        vwap_curr = float(vwap.iloc[-1])
+    except Exception:
+        return False, False
+
+    # NaN guards
+    if any(pd.isna(x) for x in (close_prev, close_curr, vwap_prev, vwap_curr)):
+        return False, False
+
+    bullish = close_prev <= vwap_prev and close_curr > vwap_curr
+    bearish = close_prev >= vwap_prev and close_curr < vwap_curr
+    return bool(bullish), bool(bearish)
+
+
 def check_volume_confirmation(df: pd.DataFrame, config: Dict) -> bool:
     """Check volume confirmation - from Volume.pine"""
     if len(df) < config["volume_ma_length"]:
@@ -811,6 +847,7 @@ def generate_signals(
     atr_series = calculate_atr(df, period=14)
     atr = atr_series.iloc[-1] if not atr_series.empty else None
     close = df["close"].iloc[-1]
+    prev_close = df["close"].iloc[-2] if len(df) > 1 else close
     
     # Guard: ATR must be valid and positive for SL/TP calculation
     if atr is None or pd.isna(atr) or atr <= 0:
@@ -822,6 +859,80 @@ def generate_signals(
     
     # 2. VWAP position (core - required)
     price_above_vwap, price_below_vwap = check_vwap_position(df, config)
+
+    # Optional aggressive triggers (gated by config)
+    allow_vwap_cross_entries = bool(config.get("allow_vwap_cross_entries", False))
+    allow_vwap_retest_entries = bool(config.get("allow_vwap_retest_entries", False))
+    allow_trend_momentum_entries = bool(config.get("allow_trend_momentum_entries", False))
+    allow_trend_breakout_entries = bool(config.get("allow_trend_breakout_entries", False))
+    bullish_vwap_cross, bearish_vwap_cross = False, False
+    vwap_retest_long, vwap_retest_short = False, False
+    trend_momentum_long, trend_momentum_short = False, False
+    trend_breakout_long, trend_breakout_short = False, False
+    ema_bull_trend, ema_bear_trend = False, False
+    vwap_curr: Optional[float] = None
+    if (
+        allow_vwap_cross_entries
+        or allow_vwap_retest_entries
+        or allow_trend_momentum_entries
+        or allow_trend_breakout_entries
+    ):
+        # VWAP series (for retest checks)
+        try:
+            vwap_series = calculate_vwap(df)
+            vwap_curr = float(vwap_series.iloc[-1])
+            if pd.isna(vwap_curr):
+                vwap_curr = None
+        except Exception:
+            vwap_curr = None
+
+        # VWAP cross (event-like trigger)
+        if allow_vwap_cross_entries:
+            bullish_vwap_cross, bearish_vwap_cross = detect_vwap_cross(df)
+
+        # EMA trend (used to align aggressive triggers with direction)
+        try:
+            ema_fast = calculate_ema(df, config.get("ema_fast", 9))
+            ema_slow = calculate_ema(df, config.get("ema_slow", 21))
+            ema_bull_trend = bool(ema_fast.iloc[-1] > ema_slow.iloc[-1])
+            ema_bear_trend = bool(ema_fast.iloc[-1] < ema_slow.iloc[-1])
+        except Exception:
+            ema_bull_trend, ema_bear_trend = False, False
+
+        # VWAP retest (wick-through + close back on trend side)
+        if allow_vwap_retest_entries and vwap_curr is not None:
+            try:
+                low = float(df["low"].iloc[-1])
+                high = float(df["high"].iloc[-1])
+                vwap_retest_long = bool(ema_bull_trend and (low <= vwap_curr) and (close > vwap_curr))
+                vwap_retest_short = bool(ema_bear_trend and (high >= vwap_curr) and (close < vwap_curr))
+            except Exception:
+                vwap_retest_long, vwap_retest_short = False, False
+
+        # Trend breakout (new local high/low in direction of trend)
+        if allow_trend_breakout_entries:
+            try:
+                lookback = int(config.get("trend_breakout_lookback_bars", 5) or 5)
+                lookback = max(1, lookback)
+                if len(df) >= lookback + 1:
+                    prev_slice = df.iloc[-(lookback + 1) : -1]  # exclude current bar
+                    prev_high = float(prev_slice["high"].max())
+                    prev_low = float(prev_slice["low"].min())
+                    trend_breakout_long = bool(ema_bull_trend and price_above_vwap and float(close) > prev_high)
+                    trend_breakout_short = bool(ema_bear_trend and price_below_vwap and float(close) < prev_low)
+            except Exception:
+                trend_breakout_long, trend_breakout_short = False, False
+
+        # Trend momentum (strong candle in direction of trend)
+        if allow_trend_momentum_entries:
+            try:
+                mult = float(config.get("trend_momentum_atr_mult", 0.5) or 0.5)
+                mult = max(0.0, mult)
+                move = float(close) - float(prev_close)
+                trend_momentum_long = bool(ema_bull_trend and price_above_vwap and move >= float(atr) * mult)
+                trend_momentum_short = bool(ema_bear_trend and price_below_vwap and (-move) >= float(atr) * mult)
+            except Exception:
+                trend_momentum_long, trend_momentum_short = False, False
     
     # 3. Volume confirmation (core - required)
     volume_confirmed = check_volume_confirmation(df, config)
@@ -903,10 +1014,31 @@ def generate_signals(
     signal_candidates = []
     
     # Long signals - ALL 8 INDICATORS CONTRIBUTE
-    if bullish_cross and price_above_vwap:
-        # Base confidence: EMA cross (1) + VWAP position (2) = 0.5
+    long_trigger = (
+        bullish_cross
+        or (allow_vwap_cross_entries and bullish_vwap_cross and ema_bull_trend)
+        or (allow_vwap_retest_entries and vwap_retest_long)
+        or (allow_trend_momentum_entries and trend_momentum_long)
+        or (allow_trend_breakout_entries and trend_breakout_long)
+    )
+    if long_trigger and price_above_vwap:
+        # Base confidence: EMA/VWAP trigger + VWAP position = 0.5
         confidence = 0.50
-        active_indicators = ["EMA_CROSS", "VWAP_ABOVE"]
+        if bullish_cross:
+            entry_trigger = "ema_cross"
+            active_indicators = ["EMA_CROSS", "VWAP_ABOVE"]
+        elif bullish_vwap_cross:
+            entry_trigger = "vwap_cross"
+            active_indicators = ["EMA_TREND", "VWAP_CROSS_UP", "VWAP_ABOVE"]
+        elif vwap_retest_long:
+            entry_trigger = "vwap_retest"
+            active_indicators = ["EMA_TREND", "VWAP_RETEST_UP", "VWAP_ABOVE"]
+        elif trend_breakout_long:
+            entry_trigger = "trend_breakout"
+            active_indicators = ["EMA_TREND", "TREND_BREAKOUT", "VWAP_ABOVE"]
+        else:
+            entry_trigger = "trend_momentum"
+            active_indicators = ["EMA_TREND", "TREND_MOMENTUM", "VWAP_ABOVE"]
         
         # (3) Volume confirmation - additive
         if volume_confirmed:
@@ -1017,7 +1149,8 @@ def generate_signals(
                         "indicators": {
                             "active_count": len(active_indicators),
                             "active_list": active_indicators,
-                            "ema_cross": True,
+                            "ema_cross": bool(bullish_cross),
+                            "entry_trigger": str(entry_trigger),
                             "vwap_position": "above",
                             "vwap_band_signal": vwap_band_signal,
                             "volume_confirmed": volume_confirmed,
@@ -1031,10 +1164,31 @@ def generate_signals(
                     })
     
     # Short signals - ALL 8 INDICATORS CONTRIBUTE
-    if bearish_cross and price_below_vwap:
-        # Base confidence: EMA cross (1) + VWAP position (2) = 0.5
+    short_trigger = (
+        bearish_cross
+        or (allow_vwap_cross_entries and bearish_vwap_cross and ema_bear_trend)
+        or (allow_vwap_retest_entries and vwap_retest_short)
+        or (allow_trend_momentum_entries and trend_momentum_short)
+        or (allow_trend_breakout_entries and trend_breakout_short)
+    )
+    if short_trigger and price_below_vwap:
+        # Base confidence: EMA/VWAP trigger + VWAP position (2) = 0.5
         confidence = 0.50
-        active_indicators = ["EMA_CROSS", "VWAP_BELOW"]
+        if bearish_cross:
+            entry_trigger = "ema_cross"
+            active_indicators = ["EMA_CROSS", "VWAP_BELOW"]
+        elif bearish_vwap_cross:
+            entry_trigger = "vwap_cross"
+            active_indicators = ["EMA_TREND", "VWAP_CROSS_DOWN", "VWAP_BELOW"]
+        elif vwap_retest_short:
+            entry_trigger = "vwap_retest"
+            active_indicators = ["EMA_TREND", "VWAP_RETEST_DOWN", "VWAP_BELOW"]
+        elif trend_breakout_short:
+            entry_trigger = "trend_breakout"
+            active_indicators = ["EMA_TREND", "TREND_BREAKOUT", "VWAP_BELOW"]
+        else:
+            entry_trigger = "trend_momentum"
+            active_indicators = ["EMA_TREND", "TREND_MOMENTUM", "VWAP_BELOW"]
         
         # (3) Volume confirmation - additive
         if volume_confirmed:
@@ -1145,7 +1299,8 @@ def generate_signals(
                         "indicators": {
                             "active_count": len(active_indicators),
                             "active_list": active_indicators,
-                            "ema_cross": True,
+                            "ema_cross": bool(bearish_cross),
+                            "entry_trigger": str(entry_trigger),
                             "vwap_position": "below",
                             "vwap_band_signal": vwap_band_signal,
                             "volume_confirmed": volume_confirmed,

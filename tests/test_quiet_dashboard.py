@@ -31,6 +31,7 @@ class TestQuietReasonFormatting:
             futures_market_open=True,
             strategy_session_open=True,
             quiet_reason="Active",
+            legacy=True,
         )
         # "Active" should not show a quiet reason line
         assert "Session closed" not in message
@@ -47,6 +48,7 @@ class TestQuietReasonFormatting:
             futures_market_open=True,
             strategy_session_open=False,  # Session gate is closed
             quiet_reason="StrategySessionClosed",
+            legacy=True,
         )
         assert "📴 Session closed" in message
 
@@ -60,6 +62,7 @@ class TestQuietReasonFormatting:
             futures_market_open=False,  # Market gate is closed
             strategy_session_open=True,
             quiet_reason="FuturesMarketClosed",
+            legacy=True,
         )
         assert "🌙 Market closed" in message
 
@@ -73,6 +76,7 @@ class TestQuietReasonFormatting:
             futures_market_open=True,
             strategy_session_open=True,
             quiet_reason="StaleData",
+            legacy=True,
         )
         assert "⏰ Data stale" in message
 
@@ -86,6 +90,7 @@ class TestQuietReasonFormatting:
             futures_market_open=True,
             strategy_session_open=True,
             quiet_reason="StaleData",
+            legacy=True,
         )
         assert "⏰ Data stale" in message
         # Actionable cue now directs to menu navigation instead of /data_quality command
@@ -102,6 +107,7 @@ class TestQuietReasonFormatting:
             strategy_session_open=True,
             quiet_reason="NoOpportunity",
             signal_diagnostics="Raw: 3 → Valid: 0 | Filtered: 2 conf, 1 R:R",
+            legacy=True,
         )
         assert "👀 Scanning" in message
         assert "🔍 Raw: 3" in message
@@ -118,6 +124,7 @@ class TestQuietReasonFormatting:
             strategy_session_open=True,
             quiet_reason="NoOpportunity",
             signal_diagnostics="Session closed",
+            legacy=True,
         )
         # "Session closed" should not be shown separately (it's implicit)
         assert "🔍 Session closed" not in message
@@ -132,6 +139,7 @@ class TestQuietReasonFormatting:
             futures_market_open=True,
             strategy_session_open=True,
             quiet_reason="NoOpportunity",
+            legacy=True,
         )
         assert "👀 Scanning" in message
 
@@ -145,6 +153,7 @@ class TestQuietReasonFormatting:
             futures_market_open=True,
             strategy_session_open=True,
             quiet_reason="DataGap",
+            legacy=True,
         )
         assert "📉 Data gap" in message
 
@@ -159,6 +168,7 @@ class TestQuietReasonFormatting:
             strategy_session_open=True,
             paused=True,
             quiet_reason="NoOpportunity",
+            legacy=True,
         )
         # When paused, quiet reason should not appear
         assert "Scanning" not in message

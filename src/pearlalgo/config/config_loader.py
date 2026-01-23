@@ -202,6 +202,64 @@ def build_strategy_config(
         except Exception:
             pass
 
+    # Strategy-specific overrides for pearl_bot_auto (indicator knobs, etc.)
+    # These keys map 1:1 to `pearlalgo.trading_bots.pearl_bot_auto.CONFIG`.
+    bot_cfg = config_data.get("pearl_bot_auto", {}) or {}
+    if isinstance(bot_cfg, dict):
+        def _coerce_bool(v: Any) -> bool:
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, str):
+                t = v.strip().lower()
+                if t in ("1", "true", "yes", "y", "on"):
+                    return True
+                if t in ("0", "false", "no", "n", "off"):
+                    return False
+            return bool(v)
+
+        casts: Dict[str, Any] = {
+            # Core indicators
+            "ema_fast": int,
+            "ema_slow": int,
+            "volume_ma_length": int,
+            "vwap_std_dev": float,
+            "vwap_bands": int,
+            # Aggressive trigger knobs
+            "allow_vwap_cross_entries": _coerce_bool,
+            "allow_vwap_retest_entries": _coerce_bool,
+            "allow_trend_momentum_entries": _coerce_bool,
+            "trend_momentum_atr_mult": float,
+            "allow_trend_breakout_entries": _coerce_bool,
+            "trend_breakout_lookback_bars": int,
+            # Extended indicators
+            "sr_length": int,
+            "sr_extend": int,
+            "sr_atr_mult": float,
+            "tbt_period": int,
+            "tbt_trend_type": str,
+            "tbt_extend": int,
+            "sd_threshold_pct": float,
+            "sd_resolution": int,
+            # Key levels
+            "key_level_proximity_pct": float,
+            "key_level_breakout_pct": float,
+            "key_level_bounce_confidence": float,
+            "key_level_breakout_confidence": float,
+            "key_level_rejection_penalty": float,
+        }
+
+        for k, caster in casts.items():
+            if k not in bot_cfg:
+                continue
+            v = bot_cfg.get(k)
+            if v is None:
+                continue
+            try:
+                strategy[k] = caster(v)
+            except Exception:
+                # Best-effort: ignore invalid overrides.
+                pass
+
     return strategy
 
 
@@ -245,7 +303,7 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         # Dashboard chart (hourly image)
         "dashboard_chart_enabled": True,       # set False to disable automatic chart pushes
         "dashboard_chart_interval": 3600,      # 1 hour between dashboard chart pushes
-        "dashboard_chart_lookback_hours": 12,  # default notification chart window (12h)
+        "dashboard_chart_lookback_hours": 8,  # default notification chart window (8h for cleaner charts)
         "dashboard_chart_timeframe": "auto",   # "auto" | "5m" | "15m" | "30m" | "1h"
         "dashboard_chart_max_bars": 420,       # cap candles for readability/Telegram
         "dashboard_chart_show_pressure": True, # show signed-volume pressure panel

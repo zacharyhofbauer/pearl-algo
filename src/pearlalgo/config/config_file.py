@@ -291,6 +291,7 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "hud",
     "sessions",
     # Strategy-level extensions
+    "pearl_bot_auto",  # direct overrides for trading_bots/pearl_bot_auto.py
     "indicators",
     "strategy",
     "strategy_variants",

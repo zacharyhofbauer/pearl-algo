@@ -1620,7 +1620,15 @@ class MarketAgentTelegramNotifier:
                 except Exception:
                     pass
 
-                message += "\n\n" + ct.get_status_summary(bot_label="Scanner")
+                # Get unrealized PNL from status if available
+                unrealized_pnl = status.get("active_trades_unrealized_pnl")
+                if unrealized_pnl is not None:
+                    try:
+                        unrealized_pnl = float(unrealized_pnl)
+                    except (ValueError, TypeError):
+                        unrealized_pnl = None
+
+                message += "\n\n" + ct.get_status_summary(bot_label="Scanner", unrealized_pnl=unrealized_pnl)
 
                 # 30d performance (from SQLite if available)
                 try:
@@ -1646,7 +1654,8 @@ class MarketAgentTelegramNotifier:
 
                 # Challenge (current run) — match screenshot format.
                 try:
-                    ap = ct.get_attempt_performance() or {}
+                    # Use same unrealized_pnl as above
+                    ap = ct.get_attempt_performance(unrealized_pnl=unrealized_pnl) or {}
                     pnl = float(ap.get("total_pnl", 0.0) or 0.0)
                     balance = float(ap.get("current_balance", 50_000.0) or 50_000.0)
                     wins = int(ap.get("wins", 0) or 0)

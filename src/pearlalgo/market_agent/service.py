@@ -357,7 +357,7 @@ class MarketAgentService:
         self.last_dashboard_chart_sent: Optional[datetime] = None
         self.dashboard_chart_enabled = bool(service_settings.get("dashboard_chart_enabled", True))  # can disable auto charts
         self.dashboard_chart_interval = service_settings.get("dashboard_chart_interval", 3600)  # 1 hour default
-        self.dashboard_chart_lookback_hours = float(service_settings.get("dashboard_chart_lookback_hours", 48) or 48)
+        self.dashboard_chart_lookback_hours = float(service_settings.get("dashboard_chart_lookback_hours", 8) or 8)
         self.dashboard_chart_timeframe = str(service_settings.get("dashboard_chart_timeframe", "auto") or "auto")
         self.dashboard_chart_max_bars = int(service_settings.get("dashboard_chart_max_bars", 420) or 420)
         self.dashboard_chart_show_pressure = bool(service_settings.get("dashboard_chart_show_pressure", True))

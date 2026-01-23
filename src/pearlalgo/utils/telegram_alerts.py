@@ -1358,6 +1358,8 @@ def format_home_card(
     show_progress_bars: bool = False,
     show_volume_metrics: bool = True,
     compact_metric_width: int = 10,
+    *,
+    legacy: bool = False,
 ) -> str:
     """
     Build unified Home Card message for status/dashboard (balanced verbosity).
@@ -1438,6 +1440,63 @@ def format_home_card(
     - Staleness callout includes age + impact + next action
     - Derived context (pressure, diagnostics) suppressed when data is stale
     """
+    # -----------------------------------------------------------------------
+    # IMPORTANT (2026-01): Legacy Home Card is deprecated.
+    #
+    # The canonical dashboard layout is now the /start-style glanceable card
+    # (used by the Telegram command handler + push dashboards).
+    #
+    # This function remains only for backward compatibility; by default it
+    # returns the glanceable card to prevent UI drift / old layouts “slipping in”.
+    #
+    # To force the legacy Home Card layout (tests/dev only), pass legacy=True.
+    # -----------------------------------------------------------------------
+    if not legacy:
+        # Best-effort derive staleness state for the glanceable card dots.
+        data_age_seconds = None
+        try:
+            if data_age_minutes is not None:
+                data_age_seconds = float(data_age_minutes) * 60.0
+        except Exception:
+            data_age_seconds = None
+
+        data_stale: bool | None = None
+        try:
+            if data_age_seconds is None:
+                data_stale = None
+            elif not agent_running or paused:
+                data_stale = None
+            elif futures_market_open is False and strategy_session_open is False:
+                # Off-hours: stale data is expected.
+                data_stale = None
+            else:
+                data_stale = (float(data_age_seconds) / 60.0) > float(data_stale_threshold_minutes)
+        except Exception:
+            data_stale = None
+
+        # When callers can’t determine gateway status, avoid asserting green.
+        gateway_status: bool | None = None if gateway_unknown else bool(gateway_running)
+
+        # Use the calm-minimal /start layout.
+        return format_glanceable_card(
+            symbol=str(symbol),
+            time_str=str(time_str or ""),
+            agent_running=bool(agent_running),
+            gateway_running=gateway_status,
+            latest_price=latest_price,
+            daily_pnl=None,
+            active_trades_count=int(active_trades_count or 0),
+            futures_market_open=futures_market_open,
+            strategy_session_open=strategy_session_open,
+            market=None,
+            trading_bot="scanner",
+            ai_ready=False,
+            agent_uptime_seconds=None,
+            data_age_seconds=data_age_seconds,
+            agent_healthy=None,
+            data_stale=data_stale,
+        )
+
     lines = []
 
     # Header: Symbol + Time + Price

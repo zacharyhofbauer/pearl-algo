@@ -14,8 +14,12 @@ from pearlalgo.utils.telegram_alerts import (
     format_service_status,
     format_activity_line,
     format_performance_line,
-    format_home_card,
+    format_home_card as _format_home_card,
 )
+
+def format_home_card(*args, **kwargs):  # type: ignore[override]
+    """Legacy Home Card wrapper (tests only)."""
+    return _format_home_card(*args, **kwargs, legacy=True)
 
 
 def test_truncate_telegram_text_noop_when_under_limit() -> None:

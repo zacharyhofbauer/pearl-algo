@@ -12,6 +12,7 @@ def test_home_card_includes_buy_sell_pressure_line() -> None:
         futures_market_open=True,
         strategy_session_open=True,
         buy_sell_pressure="🟢 Pressure: BUYERS ▲▲ (Δ +18%, Vol 1.3x, 2h)",
+        legacy=True,
     )
     assert "Pressure:" in msg
     assert "BUYERS" in msg

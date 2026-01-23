@@ -70,6 +70,7 @@ def test_home_card_active_trades_appends_unrealized_pnl_suffix() -> None:
         active_trades_count=1,
         active_trades_unrealized_pnl=123.45,
         active_trades_price_source="level1",
+        legacy=True,
     )
 
     assert "active trade" in msg
@@ -93,6 +94,7 @@ def test_home_card_active_trades_appends_unrealized_pnl_suffix() -> None:
         active_trades_count=1,
         active_trades_unrealized_pnl=-10.0,
         active_trades_price_source="historical",
+        legacy=True,
     )
     assert "(delayed)" in msg_delayed
 
