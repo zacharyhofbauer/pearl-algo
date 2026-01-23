@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -27,6 +28,7 @@ from pearlalgo.utils.paths import ensure_state_dir, get_state_file, get_signals_
 from pearlalgo.utils.service_controller import ServiceController
 from pearlalgo.utils.telegram_alerts import (
     TelegramPrefs,
+    sanitize_telegram_markdown,
     format_glanceable_card,
     format_pnl,
     format_signal_direction,
@@ -123,6 +125,22 @@ class TelegramCommandHandler:
         self.state_dir = self._resolve_state_dir_for_market(market_upper)
         self.exports_dir = self.state_dir / "exports"
 
+    def _trade_charts_dir(self) -> Path:
+        """Directory where per-trade charts are stored (entry/exit)."""
+        return self.exports_dir / "trade_charts"
+
+    def _safe_chart_key(self, signal_id: str) -> str:
+        """Mirror notifier filename logic for trade charts."""
+        s = str(signal_id or "").strip() or "unknown"
+        s = re.sub(r"[^A-Za-z0-9_.-]+", "_", s)
+        return s[:120]
+
+    def _trade_chart_path(self, *, signal_id: str, kind: str) -> Path:
+        kind_norm = str(kind or "").strip().lower()
+        if kind_norm not in {"entry", "exit"}:
+            kind_norm = "chart"
+        return self._trade_charts_dir() / f"{self._safe_chart_key(signal_id)}_{kind_norm}.png"
+
     async def _post_init(self, application: Application) -> None:
         """Runs once after the Telegram application initializes."""
         # Keep the slash-command surface minimal: /start is the dashboard/menu.
@@ -149,29 +167,53 @@ class TelegramCommandHandler:
                         # Always include a compact support footer on dashboards so any share is diagnostic.
                         caption_text = self._with_support_footer(dashboard_text, state=state, max_chars=1024)
                         text_only = self._with_support_footer(dashboard_text, state=state, max_chars=4096)
+                        # Telegram Markdown safety: avoid parse errors from identifiers/underscores.
+                        caption_md = sanitize_telegram_markdown(caption_text)
+                        text_md = sanitize_telegram_markdown(text_only)
                         
                         # Generate 12h chart
                         chart_path = await self._generate_or_get_chart(state)
                         
                         if chart_path and chart_path.exists():
                             # Send visual dashboard with chart
-                            with open(chart_path, 'rb') as f:
-                                await application.bot.send_photo(
-                                    chat_id=self.chat_id,
-                                    photo=f,
-                                    caption=caption_text,
-                                    reply_markup=reply_markup,
-                                    parse_mode="Markdown"
-                                )
+                            try:
+                                with open(chart_path, 'rb') as f:
+                                    await application.bot.send_photo(
+                                        chat_id=self.chat_id,
+                                        photo=f,
+                                        caption=caption_md,
+                                        reply_markup=reply_markup,
+                                        parse_mode="Markdown"
+                                    )
+                            except Exception:
+                                # Fallback: send chart without Markdown parsing (keeps the chart visible).
+                                caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
+                                with open(chart_path, 'rb') as f:
+                                    await application.bot.send_photo(
+                                        chat_id=self.chat_id,
+                                        photo=f,
+                                        caption=caption_plain,
+                                        reply_markup=reply_markup,
+                                        parse_mode=None
+                                    )
                             logger.info("Visual dashboard with chart sent")
                         else:
                             # Fallback to text-only dashboard
-                            await application.bot.send_message(
-                                chat_id=self.chat_id,
-                                text=text_only,
-                                reply_markup=reply_markup,
-                                parse_mode="Markdown"
-                            )
+                            try:
+                                await application.bot.send_message(
+                                    chat_id=self.chat_id,
+                                    text=text_md,
+                                    reply_markup=reply_markup,
+                                    parse_mode="Markdown"
+                                )
+                            except Exception:
+                                text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                                await application.bot.send_message(
+                                    chat_id=self.chat_id,
+                                    text=text_plain,
+                                    reply_markup=reply_markup,
+                                    parse_mode=None
+                                )
                             logger.info("Text-only dashboard sent (no chart available)")
                     except Exception as e:
                         logger.warning(f"Could not send visual dashboard: {e}")
@@ -846,6 +888,7 @@ class TelegramCommandHandler:
         try:
             if parse_mode and "markdown" in str(parse_mode).lower():
                 text = self._with_support_footer(text)
+                text = sanitize_telegram_markdown(text)
         except Exception:
             pass
 
@@ -859,11 +902,20 @@ class TelegramCommandHandler:
             try:
                 if not getattr(message, "chat", None):
                     raise RuntimeError("Missing chat context for photo replacement")
-                await message.chat.send_message(
-                    text=text,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode,
-                )
+                try:
+                    await message.chat.send_message(
+                        text=text,
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                    )
+                except Exception:
+                    # Fallback: strip Markdown formatting to avoid parse errors.
+                    plain = str(text).replace("*", "").replace("_", "").replace("`", "")
+                    await message.chat.send_message(
+                        text=plain,
+                        reply_markup=reply_markup,
+                        parse_mode=None,
+                    )
             except Exception as send_err:
                 logger.error(f"Failed to send message after replacing photo: {send_err}")
             return
@@ -893,11 +945,19 @@ class TelegramCommandHandler:
                 try:
                     if not message or not getattr(message, "chat", None):
                         raise RuntimeError("Missing chat context for replacement message")
-                    await message.chat.send_message(
-                        text=text,
-                        reply_markup=reply_markup,
-                        parse_mode=parse_mode
-                    )
+                    try:
+                        await message.chat.send_message(
+                            text=text,
+                            reply_markup=reply_markup,
+                            parse_mode=parse_mode
+                        )
+                    except Exception:
+                        plain = str(text).replace("*", "").replace("_", "").replace("`", "")
+                        await message.chat.send_message(
+                            text=plain,
+                            reply_markup=reply_markup,
+                            parse_mode=None
+                        )
                 except Exception as send_err:
                     logger.error(f"Failed to send replacement message: {send_err}")
                 return
@@ -1025,6 +1085,8 @@ class TelegramCommandHandler:
                 # Add a compact support footer to make any screenshot/share self-diagnostic.
                 caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
                 text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
+                caption_md = sanitize_telegram_markdown(caption_text)
+                text_md = sanitize_telegram_markdown(text_only)
                 
                 if chart_path and chart_path.exists():
                     try:
@@ -1033,15 +1095,28 @@ class TelegramCommandHandler:
                         if message and message.photo:
                             # Message has photo, edit it
                             from telegram import InputMediaPhoto
-                            with open(chart_path, 'rb') as f:
-                                await query.edit_message_media(
-                                    media=InputMediaPhoto(
-                                        media=f,
-                                        caption=caption_text,
-                                        parse_mode="Markdown"
-                                    ),
-                                    reply_markup=reply_markup
-                                )
+                            try:
+                                with open(chart_path, 'rb') as f:
+                                    await query.edit_message_media(
+                                        media=InputMediaPhoto(
+                                            media=f,
+                                            caption=caption_md,
+                                            parse_mode="Markdown"
+                                        ),
+                                        reply_markup=reply_markup
+                                    )
+                            except Exception:
+                                # Fallback: update media without Markdown parsing.
+                                caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
+                                with open(chart_path, 'rb') as f:
+                                    await query.edit_message_media(
+                                        media=InputMediaPhoto(
+                                            media=f,
+                                            caption=caption_plain,
+                                            parse_mode=None
+                                        ),
+                                        reply_markup=reply_markup
+                                    )
                         else:
                             # Message doesn't have photo, delete and send new one with photo
                             try:
@@ -1049,13 +1124,23 @@ class TelegramCommandHandler:
                             except Exception:
                                 pass
                             # Send new message with photo
-                            with open(chart_path, 'rb') as f:
-                                await query.message.chat.send_photo(
-                                    photo=f,
-                                    caption=caption_text,
-                                    reply_markup=reply_markup,
-                                    parse_mode="Markdown"
-                                )
+                            try:
+                                with open(chart_path, 'rb') as f:
+                                    await query.message.chat.send_photo(
+                                        photo=f,
+                                        caption=caption_md,
+                                        reply_markup=reply_markup,
+                                        parse_mode="Markdown"
+                                    )
+                            except Exception:
+                                caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
+                                with open(chart_path, 'rb') as f:
+                                    await query.message.chat.send_photo(
+                                        photo=f,
+                                        caption=caption_plain,
+                                        reply_markup=reply_markup,
+                                        parse_mode=None
+                                    )
                             await query.answer()  # Acknowledge the callback
                     except Exception as e:
                         logger.error(f"Error showing chart: {e}", exc_info=True)
@@ -1067,14 +1152,26 @@ class TelegramCommandHandler:
                                 await message.delete()
                             except Exception:
                                 pass
-                            await message.chat.send_message(
-                                text=text_only,
-                                reply_markup=reply_markup,
-                                parse_mode="Markdown"
-                            )
+                            try:
+                                await message.chat.send_message(
+                                    text=text_md,
+                                    reply_markup=reply_markup,
+                                    parse_mode="Markdown"
+                                )
+                            except Exception:
+                                text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                                await message.chat.send_message(
+                                    text=text_plain,
+                                    reply_markup=reply_markup,
+                                    parse_mode=None
+                                )
                             await query.answer()
                         else:
-                            await query.edit_message_text(text_only, reply_markup=reply_markup, parse_mode="Markdown")
+                            try:
+                                await query.edit_message_text(text_md, reply_markup=reply_markup, parse_mode="Markdown")
+                            except Exception:
+                                text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                                await query.edit_message_text(text_plain, reply_markup=reply_markup, parse_mode=None)
                 else:
                     # No chart available - just show text menu quickly
                     message = query.message
@@ -1084,14 +1181,26 @@ class TelegramCommandHandler:
                             await message.delete()
                         except Exception:
                             pass
-                        await message.chat.send_message(
-                            text=text_only,
-                            reply_markup=reply_markup,
-                            parse_mode="Markdown"
-                        )
+                        try:
+                            await message.chat.send_message(
+                                text=text_md,
+                                reply_markup=reply_markup,
+                                parse_mode="Markdown"
+                            )
+                        except Exception:
+                            text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                            await message.chat.send_message(
+                                text=text_plain,
+                                reply_markup=reply_markup,
+                                parse_mode=None
+                            )
                         await query.answer()
                     else:
-                        await query.edit_message_text(text_only, reply_markup=reply_markup, parse_mode="Markdown")
+                        try:
+                            await query.edit_message_text(text_md, reply_markup=reply_markup, parse_mode="Markdown")
+                        except Exception:
+                            text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                            await query.edit_message_text(text_plain, reply_markup=reply_markup, parse_mode=None)
             except Exception as e:
                 logger.error(f"Error showing main menu with chart: {e}", exc_info=True)
                 await self._show_main_menu(query)
@@ -1175,23 +1284,43 @@ class TelegramCommandHandler:
             # Always include the support footer on the primary dashboard.
             caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
             text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
+            caption_md = sanitize_telegram_markdown(caption_text)
+            text_md = sanitize_telegram_markdown(text_only)
             
             if chart_path and chart_path.exists():
                 # Send photo with caption
-                with open(chart_path, 'rb') as f:
-                    await message_obj.reply_photo(
-                        photo=f,
-                        caption=caption_text,
+                try:
+                    with open(chart_path, 'rb') as f:
+                        await message_obj.reply_photo(
+                            photo=f,
+                            caption=caption_md,
+                            reply_markup=reply_markup,
+                            parse_mode="Markdown"
+                        )
+                except Exception:
+                    caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
+                    with open(chart_path, 'rb') as f:
+                        await message_obj.reply_photo(
+                            photo=f,
+                            caption=caption_plain,
+                            reply_markup=reply_markup,
+                            parse_mode=None
+                        )
+            else:
+                # Fallback to text-only if chart unavailable
+                try:
+                    await message_obj.reply_text(
+                        text_md,
                         reply_markup=reply_markup,
                         parse_mode="Markdown"
                     )
-            else:
-                # Fallback to text-only if chart unavailable
-                await message_obj.reply_text(
-                    text_only,
-                    reply_markup=reply_markup,
-                    parse_mode="Markdown"
-                )
+                except Exception:
+                    text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                    await message_obj.reply_text(
+                        text_plain,
+                        reply_markup=reply_markup,
+                        parse_mode=None
+                    )
         except Exception as e:
             logger.error(f"Error sending visual dashboard: {e}", exc_info=True)
             # Fallback to simple menu
@@ -2492,6 +2621,17 @@ class TelegramCommandHandler:
                 market = action_type.split(":", 1)[1]
                 self._set_active_market(market)
                 await self._show_markets_menu(query)
+                return
+
+            # On-demand entry/exit chart view (charts are persisted to disk by the agent).
+            if action_type.startswith("trade_chart:"):
+                # Format: trade_chart:<entry|exit>:<signal_id_prefix>
+                parts = action_type.split(":", 2)
+                if len(parts) == 3:
+                    _, kind, signal_id_prefix = parts
+                    await self._handle_trade_chart(query, kind=kind, signal_id_prefix=signal_id_prefix)
+                else:
+                    await query.answer("❌ Invalid chart request", show_alert=True)
                 return
 
             # Alert mode presets (settings menu)
@@ -4094,11 +4234,150 @@ class TelegramCommandHandler:
                 parse_mode="Markdown"
             )
             return
+
+        # If we have persisted trade charts for this signal, offer on-demand view buttons.
+        try:
+            full_signal_id = str(signal.get("signal_id") or "")
+            chart_row = []
+            if full_signal_id:
+                if self._trade_chart_path(signal_id=full_signal_id, kind="entry").exists():
+                    chart_row.append(
+                        InlineKeyboardButton(
+                            "📈 Entry chart",
+                            callback_data=f"action:trade_chart:entry:{signal_id_prefix}",
+                        )
+                    )
+                if self._trade_chart_path(signal_id=full_signal_id, kind="exit").exists():
+                    chart_row.append(
+                        InlineKeyboardButton(
+                            "📉 Exit chart",
+                            callback_data=f"action:trade_chart:exit:{signal_id_prefix}",
+                        )
+                    )
+            if chart_row:
+                keyboard = [chart_row] + keyboard
+                reply_markup = InlineKeyboardMarkup(keyboard)
+        except Exception:
+            pass
         
         # Format signal details
         text = self._format_signal_detail(signal)
         
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_trade_chart(self, query: CallbackQuery, *, kind: str, signal_id_prefix: str) -> None:
+        """
+        Display a persisted entry/exit chart for a given signal (on-demand).
+        """
+        kind_norm = str(kind or "").strip().lower()
+        if kind_norm not in {"entry", "exit"}:
+            try:
+                await query.answer("❌ Unknown chart type", show_alert=True)
+            except Exception:
+                pass
+            return
+
+        # Look up the full signal record by prefix
+        signal = self._find_signal_by_prefix(signal_id_prefix)
+        if not signal:
+            keyboard = [
+                [InlineKeyboardButton("🎯 Back to Signals", callback_data="menu:signals")],
+                self._nav_back_row(),
+            ]
+            await self._safe_edit_or_send(
+                query,
+                f"❌ Signal not found: `{signal_id_prefix}...`",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown",
+            )
+            return
+
+        signal_id = str(signal.get("signal_id") or "")
+        chart_path = self._trade_chart_path(signal_id=signal_id, kind=kind_norm)
+        if not chart_path.exists():
+            keyboard = [
+                [InlineKeyboardButton("🔍 Details", callback_data=f"signal_detail:{signal_id_prefix}")],
+                [InlineKeyboardButton("🎯 Back to Signals", callback_data="menu:signals")],
+                self._nav_back_row(),
+            ]
+            await self._safe_edit_or_send(
+                query,
+                f"📉 No saved *{kind_norm}* chart found yet for `{signal_id_prefix}...`.\n\n"
+                f"Expected at: `{chart_path.name}`",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown",
+            )
+            return
+
+        # Keep caption minimal; we want the dashboard chart to be the "see all do all".
+        caption_text = f"{'📈' if kind_norm == 'entry' else '📉'} *{kind_norm.title()} chart*  `{signal_id_prefix}...`"
+        caption_md = sanitize_telegram_markdown(caption_text)
+
+        keyboard = [
+            [
+                InlineKeyboardButton("🔍 Details", callback_data=f"signal_detail:{signal_id_prefix}"),
+                InlineKeyboardButton("🏠 Menu", callback_data="menu:main"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            message = getattr(query, "message", None)
+            # If message already has a photo, edit it; otherwise delete + send a new photo message.
+            if message is not None and getattr(message, "photo", None):
+                from telegram import InputMediaPhoto
+                try:
+                    with open(chart_path, "rb") as f:
+                        await query.edit_message_media(
+                            media=InputMediaPhoto(media=f, caption=caption_md, parse_mode="Markdown"),
+                            reply_markup=reply_markup,
+                        )
+                except Exception:
+                    caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
+                    with open(chart_path, "rb") as f:
+                        await query.edit_message_media(
+                            media=InputMediaPhoto(media=f, caption=caption_plain, parse_mode=None),
+                            reply_markup=reply_markup,
+                        )
+            else:
+                try:
+                    if message is not None:
+                        await message.delete()
+                except Exception:
+                    pass
+                try:
+                    with open(chart_path, "rb") as f:
+                        await query.message.chat.send_photo(
+                            photo=f,
+                            caption=caption_md,
+                            reply_markup=reply_markup,
+                            parse_mode="Markdown",
+                        )
+                except Exception:
+                    caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
+                    with open(chart_path, "rb") as f:
+                        await query.message.chat.send_photo(
+                            photo=f,
+                            caption=caption_plain,
+                            reply_markup=reply_markup,
+                            parse_mode=None,
+                        )
+            try:
+                await query.answer()
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning(f"Error showing trade chart: {e}")
+            keyboard = [
+                [InlineKeyboardButton("🔍 Details", callback_data=f"signal_detail:{signal_id_prefix}")],
+                self._nav_back_row(),
+            ]
+            await self._safe_edit_or_send(
+                query,
+                f"❌ Could not show chart: `{chart_path.name}`",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown",
+            )
 
     def _find_signal_by_prefix(self, signal_id_prefix: str) -> Optional[dict]:
         """

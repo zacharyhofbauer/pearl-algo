@@ -260,6 +260,38 @@ def build_strategy_config(
                 # Best-effort: ignore invalid overrides.
                 pass
 
+    # Virtual PnL grading (strategy config keys used by pearl_bot_auto + MarketAgentService)
+    # Config.yaml shape:
+    #   virtual_pnl:
+    #     enabled: bool
+    #     notify_entry: bool
+    #     notify_exit: bool
+    #     intrabar_tiebreak: stop_loss|take_profit
+    vp_cfg = config_data.get("virtual_pnl", {}) or {}
+    if isinstance(vp_cfg, dict):
+        try:
+            if "enabled" in vp_cfg and vp_cfg.get("enabled") is not None:
+                strategy["virtual_pnl_enabled"] = bool(vp_cfg.get("enabled"))
+        except Exception:
+            pass
+        try:
+            if "notify_entry" in vp_cfg and vp_cfg.get("notify_entry") is not None:
+                strategy["virtual_pnl_notify_entry"] = bool(vp_cfg.get("notify_entry"))
+        except Exception:
+            pass
+        try:
+            if "notify_exit" in vp_cfg and vp_cfg.get("notify_exit") is not None:
+                strategy["virtual_pnl_notify_exit"] = bool(vp_cfg.get("notify_exit"))
+        except Exception:
+            pass
+        try:
+            # Strategy key is `virtual_pnl_tiebreak`, config uses `intrabar_tiebreak`.
+            tiebreak = vp_cfg.get("intrabar_tiebreak")
+            if tiebreak is not None:
+                strategy["virtual_pnl_tiebreak"] = str(tiebreak)
+        except Exception:
+            pass
+
     return strategy
 
 

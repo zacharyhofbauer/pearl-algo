@@ -2205,7 +2205,9 @@ class MarketAgentService:
             if chart_path and chart_path.exists():
                 # Export chart for on-demand access (Telegram command handler reuses this).
                 try:
-                    exports_dir = self.state_dir / "exports"
+                    # NOTE: Some service instances don't define self.state_dir; the canonical
+                    # source of truth is the state manager.
+                    exports_dir = self.state_manager.state_dir / "exports"
                     exports_dir.mkdir(parents=True, exist_ok=True)
                     export_path = exports_dir / "dashboard_telegram_latest.png"
                     import shutil

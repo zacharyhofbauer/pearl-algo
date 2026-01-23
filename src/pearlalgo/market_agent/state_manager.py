@@ -215,7 +215,13 @@ class MarketAgentStateManager:
                 price_diff_pct = abs(signal_entry - recent_entry) / recent_entry
                 price_close = price_diff_pct < self._duplicate_price_threshold_pct
 
-            if within_time_window or price_close:
+            # A signal is only a true duplicate when it's both:
+            # - close in time (within the configured duplicate window), AND
+            # - close in price (within the configured threshold)
+            #
+            # Using `or` here causes legitimate signals hours apart to be dropped from
+            # persistence, which then breaks the virtual trade lifecycle (entered/exited).
+            if within_time_window and price_close:
                 return True
 
         return False
@@ -276,13 +282,19 @@ class MarketAgentStateManager:
                             except Exception as e:
                                 logger.debug(f"Error reading signals for duplicate check: {e}")
                         
-                        # Check for duplicates
-                        if self._is_duplicate_signal(signal, recent_signals):
+                        # Check for duplicates. IMPORTANT: we still persist the record.
+                        # Dropping persistence breaks the virtual trade lifecycle (entered/exited),
+                        # because status updates expect the base record to exist in signals.jsonl.
+                        is_duplicate = False
+                        try:
+                            is_duplicate = self._is_duplicate_signal(signal, recent_signals)
+                        except Exception:
+                            is_duplicate = False
+                        if is_duplicate:
                             logger.debug(
-                                f"Skipping duplicate signal: {signal_id} (type={signal.get('type')}, "
-                                f"direction={signal.get('direction')})"
+                                f"Tagging duplicate signal (persisting anyway): {signal_id} "
+                                f"(type={signal.get('type')}, direction={signal.get('direction')})"
                             )
-                            return
                         
                         # Create wrapped record in format expected by /signals command
                         signal_record = {
@@ -291,6 +303,8 @@ class MarketAgentStateManager:
                             "status": "generated",  # Default status for new signals
                             "signal": _to_json_safe(signal),  # Store JSON-safe signal dict
                         }
+                        if is_duplicate:
+                            signal_record["duplicate"] = True
 
                         try:
                             payload = json.dumps(signal_record)
