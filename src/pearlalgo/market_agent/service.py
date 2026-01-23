@@ -361,7 +361,8 @@ class MarketAgentService:
         self.dashboard_chart_timeframe = str(service_settings.get("dashboard_chart_timeframe", "auto") or "auto")
         self.dashboard_chart_max_bars = int(service_settings.get("dashboard_chart_max_bars", 420) or 420)
         self.dashboard_chart_show_pressure = bool(service_settings.get("dashboard_chart_show_pressure", True))
-        # Pearl Algo Monitor export (local dashboard_latest.png + meta)
+        # Pearl Algo Monitor export (local dashboard_latest.png + meta).
+        # Telegram UI uses dashboard_telegram_latest.png to avoid being overwritten by monitor exports.
         # NOTE: These keys are optional in config.yaml; defaults are chosen to “feel live” on the Beelink.
         self.last_dashboard_export_at: Optional[datetime] = None
         self.dashboard_export_enabled = bool(service_settings.get("dashboard_export_enabled", True))
