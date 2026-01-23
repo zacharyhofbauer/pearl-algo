@@ -1104,22 +1104,13 @@ class ChartGenerator:
     @staticmethod
     def _save_png(fig, path: Path, *, dpi: int, render_mode: str = "telegram") -> None:
         """
-        Save a chart PNG with render-mode-specific behavior.
+        Save a chart PNG for Telegram/mobile delivery.
 
-        Modes:
-        - telegram: content-cropped (bbox_inches='tight') with padding to reduce label clipping
-        - monitor: fixed pixel output based on figsize*dpi (no bbox_inches='tight')
+        Notes:
+        - We always use content-cropping (`bbox_inches='tight'`) to avoid huge empty margins
+          and to keep charts readable on phones.
+        - `render_mode` is kept for backwards compatibility but is intentionally ignored.
         """
-        mode = str(render_mode or "telegram").strip().lower()
-        if mode == "monitor":
-            fig.savefig(
-                str(path),
-                dpi=int(dpi),
-                facecolor=DARK_BG,
-                edgecolor="none",
-            )
-            return
-
         fig.savefig(
             str(path),
             dpi=int(dpi),
@@ -3412,7 +3403,8 @@ class ChartGenerator:
         *,
         lookback_bars: int = 288,
         range_label: Optional[str] = None,
-        figsize: Tuple[float, float] = (16, 7),
+        # Mobile-first default: portrait aspect for phone readability in Telegram.
+        figsize: Tuple[float, float] = (8, 12),
         dpi: int = 200,
         render_mode: str = "telegram",
         show_sessions: bool = True,
@@ -3439,7 +3431,7 @@ class ChartGenerator:
             timeframe: Timeframe label for title (e.g. "5m")
             lookback_bars: Number of bars to display
             range_label: Optional range label for title (e.g., "24h", "48h", "3d")
-            figsize: Figure size (width, height) – wider for mobile landscape
+            figsize: Figure size (width, height) – portrait recommended for mobile
             dpi: Resolution for Telegram delivery
             show_sessions: Shade Tokyo/London/NY sessions
             show_key_levels: Show RTH/ETH PDH/PDL/Open levels

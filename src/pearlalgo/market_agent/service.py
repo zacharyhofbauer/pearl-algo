@@ -361,43 +361,6 @@ class MarketAgentService:
         self.dashboard_chart_timeframe = str(service_settings.get("dashboard_chart_timeframe", "auto") or "auto")
         self.dashboard_chart_max_bars = int(service_settings.get("dashboard_chart_max_bars", 420) or 420)
         self.dashboard_chart_show_pressure = bool(service_settings.get("dashboard_chart_show_pressure", True))
-        # Pearl Algo Monitor export (local dashboard_latest.png + meta).
-        # Telegram UI uses dashboard_telegram_latest.png to avoid being overwritten by monitor exports.
-        # NOTE: These keys are optional in config.yaml; defaults are chosen to “feel live” on the Beelink.
-        self.last_dashboard_export_at: Optional[datetime] = None
-        self.dashboard_export_enabled = bool(service_settings.get("dashboard_export_enabled", True))
-        self.dashboard_export_interval = int(service_settings.get("dashboard_export_interval", 300) or 300)
-        self.dashboard_export_timeframe = str(service_settings.get("dashboard_export_timeframe", "5m") or "5m")
-        self.dashboard_export_lookback_hours = float(service_settings.get("dashboard_export_lookback_hours", 12) or 12)
-        self.dashboard_export_max_bars = int(service_settings.get("dashboard_export_max_bars", 600) or 600)
-        self.dashboard_export_dpi = int(service_settings.get("dashboard_export_dpi", 160) or 160)
-        # Explicit pixel sizing for the monitor export (stable output dimensions).
-        # Default targets the Beelink panel (2560×720).
-        _size_raw = service_settings.get("dashboard_export_size_px", [2560, 720])
-        try:
-            self.dashboard_export_size_px = (int(_size_raw[0]), int(_size_raw[1]))  # type: ignore[index]
-        except Exception:
-            self.dashboard_export_size_px = (2560, 720)
-        # Right-side "future space" padding (bars) so the last candle isn't flush to the edge.
-        # Accept 0 to disable explicitly.
-        try:
-            _pad = service_settings.get("dashboard_export_right_pad_bars", 40)
-            self.dashboard_export_right_pad_bars = int(_pad)
-        except Exception:
-            self.dashboard_export_right_pad_bars = 40
-        try:
-            w_px, h_px = self.dashboard_export_size_px
-            dpi = float(self.dashboard_export_dpi or 160)
-            if int(w_px) <= 0 or int(h_px) <= 0 or dpi <= 0:
-                raise ValueError("invalid dashboard_export_size_px/dpi")
-            self.dashboard_export_figsize = (float(w_px) / dpi, float(h_px) / dpi)
-        except Exception:
-            # Fallback: accept YAML list [w, h] for figsize
-            _figsize_raw = service_settings.get("dashboard_export_figsize", [20, 7.3])
-            try:
-                self.dashboard_export_figsize = (float(_figsize_raw[0]), float(_figsize_raw[1]))  # type: ignore[index]
-            except Exception:
-                self.dashboard_export_figsize = (20.0, 7.3)
         # Buy/Sell pressure (dashboard observability)
         self.pressure_lookback_bars = int(service_settings.get("pressure_lookback_bars", 24) or 24)
         self.pressure_baseline_bars = int(service_settings.get("pressure_baseline_bars", 120) or 120)
@@ -1177,8 +1140,6 @@ class MarketAgentService:
                 )
                 
                 await self._check_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
-                # Export a stable dashboard image for Pearl Algo Monitor (separate cadence from Telegram)
-                await self._check_monitor_export(market_data)
                 try:
                     self.state_manager.append_event(
                         "scan_finished",
@@ -2227,15 +2188,16 @@ class MarketAgentService:
                 timeframe=chosen_tf,
                 lookback_bars=min(int(bars_target), len(chart_data)),
                 range_label=range_label,
-                figsize=(16, 7),
-                dpi=150,
+                # Mobile-first: portrait + high DPI for phone readability.
+                figsize=(8, 12),
+                dpi=200,
                 show_sessions=True,
                 show_key_levels=True,
                 show_vwap=True,
                 show_ma=True,  # Show moving averages to match TradingView-style chart
                 ma_periods=[20, 50, 200],  # Common MA periods
                 show_rsi=True,
-                show_pressure=True,
+                show_pressure=bool(self.dashboard_chart_show_pressure),
                 # Overlay recent trades (entries/exits) for transparency.
                 trades=self._get_trades_for_chart(chart_data),
             )
@@ -2270,15 +2232,9 @@ class MarketAgentService:
             return None
 
     async def _check_monitor_export(self, market_data: Optional[Dict] = None) -> None:
-        """
-        Export a stable dashboard image + meta for Pearl Algo Monitor.
-
-        This is intentionally decoupled from Telegram sending cadence:
-        - Telegram dashboard charts can stay hourly (or disabled)
-        - Monitor export can refresh every ~5 minutes to “feel live” on the 2560×720 screen
-        """
-        if not getattr(self, "dashboard_export_enabled", True):
-            return
+        """Deprecated: monitor export removed (mobile-first charts only)."""
+        return
+        '''
 
         now = datetime.now(timezone.utc)
         last = getattr(self, "last_dashboard_export_at", None)
@@ -2463,6 +2419,8 @@ class MarketAgentService:
                 chart_path.unlink()
             except Exception:
                 pass
+
+        '''
 
     async def _send_dashboard(
         self,
@@ -4120,6 +4078,69 @@ class MarketAgentService:
             if self.bandit_policy is not None
             else {"enabled": False, "mode": "disabled"}
         )
+
+        # ==========================================================================
+        # Virtual positions (signals.jsonl status="entered") for Telegram command UI
+        # ==========================================================================
+        # The interactive Telegram command handler reads state.json. Persisting these
+        # fields here keeps /start dashboards accurate (open positions + unrealized PnL).
+        state["active_trades_count"] = 0
+        try:
+            # Surface latest price source (Level 1 vs historical) for UI confidence cues.
+            if isinstance(latest_bar, dict):
+                state["latest_price_source"] = latest_bar.get("_data_level") or latest_bar.get("_data_source")
+        except Exception:
+            pass
+
+        try:
+            recent_signals = self.state_manager.get_recent_signals(limit=300)
+            active: list[dict] = []
+            for rec in recent_signals:
+                if isinstance(rec, dict) and rec.get("status") == "entered":
+                    active.append(rec)
+            state["active_trades_count"] = int(len(active))
+
+            # Total unrealized PnL (USD) across active trades using freshest available price.
+            latest_price = None
+            try:
+                if isinstance(latest_bar, dict):
+                    latest_price = latest_bar.get("close")
+            except Exception:
+                latest_price = None
+
+            if latest_price is not None and len(active) > 0:
+                try:
+                    current_price = float(latest_price)
+                except Exception:
+                    current_price = None
+
+                if current_price and current_price > 0:
+                    total_upnl = 0.0
+                    for rec in active:
+                        sig = rec.get("signal", {}) or {}
+                        direction = str(sig.get("direction") or "long").lower()
+                        try:
+                            entry_price = float(sig.get("entry_price") or 0.0)
+                        except Exception:
+                            entry_price = 0.0
+                        if entry_price <= 0:
+                            continue
+                        try:
+                            tick_value = float(sig.get("tick_value") or 2.0)
+                        except Exception:
+                            tick_value = 2.0
+                        try:
+                            position_size = float(sig.get("position_size") or 1.0)
+                        except Exception:
+                            position_size = 1.0
+
+                        pnl_pts = (current_price - entry_price) if direction == "long" else (entry_price - current_price)
+                        total_upnl += float(pnl_pts) * float(tick_value) * float(position_size)
+
+                    state["active_trades_unrealized_pnl"] = float(total_upnl)
+        except Exception:
+            # Never allow optional UI fields to break state persistence.
+            pass
 
         self.state_manager.save_state(state)
 

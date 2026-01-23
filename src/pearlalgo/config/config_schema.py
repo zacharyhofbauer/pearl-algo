@@ -66,8 +66,6 @@ class ServiceConfig(BaseModel):
     dashboard_chart_interval: int = Field(default=3600, ge=300)
     dashboard_chart_timeframe: str = "5m"
     dashboard_chart_lookback_hours: int = Field(default=8, ge=1, le=48)
-    dashboard_export_size_px: List[int] = Field(default=[2560, 720])
-    dashboard_export_dpi: int = Field(default=160, ge=72, le=300)
     enable_new_bar_gating: bool = True
     adaptive_cadence_enabled: bool = True
     scan_interval_active_seconds: float = Field(default=5, ge=1)

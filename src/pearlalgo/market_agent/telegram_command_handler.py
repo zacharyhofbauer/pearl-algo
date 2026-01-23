@@ -1204,15 +1204,11 @@ class TelegramCommandHandler:
         """
         Use the latest exported dashboard chart (no generation—service owns it).
 
-        Prefer the Telegram-optimized chart (`dashboard_telegram_latest.png`) so the mobile UI
-        isn't affected by the monitor export cadence. Fallback to `dashboard_latest.png`
-        if the Telegram-specific export is not present.
+        We intentionally do **not** fall back to any legacy dashboard filenames to avoid
+        showing stale/incorrect aspect ratios on mobile.
         """
         telegram_chart = self.exports_dir / "dashboard_telegram_latest.png"
-        if telegram_chart.exists():
-            return telegram_chart
-        fallback = self.exports_dir / "dashboard_latest.png"
-        return fallback if fallback.exists() else None
+        return telegram_chart if telegram_chart.exists() else None
 
     async def _show_status_menu(self, query: CallbackQuery) -> None:
         """Show health & diagnostics submenu."""
@@ -2847,7 +2843,7 @@ class TelegramCommandHandler:
             elif action_type == "export_performance":
                 await self._handle_export_performance(query)
             elif action_type == "refresh_dashboard":
-                # Refresh visual dashboard—reuse same chart as agent start (dashboard_latest.png).
+                # Refresh visual dashboard—reuse latest exported Telegram chart (dashboard_telegram_latest.png).
                 await self._show_main_menu_with_chart(query)
             elif action_type == "toggle_chart":
                 # Toggle chart display
@@ -3321,14 +3317,72 @@ class TelegramCommandHandler:
             # Performance
             performance = state.get("performance", {})
             
-            # Active trades
-            active_trades_count = state.get("active_trades_count", 0) or 0
+            # Active trades (virtual positions)
+            # NOTE: Some older agent versions did not persist these fields to state.json.
+            # We keep a best-effort fallback to derive them from signals.jsonl.
+            active_trades_count = state.get("active_trades_count")
             active_trades_unrealized_pnl = state.get("active_trades_unrealized_pnl")
             active_trades_price_source = state.get("latest_price_source")
             
             # Data quality
             latest_bar = state.get("latest_bar", {})
             data_level = latest_bar.get("_data_level") if isinstance(latest_bar, dict) else None
+
+            # Backward-compatible fallback: derive active trades from signals.jsonl.
+            if active_trades_count is None:
+                try:
+                    from pearlalgo.market_agent.state_manager import MarketAgentStateManager
+
+                    sm = MarketAgentStateManager(state_dir=self.state_dir)
+                    recent_signals = sm.get_recent_signals(limit=300)
+                    active_recs: list[dict] = []
+                    for rec in recent_signals:
+                        if isinstance(rec, dict) and rec.get("status") == "entered":
+                            active_recs.append(rec)
+                    active_trades_count = int(len(active_recs))
+
+                    # If we don't have unrealized PnL in state, compute best-effort from latest_bar close.
+                    if active_trades_unrealized_pnl is None and active_trades_count > 0 and isinstance(latest_bar, dict):
+                        px = latest_bar.get("close")
+                        try:
+                            current_price = float(px) if px is not None else None
+                        except Exception:
+                            current_price = None
+
+                        if current_price and current_price > 0:
+                            total_upnl = 0.0
+                            for rec in active_recs:
+                                sig = rec.get("signal", {}) or {}
+                                direction = str(sig.get("direction") or "long").lower()
+                                try:
+                                    entry_price = float(sig.get("entry_price") or 0.0)
+                                except Exception:
+                                    entry_price = 0.0
+                                if entry_price <= 0:
+                                    continue
+                                try:
+                                    tick_value = float(sig.get("tick_value") or 2.0)
+                                except Exception:
+                                    tick_value = 2.0
+                                try:
+                                    position_size = float(sig.get("position_size") or 1.0)
+                                except Exception:
+                                    position_size = 1.0
+
+                                pnl_pts = (current_price - entry_price) if direction == "long" else (entry_price - current_price)
+                                total_upnl += float(pnl_pts) * float(tick_value) * float(position_size)
+
+                            active_trades_unrealized_pnl = float(total_upnl)
+
+                    if not active_trades_price_source:
+                        active_trades_price_source = data_level
+                except Exception:
+                    active_trades_count = 0
+
+            try:
+                active_trades_count = int(active_trades_count or 0)
+            except Exception:
+                active_trades_count = 0
 
             # Raw data age (seconds) for footer (even if we suppress stale warnings elsewhere).
             data_age_seconds = None
@@ -3512,6 +3566,21 @@ class TelegramCommandHandler:
                 except Exception:
                     ai_ready = False
 
+            # P&L shown on the "🎯 Active" line should reflect open positions when available.
+            # Fall back to daily_pnl only when it's non-zero (avoid showing "+$0.00" as a false cue).
+            pnl_for_active_line = None
+            if active_trades_unrealized_pnl is not None:
+                try:
+                    pnl_for_active_line = float(active_trades_unrealized_pnl)
+                except (ValueError, TypeError):
+                    pnl_for_active_line = None
+            else:
+                try:
+                    dp = float(state.get("daily_pnl", 0.0) or 0.0)
+                    pnl_for_active_line = dp if dp != 0.0 else None
+                except (ValueError, TypeError):
+                    pnl_for_active_line = None
+
             # Build glanceable dashboard message (concise, mobile-first)
             message = format_glanceable_card(
                 symbol=symbol,
@@ -3519,8 +3588,8 @@ class TelegramCommandHandler:
                 agent_running=agent_running,
                 gateway_running=(None if gateway_unknown else gateway_running),
                 latest_price=latest_price,
-                daily_pnl=float(state.get("daily_pnl", 0.0) or 0.0),
-                active_trades_count=active_trades_count,
+                daily_pnl=pnl_for_active_line,
+                active_trades_count=open_positions_count,
                 futures_market_open=futures_market_open,
                 strategy_session_open=strategy_session_open,
                 market=market_label,

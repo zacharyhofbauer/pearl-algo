@@ -1591,6 +1591,23 @@ class MarketAgentTelegramNotifier:
 
             gateway_uncertain = (gateway_running is None) or (gateway_running is False) or is_data_stale or (buffer_size < 1)
 
+            # P&L shown on the "🎯 Active" line should reflect open positions when available.
+            active_cnt = int(status.get("active_trades_count", 0) or 0)
+            pnl_for_active_line = None
+            if active_cnt > 0:
+                unreal = status.get("active_trades_unrealized_pnl")
+                if unreal is not None:
+                    try:
+                        pnl_for_active_line = float(unreal)
+                    except (ValueError, TypeError):
+                        pnl_for_active_line = None
+                else:
+                    try:
+                        dp = float(status.get("daily_pnl", 0.0) or 0.0)
+                        pnl_for_active_line = dp if dp != 0.0 else None
+                    except (ValueError, TypeError):
+                        pnl_for_active_line = None
+
             # Build the /start-style dashboard caption (glanceable card + challenge/perf blocks).
             message = format_glanceable_card(
                 symbol=symbol,
@@ -1598,8 +1615,8 @@ class MarketAgentTelegramNotifier:
                 agent_running=agent_running,
                 gateway_running=gateway_running,
                 latest_price=latest_price,
-                daily_pnl=float(status.get("daily_pnl", 0.0) or 0.0),
-                active_trades_count=int(status.get("active_trades_count", 0) or 0),
+                daily_pnl=pnl_for_active_line,
+                active_trades_count=active_cnt,
                 futures_market_open=futures_market_open,
                 strategy_session_open=strategy_session_open,
                 market=market_label,
