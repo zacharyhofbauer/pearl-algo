@@ -93,36 +93,78 @@ class TradeDatabase:
     - Persistent storage of all trades
     - Rich querying capabilities
     - Performance analytics
+    
+    Performance optimizations:
+    - WAL mode for better concurrent read/write performance
+    - Connection caching option for background workers
     """
     
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Optional[Path] = None, cache_connection: bool = False):
         """
         Initialize trade database.
         
         Args:
             db_path: Path to SQLite database file
+            cache_connection: If True, keep a persistent connection (for background workers)
         """
         self.db_path = db_path or (ensure_state_dir(None) / "trades.db")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
+        self._cache_connection = cache_connection
+        self._cached_conn: Optional[sqlite3.Connection] = None
+        
         self._init_schema()
         
-        logger.info(f"TradeDatabase initialized: {self.db_path}")
+        logger.info(f"TradeDatabase initialized: {self.db_path} (WAL mode, cache_connection={cache_connection})")
     
     @contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
-        """Get database connection."""
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-        finally:
-            conn.close()
+        """
+        Get database connection.
+        
+        If cache_connection is True, reuses a single connection (more efficient
+        for background workers). Otherwise, creates a new connection per operation
+        (safer for multi-threaded access from different contexts).
+        """
+        if self._cache_connection:
+            # Use cached connection (for background workers)
+            if self._cached_conn is None:
+                self._cached_conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+                self._cached_conn.row_factory = sqlite3.Row
+                # Optimize for write-heavy workload
+                self._cached_conn.execute("PRAGMA journal_mode=WAL")
+                self._cached_conn.execute("PRAGMA synchronous=NORMAL")  # Safe with WAL
+                self._cached_conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
+            yield self._cached_conn
+            # Don't close cached connection - it's reused
+        else:
+            # Create new connection (default behavior)
+            conn = sqlite3.connect(str(self.db_path))
+            conn.row_factory = sqlite3.Row
+            try:
+                yield conn
+            finally:
+                conn.close()
+    
+    def close(self) -> None:
+        """Close cached connection if any."""
+        if self._cached_conn is not None:
+            try:
+                self._cached_conn.close()
+            except Exception:
+                pass
+            self._cached_conn = None
     
     def _init_schema(self) -> None:
-        """Initialize database schema."""
+        """Initialize database schema with WAL mode and optimized settings."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            
+            # Enable WAL mode for better concurrent read/write performance
+            # This is especially important when the main loop reads while the worker writes
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")  # Safe with WAL, faster than FULL
+            cursor.execute("PRAGMA busy_timeout=5000")  # Wait up to 5s for locks
             
             # Trades table
             cursor.execute("""

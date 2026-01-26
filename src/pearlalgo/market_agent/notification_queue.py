@@ -223,26 +223,74 @@ class NotificationQueue:
                 await self.notifier.send_enhanced_status(payload.get("status", {}))
                 return True
             elif ntype == "dashboard":
-                await self.notifier.send_dashboard(payload.get("status", {}))
+                await self.notifier.send_dashboard(
+                    payload.get("status", {}),
+                    chart_path=payload.get("chart_path"),
+                )
                 return True
             elif ntype == "circuit_breaker":
                 await self.notifier.send_circuit_breaker_alert(
-                    payload.get("error_type", ""),
-                    payload.get("consecutive_errors", 0),
+                    payload.get("reason", ""),
+                    payload.get("details"),
                 )
                 return True
             elif ntype == "data_quality":
-                await self.notifier.send_data_quality_alert(payload.get("details", {}))
+                await self.notifier.send_data_quality_alert(
+                    payload.get("alert_type", "unknown"),
+                    payload.get("message", ""),
+                    payload.get("details"),
+                )
                 return True
             elif ntype == "entry":
-                await self.notifier.send_entry_notification(payload.get("entry_info", {}))
+                await self.notifier.send_entry_notification(
+                    signal_id=payload.get("signal_id", ""),
+                    entry_price=payload.get("entry_price", 0.0),
+                    signal=payload.get("signal", {}),
+                    buffer_data=payload.get("buffer_data"),
+                )
                 return True
             elif ntype == "exit":
-                await self.notifier.send_exit_notification(payload.get("exit_info", {}))
+                await self.notifier.send_exit_notification(
+                    signal_id=payload.get("signal_id", ""),
+                    exit_price=payload.get("exit_price", 0.0),
+                    exit_reason=payload.get("exit_reason", ""),
+                    pnl=payload.get("pnl", 0.0),
+                    signal=payload.get("signal", {}),
+                    hold_duration_minutes=payload.get("hold_duration_minutes"),
+                    buffer_data=payload.get("buffer_data"),
+                )
                 return True
             elif ntype == "heartbeat":
                 await self.notifier.send_heartbeat(payload.get("status", {}))
                 return True
+            elif ntype == "startup":
+                await self.notifier.send_startup_notification(payload.get("config", {}))
+                return True
+            elif ntype == "shutdown":
+                await self.notifier.send_shutdown_notification(payload.get("summary", {}))
+                return True
+            elif ntype == "recovery":
+                await self.notifier.send_recovery_notification(payload.get("recovery_info", {}))
+                return True
+            elif ntype == "raw_message":
+                # Direct access to underlying TelegramAlerts for raw message sends
+                if self.notifier.telegram:
+                    await self.notifier.telegram.send_message(
+                        payload.get("message", ""),
+                        parse_mode=payload.get("parse_mode"),
+                        dedupe=payload.get("dedupe", True),
+                    )
+                    return True
+                return False
+            elif ntype == "risk_warning":
+                # Direct access to underlying TelegramAlerts for risk warnings
+                if self.notifier.telegram:
+                    await self.notifier.telegram.notify_risk_warning(
+                        payload.get("message", ""),
+                        risk_status=payload.get("risk_status"),
+                    )
+                    return True
+                return False
             else:
                 logger.warning(f"Unknown notification type: {ntype}")
                 return False
@@ -327,14 +375,162 @@ class NotificationQueue:
 
     async def enqueue_circuit_breaker(
         self,
-        error_type: str,
-        consecutive_errors: int,
+        reason: str,
+        details: Optional[Dict[str, Any]] = None,
         priority: Priority = Priority.CRITICAL,
     ) -> bool:
         """Convenience method to enqueue a circuit breaker alert."""
         return await self.enqueue(
             "circuit_breaker",
-            {"error_type": error_type, "consecutive_errors": consecutive_errors},
+            {"reason": reason, "details": details},
+            priority=priority,
+        )
+
+    async def enqueue_dashboard(
+        self,
+        status: Dict[str, Any],
+        chart_path: Optional[Any] = None,
+        priority: Priority = Priority.LOW,
+    ) -> bool:
+        """Convenience method to enqueue a dashboard notification."""
+        return await self.enqueue(
+            "dashboard",
+            {"status": status, "chart_path": chart_path},
+            priority=priority,
+        )
+
+    async def enqueue_data_quality_alert(
+        self,
+        alert_type: str,
+        message: str,
+        details: Optional[Dict[str, Any]] = None,
+        priority: Priority = Priority.NORMAL,
+    ) -> bool:
+        """Convenience method to enqueue a data quality alert."""
+        return await self.enqueue(
+            "data_quality",
+            {"alert_type": alert_type, "message": message, "details": details or {}},
+            priority=priority,
+        )
+
+    async def enqueue_entry(
+        self,
+        signal_id: str,
+        entry_price: float,
+        signal: Dict[str, Any],
+        buffer_data: Optional[Any] = None,
+        priority: Priority = Priority.HIGH,
+    ) -> bool:
+        """Convenience method to enqueue an entry notification."""
+        return await self.enqueue(
+            "entry",
+            {
+                "signal_id": signal_id,
+                "entry_price": entry_price,
+                "signal": signal,
+                "buffer_data": buffer_data,
+            },
+            priority=priority,
+        )
+
+    async def enqueue_exit(
+        self,
+        signal_id: str,
+        exit_price: float,
+        exit_reason: str,
+        pnl: float,
+        signal: Dict[str, Any],
+        hold_duration_minutes: Optional[float] = None,
+        buffer_data: Optional[Any] = None,
+        priority: Priority = Priority.HIGH,
+    ) -> bool:
+        """Convenience method to enqueue an exit notification."""
+        return await self.enqueue(
+            "exit",
+            {
+                "signal_id": signal_id,
+                "exit_price": exit_price,
+                "exit_reason": exit_reason,
+                "pnl": pnl,
+                "signal": signal,
+                "hold_duration_minutes": hold_duration_minutes,
+                "buffer_data": buffer_data,
+            },
+            priority=priority,
+        )
+
+    async def enqueue_heartbeat(
+        self,
+        status: Dict[str, Any],
+        priority: Priority = Priority.LOW,
+    ) -> bool:
+        """Convenience method to enqueue a heartbeat."""
+        return await self.enqueue(
+            "heartbeat",
+            {"status": status},
+            priority=priority,
+        )
+
+    async def enqueue_startup(
+        self,
+        config: Dict[str, Any],
+        priority: Priority = Priority.NORMAL,
+    ) -> bool:
+        """Convenience method to enqueue a startup notification."""
+        return await self.enqueue(
+            "startup",
+            {"config": config},
+            priority=priority,
+        )
+
+    async def enqueue_shutdown(
+        self,
+        summary: Dict[str, Any],
+        priority: Priority = Priority.CRITICAL,
+    ) -> bool:
+        """Convenience method to enqueue a shutdown notification."""
+        return await self.enqueue(
+            "shutdown",
+            {"summary": summary},
+            priority=priority,
+        )
+
+    async def enqueue_recovery(
+        self,
+        recovery_info: Dict[str, Any],
+        priority: Priority = Priority.NORMAL,
+    ) -> bool:
+        """Convenience method to enqueue a recovery notification."""
+        return await self.enqueue(
+            "recovery",
+            {"recovery_info": recovery_info},
+            priority=priority,
+        )
+
+    async def enqueue_raw_message(
+        self,
+        message: str,
+        parse_mode: Optional[str] = None,
+        dedupe: bool = True,
+        priority: Priority = Priority.NORMAL,
+    ) -> bool:
+        """Convenience method to enqueue a raw Telegram message."""
+        return await self.enqueue(
+            "raw_message",
+            {"message": message, "parse_mode": parse_mode, "dedupe": dedupe},
+            priority=priority,
+        )
+
+    async def enqueue_risk_warning(
+        self,
+        message: str,
+        risk_status: Optional[str] = None,
+        priority: Priority = Priority.CRITICAL,
+    ) -> bool:
+        """Convenience method to enqueue a risk warning."""
+        return await self.enqueue(
+            "risk_warning",
+            {"message": message, "risk_status": risk_status},
             priority=priority,
         )
 

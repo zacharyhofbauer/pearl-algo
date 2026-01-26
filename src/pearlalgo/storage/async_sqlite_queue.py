@@ -50,9 +50,12 @@ class AsyncSQLiteQueueMetrics:
     total_writes: int = 0
     total_drops: int = 0
     total_errors: int = 0
+    total_high_priority_writes: int = 0
+    total_backpressure_waits: int = 0
     writes_per_second: float = 0.0
     avg_latency_ms: float = 0.0
     worker_running: bool = False
+    backpressure_active: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for state persistence."""
@@ -61,9 +64,12 @@ class AsyncSQLiteQueueMetrics:
             "total_writes": self.total_writes,
             "total_drops": self.total_drops,
             "total_errors": self.total_errors,
+            "total_high_priority_writes": self.total_high_priority_writes,
+            "total_backpressure_waits": self.total_backpressure_waits,
             "writes_per_second": round(self.writes_per_second, 2),
             "avg_latency_ms": round(self.avg_latency_ms, 1),
             "worker_running": self.worker_running,
+            "backpressure_active": self.backpressure_active,
         }
 
 
@@ -104,11 +110,18 @@ class AsyncSQLiteQueue:
         self._total_writes = 0
         self._total_drops = 0
         self._total_errors = 0
+        self._total_high_priority_writes = 0
+        self._total_backpressure_waits = 0
         self._write_times: list[float] = []
         self._metrics_start_time = time.monotonic()
         
+        # Backpressure configuration
+        self._backpressure_threshold = int(max_queue_size * 0.8)  # 80% full
+        self._high_priority_timeout = 5.0  # Max time to wait for HIGH priority writes
+        
         logger.info(
-            f"AsyncSQLiteQueue initialized: max_queue={max_queue_size}, priority_trades={priority_trades}"
+            f"AsyncSQLiteQueue initialized: max_queue={max_queue_size}, priority_trades={priority_trades}, "
+            f"backpressure_threshold={self._backpressure_threshold}"
         )
     
     def start(self) -> None:
@@ -157,6 +170,11 @@ class AsyncSQLiteQueue:
         """
         Enqueue a write operation.
         
+        Priority handling:
+        - HIGH: NEVER dropped. Will block briefly if queue is full (backpressure).
+        - MEDIUM: Dropped only if queue is full AND no LOW priority items to evict.
+        - LOW: Dropped immediately if queue is full.
+        
         Args:
             operation: Operation name ("add_trade", "add_signal_event", "add_cycle_diagnostics")
             priority: Write priority
@@ -177,26 +195,57 @@ class AsyncSQLiteQueue:
         )
         
         try:
-            # Non-blocking put: if queue is full, drop LOW priority writes
+            # Non-blocking put: if queue is full, handle by priority
             self._queue.put_nowait(write)
+            if priority == WritePriority.HIGH:
+                self._total_high_priority_writes += 1
             return True
         except queue.Full:
-            # Queue full: drop LOW priority writes, keep HIGH/MEDIUM
-            if priority == WritePriority.LOW:
+            # Queue full: handle based on priority
+            if priority == WritePriority.HIGH:
+                # HIGH priority NEVER drops - block with timeout (backpressure)
+                self._total_backpressure_waits += 1
+                try:
+                    logger.warning(
+                        f"AsyncSQLiteQueue full - applying backpressure for HIGH priority write: {operation}"
+                    )
+                    # Block up to timeout waiting for space
+                    self._queue.put(write, timeout=self._high_priority_timeout)
+                    self._total_high_priority_writes += 1
+                    return True
+                except queue.Full:
+                    # Even after waiting, queue is still full
+                    # As a last resort, execute HIGH priority write synchronously
+                    logger.error(
+                        f"AsyncSQLiteQueue backpressure timeout - executing HIGH priority write synchronously: {operation}"
+                    )
+                    try:
+                        self._execute_write(write)
+                        self._total_writes += 1
+                        self._total_high_priority_writes += 1
+                        return True
+                    except Exception as e:
+                        self._total_errors += 1
+                        logger.error(f"Synchronous HIGH priority write failed: {e}")
+                        return False
+            elif priority == WritePriority.MEDIUM:
+                # MEDIUM priority: try once more with short wait, then drop
+                try:
+                    self._queue.put(write, timeout=0.1)
+                    return True
+                except queue.Full:
+                    self._total_drops += 1
+                    logger.warning(f"Dropped MEDIUM priority write (queue full): {operation}")
+                    return False
+            else:
+                # LOW priority: drop immediately
                 self._total_drops += 1
                 logger.debug(f"Dropped LOW priority write (queue full): {operation}")
                 return False
-            else:
-                # For HIGH/MEDIUM priority, try to make room by dropping oldest LOW priority
-                try:
-                    # This is a simplified approach: in production you'd scan the queue
-                    # For now, just drop the write if we can't make room quickly
-                    self._total_drops += 1
-                    logger.warning(f"Dropped {priority.name} priority write (queue full): {operation}")
-                    return False
-                except Exception:
-                    self._total_drops += 1
-                    return False
+    
+    def is_backpressure_active(self) -> bool:
+        """Check if queue is under backpressure (above threshold)."""
+        return self._queue.qsize() >= self._backpressure_threshold
     
     def _worker_loop(self) -> None:
         """Background worker thread loop."""
@@ -282,9 +331,12 @@ class AsyncSQLiteQueue:
             total_writes=self._total_writes,
             total_drops=self._total_drops,
             total_errors=self._total_errors,
+            total_high_priority_writes=self._total_high_priority_writes,
+            total_backpressure_waits=self._total_backpressure_waits,
             writes_per_second=writes_per_sec,
             avg_latency_ms=avg_latency,
             worker_running=self._running and (self._worker_thread is not None) and self._worker_thread.is_alive(),
+            backpressure_active=self.is_backpressure_active(),
         )
 
 

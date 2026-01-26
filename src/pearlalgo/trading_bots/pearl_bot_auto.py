@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Tuple
 from pearlalgo.config.config_view import ConfigView
 from datetime import datetime, timezone, time as dt_time
 from zoneinfo import ZoneInfo
+import numpy as np
 import pandas as pd
 
 from pearlalgo.utils.logger import logger
@@ -102,6 +103,38 @@ CONFIG = ConfigView({
 
 
 # ============================================================================
+# CACHING (for expensive computations that don't change within time periods)
+# ============================================================================
+
+# Cache for key levels - keyed by (data_hash, date_str) to avoid recomputing
+# when data hasn't changed within the same day/week/month
+_key_levels_cache: Dict[str, Dict[str, Optional[float]]] = {}
+_key_levels_cache_max_size = 10
+
+
+def _get_key_levels_cache_key(df: pd.DataFrame) -> str:
+    """Generate cache key based on last bar timestamp and length."""
+    if df.empty:
+        return ""
+    try:
+        # Use last bar timestamp and length as cache key
+        ts = df["timestamp"].iloc[-1] if "timestamp" in df.columns else df.index[-1]
+        return f"{ts}_{len(df)}"
+    except Exception:
+        return ""
+
+
+def _clear_key_levels_cache_if_needed() -> None:
+    """Clear cache if it grows too large."""
+    global _key_levels_cache
+    if len(_key_levels_cache) > _key_levels_cache_max_size:
+        # Keep only the most recent entries
+        keys = list(_key_levels_cache.keys())
+        for key in keys[:-_key_levels_cache_max_size]:
+            del _key_levels_cache[key]
+
+
+# ============================================================================
 # INDICATOR FUNCTIONS (All inline, no classes)
 # ============================================================================
 
@@ -156,12 +189,15 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
 def calculate_sr_power_channel(
     df: pd.DataFrame,
     length: int = 130,
-    atr_mult: float = 0.5
+    atr_mult: float = 0.5,
+    precomputed_atr: Optional[float] = None,
 ) -> Tuple[float, float, int, int]:
     """
     S&R Power Channel - from S&R Power (ChartPrime).pine
     
     Returns: (resistance_level, support_level, buy_power, sell_power)
+    
+    Optimization: Accept precomputed_atr to avoid redundant ATR calculations.
     """
     if len(df) < length:
         return 0.0, 0.0, 0, 0
@@ -171,14 +207,17 @@ def calculate_sr_power_channel(
     max_price = lookback["high"].max()
     min_price = lookback["low"].min()
     
-    # Calculate ATR for channel width
-    atr = calculate_atr(df, period=200).iloc[-1] * atr_mult
+    # Use precomputed ATR if provided, otherwise calculate
+    if precomputed_atr is not None:
+        atr = precomputed_atr * atr_mult
+    else:
+        atr = calculate_atr(df, period=200).iloc[-1] * atr_mult
     
     # Resistance and Support levels
     resistance = max_price + atr
     support = min_price - atr
     
-    # Buy/Sell Power (count bullish/bearish candles)
+    # Buy/Sell Power (count bullish/bearish candles) - already vectorized
     buy_power = int((lookback["close"] > lookback["open"]).sum())
     sell_power = int((lookback["close"] < lookback["open"]).sum())
     
@@ -261,6 +300,8 @@ def calculate_supply_demand_zones(
     Supply & Demand Zones - from Supply & Demand Visible Range (Lux).pine
     
     Returns: (supply_level, supply_avg, demand_level, demand_avg)
+    
+    Optimized: Uses vectorized operations instead of iterrows() for better performance.
     """
     if len(df) < 20:
         return None, None, None, None
@@ -268,20 +309,27 @@ def calculate_supply_demand_zones(
     # Simplified version - find high volume price levels
     lookback = df.tail(100) if len(df) > 100 else df
     
-    price_range = lookback["high"].max() - lookback["low"].min()
+    low_min = lookback["low"].min()
+    high_max = lookback["high"].max()
+    price_range = high_max - low_min
     if price_range == 0:
         return None, None, None, None
     
-    # Bin prices and accumulate volume
-    bins = {}
-    for _, row in lookback.iterrows():
-        price_bin = int((row["close"] - lookback["low"].min()) / price_range * resolution)
-        if price_bin not in bins:
-            bins[price_bin] = 0
-        bins[price_bin] += row["volume"]
+    # Vectorized binning: compute bin for each row
+    closes = lookback["close"].values
+    volumes = lookback["volume"].values
     
-    total_volume = lookback["volume"].sum()
+    # Calculate bin indices (vectorized)
+    bins_arr = ((closes - low_min) / price_range * resolution).astype(int)
+    bins_arr = np.clip(bins_arr, 0, resolution - 1)  # Ensure bins are in valid range
+    
+    # Accumulate volume per bin using numpy bincount (much faster than loop)
+    bin_volumes = np.bincount(bins_arr, weights=volumes, minlength=resolution)
+    
+    total_volume = volumes.sum()
     threshold_volume = total_volume * (threshold_pct / 100.0)
+    
+    current_close = lookback["close"].iloc[-1]
     
     # Find supply (high volume at high prices) and demand (high volume at low prices)
     supply_level = None
@@ -289,14 +337,17 @@ def calculate_supply_demand_zones(
     demand_level = None
     demand_avg = None
     
-    sorted_bins = sorted(bins.items(), key=lambda x: x[1], reverse=True)
-    for price_bin, volume in sorted_bins:
+    # Get indices sorted by volume (descending)
+    sorted_indices = np.argsort(bin_volumes)[::-1]
+    
+    for price_bin in sorted_indices:
+        volume = bin_volumes[price_bin]
         if volume >= threshold_volume:
-            price = lookback["low"].min() + (price_bin / resolution * price_range)
-            if supply_level is None and price > lookback["close"].iloc[-1]:
+            price = low_min + (price_bin / resolution * price_range)
+            if supply_level is None and price > current_close:
                 supply_level = float(price)
                 supply_avg = float(price)
-            elif demand_level is None and price < lookback["close"].iloc[-1]:
+            elif demand_level is None and price < current_close:
                 demand_level = float(price)
                 demand_avg = float(price)
                 break
@@ -304,7 +355,7 @@ def calculate_supply_demand_zones(
     return supply_level, supply_avg, demand_level, demand_avg
 
 
-def get_key_levels(df: pd.DataFrame) -> Dict[str, Optional[float]]:
+def get_key_levels(df: pd.DataFrame, use_cache: bool = True) -> Dict[str, Optional[float]]:
     """
     SpacemanBTC Key Levels - comprehensive implementation.
     
@@ -315,11 +366,21 @@ def get_key_levels(df: pd.DataFrame) -> Dict[str, Optional[float]]:
     - Session: Session High/Low for current trading day
     
     Returns dict with all computed levels and their types (support/resistance).
+    
+    Optimization: Caches results since D/W/M levels rarely change within a scan cycle.
     """
+    global _key_levels_cache
+    
     levels: Dict[str, Optional[float]] = {}
     
     if df.empty or len(df) < 2:
         return levels
+    
+    # Check cache first
+    if use_cache:
+        cache_key = _get_key_levels_cache_key(df)
+        if cache_key and cache_key in _key_levels_cache:
+            return _key_levels_cache[cache_key].copy()
     
     # Ensure we have a timestamp column or index
     if "timestamp" in df.columns:
@@ -428,6 +489,13 @@ def get_key_levels(df: pd.DataFrame) -> Dict[str, Optional[float]]:
     except Exception as e:
         logger.debug(f"Error computing key levels with resampling: {e}")
         return _get_key_levels_simple(df)
+    
+    # Cache the result for future calls
+    if use_cache:
+        cache_key = _get_key_levels_cache_key(df)
+        if cache_key:
+            _clear_key_levels_cache_if_needed()
+            _key_levels_cache[cache_key] = levels.copy()
     
     return levels
 

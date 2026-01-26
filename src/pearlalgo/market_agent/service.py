@@ -28,6 +28,7 @@ from pearlalgo.market_agent.health_monitor import HealthMonitor
 from pearlalgo.market_agent.performance_tracker import PerformanceTracker
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
+from pearlalgo.market_agent.notification_queue import NotificationQueue, Priority
 from pearlalgo.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.utils.cadence import CadenceScheduler
 from pearlalgo.utils.data_quality import DataQualityChecker
@@ -145,6 +146,14 @@ class MarketAgentService:
             bot_token=telegram_bot_token,
             chat_id=telegram_chat_id,
             state_dir=state_dir,
+        )
+        
+        # Initialize notification queue for non-blocking Telegram delivery
+        self.notification_queue = NotificationQueue(
+            telegram_notifier=self.telegram_notifier,
+            max_queue_size=1000,
+            batch_delay_seconds=0.5,
+            max_retries=3,
         )
         
         # Log Telegram configuration status
@@ -587,6 +596,10 @@ class MarketAgentService:
 
         logger.info("NQ Agent Service starting...")
 
+        # Start notification queue for async Telegram delivery
+        await self.notification_queue.start()
+        logger.info("Notification queue started")
+
         # Startup flow:
         # 1) Rich startup notification (stable)
         # 2) Immediately follow with the /start-style visual dashboard (chart + caption + buttons)
@@ -624,8 +637,8 @@ class MarketAgentService:
             except Exception:
                 pass
 
-            await self.telegram_notifier.send_startup_notification(config_dict)
-            logger.info("Startup notification sent to Telegram")
+            await self.notification_queue.enqueue_startup(config_dict, priority=Priority.NORMAL)
+            logger.info("Startup notification queued")
         except Exception as e:
             logger.debug(f"Could not send startup notification: {e}")
 
@@ -698,6 +711,14 @@ class MarketAgentService:
                 self._async_sqlite_queue.stop(timeout=5.0)
             except Exception as e:
                 logger.warning(f"Error stopping async SQLite queue: {e}")
+
+        # Stop notification queue gracefully (drains pending notifications)
+        try:
+            await self.notification_queue.stop(timeout=10.0)
+            queue_stats = self.notification_queue.get_stats()
+            logger.info(f"Notification queue stopped: {queue_stats}")
+        except Exception as e:
+            logger.warning(f"Error stopping notification queue: {e}")
 
         # Save final state
         try:
@@ -876,13 +897,14 @@ class MarketAgentService:
                                     "cycle": self.cycle_count,
                                 },
                             )
-                            await self.telegram_notifier.send_circuit_breaker_alert(
+                            await self.notification_queue.enqueue_circuit_breaker(
                                 "IB Gateway connection lost",
                                 {
                                     "connection_failures": self.connection_failures,
                                     "error_type": "connection",
                                     "action_taken": "Service paused - IB Gateway appears to be down",
-                                }
+                                },
+                                priority=Priority.CRITICAL,
                             )
                             self.paused = True
                             self.pause_reason = "connection_failures"
@@ -920,10 +942,11 @@ class MarketAgentService:
 
                     # Alert on consecutive fetch failures
                     if self.data_fetch_errors >= 3:
-                        await self.telegram_notifier.send_data_quality_alert(
+                        await self.notification_queue.enqueue_data_quality_alert(
                             "fetch_failure",
                             f"Consecutive data fetch failures: {self.data_fetch_errors}",
                             {"consecutive_failures": self.data_fetch_errors},
+                            priority=Priority.NORMAL,
                         )
 
                     # Circuit breaker: if too many data fetch errors, wait longer
@@ -1095,10 +1118,11 @@ class MarketAgentService:
                         # Notify if swing trade detected
                         if trade_type == "swing":
                             try:
-                                await self.telegram_notifier.send_message(
+                                await self.notification_queue.enqueue_raw_message(
                                     f"📈 Swing Trade Detected: {signal_type} {signal_direction}\n"
                                     f"Confidence: {signal.get('confidence', 0):.1%}\n"
-                                    f"Target: ${signal.get('take_profit', 0):.2f}"
+                                    f"Target: ${signal.get('take_profit', 0):.2f}",
+                                    priority=Priority.NORMAL,
                                 )
                             except Exception:
                                 pass  # Non-fatal
@@ -1236,13 +1260,14 @@ class MarketAgentService:
                         )
                     except Exception:
                         pass
-                    await self.telegram_notifier.send_circuit_breaker_alert(
+                    await self.notification_queue.enqueue_circuit_breaker(
                         "Too many consecutive errors",
                         {
                             "consecutive_errors": self.consecutive_errors,
                             "error_type": "general",
                             "action_taken": "Service paused",
                         },
+                        priority=Priority.CRITICAL,
                     )
                     self.paused = True
                     self.pause_reason = "consecutive_errors"
@@ -1256,12 +1281,15 @@ class MarketAgentService:
                 # Send recovery notification if we had errors and now recovered
                 if had_errors:
                     try:
-                        await self.telegram_notifier.send_recovery_notification({
-                            "issue": "Consecutive errors resolved",
-                            "recovery_time_seconds": 0,
-                        })
+                        await self.notification_queue.enqueue_recovery(
+                            {
+                                "issue": "Consecutive errors resolved",
+                                "recovery_time_seconds": 0,
+                            },
+                            priority=Priority.NORMAL,
+                        )
                     except Exception as e:
-                        logger.warning(f"Could not send recovery notification: {e}")
+                        logger.warning(f"Could not queue recovery notification: {e}")
 
     def _build_context_features_for_signal(self, signal: Dict) -> Optional["ContextFeatures"]:
         """
@@ -1512,35 +1540,27 @@ class MarketAgentService:
             if execution_result:
                 signal["_execution_order_id"] = execution_result.parent_order_id
 
-            # Send to Telegram (await async call) with buffer data for chart generation
+            # Queue signal to Telegram (non-blocking)
             signal_type = signal.get('type', 'unknown')
             signal_direction = signal.get('direction', 'unknown')
             logger.info(f"Processing signal: {signal_type} {signal_direction}")
             
-            success = await self.telegram_notifier.send_signal(signal, buffer_data=buffer_data)
+            queued = await self.notification_queue.enqueue_signal(signal, buffer_data=buffer_data, priority=Priority.HIGH)
 
-            if success:
-                logger.info(f"✅ Signal sent to Telegram: {signal_type} {signal_direction}")
+            if queued:
+                logger.info(f"✅ Signal queued for Telegram: {signal_type} {signal_direction}")
                 self.signals_sent += 1
                 self.last_signal_sent_at = get_utc_timestamp()
                 # Clear last error on success to avoid stale operator confusion.
                 self.last_signal_send_error = None
             else:
                 logger.error(
-                    f"❌ Failed to send signal to Telegram: {signal_type} {signal_direction}. "
+                    f"❌ Failed to queue signal to Telegram (queue full): {signal_type} {signal_direction}. "
                     f"Telegram enabled: {self.telegram_notifier.enabled}, "
                     f"Telegram instance: {self.telegram_notifier.telegram is not None}"
                 )
                 self.signals_send_failures += 1
-                try:
-                    err = None
-                    if self.telegram_notifier.telegram is not None:
-                        err = getattr(self.telegram_notifier.telegram, "last_error", None)
-                    if err:
-                        self.last_signal_send_error = str(err)[:200]
-                except Exception:
-                    # Keep prior error if we can't read the latest reason.
-                    pass
+                self.last_signal_send_error = "Notification queue full - signal dropped"
 
             self.signal_count += 1
 
@@ -1765,7 +1785,7 @@ class MarketAgentService:
                                         f"🏆 Challenge attempt #{attempt_id} ended: {outcome.upper()} | "
                                         f"Final PnL: ${attempt_pnl:.2f}"
                                     )
-                                    # Send Telegram alert for pass/fail
+                                    # Send Telegram alert for pass/fail (fire-and-forget via queue)
                                     if self.telegram_notifier.enabled:
                                         try:
                                             emoji = "🎉" if outcome == "pass" else "❌"
@@ -1778,12 +1798,12 @@ class MarketAgentService:
                                                 f"_New attempt starting..._"
                                             )
                                             asyncio.create_task(
-                                                self.telegram_notifier.telegram.send_message(
-                                                    msg, parse_mode="Markdown", dedupe=False
+                                                self.notification_queue.enqueue_raw_message(
+                                                    msg, parse_mode="Markdown", dedupe=False, priority=Priority.HIGH
                                                 )
                                             )
                                         except Exception as tg_err:
-                                            logger.debug(f"Could not send challenge alert: {tg_err}")
+                                            logger.debug(f"Could not queue challenge alert: {tg_err}")
                             except Exception as challenge_err:
                                 logger.debug(f"Could not record challenge trade: {challenge_err}")
                         
@@ -1870,37 +1890,23 @@ class MarketAgentService:
                                     hold_mins = None
 
                                 logger.info(
-                                    f"📤 Scheduling exit notification for {sig_id[:16]}: "
+                                    f"📤 Queuing exit notification for {sig_id[:16]}: "
                                     f"exit={exit_price:.2f} | reason={exit_reason} | pnl=${pnl_value:.2f}"
                                 )
                                 
-                                # Fire-and-forget: chart generation + Telegram send can take time.
-                                async def _send_exit_notification_task():
-                                    try:
-                                        success = await self.telegram_notifier.send_exit_notification(
-                                            signal_id=str(sig_id),
-                                            exit_price=float(exit_price),
-                                            exit_reason=str(exit_reason),
-                                            pnl=float(pnl_value),
-                                            signal=sig,
-                                            hold_duration_minutes=hold_mins,
-                                            buffer_data=df,
-                                        )
-                                        if success:
-                                            logger.info(f"✅ Exit notification sent successfully for {sig_id[:16]}")
-                                        else:
-                                            logger.warning(
-                                                f"⚠️ Exit notification returned False for {sig_id[:16]} "
-                                                f"(notifier.enabled={self.telegram_notifier.enabled}, "
-                                                f"telegram={self.telegram_notifier.telegram is not None})"
-                                            )
-                                    except Exception as notify_err:
-                                        logger.error(
-                                            f"❌ Failed to send exit notification for {sig_id[:16]}: {notify_err}",
-                                            exc_info=True
-                                        )
-                                
-                                asyncio.create_task(_send_exit_notification_task())
+                                # Queue exit notification (fire-and-forget via queue)
+                                asyncio.create_task(
+                                    self.notification_queue.enqueue_exit(
+                                        signal_id=str(sig_id),
+                                        exit_price=float(exit_price),
+                                        exit_reason=str(exit_reason),
+                                        pnl=float(pnl_value),
+                                        signal=sig,
+                                        hold_duration_minutes=hold_mins,
+                                        buffer_data=df,
+                                        priority=Priority.HIGH,
+                                    )
+                                )
                             else:
                                 if not virtual_pnl_enabled:
                                     logger.debug(f"Exit notification skipped for {sig_id[:16]}: virtual_pnl_enabled=False")
@@ -2207,7 +2213,10 @@ class MarketAgentService:
             if not range_label:
                 range_label = f"{int(lookback_hours)}h" if lookback_hours < 72 else f"{int(round(lookback_hours/24))}d"
 
-            chart_path = self.telegram_notifier.chart_generator.generate_dashboard_chart(
+            # Run chart generation in thread pool to avoid blocking the event loop.
+            # This allows asyncio.wait_for timeouts to work properly.
+            chart_path = await asyncio.to_thread(
+                self.telegram_notifier.chart_generator.generate_dashboard_chart,
                 data=chart_data,
                 symbol=self.config.symbol,
                 timeframe=chosen_tf,
@@ -2616,9 +2625,9 @@ class MarketAgentService:
                 # Never let optional observability break the dashboard.
                 pass
             
-            await self.telegram_notifier.send_dashboard(status, chart_path=chart_path)
+            await self.notification_queue.enqueue_dashboard(status, chart_path=chart_path, priority=Priority.LOW)
         except Exception as e:
-            logger.error(f"Error sending dashboard: {e}", exc_info=True)
+            logger.error(f"Error queuing dashboard: {e}", exc_info=True)
     
     def _get_recent_closes(self, market_data: Optional[Dict] = None) -> list:
         """Extract recent close prices for sparkline."""
@@ -3059,9 +3068,9 @@ class MarketAgentService:
         try:
             # Use enhanced status with performance metrics
             status = self.get_status()
-            await self.telegram_notifier.send_enhanced_status(status)
+            await self.notification_queue.enqueue_status(status, priority=Priority.LOW)
         except Exception as e:
-            logger.error(f"Error sending status update: {e}", exc_info=True)
+            logger.error(f"Error queuing status update: {e}", exc_info=True)
 
     def pause(self) -> None:
         """Pause the service."""
@@ -3130,15 +3139,16 @@ class MarketAgentService:
                 await self._check_execution_control_flags()
 
     async def _notify_error(self, title: str, message: str) -> None:
-        """Notify about errors via Telegram."""
+        """Notify about errors via Telegram (through notification queue)."""
         try:
             if self.telegram_notifier.enabled and self.telegram_notifier.telegram:
-                await self.telegram_notifier.telegram.notify_risk_warning(
+                await self.notification_queue.enqueue_risk_warning(
                     f"{title}\n\n{message}",
                     risk_status="ERROR",
+                    priority=Priority.CRITICAL,
                 )
         except Exception as e:
-            logger.error(f"Error sending error notification: {e}")
+            logger.error(f"Error queuing error notification: {e}")
 
     def _check_daily_reset(self) -> None:
         """
@@ -3226,14 +3236,15 @@ class MarketAgentService:
                     )
                     logger.warning("IBKR execution connection lost")
                 
-                # Send Telegram alert
+                # Send Telegram alert (through notification queue)
                 try:
-                    await self.telegram_notifier.telegram.send_message(
+                    await self.notification_queue.enqueue_raw_message(
                         message,
                         parse_mode="Markdown",
+                        priority=Priority.NORMAL,
                     )
                 except Exception as e:
-                    logger.error(f"Failed to send connection alert: {e}")
+                    logger.error(f"Failed to queue connection alert: {e}")
             
             # Update state
             self._execution_was_connected = is_connected
@@ -3298,13 +3309,14 @@ class MarketAgentService:
                             f"Enable execution.enabled in config to use /arm, /disarm, /kill commands."
                         )
                         flag_file.unlink(missing_ok=True)
-                        # Notify user that the command was ignored
+                        # Notify user that the command was ignored (through notification queue)
                         try:
-                            await self.telegram_notifier.telegram.send_message(
+                            await self.notification_queue.enqueue_raw_message(
                                 f"⚠️ *{action.upper()} IGNORED*\n\n"
                                 f"Execution adapter is disabled.\n"
                                 f"Set `execution.enabled: true` in config and restart to enable ATS.",
                                 parse_mode="Markdown",
+                                priority=Priority.NORMAL,
                             )
                         except Exception:
                             pass
@@ -3341,16 +3353,17 @@ class MarketAgentService:
                     # Also remove any pending disarm flag (kill already disarms)
                     disarm_file.unlink(missing_ok=True)
                     
-                # Notify via Telegram (outside try/finally to ensure flag is always cleared)
+                # Notify via Telegram (through notification queue)
                 try:
                     error_note = ""
                     if cancel_errors:
                         error_note = f"\n⚠️ Errors: {len(cancel_errors)}"
-                    await self.telegram_notifier.telegram.send_message(
+                    await self.notification_queue.enqueue_raw_message(
                         f"🚨 *KILL SWITCH EXECUTED*\n\n"
                         f"Cancelled: `{cancelled_count}` orders\n"
                         f"Execution: `DISARMED`{error_note}",
                         parse_mode="Markdown",
+                        priority=Priority.CRITICAL,
                     )
                 except Exception:
                     pass
@@ -3364,12 +3377,13 @@ class MarketAgentService:
                 self.execution_adapter.disarm()
                 disarm_file.unlink(missing_ok=True)
                 
-                # Notify via Telegram
+                # Notify via Telegram (through notification queue)
                 try:
-                    await self.telegram_notifier.telegram.send_message(
+                    await self.notification_queue.enqueue_raw_message(
                         "🔒 *Execution DISARMED*\n\n"
                         "No new orders will be placed.",
                         parse_mode="Markdown",
+                        priority=Priority.HIGH,
                     )
                 except Exception:
                     pass
@@ -3384,26 +3398,28 @@ class MarketAgentService:
                 arm_file.unlink(missing_ok=True)
                 
                 if success:
-                    # Notify via Telegram
+                    # Notify via Telegram (through notification queue)
                     try:
                         mode = self._execution_config.mode.value if self._execution_config else "unknown"
-                        await self.telegram_notifier.telegram.send_message(
+                        await self.notification_queue.enqueue_raw_message(
                             f"🔫 *Execution ARMED*\n\n"
                             f"Mode: `{mode}`\n"
                             f"Orders will be placed for signals.\n\n"
                             f"⚠️ Use `/disarm` to stop or `/kill` to cancel all.",
                             parse_mode="Markdown",
+                            priority=Priority.HIGH,
                         )
                     except Exception:
                         pass
                 else:
                     logger.warning("Could not arm execution adapter - preconditions not met")
                     try:
-                        await self.telegram_notifier.telegram.send_message(
+                        await self.notification_queue.enqueue_raw_message(
                             "⚠️ *ARM FAILED*\n\n"
                             "Could not arm execution adapter.\n"
                             "Check that execution is enabled in config.",
                             parse_mode="Markdown",
+                            priority=Priority.HIGH,
                         )
                     except Exception:
                         pass
@@ -3490,24 +3506,26 @@ class MarketAgentService:
                 except Exception as e:
                     logger.warning(f"Could not update feedback file: {e}")
             
-            # Notify via Telegram
+            # Notify via Telegram (through notification queue)
             try:
                 if applied:
-                    await self.telegram_notifier.telegram.send_message(
+                    await self.notification_queue.enqueue_raw_message(
                         f"✅ *Grade Applied*\n\n"
                         f"Signal: `{signal_id[:25]}...`\n"
                         f"Type: `{signal_type}`\n"
                         f"Outcome: {'Win' if is_win else 'Loss'}\n"
                         f"Applied to learning policy.",
                         parse_mode="Markdown",
+                        priority=Priority.NORMAL,
                     )
                 else:
-                    await self.telegram_notifier.telegram.send_message(
+                    await self.notification_queue.enqueue_raw_message(
                         f"ℹ️ *Grade Logged*\n\n"
                         f"Signal: `{signal_id[:25]}...`\n"
                         f"Already exited - feedback logged but not applied.\n"
                         f"_Use `force` to override._",
                         parse_mode="Markdown",
+                        priority=Priority.NORMAL,
                     )
             except Exception:
                 pass
@@ -4046,7 +4064,7 @@ class MarketAgentService:
                     f"Closed: `{closed_count}`\n"
                     f"Total P&L: `${total_pnl:,.2f}`"
                 )
-                await self.telegram_notifier.telegram.send_message(msg, parse_mode="Markdown", dedupe=False)
+                await self.notification_queue.enqueue_raw_message(msg, parse_mode="Markdown", dedupe=False, priority=Priority.HIGH)
             except Exception:
                 pass
 
@@ -4342,6 +4360,11 @@ class MarketAgentService:
         )
 
         # ==========================================================================
+        # Notification queue stats (async Telegram delivery observability)
+        # ==========================================================================
+        state["notification_queue"] = self.notification_queue.get_stats()
+
+        # ==========================================================================
         # Virtual positions (signals.jsonl status="entered") for Telegram command UI
         # ==========================================================================
         # The interactive Telegram command handler reads state.json. Persisting these
@@ -4436,7 +4459,7 @@ class MarketAgentService:
             except Exception as e:
                 logger.debug(f"Could not fetch price for heartbeat: {e}")
             
-            await self.telegram_notifier.send_heartbeat(status)
+            await self.notification_queue.enqueue_heartbeat(status, priority=Priority.LOW)
             self.last_heartbeat = now
 
     async def _check_data_quality(self, market_data: Dict) -> None:
@@ -4488,10 +4511,11 @@ class MarketAgentService:
                 bucket = _stale_bucket(age_minutes)
                 # Only send when bucket changes (10→20→40→60...) AND we’re not throttled.
                 if (self._last_stale_bucket != bucket) and (not throttled):
-                    await self.telegram_notifier.send_data_quality_alert(
+                    await self.notification_queue.enqueue_data_quality_alert(
                         "stale_data",
                         f"Data is {age_minutes:.1f} minutes old",
                         {"age_minutes": age_minutes, "bucket": bucket},
+                        priority=Priority.NORMAL,
                     )
                     self.last_data_quality_alert = now
                     self._last_stale_data_alert_type = "stale_data"
@@ -4511,10 +4535,11 @@ class MarketAgentService:
                 or (now - self.last_data_quality_alert).total_seconds() >= 60
             )
             if can_recover:
-                await self.telegram_notifier.send_data_quality_alert(
+                await self.notification_queue.enqueue_data_quality_alert(
                     "recovery",
                     "Market data recovered (fresh bars again)",
                     {},
+                    priority=Priority.NORMAL,
                 )
                 self.last_data_quality_alert = now
             self._was_stale_during_market = False
@@ -4525,10 +4550,11 @@ class MarketAgentService:
         if df is not None and df.empty:
             self._was_data_gap = True
             if (self._last_stale_data_alert_type != "data_gap") and (not throttled):
-                await self.telegram_notifier.send_data_quality_alert(
+                await self.notification_queue.enqueue_data_quality_alert(
                     "data_gap",
                     "No market data available",
                     {},
+                    priority=Priority.NORMAL,
                 )
                 self.last_data_quality_alert = now
                 self._last_stale_data_alert_type = "data_gap"
@@ -4539,10 +4565,11 @@ class MarketAgentService:
                 or (now - self.last_data_quality_alert).total_seconds() >= 60
             )
             if can_recover:
-                await self.telegram_notifier.send_data_quality_alert(
+                await self.notification_queue.enqueue_data_quality_alert(
                     "recovery",
                     "Market data gap recovered",
                     {},
+                    priority=Priority.NORMAL,
                 )
                 self.last_data_quality_alert = now
             self._was_data_gap = False
@@ -4552,10 +4579,11 @@ class MarketAgentService:
             buffer_size = int(validation["buffer_size"].get("buffer_size", 0) or 0)
             severity = _buffer_severity(buffer_size)
             if (self._last_buffer_severity != severity) and (not throttled):
-                await self.telegram_notifier.send_data_quality_alert(
+                await self.notification_queue.enqueue_data_quality_alert(
                     "buffer_issue",
                     f"Buffer size is low: {buffer_size} bars",
                     {"buffer_size": buffer_size, "severity": severity},
+                    priority=Priority.NORMAL,
                 )
                 self.last_data_quality_alert = now
                 self._last_stale_data_alert_type = "buffer_issue"
@@ -4570,10 +4598,11 @@ class MarketAgentService:
                 or (now - self.last_data_quality_alert).total_seconds() >= 60
             )
             if can_recover:
-                await self.telegram_notifier.send_data_quality_alert(
+                await self.notification_queue.enqueue_data_quality_alert(
                     "recovery",
                     "Buffer recovered (enough bars for strategy)",
                     {},
+                    priority=Priority.NORMAL,
                 )
                 self.last_data_quality_alert = now
             self._was_buffer_inadequate = False
@@ -4589,7 +4618,7 @@ class MarketAgentService:
             self.last_connection_failure_alert is None
             or (now - self.last_connection_failure_alert).total_seconds() >= self.connection_failure_alert_interval
         ):
-            await self.telegram_notifier.send_data_quality_alert(
+            await self.notification_queue.enqueue_data_quality_alert(
                 "fetch_failure",
                 f"IB Gateway connection issue detected ({self.connection_failures} failures). "
                 "Check if IB Gateway is running.",
@@ -4598,6 +4627,7 @@ class MarketAgentService:
                     "error_type": "connection",
                     "suggestion": "Run: ./scripts/gateway/gateway.sh status or ./scripts/gateway/gateway.sh start",
                 },
+                priority=Priority.NORMAL,
             )
             self.last_connection_failure_alert = now
 

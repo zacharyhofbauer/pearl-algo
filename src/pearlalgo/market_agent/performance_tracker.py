@@ -6,7 +6,10 @@ Tracks signal performance and calculates metrics.
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
@@ -217,6 +220,8 @@ class PerformanceTracker:
 
         This is used by in-trade management (e.g., trailing stops) so the virtual-exit
         engine (_update_virtual_trade_exits) grades exits using the *latest* stop.
+        
+        Safety: Uses atomic file write with locking.
         """
         if stop_loss is None and take_profit is None:
             return
@@ -225,52 +230,80 @@ class PerformanceTracker:
         if updated_at is None:
             updated_at = datetime.now(timezone.utc)
 
-        # Read all records (jsonl), update one, write back.
-        records: List[Dict] = []
+        # Acquire exclusive lock on the signals file during read-modify-write
         try:
-            with open(self.signals_file, "r") as f:
-                for line in f:
+            with open(self.signals_file, "r+") as f:
+                # Acquire exclusive lock (blocking)
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    # Read all records
+                    records: List[Dict] = []
+                    f.seek(0)
+                    for line in f:
+                        try:
+                            records.append(json.loads(line.strip()))
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+
+                    # Update matching record
+                    updated = False
+                    for record in records:
+                        if record.get("signal_id") != signal_id:
+                            continue
+                        sig = record.get("signal", {}) or {}
+                        if not isinstance(sig, dict):
+                            sig = {}
+                        if stop_loss is not None:
+                            try:
+                                sig["stop_loss"] = float(stop_loss)
+                                record["stop_loss_updated_at"] = updated_at.isoformat()
+                            except Exception:
+                                pass
+                        if take_profit is not None:
+                            try:
+                                sig["take_profit"] = float(take_profit)
+                                record["take_profit_updated_at"] = updated_at.isoformat()
+                            except Exception:
+                                pass
+                        record["price_update_source"] = str(source)
+                        record["signal"] = sig
+                        updated = True
+                        break
+
+                    if not updated:
+                        return
+
+                    # Atomic write: write to temp file, fsync, then rename
+                    tmp_path = None
                     try:
-                        records.append(json.loads(line.strip()))
-                    except (json.JSONDecodeError, ValueError):
-                        continue
+                        dir_path = self.signals_file.parent
+                        with tempfile.NamedTemporaryFile(
+                            mode="w",
+                            dir=dir_path,
+                            delete=False,
+                            suffix=".tmp",
+                        ) as tmp_f:
+                            for record in records:
+                                tmp_f.write(json.dumps(record) + "\n")
+                            tmp_f.flush()
+                            os.fsync(tmp_f.fileno())
+                            tmp_path = tmp_f.name
+                        
+                        # Atomic rename
+                        os.replace(tmp_path, self.signals_file)
+                    except Exception as e:
+                        # Clean up temp file on failure
+                        try:
+                            if tmp_path and os.path.exists(tmp_path):
+                                os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                        logger.debug(f"Could not write signals file atomically: {e}")
+                finally:
+                    # Release lock
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         except Exception as e:
-            logger.debug(f"Could not read signals file for price update: {e}")
-            return
-
-        updated = False
-        for record in records:
-            if record.get("signal_id") != signal_id:
-                continue
-            sig = record.get("signal", {}) or {}
-            if not isinstance(sig, dict):
-                sig = {}
-            if stop_loss is not None:
-                try:
-                    sig["stop_loss"] = float(stop_loss)
-                    record["stop_loss_updated_at"] = updated_at.isoformat()
-                except Exception:
-                    pass
-            if take_profit is not None:
-                try:
-                    sig["take_profit"] = float(take_profit)
-                    record["take_profit_updated_at"] = updated_at.isoformat()
-                except Exception:
-                    pass
-            record["price_update_source"] = str(source)
-            record["signal"] = sig
-            updated = True
-            break
-
-        if not updated:
-            return
-
-        try:
-            with open(self.signals_file, "w") as f:
-                for record in records:
-                    f.write(json.dumps(record) + "\n")
-        except Exception as e:
-            logger.debug(f"Could not write signals file for price update: {e}")
+            logger.debug(f"Could not update signal prices: {e}")
 
     def track_exit(
         self,
@@ -628,62 +661,95 @@ class PerformanceTracker:
         return None
 
     def _update_signal_status(self, signal_id: str, status: str, data: Dict) -> None:
-        """Update signal status (read all, update, write back)."""
+        """
+        Update signal status using atomic file write with locking.
+        
+        Safety guarantees:
+        - File locking prevents concurrent writes from corrupting the file
+        - Atomic rename (tmp file + os.replace) ensures file is never partially written
+        - fsync ensures data is persisted to disk before rename
+        """
         logger.debug(f"Signal {signal_id} status: {status}")
 
         if not self.signals_file.exists():
             return
 
-        # Read all records
-        records = []
+        updated_record = None  # Will hold the updated record for SQLite dual-write
+
+        # Acquire exclusive lock on the signals file during read-modify-write
         try:
-            with open(self.signals_file, "r") as f:
-                for line in f:
+            with open(self.signals_file, "r+") as f:
+                # Acquire exclusive lock (blocking)
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                try:
+                    # Read all records
+                    records = []
+                    f.seek(0)
+                    for line in f:
+                        try:
+                            record = json.loads(line.strip())
+                            records.append(record)
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+
+                    # Update matching record
+                    updated = False
+                    for record in records:
+                        if record.get("signal_id") == signal_id:
+                            record["status"] = status
+                            record.update(data)
+                            updated = True
+                            updated_record = record.copy()  # Copy for SQLite
+                            break
+
+                    # If not found, log warning and exit
+                    if not updated:
+                        logger.warning(f"Signal {signal_id} not found for status update")
+                        return
+
+                    # Atomic write: write to temp file, fsync, then rename
+                    tmp_path = None
                     try:
-                        record = json.loads(line.strip())
-                        records.append(record)
-                    except (json.JSONDecodeError, ValueError):
-                        continue
+                        dir_path = self.signals_file.parent
+                        with tempfile.NamedTemporaryFile(
+                            mode="w",
+                            dir=dir_path,
+                            delete=False,
+                            suffix=".tmp",
+                        ) as tmp_f:
+                            for record in records:
+                                tmp_f.write(json.dumps(record) + "\n")
+                            tmp_f.flush()
+                            os.fsync(tmp_f.fileno())
+                            tmp_path = tmp_f.name
+                        
+                        # Atomic rename
+                        os.replace(tmp_path, self.signals_file)
+                    except Exception as e:
+                        # Clean up temp file on failure
+                        try:
+                            if tmp_path and os.path.exists(tmp_path):
+                                os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                        logger.error(f"Error writing signals file atomically: {e}")
+                        return
+                finally:
+                    # Release lock
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
         except Exception as e:
-            logger.error(f"Error reading signals file: {e}")
+            logger.error(f"Error updating signal status: {e}")
             return
-
-        # Update matching record
-        updated = False
-        for record in records:
-            if record.get("signal_id") == signal_id:
-                record["status"] = status
-                record.update(data)
-                updated = True
-                break
-
-        # If not found, create a new record (shouldn't happen, but handle gracefully)
-        if not updated:
-            logger.warning(f"Signal {signal_id} not found for status update")
-            return
-
-        # Write all records back
-        try:
-            with open(self.signals_file, "w") as f:
-                for record in records:
-                    f.write(json.dumps(record) + "\n")
-        except Exception as e:
-            logger.error(f"Error writing signals file: {e}")
 
         # Dual-write signal event into SQLite (append-only event log)
+        # This happens outside the file lock for better concurrency
         try:
-            if self._sqlite_enabled and self._trade_db is not None:
-                # Find the updated record (for payload snapshot)
-                payload = None
-                for record in records:
-                    if record.get("signal_id") == signal_id:
-                        payload = record
-                        break
+            if self._sqlite_enabled and self._trade_db is not None and updated_record is not None:
                 self._trade_db.add_signal_event(
                     signal_id=str(signal_id),
                     status=str(status),
-                    timestamp=str(payload.get("timestamp") if isinstance(payload, dict) else get_utc_timestamp()),
-                    payload=payload if isinstance(payload, dict) else {"signal_id": signal_id, "status": status, **(data or {})},
+                    timestamp=str(updated_record.get("timestamp") if isinstance(updated_record, dict) else get_utc_timestamp()),
+                    payload=updated_record if isinstance(updated_record, dict) else {"signal_id": signal_id, "status": status, **(data or {})},
                 )
         except Exception as e:
             logger.debug(f"Could not write signal event to SQLite: {e}")
