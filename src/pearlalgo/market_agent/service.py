@@ -422,6 +422,15 @@ class MarketAgentService:
         self.max_data_fetch_errors = circuit_breaker_settings.get("max_data_fetch_errors", 5)
         self.connection_failures = 0
         self.max_connection_failures = circuit_breaker_settings.get("max_connection_failures", 10)
+        
+        # Streak tracking for alerts (win/loss streaks)
+        self._streak_count = 0
+        self._streak_type: Optional[str] = None  # 'win' or 'loss'
+        self._streak_alert_threshold = 3  # Alert at 3+ streak
+        self._last_streak_alert_count = 0  # Avoid duplicate alerts
+        
+        # Daily summary tracking (sent at market close 4:15 PM ET)
+        self._daily_summary_sent_date: Optional[str] = None
         self.last_connection_failure_alert: Optional[datetime] = None
         self.last_successful_cycle: Optional[datetime] = None
         self.last_data_quality_alert: Optional[datetime] = None
@@ -661,33 +670,12 @@ class MarketAgentService:
         except Exception as e:
             logger.debug(f"Could not send startup notification: {e}")
 
-        # Now send the visual dashboard (best-effort; do not block service start).
-        try:
-            chart_path = None
-            try:
-                if self.dashboard_chart_enabled:
-                    chart_path = await asyncio.wait_for(self._generate_dashboard_chart(), timeout=30.0)
-                    if chart_path:
-                        self.last_dashboard_chart_sent = datetime.now(timezone.utc)
-            except Exception as e:
-                logger.debug(f"Could not generate initial dashboard chart: {e}")
-                chart_path = None
-
-            await self._send_dashboard(market_data or {}, quiet_reason=None, signal_diagnostics=None, chart_path=chart_path)
-            # Clean up any temp chart file returned on export failure.
-            try:
-                if (
-                    chart_path
-                    and getattr(chart_path, "name", "") not in {"dashboard_latest.png", "dashboard_telegram_latest.png"}
-                    and chart_path.exists()
-                ):
-                    chart_path.unlink()
-            except Exception:
-                pass
-            self.last_status_update = datetime.now(timezone.utc)
-            logger.info("Initial dashboard sent to Telegram")
-        except Exception as e:
-            logger.debug(f"Could not send initial dashboard: {e}")
+        # Skip automatic dashboard on startup - user can type /start for full dashboard
+        # This keeps startup notifications clean and gives user control
+        now = datetime.now(timezone.utc)
+        self.last_status_update = now
+        self.last_dashboard_chart_sent = now  # Prevent auto-chart on first cycle
+        logger.info("Startup complete - user can use /start for dashboard")
 
         # Connect execution adapter if enabled
         if self.execution_adapter is not None:
@@ -817,6 +805,9 @@ class MarketAgentService:
             
             # Reset execution daily counters if new trading day
             self._check_daily_reset()
+            
+            # Check for market close daily summary (4:15 PM ET)
+            await self._check_market_close_summary()
             
             # Check execution adapter connection health and alert on issues
             await self._check_execution_health()
@@ -2007,6 +1998,53 @@ class MarketAgentService:
                                 f"Could not schedule exit notification for {sig_id[:16]}: {e}",
                                 exc_info=True
                             )
+                        
+                        # ==========================================================================
+                        # STREAK ALERT - notify on 3+ consecutive wins or losses
+                        # ==========================================================================
+                        try:
+                            # Update streak tracking
+                            if is_win:
+                                if self._streak_type == 'win':
+                                    self._streak_count += 1
+                                else:
+                                    self._streak_type = 'win'
+                                    self._streak_count = 1
+                            else:
+                                if self._streak_type == 'loss':
+                                    self._streak_count += 1
+                                else:
+                                    self._streak_type = 'loss'
+                                    self._streak_count = 1
+                            
+                            # Send alert when streak reaches threshold (and only once per new streak level)
+                            if (self._streak_count >= self._streak_alert_threshold 
+                                and self._streak_count > self._last_streak_alert_count
+                                and self.telegram_notifier 
+                                and self.telegram_notifier.enabled):
+                                
+                                self._last_streak_alert_count = self._streak_count
+                                
+                                if self._streak_type == 'win':
+                                    emoji = "🔥"
+                                    msg = f"{emoji} *{self._streak_count} Win Streak!*\n\n"
+                                    msg += "You're on fire! Consider:\n"
+                                    msg += "• Locking in profits\n"
+                                    msg += "• Staying disciplined"
+                                else:
+                                    emoji = "❄️"
+                                    msg = f"{emoji} *{self._streak_count} Loss Streak*\n\n"
+                                    msg += "Consider taking a break.\n"
+                                    msg += "Circuit breaker is monitoring."
+                                
+                                asyncio.create_task(
+                                    self.notification_queue.enqueue_raw_message(
+                                        msg, parse_mode="Markdown", dedupe=False, priority=Priority.MEDIUM
+                                    )
+                                )
+                                logger.info(f"Streak alert sent: {self._streak_type} x{self._streak_count}")
+                        except Exception as streak_err:
+                            logger.debug(f"Could not send streak alert: {streak_err}")
             except Exception:
                 continue
 
@@ -3263,6 +3301,91 @@ class MarketAgentService:
                 f"(previous day: {self._last_trading_day})"
             )
             self._last_trading_day = today
+
+    async def _check_market_close_summary(self) -> None:
+        """
+        Send daily performance summary at market close (4:15 PM ET).
+        
+        Automatically sends once per day when the time hits 4:15-4:30 PM ET.
+        """
+        if not self.telegram_notifier or not self.telegram_notifier.enabled:
+            return
+        
+        try:
+            # Get current time in ET
+            now_utc = datetime.now(timezone.utc)
+            try:
+                import pytz
+                et_tz = pytz.timezone("US/Eastern")
+                now_et = now_utc.astimezone(et_tz)
+            except Exception:
+                # Fallback: UTC-5 approximation
+                from datetime import timedelta
+                now_et = now_utc - timedelta(hours=5)
+            
+            et_hour = now_et.hour
+            et_minute = now_et.minute
+            today_str = now_et.strftime("%Y-%m-%d")
+            
+            # Check if already sent today
+            if self._daily_summary_sent_date == today_str:
+                return
+            
+            # Send between 4:15 PM and 4:30 PM ET (market close window)
+            if not (et_hour == 16 and 15 <= et_minute <= 30):
+                return
+            
+            # Mark as sent for today
+            self._daily_summary_sent_date = today_str
+            
+            # Gather today's performance data
+            perf_file = self.performance_tracker.performance_file
+            if not perf_file.exists():
+                return
+            
+            perf_data = json.loads(perf_file.read_text(encoding="utf-8"))
+            trades = perf_data.get("trades", [])
+            
+            # Filter today's trades
+            today_trades = [
+                t for t in trades 
+                if t.get("exit_time", "")[:10] == today_str
+            ]
+            
+            if not today_trades:
+                # No trades today - send brief note
+                msg = (
+                    f"📊 *Daily Summary* • {now_et.strftime('%b %d')}\n\n"
+                    "No trades today.\n"
+                    "_Markets closed at 4:00 PM ET_"
+                )
+            else:
+                # Calculate metrics
+                total_pnl = sum(t.get("pnl", 0) for t in today_trades)
+                wins = sum(1 for t in today_trades if t.get("is_win"))
+                losses = len(today_trades) - wins
+                win_rate = (wins / len(today_trades) * 100) if today_trades else 0
+                
+                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                pnl_sign = "+" if total_pnl >= 0 else ""
+                
+                msg = (
+                    f"📊 *Daily Summary* • {now_et.strftime('%b %d')}\n\n"
+                    f"{pnl_emoji} *P&L:* {pnl_sign}${total_pnl:,.2f}\n"
+                    f"📈 *Trades:* {len(today_trades)} ({wins}W/{losses}L)\n"
+                    f"🎯 *Win Rate:* {win_rate:.0f}%\n\n"
+                    "_Markets closed at 4:00 PM ET_"
+                )
+            
+            asyncio.create_task(
+                self.notification_queue.enqueue_raw_message(
+                    msg, parse_mode="Markdown", dedupe=False, priority=Priority.MEDIUM
+                )
+            )
+            logger.info(f"Daily summary sent for {today_str}")
+            
+        except Exception as e:
+            logger.debug(f"Could not send daily summary: {e}")
 
     async def _check_execution_health(self) -> None:
         """

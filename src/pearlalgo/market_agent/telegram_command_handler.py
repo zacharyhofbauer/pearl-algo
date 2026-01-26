@@ -147,116 +147,9 @@ class TelegramCommandHandler:
         except Exception as e:
             logger.debug(f"Could not set bot commands: {e}")
 
-        # Send visual dashboard with 12h chart on startup
-        if self._startup_ping:
-            try:
-                logger.info(f"Sending visual dashboard to chat_id={self.chat_id}")
-                keyboard = self._get_main_menu_keyboard()
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                state = self._read_state()
-                if state:
-                    try:
-                        # Build full dashboard message
-                        dashboard_text = await self._build_status_dashboard_message(state)
-
-                        # Always include a compact support footer on dashboards so any share is diagnostic.
-                        caption_text = self._with_support_footer(dashboard_text, state=state, max_chars=1024)
-                        text_only = self._with_support_footer(dashboard_text, state=state, max_chars=4096)
-                        # Telegram Markdown safety: avoid parse errors from identifiers/underscores.
-                        caption_md = sanitize_telegram_markdown(caption_text)
-                        text_md = sanitize_telegram_markdown(text_only)
-                        
-                        # Generate 12h chart
-                        chart_path = await self._generate_or_get_chart(state)
-                        
-                        if chart_path and chart_path.exists():
-                            # Send visual dashboard with chart
-                            try:
-                                with open(chart_path, 'rb') as f:
-                                    await application.bot.send_photo(
-                                        chat_id=self.chat_id,
-                                        photo=f,
-                                        caption=caption_md,
-                                        reply_markup=reply_markup,
-                                        parse_mode="Markdown"
-                                    )
-                            except Exception:
-                                # Fallback: send chart without Markdown parsing (keeps the chart visible).
-                                caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
-                                with open(chart_path, 'rb') as f:
-                                    await application.bot.send_photo(
-                                        chat_id=self.chat_id,
-                                        photo=f,
-                                        caption=caption_plain,
-                                        reply_markup=reply_markup,
-                                        parse_mode=None
-                                    )
-                            logger.info("Visual dashboard with chart sent")
-                        else:
-                            # Fallback to text-only dashboard
-                            try:
-                                await application.bot.send_message(
-                                    chat_id=self.chat_id,
-                                    text=text_md,
-                                    reply_markup=reply_markup,
-                                    parse_mode="Markdown"
-                                )
-                            except Exception:
-                                text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
-                                await application.bot.send_message(
-                                    chat_id=self.chat_id,
-                                    text=text_plain,
-                                    reply_markup=reply_markup,
-                                    parse_mode=None
-                                )
-                            logger.info("Text-only dashboard sent (no chart available)")
-                    except Exception as e:
-                        logger.warning(f"Could not send visual dashboard: {e}")
-                        await application.bot.send_message(
-                            chat_id=self.chat_id,
-                            text="✅ PEARLalgo online\n\nTap 🔄 Refresh for visual dashboard:",
-                            reply_markup=reply_markup
-                        )
-                else:
-                    # No state yet - show system health overview
-                    agent_running = bool(self._is_agent_process_running())
-                    gateway_status = None
-                    try:
-                        sc = getattr(self, "service_controller", None)
-                        if sc:
-                            gateway_status = sc.get_gateway_status() or {}
-                    except Exception:
-                        gateway_status = {}
-                    
-                    gw_proc = bool(gateway_status.get("process_running", False)) if gateway_status else False
-                    gw_port = bool(gateway_status.get("port_listening", False)) if gateway_status else False
-                    gw_ok = gw_proc and gw_port
-                    
-                    # Build system health dashboard
-                    lines = [
-                        f"📊 *{self.active_market} Dashboard*",
-                        "",
-                        "━━━━━ *System Health* ━━━━━",
-                        f"🤖 Agent: {'🟢 RUNNING' if agent_running else '🔴 STOPPED'}",
-                        f"🔌 Gateway: {'🟢 ONLINE' if gw_ok else '🔴 OFFLINE'}",
-                        "📡 Handler: 🟢 ONLINE",
-                        "",
-                        "━━━━━ *Status* ━━━━━",
-                        "⚠️ No trading data yet.",
-                        "",
-                        "_Start the agent to see live dashboard._",
-                        "_Tap 🔄 Refresh after agent starts._",
-                    ]
-                    await application.bot.send_message(
-                        chat_id=self.chat_id,
-                        text=self._with_support_footer("\n".join(lines), state=None, max_chars=4096),
-                        reply_markup=reply_markup,
-                        parse_mode="Markdown"
-                    )
-                logger.info("Startup complete")
-            except Exception as e:
-                logger.warning(f"Could not send startup dashboard to chat_id={self.chat_id}: {e}")
+        # Skip auto-dashboard on startup - user uses /start for full dashboard
+        # This keeps startup clean and gives user control
+        logger.info("Command handler ready - user can use /start for dashboard")
 
     def _register_handlers(self) -> None:
         # Minimal command surface: /start is the menu.
@@ -3963,6 +3856,39 @@ class TelegramCommandHandler:
                 agent_healthy=agent_healthy,
                 data_stale=data_stale,
             )
+
+            # ------------------------------------------------------------------
+            # Transparent AI/ML status (one-liner; avoids confusion)
+            # ------------------------------------------------------------------
+            try:
+                bandit = state.get("learning") or {}
+                bandit_mode = str(bandit.get("mode") or "off").lower()
+
+                ctx = state.get("learning_contextual") or {}
+                ctx_mode = str(ctx.get("mode") or "").lower()
+                if not ctx_mode:
+                    ctx_mode = "off"
+
+                # Source of truth for ML filter "enabled" is config.yaml (service doesn't persist it).
+                ml_enabled = None
+                try:
+                    import yaml
+
+                    cfg_path = Path("config/config.yaml")
+                    if cfg_path.exists():
+                        with open(cfg_path, "r") as f:
+                            cfg = yaml.safe_load(f) or {}
+                        ml_cfg = cfg.get("ml_filter", {}) or {}
+                        ml_enabled = bool(ml_cfg.get("enabled", False))
+                except Exception:
+                    ml_enabled = None
+
+                ml_label = "ON" if ml_enabled is True else "OFF" if ml_enabled is False else "?"
+                ai_label = "ON" if ai_ready else "OFF"
+
+                message += f"\n🧠 AI/ML: AI {ai_label} • Bandit {bandit_mode} • Ctx {ctx_mode} • Filter {ml_label}"
+            except Exception:
+                pass
             
             # ==========================================================================
             # 24-HOUR PERFORMANCE (always shown - core daily metrics)
@@ -5479,8 +5405,41 @@ class TelegramCommandHandler:
         a = "ON" if agent_running else "OFF"
         c = self._format_support_duration(cycle_sec)
         v = f" v{ver}" if ver else ""
+        
+        # Session indicator from circuit breaker status
+        session_str = ""
+        try:
+            cb_status = state.get("trading_circuit_breaker", {})
+            if cb_status:
+                current_session = cb_status.get("current_session", "")
+                session_allowed = cb_status.get("session_allowed", True)
+                session_filter_enabled = cb_status.get("session_filter_enabled", False)
+                
+                if current_session:
+                    # Shorten session names for compact display
+                    session_map = {
+                        "overnight": "OVN",
+                        "premarket": "PRE",
+                        "morning": "AM",
+                        "midday": "MID",
+                        "afternoon": "PM",
+                        "close": "CLS",
+                    }
+                    short_session = session_map.get(current_session.lower(), current_session[:3].upper())
+                    
+                    if session_filter_enabled:
+                        # Show if session is allowed or filtered
+                        if session_allowed:
+                            session_str = f" | 📍{short_session}"
+                        else:
+                            session_str = f" | 🚫{short_session}"
+                    else:
+                        session_str = f" | 📍{short_session}"
+        except Exception:
+            session_str = ""
+        
         # Keep this short; it's intended to be pasted into chat for support.
-        return f"`🩺 {market}/{symbol}{v} | A:{a} | G:{gw} | D:{lvl_short} {age_str}/{thr_str}{stale_flag} | C:{c} | run:{run_id}`"
+        return f"`🩺 {market}/{symbol}{v} | A:{a}{session_str} | G:{gw} | D:{lvl_short} {age_str}/{thr_str}{stale_flag} | C:{c} | run:{run_id}`"
 
     def _with_support_footer(self, text: str, *, state: dict | None = None, max_chars: int = 4096) -> str:
         """Append the support footer (always, by trimming when needed)."""

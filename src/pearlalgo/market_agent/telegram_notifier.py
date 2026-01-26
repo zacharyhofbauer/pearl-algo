@@ -1095,7 +1095,7 @@ class MarketAgentTelegramNotifier:
             
             handler_running = _is_command_handler_running()
             
-            # Build inline buttons (consistent with entry notification)
+            # Build inline buttons (with quick Close All for locking in profits)
             reply_markup = None
             if handler_running:
                 try:
@@ -1103,6 +1103,9 @@ class MarketAgentTelegramNotifier:
                     keyboard = [
                         [
                             InlineKeyboardButton("ℹ️ Details", callback_data=callback_signal_detail(signal_id[:16])),
+                            InlineKeyboardButton("🚫 Close All", callback_data="action:close_all_trades"),
+                        ],
+                        [
                             InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
                         ],
                     ]
@@ -2160,10 +2163,9 @@ class MarketAgentTelegramNotifier:
 
     async def send_startup_notification(self, config: Dict) -> bool:
         """
-        Send the rich startup notification (kept intentionally stable).
-
-        This is the **only** non-dashboard startup message. It is followed immediately by
-        the visual dashboard (/start-style) from the running agent.
+        Send a brief startup confirmation.
+        
+        Kept minimal - user can use /start for full dashboard.
         """
         if not self.enabled or not self.telegram:
             return False
@@ -2171,7 +2173,7 @@ class MarketAgentTelegramNotifier:
         try:
             from datetime import datetime, timezone
 
-            # Market label (operator-facing) vs trading symbol (data symbol).
+            # Market label
             market = "NQ"
             try:
                 import os
@@ -2179,50 +2181,26 @@ class MarketAgentTelegramNotifier:
             except Exception:
                 market = "NQ"
 
-            symbol = str(config.get("symbol") or "MNQ")
-            latest_price = config.get("latest_price")
-
-            # Current time (format: 06:50:47 PM ET)
-            current_time = config.get("current_time") or datetime.now(timezone.utc)
-            if isinstance(current_time, str):
-                parsed = parse_utc_timestamp(current_time)
-                current_time = parsed if parsed else datetime.now(timezone.utc)
-            if getattr(current_time, "tzinfo", None) is None:
-                current_time = current_time.replace(tzinfo=timezone.utc)
+            # Current time in ET
+            current_time = datetime.now(timezone.utc)
             try:
                 import pytz
                 et_time = current_time.astimezone(pytz.timezone("US/Eastern"))
-                time_str = et_time.strftime("%I:%M:%S %p ET")
+                time_str = et_time.strftime("%I:%M %p ET")
             except Exception:
-                time_str = current_time.strftime("%H:%M:%S UTC")
-
-            timeframe = str(config.get("timeframe") or "5m")
-            scan_interval = int(config.get("scan_interval", 30) or 30)
+                time_str = current_time.strftime("%H:%M UTC")
 
             futures_market_open = config.get("futures_market_open")
             strategy_session_open = config.get("strategy_session_open")
             fut_dot = "🟢" if futures_market_open is True else "🔴" if futures_market_open is False else "⚪️"
             ses_dot = "🟢" if strategy_session_open is True else "🔴" if strategy_session_open is False else "⚪️"
-            fut_txt = "OPEN" if futures_market_open is True else "CLOSED" if futures_market_open is False else "?"
-            ses_txt = "OPEN" if strategy_session_open is True else "CLOSED" if strategy_session_open is False else "?"
 
-            msg = f"🚀 {market} Agent Started\n\n"
-            if latest_price is not None:
-                try:
-                    msg += f"💰 Price: ${float(latest_price):,.2f} ({symbol})\n"
-                except Exception:
-                    msg += f"💰 Price: {latest_price} ({symbol})\n"
-            else:
-                msg += f"💰 Price: N/A ({symbol})\n"
-            msg += f"🕐 Time: {time_str}\n"
-            msg += f"⚙️ Config: {timeframe} timeframe, {scan_interval}s scan\n"
-            msg += f"{fut_dot} Futures: {fut_txt} • {ses_dot} Session: {ses_txt}\n\n"
-            msg += "What's next:\n"
-            msg += "• Scanning for signals when conditions align\n"
-            msg += "• No guaranteed timing—watch for dashboard updates"
+            # Simple 2-line startup message
+            msg = f"🚀 *{market} Agent Started* • {time_str}\n"
+            msg += f"{fut_dot} Futures {ses_dot} Session\n\n"
+            msg += "Use /start for full dashboard"
 
-            # Startup should always send (no dedupe).
-            await self.telegram.send_message(msg, parse_mode=None, dedupe=False)
+            await self.telegram.send_message(msg, parse_mode="Markdown", dedupe=False)
             return True
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_startup_notification")

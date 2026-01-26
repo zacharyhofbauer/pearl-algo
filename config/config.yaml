@@ -287,8 +287,8 @@ swing_trading:
   max_hold_hours: 24
   position_size_multiplier: 2.5
 ml_filter:
-  enabled: true
-  mode: live
+  enabled: false  # disabled (Option A) until fully wired + validated
+  mode: shadow
   require_lift_to_block: true
   lift_lookback_trades: 200
   lift_min_trades: 50
