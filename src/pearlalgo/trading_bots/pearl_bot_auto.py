@@ -1594,6 +1594,25 @@ def generate_signals(
             "adjusted_confidence": signal["confidence"],
         }
     
+    # ==========================================================================
+    # POST-REGIME CONFIDENCE FILTER
+    # Signals that passed the initial min_confidence check may have been reduced
+    # below the threshold by the regime multiplier. Filter them out now.
+    # ==========================================================================
+    min_conf = config.get("min_confidence", 0.55)
+    pre_filter_count = len(signal_candidates)
+    signal_candidates = [
+        s for s in signal_candidates 
+        if s.get("confidence", 0) >= min_conf
+    ]
+    
+    if len(signal_candidates) < pre_filter_count:
+        filtered_count = pre_filter_count - len(signal_candidates)
+        logger.debug(
+            f"Post-regime confidence filter removed {filtered_count} signal(s) "
+            f"that fell below {min_conf:.0%} after regime adjustment"
+        )
+    
     return signal_candidates
 
 

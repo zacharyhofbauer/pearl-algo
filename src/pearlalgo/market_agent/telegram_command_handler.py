@@ -319,10 +319,8 @@ class TelegramCommandHandler:
         connection_ok: bool | None = None
         
         if state:
-            positions = (state.get("execution", {}).get("positions", 0) or 0)
-            active_trades = state.get("active_trades_count", 0) or 0
-            challenge_positions = self._count_open_challenge_positions()
-            total_active = positions + active_trades + challenge_positions
+            # Only count virtual trades for Activity button (transparency - matches Activity tab)
+            total_active = state.get("active_trades_count", 0) or 0
             daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
             agent_running = bool(self._is_agent_process_running())
             paused = bool(state.get("paused", False))
@@ -1729,6 +1727,14 @@ class TelegramCommandHandler:
             daily_wins = 0
             daily_losses = 0
             
+            # Extended metrics
+            gross_profit = 0.0
+            gross_loss = 0.0
+            avg_win = 0.0
+            avg_loss = 0.0
+            max_drawdown = 0.0
+            profit_factor = 0.0
+            
             if state:
                 # Only count virtual trades (signals with status=entered), NOT broker positions
                 virtual_trades_count = state.get("active_trades_count", 0) or 0
@@ -1738,13 +1744,63 @@ class TelegramCommandHandler:
                 daily_wins = state.get("daily_wins", 0) or 0
                 daily_losses = state.get("daily_losses", 0) or 0
             
+            # Load extended metrics from performance.json
+            try:
+                from datetime import datetime, timezone
+                perf_file = self.state_dir / "performance.json"
+                if perf_file.exists():
+                    import json
+                    with open(perf_file, 'r') as f:
+                        perf_trades = json.load(f)
+                    
+                    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                    today_trades_list = [
+                        t for t in perf_trades 
+                        if today_str in str(t.get('exit_time', ''))
+                    ]
+                    
+                    if today_trades_list:
+                        # Fallback for basic metrics
+                        if daily_trades == 0:
+                            daily_pnl = sum(float(t.get('pnl', 0) or 0) for t in today_trades_list)
+                            daily_trades = len(today_trades_list)
+                            daily_wins = sum(1 for t in today_trades_list if t.get('is_win'))
+                            daily_losses = daily_trades - daily_wins
+                        
+                        # Calculate extended metrics
+                        winning_trades = [t for t in today_trades_list if t.get('is_win')]
+                        losing_trades = [t for t in today_trades_list if not t.get('is_win')]
+                        
+                        gross_profit = sum(float(t.get('pnl', 0) or 0) for t in winning_trades)
+                        gross_loss = abs(sum(float(t.get('pnl', 0) or 0) for t in losing_trades))
+                        
+                        if winning_trades:
+                            avg_win = gross_profit / len(winning_trades)
+                        if losing_trades:
+                            avg_loss = gross_loss / len(losing_trades)
+                        if gross_loss > 0:
+                            profit_factor = gross_profit / gross_loss
+                        
+                        # Max drawdown
+                        running_pnl = 0.0
+                        peak_pnl = 0.0
+                        for t in today_trades_list:
+                            running_pnl += float(t.get('pnl', 0) or 0)
+                            if running_pnl > peak_pnl:
+                                peak_pnl = running_pnl
+                            drawdown = peak_pnl - running_pnl
+                            if drawdown > max_drawdown:
+                                max_drawdown = drawdown
+            except Exception as e:
+                logger.debug(f"Could not compute extended metrics in activity menu: {e}")
+            
             signals = self._read_recent_signals(limit=10)
             recent_count = len(signals) if signals else 0
             
-            # Build compact activity summary
+            # Build detailed activity summary
             lines = ["📊 *Activity* (Virtual Trading)", ""]
             
-            # Performance card (compact)
+            # Performance card
             pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
             pnl_sign = "+" if daily_pnl >= 0 else ""
             lines.append(f"*Today:* {pnl_emoji} {pnl_sign}${abs(daily_pnl):.2f}")
@@ -1753,6 +1809,19 @@ class TelegramCommandHandler:
                 wr = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
                 lines.append(f"Trades: {daily_trades} ({daily_wins}W/{daily_losses}L) | {wr:.0f}% WR")
             
+            # Extended metrics (detailed view)
+            if profit_factor > 0:
+                pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
+                lines.append(f"{pf_emoji} Profit Factor: {profit_factor:.2f}")
+            
+            if avg_win > 0 or avg_loss > 0:
+                lines.append(f"💵 Avg Win: ${avg_win:.2f} | Loss: ${avg_loss:.2f}")
+            
+            if max_drawdown > 0:
+                dd_emoji = "⚠️" if max_drawdown > 500 else "📉"
+                lines.append(f"{dd_emoji} Max Drawdown: ${max_drawdown:.2f}")
+            
+            lines.append("")
             lines.append(f"Signals: {daily_signals} | Virtual Open: {virtual_trades_count}")
             lines.append("")
             
@@ -3704,29 +3773,85 @@ class TelegramCommandHandler:
                 daily_wins = state.get("daily_wins")
                 daily_losses = state.get("daily_losses")
                 
-                # Fallback: compute from performance.json if state doesn't have values
-                if daily_pnl is None or daily_trades is None:
-                    try:
-                        perf_file = self.state_dir / "performance.json"
-                        if perf_file.exists():
-                            import json
-                            with open(perf_file, 'r') as f:
-                                perf_trades = json.load(f)
-                            
-                            # Filter to today's trades (by exit_time)
-                            today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-                            today_trades_list = [
-                                t for t in perf_trades 
-                                if today_str in str(t.get('exit_time', ''))
-                            ]
-                            
-                            if today_trades_list:
+                # Extended metrics (computed from performance.json)
+                gross_profit = 0.0
+                gross_loss = 0.0
+                avg_win = 0.0
+                avg_loss = 0.0
+                max_drawdown = 0.0
+                today_trades_list = []
+                
+                # Load from performance.json for detailed metrics
+                try:
+                    perf_file = self.state_dir / "performance.json"
+                    if perf_file.exists():
+                        import json
+                        with open(perf_file, 'r') as f:
+                            perf_trades = json.load(f)
+                        
+                        # Filter to today's trades (by exit_time)
+                        today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                        today_trades_list = [
+                            t for t in perf_trades 
+                            if today_str in str(t.get('exit_time', ''))
+                        ]
+                        
+                        if today_trades_list:
+                            # Basic metrics (fallback if not in state)
+                            if daily_pnl is None or daily_trades is None:
                                 daily_pnl = sum(float(t.get('pnl', 0) or 0) for t in today_trades_list)
                                 daily_trades = len(today_trades_list)
                                 daily_wins = sum(1 for t in today_trades_list if t.get('is_win'))
                                 daily_losses = daily_trades - daily_wins
-                    except Exception as e:
-                        logger.debug(f"Could not compute daily from performance.json: {e}")
+                            
+                            # Calculate Profit Factor (gross profit / gross loss)
+                            winning_trades = [t for t in today_trades_list if t.get('is_win')]
+                            losing_trades = [t for t in today_trades_list if not t.get('is_win')]
+                            
+                            gross_profit = sum(float(t.get('pnl', 0) or 0) for t in winning_trades)
+                            gross_loss = abs(sum(float(t.get('pnl', 0) or 0) for t in losing_trades))
+                            
+                            # Average win and loss
+                            if winning_trades:
+                                avg_win = gross_profit / len(winning_trades)
+                            if losing_trades:
+                                avg_loss = gross_loss / len(losing_trades)
+                            
+                            # Calculate max drawdown (peak-to-trough)
+                            running_pnl = 0.0
+                            peak_pnl = 0.0
+                            max_drawdown = 0.0
+                            for t in today_trades_list:
+                                running_pnl += float(t.get('pnl', 0) or 0)
+                                if running_pnl > peak_pnl:
+                                    peak_pnl = running_pnl
+                                drawdown = peak_pnl - running_pnl
+                                if drawdown > max_drawdown:
+                                    max_drawdown = drawdown
+                            
+                except Exception as e:
+                    logger.debug(f"Could not compute extended metrics from performance.json: {e}")
+                
+                # Calculate current win/loss streak from today's trades
+                current_streak = 0
+                streak_type = None  # 'win' or 'loss'
+                if today_trades_list:
+                    # Sort by exit_time to get proper order, most recent last
+                    sorted_trades = sorted(
+                        today_trades_list, 
+                        key=lambda t: t.get('exit_time', ''), 
+                        reverse=False
+                    )
+                    # Count consecutive from the end
+                    for t in reversed(sorted_trades):
+                        is_win = t.get('is_win', False)
+                        if streak_type is None:
+                            streak_type = 'win' if is_win else 'loss'
+                            current_streak = 1
+                        elif (streak_type == 'win' and is_win) or (streak_type == 'loss' and not is_win):
+                            current_streak += 1
+                        else:
+                            break
                 
                 # Convert to proper types
                 daily_pnl = float(daily_pnl or 0.0)
@@ -3734,21 +3859,50 @@ class TelegramCommandHandler:
                 daily_wins = int(daily_wins or 0)
                 daily_losses = int(daily_losses or 0)
                 
-                # Only show if there's activity today
+                # Only show if there's activity today - condensed one-liner like 30d
                 if daily_trades > 0 or daily_pnl != 0:
                     pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
-                    pnl_sign = "+" if daily_pnl >= 0 else ""
+                    pnl_sign = "+" if daily_pnl >= 0 else "-"
                     win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
                     
-                    message += "\n\n📈 *24h Performance:*"
-                    message += f"\n{pnl_emoji} P&L: {pnl_sign}${abs(daily_pnl):,.2f}"
-                    message += f"\n✅ Wins: {daily_wins} | ❌ Losses: {daily_losses}"
-                    if daily_trades > 0:
-                        message += f"\n📊 Win Rate: {win_rate:.0f}% ({daily_trades} trades)"
+                    # Build streak indicator (only show if streak >= 3)
+                    streak_str = ""
+                    if current_streak >= 3:
+                        if streak_type == 'win':
+                            streak_str = f" • 🔥{current_streak}W"
+                        else:
+                            streak_str = f" • ❄️{current_streak}L"
+                    
+                    # Condensed format: "24h: 🟢 +$2,375.00 (73W/74L • 50% WR) • ❄️3L"
+                    message += "\n\n*24h:*"
+                    message += f"\n{pnl_emoji} {pnl_sign}${abs(daily_pnl):,.2f} ({daily_wins}W/{daily_losses}L • {win_rate:.0f}% WR){streak_str}"
+                    
             except Exception as e:
                 logger.debug(f"Could not add 24h performance: {e}")
             
-            # Add challenge metrics if available (before recent exits)
+            # 30d performance - moved here to be right after 24h for better mobile layout
+            try:
+                from pearlalgo.learning.trade_database import TradeDatabase
+                db_path = self.state_dir / "trades.db"
+                if db_path.exists():
+                    trade_db = TradeDatabase(db_path)
+                    strategy_perf = trade_db.get_performance_by_signal_type(days=30)
+                    if strategy_perf:
+                        total_pnl_all = sum(perf.get("total_pnl", 0.0) for perf in strategy_perf.values())
+                        total_wins = sum(perf.get("wins", 0) for perf in strategy_perf.values())
+                        total_losses = sum(perf.get("losses", 0) for perf in strategy_perf.values())
+                        total_trades = total_wins + total_losses
+                        total_wr = (total_wins / total_trades * 100) if total_trades > 0 else 0.0
+                        total_emoji = "🟢" if total_pnl_all >= 0 else "🔴"
+                        message += "\n\n*30d Performance:*"
+                        message += (
+                            f"\n{total_emoji} *Total:* ${total_pnl_all:,.2f} "
+                            f"({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
+                        )
+            except Exception as e:
+                logger.debug(f"Could not load 30d performance: {e}")
+            
+            # Add challenge metrics if available (after performance sections)
             # Always show challenge - it should always exist (created automatically if missing)
             if not challenge_status and challenge_tracker_instance:
                 try:
@@ -3878,80 +4032,7 @@ class TelegramCommandHandler:
             if not challenge_displayed:
                 logger.warning("Challenge status could not be displayed despite file existing")
             
-            # Always show 7d all-time performance if available (matches screenshot format)
-            # Show it even if challenge_status exists, as it's separate historical data
-            if performance:
-                exited = performance.get("exited_signals", 0)
-                wins = performance.get("wins", 0)
-                losses = performance.get("losses", 0)
-                total_pnl = performance.get("total_pnl", 0.0)
-                
-                # Show 7d All-Time if we have any trades or PnL data
-                if exited > 0 or wins > 0 or losses > 0 or total_pnl != 0:
-                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                    # Match screenshot format: "7d All-Time: 🔴 -$3,450.04 (41W/119L)"
-                    pnl_sign = "-" if total_pnl < 0 else "+"
-                    message += "\n\n*7d All-Time:*\n"
-                    message += f"{pnl_emoji} {pnl_sign}${abs(total_pnl):,.2f} ({wins}W/{losses}L)"
-            
-            # 30d performance (sum across signal types)
-            try:
-                from pearlalgo.learning.trade_database import TradeDatabase
-
-                db_path = self.state_dir / "trades.db"
-                if db_path.exists():
-                    trade_db = TradeDatabase(db_path)
-                    strategy_perf = trade_db.get_performance_by_signal_type(days=30)
-                    if strategy_perf:
-                        message += "\n\n*30d Performance:*"
-
-                        total_pnl_all = sum(perf.get("total_pnl", 0.0) for perf in strategy_perf.values())
-                        total_wins = sum(perf.get("wins", 0) for perf in strategy_perf.values())
-                        total_losses = sum(perf.get("losses", 0) for perf in strategy_perf.values())
-                        total_trades = total_wins + total_losses
-                        total_wr = (total_wins / total_trades * 100) if total_trades > 0 else 0.0
-                        total_emoji = "🟢" if total_pnl_all >= 0 else "🔴"
-
-                        message += (
-                            f"\n{total_emoji} *Total:* ${total_pnl_all:,.2f} "
-                            f"({total_wins}W/{total_losses}L • {total_wr:.0f}% WR)"
-                        )
-            except Exception as e:
-                logger.debug(f"Could not load 30d by strategy (compact): {e}")
-
-            # Challenge (current run)
-            if challenge_tracker_instance:
-                try:
-                    # Get unrealized PNL from state if available
-                    active_trades_unrealized_pnl = state.get("active_trades_unrealized_pnl")
-                    unrealized_pnl = None
-                    if active_trades_unrealized_pnl is not None:
-                        try:
-                            unrealized_pnl = float(active_trades_unrealized_pnl)
-                        except (ValueError, TypeError):
-                            unrealized_pnl = None
-                    
-                    attempt_perf = challenge_tracker_instance.get_attempt_performance(unrealized_pnl=unrealized_pnl) or {}
-                    pnl = float(attempt_perf.get("total_pnl", 0.0) or 0.0)
-                    balance = float(
-                        attempt_perf.get(
-                            "current_balance",
-                            attempt_perf.get("starting_balance", 50_000.0),
-                        )
-                        or 50_000.0
-                    )
-                    wins = int(attempt_perf.get("wins", 0) or 0)
-                    losses = int(attempt_perf.get("losses", 0) or 0)
-                    wr = float(attempt_perf.get("win_rate", 0.0) or 0.0) * 100
-                    pnl_emoji = "🟢" if pnl >= 0 else "🔴"
-
-                    message += "\n\n*Challenge (current run):*"
-                    message += (
-                        f"\n{pnl_emoji} *{trading_bot_label}:* ${balance:,.2f} | ${pnl:+,.2f} "
-                        f"({wins}W/{losses}L • {wr:.0f}% WR)"
-                    )
-                except Exception as e:
-                    logger.debug(f"Could not load challenge by bot: {e}")
+            # 30d section moved above Challenge for better mobile layout
 
             # Recent exits (from state or fallback to signals.jsonl)
             recent_exits = state.get("recent_exits", [])
@@ -3974,12 +4055,12 @@ class TelegramCommandHandler:
                                     "exit_time": rec.get("exit_time") or rec.get("timestamp"),
                                 }
                             )
-                        if len(recent_exits) >= 3:
+                        if len(recent_exits) >= 2:
                             break
 
             if isinstance(recent_exits, list) and recent_exits:
                 message += "\n\n*Recent exits:*"
-                for t in recent_exits[:3]:
+                for t in recent_exits[:2]:
                     try:
                         pnl_val = float(t.get("pnl") or 0.0)
                     except Exception:
@@ -4009,64 +4090,8 @@ class TelegramCommandHandler:
                         except Exception:
                             pass
             
-            # Add current position/signal if active
-            if active_trades_count > 0:
-                # Try to find active signal from recent signals
-                recent_signals = self._read_recent_signals(limit=20)
-                active_rec = next((s for s in recent_signals if s.get("status") == "entered"), None)
-                
-                if active_rec:
-                    # Fields may be at record-level OR nested in rec["signal"]
-                    sig = active_rec.get("signal", {}) or {}
-                    message += "\n\n*Current Position:*"
-                    direction = str(active_rec.get("direction") or sig.get("direction") or "long").upper()
-                    signal_type = str(active_rec.get("signal_type") or sig.get("type") or "unknown")
-                    entry_price = active_rec.get("entry_price") or sig.get("entry_price")
-                    stop_loss = active_rec.get("stop_loss") or sig.get("stop_loss")
-                    take_profit = active_rec.get("take_profit") or sig.get("take_profit")
-                    confidence = active_rec.get("confidence") or sig.get("confidence")
-                    
-                    # Convert to float safely
-                    try:
-                        entry_price = float(entry_price) if entry_price else None
-                    except Exception:
-                        entry_price = None
-                    try:
-                        stop_loss = float(stop_loss) if stop_loss else None
-                    except Exception:
-                        stop_loss = None
-                    try:
-                        take_profit = float(take_profit) if take_profit else None
-                    except Exception:
-                        take_profit = None
-                    try:
-                        confidence = float(confidence) if confidence else None
-                    except Exception:
-                        confidence = None
-                    
-                    message += f"\n🎯 {symbol} {direction} | {signal_type}\n"
-                    if entry_price:
-                        message += f"Entry: ${entry_price:,.2f}\n"
-                    if stop_loss and take_profit and entry_price:
-                        if direction == "LONG":
-                            risk = entry_price - stop_loss
-                            reward = take_profit - entry_price
-                        else:
-                            risk = stop_loss - entry_price
-                            reward = entry_price - take_profit
-                        if risk > 0:
-                            rr = reward / risk
-                            message += f"R:R {rr:.1f}:1\n"
-                    if stop_loss and entry_price:
-                        stop_pts = abs(entry_price - stop_loss)
-                        message += f"Stop: ${stop_loss:,.2f} ({stop_pts:.1f} pts)\n"
-                    if take_profit and entry_price:
-                        tp_pts = abs(take_profit - entry_price)
-                        message += f"TP: ${take_profit:,.2f} ({tp_pts:.1f} pts)\n"
-                    if confidence:
-                        conf_pct = confidence * 100 if confidence <= 1 else confidence
-                        conf_label = "High" if conf_pct >= 80 else "Medium" if conf_pct >= 50 else "Low"
-                        message += f"Confidence: {conf_pct:.0f}% ({conf_label})"
+            # "Current Position" section removed from main dashboard - available in Activity tab
+            # The header already shows "X Active | $Y.YY" which provides quick visibility
             
             return message
             
