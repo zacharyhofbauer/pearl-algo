@@ -29,6 +29,11 @@ from pearlalgo.market_agent.performance_tracker import PerformanceTracker
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
 from pearlalgo.market_agent.notification_queue import NotificationQueue, Priority
+from pearlalgo.market_agent.trading_circuit_breaker import (
+    TradingCircuitBreaker,
+    TradingCircuitBreakerConfig,
+    create_trading_circuit_breaker,
+)
 from pearlalgo.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
 from pearlalgo.utils.cadence import CadenceScheduler
 from pearlalgo.utils.data_quality import DataQualityChecker
@@ -176,9 +181,23 @@ class MarketAgentService:
         service_config = load_service_config()
         service_settings = service_config.get("service", {})
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
+        trading_circuit_breaker_settings = service_config.get("trading_circuit_breaker", {}) or {}
         data_settings = service_config.get("data", {})
         telegram_ui_settings = service_config.get("telegram_ui", {}) or {}
         auto_flat_settings = service_config.get("auto_flat", {}) or {}
+        
+        # ==========================================================================
+        # TRADING CIRCUIT BREAKER (risk management for consecutive losses/drawdown)
+        # ==========================================================================
+        self.trading_circuit_breaker: Optional[TradingCircuitBreaker] = None
+        if trading_circuit_breaker_settings.get("enabled", True):
+            self.trading_circuit_breaker = create_trading_circuit_breaker(trading_circuit_breaker_settings)
+            logger.info(
+                f"Trading circuit breaker enabled: "
+                f"max_consecutive_losses={self.trading_circuit_breaker.config.max_consecutive_losses}, "
+                f"max_session_drawdown=${self.trading_circuit_breaker.config.max_session_drawdown}, "
+                f"max_positions={self.trading_circuit_breaker.config.max_concurrent_positions}"
+            )
 
         # ==========================================================================
         # STORAGE (SQLite dual-write; keeps Telegram/mobile compatibility)
@@ -1387,6 +1406,59 @@ class MarketAgentService:
             buffer_data: Optional DataFrame with OHLCV data for chart generation
         """
         try:
+            # ==========================================================================
+            # TRADING CIRCUIT BREAKER: Check if signal should be allowed
+            # ==========================================================================
+            if self.trading_circuit_breaker is not None:
+                # Get active positions for clustering check
+                active_positions = []
+                try:
+                    recent_signals = self.performance_tracker.get_recent_signals(limit=100)
+                    for rec in recent_signals:
+                        if isinstance(rec, dict) and rec.get("status") == "entered":
+                            active_positions.append(rec)
+                except Exception:
+                    pass
+                
+                # Get market data for volatility filter
+                market_data = {}
+                if buffer_data is not None and len(buffer_data) > 0:
+                    try:
+                        from pearlalgo.trading_bots.pearl_bot_auto import calculate_atr
+                        atr_series = calculate_atr(buffer_data, period=14)
+                        if len(atr_series) > 20:
+                            atr_current = float(atr_series.iloc[-1])
+                            atr_average = float(atr_series.iloc[-20:].mean())
+                            market_data = {
+                                "atr_current": atr_current,
+                                "atr_average": atr_average,
+                            }
+                    except Exception:
+                        pass
+                
+                # Check if signal should be allowed
+                cb_decision = self.trading_circuit_breaker.should_allow_signal(
+                    signal=signal,
+                    active_positions=active_positions,
+                    market_data=market_data,
+                )
+                
+                if not cb_decision.allowed:
+                    logger.warning(
+                        f"🛑 Trading circuit breaker blocked signal: {cb_decision.reason} | "
+                        f"details={cb_decision.details}"
+                    )
+                    # Notify via Telegram for critical blocks
+                    if cb_decision.severity == "critical":
+                        asyncio.create_task(
+                            self.notification_queue.enqueue_circuit_breaker(
+                                f"Trading paused: {cb_decision.reason}",
+                                cb_decision.details,
+                                priority=Priority.HIGH,
+                            )
+                        )
+                    return  # Skip this signal
+            
             # Track signal generation (delegates to state_manager for persistence)
             signal_id = self.performance_tracker.track_signal_generated(signal)
             self.last_signal_generated_at = get_utc_timestamp()
@@ -1768,6 +1840,18 @@ class MarketAgentService:
                             f"{float(exit_price):.2f}",
                             f"{pnl_value:.2f}",
                         )
+                        
+                        # Record trade with trading circuit breaker (risk management)
+                        if self.trading_circuit_breaker is not None:
+                            try:
+                                self.trading_circuit_breaker.record_trade_result({
+                                    "is_win": is_win,
+                                    "pnl": pnl_value,
+                                    "exit_time": exit_bar_ts.isoformat() if exit_bar_ts else None,
+                                    "exit_reason": exit_reason,
+                                })
+                            except Exception as cb_err:
+                                logger.debug(f"Could not record circuit breaker trade: {cb_err}")
                         
                         # Record trade with 50k challenge tracker (pass/fail rules)
                         if self._challenge_tracker is not None:
@@ -4363,6 +4447,15 @@ class MarketAgentService:
         # Notification queue stats (async Telegram delivery observability)
         # ==========================================================================
         state["notification_queue"] = self.notification_queue.get_stats()
+
+        # ==========================================================================
+        # Trading circuit breaker status (risk management observability)
+        # ==========================================================================
+        state["trading_circuit_breaker"] = (
+            self.trading_circuit_breaker.get_status()
+            if self.trading_circuit_breaker is not None
+            else {"enabled": False}
+        )
 
         # ==========================================================================
         # Virtual positions (signals.jsonl status="entered") for Telegram command UI

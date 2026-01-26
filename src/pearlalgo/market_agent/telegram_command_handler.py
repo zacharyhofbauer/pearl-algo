@@ -1721,8 +1721,8 @@ class TelegramCommandHandler:
         """Show unified Activity menu (merged Trades + Performance)."""
         try:
             state = self._read_state()
-            # Gather data
-            active_count = 0
+            # Gather data - ONLY virtual trades for transparency
+            virtual_trades_count = 0
             daily_signals = 0
             daily_pnl = 0.0
             daily_trades = 0
@@ -1730,9 +1730,8 @@ class TelegramCommandHandler:
             daily_losses = 0
             
             if state:
-                positions = (state.get("execution", {}).get("positions", 0) or 0)
-                active_trades = state.get("active_trades_count", 0) or 0
-                active_count = positions + active_trades
+                # Only count virtual trades (signals with status=entered), NOT broker positions
+                virtual_trades_count = state.get("active_trades_count", 0) or 0
                 daily_signals = state.get("daily_signals", 0) or 0
                 daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
                 daily_trades = state.get("daily_trades", 0) or 0
@@ -1743,7 +1742,7 @@ class TelegramCommandHandler:
             recent_count = len(signals) if signals else 0
             
             # Build compact activity summary
-            lines = ["📊 *Activity*", ""]
+            lines = ["📊 *Activity* (Virtual Trading)", ""]
             
             # Performance card (compact)
             pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
@@ -1754,11 +1753,11 @@ class TelegramCommandHandler:
                 wr = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
                 lines.append(f"Trades: {daily_trades} ({daily_wins}W/{daily_losses}L) | {wr:.0f}% WR")
             
-            lines.append(f"Signals: {daily_signals} | Open: {active_count}")
+            lines.append(f"Signals: {daily_signals} | Virtual Open: {virtual_trades_count}")
             lines.append("")
             
-            # Build buttons
-            active_label = f"📋 Active ({active_count})" if active_count > 0 else "📋 Active"
+            # Build buttons - use virtual trades count for clarity
+            active_label = f"📋 Virtual ({virtual_trades_count})" if virtual_trades_count > 0 else "📋 Virtual"
             recent_label = f"🎯 Signals ({recent_count})" if recent_count > 0 else "🎯 Signals"
             
             keyboard = [
@@ -1779,10 +1778,10 @@ class TelegramCommandHandler:
                 ],
             ]
             
-            # Add Close All if positions exist
-            if active_count > 0:
+            # Add Close All if virtual trades exist
+            if virtual_trades_count > 0:
                 keyboard.insert(2, [
-                    InlineKeyboardButton(f"🚫 Close All ({active_count})", callback_data="action:close_all_trades"),
+                    InlineKeyboardButton(f"🚫 Close All ({virtual_trades_count})", callback_data="action:close_all_trades"),
                     InlineKeyboardButton("💰 P&L Detail", callback_data="action:pnl_overview"),
                 ])
             
@@ -2861,58 +2860,67 @@ class TelegramCommandHandler:
                     parse_mode="Markdown"
                 )
             elif action_type == "close_all_trades":
-                # Get detailed position info
+                # Get detailed position info - ONLY virtual trades for transparency
                 state = self._read_state()
-                positions = 0
+                virtual_positions = 0
                 daily_pnl = 0.0
                 daily_trades = 0
+                unrealized_pnl = 0.0
                 
                 if state:
-                    positions = state.get("execution", {}).get("positions", 0) or 0
-                    positions += state.get("active_trades_count", 0) or 0
+                    # Only count virtual trades (signals with status=entered)
+                    virtual_positions = state.get("active_trades_count", 0) or 0
                     daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
                     daily_trades = state.get("daily_trades", 0) or 0
+                    unrealized_pnl = float(state.get("active_trades_unrealized_pnl", 0.0) or 0.0)
                 
-                lines = ["🚫 *Close All Trades*", ""]
+                lines = ["🚫 *Close All Virtual Trades*", ""]
                 
-                if positions == 0:
+                if virtual_positions == 0:
                     lines.extend([
-                        "✅ *No open positions*",
+                        "✅ *No open virtual trades*",
                         "",
-                        "There are currently no trades to close.",
+                        "There are currently no virtual trades to close.",
                     ])
                     keyboard = [self._nav_back_row()]
                 else:
                     lines.extend([
-                        "📊 *Position Summary:*",
-                        f"• Open Positions: {positions}",
-                        f"• Trades Today: {daily_trades}",
+                        "📊 *Virtual Position Summary:*",
+                        f"• Open Virtual Trades: {virtual_positions}",
+                        f"• Completed Trades Today: {daily_trades}",
                     ])
+                    
+                    # Show unrealized P&L for current positions
+                    if unrealized_pnl != 0:
+                        unreal_emoji = "🟢" if unrealized_pnl >= 0 else "🔴"
+                        unreal_sign = "+" if unrealized_pnl >= 0 else ""
+                        lines.append(f"• Unrealized P&L: {unreal_emoji} {unreal_sign}${abs(unrealized_pnl):.2f}")
                     
                     if daily_pnl != 0:
                         pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
                         pnl_sign = "+" if daily_pnl >= 0 else ""
-                        lines.append(f"• Current P&L: {pnl_emoji} {pnl_sign}${abs(daily_pnl):.2f}")
+                        lines.append(f"• Realized P&L Today: {pnl_emoji} {pnl_sign}${abs(daily_pnl):.2f}")
                     
                     lines.extend([
                         "",
                         "⚠️ *This will:*",
-                        f"• Close all {positions} position(s) at market price",
+                        f"• Close all {virtual_positions} virtual trade(s) at market price",
                         "• Agent will continue running",
                         "• Can still generate new signals",
                         "",
+                        "📝 *Note:* These are simulated trades, not broker positions",
                     ])
                     
                     # Smart warnings based on P&L
-                    if daily_pnl > 0:
-                        lines.append("💡 *Note:* Closing while in profit - consider trailing stop")
-                    elif daily_pnl < -50:
-                        lines.append("⚠️ *Notice:* Closing with daily loss - review strategy")
+                    if unrealized_pnl > 0:
+                        lines.append(f"💰 *Locking in:* +${unrealized_pnl:.2f} unrealized profit")
+                    elif unrealized_pnl < -50:
+                        lines.append("⚠️ *Notice:* Closing with unrealized loss - review strategy")
                     
-                    lines.extend(["", "*Confirm to close all positions:*"])
+                    lines.extend(["", "*Confirm to close all virtual trades:*"])
                     
                     keyboard = [
-                        [InlineKeyboardButton(f"✅ Yes - Close All ({positions})", callback_data="confirm:close_all_trades")],
+                        [InlineKeyboardButton(f"✅ Yes - Close All ({virtual_positions})", callback_data="confirm:close_all_trades")],
                         [InlineKeyboardButton("❌ Cancel", callback_data="back")],
                     ]
                 
@@ -3147,25 +3155,26 @@ class TelegramCommandHandler:
                     )
             elif confirm_action == "close_all_trades":
                 try:
-                    # Signal to close all trades via state file
+                    # Signal to close all virtual trades via state file
                     state_file = get_state_file(self.state_dir)
                     if state_file.exists():
                         state = json.loads(state_file.read_text(encoding="utf-8"))
+                        virtual_count = state.get("active_trades_count", 0) or 0
                         state["close_all_requested"] = True
                         state["close_all_requested_time"] = datetime.now(timezone.utc).isoformat()
                         state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
                         keyboard = [
-                            [InlineKeyboardButton("🛡 Check Health", callback_data="menu:status")],
+                            [InlineKeyboardButton("📊 Check Activity", callback_data="menu:activity")],
                             self._nav_back_row(),
                         ]
                         await query.edit_message_text(
-                            "✅ Close All Trades Request Sent\n\n"
-                            "The agent will close all positions at next opportunity.\n"
-                            "Check status to confirm positions are closed.",
+                            f"✅ Close All Virtual Trades Request Sent\n\n"
+                            f"Closing {virtual_count} virtual trade(s) at next opportunity (~5 seconds).\n\n"
+                            "Tap 'Check Activity' to verify positions are closed.",
                             reply_markup=InlineKeyboardMarkup(keyboard)
                         )
-                        logger.info("Close all trades requested via Telegram")
+                        logger.info(f"Close all virtual trades ({virtual_count}) requested via Telegram")
                     else:
                         await query.edit_message_text(
                             "❌ State file not found.\n\nIs the agent running?",
@@ -4029,36 +4038,37 @@ class TelegramCommandHandler:
             await query.edit_message_text(f"❌ Error displaying status: {e}", reply_markup=reply_markup)
 
     async def _handle_active_trades(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display active trades/positions."""
+        """Display active virtual trades."""
         state = self._read_state()
         if not state:
             await query.edit_message_text("❌ Could not read system state.", reply_markup=reply_markup)
             return
         
-        # Get active trades from state
-        active_trades_count = state.get("active_trades_count", 0) or 0
-        execution = state.get("execution", {})
-        positions = execution.get("positions", 0) or 0
+        # Get virtual trades from state (signals with status=entered)
+        virtual_trades_count = state.get("active_trades_count", 0) or 0
         active_trades_unrealized_pnl = state.get("active_trades_unrealized_pnl")
         
-        text = "📋 *Active Trades*\n\n"
+        text = "📋 *Active Virtual Trades*\n\n"
         
-        if active_trades_count == 0 and positions == 0:
-            text += "No active trades or positions.\n"
+        if virtual_trades_count == 0:
+            text += "No active virtual trades.\n"
+            text += "\n_Virtual trades track simulated P&L from signals._"
         else:
-            text += f"🎯 *Positions:* {positions}\n"
-            text += f"📊 *Active Trades:* {active_trades_count}\n"
+            text += f"📊 *Virtual Trades:* {virtual_trades_count}\n"
             
             if active_trades_unrealized_pnl is not None:
                 pnl_emoji = "💰" if active_trades_unrealized_pnl >= 0 else "📉"
-                text += f"\n{pnl_emoji} *Unrealized P&L:* ${active_trades_unrealized_pnl:,.2f}\n"
+                pnl_sign = "+" if active_trades_unrealized_pnl >= 0 else ""
+                text += f"{pnl_emoji} *Unrealized P&L:* {pnl_sign}${active_trades_unrealized_pnl:,.2f}\n"
+            
+            text += "\n_These are simulated trades, not broker positions._"
         
         # Try to get detailed trade info from signals
-        recent_signals = self._read_recent_signals(limit=20)
+        recent_signals = self._read_recent_signals(limit=50)
         active_signals = [s for s in recent_signals if s.get("status") == "entered"]
         
         if active_signals:
-            text += "\n*Recent Active Signals:*\n"
+            text += f"\n\n*Open Virtual Positions ({len(active_signals)}):*\n"
             for i, signal in enumerate(active_signals[-5:], 1):  # Show last 5
                 signal_id = signal.get("signal_id", "unknown")[:8]
                 direction = signal.get("direction", "").upper()

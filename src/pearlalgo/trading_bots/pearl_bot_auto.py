@@ -17,7 +17,8 @@ Perfect for testing live without using real money.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
 from pearlalgo.config.config_view import ConfigView
 from datetime import datetime, timezone, time as dt_time
@@ -132,6 +133,153 @@ def _clear_key_levels_cache_if_needed() -> None:
         keys = list(_key_levels_cache.keys())
         for key in keys[:-_key_levels_cache_max_size]:
             del _key_levels_cache[key]
+
+
+# ============================================================================
+# MARKET REGIME DETECTION
+# ============================================================================
+
+@dataclass
+class MarketRegime:
+    """Market regime classification result."""
+    regime: str  # "trending_up", "trending_down", "ranging", "volatile"
+    confidence: float  # 0.0 to 1.0
+    trend_strength: float  # ADX-like metric
+    volatility_ratio: float  # Current vs average volatility
+    recommendation: str  # "full_size", "reduced_size", "avoid"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "regime": self.regime,
+            "confidence": self.confidence,
+            "trend_strength": self.trend_strength,
+            "volatility_ratio": self.volatility_ratio,
+            "recommendation": self.recommendation,
+        }
+
+
+def detect_market_regime(
+    df: pd.DataFrame,
+    lookback: int = 50,
+    trend_threshold: float = 0.6,
+    volatility_window: int = 20,
+) -> MarketRegime:
+    """
+    Detect current market regime using multiple indicators.
+    
+    Uses:
+    - EMA slope and spread for trend direction
+    - ATR ratio for volatility assessment
+    - Price range analysis for ranging detection
+    
+    Returns:
+        MarketRegime with classification and recommendations
+    """
+    if len(df) < lookback:
+        return MarketRegime(
+            regime="unknown",
+            confidence=0.0,
+            trend_strength=0.0,
+            volatility_ratio=1.0,
+            recommendation="avoid",
+        )
+    
+    recent = df.tail(lookback)
+    
+    # Calculate EMAs for trend detection
+    ema_fast = recent["close"].ewm(span=9, adjust=False).mean()
+    ema_slow = recent["close"].ewm(span=21, adjust=False).mean()
+    ema_long = recent["close"].ewm(span=50, adjust=False).mean()
+    
+    # Trend strength: EMA alignment and spread
+    current_close = recent["close"].iloc[-1]
+    ema_fast_val = ema_fast.iloc[-1]
+    ema_slow_val = ema_slow.iloc[-1]
+    ema_long_val = ema_long.iloc[-1]
+    
+    # EMA alignment score (-1 to +1)
+    bullish_alignment = 0
+    if ema_fast_val > ema_slow_val:
+        bullish_alignment += 0.33
+    if ema_slow_val > ema_long_val:
+        bullish_alignment += 0.33
+    if current_close > ema_fast_val:
+        bullish_alignment += 0.34
+    
+    bearish_alignment = 0
+    if ema_fast_val < ema_slow_val:
+        bearish_alignment += 0.33
+    if ema_slow_val < ema_long_val:
+        bearish_alignment += 0.33
+    if current_close < ema_fast_val:
+        bearish_alignment += 0.34
+    
+    # Net alignment (-1 = strong bearish, +1 = strong bullish)
+    net_alignment = bullish_alignment - bearish_alignment
+    
+    # EMA spread as % of price (trend strength indicator)
+    ema_spread = abs(ema_fast_val - ema_slow_val) / current_close * 100
+    
+    # Volatility analysis
+    high_low_range = recent["high"] - recent["low"]
+    current_range = high_low_range.iloc[-1]
+    avg_range = high_low_range.iloc[-volatility_window:].mean()
+    volatility_ratio = current_range / avg_range if avg_range > 0 else 1.0
+    
+    # Price range analysis (for ranging detection)
+    price_high = recent["high"].max()
+    price_low = recent["low"].min()
+    price_range_pct = (price_high - price_low) / current_close * 100
+    
+    # Recent price movement (momentum)
+    price_change_pct = (current_close - recent["close"].iloc[0]) / recent["close"].iloc[0] * 100
+    
+    # Classify regime
+    regime = "ranging"
+    confidence = 0.5
+    trend_strength = abs(net_alignment)
+    
+    if abs(net_alignment) >= trend_threshold:
+        # Strong trend
+        if net_alignment > 0:
+            regime = "trending_up"
+        else:
+            regime = "trending_down"
+        confidence = min(1.0, abs(net_alignment) + ema_spread * 0.1)
+    elif volatility_ratio > 2.0:
+        # High volatility without clear trend
+        regime = "volatile"
+        confidence = min(1.0, volatility_ratio / 3.0)
+    else:
+        # Ranging market
+        regime = "ranging"
+        # Confidence in ranging increases when:
+        # - Low EMA spread
+        # - Low price range
+        # - Low net alignment
+        confidence = 1.0 - abs(net_alignment)
+    
+    # Determine recommendation
+    if regime in ("trending_up", "trending_down"):
+        if confidence > 0.7:
+            recommendation = "full_size"
+        else:
+            recommendation = "reduced_size"
+    elif regime == "volatile":
+        recommendation = "avoid" if volatility_ratio > 2.5 else "reduced_size"
+    else:  # ranging
+        if confidence > 0.7:
+            recommendation = "avoid"  # Strong ranging = avoid trend signals
+        else:
+            recommendation = "reduced_size"
+    
+    return MarketRegime(
+        regime=regime,
+        confidence=confidence,
+        trend_strength=trend_strength,
+        volatility_ratio=volatility_ratio,
+        recommendation=recommendation,
+    )
 
 
 # ============================================================================
@@ -1095,6 +1243,33 @@ def generate_signals(
     except Exception:
         pass  # VWAP bands optional - continue without
     
+    # ==========================================================================
+    # MARKET REGIME DETECTION
+    # Adjusts confidence and filters signals based on market conditions
+    # ==========================================================================
+    market_regime = detect_market_regime(df, lookback=50)
+    regime_multiplier = 1.0
+    
+    # Skip signals in unfavorable regimes (configurable)
+    skip_in_ranging = config.get("skip_signals_in_ranging", False)
+    skip_in_volatile = config.get("skip_signals_in_volatile", False)
+    
+    if skip_in_ranging and market_regime.regime == "ranging" and market_regime.confidence > 0.7:
+        logger.debug(f"Skipping signals: strong ranging market (confidence={market_regime.confidence:.2f})")
+        return signals
+    
+    if skip_in_volatile and market_regime.regime == "volatile" and market_regime.volatility_ratio > 2.5:
+        logger.debug(f"Skipping signals: extreme volatility (ratio={market_regime.volatility_ratio:.2f})")
+        return signals
+    
+    # Adjust confidence based on regime
+    if market_regime.recommendation == "full_size":
+        regime_multiplier = 1.0
+    elif market_regime.recommendation == "reduced_size":
+        regime_multiplier = 0.7  # Reduce confidence by 30%
+    else:  # "avoid"
+        regime_multiplier = 0.5  # Reduce confidence by 50%
+    
     # Combine signals with confidence scoring
     signal_candidates = []
     
@@ -1398,13 +1573,26 @@ def generate_signals(
                         },
                     })
     
-    # Add metadata to signals
+    # Add metadata to signals including regime information
     for signal in signal_candidates:
         signal["timestamp"] = current_time.isoformat()
         signal["symbol"] = config["symbol"]
         signal["timeframe"] = config["timeframe"]
         signal["type"] = "pearlbot_pinescript"
         signal["virtual_broker"] = True  # Mark as virtual - no real execution
+        
+        # Apply regime-based confidence adjustment
+        original_confidence = signal.get("confidence", 0.5)
+        adjusted_confidence = original_confidence * regime_multiplier
+        signal["confidence"] = float(min(adjusted_confidence, 0.99))
+        
+        # Add regime information for transparency
+        signal["market_regime"] = market_regime.to_dict()
+        signal["regime_adjustment"] = {
+            "original_confidence": original_confidence,
+            "multiplier": regime_multiplier,
+            "adjusted_confidence": signal["confidence"],
+        }
     
     return signal_candidates
 
