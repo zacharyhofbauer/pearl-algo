@@ -11,7 +11,6 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-from pearlalgo.utils.logger import logger
 
 
 class DataQualityChecker:

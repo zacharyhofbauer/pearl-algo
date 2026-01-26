@@ -15,13 +15,12 @@ This allows the system to adapt its decisions based on current market conditions
 
 from __future__ import annotations
 
-import hashlib
 import json
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 

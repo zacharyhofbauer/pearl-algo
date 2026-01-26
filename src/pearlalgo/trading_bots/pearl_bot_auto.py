@@ -1000,7 +1000,6 @@ def generate_signals(
     
     # 8. VWAP bands (for extension/reversion detection)
     vwap_band_signal = None
-    vwap_extended = False
     try:
         vwap, upper_bands, lower_bands = calculate_vwap_bands(
             df, 
@@ -1014,10 +1013,8 @@ def generate_signals(
             outer_upper = upper_bands[-1].iloc[-1] if len(upper_bands) > 0 else None
             outer_lower = lower_bands[-1].iloc[-1] if len(lower_bands) > 0 else None
             if outer_upper is not None and close > outer_upper:
-                vwap_extended = True
                 vwap_band_signal = "extended_above"
             elif outer_lower is not None and close < outer_lower:
-                vwap_extended = True
                 vwap_band_signal = "extended_below"
             # Check for mean reversion opportunity (near inner band)
             elif len(upper_bands) > 0 and len(lower_bands) > 0:
@@ -1104,7 +1101,7 @@ def generate_signals(
             elif key_level_signal == "near_resistance_caution":
                 # CAUTION: Approaching resistance - reduce confidence for longs
                 confidence += key_level_conf_adj  # This is negative
-                active_indicators.append(f"CAUTION_RESIST")
+                active_indicators.append("CAUTION_RESIST")
         
         # Additional key level proximity checks using enhanced levels
         if key_levels:

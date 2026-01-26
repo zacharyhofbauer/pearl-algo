@@ -17,10 +17,8 @@ import queue
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
-from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 from pearlalgo.utils.logger import logger
 
@@ -226,7 +224,7 @@ class AsyncSQLiteQueue:
                     
                 except Exception as e:
                     self._total_errors += 1
-                    logger.debug(f"SQLite write failed (non-fatal): {operation} | {e}")
+                    logger.debug(f"SQLite write failed (non-fatal): {write.operation} | {e}")
                 finally:
                     self._queue.task_done()
                 

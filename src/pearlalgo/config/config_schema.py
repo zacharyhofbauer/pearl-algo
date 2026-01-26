@@ -210,6 +210,16 @@ class VirtualPnLConfig(BaseModel):
     notify_exit: bool = True
 
 
+class AutoFlatConfig(BaseModel):
+    """Auto-flat configuration for virtual trades."""
+    enabled: bool = True
+    friday_enabled: bool = True
+    friday_time: str = "16:55"
+    weekend_enabled: bool = True
+    timezone: str = "America/New_York"
+    notify: bool = True
+
+
 class HUDConfig(BaseModel):
     """Heads-up display configuration for charts."""
     enabled: bool = True
@@ -393,6 +403,7 @@ class FullServiceConfig(BaseModel):
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     performance: PerformanceConfig = Field(default_factory=PerformanceConfig)
     virtual_pnl: VirtualPnLConfig = Field(default_factory=VirtualPnLConfig)
+    auto_flat: AutoFlatConfig = Field(default_factory=AutoFlatConfig)
     hud: HUDConfig = Field(default_factory=HUDConfig)
     sessions: List[SessionDefinition] = Field(default_factory=list)
     indicators: IndicatorsConfig = Field(default_factory=IndicatorsConfig)

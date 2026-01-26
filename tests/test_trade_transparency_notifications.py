@@ -169,6 +169,11 @@ def test_virtual_exit_schedules_telegram_exit_notification(monkeypatch: pytest.M
     svc.state_manager.signals_file.write_text(json.dumps(entered) + "\n")
 
     # Mock the exit notifier and intercept create_task.
+    #
+    # In unit tests we don't provide real Telegram credentials; force-enable a stubbed notifier
+    # so we can validate that the service *schedules* the async task when a virtual exit occurs.
+    svc.telegram_notifier.enabled = True
+    svc.telegram_notifier.telegram = MagicMock()
     svc.telegram_notifier.send_exit_notification = AsyncMock(return_value=True)
     scheduled = {"count": 0}
 

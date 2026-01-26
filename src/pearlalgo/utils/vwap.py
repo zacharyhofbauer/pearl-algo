@@ -8,7 +8,7 @@ performance against it.
 
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 import pandas as pd

@@ -23,6 +23,7 @@ When stdout is not a TTY (e.g., under systemd), ANSI colors are automatically di
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import os
@@ -34,11 +35,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-try:
-    from loguru import logger as loguru_logger
-    HAS_LOGURU = True
-except ImportError:
-    HAS_LOGURU = False
+HAS_LOGURU = importlib.util.find_spec("loguru") is not None
 
 # Context variable for correlation ID
 correlation_id_var: ContextVar[Optional[str]] = ContextVar("correlation_id", default=None)
@@ -466,7 +463,6 @@ def async_log_timing(func: Callable[..., Any]) -> Callable[..., Any]:
     
     Adds duration_ms to log records.
     """
-    import asyncio
     
     @wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:

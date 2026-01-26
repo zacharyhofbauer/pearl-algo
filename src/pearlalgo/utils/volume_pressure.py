@@ -18,7 +18,7 @@ overlays, but should not be used as an execution signal without real delta data.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 import numpy as np
 import pandas as pd

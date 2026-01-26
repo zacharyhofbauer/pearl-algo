@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install package (dev + lint extras)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,lint]"
+
+      - name: Byte-compile source (sanity)
+        run: |
+          python -m compileall src/pearlalgo
+
+      # Ruff: enforce a small "bug catching" subset, and keep the full report informational.
+      - name: Ruff (bug checks)
+        run: |
+          ruff check src/pearlalgo --select F821,E722
+
+      - name: Ruff (informational)
+        continue-on-error: true
+        run: |
+          ruff check src/pearlalgo --statistics
+
+      - name: Architecture boundaries (enforced)
+        run: |
+          python scripts/testing/check_architecture_boundaries.py --enforce
+
+      - name: Dependency audit (pip-audit)
+        run: |
+          python -m pip install --upgrade pip-audit
+          python -m pip_audit .
+
+      - name: Secret scan (tracked files)
+        run: |
+          python scripts/testing/check_no_secrets.py
+
+      - name: Multi-market smoke test
+        run: |
+          python scripts/testing/smoke_multi_market.py
+
+      - name: Unit tests (skip external deps)
+        env:
+          MPLBACKEND: Agg
+        run: |
+          pytest -m "not requires_ibkr and not requires_telegram" --cov-report=xml
+
+      - name: Generate coverage badge
+        run: |
+          python scripts/testing/generate_coverage_badge.py
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.xml
+            docs/coverage-badge.svg
+

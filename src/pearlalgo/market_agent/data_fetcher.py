@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import pandas as pd
 
@@ -189,7 +189,7 @@ class MarketAgentDataFetcher:
                     logger.info(f"Buffer: {buffer_size} bars")
             else:
                 # No historical data, but we'll still try real-time Level 1
-                logger.info(f"Buffer: 0 bars (historical data unavailable, will try Level 1 real-time data)")
+                logger.info("Buffer: 0 bars (historical data unavailable, will try Level 1 real-time data)")
 
             # Fetch latest bar if method available
             latest_bar = None
@@ -256,7 +256,7 @@ class MarketAgentDataFetcher:
             if latest_bar is None:
                 if not df.empty:
                     data_source = "historical_fallback"
-                    logger.info(f"Using historical data fallback for latest bar (real-time subscription may not be available)")
+                    logger.info("Using historical data fallback for latest bar (real-time subscription may not be available)")
                     latest_row = df.iloc[-1]
                     
                     # Extract timestamp - handle both index-based and column-based dataframes

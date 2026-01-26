@@ -159,6 +159,13 @@ virtual_pnl:
   intrabar_tiebreak: take_profit
   notify_entry: true
   notify_exit: true
+auto_flat:
+  enabled: true
+  friday_enabled: true
+  friday_time: '16:55'
+  weekend_enabled: true
+  timezone: 'America/New_York'
+  notify: true
 hud:
   enabled: true
   show_rr_box: true

@@ -7,6 +7,8 @@ These are intentionally small, fast, and assertion-driven (no placeholders).
 from __future__ import annotations
 
 import asyncio
+import json
+from datetime import datetime, timezone
 
 import pandas as pd
 import pytest
@@ -295,6 +297,60 @@ class TestVirtualPnLExitGrading:
         # pre-entry bars. This test verifies the strict-after-entry logic.
         service._update_virtual_trade_exits(market_data)
         # Success = no exception and method correctly skips pre-entry bars
+
+
+@pytest.mark.asyncio
+async def test_close_all_requested_closes_virtual_trades(tmp_path) -> None:
+    """Close-all flag should force-exit all virtual entered trades."""
+    provider = MockDataProvider(base_price=17500.0, volatility=0.0, trend=0.0)
+    config = PEARL_BOT_CONFIG.copy()
+    config.virtual_pnl_enabled = True  # type: ignore[assignment]
+
+    service = MarketAgentService(data_provider=provider, config=config, state_dir=tmp_path)
+
+    signal = {
+        "type": "pearlbot_pinescript",
+        "direction": "long",
+        "entry_price": 100.0,
+        "stop_loss": 90.0,
+        "take_profit": 110.0,
+        "confidence": 0.6,
+        "symbol": "MNQ",
+    }
+    signal_id = service.performance_tracker.track_signal_generated(signal)
+    service.performance_tracker.track_entry(signal_id, entry_price=100.0, entry_time=datetime.now(timezone.utc))
+
+    state_file = service.state_manager.state_file
+    state_file.write_text(
+        json.dumps(
+            {
+                "close_all_requested": True,
+                "close_all_requested_time": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    market_data = {"latest_bar": {"close": 101.0, "bid": 100.5, "ask": 101.5}}
+    await service._handle_close_all_requests(market_data)
+
+    recent = service.state_manager.get_recent_signals(limit=50)
+    assert not any(rec.get("status") == "entered" for rec in recent)
+
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    assert not state.get("close_all_requested", False)
+
+
+def test_auto_flat_due_friday_and_weekend(tmp_path) -> None:
+    """Auto-flat should trigger on Friday cutoff and weekend closure."""
+    provider = MockDataProvider(base_price=17500.0, volatility=0.0, trend=0.0)
+    service = MarketAgentService(data_provider=provider, config=PEARL_BOT_CONFIG.copy(), state_dir=tmp_path)
+
+    friday_after_cutoff = datetime(2026, 1, 23, 21, 56, tzinfo=timezone.utc)  # 16:56 ET
+    assert service._auto_flat_due(friday_after_cutoff, market_open=True) == "friday_auto_flat"
+
+    saturday = datetime(2026, 1, 24, 15, 0, tzinfo=timezone.utc)
+    assert service._auto_flat_due(saturday, market_open=False) == "weekend_auto_flat"
 
 
 

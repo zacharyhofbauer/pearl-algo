@@ -397,6 +397,7 @@ class TestV2StalenessCallout:
             strategy_session_open=True,
             data_age_minutes=15.0,  # 15 minutes old
             data_stale_threshold_minutes=10.0,
+            legacy=True,
         )
         # V2 spec: "⏰ Data stale (15m) • signals paused • /data_quality"
         assert "⏰ Data stale" in message
@@ -415,6 +416,7 @@ class TestV2StalenessCallout:
             strategy_session_open=True,
             data_age_minutes=5.0,  # 5 minutes old (fresh)
             data_stale_threshold_minutes=10.0,
+            legacy=True,
         )
         assert "Data stale" not in message
 
@@ -430,6 +432,7 @@ class TestV2StalenessCallout:
             buy_sell_pressure="🔴 Pressure: SELLERS ▼▼ (Δ -24%, Vol 1.0x, 2h)",
             data_age_minutes=15.0,  # Stale
             data_stale_threshold_minutes=10.0,
+            legacy=True,
         )
         # V2 spec: Suppress derived context when stale
         assert "SELLERS" not in message
@@ -447,6 +450,7 @@ class TestV2StalenessCallout:
             buy_sell_pressure="🔴 Pressure: SELLERS ▼▼ (Δ -24%, Vol 1.0x, 2h)",
             data_age_minutes=5.0,  # Fresh
             data_stale_threshold_minutes=10.0,
+            legacy=True,
         )
         assert "SELLERS" in message
 
@@ -462,6 +466,7 @@ class TestV2StalenessCallout:
             signal_diagnostics="Raw: 3 → Valid: 0 | Filtered: 2 conf, 1 R:R",
             data_age_minutes=15.0,  # Stale
             data_stale_threshold_minutes=10.0,
+            legacy=True,
         )
         # V2 spec: Suppress derived context when stale
         assert "Raw: 3" not in message

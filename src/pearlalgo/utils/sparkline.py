@@ -6,7 +6,7 @@ Mobile-friendly Unicode-based visualizations for price charts and session progre
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence
 
 
 # Unicode block elements for sparklines (8 levels)

@@ -1798,7 +1798,6 @@ def format_glanceable_card(
         Formatted glanceable card message string
     """
     lines = []
-    market_display = market or "NQ"
     bot_display = format_bot_name(trading_bot or "scanner")
     
     # Header: Symbol + Time

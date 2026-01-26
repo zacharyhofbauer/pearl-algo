@@ -34,7 +34,7 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import IntEnum
-from typing import Any, Callable, Coroutine, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Coroutine, Dict, Optional, TYPE_CHECKING
 
 from pearlalgo.utils.logger import logger
 

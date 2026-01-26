@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from ib_insync import IB, Future, LimitOrder, Order, StopOrder
+from ib_insync import IB, Future, LimitOrder, StopOrder
 
 from pearlalgo.utils.logger import logger
 
@@ -115,9 +115,9 @@ class PlaceBracketOrderTask:
             take_profit_order.ocaType = 1
             
             # Place orders
-            parent_trade = ib.placeOrder(qualified_contract, parent_order)
-            stop_trade = ib.placeOrder(qualified_contract, stop_order)
-            tp_trade = ib.placeOrder(qualified_contract, take_profit_order)
+            ib.placeOrder(qualified_contract, parent_order)
+            ib.placeOrder(qualified_contract, stop_order)
+            ib.placeOrder(qualified_contract, take_profit_order)
             
             # Wait briefly for order acknowledgment
             ib.sleep(1)
@@ -159,14 +159,11 @@ class CancelOrderTask:
         
         try:
             # Find the order in open orders
-            open_orders = ib.openOrders()
             target_order = None
-            target_contract = None
             
             for trade in ib.openTrades():
                 if trade.order.orderId == self.order_id:
                     target_order = trade.order
-                    target_contract = trade.contract
                     break
             
             if target_order is None:

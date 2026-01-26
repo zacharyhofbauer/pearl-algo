@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
 import pandas as pd
@@ -89,7 +89,7 @@ class IBKRProvider(DataProvider):
         self._executor.start()
 
         # Entitlements checker (will be initialized after connection)
-        self.entitlements_checker: Optional[IBKREntitlements] = None
+        self.entitlements_checker: Optional[object] = None
         self._entitlements_cache: Optional[Dict[str, bool]] = None
 
         logger.info(

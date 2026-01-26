@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Optional, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
-    import pandas as pd
+    pass
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import ensure_state_dir, get_state_file, get_signals_file, parse_utc_timestamp
@@ -40,10 +40,6 @@ from pearlalgo.utils.telegram_alerts import (
 from pearlalgo.utils.telegram_ui_contract import (
     resolve_callback,
     parse_callback,
-    PREFIX_MENU,
-    PREFIX_ACTION,
-    PREFIX_CONFIRM,
-    PREFIX_SIGNAL_DETAIL,
 )
 
 try:
@@ -244,7 +240,7 @@ class TelegramCommandHandler:
                         "━━━━━ *System Health* ━━━━━",
                         f"🤖 Agent: {'🟢 RUNNING' if agent_running else '🔴 STOPPED'}",
                         f"🔌 Gateway: {'🟢 ONLINE' if gw_ok else '🔴 OFFLINE'}",
-                        f"📡 Handler: 🟢 ONLINE",
+                        "📡 Handler: 🟢 ONLINE",
                         "",
                         "━━━━━ *Status* ━━━━━",
                         "⚠️ No trading data yet.",
@@ -1456,8 +1452,6 @@ class TelegramCommandHandler:
         expanded_details = bool(prefs.get("signal_detail_expanded", False))
         pinned_dashboard = bool(prefs.get("dashboard_edit_in_place", False))
         snooze_on = bool(getattr(prefs, "snooze_noncritical_alerts", False))
-        pinned_id = prefs.get("dashboard_message_id")
-
         # Last dashboard time (persisted by notifier)
         last_dash = prefs.get("last_dashboard_sent_at")
         last_dash_age = format_time_ago(str(last_dash)) if last_dash else ""
@@ -1727,8 +1721,6 @@ class TelegramCommandHandler:
         """Show unified Activity menu (merged Trades + Performance)."""
         try:
             state = self._read_state()
-            metrics = self._read_latest_metrics()
-            
             # Gather data
             active_count = 0
             daily_signals = 0
@@ -1958,12 +1950,9 @@ class TelegramCommandHandler:
         # Get trading mode from state
         state = self._read_state()
         trading_bot_enabled = False
-        trading_bot_selected = "pearl_bot_auto"
-        
         if state:
             tb_state = state.get("trading_bot") or {}
             trading_bot_enabled = bool(tb_state.get("enabled", False))
-            trading_bot_selected = tb_state.get("selected") or "pearl_bot_auto"
         
         # Determine current mode
         if trading_bot_enabled:
@@ -2038,8 +2027,6 @@ class TelegramCommandHandler:
         agent_running = False
         has_positions = False
         positions_count = 0
-        daily_pnl = 0.0
-        
         try:
             sc = getattr(self, "service_controller", None)
             if sc is not None:
@@ -2053,7 +2040,6 @@ class TelegramCommandHandler:
             active_trades = state.get("active_trades_count", 0) or 0
             positions_count = positions + active_trades
             has_positions = positions_count > 0
-            daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
         
         # Check gateway status
         gateway_running = False
@@ -2132,21 +2118,6 @@ class TelegramCommandHandler:
         signal_detail_expanded = bool(prefs.get("signal_detail_expanded", False))
         pinned_dashboard = bool(prefs.get("dashboard_edit_in_place", False))
         snooze_on = bool(getattr(prefs, "snooze_noncritical_alerts", False))
-        snooze_until_str: str | None = None
-        if snooze_on:
-            try:
-                import pytz
-                from datetime import datetime, timezone
-
-                snooze_until = prefs.get("snooze_until")
-                if snooze_until:
-                    expiry = datetime.fromisoformat(str(snooze_until).replace("Z", "+00:00"))
-                    if expiry.tzinfo is None:
-                        expiry = expiry.replace(tzinfo=timezone.utc)
-                    et = expiry.astimezone(pytz.timezone("US/Eastern"))
-                    snooze_until_str = et.strftime("%I:%M %p ET").lstrip("0")
-            except Exception:
-                snooze_until_str = None
 
         def _onoff(v: bool) -> str:
             return "🟢 ON" if v else "🔴 OFF"
@@ -3378,7 +3349,6 @@ class TelegramCommandHandler:
             tb_state = state.get("trading_bot") or {}
             tb_enabled = bool(tb_state.get("enabled", False))
             tb_selected = tb_state.get("selected") or "pearl_bot_auto"
-            trading_bot_status = tb_selected if tb_enabled else "OFF (scanner)"
             trading_bot_label = tb_selected if tb_enabled else "Scanner"
             
             # Format time
@@ -3402,7 +3372,6 @@ class TelegramCommandHandler:
             # Service status - use live process check, not stale state file
             agent_running = bool(self._is_agent_process_running())
             paused = state.get("paused", False)
-            pause_reason = state.get("pause_reason")
 
             # Uptime (seconds) for glanceable footer (avoid "Agent: OFF" when running).
             agent_uptime_seconds = None
@@ -3440,17 +3409,6 @@ class TelegramCommandHandler:
             strategy_session_open = state.get("strategy_session_open")
             
             # Activity metrics
-            cycles_session = state.get("cycle_count_session")
-            cycles_total = state.get("cycle_count", 0) or 0
-            signals_generated = state.get("signal_count", 0) or 0
-            signals_sent = state.get("signals_sent", 0) or 0
-            signal_send_failures = state.get("signals_send_failures", 0) or 0
-            errors = state.get("error_count", 0) or 0
-            
-            # Buffer
-            buffer_size = state.get("buffer_size", 0) or 0
-            buffer_target = state.get("buffer_size_target")
-            
             # Price
             latest_price = state.get("latest_price")
             
@@ -3543,9 +3501,6 @@ class TelegramCommandHandler:
                         config = yaml.safe_load(f) or {}
                         data_config = config.get("data", {})
                         data_stale_threshold_minutes = float(data_config.get("stale_data_threshold_minutes", 10.0))
-                        session_cfg = config.get("session", {}) or {}
-                        session_start = session_cfg.get("start_time")
-                        session_end = session_cfg.get("end_time")
             except Exception:
                 pass
             
@@ -3596,20 +3551,10 @@ class TelegramCommandHandler:
                 data_stale = None
             
             # Buy/Sell pressure
-            buy_sell_pressure = state.get("buy_sell_pressure")
-            buy_sell_pressure_raw = state.get("buy_sell_pressure_raw")
-            
             # Execution status
             execution = state.get("execution", {}) or {}
-            execution_enabled = execution.get("enabled", False)
-            execution_armed = execution.get("armed", False)
-            execution_mode = execution.get("mode")
             execution_positions = int(execution.get("positions", 0) or 0)
             open_positions_count = max(execution_positions, int(active_trades_count or 0))
-            
-            # Quiet reason and diagnostics
-            quiet_reason = state.get("quiet_reason")
-            signal_diagnostics = state.get("signal_diagnostics")
             
             # Last cycle time
             last_cycle_seconds = None
@@ -4456,7 +4401,7 @@ class TelegramCommandHandler:
         
         # Build message
         lines = [
-            f"🔍 *Signal Detail*",
+            "🔍 *Signal Detail*",
             "",
             f"*{symbol} {dir_emoji} {dir_label}* | {signal_type}",
             f"{status_emoji} Status: *{status_label}*",
@@ -4592,7 +4537,7 @@ class TelegramCommandHandler:
         
         # Add signal statistics
         if signals:
-            text += f"\n*Signal Statistics:*\n"
+            text += "\n*Signal Statistics:*\n"
             text += f"  Total signals: {len(signals)}\n"
             
             # Count by status
@@ -4641,14 +4586,14 @@ class TelegramCommandHandler:
             
             pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
             
-            text += f"*Today's Activity:*\n"
+            text += "*Today's Activity:*\n"
             text += f"  Signals: {len(today_signals)} total\n"
             text += f"  • Generated: {generated}\n"
             text += f"  • Active: {entered}\n"
             text += f"  • Exited: {exited}\n"
             
             if exited > 0:
-                text += f"\n*Today's P&L:*\n"
+                text += "\n*Today's P&L:*\n"
                 text += f"  {pnl_emoji} ${total_pnl:,.2f}\n"
                 text += f"  Trades: {wins}W / {losses}L\n"
         else:
@@ -4658,7 +4603,7 @@ class TelegramCommandHandler:
         if state:
             scans = state.get("cycle_count_session", 0) or 0
             errors = state.get("error_count", 0) or 0
-            text += f"\n*Session Activity:*\n"
+            text += "\n*Session Activity:*\n"
             text += f"  Scans: {scans:,}\n"
             text += f"  Errors: {errors}\n"
         
@@ -4688,15 +4633,15 @@ class TelegramCommandHandler:
             text += f"  Completed: {exited_signals}\n"
             
             if exited_signals > 0:
-                text += f"\n*Trade Performance:*\n"
+                text += "\n*Trade Performance:*\n"
                 text += f"  Wins: {wins}\n"
                 text += f"  Losses: {losses}\n"
                 text += f"  Win Rate: {win_rate:.1f}%\n"
-                text += f"\n*P&L:*\n"
+                text += "\n*P&L:*\n"
                 text += f"  Total: {pnl_emoji} ${total_pnl:,.2f}\n"
                 text += f"  Average: ${avg_pnl:,.2f}\n"
                 if avg_hold > 0:
-                    text += f"\n*Timing:*\n"
+                    text += "\n*Timing:*\n"
                     text += f"  Avg Hold: {avg_hold:.1f} min\n"
             else:
                 text += "\nNo completed trades this week.\n"
@@ -4708,13 +4653,9 @@ class TelegramCommandHandler:
 
     async def _handle_pnl_overview(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display P&L overview."""
-        state = self._read_state()
         signals = self._read_recent_signals(limit=100)
         
         text = "💰 *P&L Overview*\n\n"
-        
-        # Get performance data
-        performance = state.get("performance", {}) if state else {}
         
         # Calculate from signals
         exited_signals = [s for s in signals if s.get("status") == "exited"] if signals else []
@@ -4845,7 +4786,7 @@ class TelegramCommandHandler:
                 text += f"  Enabled: {'✅' if telegram.get('enabled', False) else '❌'}\n"
             else:
                 text += "❌ Config file not found.\n"
-                text += f"Expected at: config/config.yaml"
+                text += "Expected at: config/config.yaml"
         except Exception as e:
             text += f"❌ Could not load config: {e}\n"
         
@@ -5488,44 +5429,6 @@ class TelegramCommandHandler:
                 msg = msg[:4093] + "..."
             await self._send_message_or_edit(update, context, msg, parse_mode="Markdown")
             return
-
-        # Gateway status (best-effort)
-        gateway_running = True
-        sc = getattr(self, "service_controller", None)
-        try:
-            fn = getattr(sc, "get_gateway_status", None)
-            if callable(fn):
-                gs = fn() or {}
-                gateway_running = bool(gs.get("process_running", True)) and bool(gs.get("port_listening", True))
-        except Exception:
-            gateway_running = True
-
-        agent_running = bool(self._is_agent_process_running())
-
-        futures_market_open = state.get("futures_market_open")
-        strategy_session_open = state.get("strategy_session_open")
-        paused = bool(state.get("paused", False))
-        pause_reason = state.get("pause_reason")
-
-        cycles_total = int(state.get("cycle_count", 0) or 0)
-        signals_generated = int(state.get("signal_count", 0) or 0)
-        errors = int(state.get("error_count", 0) or 0)
-        buffer_size = int(state.get("buffer_size", 0) or 0)
-
-        latest_price = self._extract_latest_price(state)
-        data_age_minutes = self._extract_data_age_minutes(state)
-
-        # State age (seconds) from last_successful_cycle if present
-        state_age_seconds = None
-        try:
-            ts = state.get("last_successful_cycle")
-            if ts:
-                dt = parse_utc_timestamp(str(ts))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                state_age_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
-        except Exception:
-            state_age_seconds = None
 
         # Legacy /status is deprecated: redirect to the canonical visual dashboard.
         msg = await self._build_status_dashboard_message(state)

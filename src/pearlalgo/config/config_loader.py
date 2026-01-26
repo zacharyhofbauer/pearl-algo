@@ -437,6 +437,14 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "notify_entry": False,
         "notify_exit": False,
     },
+    "auto_flat": {
+        "enabled": True,
+        "friday_enabled": True,
+        "friday_time": "16:55",
+        "weekend_enabled": True,
+        "timezone": "America/New_York",
+        "notify": True,
+    },
     # Market hours configuration (for holiday/early-close overrides)
     # Disabled by default to preserve current behavior.
     # Enable by setting enable_config_overrides: true and providing dates.

@@ -14,11 +14,9 @@ Features:
 
 from __future__ import annotations
 
-import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -42,7 +40,6 @@ except ImportError:
 
 try:
     from sklearn.calibration import CalibratedClassifierCV
-    from sklearn.model_selection import cross_val_score
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
@@ -482,7 +479,6 @@ class MLSignalFilter:
             # Calculate metrics by threshold
             tp = np.sum((val_pred == 1) & (y_val == 1))
             fp = np.sum((val_pred == 1) & (y_val == 0))
-            tn = np.sum((val_pred == 0) & (y_val == 0))
             fn = np.sum((val_pred == 0) & (y_val == 1))
             
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0

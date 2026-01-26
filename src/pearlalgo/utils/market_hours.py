@@ -7,7 +7,7 @@ Futures markets are generally 24/5 (Sunday 6pm ET - Friday 5pm ET).
 
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import datetime, time
 from typing import Iterable, Mapping, Optional
 
 import pytz
@@ -172,10 +172,6 @@ class MarketHours:
                 dt = dt.astimezone(UTC)
 
         et_dt = dt.astimezone(self.tz)
-        et_date = et_dt.date()
-        et_time = et_dt.time()
-        weekday = et_dt.weekday()
-
         # If market is open, return next day's open
         if self.is_market_open(dt):
             # Move to next day

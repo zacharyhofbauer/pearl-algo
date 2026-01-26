@@ -7,32 +7,23 @@ Sends signals and status updates to Telegram.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import pandas as pd
 
 from pearlalgo.utils.logger import logger
 
-try:
-    import telegram
-    from telegram import Bot
-    TELEGRAM_AVAILABLE = True
-except ImportError:
-    TELEGRAM_AVAILABLE = False
-    logger.warning("python-telegram-bot not installed, Telegram notifications disabled")
-
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import get_market_hours
 from pearlalgo.utils.paths import ensure_state_dir, parse_utc_timestamp
-from pearlalgo.utils.retry import async_retry_with_backoff
 from pearlalgo.utils.telegram_alerts import (
     TelegramAlerts,
     TelegramPrefs,
-    _format_separator,
     _truncate_telegram_text,
     _format_uptime,
     _format_currency,
@@ -41,33 +32,20 @@ from pearlalgo.utils.telegram_alerts import (
     format_signal_direction,
     format_signal_confidence_tier,
     format_pnl,
-    format_gate_status,
-    format_service_status,
-    format_session_window,
     safe_label,
     format_glanceable_card,
     # New UX improvement helpers
-    format_activity_pulse,
-    format_next_session_time,
     format_signal_action_cue,
-    format_signal_timing,
-    format_performance_trend,
     sanitize_telegram_markdown,
     # Standardized terminology constants
-    LABEL_AGENT,
-    LABEL_GATEWAY,
     LABEL_SCANS,
-    STATE_RUNNING,
-    STATE_STOPPED,
 )
 from pearlalgo.utils.telegram_ui_contract import (
     callback_menu,
     callback_action,
     callback_signal_detail,
     callback_confirm,
-    callback_back,
     MENU_MAIN,
-    MENU_SIGNALS,
     MENU_STATUS,
     MENU_SYSTEM,
     MENU_SETTINGS,
@@ -82,6 +60,10 @@ try:
 except ImportError:
     CHART_GENERATOR_AVAILABLE = False
     ChartGenerator = None
+
+TELEGRAM_AVAILABLE = importlib.util.find_spec("telegram") is not None
+if not TELEGRAM_AVAILABLE:
+    logger.warning("python-telegram-bot not installed, Telegram notifications disabled")
 
 
 def _is_command_handler_running() -> bool:
@@ -704,7 +686,6 @@ class MarketAgentTelegramNotifier:
         # Get MTF context
         mtf_analysis = signal.get("mtf_analysis", {})
         mtf_alignment = mtf_analysis.get("alignment", "partial")
-        mtf_score = mtf_analysis.get("alignment_score", 0.5)
 
         # Get VWAP context
         vwap_data = signal.get("vwap_data", {})
@@ -841,18 +822,18 @@ class MarketAgentTelegramNotifier:
             # Check if order book aligns with signal
             if signal_direction_lower == "long":
                 if imbalance > 0.15:
-                    message += f"• ✅ Order Book: Aligned (bid pressure supports long)\n"
+                    message += "• ✅ Order Book: Aligned (bid pressure supports long)\n"
                 elif imbalance < -0.15:
-                    message += f"• ⚠️ Order Book: Opposing (ask pressure against long)\n"
+                    message += "• ⚠️ Order Book: Opposing (ask pressure against long)\n"
                 else:
-                    message += f"• ⚪ Order Book: Neutral\n"
+                    message += "• ⚪ Order Book: Neutral\n"
             elif signal_direction_lower == "short":
                 if imbalance < -0.15:
-                    message += f"• ✅ Order Book: Aligned (ask pressure supports short)\n"
+                    message += "• ✅ Order Book: Aligned (ask pressure supports short)\n"
                 elif imbalance > 0.15:
-                    message += f"• ⚠️ Order Book: Opposing (bid pressure against short)\n"
+                    message += "• ⚠️ Order Book: Opposing (bid pressure against short)\n"
                 else:
-                    message += f"• ⚪ Order Book: Neutral\n"
+                    message += "• ⚪ Order Book: Neutral\n"
 
         # ATR/Volatility
         atr = indicators.get("atr", 0)
@@ -940,7 +921,6 @@ class MarketAgentTelegramNotifier:
 
         try:
             symbol = signal.get("symbol", "MNQ")
-            signal_type = signal.get("type", "unknown").replace("_", " ").title()
             stop_loss = float(signal.get("stop_loss", 0) or 0)
             take_profit = float(signal.get("take_profit", 0) or 0)
             
@@ -1066,7 +1046,6 @@ class MarketAgentTelegramNotifier:
 
         try:
             symbol = signal.get("symbol", "MNQ")
-            signal_type = signal.get("type", "unknown").replace("_", " ").title()
             entry_price = float(signal.get("entry_price", 0) or 0)
             
             # Use shared helpers
@@ -1204,7 +1183,6 @@ class MarketAgentTelegramNotifier:
         Returns:
             Formatted message string
         """
-        symbol = signal.get("symbol", "MNQ")  # Default to MNQ (micro Nasdaq)
         signal_type = signal.get("type", "unknown")
         direction = signal.get("direction", "").upper()
         entry_price = signal.get("entry_price", 0)
@@ -1297,7 +1275,7 @@ class MarketAgentTelegramNotifier:
             return False
 
         try:
-            message = f"📊 *NQ Agent Status*\n\n"
+            message = "📊 *NQ Agent Status*\n\n"
 
             # Service and market status
             status_emoji = "🟢" if status.get("running") else "🔴"
@@ -1385,10 +1363,10 @@ class MarketAgentTelegramNotifier:
                         elif imbalance < -0.1:
                             data_text += f" • 🔴 Ask {imbalance_pct:+.1f}%"
                         else:
-                            data_text += f" • ⚪ Balanced"
+                            data_text += " • ⚪ Balanced"
                     message += f"{data_emoji} *Data:* {data_text}\n"
                 elif data_level == 'level1':
-                    message += f"📈 *Data:* Level 1\n"
+                    message += "📈 *Data:* Level 1\n"
                 else:
                     # Check if historical data is ETH (Extended Trading Hours) which includes all sessions
                     is_eth = latest_bar.get('_historical_eth', False)
@@ -1432,7 +1410,7 @@ class MarketAgentTelegramNotifier:
 
                     message += f"📈 *Performance (7d):* {wins}W/{losses}L • {_format_percentage(win_rate)} WR • {_format_currency(total_pnl)} • {_format_currency(avg_pnl)} avg\n"
                 else:
-                    message += f"📈 *Performance (7d):* No completed trades yet\n"
+                    message += "📈 *Performance (7d):* No completed trades yet\n"
 
             await self.telegram.send_message(message)
             return True
@@ -1475,7 +1453,7 @@ class MarketAgentTelegramNotifier:
             time_str = ""
             if current_time:
                 try:
-                    from datetime import datetime, timezone as tz
+                    from datetime import timezone as tz
                     import pytz
                     if isinstance(current_time, str):
                         current_time = parse_utc_timestamp(current_time)
@@ -1488,7 +1466,7 @@ class MarketAgentTelegramNotifier:
                     try:
                         if hasattr(current_time, 'strftime'):
                             time_str = current_time.strftime("%H:%M UTC")
-                    except:
+                    except Exception:
                         pass
             
             # Build compact message
@@ -2267,7 +2245,7 @@ class MarketAgentTelegramNotifier:
             shutdown_reason = summary.get('shutdown_reason', 'Normal shutdown')
             
             # Header with reason (if abnormal)
-            message = f"🛑 *Agent Stopped*\n"
+            message = "🛑 *Agent Stopped*\n"
             if shutdown_reason and shutdown_reason not in ("Normal shutdown", "Final cleanup"):
                 reason_emoji = "⚠️" if "error" in shutdown_reason.lower() or "circuit" in shutdown_reason.lower() else "ℹ️"
                 message += f"{reason_emoji} {safe_label(str(shutdown_reason))}\n"
@@ -2303,7 +2281,7 @@ class MarketAgentTelegramNotifier:
                 message += f"\n{pnl_emoji} *P&L:* {_format_currency(total_pnl)}\n"
 
             # Restart hint
-            message += f"\n💡 /start\\_agent"
+            message += "\n💡 /start\\_agent"
 
             await self.telegram.send_message(message)
             return True
@@ -2325,7 +2303,7 @@ class MarketAgentTelegramNotifier:
             return False
 
         try:
-            message = f"📅 *Weekly Performance Summary*\n\n"
+            message = "📅 *Weekly Performance Summary*\n\n"
 
             total_signals = performance_metrics.get("total_signals", 0)
             exited_signals = performance_metrics.get("exited_signals", 0)
@@ -2337,7 +2315,7 @@ class MarketAgentTelegramNotifier:
             avg_hold = performance_metrics.get("avg_hold_minutes", 0)
 
             # Signal statistics (mobile-friendly)
-            message += f"*Signals:*\n"
+            message += "*Signals:*\n"
             message += f"• Total: {total_signals}\n"
             message += f"• Exited: {exited_signals}\n"
             if total_signals > 0:
@@ -2345,7 +2323,7 @@ class MarketAgentTelegramNotifier:
                 message += f"• Exit Rate: {_format_percentage(exit_rate)}\n"
 
             if exited_signals > 0:
-                message += f"\n*Trade Performance:*\n"
+                message += "\n*Trade Performance:*\n"
                 message += f"✅ {wins}W  ❌ {losses}L\n"
                 message += f"📈 {_format_percentage(win_rate)} WR\n"
                 message += f"💰 {_format_currency(total_pnl)}\n"
@@ -2354,11 +2332,11 @@ class MarketAgentTelegramNotifier:
 
                 # Performance trend
                 if total_pnl > 0:
-                    message += f"\n📈 *Trend:* ↗️ Profitable week\n"
+                    message += "\n📈 *Trend:* ↗️ Profitable week\n"
                 elif total_pnl < 0:
-                    message += f"\n📉 *Trend:* ↘️ Loss week\n"
+                    message += "\n📉 *Trend:* ↘️ Loss week\n"
                 else:
-                    message += f"\n➡️ *Trend:* ➡️ Break even\n"
+                    message += "\n➡️ *Trend:* ➡️ Break even\n"
             else:
                 message += "\n⏳ *No completed trades this week*\n"
 
@@ -2384,7 +2362,7 @@ class MarketAgentTelegramNotifier:
 
         try:
             # Format message with clear explanation (escaped for markdown safety)
-            message = f"🛑 *Circuit Breaker Activated*\n\n"
+            message = "🛑 *Circuit Breaker Activated*\n\n"
             message += f"*Reason:* {safe_label(str(reason))}\n"
 
             # What happened
@@ -2434,10 +2412,10 @@ class MarketAgentTelegramNotifier:
 
         try:
             issue = safe_label(str(recovery_info.get('issue', 'Unknown')))
-            message = f"✅ *Service Recovered*\n\n"
+            message = "✅ *Service Recovered*\n\n"
             message += f"*Issue:* {issue}\n"
             message += f"*Time:* {recovery_info.get('recovery_time_seconds', 0):.0f}s\n"
-            message += f"*Status:* Normal operation\n"
+            message += "*Status:* Normal operation\n"
 
             await self.telegram.send_message(message)
             return True
@@ -2472,7 +2450,7 @@ class MarketAgentTelegramNotifier:
             message += f"*Total Errors:* {error_count}\n"
 
             if error_types:
-                message += f"\n*By Type:*\n"
+                message += "\n*By Type:*\n"
                 for error_type, count in sorted(error_types.items(), key=lambda x: x[1], reverse=True):
                     message += f"• {safe_label(str(error_type))}: {count}\n"
 
@@ -2522,7 +2500,7 @@ class MarketAgentTelegramNotifier:
             
             if alert_type == "significant_move":
                 if abs(price_change_pct) > 1.0:
-                    message += f"\n⚠️ Significant price movement detected\n"
+                    message += "\n⚠️ Significant price movement detected\n"
 
             await self.telegram.send_message(message)
             return True

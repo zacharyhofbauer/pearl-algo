@@ -1,5 +1,7 @@
 # PearlAlgo Market Trading Agent
 
+![Coverage](docs/coverage-badge.svg)
+
 Production-ready market trading agent with a modular architecture:
 data providers (IBKR), strategy/scanner/signal generation, state + metrics, Telegram UI,
 and optional execution + learning layers (disabled/safe by default).
@@ -54,7 +56,31 @@ Service behavior is configured in `config/config.yaml`.
 
 # Validation runner (telegram/signals/service/arch)
 python3 scripts/testing/test_all.py
+
+# Coverage + badge
+make coverage
 ```
+
+### Convenience (Makefile)
+
+```bash
+# Install deps (editable) + dev tooling
+make install
+
+# Run the same checks CI runs locally
+make ci
+
+# Optional: dependency vulnerability scan
+make audit
+```
+
+### CI
+
+GitHub Actions workflow lives at `.github/workflows/ci.yml` and runs:
+- Unit tests (skipping IBKR / Telegram-credential tests)
+- Architecture boundary enforcement
+- Secret scan on tracked files
+- Multi-market config + state isolation smoke test
 
 ## Docs (start here)
 

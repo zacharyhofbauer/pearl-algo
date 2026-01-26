@@ -13,11 +13,10 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from pearlalgo.learning.policy_state import PolicyState, SignalTypeStats
+from pearlalgo.learning.policy_state import PolicyState
 from pearlalgo.utils.logger import logger
 
 

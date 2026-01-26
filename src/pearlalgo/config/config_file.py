@@ -290,6 +290,7 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "virtual_pnl",
     "hud",
     "sessions",
+    "auto_flat",
     # Strategy-level extensions
     "pearl_bot_auto",  # direct overrides for trading_bots/pearl_bot_auto.py
     "indicators",

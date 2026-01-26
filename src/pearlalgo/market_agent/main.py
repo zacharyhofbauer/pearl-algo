@@ -7,10 +7,19 @@ Main entry point for running the market agent service.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
 from pearlalgo.utils.logger import logger
+from pearlalgo.config.config_file import load_config_yaml
+from pearlalgo.config.config_loader import build_strategy_config
+from pearlalgo.config.config_view import ConfigView
+from pearlalgo.data_providers.factory import create_data_provider
+from pearlalgo.market_agent.service import MarketAgentService
+from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
+from pearlalgo.utils.logging_config import set_run_id, setup_logging
+from pearlalgo.utils.paths import ensure_state_dir
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent.parent
@@ -27,16 +36,6 @@ except ImportError:
     pass  # dotenv not required, but helpful
 except Exception as e:
     logger.warning(f"Could not load .env file: {e}")
-
-from pearlalgo.config.config_file import load_config_yaml
-from pearlalgo.config.config_loader import build_strategy_config
-from pearlalgo.config.config_view import ConfigView
-from pearlalgo.data_providers.factory import create_data_provider
-from pearlalgo.market_agent.service import MarketAgentService
-from pearlalgo.trading_bots.pearl_bot_auto import CONFIG as PEARL_BOT_CONFIG
-from pearlalgo.utils.logging_config import set_run_id, setup_logging
-from pearlalgo.utils.paths import ensure_state_dir
-
 
 async def main():
     """Main entry point."""
@@ -55,8 +54,6 @@ async def main():
         pass  # loguru not available, run_id still in context var
     
     logger.info(f"Starting Market Agent Service | run_id={run_id}")
-
-    import os
 
     # Load config.yaml (base + optional overlay) once for this run.
     config_data = load_config_yaml()

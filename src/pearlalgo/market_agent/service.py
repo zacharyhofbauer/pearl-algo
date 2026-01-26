@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import shutil
 import signal
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
@@ -31,7 +29,7 @@ from pearlalgo.market_agent.performance_tracker import PerformanceTracker
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
 from pearlalgo.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
-from pearlalgo.utils.cadence import CadenceMetrics, CadenceScheduler
+from pearlalgo.utils.cadence import CadenceScheduler
 from pearlalgo.utils.data_quality import DataQualityChecker
 from pearlalgo.utils.error_handler import ErrorHandler
 from pearlalgo.utils.market_hours import configure_market_hours, get_market_hours
@@ -171,6 +169,7 @@ class MarketAgentService:
         circuit_breaker_settings = service_config.get("circuit_breaker", {})
         data_settings = service_config.get("data", {})
         telegram_ui_settings = service_config.get("telegram_ui", {}) or {}
+        auto_flat_settings = service_config.get("auto_flat", {}) or {}
 
         # ==========================================================================
         # STORAGE (SQLite dual-write; keeps Telegram/mobile compatibility)
@@ -193,7 +192,7 @@ class MarketAgentService:
                     self._async_writes_enabled = bool(storage_cfg.get("async_writes_enabled", False))
                     if self._async_writes_enabled:
                         try:
-                            from pearlalgo.storage.async_sqlite_queue import AsyncSQLiteQueue, WritePriority
+                            from pearlalgo.storage.async_sqlite_queue import AsyncSQLiteQueue
                             
                             max_queue_size = int(storage_cfg.get("async_queue_max_size", 1000) or 1000)
                             priority_trades = bool(storage_cfg.get("async_queue_priority_trades", True))
@@ -276,6 +275,28 @@ class MarketAgentService:
         self._ml_blocking_allowed: bool = False
         self._ml_lift_metrics: Dict[str, Any] = {}
         self._ml_lift_last_eval_at: Optional[datetime] = None
+
+        # ==========================================================================
+        # AUTO-FLAT (Virtual trades) - Friday/Weekend safety
+        # ==========================================================================
+        self._auto_flat_enabled = bool(auto_flat_settings.get("enabled", False))
+        self._auto_flat_friday_enabled = bool(auto_flat_settings.get("friday_enabled", True))
+        self._auto_flat_weekend_enabled = bool(auto_flat_settings.get("weekend_enabled", True))
+        self._auto_flat_timezone = str(auto_flat_settings.get("timezone", "America/New_York") or "America/New_York")
+        self._auto_flat_notify = bool(auto_flat_settings.get("notify", True))
+        self._auto_flat_friday_time = self._parse_hhmm(
+            auto_flat_settings.get("friday_time"),
+            default=(16, 55),
+        )
+        self._auto_flat_last_dates: Dict[str, Optional[date]] = {
+            "friday_auto_flat": None,
+            "weekend_auto_flat": None,
+        }
+        self._last_close_all_at: Optional[str] = None
+        self._last_close_all_reason: Optional[str] = None
+        self._last_close_all_count: Optional[int] = None
+        self._last_close_all_pnl: Optional[float] = None
+        self._last_close_all_price_source: Optional[str] = None
 
         # Telegram UI formatting (Home Card / dashboards)
         try:
@@ -877,6 +898,12 @@ class MarketAgentService:
                     # Check data quality
                     await self._check_data_quality(market_data)
 
+                    # Close-all handler (manual flag + auto-flat rules)
+                    try:
+                        await self._handle_close_all_requests(market_data)
+                    except Exception as e:
+                        logger.debug(f"Close-all handler error: {e}")
+
                 except Exception as e:
                     # Use ErrorHandler for standardized error handling
                     error_info = ErrorHandler.handle_data_fetch_error(
@@ -1037,8 +1064,6 @@ class MarketAgentService:
                     futures_market_open = bool(get_market_hours().is_market_open())
                 except Exception:
                     futures_market_open = False
-                regime_info = "unknown"  # Regime detection removed with nq_intraday
-                
                 logger.info(
                     "Cycle completed",
                     extra={
@@ -3853,6 +3878,236 @@ class MarketAgentService:
         except Exception as e:
             logger.debug(f"Could not refresh ML lift metrics: {e}")
 
+    @staticmethod
+    def _parse_hhmm(value: Any, *, default: tuple[int, int]) -> tuple[int, int]:
+        """Parse HH:MM string into (hour, minute), fallback to default."""
+        if isinstance(value, str):
+            parts = value.strip().split(":")
+            if len(parts) == 2:
+                try:
+                    hour = int(parts[0])
+                    minute = int(parts[1])
+                    if 0 <= hour <= 23 and 0 <= minute <= 59:
+                        return hour, minute
+                except Exception:
+                    pass
+        return default
+
+    def _get_active_virtual_trades(self, *, limit: int = 300) -> list[dict]:
+        """Return active virtual trades (signals.jsonl status=entered)."""
+        try:
+            recent_signals = self.state_manager.get_recent_signals(limit=limit)
+        except Exception:
+            return []
+        active: list[dict] = []
+        for rec in recent_signals:
+            if isinstance(rec, dict) and rec.get("status") == "entered":
+                active.append(rec)
+        return active
+
+    def _resolve_latest_prices(self, market_data: Optional[Dict]) -> dict:
+        """Resolve latest bid/ask/close prices from market_data or cached data."""
+        latest_bar = None
+        if isinstance(market_data, dict):
+            latest_bar = market_data.get("latest_bar")
+        if not isinstance(latest_bar, dict):
+            try:
+                cached = getattr(self.data_fetcher, "_last_market_data", None) or {}
+                latest_bar = cached.get("latest_bar")
+            except Exception:
+                latest_bar = None
+        if not isinstance(latest_bar, dict):
+            return {"close": None, "bid": None, "ask": None, "source": None}
+
+        def _f(v: Any) -> Optional[float]:
+            try:
+                out = float(v)
+                return out if out > 0 else None
+            except Exception:
+                return None
+
+        close_px = _f(latest_bar.get("close"))
+        bid_px = _f(latest_bar.get("bid"))
+        ask_px = _f(latest_bar.get("ask"))
+        source = latest_bar.get("_data_level") or latest_bar.get("_data_source")
+        return {
+            "close": close_px,
+            "bid": bid_px,
+            "ask": ask_px,
+            "source": str(source) if source is not None else None,
+        }
+
+    def _auto_flat_due(self, now_utc: datetime, *, market_open: Optional[bool]) -> Optional[str]:
+        """Return auto-flat reason if Friday/weekend rule should trigger."""
+        if not self._auto_flat_enabled:
+            return None
+        try:
+            tz = ZoneInfo(self._auto_flat_timezone)
+        except Exception:
+            tz = ZoneInfo("America/New_York")
+
+        local_now = now_utc.astimezone(tz)
+        weekday = local_now.weekday()  # 0=Mon .. 6=Sun
+
+        if self._auto_flat_friday_enabled and weekday == 4:
+            fh, fm = self._auto_flat_friday_time
+            if local_now.time() >= time(fh, fm):
+                if self._auto_flat_last_dates.get("friday_auto_flat") != local_now.date():
+                    return "friday_auto_flat"
+
+        if self._auto_flat_weekend_enabled and market_open is False:
+            is_weekend_window = (
+                weekday == 5  # Saturday
+                or (weekday == 6 and local_now.time() < time(18, 0))  # Sunday pre-open
+                or (weekday == 4 and local_now.time() >= time(17, 0))  # Friday after close
+            )
+            if is_weekend_window:
+                if self._auto_flat_last_dates.get("weekend_auto_flat") != local_now.date():
+                    return "weekend_auto_flat"
+
+        return None
+
+    async def _close_all_virtual_trades(self, *, market_data: Dict, reason: str) -> int:
+        """Force-close all virtual trades (status=entered) using latest price."""
+        if not getattr(self.config, "virtual_pnl_enabled", True):
+            logger.warning("Auto/close-all requested but virtual PnL is disabled")
+            return 0
+
+        active = self._get_active_virtual_trades(limit=500)
+        if not active:
+            return 0
+
+        prices = self._resolve_latest_prices(market_data)
+        close_px = prices.get("close")
+        if close_px is None:
+            logger.warning("Close-all requested but no valid latest price available")
+            return 0
+
+        bid_px = prices.get("bid")
+        ask_px = prices.get("ask")
+        price_source = prices.get("source")
+
+        now = datetime.now(timezone.utc)
+        closed_count = 0
+        total_pnl = 0.0
+
+        for rec in active:
+            sig_id = str(rec.get("signal_id") or "").strip()
+            if not sig_id:
+                continue
+            sig = rec.get("signal", {}) or {}
+            direction = str(sig.get("direction") or "long").lower()
+
+            # Conservative fill: long exits at bid, short exits at ask.
+            exit_px = close_px
+            if direction == "long" and isinstance(bid_px, float):
+                exit_px = bid_px
+            elif direction == "short" and isinstance(ask_px, float):
+                exit_px = ask_px
+
+            perf = self.performance_tracker.track_exit(
+                signal_id=sig_id,
+                exit_price=float(exit_px),
+                exit_reason=str(reason),
+                exit_time=now,
+            )
+            closed_count += 1
+            if isinstance(perf, dict):
+                try:
+                    total_pnl += float(perf.get("pnl") or 0.0)
+                except Exception:
+                    pass
+
+        self._last_close_all_at = now.isoformat()
+        self._last_close_all_reason = str(reason)
+        self._last_close_all_count = int(closed_count)
+        self._last_close_all_pnl = float(total_pnl)
+        self._last_close_all_price_source = str(price_source) if price_source else None
+
+        try:
+            self.state_manager.append_event(
+                "close_all_trades",
+                {
+                    "reason": str(reason),
+                    "count": int(closed_count),
+                    "total_pnl": float(total_pnl),
+                    "price_source": self._last_close_all_price_source,
+                },
+                level="warning",
+            )
+        except Exception:
+            pass
+
+        if self._auto_flat_notify and self.telegram_notifier.enabled:
+            try:
+                msg = (
+                    f"🚫 *Close All Trades Executed*\n\n"
+                    f"Reason: `{reason}`\n"
+                    f"Closed: `{closed_count}`\n"
+                    f"Total P&L: `${total_pnl:,.2f}`"
+                )
+                await self.telegram_notifier.telegram.send_message(msg, parse_mode="Markdown", dedupe=False)
+            except Exception:
+                pass
+
+        return closed_count
+
+    def _clear_close_all_flag(self) -> None:
+        """Clear close_all_requested flags in state.json (best-effort)."""
+        state_file = getattr(self.state_manager, "state_file", None)
+        if not state_file or not Path(state_file).exists():
+            return
+        try:
+            raw = Path(state_file).read_text(encoding="utf-8")
+            state = json.loads(raw) if raw else {}
+        except Exception:
+            state = {}
+        if not isinstance(state, dict):
+            return
+        if "close_all_requested" in state or "close_all_requested_time" in state:
+            state.pop("close_all_requested", None)
+            state.pop("close_all_requested_time", None)
+            try:
+                Path(state_file).write_text(json.dumps(state, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+    async def _handle_close_all_requests(self, market_data: Dict) -> None:
+        """Handle manual close-all flag and auto-flat rules."""
+        state_file = getattr(self.state_manager, "state_file", None)
+        manual_requested = False
+        if state_file and Path(state_file).exists():
+            try:
+                raw = Path(state_file).read_text(encoding="utf-8")
+                state = json.loads(raw) if raw else {}
+                manual_requested = bool(state.get("close_all_requested", False))
+            except Exception:
+                manual_requested = False
+
+        if manual_requested:
+            logger.warning("Close-all flag detected - flattening virtual trades")
+            await self._close_all_virtual_trades(market_data=market_data, reason="close_all_requested")
+            self._clear_close_all_flag()
+
+        # Auto-flat rules (Friday + weekend safety)
+        try:
+            market_open = bool(get_market_hours().is_market_open())
+        except Exception:
+            market_open = None
+        now = datetime.now(timezone.utc)
+        reason = self._auto_flat_due(now, market_open=market_open)
+        if reason:
+            active = self._get_active_virtual_trades(limit=200)
+            if active:
+                logger.warning(f"Auto-flat triggered: {reason}")
+                closed = await self._close_all_virtual_trades(market_data=market_data, reason=reason)
+                if closed > 0:
+                    try:
+                        local_now = now.astimezone(ZoneInfo(self._auto_flat_timezone))
+                        self._auto_flat_last_dates[reason] = local_now.date()
+                    except Exception:
+                        self._auto_flat_last_dates[reason] = now.date()
+
     def _save_state(self) -> None:
         """Save current service state."""
         # Include lightweight data freshness metadata for Telegram UI / operators.
@@ -4028,6 +4283,11 @@ class MarketAgentService:
             # Operational metadata
             "run_id": run_id,
             "version": version,
+            "close_all_last_executed": self._last_close_all_at,
+            "close_all_last_reason": self._last_close_all_reason,
+            "close_all_last_count": self._last_close_all_count,
+            "close_all_last_pnl": self._last_close_all_pnl,
+            "close_all_last_price_source": self._last_close_all_price_source,
         }
         # Reuse futures_market_open from earlier check (avoid duplicate API call)
         state["futures_market_open"] = futures_market_open
