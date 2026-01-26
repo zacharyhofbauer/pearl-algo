@@ -3695,6 +3695,59 @@ class TelegramCommandHandler:
                 data_stale=data_stale,
             )
             
+            # ==========================================================================
+            # 24-HOUR PERFORMANCE (always shown - core daily metrics)
+            # ==========================================================================
+            try:
+                daily_pnl = state.get("daily_pnl")
+                daily_trades = state.get("daily_trades")
+                daily_wins = state.get("daily_wins")
+                daily_losses = state.get("daily_losses")
+                
+                # Fallback: compute from performance.json if state doesn't have values
+                if daily_pnl is None or daily_trades is None:
+                    try:
+                        perf_file = self.state_dir / "performance.json"
+                        if perf_file.exists():
+                            import json
+                            with open(perf_file, 'r') as f:
+                                perf_trades = json.load(f)
+                            
+                            # Filter to today's trades (by exit_time)
+                            today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                            today_trades_list = [
+                                t for t in perf_trades 
+                                if today_str in str(t.get('exit_time', ''))
+                            ]
+                            
+                            if today_trades_list:
+                                daily_pnl = sum(float(t.get('pnl', 0) or 0) for t in today_trades_list)
+                                daily_trades = len(today_trades_list)
+                                daily_wins = sum(1 for t in today_trades_list if t.get('is_win'))
+                                daily_losses = daily_trades - daily_wins
+                    except Exception as e:
+                        logger.debug(f"Could not compute daily from performance.json: {e}")
+                
+                # Convert to proper types
+                daily_pnl = float(daily_pnl or 0.0)
+                daily_trades = int(daily_trades or 0)
+                daily_wins = int(daily_wins or 0)
+                daily_losses = int(daily_losses or 0)
+                
+                # Only show if there's activity today
+                if daily_trades > 0 or daily_pnl != 0:
+                    pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                    pnl_sign = "+" if daily_pnl >= 0 else ""
+                    win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
+                    
+                    message += "\n\n📈 *24h Performance:*"
+                    message += f"\n{pnl_emoji} P&L: {pnl_sign}${abs(daily_pnl):,.2f}"
+                    message += f"\n✅ Wins: {daily_wins} | ❌ Losses: {daily_losses}"
+                    if daily_trades > 0:
+                        message += f"\n📊 Win Rate: {win_rate:.0f}% ({daily_trades} trades)"
+            except Exception as e:
+                logger.debug(f"Could not add 24h performance: {e}")
+            
             # Add challenge metrics if available (before recent exits)
             # Always show challenge - it should always exist (created automatically if missing)
             if not challenge_status and challenge_tracker_instance:
