@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,15 @@ class TradingCircuitBreakerConfig:
     # Auto-recovery
     auto_resume_after_cooldown: bool = True
     require_winning_trade_to_resume: bool = False
+    
+    # Session filter - skip signals during historically poor-performing sessions (ET hours)
+    # Based on data analysis: overnight/close/midday perform well, morning/afternoon/premarket perform poorly
+    enable_session_filter: bool = True
+    # Sessions to ALLOW (all others blocked when filter is enabled)
+    # Default: overnight (6PM-4AM), midday (10AM-2PM), close (5PM-6PM)
+    allowed_sessions: List[str] = field(default_factory=lambda: ["overnight", "midday", "close"])
+    # Session definitions (start_hour, end_hour) in ET (Eastern Time, UTC-5)
+    # overnight: 18-4 (6PM-4AM), premarket: 4-6, morning: 6-10, midday: 10-14, afternoon: 14-17, close: 17-18
 
 
 class TradingCircuitBreaker:
@@ -185,6 +194,13 @@ class TradingCircuitBreaker:
                 self._record_block(decision.reason)
                 return decision
         
+        # Check session filter (time-of-day based filtering)
+        if self.config.enable_session_filter:
+            decision = self._check_session_filter()
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+        
         return CircuitBreakerDecision(
             allowed=True,
             reason="passed_all_checks",
@@ -266,6 +282,8 @@ class TradingCircuitBreaker:
     def get_status(self) -> Dict[str, Any]:
         """Get current circuit breaker status."""
         recent_win_rate = self._calculate_rolling_win_rate()
+        current_session, et_hour = self._get_current_session()
+        session_allowed = current_session in self.config.allowed_sessions
         
         return {
             "enabled": True,
@@ -283,6 +301,12 @@ class TradingCircuitBreaker:
             "recent_trades_count": len(self._recent_trades),
             "total_blocks": self._total_blocks,
             "blocks_by_reason": self._blocks_by_reason.copy(),
+            # Session filter status
+            "session_filter_enabled": self.config.enable_session_filter,
+            "current_session": current_session,
+            "et_hour": et_hour,
+            "session_allowed": session_allowed,
+            "allowed_sessions": self.config.allowed_sessions,
         }
     
     # =========================================================================
@@ -506,6 +530,69 @@ class TradingCircuitBreaker:
                 )
         
         return CircuitBreakerDecision(allowed=True, reason="volatility_ok")
+    
+    def _get_current_session(self) -> Tuple[str, int]:
+        """
+        Get the current trading session based on Eastern Time.
+        
+        Returns:
+            Tuple of (session_name, et_hour)
+        """
+        now = datetime.now(timezone.utc)
+        # Convert UTC to ET (UTC-5, simplified - doesn't account for DST)
+        et_hour = (now.hour - 5) % 24
+        
+        # Session definitions (in ET hours)
+        sessions = {
+            'overnight': (18, 4),      # 6PM - 4AM ET
+            'premarket': (4, 6),       # 4AM - 6AM ET
+            'morning': (6, 10),        # 6AM - 10AM ET (morning open)
+            'midday': (10, 14),        # 10AM - 2PM ET
+            'afternoon': (14, 17),     # 2PM - 5PM ET
+            'close': (17, 18),         # 5PM - 6PM ET
+        }
+        
+        for session_name, (start, end) in sessions.items():
+            if start > end:  # overnight wraps around midnight
+                if et_hour >= start or et_hour < end:
+                    return session_name, et_hour
+            elif start <= et_hour < end:
+                return session_name, et_hour
+        
+        return 'other', et_hour
+    
+    def _check_session_filter(self) -> CircuitBreakerDecision:
+        """
+        Check if current session is allowed for trading.
+        
+        Based on historical data analysis:
+        - Good sessions: overnight (63% WR), close (78% WR), midday (45% WR)
+        - Bad sessions: morning (19% WR), afternoon (19% WR), premarket (22% WR)
+        """
+        current_session, et_hour = self._get_current_session()
+        
+        if current_session in self.config.allowed_sessions:
+            return CircuitBreakerDecision(
+                allowed=True, 
+                reason="session_allowed",
+                details={
+                    "current_session": current_session,
+                    "et_hour": et_hour,
+                    "allowed_sessions": self.config.allowed_sessions,
+                }
+            )
+        
+        return CircuitBreakerDecision(
+            allowed=False,
+            reason="session_filtered",
+            severity="info",
+            details={
+                "current_session": current_session,
+                "et_hour": et_hour,
+                "allowed_sessions": self.config.allowed_sessions,
+                "message": f"Session '{current_session}' historically underperforms - signal skipped",
+            }
+        )
 
 
 def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> TradingCircuitBreaker:
@@ -539,6 +626,9 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         chop_win_rate_threshold=config.get("chop_win_rate_threshold", 0.35),
         auto_resume_after_cooldown=config.get("auto_resume_after_cooldown", True),
         require_winning_trade_to_resume=config.get("require_winning_trade_to_resume", False),
+        # Session filter settings
+        enable_session_filter=config.get("enable_session_filter", True),
+        allowed_sessions=config.get("allowed_sessions", ["overnight", "midday", "close"]),
     )
     
     return TradingCircuitBreaker(cb_config)

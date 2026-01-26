@@ -971,6 +971,8 @@ class TelegramCommandHandler:
                 await self._show_activity_menu(query)  # Redirect to unified Activity
             elif action == "activity":
                 await self._show_activity_menu(query)
+            elif action == "analytics":
+                await self._show_analytics_menu(query)
             elif action == "bots":
                 await self._show_bots_menu(query)
             elif action == "markets":
@@ -1840,7 +1842,11 @@ class TelegramCommandHandler:
                     InlineKeyboardButton("📈 Performance", callback_data="action:performance_metrics"),
                     InlineKeyboardButton("📊 History", callback_data="action:signal_history"),
                 ],
-                # Row 3: Actions
+                # Row 3: Analytics (NEW)
+                [
+                    InlineKeyboardButton("🔬 Analytics", callback_data="menu:analytics"),
+                ],
+                # Row 4: Actions
                 [
                     InlineKeyboardButton("🔄 Refresh", callback_data="menu:activity"),
                     self._nav_back_row()[0],
@@ -1867,6 +1873,200 @@ class TelegramCommandHandler:
                 self._nav_back_row(),
             ]
             await self._safe_edit_or_send(query, "📊 Activity\n\nSelect an option:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def _show_analytics_menu(self, query: CallbackQuery) -> None:
+        """Show performance analytics with session and hourly breakdown."""
+        try:
+            from datetime import datetime, timezone
+            from collections import defaultdict
+            import json
+            
+            lines = ["🔬 *Performance Analytics*", ""]
+            
+            # Load all trades from performance.json
+            perf_file = self.state_dir / "performance.json"
+            if not perf_file.exists():
+                lines.append("No performance data available yet.")
+                lines.append("Start trading to see analytics.")
+            else:
+                with open(perf_file, 'r') as f:
+                    all_trades = json.load(f)
+                
+                if not all_trades:
+                    lines.append("No trades recorded yet.")
+                else:
+                    total_trades = len(all_trades)
+                    total_wins = sum(1 for t in all_trades if t.get('is_win'))
+                    total_pnl = sum(float(t.get('pnl', 0) or 0) for t in all_trades)
+                    overall_wr = (total_wins / total_trades * 100) if total_trades > 0 else 0
+                    
+                    pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                    lines.append(f"*Overall:* {total_trades} trades | {overall_wr:.0f}% WR | {pnl_emoji} ${total_pnl:,.2f}")
+                    lines.append("")
+                    
+                    # Session breakdown
+                    sessions = {
+                        'overnight': (18, 4),      # 6PM - 4AM ET
+                        'premarket': (4, 6),       # 4AM - 6AM ET
+                        'morning': (6, 10),        # 6AM - 10AM ET
+                        'midday': (10, 14),        # 10AM - 2PM ET
+                        'afternoon': (14, 17),     # 2PM - 5PM ET
+                        'close': (17, 18),         # 5PM - 6PM ET
+                    }
+                    
+                    session_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
+                    
+                    for t in all_trades:
+                        time_str = t.get('exit_time') or t.get('entry_time')
+                        if not time_str:
+                            continue
+                        try:
+                            time_str = str(time_str).replace('Z', '+00:00')
+                            if '.' in time_str and '+' in time_str:
+                                parts = time_str.split('+')
+                                base = parts[0].split('.')[0]
+                                time_str = base + '+' + parts[1]
+                            dt = datetime.fromisoformat(time_str)
+                            et_hour = (dt.hour - 5) % 24  # Convert UTC to ET
+                            
+                            session_name = 'other'
+                            for sname, (start, end) in sessions.items():
+                                if start > end:  # overnight wraps
+                                    if et_hour >= start or et_hour < end:
+                                        session_name = sname
+                                        break
+                                elif start <= et_hour < end:
+                                    session_name = sname
+                                    break
+                            
+                            if t.get('is_win'):
+                                session_stats[session_name]['wins'] += 1
+                            else:
+                                session_stats[session_name]['losses'] += 1
+                            session_stats[session_name]['pnl'] += float(t.get('pnl', 0) or 0)
+                        except Exception:
+                            pass
+                    
+                    lines.append("*📅 Session Performance:*")
+                    session_order = ['overnight', 'premarket', 'morning', 'midday', 'afternoon', 'close']
+                    for sname in session_order:
+                        data = session_stats[sname]
+                        count = data['wins'] + data['losses']
+                        if count > 0:
+                            wr = (data['wins'] / count * 100)
+                            pnl = data['pnl']
+                            emoji = "🟢" if pnl >= 0 else "🔴"
+                            # Highlight best/worst sessions
+                            if wr >= 55:
+                                indicator = "✅"
+                            elif wr <= 30:
+                                indicator = "⚠️"
+                            else:
+                                indicator = "•"
+                            lines.append(f"{indicator} {sname.title()}: {wr:.0f}% WR | {emoji} ${pnl:,.0f}")
+                    
+                    lines.append("")
+                    
+                    # Top hours
+                    hour_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
+                    for t in all_trades:
+                        time_str = t.get('exit_time') or t.get('entry_time')
+                        if not time_str:
+                            continue
+                        try:
+                            time_str = str(time_str).replace('Z', '+00:00')
+                            if '.' in time_str and '+' in time_str:
+                                parts = time_str.split('+')
+                                base = parts[0].split('.')[0]
+                                time_str = base + '+' + parts[1]
+                            dt = datetime.fromisoformat(time_str)
+                            et_hour = (dt.hour - 5) % 24
+                            
+                            if t.get('is_win'):
+                                hour_stats[et_hour]['wins'] += 1
+                            else:
+                                hour_stats[et_hour]['losses'] += 1
+                            hour_stats[et_hour]['pnl'] += float(t.get('pnl', 0) or 0)
+                        except Exception:
+                            pass
+                    
+                    # Find best and worst hours
+                    hours_with_data = [(h, d) for h, d in hour_stats.items() if d['wins'] + d['losses'] >= 5]
+                    if hours_with_data:
+                        # Sort by P&L
+                        sorted_hours = sorted(hours_with_data, key=lambda x: x[1]['pnl'], reverse=True)
+                        
+                        lines.append("*⏰ Best Hours (ET):*")
+                        for h, data in sorted_hours[:3]:
+                            count = data['wins'] + data['losses']
+                            wr = (data['wins'] / count * 100) if count > 0 else 0
+                            pnl = data['pnl']
+                            if pnl > 0:
+                                lines.append(f"🔥 {h:02d}:00: {wr:.0f}% WR | +${pnl:,.0f}")
+                        
+                        lines.append("")
+                        lines.append("*⏰ Worst Hours (ET):*")
+                        for h, data in sorted_hours[-3:]:
+                            count = data['wins'] + data['losses']
+                            wr = (data['wins'] / count * 100) if count > 0 else 0
+                            pnl = data['pnl']
+                            if pnl < 0:
+                                lines.append(f"❄️ {h:02d}:00: {wr:.0f}% WR | -${abs(pnl):,.0f}")
+                    
+                    # Hold duration insight
+                    lines.append("")
+                    duration_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
+                    for t in all_trades:
+                        hold_mins = t.get('hold_duration_minutes', 0) or 0
+                        if hold_mins < 30:
+                            bucket = 'Quick (<30m)'
+                        elif hold_mins < 60:
+                            bucket = 'Medium (30-60m)'
+                        else:
+                            bucket = 'Long (60m+)'
+                        
+                        if t.get('is_win'):
+                            duration_stats[bucket]['wins'] += 1
+                        else:
+                            duration_stats[bucket]['losses'] += 1
+                        duration_stats[bucket]['pnl'] += float(t.get('pnl', 0) or 0)
+                    
+                    lines.append("*⏱️ Hold Duration:*")
+                    for bucket in ['Quick (<30m)', 'Medium (30-60m)', 'Long (60m+)']:
+                        data = duration_stats[bucket]
+                        count = data['wins'] + data['losses']
+                        if count > 0:
+                            wr = (data['wins'] / count * 100)
+                            pnl = data['pnl']
+                            emoji = "🟢" if pnl >= 0 else "🔴"
+                            lines.append(f"• {bucket}: {wr:.0f}% WR | {emoji} ${pnl:,.0f}")
+            
+            text = "\n".join(lines)
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("🔄 Refresh", callback_data="menu:analytics"),
+                ],
+                [
+                    InlineKeyboardButton("📊 Back to Activity", callback_data="menu:activity"),
+                    self._nav_back_row()[0],
+                ],
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error in _show_analytics_menu: {e}", exc_info=True)
+            keyboard = [
+                [InlineKeyboardButton("📊 Back to Activity", callback_data="menu:activity")],
+                self._nav_back_row(),
+            ]
+            await self._safe_edit_or_send(
+                query, 
+                f"🔬 Analytics\n\n❌ Error loading analytics: {str(e)[:100]}", 
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
     async def _show_signals_menu(self, query: CallbackQuery) -> None:
         """Legacy signals menu - redirects to Activity menu."""

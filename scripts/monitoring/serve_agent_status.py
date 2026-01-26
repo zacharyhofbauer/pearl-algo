@@ -176,29 +176,153 @@ def generate_metrics(state: dict[str, Any]) -> str:
     """Generate Prometheus metrics from state (used by tests + sidecar)."""
     def _b(v: Any) -> int:
         return 1 if bool(v) else 0
+    
+    def _f(v: Any, default: float = 0.0) -> float:
+        try:
+            return float(v) if v is not None else default
+        except (ValueError, TypeError):
+            return default
 
     state_error = 1 if "_error" in state else 0
     running = _b(state.get("running", False)) if state_error == 0 else 0
+    paused = _b(state.get("paused", False)) if state_error == 0 else 0
     cycles_total = int(state.get("cycle_count", 0) or 0) if state_error == 0 else 0
     signals_total = int(state.get("signal_count", 0) or 0) if state_error == 0 else 0
     errors_total = int(state.get("error_count", 0) or 0) if state_error == 0 else 0
+    
+    # Trading metrics
+    daily_pnl = _f(state.get("daily_pnl", 0.0)) if state_error == 0 else 0.0
+    daily_trades = int(state.get("daily_trades", 0) or 0) if state_error == 0 else 0
+    daily_wins = int(state.get("daily_wins", 0) or 0) if state_error == 0 else 0
+    daily_losses = int(state.get("daily_losses", 0) or 0) if state_error == 0 else 0
+    daily_signals = int(state.get("daily_signals", 0) or 0) if state_error == 0 else 0
+    active_trades = int(state.get("active_trades_count", 0) or 0) if state_error == 0 else 0
+    
+    # Calculate win rate
+    daily_win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0.0
+    
+    # Market status
+    futures_open = _b(state.get("futures_market_open", False)) if state_error == 0 else 0
+    session_open = _b(state.get("strategy_session_open", False)) if state_error == 0 else 0
+    data_fresh = _b(state.get("data_fresh", False)) if state_error == 0 else 0
+    
+    # Error tracking
+    consecutive_errors = int(state.get("consecutive_errors", 0) or 0) if state_error == 0 else 0
+    connection_failures = int(state.get("connection_failures", 0) or 0) if state_error == 0 else 0
+    
+    # Circuit breaker status
+    circuit_breaker = state.get("trading_circuit_breaker", {}) if state_error == 0 else {}
+    cb_active = _b(circuit_breaker.get("is_paused", False))
+    cb_consecutive_losses = int(circuit_breaker.get("consecutive_losses", 0) or 0)
+    cb_session_pnl = _f(circuit_breaker.get("session_pnl", 0.0))
+    cb_daily_pnl = _f(circuit_breaker.get("daily_pnl", 0.0))
+    
+    # Session filter status
+    session_filter_enabled = _b(circuit_breaker.get("session_filter_enabled", True))
+    session_allowed = _b(circuit_breaker.get("session_allowed", True))
+    current_session = circuit_breaker.get("current_session", "unknown") if state_error == 0 else "unknown"
+    et_hour = int(circuit_breaker.get("et_hour", 0) or 0) if state_error == 0 else 0
 
     lines = [
         "# HELP pearlalgo_state_error State file error flag",
         "# TYPE pearlalgo_state_error gauge",
         f"pearlalgo_state_error {state_error}",
-        "# HELP pearlalgo_agent_running Agent running flag",
+        "",
+        "# HELP pearlalgo_agent_running Agent running flag (1=running, 0=stopped)",
         "# TYPE pearlalgo_agent_running gauge",
         f"pearlalgo_agent_running {running}",
-        "# HELP pearlalgo_cycles_total Total cycles",
+        "",
+        "# HELP pearlalgo_agent_paused Agent paused flag (1=paused, 0=active)",
+        "# TYPE pearlalgo_agent_paused gauge",
+        f"pearlalgo_agent_paused {paused}",
+        "",
+        "# HELP pearlalgo_cycles_total Total scan cycles completed",
         "# TYPE pearlalgo_cycles_total counter",
         f"pearlalgo_cycles_total {cycles_total}",
+        "",
         "# HELP pearlalgo_signals_generated_total Total signals generated",
         "# TYPE pearlalgo_signals_generated_total counter",
         f"pearlalgo_signals_generated_total {signals_total}",
-        "# HELP pearlalgo_errors_total Total errors",
+        "",
+        "# HELP pearlalgo_errors_total Total errors encountered",
         "# TYPE pearlalgo_errors_total counter",
         f"pearlalgo_errors_total {errors_total}",
+        "",
+        "# HELP pearlalgo_daily_pnl_dollars Daily profit/loss in dollars",
+        "# TYPE pearlalgo_daily_pnl_dollars gauge",
+        f"pearlalgo_daily_pnl_dollars {daily_pnl:.2f}",
+        "",
+        "# HELP pearlalgo_daily_trades_total Total trades completed today",
+        "# TYPE pearlalgo_daily_trades_total gauge",
+        f"pearlalgo_daily_trades_total {daily_trades}",
+        "",
+        "# HELP pearlalgo_daily_wins_total Winning trades today",
+        "# TYPE pearlalgo_daily_wins_total gauge",
+        f"pearlalgo_daily_wins_total {daily_wins}",
+        "",
+        "# HELP pearlalgo_daily_losses_total Losing trades today",
+        "# TYPE pearlalgo_daily_losses_total gauge",
+        f"pearlalgo_daily_losses_total {daily_losses}",
+        "",
+        "# HELP pearlalgo_daily_win_rate_percent Daily win rate percentage",
+        "# TYPE pearlalgo_daily_win_rate_percent gauge",
+        f"pearlalgo_daily_win_rate_percent {daily_win_rate:.1f}",
+        "",
+        "# HELP pearlalgo_daily_signals_total Signals generated today",
+        "# TYPE pearlalgo_daily_signals_total gauge",
+        f"pearlalgo_daily_signals_total {daily_signals}",
+        "",
+        "# HELP pearlalgo_active_trades Current number of active virtual trades",
+        "# TYPE pearlalgo_active_trades gauge",
+        f"pearlalgo_active_trades {active_trades}",
+        "",
+        "# HELP pearlalgo_futures_market_open Futures market open flag (1=open, 0=closed)",
+        "# TYPE pearlalgo_futures_market_open gauge",
+        f"pearlalgo_futures_market_open {futures_open}",
+        "",
+        "# HELP pearlalgo_session_open Strategy session open flag (1=open, 0=closed)",
+        "# TYPE pearlalgo_session_open gauge",
+        f"pearlalgo_session_open {session_open}",
+        "",
+        "# HELP pearlalgo_data_fresh Data freshness flag (1=fresh, 0=stale)",
+        "# TYPE pearlalgo_data_fresh gauge",
+        f"pearlalgo_data_fresh {data_fresh}",
+        "",
+        "# HELP pearlalgo_consecutive_errors Current consecutive error count",
+        "# TYPE pearlalgo_consecutive_errors gauge",
+        f"pearlalgo_consecutive_errors {consecutive_errors}",
+        "",
+        "# HELP pearlalgo_connection_failures Current connection failure count",
+        "# TYPE pearlalgo_connection_failures gauge",
+        f"pearlalgo_connection_failures {connection_failures}",
+        "",
+        "# HELP pearlalgo_circuit_breaker_active Circuit breaker paused flag (1=paused, 0=active)",
+        "# TYPE pearlalgo_circuit_breaker_active gauge",
+        f"pearlalgo_circuit_breaker_active {cb_active}",
+        "",
+        "# HELP pearlalgo_circuit_breaker_consecutive_losses Consecutive losses tracked by circuit breaker",
+        "# TYPE pearlalgo_circuit_breaker_consecutive_losses gauge",
+        f"pearlalgo_circuit_breaker_consecutive_losses {cb_consecutive_losses}",
+        "",
+        "# HELP pearlalgo_circuit_breaker_session_pnl Session P&L tracked by circuit breaker",
+        "# TYPE pearlalgo_circuit_breaker_session_pnl gauge",
+        f"pearlalgo_circuit_breaker_session_pnl {cb_session_pnl:.2f}",
+        "",
+        "# HELP pearlalgo_circuit_breaker_daily_pnl Daily P&L tracked by circuit breaker",
+        "# TYPE pearlalgo_circuit_breaker_daily_pnl gauge",
+        f"pearlalgo_circuit_breaker_daily_pnl {cb_daily_pnl:.2f}",
+        "",
+        "# HELP pearlalgo_session_filter_enabled Session filter enabled flag (1=enabled, 0=disabled)",
+        "# TYPE pearlalgo_session_filter_enabled gauge",
+        f"pearlalgo_session_filter_enabled {session_filter_enabled}",
+        "",
+        "# HELP pearlalgo_session_allowed Current session trading allowed (1=allowed, 0=blocked)",
+        "# TYPE pearlalgo_session_allowed gauge",
+        f"pearlalgo_session_allowed {session_allowed}",
+        "",
+        f'# HELP pearlalgo_current_et_hour Current hour in Eastern Time (0-23)',
+        "# TYPE pearlalgo_current_et_hour gauge",
+        f"pearlalgo_current_et_hour {et_hour}",
         "",
     ]
     return "\n".join(lines)

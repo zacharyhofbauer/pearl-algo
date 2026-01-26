@@ -48,6 +48,23 @@ circuit_breaker:
   max_consecutive_errors: 10
   max_connection_failures: 10
   max_data_fetch_errors: 5
+
+# Trading circuit breaker (risk management for trading losses)
+trading_circuit_breaker:
+  enabled: true
+  max_consecutive_losses: 5
+  max_session_drawdown: 500.0
+  max_daily_drawdown: 1000.0
+  max_concurrent_positions: 5
+  # Session filter - skip signals during historically poor-performing time windows
+  # Based on data: overnight/close/midday = good, morning/afternoon/premarket = bad
+  enable_session_filter: true
+  allowed_sessions:
+    - overnight    # 6PM-4AM ET: 63% WR, +$3,144
+    - midday       # 10AM-2PM ET: 45% WR, +$1,105
+    - close        # 5PM-6PM ET: 78% WR, +$341
+  # Blocked sessions (not listed above): premarket (4-6AM), morning (6-10AM), afternoon (2-5PM)
+
 data:
   # Buffer sizes: sr_length=130, ATR(200) needs ~200 bars + margin
   # With timeframe=1m, need ~4+ hours / 250+ bars for all indicators
