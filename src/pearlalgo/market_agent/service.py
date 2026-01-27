@@ -3648,6 +3648,16 @@ class MarketAgentService:
                 return
 
             now = datetime.now(timezone.utc)
+            force = False
+            try:
+                content = flag_file.read_text(encoding="utf-8")
+                for line in content.splitlines():
+                    key = line.strip().lower()
+                    if key in {"force=1", "force=true", "force=yes"}:
+                        force = True
+                        break
+            except Exception:
+                force = False
 
             # Cooldown to avoid regeneration storms
             try:
@@ -3657,7 +3667,7 @@ class MarketAgentService:
             last = getattr(self, "_last_dashboard_chart_refresh_at", None)
             if last is not None:
                 try:
-                    if (now - last).total_seconds() < float(cooldown):
+                    if (not force) and (now - last).total_seconds() < float(cooldown):
                         # Clear the flag so we don't build up a backlog.
                         try:
                             flag_file.unlink(missing_ok=True)
@@ -3675,8 +3685,9 @@ class MarketAgentService:
 
             # Generate + export the latest Telegram dashboard chart (bounded runtime).
             try:
-                await asyncio.wait_for(self._generate_dashboard_chart(), timeout=30.0)
-                self._last_dashboard_chart_refresh_at = now
+                result = await asyncio.wait_for(self._generate_dashboard_chart(), timeout=30.0)
+                if isinstance(result, Path) and result.exists():
+                    self._last_dashboard_chart_refresh_at = now
             except Exception as e:
                 logger.debug(f"Dashboard chart refresh request failed: {e}")
                 return

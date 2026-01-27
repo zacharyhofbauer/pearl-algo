@@ -1362,14 +1362,14 @@ class TelegramCommandHandler:
                         fresh_flag = False
                 if not fresh_flag:
                     flag_file.write_text(
-                        f"requested_at={datetime.now(timezone.utc).isoformat()}\nrequested_by=telegram_dashboard\n",
+                        f"requested_at={datetime.now(timezone.utc).isoformat()}\nrequested_by=telegram_dashboard\nforce={1 if force_refresh else 0}\n",
                         encoding="utf-8",
                     )
             except Exception:
                 pass
 
             # Wait briefly for the agent to export the refreshed chart.
-            wait_seconds = 20 if force_refresh else 12
+            wait_seconds = 35 if force_refresh else 12
             deadline = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
             while datetime.now(timezone.utc) < deadline:
                 try:
@@ -3390,6 +3390,10 @@ class TelegramCommandHandler:
                 await self._handle_export_performance(query)
             elif action_type == "refresh_dashboard":
                 # Force regenerate the exported Telegram chart via the agent service flag.
+                try:
+                    await query.answer("⏳ Refreshing chart...")
+                except Exception:
+                    pass
                 await self._show_main_menu_with_chart(query, force_chart_refresh=True)
             elif action_type == "toggle_chart":
                 # Toggle chart display
