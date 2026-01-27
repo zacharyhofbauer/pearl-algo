@@ -39,6 +39,12 @@ jobs:
         run: |
           ruff check src/pearlalgo --statistics
 
+      - name: Type checking (mypy)
+        continue-on-error: true
+        run: |
+          mypy src/pearlalgo --no-error-summary 2>&1 | head -100 || true
+          echo "::notice::Type checking completed (informational mode)"
+
       - name: Architecture boundaries (enforced)
         run: |
           python scripts/testing/check_architecture_boundaries.py --enforce

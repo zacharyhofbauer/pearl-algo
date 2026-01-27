@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import ensure_state_dir, get_utc_timestamp
@@ -146,9 +146,9 @@ class HealthMonitor:
 
     def get_overall_health(
         self,
-        data_provider=None,
-        telegram_notifier=None,
-    ) -> Dict:
+        data_provider: Any = None,
+        telegram_notifier: Any = None,
+    ) -> Dict[str, Any]:
         """
         Get overall health status of all components.
         
@@ -159,42 +159,42 @@ class HealthMonitor:
         Returns:
             Overall health status dictionary
         """
-        health = {
-            "timestamp": get_utc_timestamp(),
-            "components": {},
-            "overall": "unknown",
-        }
-
+        components: Dict[str, Dict[str, Any]] = {}
+        
         # Check data provider
         if data_provider:
-            health["components"]["data_provider"] = self.check_data_provider_health(data_provider)
+            components["data_provider"] = self.check_data_provider_health(data_provider)
 
         # Check Telegram
         if telegram_notifier:
-            health["components"]["telegram"] = self.check_telegram_health(telegram_notifier)
+            components["telegram"] = self.check_telegram_health(telegram_notifier)
 
         # Check file system
-        health["components"]["file_system"] = self.check_file_system_health()
+        components["file_system"] = self.check_file_system_health()
 
         # Determine overall health
         all_healthy = all(
             comp.get("healthy", False)
-            for comp in health["components"].values()
+            for comp in components.values()
         )
 
         if all_healthy:
-            health["overall"] = "healthy"
+            overall = "healthy"
         else:
             # Check if critical components are healthy
             critical_healthy = (
-                health["components"].get("data_provider", {}).get("healthy", False)
-                and health["components"].get("file_system", {}).get("healthy", False)
+                components.get("data_provider", {}).get("healthy", False)
+                and components.get("file_system", {}).get("healthy", False)
             )
-            health["overall"] = "degraded" if critical_healthy else "unhealthy"
+            overall = "degraded" if critical_healthy else "unhealthy"
 
         self.last_check = datetime.now(timezone.utc)
 
-        return health
+        return {
+            "timestamp": get_utc_timestamp(),
+            "components": components,
+            "overall": overall,
+        }
 
 
 

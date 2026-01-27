@@ -49,6 +49,7 @@ python3 scripts/testing/smoke_multi_market.py
 1. **No code duplication**: tests import production code from `src/pearlalgo/` directly.
 2. **Development mode required**: install with `pip install -e .` so imports resolve.
 3. **Mock external services**: IBKR/Telegram mocked; internal logic uses real code.
+4. **Type safety**: Run mypy to catch type errors before runtime.
 
 ### Option 3: Automated Test Script
 ```bash
@@ -550,6 +551,95 @@ lint-imports
 
 The import-linter configuration in `pyproject.toml` mirrors the same boundary rules as the stdlib checker.
 Both tools can be run side-by-side; choose whichever fits your workflow.
+
+---
+
+## 🔍 Type Checking with mypy
+
+Static type checking catches type-related bugs before runtime. The project uses mypy for type validation.
+
+### Quick Start
+
+```bash
+# Run type checking
+mypy src/pearlalgo
+
+# Run with verbose output
+mypy src/pearlalgo --verbose
+
+# Check specific module
+mypy src/pearlalgo/market_agent/
+```
+
+### Configuration
+
+mypy is configured via `mypy.ini` at the project root:
+
+- **Python version**: 3.12
+- **Mode**: Relaxed (warn, don't fail) - suitable for gradual adoption
+- **External libraries**: Missing imports ignored for third-party libs without stubs
+
+### What It Catches
+
+| Bug Type | Example |
+|----------|---------|
+| None access | `signal.get("entry")["price"]` when signal could be None |
+| Wrong return type | Function returns float but caller expects int |
+| Missing dict key | `config["nonexistent_key"]` |
+| Argument mismatch | Passing wrong number/types of arguments |
+
+### CI Integration
+
+mypy runs in CI as an informational check (continue-on-error). To enforce strictly:
+
+```bash
+# Local strict check
+mypy src/pearlalgo --strict
+
+# In CI, set continue-on-error: false to enforce
+```
+
+### Adding Type Annotations
+
+When adding new code, include type hints:
+
+```python
+# Good
+def calculate_position_size(
+    confidence: float,
+    risk_pct: float,
+    account_balance: float,
+) -> int:
+    return int(confidence * risk_pct * account_balance)
+
+# Avoid
+def calculate_position_size(confidence, risk_pct, account_balance):
+    return confidence * risk_pct * account_balance
+```
+
+### Common Fixes
+
+**1. Optional types:**
+```python
+# Before (mypy error: Item "None" has no attribute "x")
+def process(data):
+    return data.value
+
+# After
+def process(data: Optional[Data]) -> int:
+    if data is None:
+        return 0
+    return data.value
+```
+
+**2. Dict access:**
+```python
+# Before (mypy error: TypedDict has no key "foo")
+config["foo"]
+
+# After
+config.get("foo", default_value)
+```
 
 ---
 

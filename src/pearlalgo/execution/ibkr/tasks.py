@@ -61,9 +61,16 @@ class PlaceBracketOrderTask:
             # Use front month contract
             sorted_contracts = sorted(
                 contracts, 
-                key=lambda cd: cd.contract.lastTradeDateOrContractMonth
+                key=lambda cd: cd.contract.lastTradeDateOrContractMonth if cd.contract else ""
             )
             qualified_contract = sorted_contracts[0].contract
+            
+            if qualified_contract is None:
+                return {
+                    "success": False,
+                    "error": f"Contract details missing for {self.symbol}",
+                    "signal_id": self.signal_id,
+                }
             
             logger.info(
                 f"Using contract: {qualified_contract.localSymbol} "
@@ -134,7 +141,7 @@ class PlaceBracketOrderTask:
                 "stop_order_id": str(stop_order.orderId),
                 "take_profit_order_id": str(take_profit_order.orderId),
                 "oca_group": oca_group,
-                "contract": qualified_contract.localSymbol,
+                "contract": qualified_contract.localSymbol if qualified_contract else self.symbol,
                 "status": "placed",
             }
             

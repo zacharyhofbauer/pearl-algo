@@ -173,7 +173,69 @@ def evaluate_health(state: dict[str, Any]) -> tuple[bool, str, dict[str, Any]]:
 
 
 def generate_metrics(state: dict[str, Any]) -> str:
-    """Generate Prometheus metrics from state (used by tests + sidecar)."""
+    """Generate Prometheus metrics from state (used by tests + sidecar).
+    
+    Metrics exposed (grouped by category):
+    
+    **Agent Status:**
+    - pearlalgo_state_error: State file error flag
+    - pearlalgo_agent_running: Agent running flag
+    - pearlalgo_agent_paused: Agent paused flag
+    - pearlalgo_cycles_total: Total scan cycles completed
+    - pearlalgo_cycles_session_total: Cycles this session
+    
+    **Trading Performance:**
+    - pearlalgo_signals_generated_total: Total signals generated
+    - pearlalgo_daily_pnl_dollars: Daily P&L
+    - pearlalgo_daily_trades_total: Trades today
+    - pearlalgo_daily_wins_total: Winning trades
+    - pearlalgo_daily_losses_total: Losing trades
+    - pearlalgo_daily_win_rate_percent: Win rate
+    - pearlalgo_active_trades: Active positions
+    - pearlalgo_cumulative_pnl_dollars: All-time P&L
+    
+    **Market Status:**
+    - pearlalgo_futures_market_open: Market open flag
+    - pearlalgo_session_open: Strategy session flag
+    - pearlalgo_data_fresh: Data freshness flag
+    - pearlalgo_data_age_seconds: Age of latest bar
+    - pearlalgo_buffer_size: Current buffer size
+    
+    **Error Tracking:**
+    - pearlalgo_errors_total: Total errors
+    - pearlalgo_consecutive_errors: Current streak
+    - pearlalgo_connection_failures: Connection failures
+    - pearlalgo_data_fetch_errors: Data fetch errors
+    - pearlalgo_signals_send_failures_total: Telegram failures
+    
+    **Circuit Breaker:**
+    - pearlalgo_circuit_breaker_active: CB paused flag
+    - pearlalgo_circuit_breaker_consecutive_losses: Loss streak
+    - pearlalgo_circuit_breaker_session_pnl: Session P&L
+    - pearlalgo_circuit_breaker_daily_pnl: Daily P&L
+    - pearlalgo_session_filter_enabled: Session filter flag
+    - pearlalgo_session_allowed: Current session allowed
+    
+    **Challenge Tracker:**
+    - pearlalgo_challenge_enabled: Challenge mode flag
+    - pearlalgo_challenge_balance_dollars: Current balance
+    - pearlalgo_challenge_pnl_dollars: Challenge P&L
+    - pearlalgo_challenge_progress_percent: Progress to target
+    - pearlalgo_challenge_drawdown_dollars: Current drawdown
+    
+    **ML/Learning (shadow mode):**
+    - pearlalgo_ml_filter_enabled: ML filter enabled
+    - pearlalgo_ml_filter_mode: ML mode (0=off, 1=shadow, 2=live)
+    - pearlalgo_ml_signals_evaluated: Signals evaluated by ML
+    - pearlalgo_ml_signals_passed: Signals that passed ML filter
+    - pearlalgo_bandit_policy_enabled: Bandit learning enabled
+    
+    **Cadence/Latency:**
+    - pearlalgo_cycle_duration_seconds: Last cycle duration
+    - pearlalgo_cycle_duration_p50_seconds: Median cycle time
+    - pearlalgo_cycle_duration_p99_seconds: 99th percentile
+    - pearlalgo_cadence_mode: Current cadence (0=closed, 1=idle, 2=active, 3=velocity)
+    """
     def _b(v: Any) -> int:
         return 1 if bool(v) else 0
     
@@ -182,49 +244,97 @@ def generate_metrics(state: dict[str, Any]) -> str:
             return float(v) if v is not None else default
         except (ValueError, TypeError):
             return default
+    
+    def _i(v: Any, default: int = 0) -> int:
+        try:
+            return int(v) if v is not None else default
+        except (ValueError, TypeError):
+            return default
 
     state_error = 1 if "_error" in state else 0
+    
+    # === AGENT STATUS ===
     running = _b(state.get("running", False)) if state_error == 0 else 0
     paused = _b(state.get("paused", False)) if state_error == 0 else 0
-    cycles_total = int(state.get("cycle_count", 0) or 0) if state_error == 0 else 0
-    signals_total = int(state.get("signal_count", 0) or 0) if state_error == 0 else 0
-    errors_total = int(state.get("error_count", 0) or 0) if state_error == 0 else 0
+    pause_reason = state.get("pause_reason", "") or ""
+    cycles_total = _i(state.get("cycle_count", 0)) if state_error == 0 else 0
+    cycles_session = _i(state.get("cycle_count_session", 0)) if state_error == 0 else 0
+    signals_total = _i(state.get("signal_count", 0)) if state_error == 0 else 0
+    signals_session = _i(state.get("signal_count_session", 0)) if state_error == 0 else 0
+    errors_total = _i(state.get("error_count", 0)) if state_error == 0 else 0
     
-    # Trading metrics
+    # === TRADING PERFORMANCE ===
     daily_pnl = _f(state.get("daily_pnl", 0.0)) if state_error == 0 else 0.0
-    daily_trades = int(state.get("daily_trades", 0) or 0) if state_error == 0 else 0
-    daily_wins = int(state.get("daily_wins", 0) or 0) if state_error == 0 else 0
-    daily_losses = int(state.get("daily_losses", 0) or 0) if state_error == 0 else 0
-    daily_signals = int(state.get("daily_signals", 0) or 0) if state_error == 0 else 0
-    active_trades = int(state.get("active_trades_count", 0) or 0) if state_error == 0 else 0
-    
-    # Calculate win rate
+    cumulative_pnl = _f(state.get("cumulative_pnl", 0.0)) if state_error == 0 else 0.0
+    daily_trades = _i(state.get("daily_trades", 0)) if state_error == 0 else 0
+    daily_wins = _i(state.get("daily_wins", 0)) if state_error == 0 else 0
+    daily_losses = _i(state.get("daily_losses", 0)) if state_error == 0 else 0
+    daily_signals = _i(state.get("daily_signals", 0)) if state_error == 0 else 0
+    active_trades = _i(state.get("active_trades_count", 0)) if state_error == 0 else 0
+    signals_sent = _i(state.get("signals_sent", 0)) if state_error == 0 else 0
+    signals_send_failures = _i(state.get("signals_send_failures", 0)) if state_error == 0 else 0
     daily_win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0.0
     
-    # Market status
+    # === MARKET STATUS ===
     futures_open = _b(state.get("futures_market_open", False)) if state_error == 0 else 0
     session_open = _b(state.get("strategy_session_open", False)) if state_error == 0 else 0
     data_fresh = _b(state.get("data_fresh", False)) if state_error == 0 else 0
+    data_age_minutes = _f(state.get("latest_bar_age_minutes", 0.0)) if state_error == 0 else 0.0
+    buffer_size = _i(state.get("buffer_size", 0)) if state_error == 0 else 0
+    buffer_target = _i(state.get("buffer_size_target", 300)) if state_error == 0 else 300
     
-    # Error tracking
-    consecutive_errors = int(state.get("consecutive_errors", 0) or 0) if state_error == 0 else 0
-    connection_failures = int(state.get("connection_failures", 0) or 0) if state_error == 0 else 0
+    # === ERROR TRACKING ===
+    consecutive_errors = _i(state.get("consecutive_errors", 0)) if state_error == 0 else 0
+    connection_failures = _i(state.get("connection_failures", 0)) if state_error == 0 else 0
+    data_fetch_errors = _i(state.get("data_fetch_errors", 0)) if state_error == 0 else 0
     
-    # Circuit breaker status
+    # === CIRCUIT BREAKER ===
     circuit_breaker = state.get("trading_circuit_breaker", {}) if state_error == 0 else {}
     cb_active = _b(circuit_breaker.get("is_paused", False))
-    cb_consecutive_losses = int(circuit_breaker.get("consecutive_losses", 0) or 0)
+    cb_consecutive_losses = _i(circuit_breaker.get("consecutive_losses", 0))
     cb_session_pnl = _f(circuit_breaker.get("session_pnl", 0.0))
     cb_daily_pnl = _f(circuit_breaker.get("daily_pnl", 0.0))
-    
-    # Session filter status
     session_filter_enabled = _b(circuit_breaker.get("session_filter_enabled", True))
     session_allowed = _b(circuit_breaker.get("session_allowed", True))
-    current_session = circuit_breaker.get("current_session", "unknown") if state_error == 0 else "unknown"
-    et_hour = int(circuit_breaker.get("et_hour", 0) or 0) if state_error == 0 else 0
+    et_hour = _i(circuit_breaker.get("et_hour", 0)) if state_error == 0 else 0
+    
+    # === CHALLENGE TRACKER ===
+    challenge = state.get("challenge", {}) if state_error == 0 else {}
+    challenge_enabled = _b(challenge.get("enabled", False))
+    challenge_balance = _f(challenge.get("current_balance", 0.0))
+    challenge_pnl = _f(challenge.get("pnl", 0.0))
+    challenge_start = _f(challenge.get("start_balance", 50000.0))
+    challenge_target = _f(challenge.get("profit_target", 3000.0))
+    challenge_max_dd = _f(challenge.get("max_drawdown", 2000.0))
+    challenge_progress = (challenge_pnl / challenge_target * 100) if challenge_target > 0 else 0.0
+    challenge_drawdown = _f(challenge.get("current_drawdown", 0.0))
+    
+    # === ML/LEARNING ===
+    ml_filter = state.get("ml_filter", {}) if state_error == 0 else {}
+    ml_enabled = _b(ml_filter.get("enabled", False))
+    ml_mode_str = ml_filter.get("mode", "off") if state_error == 0 else "off"
+    ml_mode = {"off": 0, "shadow": 1, "live": 2}.get(ml_mode_str, 0)
+    ml_evaluated = _i(ml_filter.get("signals_evaluated", 0))
+    ml_passed = _i(ml_filter.get("signals_passed", 0))
+    ml_blocked = _i(ml_filter.get("signals_blocked", 0))
+    
+    bandit = state.get("bandit_policy", {}) if state_error == 0 else {}
+    bandit_enabled = _b(bandit.get("enabled", False))
+    bandit_mode_str = bandit.get("mode", "off") if state_error == 0 else "off"
+    bandit_mode = {"off": 0, "shadow": 1, "live": 2}.get(bandit_mode_str, 0)
+    
+    # === CADENCE/LATENCY ===
+    cadence = state.get("cadence_metrics", {}) if state_error == 0 else {}
+    cycle_duration = _f(cadence.get("last_cycle_duration_seconds", 0.0))
+    cycle_p50 = _f(cadence.get("cycle_duration_p50_seconds", 0.0))
+    cycle_p99 = _f(cadence.get("cycle_duration_p99_seconds", 0.0))
+    missed_cycles = _i(cadence.get("missed_cycles", 0))
+    cadence_mode_str = cadence.get("current_mode", "idle") if state_error == 0 else "idle"
+    cadence_mode = {"closed": 0, "idle": 1, "active": 2, "velocity": 3}.get(cadence_mode_str, 1)
 
     lines = [
-        "# HELP pearlalgo_state_error State file error flag",
+        # === AGENT STATUS ===
+        "# HELP pearlalgo_state_error State file error flag (1=error, 0=ok)",
         "# TYPE pearlalgo_state_error gauge",
         f"pearlalgo_state_error {state_error}",
         "",
@@ -236,21 +346,35 @@ def generate_metrics(state: dict[str, Any]) -> str:
         "# TYPE pearlalgo_agent_paused gauge",
         f"pearlalgo_agent_paused {paused}",
         "",
-        "# HELP pearlalgo_cycles_total Total scan cycles completed",
+        "# HELP pearlalgo_cycles_total Total scan cycles completed (all-time)",
         "# TYPE pearlalgo_cycles_total counter",
         f"pearlalgo_cycles_total {cycles_total}",
         "",
-        "# HELP pearlalgo_signals_generated_total Total signals generated",
+        "# HELP pearlalgo_cycles_session_total Scan cycles this session",
+        "# TYPE pearlalgo_cycles_session_total gauge",
+        f"pearlalgo_cycles_session_total {cycles_session}",
+        "",
+        
+        # === TRADING PERFORMANCE ===
+        "# HELP pearlalgo_signals_generated_total Total signals generated (all-time)",
         "# TYPE pearlalgo_signals_generated_total counter",
         f"pearlalgo_signals_generated_total {signals_total}",
         "",
-        "# HELP pearlalgo_errors_total Total errors encountered",
-        "# TYPE pearlalgo_errors_total counter",
-        f"pearlalgo_errors_total {errors_total}",
+        "# HELP pearlalgo_signals_session_total Signals generated this session",
+        "# TYPE pearlalgo_signals_session_total gauge",
+        f"pearlalgo_signals_session_total {signals_session}",
+        "",
+        "# HELP pearlalgo_signals_sent_total Signals successfully sent to Telegram",
+        "# TYPE pearlalgo_signals_sent_total counter",
+        f"pearlalgo_signals_sent_total {signals_sent}",
         "",
         "# HELP pearlalgo_daily_pnl_dollars Daily profit/loss in dollars",
         "# TYPE pearlalgo_daily_pnl_dollars gauge",
         f"pearlalgo_daily_pnl_dollars {daily_pnl:.2f}",
+        "",
+        "# HELP pearlalgo_cumulative_pnl_dollars All-time cumulative P&L in dollars",
+        "# TYPE pearlalgo_cumulative_pnl_dollars gauge",
+        f"pearlalgo_cumulative_pnl_dollars {cumulative_pnl:.2f}",
         "",
         "# HELP pearlalgo_daily_trades_total Total trades completed today",
         "# TYPE pearlalgo_daily_trades_total gauge",
@@ -276,6 +400,8 @@ def generate_metrics(state: dict[str, Any]) -> str:
         "# TYPE pearlalgo_active_trades gauge",
         f"pearlalgo_active_trades {active_trades}",
         "",
+        
+        # === MARKET STATUS ===
         "# HELP pearlalgo_futures_market_open Futures market open flag (1=open, 0=closed)",
         "# TYPE pearlalgo_futures_market_open gauge",
         f"pearlalgo_futures_market_open {futures_open}",
@@ -288,6 +414,24 @@ def generate_metrics(state: dict[str, Any]) -> str:
         "# TYPE pearlalgo_data_fresh gauge",
         f"pearlalgo_data_fresh {data_fresh}",
         "",
+        "# HELP pearlalgo_data_age_seconds Age of latest market data in seconds",
+        "# TYPE pearlalgo_data_age_seconds gauge",
+        f"pearlalgo_data_age_seconds {data_age_minutes * 60:.1f}",
+        "",
+        "# HELP pearlalgo_buffer_size Current number of bars in data buffer",
+        "# TYPE pearlalgo_buffer_size gauge",
+        f"pearlalgo_buffer_size {buffer_size}",
+        "",
+        "# HELP pearlalgo_buffer_target Target buffer size from config",
+        "# TYPE pearlalgo_buffer_target gauge",
+        f"pearlalgo_buffer_target {buffer_target}",
+        "",
+        
+        # === ERROR TRACKING ===
+        "# HELP pearlalgo_errors_total Total errors encountered (all-time)",
+        "# TYPE pearlalgo_errors_total counter",
+        f"pearlalgo_errors_total {errors_total}",
+        "",
         "# HELP pearlalgo_consecutive_errors Current consecutive error count",
         "# TYPE pearlalgo_consecutive_errors gauge",
         f"pearlalgo_consecutive_errors {consecutive_errors}",
@@ -296,6 +440,16 @@ def generate_metrics(state: dict[str, Any]) -> str:
         "# TYPE pearlalgo_connection_failures gauge",
         f"pearlalgo_connection_failures {connection_failures}",
         "",
+        "# HELP pearlalgo_data_fetch_errors Current data fetch error count",
+        "# TYPE pearlalgo_data_fetch_errors gauge",
+        f"pearlalgo_data_fetch_errors {data_fetch_errors}",
+        "",
+        "# HELP pearlalgo_signals_send_failures_total Telegram send failures (all-time)",
+        "# TYPE pearlalgo_signals_send_failures_total counter",
+        f"pearlalgo_signals_send_failures_total {signals_send_failures}",
+        "",
+        
+        # === CIRCUIT BREAKER ===
         "# HELP pearlalgo_circuit_breaker_active Circuit breaker paused flag (1=paused, 0=active)",
         "# TYPE pearlalgo_circuit_breaker_active gauge",
         f"pearlalgo_circuit_breaker_active {cb_active}",
@@ -320,9 +474,83 @@ def generate_metrics(state: dict[str, Any]) -> str:
         "# TYPE pearlalgo_session_allowed gauge",
         f"pearlalgo_session_allowed {session_allowed}",
         "",
-        f'# HELP pearlalgo_current_et_hour Current hour in Eastern Time (0-23)',
+        "# HELP pearlalgo_current_et_hour Current hour in Eastern Time (0-23)",
         "# TYPE pearlalgo_current_et_hour gauge",
         f"pearlalgo_current_et_hour {et_hour}",
+        "",
+        
+        # === CHALLENGE TRACKER ===
+        "# HELP pearlalgo_challenge_enabled Challenge mode enabled (1=enabled, 0=disabled)",
+        "# TYPE pearlalgo_challenge_enabled gauge",
+        f"pearlalgo_challenge_enabled {challenge_enabled}",
+        "",
+        "# HELP pearlalgo_challenge_balance_dollars Current challenge balance",
+        "# TYPE pearlalgo_challenge_balance_dollars gauge",
+        f"pearlalgo_challenge_balance_dollars {challenge_balance:.2f}",
+        "",
+        "# HELP pearlalgo_challenge_pnl_dollars Challenge P&L from start",
+        "# TYPE pearlalgo_challenge_pnl_dollars gauge",
+        f"pearlalgo_challenge_pnl_dollars {challenge_pnl:.2f}",
+        "",
+        "# HELP pearlalgo_challenge_progress_percent Progress toward profit target (0-100+)",
+        "# TYPE pearlalgo_challenge_progress_percent gauge",
+        f"pearlalgo_challenge_progress_percent {challenge_progress:.1f}",
+        "",
+        "# HELP pearlalgo_challenge_drawdown_dollars Current drawdown from peak",
+        "# TYPE pearlalgo_challenge_drawdown_dollars gauge",
+        f"pearlalgo_challenge_drawdown_dollars {challenge_drawdown:.2f}",
+        "",
+        
+        # === ML/LEARNING ===
+        "# HELP pearlalgo_ml_filter_enabled ML signal filter enabled (1=enabled, 0=disabled)",
+        "# TYPE pearlalgo_ml_filter_enabled gauge",
+        f"pearlalgo_ml_filter_enabled {ml_enabled}",
+        "",
+        "# HELP pearlalgo_ml_filter_mode ML filter mode (0=off, 1=shadow, 2=live)",
+        "# TYPE pearlalgo_ml_filter_mode gauge",
+        f"pearlalgo_ml_filter_mode {ml_mode}",
+        "",
+        "# HELP pearlalgo_ml_signals_evaluated_total Signals evaluated by ML filter",
+        "# TYPE pearlalgo_ml_signals_evaluated_total counter",
+        f"pearlalgo_ml_signals_evaluated_total {ml_evaluated}",
+        "",
+        "# HELP pearlalgo_ml_signals_passed_total Signals that passed ML filter",
+        "# TYPE pearlalgo_ml_signals_passed_total counter",
+        f"pearlalgo_ml_signals_passed_total {ml_passed}",
+        "",
+        "# HELP pearlalgo_ml_signals_blocked_total Signals blocked by ML filter",
+        "# TYPE pearlalgo_ml_signals_blocked_total counter",
+        f"pearlalgo_ml_signals_blocked_total {ml_blocked}",
+        "",
+        "# HELP pearlalgo_bandit_policy_enabled Bandit policy learning enabled (1=enabled, 0=disabled)",
+        "# TYPE pearlalgo_bandit_policy_enabled gauge",
+        f"pearlalgo_bandit_policy_enabled {bandit_enabled}",
+        "",
+        "# HELP pearlalgo_bandit_policy_mode Bandit policy mode (0=off, 1=shadow, 2=live)",
+        "# TYPE pearlalgo_bandit_policy_mode gauge",
+        f"pearlalgo_bandit_policy_mode {bandit_mode}",
+        "",
+        
+        # === CADENCE/LATENCY ===
+        "# HELP pearlalgo_cycle_duration_seconds Duration of last scan cycle",
+        "# TYPE pearlalgo_cycle_duration_seconds gauge",
+        f"pearlalgo_cycle_duration_seconds {cycle_duration:.3f}",
+        "",
+        "# HELP pearlalgo_cycle_duration_p50_seconds Median (p50) cycle duration",
+        "# TYPE pearlalgo_cycle_duration_p50_seconds gauge",
+        f"pearlalgo_cycle_duration_p50_seconds {cycle_p50:.3f}",
+        "",
+        "# HELP pearlalgo_cycle_duration_p99_seconds 99th percentile cycle duration",
+        "# TYPE pearlalgo_cycle_duration_p99_seconds gauge",
+        f"pearlalgo_cycle_duration_p99_seconds {cycle_p99:.3f}",
+        "",
+        "# HELP pearlalgo_missed_cycles_total Cycles missed due to slow processing",
+        "# TYPE pearlalgo_missed_cycles_total counter",
+        f"pearlalgo_missed_cycles_total {missed_cycles}",
+        "",
+        "# HELP pearlalgo_cadence_mode Current cadence mode (0=closed, 1=idle, 2=active, 3=velocity)",
+        "# TYPE pearlalgo_cadence_mode gauge",
+        f"pearlalgo_cadence_mode {cadence_mode}",
         "",
     ]
     return "\n".join(lines)

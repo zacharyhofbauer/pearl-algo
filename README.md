@@ -57,6 +57,9 @@ Service behavior is configured in `config/config.yaml`.
 # Validation runner (telegram/signals/service/arch)
 python3 scripts/testing/test_all.py
 
+# Type checking (mypy)
+mypy src/pearlalgo
+
 # Coverage + badge
 make coverage
 ```

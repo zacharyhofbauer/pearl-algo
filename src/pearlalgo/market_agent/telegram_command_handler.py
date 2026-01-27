@@ -17,7 +17,7 @@ import os
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Any, TYPE_CHECKING
 
@@ -105,6 +105,12 @@ class TelegramCommandHandler:
         )
         self.service_controller = ServiceController()
         self._register_handlers()
+
+        # Pearl chat state (explicit opt-in mode)
+        self._pearl_chat_active = False
+        self._pearl_chat_last_activity: Optional[datetime] = None
+        self._pearl_chat_timeout_minutes = 15  # Auto-exit after inactivity
+        self._pearl_chat_lock = asyncio.Lock()  # Rate-limit concurrent requests
 
     def _state_dir_path_for_market(self, market: str) -> Path:
         """Absolute state dir path for a given market (does not create it)."""
@@ -451,7 +457,7 @@ class TelegramCommandHandler:
         await self._send_visual_dashboard(update.message)
 
     async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle plain text messages for AI patch wizard."""
+        """Handle plain text messages for AI patch wizard and Pearl chat."""
         if not update.message:
             return
         if not await self._check_authorized(update):
@@ -459,6 +465,27 @@ class TelegramCommandHandler:
 
         text = str(update.message.text or "").strip()
         if not text:
+            return
+
+        # ─────────────────────────────────────────────────────────────────────
+        # PEARL CHAT MODE (explicit opt-in, highest priority when active)
+        # ─────────────────────────────────────────────────────────────────────
+        if self._pearl_chat_active:
+            # Check for timeout (auto-exit after inactivity)
+            now = datetime.now(timezone.utc)
+            if self._pearl_chat_last_activity:
+                elapsed_minutes = (now - self._pearl_chat_last_activity).total_seconds() / 60.0
+                if elapsed_minutes > self._pearl_chat_timeout_minutes:
+                    self._pearl_chat_active = False
+                    await update.message.reply_text(
+                        "💬 Pearl chat session timed out due to inactivity.\n\n"
+                        "Tap *Ask Pearl* to start a new conversation.",
+                        parse_mode="Markdown",
+                    )
+                    return
+
+            # Route to Pearl chat handler
+            await self._handle_pearl_chat_message(update, text)
             return
 
         state = None
@@ -1755,10 +1782,14 @@ class TelegramCommandHandler:
                     InlineKeyboardButton("📈 Performance", callback_data="action:performance_metrics"),
                     InlineKeyboardButton("📊 History", callback_data="action:signal_history"),
                 ],
-                # Row 3: Analytics (NEW)
+                # Row 3: Analytics + AI
                 [
                     InlineKeyboardButton("🔬 Analytics", callback_data="menu:analytics"),
                     InlineKeyboardButton("🧠 AI Coach", callback_data="action:ai_coach"),
+                ],
+                # Row 3b: Pearl Chat
+                [
+                    InlineKeyboardButton("💬 Ask Pearl", callback_data="action:ask_pearl"),
                 ],
                 # Row 4: Actions
                 [
@@ -2363,6 +2394,10 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🧩 AI Patch", callback_data="action:ai_patch_wizard"),
                 InlineKeyboardButton("🧠 AI Ops", callback_data="action:ai_ops"),
             ],
+            # Row 5b: Pearl Chat
+            [
+                InlineKeyboardButton("💬 Ask Pearl", callback_data="action:ask_pearl"),
+            ],
             # Row 6: Back
             self._nav_back_row(),
         ]
@@ -2893,6 +2928,15 @@ class TelegramCommandHandler:
                 await self._handle_pnl_overview(query, reply_markup)
             elif action_type == "ai_coach":
                 await self._handle_ai_coach(query, reply_markup)
+            elif action_type == "ask_pearl":
+                await self._handle_ask_pearl(query)
+                return
+            elif action_type == "exit_pearl":
+                await self._handle_exit_pearl(query)
+                return
+            elif action_type == "reset_pearl_memory":
+                await self._handle_reset_pearl_memory(query)
+                return
             elif action_type == "ai_patch_wizard":
                 await self._show_ai_patch_wizard(query)
             elif action_type == "ai_ops":
@@ -4852,6 +4896,564 @@ class TelegramCommandHandler:
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown",
         )
+
+    # =========================================================================
+    # PEARL CHAT (Jarvis-style read-only assistant)
+    # =========================================================================
+
+    def _pearl_memory_file(self) -> Path:
+        """Path to Pearl's persistent memory file."""
+        return self.state_dir / "pearl_memory.json"
+
+    def _pearl_history_file(self) -> Path:
+        """Path to Pearl's chat history file."""
+        return self.state_dir / "pearl_chat_history.jsonl"
+
+    async def _handle_ask_pearl(self, query: CallbackQuery) -> None:
+        """Enter Pearl chat mode."""
+        # Check OpenAI availability
+        if not await self._ensure_openai_ready(query):
+            return
+
+        self._pearl_chat_active = True
+        self._pearl_chat_last_activity = datetime.now(timezone.utc)
+
+        # Load any existing memory summary for context
+        memory_preview = ""
+        try:
+            mem_file = self._pearl_memory_file()
+            if mem_file.exists():
+                mem = json.loads(mem_file.read_text(encoding="utf-8"))
+                summary = mem.get("summary", "")
+                if summary:
+                    memory_preview = f"\n_Remembers: {summary[:100]}{'…' if len(summary) > 100 else ''}_\n"
+        except Exception:
+            pass
+
+        text = (
+            "💬 *Pearl Chat*\n\n"
+            "Hello! I'm Pearl, your trading assistant. I can answer questions about:\n"
+            "• Your recent performance and trades\n"
+            "• Market conditions and session analysis\n"
+            "• Strategy insights and ML filter status\n"
+            "• General trading guidance\n\n"
+            f"{memory_preview}"
+            "⚠️ *Note:* I'm read-only. I cannot execute trades, restart services, or change settings. "
+            "For actions, use the menu buttons.\n\n"
+            "*Just type your question and I'll respond!*"
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton("🚪 Exit Chat", callback_data="action:exit_pearl"),
+                InlineKeyboardButton("🗑️ Reset Memory", callback_data="action:reset_pearl_memory"),
+            ],
+            self._nav_back_row(),
+        ]
+
+        await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    async def _handle_exit_pearl(self, query: CallbackQuery) -> None:
+        """Exit Pearl chat mode."""
+        self._pearl_chat_active = False
+        self._pearl_chat_last_activity = None
+
+        text = (
+            "💬 *Pearl Chat Ended*\n\n"
+            "Your conversation has been saved to memory.\n"
+            "Tap *Ask Pearl* anytime to continue."
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("💬 Ask Pearl", callback_data="action:ask_pearl")],
+            self._nav_back_row(),
+        ]
+
+        await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    async def _handle_reset_pearl_memory(self, query: CallbackQuery) -> None:
+        """Reset Pearl's persistent memory and chat history."""
+        deleted = []
+        try:
+            mem_file = self._pearl_memory_file()
+            if mem_file.exists():
+                mem_file.unlink()
+                deleted.append("memory")
+        except Exception:
+            pass
+        try:
+            hist_file = self._pearl_history_file()
+            if hist_file.exists():
+                hist_file.unlink()
+                deleted.append("chat history")
+        except Exception:
+            pass
+
+        if deleted:
+            msg = f"🗑️ Pearl {', '.join(deleted)} cleared."
+        else:
+            msg = "🗑️ No Pearl memory to clear."
+
+        text = (
+            "💬 *Pearl Memory Reset*\n\n"
+            f"{msg}\n\n"
+            "Pearl will start fresh next time you chat."
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("💬 Ask Pearl", callback_data="action:ask_pearl")],
+            self._nav_back_row(),
+        ]
+
+        await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    async def _handle_pearl_chat_message(self, update: Update, user_text: str) -> None:
+        """Handle a user message in Pearl chat mode."""
+        # Update last activity
+        self._pearl_chat_last_activity = datetime.now(timezone.utc)
+
+        # Rate-limit: only one concurrent Pearl request at a time
+        if self._pearl_chat_lock.locked():
+            await update.message.reply_text(
+                "⏳ Pearl is still thinking about your previous question. Please wait…"
+            )
+            return
+
+        async with self._pearl_chat_lock:
+            # Send thinking indicator
+            thinking_msg = await update.message.reply_text("💬 Pearl is thinking…")
+
+            try:
+                # Build system snapshot and get response
+                response = await self._get_pearl_response(user_text)
+
+                # Delete thinking indicator and send response
+                try:
+                    await thinking_msg.delete()
+                except Exception:
+                    pass
+
+                # Build response with controls
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🚪 Exit Chat", callback_data="action:exit_pearl"),
+                        InlineKeyboardButton("🗑️ Reset Memory", callback_data="action:reset_pearl_memory"),
+                    ],
+                ]
+
+                await update.message.reply_text(
+                    f"💬 *Pearl:*\n\n{response}",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="Markdown",
+                )
+
+            except Exception as e:
+                logger.error(f"Pearl chat error: {e}", exc_info=True)
+                try:
+                    await thinking_msg.delete()
+                except Exception:
+                    pass
+                await update.message.reply_text(
+                    f"❌ Pearl encountered an error: {str(e)[:200]}\n\n"
+                    "Please try again or tap *Exit Chat* to leave.",
+                    parse_mode="Markdown",
+                )
+
+    def _build_pearl_snapshot(self) -> str:
+        """
+        Build a compact system snapshot for Pearl's context (~1-2k chars).
+        
+        Sources:
+        - state.json: agent health, cadence, active trades, ML lift
+        - performance.json: today/72h/30d metrics
+        - signals.jsonl: recent exits
+        """
+        lines = []
+        now = datetime.now(timezone.utc)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 1) Agent State (from state.json)
+        # ─────────────────────────────────────────────────────────────────────
+        state = self._read_state() or {}
+        
+        # Agent status
+        running = bool(self._is_agent_process_running())
+        paused = bool(state.get("paused", False))
+        status = "RUNNING" if running else "STOPPED"
+        if running and paused:
+            status = "PAUSED"
+        lines.append(f"Agent: {status} | Market: {self.active_market}")
+
+        # Market session
+        futures_open = state.get("futures_market_open")
+        session_open = state.get("strategy_session_open")
+        if futures_open is not None:
+            lines.append(f"Futures market: {'OPEN' if futures_open else 'CLOSED'}")
+        if session_open is not None:
+            lines.append(f"Strategy session: {'OPEN' if session_open else 'CLOSED'}")
+
+        # Active trades
+        active_count = state.get("active_trades_count", 0) or 0
+        unrealized_pnl = float(state.get("active_trades_unrealized_pnl", 0.0) or 0.0)
+        if active_count > 0:
+            lines.append(f"Active trades: {active_count} (unrealized: ${unrealized_pnl:+.2f})")
+        else:
+            lines.append("Active trades: 0")
+
+        # Circuit breaker status
+        cb = state.get("circuit_breaker") or {}
+        if cb:
+            cb_state = cb.get("state", "unknown")
+            daily_loss = float(cb.get("daily_loss_pct", 0) or 0)
+            lines.append(f"Circuit breaker: {cb_state} (daily loss: {daily_loss:.2%})")
+
+        # ML filter status
+        ml = state.get("ml_filter") or {}
+        if ml:
+            ml_enabled = ml.get("enabled", False)
+            ml_mode = ml.get("mode", "disabled")
+            lift = ml.get("lift") or {}
+            scored = lift.get("scored_trades", 0)
+            min_trades = lift.get("min_trades", 50)
+            if ml_enabled:
+                lines.append(f"ML filter: {ml_mode} (lift {scored}/{min_trades})")
+
+        lines.append("")
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 2) Performance (from performance.json or state.json)
+        # ─────────────────────────────────────────────────────────────────────
+        lines.append("Performance:")
+
+        # Today's metrics from state
+        daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
+        daily_trades = state.get("daily_trades", 0) or 0
+        daily_wins = state.get("daily_wins", 0) or 0
+        daily_losses = daily_trades - daily_wins
+        daily_wr = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
+        lines.append(f"- Today: ${daily_pnl:+.2f} | {daily_trades} trades ({daily_wins}W/{daily_losses}L) | {daily_wr:.0f}% WR")
+
+        # Load performance.json for extended metrics
+        try:
+            perf_file = self.state_dir / "performance.json"
+            if perf_file.exists():
+                with open(perf_file, 'r') as f:
+                    all_trades = json.load(f)
+                
+                if all_trades:
+                    # 72-hour metrics
+                    cutoff_72h = now - timedelta(hours=72)
+                    trades_72h = []
+                    for t in all_trades:
+                        try:
+                            ts = t.get("exit_time") or t.get("entry_time")
+                            if ts:
+                                ts_str = str(ts).replace('Z', '+00:00')
+                                dt = datetime.fromisoformat(ts_str.split('.')[0] + '+00:00' if '.' in ts_str and '+' not in ts_str else ts_str)
+                                if dt.tzinfo is None:
+                                    dt = dt.replace(tzinfo=timezone.utc)
+                                if dt >= cutoff_72h:
+                                    trades_72h.append(t)
+                        except Exception:
+                            pass
+                    
+                    if trades_72h:
+                        pnl_72h = sum(float(t.get('pnl', 0) or 0) for t in trades_72h)
+                        wins_72h = sum(1 for t in trades_72h if t.get('is_win'))
+                        wr_72h = (wins_72h / len(trades_72h) * 100) if trades_72h else 0
+                        lines.append(f"- 72h: ${pnl_72h:+.2f} | {len(trades_72h)} trades | {wr_72h:.0f}% WR")
+
+                    # 30-day metrics
+                    cutoff_30d = now - timedelta(days=30)
+                    trades_30d = []
+                    for t in all_trades:
+                        try:
+                            ts = t.get("exit_time") or t.get("entry_time")
+                            if ts:
+                                ts_str = str(ts).replace('Z', '+00:00')
+                                dt = datetime.fromisoformat(ts_str.split('.')[0] + '+00:00' if '.' in ts_str and '+' not in ts_str else ts_str)
+                                if dt.tzinfo is None:
+                                    dt = dt.replace(tzinfo=timezone.utc)
+                                if dt >= cutoff_30d:
+                                    trades_30d.append(t)
+                        except Exception:
+                            pass
+                    
+                    if trades_30d:
+                        pnl_30d = sum(float(t.get('pnl', 0) or 0) for t in trades_30d)
+                        wins_30d = sum(1 for t in trades_30d if t.get('is_win'))
+                        wr_30d = (wins_30d / len(trades_30d) * 100) if trades_30d else 0
+                        lines.append(f"- 30d: ${pnl_30d:+.2f} | {len(trades_30d)} trades | {wr_30d:.0f}% WR")
+
+                        # Profit factor and max drawdown
+                        winning = [t for t in trades_30d if t.get('is_win')]
+                        losing = [t for t in trades_30d if not t.get('is_win')]
+                        gross_profit = sum(float(t.get('pnl', 0) or 0) for t in winning)
+                        gross_loss = abs(sum(float(t.get('pnl', 0) or 0) for t in losing))
+                        if gross_loss > 0:
+                            pf = gross_profit / gross_loss
+                            lines.append(f"- Profit Factor (30d): {pf:.2f}")
+        except Exception as e:
+            logger.debug(f"Could not load performance.json for Pearl: {e}")
+
+        lines.append("")
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 3) Recent Exits (from signals.jsonl)
+        # ─────────────────────────────────────────────────────────────────────
+        lines.append("Recent exits (last 5):")
+        try:
+            signals = self._read_recent_signals(limit=20)
+            exits = [s for s in signals if s.get("exit_time")][:5]
+            if exits:
+                for s in exits:
+                    pnl = float(s.get("pnl", 0) or 0)
+                    direction = s.get("direction", "?").upper()
+                    exit_reason = s.get("exit_reason") or s.get("status") or "unknown"
+                    lines.append(f"- {direction}: ${pnl:+.2f} ({exit_reason})")
+            else:
+                lines.append("- No recent exits")
+        except Exception:
+            lines.append("- Could not load signals")
+
+        lines.append("")
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 4) Current Time (for temporal context)
+        # ─────────────────────────────────────────────────────────────────────
+        et_hour = (now.hour - 5) % 24  # Approximate ET conversion
+        lines.append(f"Current time: {now.strftime('%Y-%m-%d %H:%M')} UTC (approx {et_hour:02d}:00 ET)")
+
+        return "\n".join(lines)
+
+    def _load_pearl_memory(self) -> dict:
+        """Load Pearl's persistent memory (preferences + summary)."""
+        try:
+            mem_file = self._pearl_memory_file()
+            if mem_file.exists():
+                return json.loads(mem_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.debug(f"Could not load Pearl memory: {e}")
+        return {"summary": "", "preferences": {}, "last_updated": None}
+
+    def _save_pearl_memory(self, memory: dict) -> None:
+        """Save Pearl's persistent memory."""
+        try:
+            memory["last_updated"] = datetime.now(timezone.utc).isoformat()
+            mem_file = self._pearl_memory_file()
+            mem_file.write_text(json.dumps(memory, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"Could not save Pearl memory: {e}")
+
+    def _load_pearl_history(self, max_turns: int = 10) -> list[dict]:
+        """Load recent Pearl chat history (trimmed to last N turns)."""
+        history = []
+        try:
+            hist_file = self._pearl_history_file()
+            if hist_file.exists():
+                with open(hist_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                history.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                pass
+        except Exception as e:
+            logger.debug(f"Could not load Pearl history: {e}")
+        
+        # Return only the last N turns
+        return history[-max_turns:]
+
+    def _append_pearl_history(self, role: str, content: str) -> None:
+        """Append a message to Pearl's chat history."""
+        try:
+            hist_file = self._pearl_history_file()
+            entry = {
+                "role": role,
+                "content": content,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            with open(hist_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry) + "\n")
+            
+            # Trim if history is too large (keep last 50 turns)
+            self._trim_pearl_history(max_turns=50)
+        except Exception as e:
+            logger.warning(f"Could not append to Pearl history: {e}")
+
+    def _trim_pearl_history(self, max_turns: int = 50) -> None:
+        """Trim Pearl's chat history to the last N turns."""
+        try:
+            hist_file = self._pearl_history_file()
+            if not hist_file.exists():
+                return
+            
+            # Read all entries
+            entries = []
+            with open(hist_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            entries.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+            
+            # Trim if needed
+            if len(entries) > max_turns:
+                entries = entries[-max_turns:]
+                with open(hist_file, 'w', encoding='utf-8') as f:
+                    for entry in entries:
+                        f.write(json.dumps(entry) + "\n")
+        except Exception as e:
+            logger.debug(f"Could not trim Pearl history: {e}")
+
+    def _build_pearl_memory_summary(self) -> str:
+        """Build a concise memory summary string for the LLM context."""
+        memory = self._load_pearl_memory()
+        parts = []
+        
+        # Include durable summary if present
+        summary = memory.get("summary", "")
+        if summary:
+            parts.append(f"Previous context: {summary}")
+        
+        # Include any stored preferences
+        prefs = memory.get("preferences") or {}
+        if prefs:
+            pref_lines = [f"- {k}: {v}" for k, v in prefs.items()]
+            parts.append("Operator preferences:\n" + "\n".join(pref_lines))
+        
+        return "\n\n".join(parts) if parts else ""
+
+    def _update_pearl_memory_summary(self, new_summary: str) -> None:
+        """Update the durable summary in Pearl's memory."""
+        memory = self._load_pearl_memory()
+        memory["summary"] = new_summary[:500]  # Cap summary length
+        self._save_pearl_memory(memory)
+
+    # Denylist patterns for execution requests
+    _PEARL_EXECUTION_DENYLIST = [
+        # Trading actions
+        ("close all", "🚫 Close All Trades", "Use 📊 Activity > 🚫 Close All"),
+        ("close position", "🚫 Close Position", "Use 📊 Activity > 🚫 Close All"),
+        ("close trade", "🚫 Close Trade", "Use 📊 Activity > 🚫 Close All"),
+        ("exit trade", "🚫 Exit Trade", "Use 📊 Activity > 🚫 Close All"),
+        ("emergency stop", "🚨 Emergency Stop", "Use 🎛️ System > 🚨 Emergency Stop"),
+        ("flatten", "🚫 Close All", "Use 📊 Activity > 🚫 Close All"),
+        # Service control
+        ("start agent", "▶️ Start Agent", "Use 🎛️ System > ▶️ Start Agent"),
+        ("stop agent", "⏹️ Stop Agent", "Use 🎛️ System > ⏹️ Stop Agent"),
+        ("restart agent", "🔄 Restart Agent", "Use 🎛️ System > 🔄 Restart Agent"),
+        ("start gateway", "▶️ Start Gateway", "Use 🎛️ System > ▶️ Start Gateway"),
+        ("stop gateway", "⏹️ Stop Gateway", "Use 🎛️ System > ⏹️ Stop Gateway"),
+        ("restart gateway", "🔄 Restart Gateway", "Use 🎛️ System > 🔄 Restart"),
+        ("restart telegram", "🔄 Restart Telegram", "Use 🎛️ System > 🔄 Restart"),
+        # Config/code changes
+        ("change config", "⚙️ Change Config", "Use ⚙️ Settings > 🧠 AI Ops"),
+        ("edit config", "⚙️ Edit Config", "Use ⚙️ Settings > 🧠 AI Ops"),
+        ("apply patch", "🧩 Apply Patch", "Use ⚙️ Settings > 🧩 AI Patch"),
+        ("make change", "🧩 Apply Patch", "Use ⚙️ Settings > 🧩 AI Patch"),
+        ("modify code", "🧩 Modify Code", "Use ⚙️ Settings > 🧩 AI Patch"),
+        # Risk settings
+        ("set stop loss", "⚙️ Change Stop Loss", "Use ⚙️ Settings > 🧠 AI Ops"),
+        ("change stop", "⚙️ Change Stop", "Use ⚙️ Settings > 🧠 AI Ops"),
+        ("set risk", "⚙️ Change Risk", "Use ⚙️ Settings > 🧠 AI Ops"),
+        ("enable trading", "🟢 Enable Trading", "Use ⚙️ Settings > 🤖 Bots"),
+        ("disable trading", "🔴 Disable Trading", "Use ⚙️ Settings > 🤖 Bots"),
+    ]
+
+    def _check_pearl_execution_request(self, user_text: str) -> str | None:
+        """
+        Check if the user is requesting an execution action.
+        
+        Returns a polite refusal with menu guidance if so, None otherwise.
+        """
+        text_lower = user_text.lower()
+        
+        for pattern, action_name, menu_path in self._PEARL_EXECUTION_DENYLIST:
+            if pattern in text_lower:
+                return (
+                    f"I can't execute {action_name} for you - I'm read-only! 🔒\n\n"
+                    f"To do this yourself:\n**{menu_path}**\n\n"
+                    "Is there anything else I can help you understand about your trading or performance?"
+                )
+        
+        return None
+
+    async def _get_pearl_response(self, user_text: str) -> str:
+        """
+        Get a response from Pearl (Jarvis-style assistant).
+        
+        Uses OpenAI chat completion with:
+        - System snapshot (performance, trades, ML status)
+        - Memory summary (durable context)
+        - Chat history (recent turns)
+        - Pearl persona (read-only, never executes)
+        """
+        # Check for execution requests before sending to OpenAI (guardrail)
+        refusal = self._check_pearl_execution_request(user_text)
+        if refusal:
+            # Still log this as a conversation turn
+            await asyncio.to_thread(self._append_pearl_history, "user", user_text)
+            await asyncio.to_thread(self._append_pearl_history, "assistant", refusal)
+            return refusal
+
+        from pearlalgo.utils.openai_client import OpenAIClient, build_chat_system_prompt, OpenAIAPIError
+
+        # Build components off-thread to avoid blocking
+        snapshot = await asyncio.to_thread(self._build_pearl_snapshot)
+        memory_summary = await asyncio.to_thread(self._build_pearl_memory_summary)
+        history = await asyncio.to_thread(self._load_pearl_history, 6)  # Last 6 turns
+
+        # Build Pearl-specific system prompt
+        pearl_persona = (
+            "You are Pearl, a Jarvis-style trading assistant for PearlAlgo. "
+            "You are friendly, professional, and data-driven.\n\n"
+            "CRITICAL RULES:\n"
+            "1. You are READ-ONLY. You CANNOT execute trades, restart services, change settings, or apply patches.\n"
+            "2. If asked to perform an action, explain what menu button to use instead (e.g., 'Use 🎛️ System > Restart Agent').\n"
+            "3. Base all answers on the SYSTEM SNAPSHOT data provided. If data is missing, say so.\n"
+            "4. Be concise but helpful. Use bullet points for lists.\n"
+            "5. When discussing performance, cite specific numbers from the snapshot.\n"
+            "6. Never make up data or trades that aren't in the snapshot.\n"
+        )
+
+        base_prompt = build_chat_system_prompt(
+            system_snapshot=snapshot,
+            memory_summary=memory_summary,
+        )
+        full_system_prompt = pearl_persona + "\n\n" + base_prompt
+
+        # Build messages list from history + current query
+        messages = []
+        for entry in history:
+            role = entry.get("role", "user")
+            content = entry.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        
+        # Add current user message
+        messages.append({"role": "user", "content": user_text})
+
+        # Call OpenAI off-thread
+        def _call_openai():
+            client = OpenAIClient()
+            return client.chat(messages=messages, system_prompt=full_system_prompt)
+
+        try:
+            response = await asyncio.to_thread(_call_openai)
+        except OpenAIAPIError as e:
+            raise Exception(f"OpenAI error: {e}")
+        except Exception as e:
+            raise Exception(f"Unexpected error: {e}")
+
+        # Save conversation to history
+        await asyncio.to_thread(self._append_pearl_history, "user", user_text)
+        await asyncio.to_thread(self._append_pearl_history, "assistant", response)
+
+        return response
 
     async def _handle_signal_history(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display signal history summary."""

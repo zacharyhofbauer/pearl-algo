@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.21.0", "pytest-cov>=4.1.0", "ruff>=0.6"]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.21.0", "pytest-cov>=4.1.0", "ruff>=0.6", "mypy>=1.11.0", "pandas-stubs>=2.0", "types-PyYAML>=6.0", "types-pytz>=2024.1"]
 lint = ["import-linter>=2.0"]
 llm = ["openai>=1.40.0"]
 monitor = ["PyQt6>=6.5"]

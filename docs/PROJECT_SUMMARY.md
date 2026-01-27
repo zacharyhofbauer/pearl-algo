@@ -1,7 +1,7 @@
 # Project Summary - PearlAlgo MNQ Trading Agent
 
-**Version:** 0.2.2  
-**Last Updated:** 2025-12-31 (IBKR Data Quality & Observability)  
+**Version:** 0.2.3  
+**Last Updated:** 2026-01-27 (Type Checking, Prometheus Metrics Expansion, Test Coverage)  
 **Status:** Production-Ready  
 **Trading Style:** Prop Firm - Intraday Swings & Quick Scalps
 
@@ -361,7 +361,12 @@ Signal Count Incremented
 
 - **pytest**: 8.3+ (Testing framework)
 - **pytest-asyncio**: 0.21.0+ (Async testing)
+- **pytest-cov**: 4.1+ (Coverage reporting)
 - **ruff**: 0.6+ (Linting and formatting)
+- **mypy**: 1.11+ (Static type checking)
+- **pandas-stubs**: 2.0+ (Type stubs for pandas)
+- **types-PyYAML**: 6.0+ (Type stubs for PyYAML)
+- **types-pytz**: 2024.1+ (Type stubs for pytz)
 
 ### External Services
 
@@ -1292,12 +1297,40 @@ The system is ready for production use and optimized for prop firm trading with 
 
 **For detailed guides, see:**
 - `docs/MARKET_AGENT_GUIDE.md` - Operational guide (how to run and operate)
-- `docs/TESTING_GUIDE.md` - Complete testing guide (all testing procedures)
+- `docs/TESTING_GUIDE.md` - Complete testing guide (all testing procedures, mypy type checking)
 - `docs/GATEWAY.md` - IBKR Gateway setup
 - `docs/MARKET_DATA_SUBSCRIPTION.md` - How to get live market data (fix Error 354)
 
-**Last Updated:** 2025-12-31  
+**Last Updated:** 2026-01-27  
 **Current Configuration:** MNQ (Mini NQ) - Prop Firm Style Trading
+
+---
+
+## Recent Updates (v0.2.3)
+
+### Type Checking (mypy)
+- Added mypy configuration (`mypy.ini`) for static type checking
+- Type stubs installed for pandas, PyYAML, and pytz
+- CI pipeline includes mypy (informational mode)
+- Fixed critical type errors in health_monitor.py and execution/ibkr/tasks.py
+
+### Prometheus Metrics Expansion
+- **50+ metrics** now exposed via `/metrics` endpoint
+- New metric categories:
+  - Challenge tracker (balance, progress, drawdown)
+  - ML/Learning (filter mode, signals evaluated/passed/blocked)
+  - Cadence/Latency (cycle duration p50/p99, missed cycles)
+  - Enhanced trading metrics (cumulative P&L, session signals)
+  - Data quality (age, buffer size vs target)
+
+### Test Coverage Expansion
+- Added comprehensive test suites:
+  - `test_prometheus_metrics.py` - 25 tests for metrics generation
+  - `test_health_monitor.py` - Health component testing
+  - `test_error_handler.py` - Error classification and handling
+  - `test_sparkline.py` - UI rendering utilities
+  - `test_logging_config.py` - Logging setup validation
+  - `test_retry.py` - Async retry logic
 
 
 

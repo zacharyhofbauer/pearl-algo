@@ -357,6 +357,8 @@ class TestPrometheusMetrics:
         for line in metrics.strip().split("\n"):
             if line.startswith("#"):
                 continue
+            if not line.strip():  # Skip empty lines
+                continue
             # Should have metric_name value format
             parts = line.split()
             assert len(parts) >= 2, f"Invalid metric line: {line}"
