@@ -354,12 +354,13 @@ def format_signal_status(status: str, is_win: bool | None = None) -> tuple[str, 
 
 def format_signal_direction(direction: str) -> tuple[str, str]:
     """Return (emoji, label) for a signal direction."""
-    direction_lower = (direction or "").lower()
+    direction_str = str(direction) if direction else ""
+    direction_lower = direction_str.lower()
     if direction_lower == "long":
         return "🟢", "LONG"
     elif direction_lower == "short":
         return "🔴", "SHORT"
-    return "⚪", direction.upper() if direction else "N/A"
+    return "⚪", direction_str.upper() if direction_str else "N/A"
 
 
 def format_signal_confidence_tier(confidence: float) -> tuple[str, str]:

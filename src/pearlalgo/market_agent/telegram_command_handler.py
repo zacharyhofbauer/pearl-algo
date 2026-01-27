@@ -1017,7 +1017,7 @@ class TelegramCommandHandler:
         text = self._with_support_footer("\n".join(lines), state=active_state if isinstance(active_state, dict) else None)
         await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-    async def _show_main_menu_with_chart(self, query: CallbackQuery) -> None:
+    async def _show_main_menu_with_chart(self, query: CallbackQuery, force_chart_refresh: bool = False) -> None:
         """Show the main menu with chart displayed above the menu text."""
         keyboard = self._get_main_menu_keyboard()
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1026,7 +1026,7 @@ class TelegramCommandHandler:
         if state:
             try:
                 message_text = await self._build_status_dashboard_message(state)
-                chart_path = await self._generate_or_get_chart(state)
+                chart_path = await self._generate_or_get_chart(state, force_refresh=force_chart_refresh)
 
                 # Add a compact support footer to make any screenshot/share self-diagnostic.
                 caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
@@ -1087,7 +1087,10 @@ class TelegramCommandHandler:
                                         reply_markup=reply_markup,
                                         parse_mode=None
                                     )
-                            await query.answer()  # Acknowledge the callback
+                            try:
+                                await query.answer()  # Acknowledge the callback
+                            except Exception:
+                                pass
                     except Exception as e:
                         logger.error(f"Error showing chart: {e}", exc_info=True)
                         # Fallback to text only
@@ -1275,7 +1278,7 @@ class TelegramCommandHandler:
                 reply_markup=reply_markup
             )
 
-    async def _generate_or_get_chart(self, state: dict) -> Optional[Path]:
+    async def _generate_or_get_chart(self, state: dict, force_refresh: bool = False) -> Optional[Path]:
         """
         Use the latest exported dashboard chart.
 
@@ -1332,8 +1335,8 @@ class TelegramCommandHandler:
         except Exception:
             prev_mtime = None
 
-        should_request_refresh = False
-        if data_is_fresh:
+        should_request_refresh = bool(force_refresh)
+        if (not should_request_refresh) and data_is_fresh:
             if not telegram_chart.exists():
                 should_request_refresh = True
             else:
@@ -1366,7 +1369,8 @@ class TelegramCommandHandler:
                 pass
 
             # Wait briefly for the agent to export the refreshed chart.
-            deadline = datetime.now(timezone.utc) + timedelta(seconds=12)
+            wait_seconds = 20 if force_refresh else 12
+            deadline = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
             while datetime.now(timezone.utc) < deadline:
                 try:
                     if telegram_chart.exists():
@@ -3385,8 +3389,8 @@ class TelegramCommandHandler:
             elif action_type == "export_performance":
                 await self._handle_export_performance(query)
             elif action_type == "refresh_dashboard":
-                # Refresh visual dashboard—reuse latest exported Telegram chart (dashboard_telegram_latest.png).
-                await self._show_main_menu_with_chart(query)
+                # Force regenerate the exported Telegram chart via the agent service flag.
+                await self._show_main_menu_with_chart(query, force_chart_refresh=True)
             elif action_type == "toggle_chart":
                 # Toggle chart display
                 await self._toggle_chart_display(query)
