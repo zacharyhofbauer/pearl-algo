@@ -6109,22 +6109,22 @@ class TelegramCommandHandler:
                                 hold_times.append(hold_mins)
                         avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0
                         
-                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                        pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
                         wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
                         pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
                         
                         text += "*7-Day Summary:*\n"
-                text += f"  Trades: {total_trades} ({wins}W / {losses}L)\n"
+                        text += f"  Trades: {total_trades} ({wins}W / {losses}L)\n"
                         text += f"  Win Rate: {wr_emoji} {win_rate:.1f}%\n"
-                text += f"  Total P&L: {pnl_emoji} ${total_pnl:,.2f}\n"
-                text += f"  Avg P&L: ${avg_pnl:,.2f}\n"
+                        text += f"  Total P&L: {pnl_emoji} ${total_pnl:,.2f}\n"
+                        text += f"  Avg P&L: ${avg_pnl:,.2f}\n"
                         if profit_factor > 0:
                             text += f"  Profit Factor: {pf_emoji} {profit_factor:.2f}\n"
                         text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
                         text += f"  Avg Loss: 🔴 ${avg_loss:,.2f}\n"
-                if avg_hold > 0:
-                    text += f"  Avg Hold: {avg_hold:.1f} min\n"
-            else:
+                        if avg_hold > 0:
+                            text += f"  Avg Hold: {avg_hold:.1f} min\n"
+                    else:
                         text += "*7-Day Summary:*\n  No completed trades in the last 7 days.\n"
                     
                     # All-time summary
@@ -6287,21 +6287,21 @@ class TelegramCommandHandler:
                 largest_loss = min((float(t.get('pnl', 0) or 0) for t in all_trades), default=0)
                 
                 win_rate = (len(winning_trades) / len(all_trades) * 100) if all_trades else 0
-            
-            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                
+                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
                 wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
                 pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
-            
-            text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
+                
+                text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
                 text += f"*Trades:* {len(all_trades)} ({len(winning_trades)}W / {len(losing_trades)}L)\n"
                 text += f"*Win Rate:* {wr_emoji} {win_rate:.1f}%\n\n"
-            
-            text += "*Averages:*\n"
-            text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
+                
+                text += "*Averages:*\n"
+                text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
                 text += f"  Avg Loss: 🔴 ${avg_loss:,.2f}\n\n"
-            
-            text += "*Extremes:*\n"
-            text += f"  Best Trade: 🟢 ${largest_win:,.2f}\n"
+                
+                text += "*Extremes:*\n"
+                text += f"  Best Trade: 🟢 ${largest_win:,.2f}\n"
                 text += f"  Worst Trade: 🔴 ${abs(largest_loss):,.2f}\n\n"
                 
                 text += "*Risk Metrics:*\n"
@@ -6324,9 +6324,9 @@ class TelegramCommandHandler:
                 if max_drawdown > 0:
                     dd_emoji = "⚠️" if max_drawdown > 500 else "📉"
                     text += f"  Max Drawdown: {dd_emoji} ${max_drawdown:,.2f}\n"
-        else:
-            text += "No completed trades to analyze.\n"
-                text += "\n💡 P&L data is calculated from your trading history."
+            else:
+                text += "No completed trades to analyze.\n"
+            text += "\n💡 P&L data is calculated from your trading history."
         except Exception as e:
             logger.debug(f"Error loading P&L overview: {e}")
             text += f"Error loading data: {str(e)[:50]}\n"
