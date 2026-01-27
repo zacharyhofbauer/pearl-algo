@@ -432,7 +432,7 @@ class PerformanceTracker:
                     features = {}
 
                 # Attach ML prediction fields (for shadow A/B lift measurement).
-                # These are stored on the signal as `_ml_prediction` by NQSignalGenerator.
+                # These are stored on the signal as `_ml_prediction` by the signal generator.
                 try:
                     ml_pred = signal.get("_ml_prediction")
                     if isinstance(ml_pred, dict):

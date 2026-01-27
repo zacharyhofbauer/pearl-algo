@@ -418,7 +418,44 @@ cat data/agent_state/NQ/state.json | jq '.signal_diagnostics_raw'
 
 ---
 
-## 13. Troubleshooting & Maintenance
+## 13. Direction Gating & Risk Phases (config/config.yaml)
+
+The trading circuit breaker includes multiple phases of risk control that can be individually enabled/disabled.
+
+### Phase 1: Direction Gating (ENABLED by default)
+Blocks signals based on market regime alignment:
+- **trending_up** → long only
+- **trending_down** → short only  
+- **ranging/volatile/unknown** → long only (conservative)
+
+**Rollback:** Set `enable_direction_gating: false` under `trading_circuit_breaker`
+
+### Phase 2: Regime Avoidance (OFF by default)
+Blocks all signals in poor-performing regimes (ranging, volatile).
+Shadow measurement logs "would-have-blocked" counts when OFF.
+
+**Rollback:** Set `enable_regime_avoidance: false` under `trading_circuit_breaker`
+
+### Phase 3: Trigger Filters (OFF by default)
+Requires volume confirmation for ema_cross triggers and low-regime entries.
+
+**Rollback:** Set `enable_trigger_filters: false` under `trading_circuit_breaker`
+
+### Phase 4: ML Chop Shield (OFF by default)
+Blocks ML FAIL signals in ranging/volatile regimes after lift is proven (50+ scored trades, 15%+ win-rate delta).
+
+**Rollback:** Set `enable_ml_chop_shield: false` under `trading_circuit_breaker`
+
+### Validation Checklist
+After enabling any phase:
+1. Check Telegram dashboard for `🛡️ Gate:` status line
+2. Verify `state.json` shows `trading_circuit_breaker` section with correct flags
+3. Monitor `blocks_by_reason` in circuit breaker status
+4. Review logs for `Trading circuit breaker blocked signal` entries
+
+---
+
+## 14. Troubleshooting & Maintenance
 
 ### Clearing Telegram Chat History
 

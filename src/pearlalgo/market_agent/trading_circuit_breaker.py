@@ -86,6 +86,43 @@ class TradingCircuitBreakerConfig:
     allowed_sessions: List[str] = field(default_factory=lambda: ["overnight", "midday", "close"])
     # Session definitions (start_hour, end_hour) in ET (Eastern Time, UTC-5)
     # overnight: 18-4 (6PM-4AM), premarket: 4-6, morning: 6-10, midday: 10-14, afternoon: 14-17, close: 17-18
+    
+    # =========================================================================
+    # Phase 1: Direction gating by market regime
+    # Based on data: shorts underperform longs (40% vs 47% WR), shorts are 0W/2L today
+    # trending_up: 74% WR, ranging: 0% WR, volatile: 0% WR, trending_down: 40% WR
+    # =========================================================================
+    enable_direction_gating: bool = True
+    direction_gating_min_confidence: float = 0.70  # Only apply strict gating if regime confidence >= this
+    # Direction rules per regime (when confidence is met):
+    # - trending_up -> long only
+    # - trending_down -> short only
+    # - ranging/volatile/unknown -> long only (conservative given short-side leak)
+    
+    # =========================================================================
+    # Phase 2: Optional regime avoidance (default OFF for observation)
+    # =========================================================================
+    enable_regime_avoidance: bool = False  # Start with logging "would-have-blocked"
+    blocked_regimes: List[str] = field(default_factory=lambda: ["ranging", "volatile"])
+    regime_avoidance_min_confidence: float = 0.70
+    
+    # =========================================================================
+    # Phase 3: Trigger-based de-risking filters
+    # =========================================================================
+    enable_trigger_filters: bool = False  # Start OFF
+    # ema_cross trigger requires volume confirmation when enabled
+    ema_cross_require_volume: bool = True
+    # In ranging/volatile regimes, require volume confirmation for all entries
+    low_regime_require_volume: bool = True
+    
+    # =========================================================================
+    # Phase 4: ML chop shield (adaptive blocking)
+    # Only enable after sufficient data proves lift
+    # =========================================================================
+    enable_ml_chop_shield: bool = False  # Requires external validation
+    ml_min_scored_trades: int = 50  # Minimum trades for lift validation
+    ml_min_winrate_delta: float = 0.15  # PASS vs FAIL must differ by 15+ percentage points
+    ml_chop_shield_regimes: List[str] = field(default_factory=lambda: ["ranging", "volatile"])
 
 
 class TradingCircuitBreaker:
@@ -117,11 +154,19 @@ class TradingCircuitBreaker:
         self._total_blocks: int = 0
         self._blocks_by_reason: Dict[str, int] = {}
         
+        # "Would have blocked" counters for shadow measurement (Phase 2 & 3)
+        self._would_have_blocked_regime: int = 0
+        self._would_have_blocked_trigger: int = 0
+        
+        # Direction gating statistics
+        self._direction_gating_blocks: int = 0
+        
         logger.info(
             f"TradingCircuitBreaker initialized: "
             f"max_consecutive_losses={self.config.max_consecutive_losses}, "
             f"max_session_drawdown=${self.config.max_session_drawdown}, "
-            f"max_concurrent_positions={self.config.max_concurrent_positions}"
+            f"max_concurrent_positions={self.config.max_concurrent_positions}, "
+            f"direction_gating={self.config.enable_direction_gating}"
         )
     
     def should_allow_signal(
@@ -130,6 +175,7 @@ class TradingCircuitBreaker:
         performance_stats: Optional[Dict[str, Any]] = None,
         active_positions: Optional[List[Dict[str, Any]]] = None,
         market_data: Optional[Dict[str, Any]] = None,
+        ml_stats: Optional[Dict[str, Any]] = None,
     ) -> CircuitBreakerDecision:
         """
         Evaluate whether a new signal should be allowed.
@@ -139,6 +185,7 @@ class TradingCircuitBreaker:
             performance_stats: Recent performance statistics from PerformanceTracker
             active_positions: List of currently open positions
             market_data: Market data including ATR, volatility metrics
+            ml_stats: ML filter statistics for chop shield validation
         
         Returns:
             CircuitBreakerDecision indicating whether the signal is allowed
@@ -197,6 +244,60 @@ class TradingCircuitBreaker:
         # Check session filter (time-of-day based filtering)
         if self.config.enable_session_filter:
             decision = self._check_session_filter()
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+        
+        # =======================================================================
+        # Phase 1: Direction gating by market regime (ENABLED by default)
+        # =======================================================================
+        if self.config.enable_direction_gating:
+            decision = self._check_direction_gating(signal)
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+        
+        # =======================================================================
+        # Phase 2: Regime avoidance (OFF by default - log "would-have-blocked")
+        # =======================================================================
+        if self.config.enable_regime_avoidance:
+            decision = self._check_regime_avoidance(signal)
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+        else:
+            # Log "would-have-blocked" for measurement (only in debug mode)
+            would_block_decision = self._check_regime_avoidance(signal)
+            if not would_block_decision.allowed:
+                self._would_have_blocked_regime = self._would_have_blocked_regime + 1
+                logger.debug(
+                    f"[Phase 2 shadow] Would have blocked: {would_block_decision.reason} | "
+                    f"details={would_block_decision.details}"
+                )
+        
+        # =======================================================================
+        # Phase 3: Trigger filters (OFF by default)
+        # =======================================================================
+        if self.config.enable_trigger_filters:
+            decision = self._check_trigger_filters(signal)
+            if not decision.allowed:
+                self._record_block(decision.reason)
+                return decision
+        else:
+            # Log "would-have-blocked" for measurement
+            would_block_decision = self._check_trigger_filters(signal)
+            if not would_block_decision.allowed:
+                self._would_have_blocked_trigger = self._would_have_blocked_trigger + 1
+                logger.debug(
+                    f"[Phase 3 shadow] Would have blocked: {would_block_decision.reason} | "
+                    f"details={would_block_decision.details}"
+                )
+        
+        # =======================================================================
+        # Phase 4: ML chop shield (OFF by default - requires proven lift)
+        # =======================================================================
+        if self.config.enable_ml_chop_shield and ml_stats is not None:
+            decision = self._check_ml_chop_shield(signal, ml_stats)
             if not decision.allowed:
                 self._record_block(decision.reason)
                 return decision
@@ -279,6 +380,86 @@ class TradingCircuitBreaker:
         self._clear_cooldown()
         logger.info("Circuit breaker cooldown cleared manually")
     
+    def validate_config(self) -> List[str]:
+        """
+        Validate the circuit breaker configuration at startup.
+        
+        Returns:
+            List of warning messages (empty if all valid)
+        """
+        warnings = []
+        
+        # Phase 1: Direction gating sanity checks
+        if self.config.enable_direction_gating:
+            if not (0.0 <= self.config.direction_gating_min_confidence <= 1.0):
+                warnings.append(
+                    f"direction_gating_min_confidence={self.config.direction_gating_min_confidence} "
+                    "should be between 0.0 and 1.0"
+                )
+        
+        # Phase 2: Regime avoidance sanity checks
+        if self.config.enable_regime_avoidance:
+            if not self.config.blocked_regimes:
+                warnings.append(
+                    "enable_regime_avoidance=true but blocked_regimes is empty"
+                )
+        
+        # Phase 3: Trigger filters sanity checks
+        if self.config.enable_trigger_filters:
+            if not self.config.ema_cross_require_volume and not self.config.low_regime_require_volume:
+                warnings.append(
+                    "enable_trigger_filters=true but both volume requirements are disabled"
+                )
+        
+        # Phase 4: ML chop shield sanity checks
+        if self.config.enable_ml_chop_shield:
+            if self.config.ml_min_scored_trades < 30:
+                warnings.append(
+                    f"ml_min_scored_trades={self.config.ml_min_scored_trades} is low; "
+                    "recommend at least 30-50 for reliable lift validation"
+                )
+            if not (0.0 <= self.config.ml_min_winrate_delta <= 1.0):
+                warnings.append(
+                    f"ml_min_winrate_delta={self.config.ml_min_winrate_delta} "
+                    "should be between 0.0 and 1.0"
+                )
+            if not self.config.ml_chop_shield_regimes:
+                warnings.append(
+                    "enable_ml_chop_shield=true but ml_chop_shield_regimes is empty"
+                )
+        
+        # Log warnings
+        for w in warnings:
+            logger.warning(f"[TradingCircuitBreaker config] {w}")
+        
+        return warnings
+    
+    def get_rollback_instructions(self) -> Dict[str, str]:
+        """
+        Get instructions for rolling back each phase via config changes.
+        
+        Returns:
+            Dict mapping phase name to rollback instruction
+        """
+        return {
+            "phase1_direction_gating": (
+                "Set `enable_direction_gating: false` in config.yaml under trading_circuit_breaker. "
+                "This disables direction gating and allows both longs and shorts in all regimes."
+            ),
+            "phase2_regime_avoidance": (
+                "Set `enable_regime_avoidance: false` in config.yaml under trading_circuit_breaker. "
+                "This disables blocking of signals in ranging/volatile regimes (already OFF by default)."
+            ),
+            "phase3_trigger_filters": (
+                "Set `enable_trigger_filters: false` in config.yaml under trading_circuit_breaker. "
+                "This disables volume requirements for ema_cross and low-regime entries (already OFF by default)."
+            ),
+            "phase4_ml_chop_shield": (
+                "Set `enable_ml_chop_shield: false` in config.yaml under trading_circuit_breaker. "
+                "This disables ML FAIL blocking in ranging/volatile regimes (already OFF by default)."
+            ),
+        }
+    
     def get_status(self) -> Dict[str, Any]:
         """Get current circuit breaker status."""
         recent_win_rate = self._calculate_rolling_win_rate()
@@ -307,6 +488,20 @@ class TradingCircuitBreaker:
             "et_hour": et_hour,
             "session_allowed": session_allowed,
             "allowed_sessions": self.config.allowed_sessions,
+            # Phase 1: Direction gating
+            "direction_gating_enabled": self.config.enable_direction_gating,
+            "direction_gating_min_confidence": self.config.direction_gating_min_confidence,
+            # Phase 2: Regime avoidance (shadow measurement)
+            "regime_avoidance_enabled": self.config.enable_regime_avoidance,
+            "blocked_regimes": self.config.blocked_regimes,
+            "would_have_blocked_regime": self._would_have_blocked_regime,
+            # Phase 3: Trigger filters (shadow measurement)
+            "trigger_filters_enabled": self.config.enable_trigger_filters,
+            "would_have_blocked_trigger": self._would_have_blocked_trigger,
+            # Phase 4: ML chop shield
+            "ml_chop_shield_enabled": self.config.enable_ml_chop_shield,
+            "ml_min_scored_trades": self.config.ml_min_scored_trades,
+            "ml_chop_shield_regimes": self.config.ml_chop_shield_regimes,
         }
     
     # =========================================================================
@@ -593,6 +788,277 @@ class TradingCircuitBreaker:
                 "message": f"Session '{current_session}' historically underperforms - signal skipped",
             }
         )
+    
+    def _check_direction_gating(self, signal: Dict[str, Any]) -> CircuitBreakerDecision:
+        """
+        Phase 1: Check if signal direction is allowed for the current market regime.
+        
+        Rules (when regime confidence >= threshold):
+        - trending_up -> allow long only
+        - trending_down -> allow short only
+        - ranging/volatile/unknown -> allow long only (conservative)
+        
+        Data basis:
+        - Shorts all-time: 40% WR vs Longs 47% WR
+        - trending_up: 74% WR, ranging: 0% WR, volatile: 0% WR
+        """
+        direction = str(signal.get("direction", "")).lower()
+        if direction not in ("long", "short"):
+            # Unknown direction - allow (shouldn't happen in practice)
+            return CircuitBreakerDecision(
+                allowed=True,
+                reason="direction_gating_unknown_direction",
+                details={"direction": direction},
+            )
+        
+        # Extract market regime from signal
+        market_regime = signal.get("market_regime") or {}
+        if not isinstance(market_regime, dict):
+            market_regime = {}
+        
+        regime_type = str(market_regime.get("regime", "unknown")).lower()
+        regime_confidence = 0.0
+        try:
+            regime_confidence = float(market_regime.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            regime_confidence = 0.0
+        
+        # If confidence is below threshold, treat regime as "unknown"
+        effective_regime = regime_type
+        if regime_confidence < self.config.direction_gating_min_confidence:
+            effective_regime = "unknown"
+        
+        # Direction rules by regime
+        allowed_direction = "long"  # Default conservative
+        if effective_regime == "trending_up":
+            allowed_direction = "long"
+        elif effective_regime == "trending_down":
+            allowed_direction = "short"
+        else:
+            # ranging, volatile, unknown -> long only (conservative given short-side leak)
+            allowed_direction = "long"
+        
+        if direction == allowed_direction:
+            return CircuitBreakerDecision(
+                allowed=True,
+                reason="direction_gating_ok",
+                details={
+                    "direction": direction,
+                    "regime": regime_type,
+                    "effective_regime": effective_regime,
+                    "regime_confidence": regime_confidence,
+                    "allowed_direction": allowed_direction,
+                },
+            )
+        
+        return CircuitBreakerDecision(
+            allowed=False,
+            reason="direction_gating",
+            severity="info",
+            details={
+                "direction": direction,
+                "regime": regime_type,
+                "effective_regime": effective_regime,
+                "regime_confidence": regime_confidence,
+                "allowed_direction": allowed_direction,
+                "message": f"Direction '{direction}' not allowed in regime '{effective_regime}' (only '{allowed_direction}' permitted)",
+            },
+        )
+    
+    def _check_regime_avoidance(self, signal: Dict[str, Any]) -> CircuitBreakerDecision:
+        """
+        Phase 2: Optionally block signals in historically poor-performing regimes.
+        
+        Blocked regimes by default: ranging (0W/12L), volatile (0W/2L)
+        """
+        market_regime = signal.get("market_regime") or {}
+        if not isinstance(market_regime, dict):
+            market_regime = {}
+        
+        regime_type = str(market_regime.get("regime", "unknown")).lower()
+        regime_confidence = 0.0
+        try:
+            regime_confidence = float(market_regime.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            regime_confidence = 0.0
+        
+        # Only apply if confidence meets threshold
+        if regime_confidence < self.config.regime_avoidance_min_confidence:
+            return CircuitBreakerDecision(
+                allowed=True,
+                reason="regime_avoidance_low_confidence",
+                details={
+                    "regime": regime_type,
+                    "regime_confidence": regime_confidence,
+                    "min_confidence": self.config.regime_avoidance_min_confidence,
+                },
+            )
+        
+        # Check if regime is in blocked list
+        blocked_regimes_lower = [r.lower() for r in self.config.blocked_regimes]
+        if regime_type in blocked_regimes_lower:
+            return CircuitBreakerDecision(
+                allowed=False,
+                reason="regime_avoidance",
+                severity="info",
+                details={
+                    "regime": regime_type,
+                    "regime_confidence": regime_confidence,
+                    "blocked_regimes": self.config.blocked_regimes,
+                    "message": f"Regime '{regime_type}' is historically poor-performing - signal skipped",
+                },
+            )
+        
+        return CircuitBreakerDecision(
+            allowed=True,
+            reason="regime_avoidance_ok",
+            details={"regime": regime_type, "regime_confidence": regime_confidence},
+        )
+    
+    def _check_trigger_filters(self, signal: Dict[str, Any]) -> CircuitBreakerDecision:
+        """
+        Phase 3: De-risk low-quality trigger types.
+        
+        Rules:
+        - ema_cross requires volume_confirmed=true (39% WR vs better triggers)
+        - In ranging/volatile regimes, require volume confirmation for all entries
+        """
+        entry_trigger = str(signal.get("entry_trigger", signal.get("type", ""))).lower()
+        volume_confirmed = bool(signal.get("volume_confirmed", False))
+        
+        market_regime = signal.get("market_regime") or {}
+        if not isinstance(market_regime, dict):
+            market_regime = {}
+        regime_type = str(market_regime.get("regime", "unknown")).lower()
+        
+        # Check ema_cross volume requirement
+        if self.config.ema_cross_require_volume and entry_trigger == "ema_cross":
+            if not volume_confirmed:
+                return CircuitBreakerDecision(
+                    allowed=False,
+                    reason="trigger_ema_cross_no_volume",
+                    severity="info",
+                    details={
+                        "entry_trigger": entry_trigger,
+                        "volume_confirmed": volume_confirmed,
+                        "message": "ema_cross trigger requires volume confirmation",
+                    },
+                )
+        
+        # Check volume requirement in poor regimes
+        if self.config.low_regime_require_volume and regime_type in ("ranging", "volatile"):
+            if not volume_confirmed:
+                return CircuitBreakerDecision(
+                    allowed=False,
+                    reason="trigger_low_regime_no_volume",
+                    severity="info",
+                    details={
+                        "regime": regime_type,
+                        "entry_trigger": entry_trigger,
+                        "volume_confirmed": volume_confirmed,
+                        "message": f"Entries in '{regime_type}' regime require volume confirmation",
+                    },
+                )
+        
+        return CircuitBreakerDecision(
+            allowed=True,
+            reason="trigger_filters_ok",
+            details={
+                "entry_trigger": entry_trigger,
+                "volume_confirmed": volume_confirmed,
+                "regime": regime_type,
+            },
+        )
+    
+    def _check_ml_chop_shield(
+        self, signal: Dict[str, Any], ml_stats: Optional[Dict[str, Any]] = None
+    ) -> CircuitBreakerDecision:
+        """
+        Phase 4: Block ML FAIL signals in poor regimes when lift is proven.
+        
+        Preconditions (must all be met):
+        1. ML stats provided with sufficient scored trades (>= ml_min_scored_trades)
+        2. PASS vs FAIL win-rate delta >= ml_min_winrate_delta
+        3. Signal marked as ML FAIL
+        4. Current regime is in ml_chop_shield_regimes
+        """
+        if ml_stats is None:
+            return CircuitBreakerDecision(
+                allowed=True,
+                reason="ml_chop_shield_no_stats",
+            )
+        
+        # Check if enough trades have been scored
+        scored_trades = int(ml_stats.get("scored_trades", 0))
+        if scored_trades < self.config.ml_min_scored_trades:
+            return CircuitBreakerDecision(
+                allowed=True,
+                reason="ml_chop_shield_insufficient_data",
+                details={
+                    "scored_trades": scored_trades,
+                    "required": self.config.ml_min_scored_trades,
+                },
+            )
+        
+        # Check lift (PASS vs FAIL win-rate delta)
+        pass_win_rate = float(ml_stats.get("pass_win_rate", 0.0))
+        fail_win_rate = float(ml_stats.get("fail_win_rate", 0.0))
+        win_rate_delta = pass_win_rate - fail_win_rate
+        
+        if win_rate_delta < self.config.ml_min_winrate_delta:
+            return CircuitBreakerDecision(
+                allowed=True,
+                reason="ml_chop_shield_insufficient_lift",
+                details={
+                    "pass_win_rate": pass_win_rate,
+                    "fail_win_rate": fail_win_rate,
+                    "win_rate_delta": win_rate_delta,
+                    "required_delta": self.config.ml_min_winrate_delta,
+                },
+            )
+        
+        # Check if signal is ML FAIL
+        ml_prediction = signal.get("_ml_prediction") or {}
+        ml_pass = ml_prediction.get("pass_filter", True)  # Default to pass if no data
+        if ml_pass:
+            return CircuitBreakerDecision(
+                allowed=True,
+                reason="ml_chop_shield_signal_passed",
+                details={"ml_pass": ml_pass},
+            )
+        
+        # Check if current regime is in chop shield regimes
+        market_regime = signal.get("market_regime") or {}
+        if not isinstance(market_regime, dict):
+            market_regime = {}
+        regime_type = str(market_regime.get("regime", "unknown")).lower()
+        
+        shield_regimes_lower = [r.lower() for r in self.config.ml_chop_shield_regimes]
+        if regime_type not in shield_regimes_lower:
+            return CircuitBreakerDecision(
+                allowed=True,
+                reason="ml_chop_shield_regime_not_targeted",
+                details={
+                    "regime": regime_type,
+                    "shield_regimes": self.config.ml_chop_shield_regimes,
+                },
+            )
+        
+        # All conditions met - block the signal
+        return CircuitBreakerDecision(
+            allowed=False,
+            reason="ml_chop_shield",
+            severity="info",
+            details={
+                "regime": regime_type,
+                "ml_pass": ml_pass,
+                "pass_win_rate": pass_win_rate,
+                "fail_win_rate": fail_win_rate,
+                "win_rate_delta": win_rate_delta,
+                "scored_trades": scored_trades,
+                "message": f"ML FAIL signal blocked in '{regime_type}' regime (lift validated: {win_rate_delta:.1%})",
+            },
+        )
 
 
 def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> TradingCircuitBreaker:
@@ -629,6 +1095,22 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         # Session filter settings
         enable_session_filter=config.get("enable_session_filter", True),
         allowed_sessions=config.get("allowed_sessions", ["overnight", "midday", "close"]),
+        # Phase 1: Direction gating
+        enable_direction_gating=config.get("enable_direction_gating", True),
+        direction_gating_min_confidence=config.get("direction_gating_min_confidence", 0.70),
+        # Phase 2: Regime avoidance
+        enable_regime_avoidance=config.get("enable_regime_avoidance", False),
+        blocked_regimes=config.get("blocked_regimes", ["ranging", "volatile"]),
+        regime_avoidance_min_confidence=config.get("regime_avoidance_min_confidence", 0.70),
+        # Phase 3: Trigger filters
+        enable_trigger_filters=config.get("enable_trigger_filters", False),
+        ema_cross_require_volume=config.get("ema_cross_require_volume", True),
+        low_regime_require_volume=config.get("low_regime_require_volume", True),
+        # Phase 4: ML chop shield
+        enable_ml_chop_shield=config.get("enable_ml_chop_shield", False),
+        ml_min_scored_trades=config.get("ml_min_scored_trades", 50),
+        ml_min_winrate_delta=config.get("ml_min_winrate_delta", 0.15),
+        ml_chop_shield_regimes=config.get("ml_chop_shield_regimes", ["ranging", "volatile"]),
     )
     
     return TradingCircuitBreaker(cb_config)

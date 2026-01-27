@@ -64,6 +64,44 @@ trading_circuit_breaker:
     - midday       # 10AM-2PM ET: 45% WR, +$1,105
     - close        # 5PM-6PM ET: 78% WR, +$341
   # Blocked sessions (not listed above): premarket (4-6AM), morning (6-10AM), afternoon (2-5PM)
+  
+  # =========================================================================
+  # Phase 1: Direction gating by market regime (ENABLED by default)
+  # Based on data: shorts underperform longs (40% vs 47% WR)
+  # trending_up: 74% WR, ranging: 0% WR, volatile: 0% WR, trending_down: 40% WR
+  # =========================================================================
+  enable_direction_gating: true
+  direction_gating_min_confidence: 0.70  # Strict gating only if regime confidence >= this
+  # Rules: trending_up -> long only, trending_down -> short only
+  #        ranging/volatile/unknown -> long only (conservative)
+  
+  # =========================================================================
+  # Phase 2: Regime avoidance (OFF by default - shadow measurement)
+  # Will log "would-have-blocked" for ranging/volatile to validate impact
+  # =========================================================================
+  enable_regime_avoidance: false  # Start OFF; turn on after validating shadow data
+  blocked_regimes:
+    - ranging      # 0W/12L (0% WR) in recent data
+    - volatile     # 0W/2L (0% WR) in recent data
+  regime_avoidance_min_confidence: 0.70
+  
+  # =========================================================================
+  # Phase 3: Trigger-based de-risking (OFF by default - shadow measurement)
+  # =========================================================================
+  enable_trigger_filters: false  # Start OFF
+  ema_cross_require_volume: true   # ema_cross (39% WR) needs volume confirmation
+  low_regime_require_volume: true  # Require volume in ranging/volatile regimes
+  
+  # =========================================================================
+  # Phase 4: ML chop shield (OFF - requires proven lift)
+  # Only block ML FAIL after 50+ scored trades and 15%+ lift validated
+  # =========================================================================
+  enable_ml_chop_shield: false
+  ml_min_scored_trades: 50
+  ml_min_winrate_delta: 0.15       # PASS vs FAIL must differ by 15+ percentage points
+  ml_chop_shield_regimes:
+    - ranging
+    - volatile
 
 data:
   # Buffer sizes: sr_length=130, ATR(200) needs ~200 bars + margin

@@ -4026,7 +4026,7 @@ class TelegramCommandHandler:
                 agent_healthy=agent_healthy,
                 data_stale=data_stale,
             )
-
+            
             # ------------------------------------------------------------------
             # Transparent AI/ML status (one-liner; avoids confusion)
             # ------------------------------------------------------------------
@@ -4086,6 +4086,41 @@ class TelegramCommandHandler:
                     lift_progress = ""
 
                 message += f"\n🧠 AI/ML: AI {ai_label} • Bandit {bandit_mode} • Ctx {ctx_mode} • Filter {ml_label}{lift_progress}"
+            except Exception:
+                pass
+            
+            # ------------------------------------------------------------------
+            # Direction gating status (Phase 1 risk control)
+            # ------------------------------------------------------------------
+            try:
+                tcb = state.get("trading_circuit_breaker") or {}
+                dir_gating_enabled = tcb.get("direction_gating_enabled", False)
+                if dir_gating_enabled:
+                    # Show current session and direction gating status
+                    current_session = tcb.get("current_session", "")
+                    session_allowed = tcb.get("session_allowed", True)
+                    blocks = tcb.get("blocks_by_reason") or {}
+                    dir_blocks = blocks.get("direction_gating", 0)
+                    
+                    # Would-have-blocked counters (shadow measurement for Phases 2 & 3)
+                    whb_regime = tcb.get("would_have_blocked_regime", 0)
+                    whb_trigger = tcb.get("would_have_blocked_trigger", 0)
+                    
+                    # Build status line
+                    dir_status = "🛡️ Gate: Dir✓"
+                    if dir_blocks > 0:
+                        dir_status += f" ({dir_blocks}🚫)"
+                    
+                    # Shadow measurement counts (only show if non-zero)
+                    shadow_parts = []
+                    if whb_regime > 0:
+                        shadow_parts.append(f"regime:{whb_regime}")
+                    if whb_trigger > 0:
+                        shadow_parts.append(f"trigger:{whb_trigger}")
+                    if shadow_parts:
+                        dir_status += f" • Shadow({','.join(shadow_parts)})"
+                    
+                    message += f"\n{dir_status}"
             except Exception:
                 pass
             
@@ -4518,7 +4553,7 @@ class TelegramCommandHandler:
                 text += f"   ID: `{signal_id}`\n"
                 if entry_price:
                     text += f"   Entry: ${entry_price:,.2f}\n"
-            
+        
             # Add Close All button if trades exist
             if virtual_trades_count > 0:
                 keyboard_rows.append([
@@ -5624,7 +5659,7 @@ class TelegramCommandHandler:
                 status_counts[status] = status_counts.get(status, 0) + 1
                 type_counts[signal_type] = type_counts.get(signal_type, 0) + 1
                 direction_counts[direction] = direction_counts.get(direction, 0) + 1
-                
+            
                 if status == "exited":
                     total_pnl += float(signal.get("pnl", 0) or 0)
             
@@ -6074,22 +6109,22 @@ class TelegramCommandHandler:
                                 hold_times.append(hold_mins)
                         avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0
                         
-                        pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
                         wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
                         pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
                         
                         text += "*7-Day Summary:*\n"
-                        text += f"  Trades: {total_trades} ({wins}W / {losses}L)\n"
+                text += f"  Trades: {total_trades} ({wins}W / {losses}L)\n"
                         text += f"  Win Rate: {wr_emoji} {win_rate:.1f}%\n"
-                        text += f"  Total P&L: {pnl_emoji} ${total_pnl:,.2f}\n"
-                        text += f"  Avg P&L: ${avg_pnl:,.2f}\n"
+                text += f"  Total P&L: {pnl_emoji} ${total_pnl:,.2f}\n"
+                text += f"  Avg P&L: ${avg_pnl:,.2f}\n"
                         if profit_factor > 0:
                             text += f"  Profit Factor: {pf_emoji} {profit_factor:.2f}\n"
                         text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
                         text += f"  Avg Loss: 🔴 ${avg_loss:,.2f}\n"
-                        if avg_hold > 0:
-                            text += f"  Avg Hold: {avg_hold:.1f} min\n"
-                    else:
+                if avg_hold > 0:
+                    text += f"  Avg Hold: {avg_hold:.1f} min\n"
+            else:
                         text += "*7-Day Summary:*\n  No completed trades in the last 7 days.\n"
                     
                     # All-time summary
@@ -6252,21 +6287,21 @@ class TelegramCommandHandler:
                 largest_loss = min((float(t.get('pnl', 0) or 0) for t in all_trades), default=0)
                 
                 win_rate = (len(winning_trades) / len(all_trades) * 100) if all_trades else 0
-                
-                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+            
+            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
                 wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
                 pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
-                
-                text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
+            
+            text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
                 text += f"*Trades:* {len(all_trades)} ({len(winning_trades)}W / {len(losing_trades)}L)\n"
                 text += f"*Win Rate:* {wr_emoji} {win_rate:.1f}%\n\n"
-                
-                text += "*Averages:*\n"
-                text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
+            
+            text += "*Averages:*\n"
+            text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
                 text += f"  Avg Loss: 🔴 ${avg_loss:,.2f}\n\n"
-                
-                text += "*Extremes:*\n"
-                text += f"  Best Trade: 🟢 ${largest_win:,.2f}\n"
+            
+            text += "*Extremes:*\n"
+            text += f"  Best Trade: 🟢 ${largest_win:,.2f}\n"
                 text += f"  Worst Trade: 🔴 ${abs(largest_loss):,.2f}\n\n"
                 
                 text += "*Risk Metrics:*\n"
@@ -6289,8 +6324,8 @@ class TelegramCommandHandler:
                 if max_drawdown > 0:
                     dd_emoji = "⚠️" if max_drawdown > 500 else "📉"
                     text += f"  Max Drawdown: {dd_emoji} ${max_drawdown:,.2f}\n"
-            else:
-                text += "No completed trades to analyze.\n"
+        else:
+            text += "No completed trades to analyze.\n"
                 text += "\n💡 P&L data is calculated from your trading history."
         except Exception as e:
             logger.debug(f"Error loading P&L overview: {e}")

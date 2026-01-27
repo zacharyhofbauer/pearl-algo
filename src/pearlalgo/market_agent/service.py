@@ -202,11 +202,16 @@ class MarketAgentService:
         self.trading_circuit_breaker: Optional[TradingCircuitBreaker] = None
         if trading_circuit_breaker_settings.get("enabled", True):
             self.trading_circuit_breaker = create_trading_circuit_breaker(trading_circuit_breaker_settings)
+            # Validate config at startup
+            config_warnings = self.trading_circuit_breaker.validate_config()
+            if config_warnings:
+                logger.warning(f"Trading circuit breaker config warnings: {config_warnings}")
             logger.info(
                 f"Trading circuit breaker enabled: "
                 f"max_consecutive_losses={self.trading_circuit_breaker.config.max_consecutive_losses}, "
                 f"max_session_drawdown=${self.trading_circuit_breaker.config.max_session_drawdown}, "
-                f"max_positions={self.trading_circuit_breaker.config.max_concurrent_positions}"
+                f"max_positions={self.trading_circuit_breaker.config.max_concurrent_positions}, "
+                f"direction_gating={self.trading_circuit_breaker.config.enable_direction_gating}"
             )
 
         # ==========================================================================
