@@ -616,8 +616,27 @@ class TelegramCommandHandler:
                     line = line.strip()
                     if line:
                         try:
-                            signal = json.loads(line)
-                            signals.append(signal)
+                            rec = json.loads(line)
+                            # Normalize for UI: many handlers expect direction/type/etc at top-level,
+                            # but the JSONL stores these under rec["signal"].
+                            if isinstance(rec, dict):
+                                sig = rec.get("signal", {})
+                                if isinstance(sig, dict):
+                                    for k in (
+                                        "direction",
+                                        "type",
+                                        "symbol",
+                                        "timeframe",
+                                        "entry_price",
+                                        "stop_loss",
+                                        "take_profit",
+                                        "confidence",
+                                        "risk_reward",
+                                        "reason",
+                                    ):
+                                        if rec.get(k) is None and sig.get(k) is not None:
+                                            rec[k] = sig.get(k)
+                            signals.append(rec)
                         except json.JSONDecodeError:
                             continue
             # Return most recent signals first
@@ -3905,6 +3924,13 @@ class TelegramCommandHandler:
                     min_trades = lift.get("min_trades")
                     if scored is not None and min_trades:
                         lift_progress = f" • Lift {int(scored)}/{int(min_trades)}"
+                        try:
+                            p = lift.get("pass_trades")
+                            f = lift.get("fail_trades")
+                            if p is not None and f is not None:
+                                lift_progress += f" ({int(p)}P/{int(f)}F)"
+                        except Exception:
+                            pass
                 except Exception:
                     lift_progress = ""
 

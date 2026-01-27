@@ -309,6 +309,14 @@ class MarketAgentService:
         self._ml_lift_lookback_trades = int(ml_cfg.get("lift_lookback_trades", 200) or 200)
         self._ml_lift_min_trades = int(ml_cfg.get("lift_min_trades", 50) or 50)
         self._ml_lift_min_winrate_delta = float(ml_cfg.get("lift_min_winrate_delta", 0.05) or 0.05)
+        # Shadow-only threshold for lift measurement (does NOT affect trading; only pass/fail labels).
+        self._ml_shadow_threshold: Optional[float] = None
+        try:
+            st = ml_cfg.get("shadow_threshold", None)
+            if st is not None:
+                self._ml_shadow_threshold = float(st)
+        except Exception:
+            self._ml_shadow_threshold = None
         # Default safe: do NOT allow live blocking until we have evaluated lift.
         self._ml_blocking_allowed: bool = False
         self._ml_lift_metrics: Dict[str, Any] = {}
@@ -1536,8 +1544,22 @@ class MarketAgentService:
                     _should_exec, pred = self._ml_signal_filter.should_execute(signal, ctx)
                     try:
                         signal["_ml_prediction"] = pred.to_dict()
-                        # Shadow-only note (helps audits; not used for gating)
-                        signal["_ml_shadow_pass_filter"] = bool(_should_exec)
+                        # Shadow-only note (helps audits; not used for gating).
+                        # For lift measurement we can optionally use a separate shadow threshold
+                        # so we get a meaningful PASS/FAIL split without affecting trading.
+                        pass_for_lift = bool(_should_exec)
+                        try:
+                            if (
+                                getattr(self, "_ml_filter_mode", "shadow") == "shadow"
+                                and getattr(self, "_ml_shadow_threshold", None) is not None
+                            ):
+                                pass_for_lift = float(getattr(pred, "win_probability", 0.0) or 0.0) >= float(
+                                    self._ml_shadow_threshold  # type: ignore[arg-type]
+                                )
+                                signal["_ml_shadow_threshold"] = float(self._ml_shadow_threshold)  # type: ignore[arg-type]
+                        except Exception:
+                            pass_for_lift = bool(_should_exec)
+                        signal["_ml_shadow_pass_filter"] = bool(pass_for_lift)
                     except Exception:
                         signal["_ml_prediction"] = None
             except Exception as e:
@@ -4196,7 +4218,8 @@ class MarketAgentService:
         Expects trade dicts from TradeDatabase.get_recent_trades_by_exit(), including:
         - is_win (bool)
         - pnl (float)
-        - features.ml_pass_filter (0/1)
+        - features.ml_win_probability (float) OR features.ml_pass_filter (0/1)
+        - features.ml_pass_threshold (float, optional)
         - features.ml_fallback_used (0/1)
         """
         if not isinstance(trades, list) or not trades:
@@ -4210,7 +4233,9 @@ class MarketAgentService:
             feats = t.get("features", {})
             if not isinstance(feats, dict):
                 continue
-            if "ml_pass_filter" not in feats:
+            has_prob = ("ml_win_probability" in feats) and (feats.get("ml_win_probability") is not None)
+            has_flag = "ml_pass_filter" in feats
+            if not (has_prob or has_flag):
                 continue
             # If model wasn't ready, ML filter is in neutral fallback (no gating signal).
             try:
@@ -4221,30 +4246,68 @@ class MarketAgentService:
             scored.append(t)
 
         total_scored = len(scored)
-        if total_scored < int(getattr(self, "_ml_lift_min_trades", 50) or 50):
-            return {
-                "status": "insufficient_data",
-                "scored_trades": total_scored,
-                "min_trades": int(getattr(self, "_ml_lift_min_trades", 50) or 50),
-                "lift_ok": False,
-                "blocking_allowed": False,
-            }
-
-        pass_group = []
-        fail_group = []
+        # Determine pass/fail groups.
+        # Prefer probability-based thresholding (shadow_threshold / stored ml_pass_threshold) so we
+        # can create a meaningful split even if historical trades were written before that feature.
+        pass_group: list = []
+        fail_group: list = []
+        threshold_used: Optional[float] = None
         for t in scored:
             feats = t.get("features", {}) or {}
+
+            # Determine the threshold for this trade (prefer stored threshold, else current shadow threshold).
+            thr = None
             try:
-                pass_flag = float(feats.get("ml_pass_filter", 1.0) or 0.0) >= 0.5
+                if feats.get("ml_pass_threshold") is not None:
+                    thr = float(feats.get("ml_pass_threshold") or 0.0)
             except Exception:
-                pass_flag = True
+                thr = None
+            if thr is None:
+                try:
+                    st = getattr(self, "_ml_shadow_threshold", None)
+                    if getattr(self, "_ml_filter_mode", "shadow") == "shadow" and st is not None:
+                        thr = float(st)
+                except Exception:
+                    thr = None
+
+            pass_flag = True
+            if thr is not None:
+                threshold_used = float(thr)
+                try:
+                    p = float(feats.get("ml_win_probability", 0.0) or 0.0)
+                    pass_flag = p >= float(thr)
+                except Exception:
+                    pass_flag = True
+            else:
+                # Fallback to stored boolean flag if probability/threshold missing.
+                try:
+                    pass_flag = float(feats.get("ml_pass_filter", 1.0) or 0.0) >= 0.5
+                except Exception:
+                    pass_flag = True
+
             if pass_flag:
                 pass_group.append(t)
             else:
                 fail_group.append(t)
 
+        if total_scored < int(getattr(self, "_ml_lift_min_trades", 50) or 50):
+            # Provide pass/fail split even before reaching min_trades so operators can
+            # verify that lift measurement is actually meaningful (i.e. we have both groups).
+            out = {
+                "status": "insufficient_data",
+                "scored_trades": total_scored,
+                "min_trades": int(getattr(self, "_ml_lift_min_trades", 50) or 50),
+                "pass_trades": int(len(pass_group)),
+                "fail_trades": int(len(fail_group)),
+                "lift_ok": False,
+                "blocking_allowed": False,
+            }
+            if threshold_used is not None:
+                out["pass_threshold_used"] = float(threshold_used)
+            return out
+
         if not pass_group or not fail_group:
-            return {
+            out = {
                 "status": "no_split",
                 "scored_trades": total_scored,
                 "pass_trades": len(pass_group),
@@ -4253,6 +4316,9 @@ class MarketAgentService:
                 "blocking_allowed": False,
                 "reason": "Need both pass+fail groups to measure lift",
             }
+            if threshold_used is not None:
+                out["pass_threshold_used"] = float(threshold_used)
+            return out
 
         def _wr(xs: list) -> float:
             wins = 0
@@ -4302,6 +4368,7 @@ class MarketAgentService:
             "lift_avg_pnl": float(lift_pnl),
             "lift_ok": bool(lift_ok),
             "lift_min_winrate_delta": float(min_delta),
+            "pass_threshold_used": float(threshold_used) if threshold_used is not None else None,
             "mode": getattr(self, "_ml_filter_mode", "shadow"),
             "require_lift_to_block": bool(getattr(self, "_ml_require_lift_to_block", True)),
             "blocking_allowed": bool(blocking_allowed),

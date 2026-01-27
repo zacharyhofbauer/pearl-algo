@@ -440,10 +440,24 @@ class PerformanceTracker:
                             features["ml_win_probability"] = float(ml_pred.get("win_probability", 0.0) or 0.0)
                         except Exception:
                             pass
-                        try:
-                            features["ml_pass_filter"] = 1.0 if bool(ml_pred.get("pass_filter", True)) else 0.0
-                        except Exception:
-                            pass
+                        # Use shadow lift flag when available (separate threshold for measurement only).
+                        shadow_pf = signal.get("_ml_shadow_pass_filter", None)
+                        shadow_thr = signal.get("_ml_shadow_threshold", None)
+                        if shadow_pf is not None:
+                            try:
+                                features["ml_pass_filter"] = 1.0 if bool(shadow_pf) else 0.0
+                            except Exception:
+                                pass
+                            try:
+                                if shadow_thr is not None:
+                                    features["ml_pass_threshold"] = float(shadow_thr)
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                features["ml_pass_filter"] = 1.0 if bool(ml_pred.get("pass_filter", True)) else 0.0
+                            except Exception:
+                                pass
                         try:
                             features["ml_fallback_used"] = 1.0 if bool(ml_pred.get("fallback_used", False)) else 0.0
                         except Exception:
