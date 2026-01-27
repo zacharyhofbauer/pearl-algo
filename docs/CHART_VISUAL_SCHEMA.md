@@ -1,7 +1,7 @@
 # Chart Visual Schema & Trust Contracts
 
 **Status**: Authoritative reference for chart visual semantics  
-**Last Updated**: 2026-01-21  
+**Last Updated**: 2026-01-27  
 **Source of Truth**: `src/pearlalgo/market_agent/chart_generator.py`
 
 ---
@@ -50,12 +50,22 @@ A great chart feels boring — because the trader never has to wonder whether it
 | Element | Hex | Usage |
 |---------|-----|-------|
 | VWAP | `#2196f3` | VWAP line and bands — blue family |
-| MA[0] | `#2196f3` | First MA (e.g., MA20) — blue |
-| MA[1] | `#9c27b0` | Second MA (e.g., MA50) — purple |
-| MA[2] | `#f44336` | Third MA (e.g., MA200) — red |
+| MA[0] | `#2196f3` | First MA (e.g., EMA9) — blue |
+| MA[1] | `#2196f3` | Second MA (e.g., EMA20) — blue |
+| MA[2] | `#9c27b0` | Third MA (e.g., EMA50) — purple |
+| MA[3] | `#f44336` | Fourth MA (e.g., EMA200) — red |
 | RSI | `#b388ff` | RSI line in sub-panel — light purple |
 
-**Contract**: MA colors are assigned in order. Changing the order changes visual meaning.
+**Contract**: MA colors are assigned in order (default: [9, 20, 50, 200]). Blue for fast EMAs, purple for medium, red for slow. Changing the order changes visual meaning.
+
+### TBT Trendline Colors (Configurable)
+
+| Element | Hex | Constant | Usage |
+|---------|-----|----------|-------|
+| TBT Resistance | `#ffc107` | `tbt_resistance_color` | Amber/yellow resistance trendline |
+| TBT Support | `#00e676` | `tbt_support_color` | Light green support trendline |
+
+**Contract**: Trendlines are dashed by default (`tbt_line_style: "--"`). Colors are configurable but should remain distinct from indicator colors.
 
 ### Zone Colors (HUD Overlays)
 
@@ -228,9 +238,11 @@ Same structure as dashboard, plus:
 
 ### Session Metrics Displayed
 
-- Range in ticks
-- Session average price
+- Session name (top line)
+- Range in ticks and session average price (second line, comma-separated)
 - Open/Close levels (dashed lines within session span)
+
+**Format**: `"SessionName\nRange: X, Avg: Y,YYY.YY"` (controlled by `show_session_range_stats`)
 
 ---
 
@@ -360,9 +372,26 @@ then re-run the visual regression tests to confirm.
 
 ## Optional Configuration
 
+### Mobile Mode (Consolidated)
+
+Enable all mobile-friendly optimizations with a single flag:
+
+```python
+config = ChartConfig(
+    mobile_mode=True,  # Enables all mobile optimizations
+)
+```
+
+This automatically sets:
+- `mobile_enhanced_fonts=True` (larger fonts)
+- `rr_box_font_size=10` (larger RR box labels)
+- `compact_labels=True` (reduced clutter)
+- `max_right_labels=6` (fewer labels)
+- `right_label_merge_ticks=6` (more aggressive merging)
+
 ### Mobile Readability Enhancement (P7)
 
-Enable larger RR box fonts for mobile viewing:
+Enable larger RR box fonts for mobile viewing (without full mobile mode):
 
 ```python
 config = ChartConfig(
@@ -381,7 +410,57 @@ config = ChartConfig(
 )
 ```
 
-**Note**: These options are disabled by default to preserve baseline stability and existing visual contracts.
+### Power Meter Display
+
+Show buy/sell power ratio in top-left corner (independent of power channel zones):
+
+```python
+config = ChartConfig(
+    show_power_readout=True,   # Show "Power X/Y" in top-left (default: True)
+    show_power_channel=False,  # Can hide zones while keeping readout
+)
+```
+
+**Contract**: Power readout shows buy/sell candle count from the lookback period. Format: "Power {buy}/{sell}".
+
+### VWAP Band Fills
+
+Enable semi-transparent fills between VWAP line and ±1σ bands:
+
+```python
+config = ChartConfig(
+    vwap_fill_bands=True,  # Default: False
+)
+```
+
+**Contract**: Fills use VWAP_COLOR with alpha 0.08, placed at ZORDER_ZONES (behind candles).
+
+### Indicator Legend
+
+Show/hide the indicator legend in top-right corner:
+
+```python
+config = ChartConfig(
+    show_legend=True,  # Default: True
+)
+```
+
+**Contract**: Legend shows VWAP first, then EMAs in configured order. Placed in upper-right to avoid collision with power readout (upper-left).
+
+### TBT Trendline Customization
+
+Customize TBT trendline appearance:
+
+```python
+config = ChartConfig(
+    tbt_resistance_color="#ffc107",  # Amber/yellow (default)
+    tbt_support_color="#00e676",     # Light green (default)
+    tbt_line_style="--",             # Dashed (default)
+    tbt_line_width=1.8,              # Line width (default)
+)
+```
+
+**Note**: All optional features are disabled by default (except show_legend and show_power_readout) to preserve baseline stability and existing visual contracts.
 
 ---
 
@@ -439,6 +518,13 @@ chart_path = generator.generate_dashboard_chart(
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-01-27 | Added mobile_mode consolidated flag for all mobile optimizations | AI Agent |
+| 2026-01-27 | Added show_power_readout option (independent of power channel zones) | AI Agent |
+| 2026-01-27 | Added vwap_fill_bands option for VWAP band fills | AI Agent |
+| 2026-01-27 | Added show_legend config option | AI Agent |
+| 2026-01-27 | Added configurable TBT trendline colors (tbt_resistance_color, tbt_support_color) | AI Agent |
+| 2026-01-27 | Enhanced session labels with Range/Avg stats (show_session_range_stats) | AI Agent |
+| 2026-01-27 | Expanded MA_COLORS to 4 colors, default ma_periods now [9, 20, 50, 200] | AI Agent |
 | 2026-01-21 | Added optional render manifest for semantic regression | AI Agent |
 | 2026-01-21 | Added comprehensive baseline/test/generator inventory | AI Agent |
 | 2026-01-21 | Documented EMA crossover markers (cyan/pink) with semantic ambiguity warning | AI Agent |

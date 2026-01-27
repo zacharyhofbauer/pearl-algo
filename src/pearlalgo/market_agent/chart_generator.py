@@ -43,7 +43,13 @@ SIGNAL_LONG = "#26a69a"
 SIGNAL_SHORT = "#ef5350"
 ENTRY_COLOR = "#2962ff"
 VWAP_COLOR = "#2196f3"
-MA_COLORS = ['#2196f3', '#9c27b0', '#f44336']
+# MA colors: supports up to 4 EMAs (9, 20, 50, 200)
+# Blue for fast (9/20), Purple for medium (50), Red for slow (200)
+MA_COLORS = ['#2196f3', '#2196f3', '#9c27b0', '#f44336']
+
+# TBT Trendline colors (configurable via ChartConfig)
+TBT_RESISTANCE_COLOR = "#ffc107"  # Amber/yellow for resistance trendlines
+TBT_SUPPORT_COLOR = "#00e676"     # Light green for support trendlines
 
 # Zone colors (LuxAlgo/ChartPrime style)
 SUPPLY_ZONE_COLOR = "#2157f3"  # LuxAlgo supply zone (resistance) - blue
@@ -849,7 +855,7 @@ class ChartConfig:
     """Configuration for chart generation with TradingView-style defaults."""
     show_vwap: bool = True
     show_ma: bool = True
-    ma_periods: List[int] = field(default_factory=lambda: [20, 50])
+    ma_periods: List[int] = field(default_factory=lambda: [9, 20, 50, 200])  # EMA9/20/50/200 by default
     signal_marker_size: int = 300
     max_signals_displayed: int = 50
     cluster_signals: bool = True
@@ -869,11 +875,19 @@ class ChartConfig:
     show_session_oc: bool = True
     show_session_tick_range: bool = True
     show_session_average: bool = True
+    show_session_range_stats: bool = True  # Show Range/Avg inside session shading
 
     show_supply_demand: bool = True
     show_power_channel: bool = True
+    show_power_readout: bool = True  # Show Power buy/sell ratio in top-left corner
     show_tbt_targets: bool = True
     show_key_levels: bool = True
+
+    # TBT Trendline styling (configurable colors for visibility)
+    tbt_resistance_color: str = "#ffc107"  # Amber/yellow for resistance
+    tbt_support_color: str = "#00e676"     # Light green for support
+    tbt_line_style: str = "--"             # Dashed line style
+    tbt_line_width: float = 1.8            # Line width
 
     show_right_labels: bool = True
     max_right_labels: int = 12
@@ -881,6 +895,12 @@ class ChartConfig:
 
     show_rsi: bool = True
     rsi_period: int = 14
+
+    # VWAP band fill option (visual enhancement)
+    vwap_fill_bands: bool = False  # Fill between VWAP and ±1σ bands
+
+    # Legend display option
+    show_legend: bool = True  # Show indicator legend in top-right corner
 
     # Optional mobile readability enhancement (P7 from visual integrity plan)
     # When True, uses 10pt font for RR box labels (vs default 9pt) for better
@@ -894,6 +914,11 @@ class ChartConfig:
     # - right_label_merge_ticks increased to 6 (from 4)
     # Default False to preserve current behavior.
     compact_labels: bool = False
+
+    # Mobile mode: consolidates all mobile optimizations
+    # When True, enables: mobile_enhanced_fonts, larger tick labels, thicker lines,
+    # auto-compact labels, and reduced max_right_labels
+    mobile_mode: bool = False
 
     @classmethod
     def from_strategy_config(cls, strategy_config) -> "ChartConfig":
@@ -911,18 +936,27 @@ class ChartConfig:
             "hud_show_session_oc": "show_session_oc",
             "hud_show_session_tick_range": "show_session_tick_range",
             "hud_show_session_average": "show_session_average",
+            "hud_show_session_range_stats": "show_session_range_stats",
             "hud_show_supply_demand": "show_supply_demand",
             "hud_show_power_channel": "show_power_channel",
+            "hud_show_power_readout": "show_power_readout",
             "hud_show_tbt_targets": "show_tbt_targets",
             "hud_show_key_levels": "show_key_levels",
+            "hud_tbt_resistance_color": "tbt_resistance_color",
+            "hud_tbt_support_color": "tbt_support_color",
+            "hud_tbt_line_style": "tbt_line_style",
+            "hud_tbt_line_width": "tbt_line_width",
             "hud_show_right_labels": "show_right_labels",
             "hud_max_right_labels": "max_right_labels",
             "hud_right_label_merge_ticks": "right_label_merge_ticks",
             "hud_show_rsi": "show_rsi",
             "hud_rsi_period": "rsi_period",
+            "hud_vwap_fill_bands": "vwap_fill_bands",
+            "hud_show_legend": "show_legend",
             "hud_mobile_enhanced_fonts": "mobile_enhanced_fonts",
             "hud_rr_box_font_size": "rr_box_font_size",
             "hud_compact_labels": "compact_labels",
+            "hud_mobile_mode": "mobile_mode",
         }
         
         for src_attr, dst_attr in attr_map.items():
@@ -945,6 +979,12 @@ class ChartGenerator:
             raise ImportError("mplfinance required. Install with: pip install mplfinance")
         
         self.config = config or ChartConfig()
+        
+        # Apply mobile mode optimizations if enabled
+        # This consolidates all mobile-friendly settings into a single flag
+        if self.config.mobile_mode:
+            self._apply_mobile_mode()
+        
         # Default export DPI tuned for Telegram clarity while keeping file sizes reasonable.
         self.dpi = 200
 
@@ -956,6 +996,27 @@ class ChartGenerator:
         
         # Create TradingView dark theme style
         self._create_tradingview_style()
+    
+    def _apply_mobile_mode(self) -> None:
+        """Apply all mobile-friendly optimizations when mobile_mode=True.
+        
+        Consolidates multiple settings for optimal mobile/Telegram viewing:
+        - Larger fonts for readability on small screens
+        - Compact labels to reduce clutter
+        - Thicker lines for visibility
+        - Fewer right-side labels
+        """
+        # Enable mobile-enhanced fonts (larger RR box labels)
+        self.config.mobile_enhanced_fonts = True
+        self.config.rr_box_font_size = 10  # Slightly larger than default 9pt
+        
+        # Enable compact label mode
+        self.config.compact_labels = True
+        self.config.max_right_labels = 6  # Reduced from default 12
+        self.config.right_label_merge_ticks = 6  # More aggressive merging
+        
+        # Keep legend visible but session stats may clutter on small screens
+        # Users can still override these individually if needed
 
     def _load_key_level_history(self, symbol: str) -> Optional[pd.DataFrame]:
         """
@@ -1924,17 +1985,26 @@ class ChartGenerator:
                         )
 
                 if self.config.show_session_names:
-                    parts = []
-                    if self.config.show_session_tick_range:
-                        rt = s.get("range_ticks")
-                        if rt is not None:
-                            parts.append(f"Range: {rt}")
-                    if self.config.show_session_average:
-                        avg = s.get("avg")
-                        if avg is not None:
-                            parts.append(f"Avg: {float(avg):.2f}")
-                    parts.append(str(s.get("name") or "Session"))
-                    label = "\n".join(parts)
+                    # Build label with session name on top, stats below (like TradingView)
+                    name = str(s.get("name") or "Session")
+                    
+                    # Stats line (Range and Avg on same line, comma-separated)
+                    stats_parts = []
+                    if self.config.show_session_range_stats:
+                        if self.config.show_session_tick_range:
+                            rt = s.get("range_ticks")
+                            if rt is not None:
+                                stats_parts.append(f"Range: {rt}")
+                        if self.config.show_session_average:
+                            avg = s.get("avg")
+                            if avg is not None:
+                                stats_parts.append(f"Avg: {float(avg):,.2f}")
+                    
+                    # Format: "SessionName\nRange: X, Avg: Y,YYY.YY"
+                    if stats_parts:
+                        label = f"{name}\n{', '.join(stats_parts)}"
+                    else:
+                        label = name
 
                     # Place label inside the panel (ymin + offset) for consistent visibility
                     # This prevents labels from overlapping panel boundaries
@@ -1987,51 +2057,111 @@ class ChartGenerator:
         except Exception:
             return
 
+    def _draw_vwap_band_fills(self, ax, hud: Dict) -> None:
+        """Draw VWAP band fills (optional visual enhancement).
+        
+        Creates semi-transparent fills between VWAP line and ±1σ bands for better
+        visibility of the VWAP channel. Only drawn if vwap_fill_bands is enabled.
+        """
+        if not self.config.vwap_fill_bands:
+            return
+        
+        vwap_data = hud.get("vwap") if isinstance(hud, dict) else None
+        if not isinstance(vwap_data, dict):
+            return
+        
+        try:
+            # Get stored series data
+            vwap_series = vwap_data.get("_series")
+            upper1 = vwap_data.get("_upper1")
+            lower1 = vwap_data.get("_lower1")
+            
+            if vwap_series is None or upper1 is None or lower1 is None:
+                return
+            
+            # Fill between VWAP and upper band
+            if not vwap_series.isna().all() and not upper1.isna().all():
+                x_coords = np.arange(len(vwap_series))
+                # Fill between VWAP and +1σ (upper region)
+                ax.fill_between(
+                    x_coords,
+                    vwap_series.fillna(method='ffill').fillna(method='bfill').values,
+                    upper1.fillna(method='ffill').fillna(method='bfill').values,
+                    color=VWAP_COLOR,
+                    alpha=0.08,
+                    zorder=ZORDER_ZONES,
+                    linewidth=0,
+                )
+            
+            # Fill between VWAP and lower band
+            if not vwap_series.isna().all() and not lower1.isna().all():
+                x_coords = np.arange(len(vwap_series))
+                # Fill between VWAP and -1σ (lower region)
+                ax.fill_between(
+                    x_coords,
+                    lower1.fillna(method='ffill').fillna(method='bfill').values,
+                    vwap_series.fillna(method='ffill').fillna(method='bfill').values,
+                    color=VWAP_COLOR,
+                    alpha=0.08,
+                    zorder=ZORDER_ZONES,
+                    linewidth=0,
+                )
+        except Exception:
+            return
+
     def _draw_power_channel_overlay(self, ax, hud: Dict) -> None:
         """Draw ChartPrime-style power channel with explicit z-order."""
-        if not self.config.show_power_channel:
-            return
         pc = hud.get("power_channel") if isinstance(hud, dict) else None
         if not isinstance(pc, dict):
             return
 
         try:
-            t_col = POWER_CHANNEL_RESISTANCE  # fuchsia (Pine default)
-            b_col = POWER_CHANNEL_SUPPORT  # lime (Pine default)
+            # Draw power channel zones only if show_power_channel is True
+            if self.config.show_power_channel:
+                t_col = POWER_CHANNEL_RESISTANCE  # fuchsia (Pine default)
+                b_col = POWER_CHANNEL_SUPPORT  # lime (Pine default)
 
-            res_top = float(pc.get("res_area_top", 0.0) or 0.0)
-            res_bot = float(pc.get("res_area_bottom", 0.0) or 0.0)
-            sup_top = float(pc.get("sup_area_top", 0.0) or 0.0)
-            sup_bot = float(pc.get("sup_area_bottom", 0.0) or 0.0)
-            mid = float(pc.get("mid", 0.0) or 0.0)
+                res_top = float(pc.get("res_area_top", 0.0) or 0.0)
+                res_bot = float(pc.get("res_area_bottom", 0.0) or 0.0)
+                sup_top = float(pc.get("sup_area_top", 0.0) or 0.0)
+                sup_bot = float(pc.get("sup_area_bottom", 0.0) or 0.0)
+                mid = float(pc.get("mid", 0.0) or 0.0)
 
-            if res_top > 0 and res_bot > 0 and res_top > res_bot:
-                ax.axhspan(res_bot, res_top, facecolor=t_col, alpha=ALPHA_ZONE_POWER_CHANNEL, edgecolor="none", zorder=ZORDER_ZONES)
-                ax.axhline(res_top, color=t_col, linewidth=1.2, alpha=ALPHA_LINE_SECONDARY, zorder=ZORDER_ZONES)
-            if sup_top > 0 and sup_bot > 0 and sup_top > sup_bot:
-                ax.axhspan(sup_bot, sup_top, facecolor=b_col, alpha=ALPHA_ZONE_POWER_CHANNEL, edgecolor="none", zorder=ZORDER_ZONES)
-                ax.axhline(sup_bot, color=b_col, linewidth=1.2, alpha=0.7, zorder=ZORDER_ZONES)
-            if mid > 0:
-                ax.axhline(mid, color=TEXT_SECONDARY, linewidth=1.0, alpha=0.45, linestyle=":", zorder=ZORDER_ZONES)
+                if res_top > 0 and res_bot > 0 and res_top > res_bot:
+                    ax.axhspan(res_bot, res_top, facecolor=t_col, alpha=ALPHA_ZONE_POWER_CHANNEL, edgecolor="none", zorder=ZORDER_ZONES)
+                    ax.axhline(res_top, color=t_col, linewidth=1.2, alpha=ALPHA_LINE_SECONDARY, zorder=ZORDER_ZONES)
+                if sup_top > 0 and sup_bot > 0 and sup_top > sup_bot:
+                    ax.axhspan(sup_bot, sup_top, facecolor=b_col, alpha=ALPHA_ZONE_POWER_CHANNEL, edgecolor="none", zorder=ZORDER_ZONES)
+                    ax.axhline(sup_bot, color=b_col, linewidth=1.2, alpha=0.7, zorder=ZORDER_ZONES)
+                if mid > 0:
+                    ax.axhline(mid, color=TEXT_SECONDARY, linewidth=1.0, alpha=0.45, linestyle=":", zorder=ZORDER_ZONES)
 
-            # Power readout (compact) - placed with high z-order for visibility
-            buy = pc.get("buy_power")
-            sell = pc.get("sell_power")
-            if buy is not None or sell is not None:
-                txt = f"Power {int(buy or 0)}/{int(sell or 0)}"
-                # Place in upper-left of price panel
-                ax.text(
-                    0.01,
-                    0.90,
-                    txt,
-                    transform=ax.transAxes,
-                    ha="left",
-                    va="top",
-                    fontsize=FONT_SIZE_POWER_READOUT,
-                    color=TEXT_PRIMARY,
-                    alpha=0.85,
-                    zorder=ZORDER_TEXT_LABELS,
-                )
+            # Power readout (compact) - can be shown independently of power channel zones
+            # Placed in top-left with semi-transparent background for visibility
+            if self.config.show_power_readout:
+                buy = pc.get("buy_power")
+                sell = pc.get("sell_power")
+                if buy is not None or sell is not None:
+                    txt = f"Power {int(buy or 0)}/{int(sell or 0)}"
+                    # Place in upper-left of price panel with background box
+                    ax.text(
+                        0.02,
+                        0.98,
+                        txt,
+                        transform=ax.transAxes,
+                        ha="left",
+                        va="top",
+                        fontsize=FONT_SIZE_POWER_READOUT,
+                        color=TEXT_PRIMARY,
+                        alpha=0.95,
+                        zorder=ZORDER_TEXT_LABELS,
+                        bbox=dict(
+                            facecolor=DARK_BG,
+                            alpha=ALPHA_LEGEND_BG,
+                            edgecolor=GRID_COLOR,
+                            boxstyle="round,pad=0.3",
+                        ),
+                    )
         except Exception:
             return
 
@@ -2066,15 +2196,21 @@ class ChartGenerator:
                         continue
 
                     kind = str(ln.get("kind") or "").strip().lower()
-                    # Use high-contrast colors so trendlines remain visible over dense candles.
-                    col = "#ffeb3b" if kind == "resistance" else ("#ff9800" if kind == "support" else TEXT_PRIMARY)
-                    ls = "--" if kind in ("resistance", "support") else ":"
+                    # Use configurable high-contrast colors so trendlines remain visible over dense candles.
+                    if kind == "resistance":
+                        col = self.config.tbt_resistance_color
+                    elif kind == "support":
+                        col = self.config.tbt_support_color
+                    else:
+                        col = TEXT_PRIMARY
+                    ls = self.config.tbt_line_style if kind in ("resistance", "support") else ":"
+                    lw = self.config.tbt_line_width
                     ax.plot(
                         [x1, x2],
                         [y1, y2],
                         color=col,
-                        linewidth=2.0,
-                        alpha=0.75,
+                        linewidth=lw,
+                        alpha=0.80,
                         linestyle=ls,
                         zorder=(ZORDER_CANDLES + 0.05),
                     )
@@ -2142,8 +2278,13 @@ class ChartGenerator:
         """Draw a consistent legend for dashboard charts.
         
         Fixed order: VWAP, EMA(…) lines (or configured periods).
-        Placed in upper-left corner with stable styling.
+        Placed in upper-right corner with stable styling.
+        Respects the show_legend config option.
         """
+        # Check if legend is enabled via config
+        if not self.config.show_legend:
+            return
+            
         try:
             from matplotlib.lines import Line2D
             
@@ -2156,9 +2297,9 @@ class ChartGenerator:
                     "VWAP"
                 ))
             
-            # Moving averages in order
+            # Moving averages in order (supports up to 4 EMAs with distinct colors)
             if show_ma:
-                ma_periods_list = ma_periods or [20, 50, 200]
+                ma_periods_list = ma_periods or self.config.ma_periods
                 for i, period in enumerate(ma_periods_list):
                     color = MA_COLORS[i % len(MA_COLORS)]
                     legend_items.append((
@@ -2170,7 +2311,7 @@ class ChartGenerator:
                 return
             
             handles, labels = zip(*legend_items)
-            # Place legend away from the Power readout (which lives upper-left at y≈0.90).
+            # Place legend away from the Power readout (which lives upper-left at y≈0.98).
             # Upper-right is consistently free and avoids collisions on mobile charts.
             ax.legend(
                 handles,
@@ -3647,6 +3788,11 @@ class ChartGenerator:
                                 "vwap_upper_2": float(upper2.dropna().iloc[-1]) if not upper2.isna().all() else last_vwap,
                                 "vwap_lower_2": float(lower2.dropna().iloc[-1]) if not lower2.isna().all() else last_vwap,
                             }
+                            # Store full series for fill_between when enabled
+                            if self.config.vwap_fill_bands:
+                                hud["vwap"]["_series"] = vwap_series
+                                hud["vwap"]["_upper1"] = upper1
+                                hud["vwap"]["_lower1"] = lower1
                         except Exception:
                             pass
                 except Exception as e:
@@ -4036,6 +4182,9 @@ class ChartGenerator:
                     self._draw_supply_demand_overlay(ax_price, hud)
                     self._draw_power_channel_overlay(ax_price, hud)
                     self._draw_tbt_overlay(ax_price, hud)
+                    
+                    # VWAP band fills (optional, enabled via vwap_fill_bands config)
+                    self._draw_vwap_band_fills(ax_price, hud)
 
                     # Key levels (DO/PDH/PDL/PDM, RTH, VWAP, POC) via shared pipeline
                     # Reuses _collect_level_candidates for consistency with entry/exit charts
