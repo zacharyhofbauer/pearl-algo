@@ -198,8 +198,8 @@ class MarketAgentTelegramNotifier:
                     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                     keyboard = [
                         [
-                            InlineKeyboardButton("🔍 Details", callback_data=f"signal_detail:{signal_id[:8]}"),
-                            InlineKeyboardButton("🏠 Menu", callback_data="back"),
+                            InlineKeyboardButton("🔍 Details", callback_data=callback_signal_detail(signal_id[:16])),
+                            InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
                         ]
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -971,6 +971,9 @@ class MarketAgentTelegramNotifier:
                     keyboard = [
                         [
                             InlineKeyboardButton("ℹ️ Details", callback_data=callback_signal_detail(signal_id[:16])),
+                            InlineKeyboardButton("🚫 Close All", callback_data=callback_action("close_all_trades")),
+                        ],
+                        [
                             InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
                         ],
                     ]
@@ -1103,7 +1106,7 @@ class MarketAgentTelegramNotifier:
                     keyboard = [
                         [
                             InlineKeyboardButton("ℹ️ Details", callback_data=callback_signal_detail(signal_id[:16])),
-                            InlineKeyboardButton("🚫 Close All", callback_data="action:close_all_trades"),
+                            InlineKeyboardButton("🚫 Close All", callback_data=callback_action("close_all_trades")),
                         ],
                         [
                             InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
@@ -1691,6 +1694,157 @@ class MarketAgentTelegramNotifier:
                 data_stale=(None if data_age_seconds is None else bool(is_data_stale)),
             )
 
+            # ------------------------------------------------------------------
+            # Transparent AI/ML status (one-liner; match /start dashboard)
+            # ------------------------------------------------------------------
+            try:
+                # AI readiness (best-effort): informational only (does not affect trading).
+                ai_ready = False
+                try:
+                    from pearlalgo.utils.openai_client import OPENAI_AVAILABLE, OpenAIClient
+
+                    if OPENAI_AVAILABLE:
+                        try:
+                            OpenAIClient()
+                            ai_ready = True
+                        except Exception:
+                            ai_ready = False
+                except Exception:
+                    ai_ready = False
+
+                bandit = status.get("learning") or {}
+                bandit_mode = str(bandit.get("mode") or "off").lower()
+
+                ctx = status.get("learning_contextual") or {}
+                ctx_mode = str(ctx.get("mode") or "off").lower() or "off"
+
+                ml_label = "?"
+                try:
+                    ml_state = status.get("ml_filter") or {}
+                    if isinstance(ml_state, dict) and "enabled" in ml_state:
+                        if bool(ml_state.get("enabled", False)):
+                            mm = str(ml_state.get("mode") or "on").lower()
+                            ml_label = mm if mm in ("shadow", "live") else "on"
+                        else:
+                            ml_label = "off"
+                except Exception:
+                    ml_label = "?"
+
+                lift_progress = ""
+                try:
+                    ml_state = status.get("ml_filter") or {}
+                    lift = (ml_state or {}).get("lift") if isinstance(ml_state, dict) else {}
+                    lift = lift or {}
+                    scored = lift.get("scored_trades")
+                    min_trades = lift.get("min_trades")
+                    if scored is not None and min_trades:
+                        lift_progress = f" • Lift {int(scored)}/{int(min_trades)}"
+                        try:
+                            p = lift.get("pass_trades")
+                            f = lift.get("fail_trades")
+                            if p is not None and f is not None:
+                                lift_progress += f" ({int(p)}P/{int(f)}F)"
+                        except Exception:
+                            pass
+                except Exception:
+                    lift_progress = ""
+
+                ai_label = "ON" if ai_ready else "OFF"
+                message += f"\n🧠 AI/ML: AI {ai_label} • Bandit {bandit_mode} • Ctx {ctx_mode} • Filter {ml_label}{lift_progress}"
+            except Exception:
+                pass
+
+            # ------------------------------------------------------------------
+            # 24h + 72h performance (match /start dashboard semantics)
+            # ------------------------------------------------------------------
+            try:
+                from datetime import timedelta
+                import json
+
+                daily_pnl = status.get("daily_pnl")
+                daily_trades = status.get("daily_trades")
+                daily_wins = status.get("daily_wins")
+                daily_losses = status.get("daily_losses")
+
+                perf_trades: list[dict] = []
+                today_trades_list: list[dict] = []
+                perf_file = self.state_dir / "performance.json"
+                if perf_file.exists():
+                    try:
+                        perf_trades = json.loads(perf_file.read_text(encoding="utf-8"))
+                        if not isinstance(perf_trades, list):
+                            perf_trades = []
+                    except Exception:
+                        perf_trades = []
+
+                # "24h" section is actually today's UTC trades (legacy label; matches existing dashboard).
+                if perf_trades:
+                    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    today_trades_list = [t for t in perf_trades if today_str in str(t.get("exit_time", "") or "")]
+                    if today_trades_list and (daily_pnl is None or daily_trades is None):
+                        daily_pnl = sum(float(t.get("pnl", 0) or 0) for t in today_trades_list)
+                        daily_trades = len(today_trades_list)
+                        daily_wins = sum(1 for t in today_trades_list if t.get("is_win"))
+                        daily_losses = int(daily_trades - int(daily_wins or 0))
+
+                # Streak (from today's trades)
+                current_streak = 0
+                streak_type = None  # 'win' or 'loss'
+                if today_trades_list:
+                    sorted_trades = sorted(today_trades_list, key=lambda t: str(t.get("exit_time", "") or ""))
+                    for t in reversed(sorted_trades):
+                        is_win = bool(t.get("is_win", False))
+                        if streak_type is None:
+                            streak_type = "win" if is_win else "loss"
+                            current_streak = 1
+                        elif (streak_type == "win" and is_win) or (streak_type == "loss" and (not is_win)):
+                            current_streak += 1
+                        else:
+                            break
+
+                daily_pnl = float(daily_pnl or 0.0)
+                daily_trades = int(daily_trades or 0)
+                daily_wins = int(daily_wins or 0)
+                daily_losses = int(daily_losses or 0)
+
+                if daily_trades > 0 or daily_pnl != 0:
+                    pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                    pnl_sign = "+" if daily_pnl >= 0 else "-"
+                    win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0.0
+                    streak_str = ""
+                    if current_streak >= 3 and streak_type:
+                        streak_str = f" • {'🔥' if streak_type == 'win' else '❄️'}{current_streak}{'W' if streak_type == 'win' else 'L'}"
+                    message += "\n\n*24h:*"
+                    message += f"\n{pnl_emoji} {pnl_sign}${abs(daily_pnl):,.2f} ({daily_wins}W/{daily_losses}L • {win_rate:.0f}% WR){streak_str}"
+
+                # Rolling 72h
+                if perf_trades:
+                    cutoff = datetime.now(timezone.utc) - timedelta(hours=72)
+                    trades_72h: list[dict] = []
+                    for t in perf_trades:
+                        try:
+                            ts = str(t.get("exit_time", "") or "")
+                            if not ts:
+                                continue
+                            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            if dt >= cutoff:
+                                trades_72h.append(t)
+                        except Exception:
+                            continue
+                    if trades_72h:
+                        pnl_72h = sum(float(t.get("pnl", 0) or 0) for t in trades_72h)
+                        wins_72h = sum(1 for t in trades_72h if t.get("is_win"))
+                        losses_72h = int(len(trades_72h) - int(wins_72h or 0))
+                        wr_72h = (wins_72h / len(trades_72h) * 100) if trades_72h else 0.0
+                        pnl_emoji_72h = "🟢" if pnl_72h >= 0 else "🔴"
+                        pnl_sign_72h = "+" if pnl_72h >= 0 else "-"
+                        message += "\n\n*72h:*"
+                        message += f"\n{pnl_emoji_72h} {pnl_sign_72h}${abs(pnl_72h):,.2f} ({int(wins_72h)}W/{int(losses_72h)}L • {wr_72h:.0f}% WR)"
+            except Exception:
+                pass
+
             # Challenge + performance (best-effort; never block dashboard).
             try:
                 from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
@@ -1707,8 +1861,6 @@ class MarketAgentTelegramNotifier:
                         unrealized_pnl = float(unrealized_pnl)
                     except (ValueError, TypeError):
                         unrealized_pnl = None
-
-                message += "\n\n" + ct.get_status_summary(bot_label="Scanner", unrealized_pnl=unrealized_pnl)
 
                 # 30d performance (from SQLite if available)
                 try:
@@ -1732,21 +1884,30 @@ class MarketAgentTelegramNotifier:
                 except Exception:
                     pass
 
-                # Challenge (current run) — match screenshot format.
+                # Single canonical challenge block (avoid duplicate "current run" sections).
                 try:
-                    # Use same unrealized_pnl as above
-                    ap = ct.get_attempt_performance(unrealized_pnl=unrealized_pnl) or {}
-                    pnl = float(ap.get("total_pnl", 0.0) or 0.0)
-                    balance = float(ap.get("current_balance", 50_000.0) or 50_000.0)
-                    wins = int(ap.get("wins", 0) or 0)
-                    losses = int(ap.get("losses", 0) or 0)
-                    wr = float(ap.get("win_rate", 0.0) or 0.0) * 100.0
-                    pnl_emoji = "🟢" if pnl >= 0 else "🔴"
-                    message += "\n\n*Challenge (current run):*"
-                    message += (
-                        f"\n{pnl_emoji} *Scanner:* ${balance:,.2f} | ${pnl:+,.2f} "
-                        f"({wins}W/{losses}L • {wr:.0f}% WR)"
-                    )
+                    message += "\n\n" + ct.get_status_summary(bot_label="Scanner", unrealized_pnl=unrealized_pnl)
+                except Exception:
+                    pass
+
+                # Recent exits (compact; match /start dashboard style)
+                try:
+                    recent_exits = status.get("recent_exits", [])
+                    if isinstance(recent_exits, list) and recent_exits:
+                        message += "\n\n*Recent exits:*"
+                        for t in recent_exits[:2]:
+                            try:
+                                pnl_val = float(t.get("pnl") or 0.0)
+                            except Exception:
+                                pnl_val = 0.0
+                            pnl_emoji, pnl_str = format_pnl(pnl_val)
+                            dir_emoji, dir_label = format_signal_direction(t.get("direction", "long"))
+                            sig_type = safe_label(str(t.get("type") or "unknown"))
+                            reason = safe_label(str(t.get("exit_reason") or "")).strip()
+                            line = f"\n{pnl_emoji} *{pnl_str}* • {dir_emoji} {dir_label} • {sig_type}"
+                            if reason:
+                                line += f" • {reason}"
+                            message += line
                 except Exception:
                     pass
             except Exception:

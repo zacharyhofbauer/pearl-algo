@@ -11,6 +11,7 @@ Simple and intuitive nested button menu system.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -1757,6 +1758,7 @@ class TelegramCommandHandler:
                 # Row 3: Analytics (NEW)
                 [
                     InlineKeyboardButton("🔬 Analytics", callback_data="menu:analytics"),
+                    InlineKeyboardButton("🧠 AI Coach", callback_data="action:ai_coach"),
                 ],
                 # Row 4: Actions
                 [
@@ -2889,6 +2891,8 @@ class TelegramCommandHandler:
                 await self._handle_weekly_summary(query, reply_markup)
             elif action_type == "pnl_overview":
                 await self._handle_pnl_overview(query, reply_markup)
+            elif action_type == "ai_coach":
+                await self._handle_ai_coach(query, reply_markup)
             elif action_type == "ai_patch_wizard":
                 await self._show_ai_patch_wizard(query)
             elif action_type == "ai_ops":
@@ -4404,6 +4408,450 @@ class TelegramCommandHandler:
                 text += f"\n   ID: {signal_id}\n\n"
         
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    def _build_ai_coach_report(self, *, state: dict | None = None) -> str:
+        """
+        Build a read-only "AI/ML coach" report from local history.
+
+        IMPORTANT: This must remain read-only and must NOT affect trading/execution.
+        It is safe to call from the Telegram handler process only (not the agent loop).
+        """
+        from datetime import timedelta
+        from collections import defaultdict
+        import sqlite3
+
+        now = datetime.now(timezone.utc)
+        today_str = now.strftime("%Y-%m-%d")
+
+        # Prefer the same window logic as the dashboard for consistency:
+        # - "24h" section = trades with today's UTC date in exit_time (legacy label).
+        # - "72h" section = rolling window.
+        perf_trades: list[dict] = []
+        perf_file = self.state_dir / "performance.json"
+        try:
+            if perf_file.exists():
+                perf_trades = json.loads(perf_file.read_text(encoding="utf-8"))
+                if not isinstance(perf_trades, list):
+                    perf_trades = []
+        except Exception:
+            perf_trades = []
+
+        today_trades = [t for t in perf_trades if today_str in str(t.get("exit_time", "") or "")]
+
+        cutoff_72 = now - timedelta(hours=72)
+        trades_72h: list[dict] = []
+        for t in perf_trades:
+            ts = str(t.get("exit_time", "") or "")
+            if not ts:
+                continue
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except Exception:
+                continue
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if dt >= cutoff_72:
+                trades_72h.append(t)
+
+        def _pnl_sum(trades: list[dict]) -> float:
+            total = 0.0
+            for t in trades:
+                try:
+                    total += float(t.get("pnl", 0.0) or 0.0)
+                except Exception:
+                    continue
+            return float(total)
+
+        def _wins_losses(trades: list[dict]) -> tuple[int, int]:
+            wins = 0
+            losses = 0
+            for t in trades:
+                try:
+                    if bool(t.get("is_win", False)):
+                        wins += 1
+                    else:
+                        losses += 1
+                except Exception:
+                    losses += 1
+            return wins, losses
+
+        def _profit_factor_avg(trades: list[dict]) -> tuple[float | None, float, float]:
+            gp = 0.0
+            gl = 0.0
+            w = 0
+            l = 0
+            for t in trades:
+                try:
+                    pnl = float(t.get("pnl", 0.0) or 0.0)
+                except Exception:
+                    continue
+                if bool(t.get("is_win", False)):
+                    gp += pnl
+                    w += 1
+                else:
+                    gl += abs(pnl)
+                    l += 1
+            pf = (gp / gl) if gl > 0 else None
+            avg_win = (gp / w) if w > 0 else 0.0
+            avg_loss = (gl / l) if l > 0 else 0.0
+            return (float(pf) if pf is not None else None, float(avg_win), float(avg_loss))
+
+        def _max_drawdown(trades: list[dict]) -> float:
+            # Approximate max drawdown in window using cumulative P&L over exit_time order.
+            try:
+                sorted_trades = sorted(trades, key=lambda t: str(t.get("exit_time", "") or ""))
+            except Exception:
+                sorted_trades = list(trades)
+            running = 0.0
+            peak = 0.0
+            mdd = 0.0
+            for t in sorted_trades:
+                try:
+                    running += float(t.get("pnl", 0.0) or 0.0)
+                except Exception:
+                    continue
+                if running > peak:
+                    peak = running
+                dd = peak - running
+                if dd > mdd:
+                    mdd = dd
+            return float(mdd)
+
+        def _streak(trades: list[dict]) -> tuple[int, str]:
+            # Current win/loss streak from most recent (by exit_time).
+            if not trades:
+                return 0, ""
+            try:
+                sorted_trades = sorted(trades, key=lambda t: str(t.get("exit_time", "") or ""), reverse=False)
+            except Exception:
+                sorted_trades = list(trades)
+            streak = 0
+            streak_type: str | None = None
+            for t in reversed(sorted_trades):
+                is_win = bool(t.get("is_win", False))
+                ttype = "W" if is_win else "L"
+                if streak_type is None:
+                    streak_type = ttype
+                    streak = 1
+                elif streak_type == ttype:
+                    streak += 1
+                else:
+                    break
+            return int(streak), str(streak_type or "")
+
+        def _fmt_money(x: float) -> str:
+            sign = "+" if x >= 0 else "-"
+            return f"{sign}${abs(x):,.2f}"
+
+        def _fmt_wr(w: int, l: int) -> str:
+            n = max(1, w + l)
+            return f"{(w / n * 100):.0f}%"
+
+        # 30d summary and top signal type (SQLite)
+        pnl_30d = 0.0
+        wins_30d = 0
+        losses_30d = 0
+        top_types: list[tuple[str, float, int, int]] = []
+
+        db_path = self.state_dir / "trades.db"
+        if db_path.exists():
+            try:
+                cutoff_30 = now - timedelta(days=30)
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+
+                rows = cur.execute(
+                    "SELECT signal_type, pnl, is_win, exit_time FROM trades WHERE exit_time IS NOT NULL ORDER BY exit_time DESC"
+                ).fetchall()
+
+                type_stats: dict[str, dict[str, float | int]] = defaultdict(lambda: {"pnl": 0.0, "wins": 0, "losses": 0})
+                for r in rows:
+                    try:
+                        dt = datetime.fromisoformat(str(r["exit_time"]).replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                    except Exception:
+                        continue
+                    if dt < cutoff_30:
+                        break
+                    try:
+                        pnl_val = float(r["pnl"] or 0.0)
+                    except Exception:
+                        pnl_val = 0.0
+                    is_win = bool(int(r["is_win"] or 0))
+                    pnl_30d += pnl_val
+                    if is_win:
+                        wins_30d += 1
+                    else:
+                        losses_30d += 1
+                    st = str(r["signal_type"] or "unknown")
+                    type_stats[st]["pnl"] = float(type_stats[st]["pnl"]) + pnl_val
+                    if is_win:
+                        type_stats[st]["wins"] = int(type_stats[st]["wins"]) + 1
+                    else:
+                        type_stats[st]["losses"] = int(type_stats[st]["losses"]) + 1
+
+                # Top 3 by P&L (min 5 trades)
+                ranked = []
+                for st, d in type_stats.items():
+                    w = int(d["wins"])
+                    l = int(d["losses"])
+                    n = w + l
+                    if n < 5:
+                        continue
+                    ranked.append((st, float(d["pnl"]), w, l))
+                ranked.sort(key=lambda x: x[1], reverse=True)
+                top_types = ranked[:3]
+
+                conn.close()
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+        # ML what-if split (last 72h, from SQLite features)
+        ml_summary: dict[str, Any] = {}
+        try:
+            ml_state = (state or {}).get("ml_filter") or {}
+            lift = ml_state.get("lift") or {}
+            threshold = lift.get("pass_threshold_used")
+            if threshold is None:
+                threshold = 0.80
+            threshold = float(threshold)
+
+            if db_path.exists():
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cutoff_72_iso = cutoff_72.isoformat()
+                rows = cur.execute(
+                    """
+                    SELECT t.trade_id, t.exit_time, t.pnl, t.is_win,
+                      (SELECT tf.feature_value FROM trade_features tf WHERE tf.trade_id=t.trade_id AND tf.feature_name='ml_win_probability' LIMIT 1) as p,
+                      (SELECT tf.feature_value FROM trade_features tf WHERE tf.trade_id=t.trade_id AND tf.feature_name='ml_fallback_used' LIMIT 1) as fb
+                    FROM trades t
+                    WHERE t.exit_time >= ?
+                    ORDER BY t.exit_time DESC
+                    """,
+                    (cutoff_72_iso,),
+                ).fetchall()
+
+                scored: list[tuple[float, float, bool]] = []
+                for r in rows:
+                    try:
+                        fb = r["fb"]
+                        if fb is not None and float(fb) >= 0.5:
+                            continue
+                    except Exception:
+                        pass
+                    if r["p"] is None:
+                        continue
+                    try:
+                        p = float(r["p"])
+                    except Exception:
+                        continue
+                    scored.append((p, float(r["pnl"] or 0.0), bool(int(r["is_win"] or 0))))
+
+                pass_grp = [x for x in scored if x[0] >= threshold]
+                fail_grp = [x for x in scored if x[0] < threshold]
+
+                def _sumgrp(g: list[tuple[float, float, bool]]) -> tuple[int, float, int, int]:
+                    pnl = sum(x[1] for x in g)
+                    w = sum(1 for x in g if x[2])
+                    l = len(g) - w
+                    return len(g), float(pnl), int(w), int(l)
+
+                np, pp, wp, lp = _sumgrp(pass_grp)
+                nf, pf, wf, lf = _sumgrp(fail_grp)
+
+                ml_summary = {
+                    "threshold": float(threshold),
+                    "scored": int(len(scored)),
+                    "pass": {"n": np, "pnl": pp, "w": wp, "l": lp},
+                    "fail": {"n": nf, "pnl": pf, "w": wf, "l": lf},
+                }
+
+                conn.close()
+        except Exception:
+            ml_summary = {}
+
+        # Time-of-day (ET) by entry hour from SQLite (72h)
+        best_hours: list[str] = []
+        worst_hours: list[str] = []
+        try:
+            try:
+                from zoneinfo import ZoneInfo
+
+                et = ZoneInfo("America/New_York")
+            except Exception:
+                et = None
+
+            if db_path.exists():
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cutoff_72_iso = cutoff_72.isoformat()
+                rows = cur.execute(
+                    "SELECT entry_time, pnl, is_win, exit_time FROM trades WHERE exit_time >= ? ORDER BY exit_time DESC",
+                    (cutoff_72_iso,),
+                ).fetchall()
+
+                by_hour: dict[int, dict[str, float | int]] = defaultdict(
+                    lambda: {"wins": 0, "losses": 0, "pnl": 0.0, "n": 0}
+                )
+                for r in rows:
+                    ts = r["entry_time"]
+                    if not ts:
+                        continue
+                    try:
+                        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                    except Exception:
+                        continue
+                    h = dt.astimezone(et).hour if et is not None else dt.hour
+                    try:
+                        pnl = float(r["pnl"] or 0.0)
+                    except Exception:
+                        pnl = 0.0
+                    is_win = bool(int(r["is_win"] or 0))
+                    by_hour[h]["n"] = int(by_hour[h]["n"]) + 1
+                    by_hour[h]["pnl"] = float(by_hour[h]["pnl"]) + pnl
+                    if is_win:
+                        by_hour[h]["wins"] = int(by_hour[h]["wins"]) + 1
+                    else:
+                        by_hour[h]["losses"] = int(by_hour[h]["losses"]) + 1
+
+                hours: list[tuple[int, float, int, int, int]] = []
+                for h, d in by_hour.items():
+                    n = int(d["n"])
+                    if n < 5:
+                        continue
+                    hours.append((h, float(d["pnl"]), int(d["wins"]), int(d["losses"]), n))
+
+                if hours:
+                    # Best (by pnl)
+                    hours.sort(key=lambda x: x[1], reverse=True)
+                    for h, pnl, w, l, n in hours[:3]:
+                        if pnl <= 0:
+                            continue
+                        best_hours.append(f"🔥 {h:02d}:00 ET: {_fmt_wr(w, l)} WR | +${abs(pnl):,.0f} ({n}t)")
+
+                    # Worst (by pnl)
+                    hours.sort(key=lambda x: x[1])
+                    for h, pnl, w, l, n in hours[:3]:
+                        if pnl >= 0:
+                            continue
+                        worst_hours.append(f"❄️ {h:02d}:00 ET: {_fmt_wr(w, l)} WR | -${abs(pnl):,.0f} ({n}t)")
+
+                conn.close()
+        except Exception:
+            best_hours = []
+            worst_hours = []
+
+        # Build output
+        lines: list[str] = []
+        lines.append("🧠 *AI Coach* (read-only)")
+        lines.append("")
+
+        # Today (dashboard window)
+        w_today, l_today = _wins_losses(today_trades)
+        pnl_today = _pnl_sum(today_trades)
+        pf_today, avgw_today, avgl_today = _profit_factor_avg(today_trades)
+        mdd_today = _max_drawdown(today_trades)
+        streak_n, streak_t = _streak(today_trades)
+        streak_str = f" • {('🔥' if streak_t == 'W' else '❄️')}{streak_n}{streak_t}" if streak_n >= 3 and streak_t else ""
+
+        lines.append(
+            f"*Today (UTC):* {_fmt_money(pnl_today)} ({w_today}W/{l_today}L • {_fmt_wr(w_today, l_today)} WR){streak_str}"
+        )
+        if today_trades:
+            pf_part = f"PF {pf_today:.2f}" if pf_today is not None else "PF —"
+            lines.append(f"• {pf_part} • Avg W ${avgw_today:,.0f} / L ${avgl_today:,.0f} • Max DD ${mdd_today:,.0f}")
+        else:
+            lines.append("• No closed trades yet today.")
+
+        # 72h
+        w72, l72 = _wins_losses(trades_72h)
+        pnl72 = _pnl_sum(trades_72h)
+        pf72, avgw72, avgl72 = _profit_factor_avg(trades_72h)
+        mdd72 = _max_drawdown(trades_72h)
+        lines.append("")
+        lines.append(f"*72h:* {_fmt_money(pnl72)} ({w72}W/{l72}L • {_fmt_wr(w72, l72)} WR)")
+        if trades_72h:
+            pf_part = f"PF {pf72:.2f}" if pf72 is not None else "PF —"
+            lines.append(f"• {pf_part} • Avg W ${avgw72:,.0f} / L ${avgl72:,.0f} • Max DD ${mdd72:,.0f}")
+
+        # 30d
+        lines.append("")
+        lines.append(f"*30d:* {_fmt_money(pnl_30d)} ({wins_30d}W/{losses_30d}L • {_fmt_wr(wins_30d, losses_30d)} WR)")
+        if top_types:
+            lines.append("• Top types (30d, min 5 trades):")
+            for st, pnl, w, l in top_types:
+                lines.append(f"  - {safe_label(st)}: {_fmt_money(pnl)} ({w}W/{l}L • {_fmt_wr(w, l)} WR)")
+
+        # Time-of-day hints
+        if best_hours or worst_hours:
+            lines.append("")
+            lines.append("*Time-of-day (entry hour ET, last 72h):*")
+            for s in best_hours:
+                lines.append(s)
+            for s in worst_hours:
+                lines.append(s)
+
+        # ML shadow what-if
+        try:
+            lift = ((state or {}).get("ml_filter") or {}).get("lift") or {}
+            scored_ct = lift.get("scored_trades")
+            pass_ct = lift.get("pass_trades")
+            fail_ct = lift.get("fail_trades")
+            min_trades = lift.get("min_trades") or 50
+            if scored_ct is not None:
+                lines.append("")
+                lines.append(f"*ML shadow:* Lift {int(scored_ct)}/{int(min_trades)} ({int(pass_ct or 0)}P/{int(fail_ct or 0)}F)")
+        except Exception:
+            pass
+
+        if ml_summary:
+            thr = float(ml_summary.get("threshold") or 0.80)
+            p = ml_summary.get("pass") or {}
+            f = ml_summary.get("fail") or {}
+            lines.append(f"• What-if @ {thr:.2f} (last 72h, scored={int(ml_summary.get('scored') or 0)}):")
+            lines.append(
+                f"  - PASS: {_fmt_money(float(p.get('pnl') or 0.0))} ({int(p.get('w') or 0)}W/{int(p.get('l') or 0)}L • {_fmt_wr(int(p.get('w') or 0), int(p.get('l') or 0))} WR)"
+            )
+            lines.append(
+                f"  - FAIL: {_fmt_money(float(f.get('pnl') or 0.0))} ({int(f.get('w') or 0)}W/{int(f.get('l') or 0)}L • {_fmt_wr(int(f.get('w') or 0), int(f.get('l') or 0))} WR)"
+            )
+            lines.append("_Note: shadow-only; does not affect trading. Sample is still small._")
+
+        text = "\n".join(lines)
+        return self._with_support_footer(text, state=state)
+
+    async def _handle_ai_coach(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
+        """Generate and display the read-only AI/ML coach report."""
+        state = self._read_state() or {}
+        # Quick immediate feedback so the UI feels responsive.
+        try:
+            await query.edit_message_text("🧠 AI Coach\n\nAnalyzing recent trades…", reply_markup=reply_markup)
+        except Exception:
+            pass
+
+        # Compute off-thread to avoid blocking the Telegram event loop.
+        text = await asyncio.to_thread(self._build_ai_coach_report, state=state)
+
+        keyboard = [
+            [InlineKeyboardButton("🔄 Refresh", callback_data="action:ai_coach")],
+            [InlineKeyboardButton("📊 Back to Activity", callback_data="menu:activity"), self._nav_back_row()[0]],
+        ]
+        await self._safe_edit_or_send(
+            query,
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
 
     async def _handle_signal_history(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display signal history summary."""

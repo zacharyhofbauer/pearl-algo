@@ -283,6 +283,8 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "risk",
     "service",
     "circuit_breaker",
+    # Trading/risk circuit breaker (loss-based risk controls + session filter)
+    "trading_circuit_breaker",
     "data",
     "storage",
     "signals",
