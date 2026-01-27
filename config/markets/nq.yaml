@@ -19,3 +19,8 @@ pearl_bot_auto:
   trend_momentum_atr_mult: 0.5
   allow_trend_breakout_entries: true
   trend_breakout_lookback_bars: 5
+
+# TEMP: Allow New York morning session trades (disable time-of-day filter)
+# Revert by removing this block or setting enable_session_filter: true
+trading_circuit_breaker:
+  enable_session_filter: false

@@ -355,6 +355,41 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "max_connection_failures": 10,
         "max_data_fetch_errors": 5,
     },
+    # ==========================================================================
+    # TRADING CIRCUIT BREAKER (Loss-based risk controls + session filter)
+    # ==========================================================================
+    # IMPORTANT: This section MUST be present here so `trading_circuit_breaker:` in
+    # config.yaml / market overlays actually affects the running agent (otherwise
+    # it is silently ignored and the circuit breaker runs on hardcoded defaults).
+    "trading_circuit_breaker": {
+        "enabled": True,
+        # Consecutive loss limits
+        "max_consecutive_losses": 5,
+        "consecutive_loss_cooldown_minutes": 30,
+        # Drawdown limits
+        "max_session_drawdown": 500.0,
+        "max_daily_drawdown": 1000.0,
+        "drawdown_cooldown_minutes": 60,
+        # Rolling win rate filter
+        "rolling_window_trades": 20,
+        "min_rolling_win_rate": 0.30,
+        "win_rate_cooldown_minutes": 30,
+        # Position limits / clustering
+        "max_concurrent_positions": 5,
+        "min_price_distance_pct": 0.5,
+        # Volatility/chop filter
+        "enable_volatility_filter": True,
+        "min_atr_ratio": 0.8,
+        "max_atr_ratio": 2.5,
+        "chop_detection_window": 10,
+        "chop_win_rate_threshold": 0.35,
+        # Auto-recovery
+        "auto_resume_after_cooldown": True,
+        "require_winning_trade_to_resume": False,
+        # Session filter (time-of-day)
+        "enable_session_filter": True,
+        "allowed_sessions": ["overnight", "midday", "close"],
+    },
     "data": {
         "buffer_size": 100,
         "buffer_size_5m": 50,
