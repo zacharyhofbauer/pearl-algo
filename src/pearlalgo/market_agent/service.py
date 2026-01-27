@@ -7,6 +7,7 @@ Main 24/7 service for running market trading strategies.
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import json
 import signal
 from datetime import date, datetime, time, timedelta, timezone
@@ -89,6 +90,15 @@ except ImportError:
     ContextualBanditConfig = None  # type: ignore
     ContextFeatures = None  # type: ignore
     ContextualDecision = None  # type: ignore
+
+# ML signal filter (optional - shadow measurement / lift evaluation)
+try:
+    from pearlalgo.learning.ml_signal_filter import get_ml_signal_filter, MLSignalFilter
+    ML_FILTER_AVAILABLE = True
+except ImportError:
+    ML_FILTER_AVAILABLE = False
+    get_ml_signal_filter = None  # type: ignore
+    MLSignalFilter = None  # type: ignore
 
 class MarketAgentService:
     """
@@ -303,6 +313,39 @@ class MarketAgentService:
         self._ml_blocking_allowed: bool = False
         self._ml_lift_metrics: Dict[str, Any] = {}
         self._ml_lift_last_eval_at: Optional[datetime] = None
+
+        # ML signal filter (shadow-only measurement by default; never blocks unless explicitly enabled elsewhere)
+        self._ml_filter_enabled: bool = bool(ml_cfg.get("enabled", False))
+        self._ml_signal_filter: Optional["MLSignalFilter"] = None
+        self._ml_filter_init_status: Dict[str, Any] = {}
+        if self._ml_filter_enabled:
+            if not ML_FILTER_AVAILABLE or get_ml_signal_filter is None:
+                logger.warning("ML filter enabled in config, but dependencies unavailable (skipping)")
+                self._ml_filter_enabled = False
+            else:
+                try:
+                    # Train from recent exited signals (shadow dataset) so predictions are non-trivial.
+                    train_limit = int(ml_cfg.get("training_max_samples", 2000) or 2000)
+                    trades_for_training = self._build_ml_training_trades_from_signals(limit=train_limit)
+                    self._ml_signal_filter = get_ml_signal_filter(config=service_config, trades=trades_for_training)
+                    self._ml_filter_init_status = {
+                        "enabled": True,
+                        "mode": str(self._ml_filter_mode),
+                        "trained": bool(getattr(self._ml_signal_filter, "is_ready", False)),
+                        "training_samples": int(len(trades_for_training)),
+                    }
+                    logger.info(
+                        "ML filter initialized",
+                        extra={
+                            "mode": self._ml_filter_mode,
+                            "trained": bool(getattr(self._ml_signal_filter, "is_ready", False)),
+                            "training_samples": int(len(trades_for_training)),
+                        },
+                    )
+                except Exception as e:
+                    logger.warning(f"ML filter init failed (continuing without): {e}")
+                    self._ml_signal_filter = None
+                    self._ml_filter_enabled = False
 
         # ==========================================================================
         # AUTO-FLAT (Virtual trades) - Friday/Weekend safety
@@ -785,6 +828,12 @@ class MarketAgentService:
                 logger.warning(f"Error disconnecting execution adapter: {e}")
 
         self.running = False
+        # Persist a final state with running=False so /start doesn't show stale "ON"
+        # after a stop/shutdown notification.
+        try:
+            self._save_state()
+        except Exception as e:
+            logger.warning(f"Could not save stopped state: {e}")
         logger.info("NQ Agent Service stopped")
 
     async def _run_loop(self) -> None:
@@ -1449,6 +1498,50 @@ class MarketAgentService:
                             )
                         )
                     return  # Skip this signal
+
+            # ==========================================================================
+            # ML FILTER (shadow): attach prediction for later analytics/lift measurement
+            # NOTE: In shadow mode we NEVER block. We only record `_ml_prediction` on the signal.
+            # ==========================================================================
+            try:
+                if self._ml_filter_enabled and self._ml_signal_filter is not None:
+                    ctx: Dict[str, Any] = {}
+                    # Best-effort regime mapping if available on signal
+                    try:
+                        mr = signal.get("market_regime") or {}
+                        if isinstance(mr, dict):
+                            regime_type = str(mr.get("regime") or "")
+                            # bucket volatility if we only have ratio
+                            vol_bucket = ""
+                            try:
+                                vr = mr.get("volatility_ratio")
+                                if vr is not None:
+                                    v = float(vr)
+                                    if v < 0.8:
+                                        vol_bucket = "low"
+                                    elif v > 1.5:
+                                        vol_bucket = "high"
+                                    else:
+                                        vol_bucket = "normal"
+                            except Exception:
+                                vol_bucket = ""
+                            ctx["regime"] = {
+                                "regime": regime_type,
+                                "volatility": vol_bucket,
+                                "session": str(mr.get("session") or ""),
+                            }
+                    except Exception:
+                        ctx = {}
+
+                    _should_exec, pred = self._ml_signal_filter.should_execute(signal, ctx)
+                    try:
+                        signal["_ml_prediction"] = pred.to_dict()
+                        # Shadow-only note (helps audits; not used for gating)
+                        signal["_ml_shadow_pass_filter"] = bool(_should_exec)
+                    except Exception:
+                        signal["_ml_prediction"] = None
+            except Exception as e:
+                logger.debug(f"ML prediction failed (non-fatal): {e}")
             
             # Track signal generation (delegates to state_manager for persistence)
             signal_id = self.performance_tracker.track_signal_generated(signal)
@@ -3909,7 +4002,9 @@ class MarketAgentService:
             ),
             # ML filter operational status (shadow/live + lift gating)
             "ml_filter": {
+                "enabled": bool(getattr(self, "_ml_filter_enabled", False)),
                 "mode": getattr(self, "_ml_filter_mode", "shadow"),
+                "trained": bool(getattr(getattr(self, "_ml_signal_filter", None), "is_ready", False)),
                 "require_lift_to_block": bool(getattr(self, "_ml_require_lift_to_block", True)),
                 "blocking_allowed": bool(getattr(self, "_ml_blocking_allowed", False)),
                 "lift": getattr(self, "_ml_lift_metrics", {}) or {},
@@ -3960,6 +4055,138 @@ class MarketAgentService:
         except Exception as e:
             # Never allow observability writes to affect runtime.
             logger.debug(f"Could not persist cycle diagnostics to SQLite: {e}")
+
+    def _build_ml_training_trades_from_signals(self, *, limit: int = 2000) -> list[dict]:
+        """
+        Build supervised training samples from `signals.jsonl`.
+
+        This is intentionally lightweight and uses only data already persisted with each signal,
+        so it does not add runtime overhead to the scan loop.
+        """
+        try:
+            lim = max(1, int(limit or 2000))
+        except Exception:
+            lim = 2000
+
+        try:
+            path = getattr(self.state_manager, "signals_file", None)
+            if not path:
+                return []
+            if not Path(path).exists():
+                return []
+        except Exception:
+            return []
+
+        # Stop-loss ATR multiplier used to derive ATR from stop distance (best-effort).
+        try:
+            stop_mult = float(self.config.get("stop_loss_atr_mult", 3.5) or 3.5)
+            if stop_mult <= 0:
+                stop_mult = 3.5
+        except Exception:
+            stop_mult = 3.5
+
+        samples = deque(maxlen=lim)
+        try:
+            with open(str(path), "r", encoding="utf-8") as f:
+                for line in f:
+                    line = (line or "").strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    if not isinstance(rec, dict):
+                        continue
+                    if str(rec.get("status") or "").lower() != "exited":
+                        continue
+
+                    # Label
+                    if "is_win" in rec:
+                        is_win = bool(rec.get("is_win"))
+                    else:
+                        outcome = str(rec.get("outcome") or "").lower()
+                        if outcome not in ("win", "loss"):
+                            continue
+                        is_win = outcome == "win"
+
+                    sig = rec.get("signal") or {}
+                    if not isinstance(sig, dict):
+                        sig = {}
+
+                    # Core features we can reliably reconstruct
+                    try:
+                        confidence = float(sig.get("confidence") or 0.0)
+                    except Exception:
+                        confidence = 0.0
+                    try:
+                        rr = float(sig.get("risk_reward") or 0.0)
+                    except Exception:
+                        rr = 0.0
+
+                    # Derive ATR from stop distance (best-effort; consistent with how stops are constructed).
+                    atr_val = 0.0
+                    try:
+                        entry = float(sig.get("entry_price") or rec.get("entry_price") or 0.0)
+                        stop = float(sig.get("stop_loss") or 0.0)
+                        if entry > 0 and stop > 0 and stop_mult > 0:
+                            atr_val = abs(entry - stop) / stop_mult
+                    except Exception:
+                        atr_val = 0.0
+
+                    # Volatility ratio (if present via market_regime); else neutral.
+                    vol_ratio = 1.0
+                    try:
+                        mr = sig.get("market_regime") or {}
+                        if isinstance(mr, dict) and mr.get("volatility_ratio") is not None:
+                            vol_ratio = float(mr.get("volatility_ratio") or 1.0)
+                    except Exception:
+                        vol_ratio = 1.0
+
+                    # Optional regime dict (used for one-hot context features in MLSignalFilter)
+                    regime_dict: Dict[str, Any] = {}
+                    try:
+                        mr = sig.get("market_regime") or {}
+                        if isinstance(mr, dict):
+                            regime_type = str(mr.get("regime") or "")
+                            regime_dict["regime"] = regime_type
+                            # Bucket volatility from ratio
+                            vb = "normal"
+                            try:
+                                if float(vol_ratio) < 0.8:
+                                    vb = "low"
+                                elif float(vol_ratio) > 1.5:
+                                    vb = "high"
+                            except Exception:
+                                vb = "normal"
+                            regime_dict["volatility"] = vb
+                            regime_dict["session"] = str(mr.get("session") or "")
+                    except Exception:
+                        regime_dict = {}
+
+                    sample = {
+                        "signal_type": str(rec.get("signal_type") or sig.get("type") or "unknown"),
+                        "is_win": bool(is_win),
+                        "exit_time": str(rec.get("exit_time") or rec.get("timestamp") or ""),
+                        # MLSignalFilter expected features
+                        "confidence": float(confidence),
+                        "risk_reward": float(rr),
+                        "atr": float(atr_val),
+                        "volatility_ratio": float(vol_ratio),
+                        "volume_ratio": 1.0,       # not persisted today; neutral
+                        "rsi": 0.0,                # not persisted today; neutral
+                        "macd_histogram": 0.0,     # not persisted today; neutral
+                        "bb_position": 0.0,        # not persisted today; neutral
+                        "vwap_distance": 0.0,      # not persisted today; neutral
+                    }
+                    if regime_dict:
+                        sample["regime"] = regime_dict
+
+                    samples.append(sample)
+        except Exception:
+            return []
+
+        return list(samples)
 
     def _compute_ml_lift_metrics(self, trades: list) -> Dict[str, Any]:
         """
@@ -4565,6 +4792,24 @@ class MarketAgentService:
             if self.bandit_policy is not None
             else {"enabled": False, "mode": "disabled"}
         )
+        state["learning_contextual"] = (
+            self.contextual_policy.get_status()
+            if self.contextual_policy is not None
+            else {"enabled": False, "mode": "disabled"}
+        )
+        state["ml_filter"] = {
+            "enabled": bool(getattr(self, "_ml_filter_enabled", False)),
+            "mode": getattr(self, "_ml_filter_mode", "shadow"),
+            "trained": bool(getattr(getattr(self, "_ml_signal_filter", None), "is_ready", False)),
+            "require_lift_to_block": bool(getattr(self, "_ml_require_lift_to_block", True)),
+            "blocking_allowed": bool(getattr(self, "_ml_blocking_allowed", False)),
+            "lift": getattr(self, "_ml_lift_metrics", {}) or {},
+            "last_eval_at": (
+                self._ml_lift_last_eval_at.isoformat()
+                if getattr(self, "_ml_lift_last_eval_at", None) is not None
+                else None
+            ),
+        }
 
         # ==========================================================================
         # Notification queue stats (async Telegram delivery observability)

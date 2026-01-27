@@ -3871,6 +3871,7 @@ class TelegramCommandHandler:
 
                 # Source of truth for ML filter "enabled" is config.yaml (service doesn't persist it).
                 ml_enabled = None
+                ml_mode = None
                 try:
                     import yaml
 
@@ -3880,13 +3881,34 @@ class TelegramCommandHandler:
                             cfg = yaml.safe_load(f) or {}
                         ml_cfg = cfg.get("ml_filter", {}) or {}
                         ml_enabled = bool(ml_cfg.get("enabled", False))
+                        ml_mode = str(ml_cfg.get("mode") or "").lower()
                 except Exception:
                     ml_enabled = None
 
-                ml_label = "ON" if ml_enabled is True else "OFF" if ml_enabled is False else "?"
+                if ml_enabled is True:
+                    if ml_mode in ("shadow", "live"):
+                        ml_label = ml_mode
+                    else:
+                        ml_label = "on"
+                elif ml_enabled is False:
+                    ml_label = "off"
+                else:
+                    ml_label = "?"
                 ai_label = "ON" if ai_ready else "OFF"
 
-                message += f"\n🧠 AI/ML: AI {ai_label} • Bandit {bandit_mode} • Ctx {ctx_mode} • Filter {ml_label}"
+                # Step 1 transparency: show ML shadow lift scoring progress (scored trades / min)
+                lift_progress = ""
+                try:
+                    ml_state = state.get("ml_filter") or {}
+                    lift = ml_state.get("lift") or {}
+                    scored = lift.get("scored_trades")
+                    min_trades = lift.get("min_trades")
+                    if scored is not None and min_trades:
+                        lift_progress = f" • Lift {int(scored)}/{int(min_trades)}"
+                except Exception:
+                    lift_progress = ""
+
+                message += f"\n🧠 AI/ML: AI {ai_label} • Bandit {bandit_mode} • Ctx {ctx_mode} • Filter {ml_label}{lift_progress}"
             except Exception:
                 pass
             
@@ -3906,6 +3928,7 @@ class TelegramCommandHandler:
                 avg_loss = 0.0
                 max_drawdown = 0.0
                 today_trades_list = []
+                perf_trades = []
                 
                 # Load from performance.json for detailed metrics
                 try:
@@ -3914,6 +3937,8 @@ class TelegramCommandHandler:
                         import json
                         with open(perf_file, 'r') as f:
                             perf_trades = json.load(f)
+                        if not isinstance(perf_trades, list):
+                            perf_trades = []
                         
                         # Filter to today's trades (by exit_time)
                         today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -4002,6 +4027,39 @@ class TelegramCommandHandler:
                     # Condensed format: "24h: 🟢 +$2,375.00 (73W/74L • 50% WR) • ❄️3L"
                     message += "\n\n*24h:*"
                     message += f"\n{pnl_emoji} {pnl_sign}${abs(daily_pnl):,.2f} ({daily_wins}W/{daily_losses}L • {win_rate:.0f}% WR){streak_str}"
+
+                # ------------------------------------------------------------------
+                # 72-HOUR PERFORMANCE (rolling 72h)
+                # ------------------------------------------------------------------
+                try:
+                    from datetime import timedelta
+
+                    if perf_trades:
+                        cutoff = datetime.now(timezone.utc) - timedelta(hours=72)
+                        trades_72h = []
+                        for t in perf_trades:
+                            try:
+                                ts = str(t.get("exit_time", "") or "")
+                                if not ts:
+                                    continue
+                                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                                if dt >= cutoff:
+                                    trades_72h.append(t)
+                            except Exception:
+                                continue
+
+                        if trades_72h:
+                            pnl_72h = sum(float(t.get("pnl", 0) or 0) for t in trades_72h)
+                            wins_72h = sum(1 for t in trades_72h if t.get("is_win"))
+                            losses_72h = int(len(trades_72h) - wins_72h)
+                            wr_72h = (wins_72h / len(trades_72h) * 100) if trades_72h else 0.0
+                            pnl_emoji_72h = "🟢" if pnl_72h >= 0 else "🔴"
+                            pnl_sign_72h = "+" if pnl_72h >= 0 else "-"
+
+                            message += "\n\n*72h:*"
+                            message += f"\n{pnl_emoji_72h} {pnl_sign_72h}${abs(pnl_72h):,.2f} ({wins_72h}W/{losses_72h}L • {wr_72h:.0f}% WR)"
+                except Exception as e:
+                    logger.debug(f"Could not add 72h performance: {e}")
                     
             except Exception as e:
                 logger.debug(f"Could not add 24h performance: {e}")
