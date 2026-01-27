@@ -382,6 +382,18 @@ class TelegramCommandHandler:
         Use this everywhere instead of creating buttons manually.
         """
         return [InlineKeyboardButton("🏠 Menu", callback_data="back")]
+
+    def _activity_nav_keyboard(self, extra_buttons: list = None) -> InlineKeyboardMarkup:
+        """
+        Standard navigation for Activity sub-views.
+        Returns keyboard with Activity back button and Menu button.
+        """
+        row = []
+        if extra_buttons:
+            row.extend(extra_buttons)
+        row.append(InlineKeyboardButton("📊 Activity", callback_data="menu:activity"))
+        row.append(InlineKeyboardButton("🏠 Menu", callback_data="back"))
+        return InlineKeyboardMarkup([row])
     
     def _nav_footer(self, extra_buttons: list = None) -> list:
         """
@@ -1786,10 +1798,7 @@ class TelegramCommandHandler:
                 [
                     InlineKeyboardButton("🔬 Analytics", callback_data="menu:analytics"),
                     InlineKeyboardButton("🧠 AI Coach", callback_data="action:ai_coach"),
-                ],
-                # Row 3b: Pearl Chat
-                [
-                    InlineKeyboardButton("💬 Ask Pearl", callback_data="action:ask_pearl"),
+                    InlineKeyboardButton("💬 Pearl", callback_data="action:ask_pearl"),
                 ],
                 # Row 4: Actions
                 [
@@ -4377,7 +4386,7 @@ class TelegramCommandHandler:
         """Display active virtual trades."""
         state = self._read_state()
         if not state:
-            await query.edit_message_text("❌ Could not read system state.", reply_markup=reply_markup)
+            await query.edit_message_text("❌ Could not read system state.", reply_markup=self._activity_nav_keyboard())
             return
         
         # Get virtual trades from state (signals with status=entered)
@@ -4403,6 +4412,7 @@ class TelegramCommandHandler:
         recent_signals = self._read_recent_signals(limit=50)
         active_signals = [s for s in recent_signals if s.get("status") == "entered"]
         
+        keyboard_rows = []
         if active_signals:
             text += f"\n\n*Open Virtual Positions ({len(active_signals)}):*\n"
             for i, signal in enumerate(active_signals[-5:], 1):  # Show last 5
@@ -4411,28 +4421,45 @@ class TelegramCommandHandler:
                 entry_price = signal.get("entry_price", 0)
                 signal_type = signal.get("type", "unknown")
                 text += f"\n{i}. {direction} {signal_type}\n"
-                text += f"   ID: {signal_id}\n"
+                text += f"   ID: `{signal_id}`\n"
                 if entry_price:
                     text += f"   Entry: ${entry_price:,.2f}\n"
+            
+            # Add Close All button if trades exist
+            if virtual_trades_count > 0:
+                keyboard_rows.append([
+                    InlineKeyboardButton(f"🚫 Close All ({virtual_trades_count})", callback_data="action:close_all_trades"),
+                ])
         
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        # Add navigation
+        keyboard_rows.append([
+            InlineKeyboardButton("🔄 Refresh", callback_data="action:active_trades"),
+            InlineKeyboardButton("📊 Activity", callback_data="menu:activity"),
+            InlineKeyboardButton("🏠 Menu", callback_data="back"),
+        ])
+        
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard_rows), parse_mode="Markdown")
 
     async def _handle_recent_signals(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display recent signals."""
+        """Display recent signals with detail buttons."""
         signals = self._read_recent_signals(limit=10)
         
         text = "🎯 *Recent Signals*\n\n"
         
+        keyboard_rows = []
         if not signals:
             text += "No signals found.\n"
         else:
             text += f"Showing last {len(signals)} signals:\n\n"
+            detail_buttons = []
             for i, signal in enumerate(reversed(signals[-10:]), 1):  # Most recent first
-                signal_id = signal.get("signal_id", "unknown")[:8]
+                signal_id = signal.get("signal_id", "unknown")
+                signal_id_short = signal_id[:8]
                 direction = signal.get("direction", "").upper()
                 signal_type = signal.get("type", "unknown")
                 status = signal.get("status", "unknown")
                 entry_price = signal.get("entry_price")
+                pnl = signal.get("pnl")
                 timestamp = signal.get("timestamp", "")
                 
                 # Format timestamp
@@ -4444,14 +4471,39 @@ class TelegramCommandHandler:
                     except Exception:
                         time_str = str(timestamp)[:5] if timestamp else ""
                 
-                text += f"{i}. {direction} {signal_type} - {status}\n"
+                # Status emoji
+                status_emoji = {"entered": "🟢", "exited": "⚪", "generated": "🟡"}.get(status, "⚪")
+                
+                # Direction emoji
+                dir_emoji = "📈" if direction == "LONG" else "📉" if direction == "SHORT" else ""
+                
+                text += f"{i}. {dir_emoji} {direction} {signal_type} {status_emoji}\n"
                 if entry_price:
                     text += f"   Entry: ${entry_price:,.2f}"
                 if time_str:
                     text += f" @ {time_str}"
-                text += f"\n   ID: {signal_id}\n\n"
+                if pnl is not None and status == "exited":
+                    pnl_emoji = "🟢" if float(pnl) >= 0 else "🔴"
+                    text += f" | {pnl_emoji} ${float(pnl):+.2f}"
+                text += f"\n   `{signal_id_short}`\n\n"
+                
+                # Add detail button (2 per row)
+                detail_buttons.append(
+                    InlineKeyboardButton(f"ℹ️ {signal_id_short}", callback_data=f"signal_detail:{signal_id[:16]}")
+                )
+            
+            # Group detail buttons into rows of 2
+            for i in range(0, len(detail_buttons), 2):
+                keyboard_rows.append(detail_buttons[i:i+2])
         
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        # Add navigation
+        keyboard_rows.append([
+            InlineKeyboardButton("🔄 Refresh", callback_data="action:recent_signals"),
+            InlineKeyboardButton("📊 Activity", callback_data="menu:activity"),
+            InlineKeyboardButton("🏠 Menu", callback_data="back"),
+        ])
+        
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard_rows), parse_mode="Markdown")
 
     def _build_ai_coach_report(self, *, state: dict | None = None) -> str:
         """
@@ -5468,6 +5520,7 @@ class TelegramCommandHandler:
             status_counts = {}
             type_counts = {}
             direction_counts = {}
+            total_pnl = 0.0
             
             for signal in signals:
                 status = signal.get("status", "unknown")
@@ -5477,22 +5530,43 @@ class TelegramCommandHandler:
                 status_counts[status] = status_counts.get(status, 0) + 1
                 type_counts[signal_type] = type_counts.get(signal_type, 0) + 1
                 direction_counts[direction] = direction_counts.get(direction, 0) + 1
+                
+                if status == "exited":
+                    total_pnl += float(signal.get("pnl", 0) or 0)
             
-            text += f"*Total Signals:* {len(signals)}\n\n"
+            exited_count = status_counts.get("exited", 0)
+            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+            
+            text += f"*Total Signals:* {len(signals)}\n"
+            if exited_count > 0:
+                text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
+            text += "\n"
             
             text += "*By Status:*\n"
+            status_emoji = {"entered": "🟢", "exited": "⚪", "generated": "🟡", "cancelled": "❌"}
             for status, count in sorted(status_counts.items()):
-                text += f"  • {status}: {count}\n"
+                emoji = status_emoji.get(status, "⚪")
+                text += f"  {emoji} {status}: {count}\n"
             
             text += "\n*By Direction:*\n"
             for direction, count in sorted(direction_counts.items()):
-                text += f"  • {direction}: {count}\n"
+                dir_emoji = "📈" if direction == "LONG" else "📉" if direction == "SHORT" else "❓"
+                text += f"  {dir_emoji} {direction}: {count}\n"
             
             text += "\n*By Type:*\n"
             for sig_type, count in sorted(type_counts.items()):
                 text += f"  • {sig_type}: {count}\n"
         
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        # Navigation
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 Refresh", callback_data="action:signal_history"),
+                InlineKeyboardButton("📊 Activity", callback_data="menu:activity"),
+                InlineKeyboardButton("🏠 Menu", callback_data="back"),
+            ],
+        ]
+        
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     async def _handle_signal_detail(self, query: CallbackQuery, signal_id_prefix: str) -> None:
         """
@@ -5851,53 +5925,109 @@ class TelegramCommandHandler:
         return "\n".join(lines)
 
     async def _handle_performance_metrics(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display performance metrics from state file and signals."""
-        state = self._read_state()
-        signals = self._read_recent_signals(limit=100)
-        
+        """Display performance metrics from performance.json."""
         text = "📈 *Performance Metrics*\n\n"
         
-        # Get performance from state
-        performance = state.get("performance", {}) if state else {}
-        
-        if performance:
-            wins = performance.get("wins", 0)
-            losses = performance.get("losses", 0)
-            total_trades = wins + losses
-            win_rate = performance.get("win_rate", 0)
-            total_pnl = performance.get("total_pnl", 0)
-            avg_pnl = performance.get("avg_pnl", 0)
-            avg_hold = performance.get("avg_hold_minutes", 0)
-            
-            text += "*7-Day Summary:*\n"
-            if total_trades > 0:
-                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-                text += f"  Trades: {total_trades} ({wins}W / {losses}L)\n"
-                text += f"  Win Rate: {win_rate * 100:.1f}%\n"
-                text += f"  Total P&L: {pnl_emoji} ${total_pnl:,.2f}\n"
-                text += f"  Avg P&L: ${avg_pnl:,.2f}\n"
-                if avg_hold > 0:
-                    text += f"  Avg Hold: {avg_hold:.1f} min\n"
+        # Load performance.json for comprehensive metrics
+        try:
+            perf_file = self.state_dir / "performance.json"
+            if perf_file.exists():
+                with open(perf_file, 'r') as f:
+                    all_trades = json.load(f)
+                
+                if all_trades:
+                    now = datetime.now(timezone.utc)
+                    
+                    # 7-day metrics
+                    cutoff_7d = now - timedelta(days=7)
+                    trades_7d = []
+                    for t in all_trades:
+                        try:
+                            ts = t.get("exit_time") or t.get("entry_time")
+                            if ts:
+                                ts_str = str(ts).replace('Z', '+00:00')
+                                dt = datetime.fromisoformat(ts_str.split('.')[0] + '+00:00' if '.' in ts_str and '+' not in ts_str else ts_str)
+                                if dt.tzinfo is None:
+                                    dt = dt.replace(tzinfo=timezone.utc)
+                                if dt >= cutoff_7d:
+                                    trades_7d.append(t)
+                        except Exception:
+                            pass
+                    
+                    if trades_7d:
+                        total_trades = len(trades_7d)
+                        wins = sum(1 for t in trades_7d if t.get('is_win'))
+                        losses = total_trades - wins
+                        total_pnl = sum(float(t.get('pnl', 0) or 0) for t in trades_7d)
+                        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+                        
+                        # Calculate profit factor correctly
+                        winning_trades = [t for t in trades_7d if t.get('is_win')]
+                        losing_trades = [t for t in trades_7d if not t.get('is_win')]
+                        gross_profit = sum(float(t.get('pnl', 0) or 0) for t in winning_trades)
+                        gross_loss = abs(sum(float(t.get('pnl', 0) or 0) for t in losing_trades))
+                        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 0
+                        
+                        avg_win = (gross_profit / len(winning_trades)) if winning_trades else 0
+                        avg_loss = (gross_loss / len(losing_trades)) if losing_trades else 0
+                        avg_pnl = total_pnl / total_trades if total_trades > 0 else 0
+                        
+                        # Calculate avg hold time
+                        hold_times = []
+                        for t in trades_7d:
+                            hold_mins = t.get('hold_duration_minutes', 0) or 0
+                            if hold_mins > 0:
+                                hold_times.append(hold_mins)
+                        avg_hold = sum(hold_times) / len(hold_times) if hold_times else 0
+                        
+                        pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                        wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
+                        pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
+                        
+                        text += "*7-Day Summary:*\n"
+                        text += f"  Trades: {total_trades} ({wins}W / {losses}L)\n"
+                        text += f"  Win Rate: {wr_emoji} {win_rate:.1f}%\n"
+                        text += f"  Total P&L: {pnl_emoji} ${total_pnl:,.2f}\n"
+                        text += f"  Avg P&L: ${avg_pnl:,.2f}\n"
+                        if profit_factor > 0:
+                            text += f"  Profit Factor: {pf_emoji} {profit_factor:.2f}\n"
+                        text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
+                        text += f"  Avg Loss: 🔴 ${avg_loss:,.2f}\n"
+                        if avg_hold > 0:
+                            text += f"  Avg Hold: {avg_hold:.1f} min\n"
+                    else:
+                        text += "*7-Day Summary:*\n  No completed trades in the last 7 days.\n"
+                    
+                    # All-time summary
+                    text += "\n*All-Time Summary:*\n"
+                    total_all = len(all_trades)
+                    wins_all = sum(1 for t in all_trades if t.get('is_win'))
+                    losses_all = total_all - wins_all
+                    pnl_all = sum(float(t.get('pnl', 0) or 0) for t in all_trades)
+                    wr_all = (wins_all / total_all * 100) if total_all > 0 else 0
+                    
+                    pnl_emoji_all = "🟢" if pnl_all >= 0 else "🔴"
+                    text += f"  Trades: {total_all} ({wins_all}W / {losses_all}L)\n"
+                    text += f"  Win Rate: {wr_all:.1f}%\n"
+                    text += f"  Total P&L: {pnl_emoji_all} ${pnl_all:,.2f}\n"
+                else:
+                    text += "No performance data available yet.\n"
             else:
-                text += "  No completed trades in the last 7 days.\n"
-        else:
-            text += "*7-Day Summary:*\n  No performance data available.\n"
+                text += "No performance data available yet.\n"
+        except Exception as e:
+            logger.debug(f"Error loading performance metrics: {e}")
+            text += f"Error loading metrics: {str(e)[:50]}\n"
         
-        # Add signal statistics
-        if signals:
-            text += "\n*Signal Statistics:*\n"
-            text += f"  Total signals: {len(signals)}\n"
-            
-            # Count by status
-            status_counts = {}
-            for s in signals:
-                status = s.get("status", "unknown")
-                status_counts[status] = status_counts.get(status, 0) + 1
-            
-            for status, count in sorted(status_counts.items()):
-                text += f"  • {status}: {count}\n"
+        # Navigation
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 Refresh", callback_data="action:performance_metrics"),
+                InlineKeyboardButton("📊 Activity", callback_data="menu:activity"),
+                InlineKeyboardButton("🏠 Menu", callback_data="back"),
+            ],
+        ]
         
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     async def _handle_daily_summary(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display daily trading summary."""
@@ -6000,47 +6130,88 @@ class TelegramCommandHandler:
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _handle_pnl_overview(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display P&L overview."""
-        signals = self._read_recent_signals(limit=100)
-        
+        """Display P&L overview with correct profit factor calculation."""
         text = "💰 *P&L Overview*\n\n"
         
-        # Calculate from signals
-        exited_signals = [s for s in signals if s.get("status") == "exited"] if signals else []
+        # Load from performance.json for accurate data
+        try:
+            perf_file = self.state_dir / "performance.json"
+            all_trades = []
+            if perf_file.exists():
+                with open(perf_file, 'r') as f:
+                    all_trades = json.load(f)
+            
+            if all_trades:
+                total_pnl = sum(float(t.get('pnl', 0) or 0) for t in all_trades)
+                winning_trades = [t for t in all_trades if t.get('is_win')]
+                losing_trades = [t for t in all_trades if not t.get('is_win')]
+                
+                # Correct profit factor: gross profit / gross loss
+                gross_profit = sum(float(t.get('pnl', 0) or 0) for t in winning_trades)
+                gross_loss = abs(sum(float(t.get('pnl', 0) or 0) for t in losing_trades))
+                profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else 0
+                
+                avg_win = (gross_profit / len(winning_trades)) if winning_trades else 0
+                avg_loss = (gross_loss / len(losing_trades)) if losing_trades else 0
+                
+                largest_win = max((float(t.get('pnl', 0) or 0) for t in all_trades), default=0)
+                largest_loss = min((float(t.get('pnl', 0) or 0) for t in all_trades), default=0)
+                
+                win_rate = (len(winning_trades) / len(all_trades) * 100) if all_trades else 0
+                
+                pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
+                wr_emoji = "🟢" if win_rate >= 50 else "🟡" if win_rate >= 40 else "🔴"
+                pf_emoji = "✨" if profit_factor >= 1.5 else ("📊" if profit_factor >= 1.0 else "⚠️")
+                
+                text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
+                text += f"*Trades:* {len(all_trades)} ({len(winning_trades)}W / {len(losing_trades)}L)\n"
+                text += f"*Win Rate:* {wr_emoji} {win_rate:.1f}%\n\n"
+                
+                text += "*Averages:*\n"
+                text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
+                text += f"  Avg Loss: 🔴 ${avg_loss:,.2f}\n\n"
+                
+                text += "*Extremes:*\n"
+                text += f"  Best Trade: 🟢 ${largest_win:,.2f}\n"
+                text += f"  Worst Trade: 🔴 ${abs(largest_loss):,.2f}\n\n"
+                
+                text += "*Risk Metrics:*\n"
+                text += f"  Profit Factor: {pf_emoji} {profit_factor:.2f}\n"
+                text += f"  Gross Profit: 🟢 ${gross_profit:,.2f}\n"
+                text += f"  Gross Loss: 🔴 ${gross_loss:,.2f}\n"
+                
+                # Calculate max drawdown
+                running_pnl = 0.0
+                peak_pnl = 0.0
+                max_drawdown = 0.0
+                for t in all_trades:
+                    running_pnl += float(t.get('pnl', 0) or 0)
+                    if running_pnl > peak_pnl:
+                        peak_pnl = running_pnl
+                    drawdown = peak_pnl - running_pnl
+                    if drawdown > max_drawdown:
+                        max_drawdown = drawdown
+                
+                if max_drawdown > 0:
+                    dd_emoji = "⚠️" if max_drawdown > 500 else "📉"
+                    text += f"  Max Drawdown: {dd_emoji} ${max_drawdown:,.2f}\n"
+            else:
+                text += "No completed trades to analyze.\n"
+                text += "\n💡 P&L data is calculated from your trading history."
+        except Exception as e:
+            logger.debug(f"Error loading P&L overview: {e}")
+            text += f"Error loading data: {str(e)[:50]}\n"
         
-        if exited_signals:
-            total_pnl = sum(float(s.get("pnl", 0) or 0) for s in exited_signals)
-            wins = [s for s in exited_signals if (s.get("pnl") or 0) > 0]
-            losses = [s for s in exited_signals if (s.get("pnl") or 0) <= 0]
-            
-            avg_win = sum(float(s.get("pnl", 0)) for s in wins) / len(wins) if wins else 0
-            avg_loss = sum(float(s.get("pnl", 0)) for s in losses) / len(losses) if losses else 0
-            
-            largest_win = max((float(s.get("pnl", 0)) for s in exited_signals), default=0)
-            largest_loss = min((float(s.get("pnl", 0)) for s in exited_signals), default=0)
-            
-            pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
-            
-            text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
-            text += f"*Trades:* {len(exited_signals)} ({len(wins)}W / {len(losses)}L)\n\n"
-            
-            text += "*Averages:*\n"
-            text += f"  Avg Win: 🟢 ${avg_win:,.2f}\n"
-            text += f"  Avg Loss: 🔴 ${abs(avg_loss):,.2f}\n\n"
-            
-            text += "*Extremes:*\n"
-            text += f"  Best Trade: 🟢 ${largest_win:,.2f}\n"
-            text += f"  Worst Trade: 🔴 ${abs(largest_loss):,.2f}\n"
-            
-            # Profit factor
-            if avg_loss != 0:
-                profit_factor = abs(avg_win / avg_loss) if avg_loss else 0
-                text += f"\n*Profit Factor:* {profit_factor:.2f}\n"
-        else:
-            text += "No completed trades to analyze.\n"
-            text += "\n💡 P&L data is calculated from exited signals in your trading history."
+        # Navigation
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 Refresh", callback_data="action:pnl_overview"),
+                InlineKeyboardButton("📊 Activity", callback_data="menu:activity"),
+                InlineKeyboardButton("🏠 Menu", callback_data="back"),
+            ],
+        ]
         
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
     async def _handle_set_trading_mode(self, query: CallbackQuery, mode: str) -> None:
         """Set trading mode (scanner or pearl_bot_auto)."""
