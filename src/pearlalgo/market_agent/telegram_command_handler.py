@@ -1279,12 +1279,106 @@ class TelegramCommandHandler:
 
     async def _generate_or_get_chart(self, state: dict) -> Optional[Path]:
         """
-        Use the latest exported dashboard chart (no generation—service owns it).
+        Use the latest exported dashboard chart.
+
+        To keep the chart *fresh* without re-rendering constantly, the Telegram UI can
+        request an on-demand refresh from the running agent service via a simple flag
+        file (`dashboard_chart_refresh.flag`). The service owns chart generation and
+        updates `exports/dashboard_telegram_latest.png` atomically.
 
         We intentionally do **not** fall back to any legacy dashboard filenames to avoid
         showing stale/incorrect aspect ratios on mobile.
         """
         telegram_chart = self.exports_dir / "dashboard_telegram_latest.png"
+
+        # If the agent isn't running, we can't request generation—just return whatever exists.
+        try:
+            if not bool(self._is_agent_process_running()):
+                return telegram_chart if telegram_chart.exists() else None
+        except Exception:
+            # Best-effort: proceed without process check
+            pass
+
+        # Determine chart staleness using state.latest_bar_timestamp (UTC) vs chart file mtime (UTC).
+        latest_bar_ts = None
+        try:
+            ts_raw = (
+                state.get("latest_bar_timestamp")
+                or (state.get("latest_bar", {}) or {}).get("timestamp")
+                or state.get("last_updated")
+            )
+            if ts_raw:
+                latest_bar_ts = parse_utc_timestamp(str(ts_raw))
+                if latest_bar_ts and latest_bar_ts.tzinfo is None:
+                    latest_bar_ts = latest_bar_ts.replace(tzinfo=timezone.utc)
+        except Exception:
+            latest_bar_ts = None
+
+        # Only try to refresh when data appears fresh; avoid needless work in closed/paused markets.
+        data_is_fresh = False
+        try:
+            thr_min = float(state.get("data_stale_threshold_minutes") or 10.0)
+        except Exception:
+            thr_min = 10.0
+        if latest_bar_ts:
+            try:
+                age_min = (datetime.now(timezone.utc) - latest_bar_ts).total_seconds() / 60.0
+                data_is_fresh = (thr_min <= 0) or (age_min <= thr_min)
+            except Exception:
+                data_is_fresh = False
+
+        prev_mtime = None
+        try:
+            if telegram_chart.exists():
+                prev_mtime = float(telegram_chart.stat().st_mtime)
+        except Exception:
+            prev_mtime = None
+
+        should_request_refresh = False
+        if data_is_fresh:
+            if not telegram_chart.exists():
+                should_request_refresh = True
+            else:
+                try:
+                    chart_mtime = datetime.fromtimestamp(float(prev_mtime or 0.0), tz=timezone.utc)
+                    # Refresh if chart is meaningfully behind the latest bar timestamp.
+                    # (90s buffer avoids regenerating on every minor state write.)
+                    if latest_bar_ts and (latest_bar_ts - chart_mtime).total_seconds() > 90.0:
+                        should_request_refresh = True
+                except Exception:
+                    should_request_refresh = False
+
+        if should_request_refresh:
+            flag_file = self.state_dir / "dashboard_chart_refresh.flag"
+            try:
+                # Avoid flag spam: if a recent request exists, don't overwrite it.
+                fresh_flag = False
+                if flag_file.exists():
+                    try:
+                        mtime = datetime.fromtimestamp(flag_file.stat().st_mtime, tz=timezone.utc)
+                        fresh_flag = (datetime.now(timezone.utc) - mtime).total_seconds() < 15.0
+                    except Exception:
+                        fresh_flag = False
+                if not fresh_flag:
+                    flag_file.write_text(
+                        f"requested_at={datetime.now(timezone.utc).isoformat()}\nrequested_by=telegram_dashboard\n",
+                        encoding="utf-8",
+                    )
+            except Exception:
+                pass
+
+            # Wait briefly for the agent to export the refreshed chart.
+            deadline = datetime.now(timezone.utc) + timedelta(seconds=12)
+            while datetime.now(timezone.utc) < deadline:
+                try:
+                    if telegram_chart.exists():
+                        new_mtime = float(telegram_chart.stat().st_mtime)
+                        if prev_mtime is None or new_mtime > float(prev_mtime):
+                            break
+                except Exception:
+                    pass
+                await asyncio.sleep(0.5)
+
         return telegram_chart if telegram_chart.exists() else None
 
     async def _show_status_menu(self, query: CallbackQuery) -> None:

@@ -461,6 +461,11 @@ class MarketAgentService:
         self.dashboard_chart_timeframe = str(service_settings.get("dashboard_chart_timeframe", "auto") or "auto")
         self.dashboard_chart_max_bars = int(service_settings.get("dashboard_chart_max_bars", 420) or 420)
         self.dashboard_chart_show_pressure = bool(service_settings.get("dashboard_chart_show_pressure", True))
+        # On-demand dashboard chart refresh (triggered by Telegram /start or Refresh)
+        self._last_dashboard_chart_refresh_at: Optional[datetime] = None
+        self._dashboard_chart_refresh_cooldown_seconds: int = int(
+            service_settings.get("dashboard_chart_refresh_cooldown_seconds", 60) or 60
+        )
         # Buy/Sell pressure (dashboard observability)
         self.pressure_lookback_bars = int(service_settings.get("pressure_lookback_bars", 24) or 24)
         self.pressure_baseline_bars = int(service_settings.get("pressure_baseline_bars", 120) or 120)
@@ -859,6 +864,9 @@ class MarketAgentService:
         while not self.shutdown_requested:
             # Check for execution control flag files (from Telegram commands)
             await self._check_execution_control_flags()
+
+            # On-demand chart refresh requests (from Telegram dashboard /start/Refresh)
+            await self._check_dashboard_chart_refresh_flag()
             
             # Reset execution daily counters if new trading day
             self._check_daily_reset()
@@ -2480,10 +2488,13 @@ class MarketAgentService:
                     # source of truth is the state manager.
                     exports_dir = self.state_manager.state_dir / "exports"
                     exports_dir.mkdir(parents=True, exist_ok=True)
-                    export_path = exports_dir / "dashboard_telegram_latest.png"
                     import shutil
-                    shutil.copy2(chart_path, export_path)
-                    logger.debug(f"Dashboard chart exported to {export_path}")
+                    import os
+                    export_path = exports_dir / "dashboard_telegram_latest.png"
+                    tmp_export_path = exports_dir / ".dashboard_telegram_latest.png.tmp"
+                    shutil.copyfile(str(chart_path), str(tmp_export_path))
+                    os.replace(str(tmp_export_path), str(export_path))
+                    logger.debug(f"Dashboard chart exported to {export_path} (atomic)")
 
                     # Clean up temp file after export (the exported copy persists).
                     try:
@@ -3570,6 +3581,88 @@ class MarketAgentService:
             
             # Update state
             self._execution_was_connected = is_connected
+
+    async def _check_dashboard_chart_refresh_flag(self) -> None:
+        """
+        Check for an on-demand dashboard chart refresh request.
+
+        This is used by the Telegram UI (e.g., /start or Refresh button) to ask the
+        running agent service to regenerate `exports/dashboard_telegram_latest.png`
+        so the chart reflects the most recent candles.
+
+        Implementation notes:
+        - Uses a simple flag file in the market state dir to avoid touching `state.json`
+          (reduces write races between processes).
+        - Enforces TTL + cooldown to prevent chart spam / API load.
+        - Does **not** send any Telegram messages; it only updates the exported PNG.
+        """
+        FLAG_TTL_SECONDS = 300  # ignore flags older than 5 minutes
+        flag_file_name = "dashboard_chart_refresh.flag"
+
+        def _is_flag_stale(flag_file: Path) -> bool:
+            try:
+                content = flag_file.read_text(encoding="utf-8")
+                if "requested_at=" in content:
+                    ts_str = content.split("requested_at=")[1].splitlines()[0].strip()
+                    ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    age_seconds = (datetime.now(timezone.utc) - ts).total_seconds()
+                    return age_seconds > FLAG_TTL_SECONDS
+                mtime = datetime.fromtimestamp(flag_file.stat().st_mtime, tz=timezone.utc)
+                age_seconds = (datetime.now(timezone.utc) - mtime).total_seconds()
+                return age_seconds > FLAG_TTL_SECONDS
+            except Exception:
+                # If we can't determine age, treat as stale for safety
+                return True
+
+        try:
+            state_dir = self.state_manager.state_dir
+            flag_file = state_dir / flag_file_name
+            if not flag_file.exists():
+                return
+
+            # Clear stale flags
+            if _is_flag_stale(flag_file):
+                try:
+                    flag_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return
+
+            now = datetime.now(timezone.utc)
+
+            # Cooldown to avoid regeneration storms
+            try:
+                cooldown = int(getattr(self, "_dashboard_chart_refresh_cooldown_seconds", 60) or 60)
+            except Exception:
+                cooldown = 60
+            last = getattr(self, "_last_dashboard_chart_refresh_at", None)
+            if last is not None:
+                try:
+                    if (now - last).total_seconds() < float(cooldown):
+                        # Clear the flag so we don't build up a backlog.
+                        try:
+                            flag_file.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                        return
+                except Exception:
+                    pass
+
+            # Remove the flag early to allow a subsequent request while we work.
+            try:
+                flag_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+            # Generate + export the latest Telegram dashboard chart (bounded runtime).
+            try:
+                await asyncio.wait_for(self._generate_dashboard_chart(), timeout=30.0)
+                self._last_dashboard_chart_refresh_at = now
+            except Exception as e:
+                logger.debug(f"Dashboard chart refresh request failed: {e}")
+                return
+        except Exception:
+            return
 
     async def _check_execution_control_flags(self) -> None:
         """
