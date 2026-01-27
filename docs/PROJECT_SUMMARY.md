@@ -300,7 +300,7 @@ pearl_bot_auto.generate_signals(df, config)
 For each signal:
   ├─→ Performance Tracker.track_signal_generated()
   ├─→ State Manager.save_signal()
-  └─→ Telegram Notifier.send_signal()
+  └─→ Telegram Notifier.send_entry_notification()
   ↓
 Periodic Updates:
   ├─→ Dashboard Update (hourly by default)

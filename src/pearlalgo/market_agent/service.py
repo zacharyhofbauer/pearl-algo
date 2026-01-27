@@ -1731,49 +1731,37 @@ class MarketAgentService:
             if execution_result:
                 signal["_execution_order_id"] = execution_result.parent_order_id
 
-            # Queue signal to Telegram (non-blocking)
+            # Queue entry alert to Telegram (non-blocking)
             signal_type = signal.get('type', 'unknown')
             signal_direction = signal.get('direction', 'unknown')
             logger.info(f"Processing signal: {signal_type} {signal_direction}")
-            
-            queued = await self.notification_queue.enqueue_signal(signal, buffer_data=buffer_data, priority=Priority.HIGH)
 
+            # Always send entry notification as the canonical alert
+            queued = await self.notification_queue.enqueue_entry(
+                signal_id=str(signal_id),
+                entry_price=float(entry_price),
+                signal=signal,
+                buffer_data=buffer_data,
+                priority=Priority.HIGH,
+            )
             if queued:
-                logger.info(f"✅ Signal queued for Telegram: {signal_type} {signal_direction}")
+                logger.info(f"✅ Entry queued for Telegram: {signal_type} {signal_direction}")
                 self.signals_sent += 1
                 self.last_signal_sent_at = get_utc_timestamp()
-                # Clear last error on success to avoid stale operator confusion.
                 self.last_signal_send_error = None
             else:
                 logger.error(
-                    f"❌ Failed to queue signal to Telegram (queue full): {signal_type} {signal_direction}. "
+                    f"❌ Failed to queue entry to Telegram (queue full): {signal_type} {signal_direction}. "
                     f"Telegram enabled: {self.telegram_notifier.enabled}, "
                     f"Telegram instance: {self.telegram_notifier.telegram is not None}"
                 )
                 self.signals_send_failures += 1
-                self.last_signal_send_error = "Notification queue full - signal dropped"
+                self.last_signal_send_error = "Notification queue full - entry dropped"
 
             self.signal_count += 1
 
-            # Optional: send a dedicated ENTRY notification for virtual trades (with chart).
-            # This is config-gated to preserve the default "no entry spam" behavior.
-            try:
-                if (
-                    entry_tracked
-                    and bool(getattr(self.config, "virtual_pnl_enabled", True))
-                    and bool(getattr(self.config, "virtual_pnl_notify_entry", False))
-                ):
-                    # Fire-and-forget to avoid delaying the scan loop on chart generation.
-                    asyncio.create_task(
-                        self.telegram_notifier.send_entry_notification(
-                            signal_id=str(signal_id),
-                            entry_price=float(entry_price),
-                            signal=signal,
-                            buffer_data=buffer_data,
-                        )
-                    )
-            except Exception as e:
-                logger.debug(f"Could not schedule entry notification for {str(signal_id)[:16]}: {e}")
+            # Entry notification is delivered via NotificationQueue when enabled, so it
+            # inherits retry/backoff behavior and preserves consistent delivery ordering.
 
         except Exception as e:
             logger.error(f"Error processing signal: {e}", exc_info=True)
@@ -2136,14 +2124,18 @@ class MarketAgentService:
                                 if self._streak_type == 'win':
                                     self._streak_count += 1
                                 else:
+                                    # Streak type changed - reset alert tracking
                                     self._streak_type = 'win'
                                     self._streak_count = 1
+                                    self._last_streak_alert_count = 0
                             else:
                                 if self._streak_type == 'loss':
                                     self._streak_count += 1
                                 else:
+                                    # Streak type changed - reset alert tracking
                                     self._streak_type = 'loss'
                                     self._streak_count = 1
+                                    self._last_streak_alert_count = 0
                             
                             # Send alert when streak reaches threshold (and only once per new streak level)
                             if (self._streak_count >= self._streak_alert_threshold 
@@ -2465,6 +2457,21 @@ class MarketAgentService:
 
             # Run chart generation in thread pool to avoid blocking the event loop.
             # This allows asyncio.wait_for timeouts to work properly.
+            
+            # Apply Telegram render profile for mobile-optimized visuals (no-overlap labels).
+            # This sets mobile_mode=True, compact_labels=True, and disables verbose session stats.
+            cg = self.telegram_notifier.chart_generator
+            if cg and hasattr(cg, "config"):
+                cg.config.mobile_mode = True
+                cg.config.compact_labels = True
+                cg.config.show_session_range_stats = False  # Session names only (no Range/Avg text)
+                cg.config.max_right_labels = 6  # Fewer labels for cleaner mobile view
+                cg.config.right_label_merge_ticks = 6  # More aggressive merging
+                # Optimized panel ratios: more price space, less sub-panel space
+                cg.config.panel_ratio_price = 9.0   # Increased from 8.0 for more price area
+                cg.config.panel_ratio_volume = 1.5  # Reduced from 1.8
+                cg.config.panel_ratio_sub = 1.0     # Reduced from 1.2 (applies to pressure + RSI)
+            
             chart_path = await asyncio.to_thread(
                 self.telegram_notifier.chart_generator.generate_dashboard_chart,
                 data=chart_data,
@@ -2475,6 +2482,7 @@ class MarketAgentService:
                 # Mobile-first: portrait + high DPI for phone readability.
                 figsize=(8, 12),
                 dpi=200,
+                render_mode="telegram",  # Explicit Telegram render mode
                 show_sessions=True,
                 show_key_levels=True,
                 show_vwap=True,
@@ -3475,7 +3483,13 @@ class MarketAgentService:
                 return
             
             perf_data = json.loads(perf_file.read_text(encoding="utf-8"))
-            trades = perf_data.get("trades", [])
+            # performance.json is a list of trade records (backward compatible).
+            if isinstance(perf_data, list):
+                trades = perf_data
+            elif isinstance(perf_data, dict):
+                trades = perf_data.get("trades", []) or []
+            else:
+                trades = []
             
             # Filter today's trades
             today_trades = [

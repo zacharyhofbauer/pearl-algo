@@ -52,8 +52,8 @@ class TestDisabledNotifier:
         assert notifier.enabled is False
 
     @pytest.mark.asyncio
-    async def test_send_signal_returns_false_when_disabled(self) -> None:
-        """Test that send_signal returns False when disabled."""
+    async def test_send_entry_notification_returns_false_when_disabled(self) -> None:
+        """Test that send_entry_notification returns False when disabled."""
         notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {
@@ -63,7 +63,11 @@ class TestDisabledNotifier:
             "entry_price": 17500.0,
         }
         
-        result = await notifier.send_signal(signal)
+        result = await notifier.send_entry_notification(
+            signal_id="test_signal",
+            entry_price=17500.0,
+            signal=signal,
+        )
         
         assert result is False
 
@@ -80,76 +84,6 @@ class TestDisabledNotifier:
         result = await notifier.send_status(status)
         
         assert result is False
-
-
-class TestSignalFormatting:
-    """Tests for signal message formatting."""
-
-    def test_format_minimal_signal_with_valid_data(self) -> None:
-        """Test minimal signal formatting with valid data."""
-        notifier = MarketAgentTelegramNotifier(enabled=False)
-        
-        signal = {
-            "symbol": "MNQ",
-            "type": "breakout",
-            "direction": "long",
-            "entry_price": 17500.0,
-            "stop_loss": 17480.0,
-            "take_profit": 17550.0,
-            "confidence": 0.75,
-        }
-        
-        result = notifier._format_minimal_signal(signal)
-        
-        assert "MNQ" in result
-        assert "LONG" in result
-        assert "17500" in result
-
-    def test_format_minimal_signal_with_missing_fields(self) -> None:
-        """Test minimal signal formatting with missing fields."""
-        notifier = MarketAgentTelegramNotifier(enabled=False)
-        
-        signal = {}  # Empty signal
-        
-        # Should not raise
-        result = notifier._format_minimal_signal(signal)
-        
-        assert isinstance(result, str)
-        assert len(result) > 0
-
-    def test_format_minimal_signal_with_none_values(self) -> None:
-        """Test minimal signal formatting with None values."""
-        notifier = MarketAgentTelegramNotifier(enabled=False)
-        
-        signal = {
-            "symbol": None,
-            "type": None,
-            "direction": None,
-            "entry_price": None,
-            "stop_loss": None,
-            "take_profit": None,
-            "confidence": None,
-        }
-        
-        # Should not raise
-        result = notifier._format_minimal_signal(signal)
-        
-        assert isinstance(result, str)
-
-    def test_format_minimal_signal_with_invalid_types(self) -> None:
-        """Test minimal signal formatting with invalid types."""
-        notifier = MarketAgentTelegramNotifier(enabled=False)
-        
-        signal = {
-            "symbol": 12345,  # Should be string
-            "entry_price": "not a number",  # Should be float
-            "confidence": "high",  # Should be float
-        }
-        
-        # Should not raise
-        result = notifier._format_minimal_signal(signal)
-        
-        assert isinstance(result, str)
 
 
 class TestCompactSignalFormatting:
@@ -297,8 +231,8 @@ class TestChartGeneration:
     """Tests for chart generation handling."""
 
     @pytest.mark.asyncio
-    async def test_send_signal_handles_empty_buffer_data(self) -> None:
-        """Test that send_signal handles empty buffer data."""
+    async def test_send_entry_notification_handles_empty_buffer_data(self) -> None:
+        """Test that send_entry_notification handles empty buffer data."""
         notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {
@@ -310,13 +244,18 @@ class TestChartGeneration:
         
         buffer_data = pd.DataFrame()  # Empty
         
-        result = await notifier.send_signal(signal, buffer_data=buffer_data)
+        result = await notifier.send_entry_notification(
+            signal_id="test",
+            entry_price=17500.0,
+            signal=signal,
+            buffer_data=buffer_data,
+        )
         
         assert result is False  # Disabled
 
     @pytest.mark.asyncio
-    async def test_send_signal_handles_none_buffer_data(self) -> None:
-        """Test that send_signal handles None buffer data."""
+    async def test_send_entry_notification_handles_none_buffer_data(self) -> None:
+        """Test that send_entry_notification handles None buffer data."""
         notifier = MarketAgentTelegramNotifier(enabled=False)
         
         signal = {
@@ -326,7 +265,12 @@ class TestChartGeneration:
             "entry_price": 17500.0,
         }
         
-        result = await notifier.send_signal(signal, buffer_data=None)
+        result = await notifier.send_entry_notification(
+            signal_id="test",
+            entry_price=17500.0,
+            signal=signal,
+            buffer_data=None,
+        )
         
         assert result is False  # Disabled
 
@@ -498,8 +442,8 @@ class TestErrorResilience:
     """Tests for error handling and resilience."""
 
     @pytest.mark.asyncio
-    async def test_send_signal_catches_exceptions(self) -> None:
-        """Test that send_signal catches and handles exceptions."""
+    async def test_send_entry_notification_catches_exceptions(self) -> None:
+        """Test that send_entry_notification catches and handles exceptions."""
         # Create a notifier that would be enabled but with mock that raises
         notifier = MarketAgentTelegramNotifier(
             bot_token="fake_token",
@@ -507,20 +451,27 @@ class TestErrorResilience:
             enabled=True,
         )
         
+        signal = {"signal_id": "test", "type": "breakout", "direction": "long", "entry_price": 17500.0}
+        
         # If initialization failed (no real Telegram), should be disabled
         if not notifier.enabled:
-            signal = {"signal_id": "test", "type": "breakout", "direction": "long"}
-            result = await notifier.send_signal(signal)
+            result = await notifier.send_entry_notification(
+                signal_id="test",
+                entry_price=17500.0,
+                signal=signal,
+            )
             assert result is False
         else:
             # Mock telegram to raise
             notifier.telegram = MagicMock()
             notifier.telegram.send_message = AsyncMock(side_effect=Exception("Network error"))
             
-            signal = {"signal_id": "test", "type": "breakout", "direction": "long"}
-            
             # Should not raise, should return False
-            result = await notifier.send_signal(signal)
+            result = await notifier.send_entry_notification(
+                signal_id="test",
+                entry_price=17500.0,
+                signal=signal,
+            )
             assert result is False
 
     def test_format_methods_never_raise(self) -> None:
@@ -539,10 +490,10 @@ class TestErrorResilience:
             if signal is None:
                 continue
             try:
-                result = notifier._format_minimal_signal(signal)
+                result = notifier._format_compact_signal(signal)
                 assert isinstance(result, str)
             except Exception as e:
-                pytest.fail(f"_format_minimal_signal raised {e} for input {signal}")
+                pytest.fail(f"_format_compact_signal raised {e} for input {signal}")
 
 
 class TestTelegramMessageLimits:
@@ -552,7 +503,7 @@ class TestTelegramMessageLimits:
         """Test that generated messages have reasonable length."""
         notifier = MarketAgentTelegramNotifier(enabled=False)
         
-        # Test minimal signal stays under limit
+        # Test compact signal stays under limit
         signal = {
             "symbol": "MNQ" * 100,  # Very long symbol (edge case)
             "type": "breakout" * 100,
@@ -561,7 +512,7 @@ class TestTelegramMessageLimits:
             "reason": "x" * 1000,  # Very long reason
         }
         
-        result = notifier._format_minimal_signal(signal)
+        result = notifier._format_compact_signal(signal)
         
         # Should produce a string (not crash)
         assert isinstance(result, str)

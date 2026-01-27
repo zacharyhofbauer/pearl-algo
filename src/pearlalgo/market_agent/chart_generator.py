@@ -43,9 +43,9 @@ SIGNAL_LONG = "#26a69a"
 SIGNAL_SHORT = "#ef5350"
 ENTRY_COLOR = "#2962ff"
 VWAP_COLOR = "#2196f3"
-# MA colors: supports up to 4 EMAs (9, 20, 50, 200)
-# Blue for fast (9/20), Purple for medium (50), Red for slow (200)
-MA_COLORS = ['#2196f3', '#2196f3', '#9c27b0', '#f44336']
+# MA colors: supports up to 4 EMAs (9, 20, 50, 200) with unique colors
+# Cyan for EMA9, Blue for EMA20, Purple for EMA50, Red for EMA200
+MA_COLORS = ['#00bcd4', '#2196f3', '#9c27b0', '#f44336']
 
 # TBT Trendline colors (configurable via ChartConfig)
 TBT_RESISTANCE_COLOR = "#ffc107"  # Amber/yellow for resistance trendlines
@@ -71,13 +71,17 @@ ZORDER_TEXT_LABELS = 4
 
 # Font size constants (in points) - for consistent text sizing across chart elements
 # Tuned for Telegram/mobile readability.
-FONT_SIZE_LABEL = 10          # Right-side level labels
-FONT_SIZE_SESSION = 9         # Session names (Tokyo/London/NY)
-FONT_SIZE_POWER_READOUT = 11  # Power channel buy/sell readout
+FONT_SIZE_LABEL = 8           # Right-side level labels (compact for mobile)
+FONT_SIZE_LABEL_MOBILE = 7    # Even smaller for mobile merged labels
+FONT_SIZE_SESSION = 8         # Session names (Tokyo/London/NY)
+FONT_SIZE_POWER_READOUT = 10  # Power channel buy/sell readout
 FONT_SIZE_RR_BOX = 9          # Risk/reward box USD labels
-FONT_SIZE_LEGEND = 9          # Dashboard legend text
-FONT_SIZE_TITLE = 14          # Equity curve chart title
+FONT_SIZE_LEGEND = 8          # Dashboard legend text (compact)
+FONT_SIZE_TITLE = 10          # Chart title (smaller, header-style)
+FONT_SIZE_TITLE_MOBILE = 9    # Even smaller title for mobile
 FONT_SIZE_SUMMARY = 10        # Performance summary text
+FONT_SIZE_AXIS_TICK = 8       # X/Y axis tick labels
+FONT_SIZE_AXIS_TICK_MOBILE = 7  # Smaller axis ticks for mobile
 
 # Alpha (opacity) constants - for consistent transparency across chart elements
 # Low alpha values ensure zones don't obscure candles (visual contract)
@@ -86,6 +90,7 @@ ALPHA_ZONE_POWER_CHANNEL = 0.10  # Power channel zone fills
 ALPHA_ZONE_RR_BOX_PROFIT = 0.20  # RR box profit zone
 ALPHA_ZONE_RR_BOX_RISK = 0.22    # RR box risk zone
 ALPHA_SESSION_SHADING = 0.08     # Session background shading
+ALPHA_VWAP_BAND_FILL = 0.12      # VWAP band fill between VWAP and ±1σ (subtle but visible)
 ALPHA_LINE_PRIMARY = 0.9         # Entry line, primary levels
 ALPHA_LINE_SECONDARY = 0.7       # Stop/target, secondary levels
 ALPHA_LINE_CONTEXTUAL = 0.55     # S/R, session averages
@@ -174,17 +179,6 @@ def compute_spaceman_key_levels(levels_df: pd.DataFrame) -> Dict[str, Any]:
         if ohlc.empty:
             return {}
 
-        resampled = (
-            ohlc.resample("4H")
-            .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
-            .dropna(subset=["open", "high", "low", "close"])
-        )
-        if len(resampled) < 2:
-            return {}
-
-        cur = resampled.iloc[-1]
-        prev = resampled.iloc[-2]
-
         def _pack(row: pd.Series) -> Dict[str, float]:
             hi = float(row["high"])
             lo = float(row["low"])
@@ -195,7 +189,101 @@ def compute_spaceman_key_levels(levels_df: pd.DataFrame) -> Dict[str, Any]:
                 "mid": float((hi + lo) / 2.0),
             }
 
-        return {"intra_4h": {"current": _pack(cur), "previous": _pack(prev)}}
+        result = {}
+
+        # 4H levels
+        resampled_4h = (
+            ohlc.resample("4h")
+            .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+            .dropna(subset=["open", "high", "low", "close"])
+        )
+        if len(resampled_4h) >= 2:
+            cur = resampled_4h.iloc[-1]
+            prev = resampled_4h.iloc[-2]
+            result["intra_4h"] = {"current": _pack(cur), "previous": _pack(prev)}
+
+        # Weekly levels (W-Mon anchored, or W for pandas default Sunday)
+        try:
+            resampled_w = (
+                ohlc.resample("W")
+                .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+                .dropna(subset=["open", "high", "low", "close"])
+            )
+            if len(resampled_w) >= 2:
+                cur_w = resampled_w.iloc[-1]
+                prev_w = resampled_w.iloc[-2]
+                result["weekly"] = {"current": _pack(cur_w), "previous": _pack(prev_w)}
+        except Exception:
+            pass
+
+        # Monthly levels (MS = Month Start)
+        try:
+            resampled_m = (
+                ohlc.resample("MS")
+                .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+                .dropna(subset=["open", "high", "low", "close"])
+            )
+            if len(resampled_m) >= 2:
+                cur_m = resampled_m.iloc[-1]
+                prev_m = resampled_m.iloc[-2]
+                result["monthly"] = {"current": _pack(cur_m), "previous": _pack(prev_m)}
+        except Exception:
+            pass
+
+        # Monday Range (current week's Monday high/low/mid)
+        try:
+            # Filter to Monday bars only (dayofweek == 0)
+            monday_mask = ohlc.index.dayofweek == 0
+            monday_bars = ohlc[monday_mask]
+            if not monday_bars.empty:
+                # Get the most recent Monday's range
+                last_monday = monday_bars.index[-1].date()
+                today_monday = monday_bars[monday_bars.index.date == last_monday]
+                if not today_monday.empty:
+                    mon_high = float(today_monday["high"].max())
+                    mon_low = float(today_monday["low"].min())
+                    mon_mid = (mon_high + mon_low) / 2.0
+                    result["monday_range"] = {
+                        "high": mon_high,
+                        "low": mon_low,
+                        "mid": mon_mid,
+                    }
+        except Exception:
+            pass
+
+        # Quarterly levels (QS = Quarter Start)
+        try:
+            resampled_q = (
+                ohlc.resample("QS")
+                .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+                .dropna(subset=["open", "high", "low", "close"])
+            )
+            if len(resampled_q) >= 2:
+                cur_q = resampled_q.iloc[-1]
+                prev_q = resampled_q.iloc[-2]
+                result["quarterly"] = {"current": _pack(cur_q), "previous": _pack(prev_q)}
+        except Exception:
+            pass
+
+        # Yearly levels (YS = Year Start)
+        try:
+            resampled_y = (
+                ohlc.resample("YS")
+                .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
+                .dropna(subset=["open", "high", "low", "close"])
+            )
+            if len(resampled_y) >= 1:
+                cur_y = resampled_y.iloc[-1]
+                # Yearly shows current year's H/L/M (not previous)
+                result["yearly"] = {
+                    "current": _pack(cur_y),
+                    # If we have a previous year, include it
+                    "previous": _pack(resampled_y.iloc[-2]) if len(resampled_y) >= 2 else None,
+                }
+        except Exception:
+            pass
+
+        return result
     except Exception:
         # Best-effort feature: never fail charting if this computation breaks.
         return {}
@@ -883,6 +971,11 @@ class ChartConfig:
     show_tbt_targets: bool = True
     show_key_levels: bool = True
 
+    # Key level timeframes to display (SpacemanBTC style)
+    # Options: "4h", "daily", "weekly", "monthly", "monday"
+    # Default shows 4H, Daily, and Weekly levels. Add "monthly" or "monday" for more.
+    key_level_timeframes: tuple = ("4h", "daily", "weekly")
+
     # TBT Trendline styling (configurable colors for visibility)
     tbt_resistance_color: str = "#ffc107"  # Amber/yellow for resistance
     tbt_support_color: str = "#00e676"     # Light green for support
@@ -895,6 +988,17 @@ class ChartConfig:
 
     show_rsi: bool = True
     rsi_period: int = 14
+    rsi_overbought_oversold_shading: bool = True  # Shade overbought (>70) and oversold (<30) zones
+
+    # Panel visibility options (allows hiding panels for more price space)
+    show_pressure_panel: bool = True  # Pressure panel (signed volume histogram)
+    show_volume_panel: bool = True    # Volume panel (can disable for cleaner charts)
+
+    # Panel ratio configuration (advanced - controls vertical space allocation)
+    # Default optimized ratios give ~66% to price panel when all sub-panels enabled
+    panel_ratio_price: float = 8.0    # Price panel ratio (larger = more space)
+    panel_ratio_volume: float = 1.8   # Volume panel ratio
+    panel_ratio_sub: float = 1.2      # Sub-panel ratio (applied to pressure and RSI)
 
     # VWAP band fill option (visual enhancement)
     vwap_fill_bands: bool = False  # Fill between VWAP and ±1σ bands
@@ -951,6 +1055,13 @@ class ChartConfig:
             "hud_right_label_merge_ticks": "right_label_merge_ticks",
             "hud_show_rsi": "show_rsi",
             "hud_rsi_period": "rsi_period",
+            "hud_rsi_overbought_oversold_shading": "rsi_overbought_oversold_shading",
+            "hud_show_pressure_panel": "show_pressure_panel",
+            "hud_show_volume_panel": "show_volume_panel",
+            "hud_panel_ratio_price": "panel_ratio_price",
+            "hud_panel_ratio_volume": "panel_ratio_volume",
+            "hud_panel_ratio_sub": "panel_ratio_sub",
+            "hud_key_level_timeframes": "key_level_timeframes",
             "hud_vwap_fill_bands": "vwap_fill_bands",
             "hud_show_legend": "show_legend",
             "hud_mobile_enhanced_fonts": "mobile_enhanced_fonts",
@@ -1320,17 +1431,17 @@ class ChartGenerator:
         """Create list of indicators for mplfinance."""
         indicators = []
         
-        # Add moving averages
+        # Add moving averages (EMA - Exponential Moving Average)
         if self.config.show_ma:
             for period in self.config.ma_periods:
                 if period <= len(data):
                     color = MA_COLORS[self.config.ma_periods.index(period) % len(MA_COLORS)]
                     indicators.append(mpf.make_addplot(
-                        data['Close'].rolling(period).mean(),
+                        data['Close'].ewm(span=period, adjust=False).mean(),
                         color=color,
                         width=1.2,
                         alpha=0.7,
-                        label=f'MA{period}'
+                        label=f'EMA{period}'
                     ))
         
         # Add VWAP if requested
@@ -1554,7 +1665,8 @@ class ChartGenerator:
         except Exception:
             current_price = float(signal.get("entry_price") or 0.0) or 0.0
 
-        def _add(price: Any, label: str, color: str, *, priority: int, linestyle: str = "--", lw: float = 1.0, alpha: float = 0.6):
+        def _add(price: Any, label: str, color: str, *, priority: int, linestyle: str = "--", lw: float = 1.0, alpha: float = 0.6, kind: str = "key_level"):
+            """Add a level candidate with optional kind tag for filtering."""
             try:
                 p = float(price)
             except Exception:
@@ -1570,13 +1682,14 @@ class ChartGenerator:
                     "linestyle": linestyle,
                     "lw": float(lw),
                     "alpha": float(alpha),
+                    "kind": str(kind),  # Category for filtering (vwap, key_level, trade, etc.)
                 }
             )
 
         # Trade lines (always highest priority)
-        _add(signal.get("entry_price"), "Entry", ENTRY_COLOR, priority=100, linestyle="-", lw=1.8, alpha=0.95)
-        _add(signal.get("stop_loss"), "Stop", SIGNAL_SHORT, priority=95, linestyle="--", lw=1.4, alpha=0.9)
-        _add(signal.get("take_profit"), "Target", SIGNAL_LONG, priority=95, linestyle="--", lw=1.4, alpha=0.9)
+        _add(signal.get("entry_price"), "Entry", ENTRY_COLOR, priority=100, linestyle="-", lw=1.8, alpha=0.95, kind="trade")
+        _add(signal.get("stop_loss"), "Stop", SIGNAL_SHORT, priority=95, linestyle="--", lw=1.4, alpha=0.9, kind="trade")
+        _add(signal.get("take_profit"), "Target", SIGNAL_LONG, priority=95, linestyle="--", lw=1.4, alpha=0.9, kind="trade")
 
         # Extra levels (e.g., Exit)
         if extra_levels:
@@ -1597,12 +1710,12 @@ class ChartGenerator:
         # VWAP + bands (from scanner)
         vwap = (hud.get("vwap") or signal.get("vwap_data") or {}) if isinstance(hud, dict) else (signal.get("vwap_data") or {})
         if isinstance(vwap, dict):
-            _add(vwap.get("vwap"), "VWAP", VWAP_COLOR, priority=60, linestyle="-", lw=1.2, alpha=0.65)
+            _add(vwap.get("vwap"), "VWAP", VWAP_COLOR, priority=60, linestyle="-", lw=1.2, alpha=0.65, kind="vwap")
             # Use sigma wording (matches VWAP AA bands + avoids “2x” ambiguity in right labels)
-            _add(vwap.get("vwap_upper_1"), "VWAP +1σ", VWAP_COLOR, priority=40, linestyle="--", lw=1.0, alpha=0.35)
-            _add(vwap.get("vwap_lower_1"), "VWAP -1σ", VWAP_COLOR, priority=40, linestyle="--", lw=1.0, alpha=0.35)
-            _add(vwap.get("vwap_upper_2"), "VWAP +2σ", VWAP_COLOR, priority=30, linestyle="--", lw=0.9, alpha=0.25)
-            _add(vwap.get("vwap_lower_2"), "VWAP -2σ", VWAP_COLOR, priority=30, linestyle="--", lw=0.9, alpha=0.25)
+            _add(vwap.get("vwap_upper_1"), "VWAP +1σ", VWAP_COLOR, priority=40, linestyle="--", lw=1.0, alpha=0.35, kind="vwap")
+            _add(vwap.get("vwap_lower_1"), "VWAP -1σ", VWAP_COLOR, priority=40, linestyle="--", lw=1.0, alpha=0.35, kind="vwap")
+            _add(vwap.get("vwap_upper_2"), "VWAP +2σ", VWAP_COLOR, priority=30, linestyle="--", lw=0.9, alpha=0.25, kind="vwap")
+            _add(vwap.get("vwap_lower_2"), "VWAP -2σ", VWAP_COLOR, priority=30, linestyle="--", lw=0.9, alpha=0.25, kind="vwap")
 
         # Volume profile levels (POC/VAH/VAL)
         vp = hud.get("volume_profile") or signal.get("volume_profile") or {}
@@ -1680,20 +1793,77 @@ class ChartGenerator:
                 sp = None
 
             if isinstance(sp, dict):
-                # Keep dashboard key levels focused.
-                # The visual regression baselines intentionally include only the 4H context
-                # from the Spaceman-style set; higher timeframe (W/M/Q/Y) levels are noisy
-                # for short lookbacks and are prone to local-data drift.
-                c_4h = "#ff9800"  # orange
+                # Get configured timeframes to display
+                enabled_tfs = set(tf.lower() for tf in self.config.key_level_timeframes)
 
-                intra = sp.get("intra_4h") or {}
-                if isinstance(intra, dict):
-                    cur = intra.get("current") or {}
-                    prev = intra.get("previous") or {}
-                    _add(cur.get("open"), "4H-O", c_4h, priority=44, linestyle="--", lw=1.0, alpha=0.30)
-                    _add(prev.get("high"), "P-4H-H", c_4h, priority=43, linestyle="--", lw=1.0, alpha=0.26)
-                    _add(prev.get("low"), "P-4H-L", c_4h, priority=43, linestyle="--", lw=1.0, alpha=0.26)
-                    _add(prev.get("mid"), "P-4H-M", c_4h, priority=40, linestyle=":", lw=1.0, alpha=0.22)
+                # 4H levels (orange) - show if "4h" in config
+                if "4h" in enabled_tfs:
+                    c_4h = "#ff9800"  # orange
+                    intra = sp.get("intra_4h") or {}
+                    if isinstance(intra, dict):
+                        cur = intra.get("current") or {}
+                        prev = intra.get("previous") or {}
+                        _add(cur.get("open"), "4H-O", c_4h, priority=44, linestyle="--", lw=1.0, alpha=0.30)
+                        _add(prev.get("high"), "P-4H-H", c_4h, priority=43, linestyle="--", lw=1.0, alpha=0.26)
+                        _add(prev.get("low"), "P-4H-L", c_4h, priority=43, linestyle="--", lw=1.0, alpha=0.26)
+                        _add(prev.get("mid"), "P-4H-M", c_4h, priority=40, linestyle=":", lw=1.0, alpha=0.22)
+
+                # Weekly levels (yellow) - show if "weekly" in config
+                if "weekly" in enabled_tfs:
+                    c_weekly = "#fffcbc"  # pale yellow (SpacemanBTC style)
+                    weekly = sp.get("weekly") or {}
+                    if isinstance(weekly, dict):
+                        cur_w = weekly.get("current") or {}
+                        prev_w = weekly.get("previous") or {}
+                        _add(cur_w.get("open"), "W-O", c_weekly, priority=38, linestyle="--", lw=1.2, alpha=0.35)
+                        _add(prev_w.get("high"), "P-W-H", c_weekly, priority=37, linestyle="--", lw=1.2, alpha=0.30)
+                        _add(prev_w.get("low"), "P-W-L", c_weekly, priority=37, linestyle="--", lw=1.2, alpha=0.30)
+                        _add(prev_w.get("mid"), "P-W-M", c_weekly, priority=35, linestyle=":", lw=1.0, alpha=0.25)
+
+                # Monthly levels (green) - show if "monthly" in config
+                if "monthly" in enabled_tfs:
+                    c_monthly = "#08d48c"  # green (SpacemanBTC style)
+                    monthly = sp.get("monthly") or {}
+                    if isinstance(monthly, dict):
+                        cur_m = monthly.get("current") or {}
+                        prev_m = monthly.get("previous") or {}
+                        _add(cur_m.get("open"), "M-O", c_monthly, priority=34, linestyle="--", lw=1.4, alpha=0.35)
+                        _add(prev_m.get("high"), "P-M-H", c_monthly, priority=33, linestyle="--", lw=1.4, alpha=0.30)
+                        _add(prev_m.get("low"), "P-M-L", c_monthly, priority=33, linestyle="--", lw=1.4, alpha=0.30)
+                        _add(prev_m.get("mid"), "P-M-M", c_monthly, priority=32, linestyle=":", lw=1.0, alpha=0.25)
+
+                # Monday Range levels (white) - show if "monday" in config
+                if "monday" in enabled_tfs:
+                    c_monday = "#ffffff"  # white (SpacemanBTC style)
+                    monday = sp.get("monday_range") or {}
+                    if isinstance(monday, dict):
+                        _add(monday.get("high"), "Mon-H", c_monday, priority=31, linestyle="--", lw=1.0, alpha=0.30)
+                        _add(monday.get("low"), "Mon-L", c_monday, priority=31, linestyle="--", lw=1.0, alpha=0.30)
+                        _add(monday.get("mid"), "Mon-M", c_monday, priority=30, linestyle=":", lw=1.0, alpha=0.25)
+
+                # Quarterly levels (red) - show if "quarterly" in config
+                if "quarterly" in enabled_tfs:
+                    c_quarterly = "#ff0000"  # red (SpacemanBTC style)
+                    quarterly = sp.get("quarterly") or {}
+                    if isinstance(quarterly, dict):
+                        cur_q = quarterly.get("current") or {}
+                        prev_q = quarterly.get("previous") or {}
+                        _add(cur_q.get("open"), "Q-O", c_quarterly, priority=29, linestyle="--", lw=1.4, alpha=0.35)
+                        _add(prev_q.get("high"), "P-Q-H", c_quarterly, priority=28, linestyle="--", lw=1.4, alpha=0.30)
+                        _add(prev_q.get("low"), "P-Q-L", c_quarterly, priority=28, linestyle="--", lw=1.4, alpha=0.30)
+                        _add(prev_q.get("mid"), "P-Q-M", c_quarterly, priority=27, linestyle=":", lw=1.0, alpha=0.25)
+
+                # Yearly levels (red) - show if "yearly" in config
+                if "yearly" in enabled_tfs:
+                    c_yearly = "#ff0000"  # red (SpacemanBTC style)
+                    yearly = sp.get("yearly") or {}
+                    if isinstance(yearly, dict):
+                        cur_y = yearly.get("current") or {}
+                        # Yearly shows current year's O/H/L/M
+                        _add(cur_y.get("open"), "Y-O", c_yearly, priority=26, linestyle="--", lw=1.6, alpha=0.40)
+                        _add(cur_y.get("high"), "CY-H", c_yearly, priority=25, linestyle="--", lw=1.6, alpha=0.35)
+                        _add(cur_y.get("low"), "CY-L", c_yearly, priority=25, linestyle="--", lw=1.6, alpha=0.35)
+                        _add(cur_y.get("mid"), "CY-M", c_yearly, priority=24, linestyle=":", lw=1.2, alpha=0.30)
         except Exception:
             pass
 
@@ -1746,8 +1916,14 @@ class ChartGenerator:
             anchor_price = float(top.get("price", 0.0))
 
             labels = [str(x.get("label") or "") for x in g_sorted if str(x.get("label") or "")]
-            labels = labels[:3] + ([f"+{len(labels)-3}"] if len(labels) > 3 else [])
-            label = " / ".join(labels)
+            # Compact merged labels: max 2 labels, use "/" separator (no spaces)
+            # If more than 2, show top 2 + count
+            if len(labels) > 2:
+                label = f"{labels[0]}/{labels[1]}+{len(labels)-2}"
+            elif len(labels) == 2:
+                label = f"{labels[0]}/{labels[1]}"
+            else:
+                label = labels[0] if labels else ""
 
             merged.append(
                 {
@@ -1758,6 +1934,7 @@ class ChartGenerator:
                     "linestyle": str(top.get("linestyle") or "--"),
                     "lw": float(top.get("lw") or 1.0),
                     "alpha": float(top.get("alpha") or 0.6),
+                    "kind": str(top.get("kind") or "key_level"),  # Preserve kind for filtering
                 }
             )
 
@@ -1771,7 +1948,7 @@ class ChartGenerator:
         *,
         current_price: float,
         max_labels: int,
-        min_label_spacing_pts: float = 8.0,
+        min_label_spacing_pts: float = 10.0,
     ) -> None:
         """Draw TradingView-style right-side level labels with minimal clutter.
         
@@ -1802,6 +1979,16 @@ class ChartGenerator:
         if not visible_levels:
             return
 
+        # Hybrid label policy: filter out VWAP right labels for mobile/Telegram mode
+        # (VWAP lines/bands are still drawn; only the right-side text labels are removed)
+        if self.config.mobile_mode:
+            visible_levels = [
+                lvl for lvl in visible_levels
+                if lvl.get("kind") != "vwap"
+            ]
+            if not visible_levels:
+                return
+
         # Pick most relevant levels (priority first, then proximity to current price)
         def _score(lvl: Dict[str, Any]) -> Tuple[int, float]:
             pri = int(lvl.get("priority", 0))
@@ -1813,7 +2000,7 @@ class ChartGenerator:
 
         candidates = sorted(visible_levels, key=_score)
         
-        # Collision-aware label selection: drop lower-priority labels that would overlap
+        # Collision-free stacking: compute dynamic max labels and stack overlapping labels
         # Convert min_label_spacing_pts to data units using figure transform
         try:
             # Get pixels-per-data-unit for y-axis
@@ -1822,38 +2009,61 @@ class ChartGenerator:
             y_range = ymax - ymin
             pts_per_data = y_pixels / y_range if y_range > 0 else 1.0
             min_spacing_data = min_label_spacing_pts / pts_per_data if pts_per_data > 0 else 0.0
+            
+            # Dynamic max labels: estimate how many labels fit vertically
+            # ~18pt per label (font + padding), with buffer
+            label_height_pts = 18.0
+            dynamic_max = max(4, int(y_pixels / label_height_pts * 0.7))  # 70% fill
+            effective_max = min(max_labels, dynamic_max)
         except Exception:
             min_spacing_data = (ymax - ymin) * 0.02  # Fallback: 2% of range
+            effective_max = max_labels
         
-        selected: List[Dict[str, Any]] = []
-        occupied_prices: List[float] = []
+        # Select top-priority labels up to effective_max
+        selected = candidates[:max(1, int(effective_max))]
         
-        for lvl in candidates:
-            if len(selected) >= max(1, int(max_labels)):
-                break
-            
-            p = float(lvl.get("price", 0.0))
-            
-            # Check collision with already-selected labels
-            collision = False
-            for occ_p in occupied_prices:
-                if abs(p - occ_p) < min_spacing_data:
-                    collision = True
-                    break
-            
-            if not collision:
-                selected.append(lvl)
-                occupied_prices.append(p)
+        if not selected:
+            return
 
         # Create extra right margin so labels aren't clipped (wider for safety)
         try:
-            fig.subplots_adjust(right=0.80)
+            fig.subplots_adjust(right=0.78)
         except Exception:
             pass
 
         trans = ax.get_yaxis_transform()
-
+        
+        # Collision-free stacking: assign display positions (may differ from true price)
+        # This prevents overlapping labels while preserving accurate price lines
+        occupied_positions: List[float] = []
+        label_positions: List[Tuple[Dict[str, Any], float]] = []  # (level, display_y)
+        
         for lvl in selected:
+            p = float(lvl["price"])
+            display_y = p
+            
+            # Check collision with already-placed labels and shift if needed
+            for _ in range(20):  # Max iterations to prevent infinite loop
+                collision = False
+                for occ_y in occupied_positions:
+                    if abs(display_y - occ_y) < min_spacing_data:
+                        collision = True
+                        # Shift up or down depending on position in range
+                        if display_y > (ymin + ymax) / 2:
+                            display_y = occ_y - min_spacing_data  # Shift down
+                        else:
+                            display_y = occ_y + min_spacing_data  # Shift up
+                        break
+                if not collision:
+                    break
+            
+            # Clamp to visible range
+            display_y = max(ymin + min_spacing_data * 0.5, min(ymax - min_spacing_data * 0.5, display_y))
+            occupied_positions.append(display_y)
+            label_positions.append((lvl, display_y))
+
+        # Draw all labels with leader lines where needed
+        for lvl, display_y in label_positions:
             p = float(lvl["price"])
             label = str(lvl.get("label") or "")
             color = str(lvl.get("color") or TEXT_PRIMARY)
@@ -1861,7 +2071,7 @@ class ChartGenerator:
             ls = str(lvl.get("linestyle") or "--")
             lw = float(lvl.get("lw") or 1.0)
 
-            # Level line with explicit z-order
+            # Level line at TRUE price (not display position)
             ax.axhline(
                 p,
                 color=color,
@@ -1871,22 +2081,39 @@ class ChartGenerator:
                 zorder=ZORDER_LEVEL_LINES,
             )
 
-            # Right label with explicit z-order
+            # Leader line if label is shifted from true price
+            needs_leader = abs(display_y - p) > min_spacing_data * 0.3
+            if needs_leader:
+                # Draw subtle connector from true price to label position
+                ax.plot(
+                    [1.0, 1.003], [p, display_y],
+                    color=color,
+                    linewidth=0.8,
+                    alpha=0.4,
+                    transform=trans,
+                    clip_on=False,
+                    zorder=ZORDER_TEXT_LABELS - 1,
+                )
+
+            # Right label at DISPLAY position (may be stacked)
             try:
                 rgba = mcolors.to_rgba(color, alpha=0.20)
             except Exception:
                 rgba = (0, 0, 0, 0.2)
-            txt = f"{label}  {p:,.2f}" if label else f"{p:,.2f}"
+            # Compact label format: "Label price" with single space, no thousands separator for cleaner look
+            txt = f"{label} {p:.2f}" if label else f"{p:.2f}"
+            # Use smaller font for mobile mode
+            label_fontsize = FONT_SIZE_LABEL_MOBILE if self.config.mobile_mode else FONT_SIZE_LABEL
             ax.text(
                 1.005,
-                p,
+                display_y,
                 txt,
                 transform=trans,
                 ha="left",
                 va="center",
-                fontsize=FONT_SIZE_LABEL,
+                fontsize=label_fontsize,
                 color=TEXT_PRIMARY,
-                bbox=dict(facecolor=rgba, edgecolor="none", boxstyle="round,pad=0.25"),
+                bbox=dict(facecolor=rgba, edgecolor="none", boxstyle="round,pad=0.2"),
                 clip_on=False,
                 zorder=ZORDER_TEXT_LABELS,
             )
@@ -1920,8 +2147,11 @@ class ChartGenerator:
         try:
             ymin, ymax = ax.get_ylim()
             y_range = ymax - ymin
-            # Place labels slightly inside the panel (3% above ymin)
-            label_y_offset = y_range * 0.03 if y_range > 0 else 0.0
+            # Place labels slightly inside the panel (above ymin)
+            # Mobile mode: higher offset (8%) to avoid RR-box overlap
+            # Desktop mode: smaller offset (3%)
+            offset_pct = 0.08 if self.config.mobile_mode else 0.03
+            label_y_offset = y_range * offset_pct if y_range > 0 else 0.0
         except Exception:
             ymin = 0.0
             label_y_offset = 0.0
@@ -2025,7 +2255,10 @@ class ChartGenerator:
                 continue
 
     def _draw_supply_demand_overlay(self, ax, hud: Dict) -> None:
-        """Draw LuxAlgo-style supply/demand zones with explicit z-order."""
+        """Draw LuxAlgo-style supply/demand zones with explicit z-order.
+        
+        Only draws zones that intersect with the visible y-range (dynamic filtering).
+        """
         if not self.config.show_supply_demand:
             return
         sd = hud.get("supply_demand_vr") if isinstance(hud, dict) else None
@@ -2036,6 +2269,17 @@ class ChartGenerator:
         demand = sd.get("demand") or {}
 
         try:
+            # Get visible y-range for dynamic filtering
+            ymin, ymax = ax.get_ylim()
+            
+            def _zone_visible(bot: float, top: float) -> bool:
+                """Check if zone intersects with visible range."""
+                return top >= ymin and bot <= ymax
+            
+            def _price_visible(price: float) -> bool:
+                """Check if price is within visible range."""
+                return ymin <= price <= ymax
+
             # Colors from Pine reference (LuxAlgo): supply blue, demand orange.
             sup_color = SUPPLY_ZONE_COLOR
             dem_color = DEMAND_ZONE_COLOR
@@ -2045,15 +2289,25 @@ class ChartGenerator:
             d_top = float(demand.get("top", 0.0) or 0.0)
             d_bot = float(demand.get("bottom", 0.0) or 0.0)
 
-            if s_top > 0 and s_bot > 0 and s_top > s_bot:
+            # Only draw supply zone if it intersects visible range
+            if s_top > 0 and s_bot > 0 and s_top > s_bot and _zone_visible(s_bot, s_top):
                 ax.axhspan(s_bot, s_top, facecolor=sup_color, alpha=ALPHA_ZONE_SUPPLY_DEMAND, edgecolor="none", zorder=ZORDER_ZONES)
-                ax.axhline(float(supply.get("avg", (s_top + s_bot) / 2.0)), color=sup_color, linewidth=1.0, alpha=0.7, zorder=ZORDER_ZONES)
-                ax.axhline(float(supply.get("wavg", (s_top + s_bot) / 2.0)), color=sup_color, linewidth=1.0, alpha=0.7, linestyle="--", zorder=ZORDER_ZONES)
+                s_avg = float(supply.get("avg", (s_top + s_bot) / 2.0))
+                s_wavg = float(supply.get("wavg", (s_top + s_bot) / 2.0))
+                if _price_visible(s_avg):
+                    ax.axhline(s_avg, color=sup_color, linewidth=1.0, alpha=0.7, zorder=ZORDER_ZONES)
+                if _price_visible(s_wavg):
+                    ax.axhline(s_wavg, color=sup_color, linewidth=1.0, alpha=0.7, linestyle="--", zorder=ZORDER_ZONES)
 
-            if d_top > 0 and d_bot > 0 and d_top > d_bot:
+            # Only draw demand zone if it intersects visible range
+            if d_top > 0 and d_bot > 0 and d_top > d_bot and _zone_visible(d_bot, d_top):
                 ax.axhspan(d_bot, d_top, facecolor=dem_color, alpha=ALPHA_ZONE_SUPPLY_DEMAND, edgecolor="none", zorder=ZORDER_ZONES)
-                ax.axhline(float(demand.get("avg", (d_top + d_bot) / 2.0)), color=dem_color, linewidth=1.0, alpha=0.7, zorder=ZORDER_ZONES)
-                ax.axhline(float(demand.get("wavg", (d_top + d_bot) / 2.0)), color=dem_color, linewidth=1.0, alpha=0.7, linestyle="--", zorder=ZORDER_ZONES)
+                d_avg = float(demand.get("avg", (d_top + d_bot) / 2.0))
+                d_wavg = float(demand.get("wavg", (d_top + d_bot) / 2.0))
+                if _price_visible(d_avg):
+                    ax.axhline(d_avg, color=dem_color, linewidth=1.0, alpha=0.7, zorder=ZORDER_ZONES)
+                if _price_visible(d_wavg):
+                    ax.axhline(d_wavg, color=dem_color, linewidth=1.0, alpha=0.7, linestyle="--", zorder=ZORDER_ZONES)
         except Exception:
             return
 
@@ -2085,10 +2339,10 @@ class ChartGenerator:
                 # Fill between VWAP and +1σ (upper region)
                 ax.fill_between(
                     x_coords,
-                    vwap_series.fillna(method='ffill').fillna(method='bfill').values,
-                    upper1.fillna(method='ffill').fillna(method='bfill').values,
+                    vwap_series.ffill().bfill().values,
+                    upper1.ffill().bfill().values,
                     color=VWAP_COLOR,
-                    alpha=0.08,
+                    alpha=ALPHA_VWAP_BAND_FILL,
                     zorder=ZORDER_ZONES,
                     linewidth=0,
                 )
@@ -2099,23 +2353,84 @@ class ChartGenerator:
                 # Fill between VWAP and -1σ (lower region)
                 ax.fill_between(
                     x_coords,
-                    lower1.fillna(method='ffill').fillna(method='bfill').values,
-                    vwap_series.fillna(method='ffill').fillna(method='bfill').values,
+                    lower1.ffill().bfill().values,
+                    vwap_series.ffill().bfill().values,
                     color=VWAP_COLOR,
-                    alpha=0.08,
+                    alpha=ALPHA_VWAP_BAND_FILL,
                     zorder=ZORDER_ZONES,
                     linewidth=0,
                 )
         except Exception:
             return
 
+    def _draw_rsi_overbought_oversold_shading(self, ax_rsi, rsi_series: pd.Series) -> None:
+        """Draw optional overbought/oversold shading on RSI panel.
+        
+        Adds subtle background shading:
+        - Green tint in oversold zone (RSI < 30)
+        - Red tint in overbought zone (RSI > 70)
+        """
+        if not self.config.rsi_overbought_oversold_shading:
+            return
+        
+        if ax_rsi is None or rsi_series is None or rsi_series.empty:
+            return
+        
+        try:
+            x_coords = np.arange(len(rsi_series))
+            rsi_vals = rsi_series.fillna(50).values  # Default to 50 for NaN
+            
+            # Oversold zone shading (RSI < 30) - green tint
+            oversold_mask = rsi_vals < 30
+            if oversold_mask.any():
+                ax_rsi.fill_between(
+                    x_coords,
+                    0,
+                    30,
+                    where=oversold_mask,
+                    color=SIGNAL_LONG,  # Green
+                    alpha=0.08,
+                    zorder=0,
+                    linewidth=0,
+                )
+            
+            # Overbought zone shading (RSI > 70) - red tint
+            overbought_mask = rsi_vals > 70
+            if overbought_mask.any():
+                ax_rsi.fill_between(
+                    x_coords,
+                    70,
+                    100,
+                    where=overbought_mask,
+                    color=SIGNAL_SHORT,  # Red
+                    alpha=0.08,
+                    zorder=0,
+                    linewidth=0,
+                )
+        except Exception:
+            return
+
     def _draw_power_channel_overlay(self, ax, hud: Dict) -> None:
-        """Draw ChartPrime-style power channel with explicit z-order."""
+        """Draw ChartPrime-style power channel with explicit z-order.
+        
+        Only draws zones/lines that intersect with the visible y-range (dynamic filtering).
+        """
         pc = hud.get("power_channel") if isinstance(hud, dict) else None
         if not isinstance(pc, dict):
             return
 
         try:
+            # Get visible y-range for dynamic filtering
+            ymin, ymax = ax.get_ylim()
+            
+            def _zone_visible(bot: float, top: float) -> bool:
+                """Check if zone intersects with visible range."""
+                return top >= ymin and bot <= ymax
+            
+            def _price_visible(price: float) -> bool:
+                """Check if price is within visible range."""
+                return ymin <= price <= ymax
+
             # Draw power channel zones only if show_power_channel is True
             if self.config.show_power_channel:
                 t_col = POWER_CHANNEL_RESISTANCE  # fuchsia (Pine default)
@@ -2127,17 +2442,23 @@ class ChartGenerator:
                 sup_bot = float(pc.get("sup_area_bottom", 0.0) or 0.0)
                 mid = float(pc.get("mid", 0.0) or 0.0)
 
-                if res_top > 0 and res_bot > 0 and res_top > res_bot:
+                # Only draw resistance zone if visible
+                if res_top > 0 and res_bot > 0 and res_top > res_bot and _zone_visible(res_bot, res_top):
                     ax.axhspan(res_bot, res_top, facecolor=t_col, alpha=ALPHA_ZONE_POWER_CHANNEL, edgecolor="none", zorder=ZORDER_ZONES)
-                    ax.axhline(res_top, color=t_col, linewidth=1.2, alpha=ALPHA_LINE_SECONDARY, zorder=ZORDER_ZONES)
-                if sup_top > 0 and sup_bot > 0 and sup_top > sup_bot:
+                    if _price_visible(res_top):
+                        ax.axhline(res_top, color=t_col, linewidth=1.2, alpha=ALPHA_LINE_SECONDARY, zorder=ZORDER_ZONES)
+                # Only draw support zone if visible
+                if sup_top > 0 and sup_bot > 0 and sup_top > sup_bot and _zone_visible(sup_bot, sup_top):
                     ax.axhspan(sup_bot, sup_top, facecolor=b_col, alpha=ALPHA_ZONE_POWER_CHANNEL, edgecolor="none", zorder=ZORDER_ZONES)
-                    ax.axhline(sup_bot, color=b_col, linewidth=1.2, alpha=0.7, zorder=ZORDER_ZONES)
-                if mid > 0:
+                    if _price_visible(sup_bot):
+                        ax.axhline(sup_bot, color=b_col, linewidth=1.2, alpha=0.7, zorder=ZORDER_ZONES)
+                # Only draw mid line if visible
+                if mid > 0 and _price_visible(mid):
                     ax.axhline(mid, color=TEXT_SECONDARY, linewidth=1.0, alpha=0.45, linestyle=":", zorder=ZORDER_ZONES)
 
             # Power readout (compact) - can be shown independently of power channel zones
             # Placed in top-left with semi-transparent background for visibility
+            # Positioned at (0.01, 0.92) to avoid overlap with chart title
             if self.config.show_power_readout:
                 buy = pc.get("buy_power")
                 sell = pc.get("sell_power")
@@ -2145,8 +2466,8 @@ class ChartGenerator:
                     txt = f"Power {int(buy or 0)}/{int(sell or 0)}"
                     # Place in upper-left of price panel with background box
                     ax.text(
-                        0.02,
-                        0.98,
+                        0.01,
+                        0.92,
                         txt,
                         transform=ax.transAxes,
                         ha="left",
@@ -2311,19 +2632,25 @@ class ChartGenerator:
                 return
             
             handles, labels = zip(*legend_items)
-            # Place legend away from the Power readout (which lives upper-left at y≈0.98).
-            # Upper-right is consistently free and avoids collisions on mobile charts.
+            # Place legend away from the Power readout (which lives upper-left at y≈0.92).
+            # Upper-right with bbox_to_anchor for precise positioning below title.
+            # Use ncol=2 for compact horizontal layout with 5 items (VWAP + 4 EMAs).
+            # Position at 0.86 (14% from top) to avoid overlap with title text.
+            legend_y = 0.86 if self.config.mobile_mode else 0.92
             ax.legend(
                 handles,
                 labels,
                 loc="upper right",
+                bbox_to_anchor=(0.99, legend_y),
                 fontsize=FONT_SIZE_LEGEND,
                 framealpha=ALPHA_LEGEND_BG,
                 facecolor=DARK_BG,
                 edgecolor=GRID_COLOR,
                 labelcolor=TEXT_PRIMARY,
-                handlelength=1.5,
-                handletextpad=0.5,
+                ncol=2,  # 2 columns for compact layout
+                handlelength=1.2,
+                handletextpad=0.4,
+                columnspacing=1.0,
             )
         except Exception:
             pass
@@ -2518,10 +2845,12 @@ class ChartGenerator:
             volume_on = True if 'Volume' in df.columns else False
             if self.config.show_rsi:
                 # RSI is plotted in a separate panel below volume.
+                # Uses Wilder's smoothing (EMA with alpha=1/period) for standard RSI
                 close = df["Close"]
                 delta = close.diff()
-                gain = delta.clip(lower=0).rolling(self.config.rsi_period).mean()
-                loss = (-delta.clip(upper=0)).rolling(self.config.rsi_period).mean()
+                alpha = 1.0 / self.config.rsi_period
+                gain = delta.clip(lower=0).ewm(alpha=alpha, adjust=False).mean()
+                loss = (-delta.clip(upper=0)).ewm(alpha=alpha, adjust=False).mean()
                 rs = gain / loss.replace(0, np.nan)
                 rsi = 100 - (100 / (1 + rs))
 
@@ -2541,17 +2870,19 @@ class ChartGenerator:
                         )
                     )
 
-                panel_ratios = (6, 2, 2) if volume_on else (7, 3)
+                panel_ratios = (8, 1.8, 1.4) if volume_on else (8, 2)  # Optimized: ~71% price
 
             # Wider candles + thicker wicks for Telegram visibility
             # Build kwargs - only include panel_ratios if RSI is enabled (mplfinance rejects None)
+            # Blank ylabel for mobile/Telegram to avoid collision with right labels
+            ylabel_str = '' if self.config.mobile_mode else 'Price ($)'
             plot_kwargs = dict(
                 type='candle',
                 style=self.style,
                 addplot=addplot if addplot else None,
                 volume=volume_on,
                 title=title,
-                ylabel='Price ($)',
+                ylabel=ylabel_str,
                 ylabel_lower='Volume',
                 figsize=(14, 9),
                 show_nontrading=False,
@@ -2684,10 +3015,12 @@ class ChartGenerator:
             
             volume_on = True if 'Volume' in df.columns else False
             if self.config.show_rsi:
+                # Uses Wilder's smoothing (EMA with alpha=1/period) for standard RSI
                 close = df["Close"]
                 delta = close.diff()
-                gain = delta.clip(lower=0).rolling(self.config.rsi_period).mean()
-                loss = (-delta.clip(upper=0)).rolling(self.config.rsi_period).mean()
+                alpha = 1.0 / self.config.rsi_period
+                gain = delta.clip(lower=0).ewm(alpha=alpha, adjust=False).mean()
+                loss = (-delta.clip(upper=0)).ewm(alpha=alpha, adjust=False).mean()
                 rs = gain / loss.replace(0, np.nan)
                 rsi = 100 - (100 / (1 + rs))
 
@@ -2706,17 +3039,19 @@ class ChartGenerator:
                             alpha=a,
                         )
                     )
-                panel_ratios = (6, 2, 2) if volume_on else (7, 3)
+                panel_ratios = (8, 1.8, 1.4) if volume_on else (8, 2)  # Optimized: ~71% price
 
             # Wider candles + thicker wicks for Telegram visibility
             # Build kwargs - only include panel_ratios if RSI is enabled (mplfinance rejects None)
+            # Blank ylabel for mobile/Telegram to avoid collision with right labels
+            ylabel_str = '' if self.config.mobile_mode else 'Price ($)'
             plot_kwargs = dict(
                 type='candle',
                 style=self.style,
                 addplot=addplot if addplot else None,
                 volume=volume_on,
                 title=title,
-                ylabel='Price ($)',
+                ylabel=ylabel_str,
                 ylabel_lower='Volume',
                 figsize=(14, 9),
                 show_nontrading=False,
@@ -2942,14 +3277,15 @@ class ChartGenerator:
                     label=f'Exit: ${exit_price:.2f}'
                 ))
 
-            # RSI panel
+            # RSI panel - Uses Wilder's smoothing (EMA with alpha=1/period) for standard RSI
             volume_on = "Volume" in df.columns
             panel_ratios = None
             if self.config.show_rsi:
                 close = df["Close"]
                 delta = close.diff()
-                gain = delta.clip(lower=0).rolling(self.config.rsi_period).mean()
-                loss = (-delta.clip(upper=0)).rolling(self.config.rsi_period).mean()
+                alpha = 1.0 / self.config.rsi_period
+                gain = delta.clip(lower=0).ewm(alpha=alpha, adjust=False).mean()
+                loss = (-delta.clip(upper=0)).ewm(alpha=alpha, adjust=False).mean()
                 rs = gain / loss.replace(0, np.nan)
                 rsi = 100 - (100 / (1 + rs))
 
@@ -2984,13 +3320,15 @@ class ChartGenerator:
             temp_file.close()
 
             # Plot kwargs
+            # Blank ylabel for mobile/Telegram to avoid collision with right labels
+            ylabel_str = '' if self.config.mobile_mode else 'Price ($)'
             plot_kwargs = dict(
                 type='candle',
                 style=self.style,
                 addplot=addplot if addplot else None,
                 volume=volume_on,
                 title=title,
-                ylabel='Price ($)',
+                ylabel=ylabel_str,
                 ylabel_lower='Volume',
                 figsize=figsize or (14, 9),
                 show_nontrading=False,
@@ -3475,13 +3813,15 @@ class ChartGenerator:
             # Use line chart for long backtests (clearer than thousands of candles)
             chart_type = 'line' if use_line_chart else 'candle'
             
+            # Blank ylabel for mobile/Telegram to avoid collision with right labels
+            ylabel_str = '' if self.config.mobile_mode else 'Price ($)'
             plot_kwargs = {
                 'type': chart_type,
                 'style': self.style,
                 'addplot': addplot if addplot else None,
                 'volume': True if 'Volume' in df.columns else False,
                 'title': chart_title,
-                'ylabel': 'Price ($)',
+                'ylabel': ylabel_str,
                 'ylabel_lower': 'Volume',
                 'figsize': effective_figsize,
                 'savefig': dict(
@@ -3814,9 +4154,10 @@ class ChartGenerator:
                 except Exception:
                     pass
 
-            volume_on = "Volume" in df.columns
+            volume_on = "Volume" in df.columns and self.config.show_volume_panel
             # Pressure panel (buy/sell proxy): signed volume histogram (+vol for up candles, -vol for down candles)
-            pressure_enabled = bool(show_pressure and volume_on)
+            # Respects both function parameter and config option
+            pressure_enabled = bool(show_pressure and volume_on and self.config.show_pressure_panel)
             if pressure_enabled:
                 try:
                     close = df["Close"]
@@ -3843,13 +4184,17 @@ class ChartGenerator:
                     logger.debug(f"Error adding pressure panel to dashboard chart: {e}")
 
             # RSI panel (shift down if pressure is enabled)
+            # Uses Wilder's smoothing (EMA with alpha=1/period) for standard RSI
             panel_ratios = None
+            rsi_series_for_shading = None
+            rsi_panel_idx = None
             if show_rsi:
                 try:
                     close = df["Close"]
                     delta = close.diff()
-                    gain = delta.clip(lower=0).rolling(self.config.rsi_period).mean()
-                    loss = (-delta.clip(upper=0)).rolling(self.config.rsi_period).mean()
+                    alpha = 1.0 / self.config.rsi_period
+                    gain = delta.clip(lower=0).ewm(alpha=alpha, adjust=False).mean()
+                    loss = (-delta.clip(upper=0)).ewm(alpha=alpha, adjust=False).mean()
                     rs = gain / loss.replace(0, np.nan)
                     rsi = 100 - (100 / (1 + rs))
 
@@ -3880,16 +4225,27 @@ class ChartGenerator:
                                 alpha=a,
                             )
                         )
+                    # Use configurable panel ratios
+                    pr_price = self.config.panel_ratio_price
+                    pr_vol = self.config.panel_ratio_volume
+                    pr_sub = self.config.panel_ratio_sub
                     if volume_on and pressure_enabled:
-                        panel_ratios = (6, 2, 1.6, 1.6)
+                        panel_ratios = (pr_price, pr_vol, pr_sub, pr_sub)
                     else:
-                        panel_ratios = (6, 2, 2) if volume_on else (7, 3)
+                        panel_ratios = (pr_price, pr_vol, pr_sub + 0.2) if volume_on else (pr_price, pr_sub + 0.8)
+                    
+                    # Store for overbought/oversold shading (applied after mpf.plot)
+                    rsi_series_for_shading = rsi
+                    rsi_panel_idx = rsi_panel
                 except Exception as e:
                     logger.debug(f"Error adding RSI to dashboard chart: {e}")
 
             # If RSI is off but pressure is on, still provide panel ratios for stable layout
             if panel_ratios is None and volume_on and pressure_enabled:
-                panel_ratios = (7, 2, 2)
+                pr_price = self.config.panel_ratio_price
+                pr_vol = self.config.panel_ratio_volume
+                pr_sub = self.config.panel_ratio_sub
+                panel_ratios = (pr_price, pr_vol, pr_sub + 0.2)
 
             # Trade markers overlay (entries/exits) for transparency on push dashboards.
             # NOTE: Keep this visually light; too many markers will clutter mobile charts.
@@ -4133,13 +4489,21 @@ class ChartGenerator:
 
             # Wider candles for Telegram visibility
             # Build kwargs - only include panel_ratios if RSI added successfully (mplfinance rejects None)
+            # Blank ylabel for mobile/Telegram to avoid collision with right labels
+            is_telegram = render_mode == "telegram" or self.config.mobile_mode
+            ylabel_str = "" if is_telegram else "Price ($)"
+            
+            # For Telegram/mobile: use figure-level suptitle (not axes title) to save chart space
+            # Pass empty title to mpf.plot, add suptitle after
+            mpf_title = "" if is_telegram else title
+            
             plot_kwargs = dict(
                 type="candle",
                 style=self.style,
                 addplot=addplot if addplot else None,
                 volume=volume_on,
-                title=title,
-                ylabel="Price ($)",
+                title=mpf_title,
+                ylabel=ylabel_str,
                 ylabel_lower="Volume" if volume_on else None,
                 figsize=figsize,
                 show_nontrading=False,
@@ -4156,6 +4520,43 @@ class ChartGenerator:
 
             fig, axlist = mpf.plot(df, **plot_kwargs)
 
+            # For Telegram/mobile: add compact figure-level title and reduce axis font sizes
+            if is_telegram:
+                try:
+                    # Add figure-level suptitle (outside plot area, at very top)
+                    fig.suptitle(
+                        title,
+                        fontsize=FONT_SIZE_TITLE_MOBILE,
+                        color=TEXT_PRIMARY,
+                        y=0.995,  # Very top of figure
+                        fontweight='normal',
+                    )
+                    # Reduce axis tick font sizes for all panels
+                    for ax in (axlist if isinstance(axlist, list) else [axlist]):
+                        if ax is not None:
+                            ax.tick_params(axis='both', labelsize=FONT_SIZE_AXIS_TICK_MOBILE)
+                except Exception:
+                    pass
+
+            # RSI overbought/oversold shading (must be done after mpf.plot, before other overlays)
+            if rsi_series_for_shading is not None and rsi_panel_idx is not None:
+                try:
+                    # In mplfinance, axlist indices map to panels:
+                    # [0]=price, [1]=volume, [2]=pressure or RSI, [3]=RSI (if pressure enabled)
+                    # Each panel may have sub-axes, so we need to find the right one
+                    ax_rsi = None
+                    if isinstance(axlist, list):
+                        # Find the axis for the RSI panel
+                        # mplfinance returns axes in panel order, with volume sharing index with price
+                        # The actual mapping depends on panel_ratios and which panels are enabled
+                        potential_idx = rsi_panel_idx * 2 if volume_on else rsi_panel_idx
+                        if potential_idx < len(axlist):
+                            ax_rsi = axlist[potential_idx]
+                    if ax_rsi is not None:
+                        self._draw_rsi_overbought_oversold_shading(ax_rsi, rsi_series_for_shading)
+                except Exception as e:
+                    logger.debug(f"Error adding RSI shading: {e}")
+
             # HUD overlays (sessions, key levels, legend)
             try:
                 ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
@@ -4170,6 +4571,17 @@ class ChartGenerator:
                         right_pad = 0
                     if right_pad and len(df) > 0:
                         ax_price.set_xlim(-0.5, float((len(df) - 1) + right_pad))
+
+                    # Add TOP PADDING for title/legend headroom (prevents overlap with candles)
+                    # Extend y-max by ~5% for Telegram/mobile mode to create space for title+legend
+                    if is_telegram:
+                        try:
+                            ymin, ymax = ax_price.get_ylim()
+                            y_range = ymax - ymin
+                            top_padding = y_range * 0.06  # 6% headroom for title/legend
+                            ax_price.set_ylim(ymin, ymax + top_padding)
+                        except Exception:
+                            pass
 
                     # Limit y-axis ticks to prevent overlapping labels
                     self._limit_yaxis_ticks(ax_price, max_ticks=8)

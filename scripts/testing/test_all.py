@@ -107,11 +107,15 @@ async def test_telegram_notifications():
     
     # Test all notification types
     tests = [
-        ("Signal", lambda: notifier.send_signal({
-            "symbol": "MNQ", "direction": "long", "entry_price": 17500.0,
-            "stop_loss": 17450.0, "take_profit": 17600.0, "confidence": 0.75,
-            "reason": "Test signal", "strategy": "pearl_bot_auto", "type": "breakout",
-        })),
+        ("Entry", lambda: notifier.send_entry_notification(
+            signal_id="test_entry_001",
+            entry_price=17500.0,
+            signal={
+                "symbol": "MNQ", "direction": "long", "entry_price": 17500.0,
+                "stop_loss": 17450.0, "take_profit": 17600.0, "confidence": 0.75,
+                "reason": "Test entry", "strategy": "pearl_bot_auto", "type": "breakout",
+            },
+        )),
         ("Heartbeat", lambda: notifier.send_heartbeat({
             "running": True, "uptime": {"hours": 1, "minutes": 30},
             "cycle_count": 100, "signal_count": 5, "error_count": 0,

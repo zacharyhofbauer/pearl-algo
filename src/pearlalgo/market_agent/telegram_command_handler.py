@@ -601,10 +601,10 @@ class TelegramCommandHandler:
 
         text = (
             "⚙️ Settings\n\n"
-            f"📈 Auto-Chart on Signal: {_onoff(auto_chart)}\n"
+            f"📈 Auto-Chart on Alert: {_onoff(auto_chart)}\n"
             f"🕐 Interval Notifications: {_onoff(interval_notifications)}\n"
             f"🔘 Dashboard Buttons: {_onoff(dashboard_buttons)}\n"
-            f"🔍 Expanded Signal Details: {_onoff(signal_detail_expanded)}\n\n"
+            f"🔍 Expanded Trade Details: {_onoff(signal_detail_expanded)}\n\n"
             "Tap a button to toggle:"
         )
 
@@ -917,8 +917,6 @@ class TelegramCommandHandler:
         try:
             if action == "status":
                 await self._show_status_menu(query)
-            elif action == "signals":
-                await self._show_activity_menu(query)  # Redirect to unified Activity
             elif action == "performance":
                 await self._show_activity_menu(query)  # Redirect to unified Activity
             elif action == "activity":
@@ -1742,21 +1740,28 @@ class TelegramCommandHandler:
             return
 
         if action == "test_signal":
+            entry_price = float(state.get("latest_price") or 25000.0)
+            signal_id = f"ui_doctor_test_{int(now.timestamp())}"
             test_signal = {
                 "_is_test": True,
-                "signal_id": f"ui_doctor_test_{int(now.timestamp())}",
+                "signal_id": signal_id,
                 "symbol": state.get("symbol", "MNQ") or "MNQ",
                 "type": "ui_doctor_test",
                 "direction": "long",
                 "status": "generated",
-                "entry_price": float(state.get("latest_price") or 25000.0),
-                "stop_loss": float(state.get("latest_price") or 25000.0) - 20.0,
-                "take_profit": float(state.get("latest_price") or 25000.0) + 40.0,
+                "entry_price": entry_price,
+                "stop_loss": entry_price - 20.0,
+                "take_profit": entry_price + 40.0,
                 "confidence": 0.70,
                 "timestamp": now.isoformat(),
                 "reason": "test ui doctor",
             }
-            await notifier.send_signal(test_signal, buffer_data=None)
+            await notifier.send_entry_notification(
+                signal_id=signal_id,
+                entry_price=entry_price,
+                signal=test_signal,
+                buffer_data=None,
+            )
             await self._show_ui_doctor(query)
             return
 
@@ -1806,6 +1811,22 @@ class TelegramCommandHandler:
                         t for t in perf_trades 
                         if today_str in str(t.get('exit_time', ''))
                     ]
+
+                    # De-dupe by signal_id to avoid any double-counting if performance.json
+                    # ever accumulates duplicate exits.
+                    try:
+                        by_id = {}
+                        no_id = []
+                        for t in today_trades_list:
+                            sid = str(t.get("signal_id") or "").strip() if isinstance(t, dict) else ""
+                            if not sid:
+                                no_id.append(t)
+                                continue
+                            by_id[sid] = t  # keep most recent occurrence
+                        if by_id:
+                            today_trades_list = list(by_id.values()) + no_id
+                    except Exception:
+                        pass
                     
                     if today_trades_list:
                         # Fallback for basic metrics
@@ -1846,7 +1867,7 @@ class TelegramCommandHandler:
             recent_count = len(signals) if signals else 0
             
             # Build detailed activity summary
-            lines = ["📊 *Activity* (Virtual Trading)", ""]
+            lines = ["📊 *Activity*", ""]
             
             # Performance card
             pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
@@ -1870,43 +1891,76 @@ class TelegramCommandHandler:
                 lines.append(f"{dd_emoji} Max Drawdown: ${max_drawdown:.2f}")
             
             lines.append("")
-            lines.append(f"Signals: {daily_signals} | Virtual Open: {virtual_trades_count}")
+            # Legacy signals + virtual lifecycle are unified under Trades.
+            lines.append(f"Open Trades: {virtual_trades_count} | Recent: {recent_count}")
             lines.append("")
             
-            # Build buttons - use virtual trades count for clarity
-            active_label = f"📋 Virtual ({virtual_trades_count})" if virtual_trades_count > 0 else "📋 Virtual"
-            recent_label = f"🎯 Signals ({recent_count})" if recent_count > 0 else "🎯 Signals"
-            
-            keyboard = [
-                # Row 1: Current positions & signals
+            # Build buttons from a compact declarative spec so future edits are one-place.
+            ctx = {
+                "virtual_open": int(virtual_trades_count or 0),
+                "recent_count": int(recent_count or 0),
+            }
+
+            def _trades_label(c: dict) -> str:
+                open_cnt = int(c.get("virtual_open", 0) or 0)
+                return f"📋 Trades ({open_cnt})" if open_cnt > 0 else "📋 Trades"
+
+            def _close_all_label(c: dict) -> str:
+                open_cnt = int(c.get("virtual_open", 0) or 0)
+                return f"🚫 Close All ({open_cnt})" if open_cnt > 0 else "🚫 Close All"
+
+            spec = [
+                # Row 1: Unified Trades
                 [
-                    InlineKeyboardButton(active_label, callback_data="action:active_trades"),
-                    InlineKeyboardButton(recent_label, callback_data="action:recent_signals"),
+                    {"label": _trades_label, "callback": "action:trades_overview"},
+                    {"label": "📊 History", "callback": "action:signal_history"},
                 ],
                 # Row 2: Reports
                 [
-                    InlineKeyboardButton("📈 Performance", callback_data="action:performance_metrics"),
-                    InlineKeyboardButton("📊 History", callback_data="action:signal_history"),
+                    {"label": "📈 Performance", "callback": "action:performance_metrics"},
+                    {"label": "💰 P&L Detail", "callback": "action:pnl_overview"},
                 ],
-                # Row 3: Analytics + AI
+                # Row 3: Actions (conditional)
                 [
-                    InlineKeyboardButton("🔬 Analytics", callback_data="menu:analytics"),
-                    InlineKeyboardButton("🧠 AI Coach", callback_data="action:ai_coach"),
-                    InlineKeyboardButton("💬 Pearl", callback_data="action:ask_pearl"),
+                    {
+                        "label": _close_all_label,
+                        "callback": "action:close_all_trades",
+                        "show_if": lambda c: int(c.get("virtual_open", 0) or 0) > 0,
+                    },
                 ],
-                # Row 4: Actions
+                # Row 4: Analytics + AI
                 [
-                    InlineKeyboardButton("🔄 Refresh", callback_data="menu:activity"),
-                    self._nav_back_row()[0],
+                    {"label": "🔬 Analytics", "callback": "menu:analytics"},
+                    {"label": "🧠 AI Coach", "callback": "action:ai_coach"},
+                    {"label": "💬 Pearl", "callback": "action:ask_pearl"},
+                ],
+                # Row 5: Navigation
+                [
+                    {"label": "🔄 Refresh", "callback": "menu:activity"},
+                    {"label": "🏠 Menu", "callback": "back"},
                 ],
             ]
-            
-            # Add Close All if virtual trades exist
-            if virtual_trades_count > 0:
-                keyboard.insert(2, [
-                    InlineKeyboardButton(f"🚫 Close All ({virtual_trades_count})", callback_data="action:close_all_trades"),
-                    InlineKeyboardButton("💰 P&L Detail", callback_data="action:pnl_overview"),
-                ])
+
+            keyboard: list[list[InlineKeyboardButton]] = []
+            for row_spec in spec:
+                row: list[InlineKeyboardButton] = []
+                for item in row_spec:
+                    try:
+                        show_if = item.get("show_if")
+                        if callable(show_if) and not bool(show_if(ctx)):
+                            continue
+                        label = item.get("label", "")
+                        if callable(label):
+                            label = label(ctx)
+                        label = str(label or "").strip()
+                        cb = str(item.get("callback") or "").strip()
+                        if not label or not cb:
+                            continue
+                        row.append(InlineKeyboardButton(label, callback_data=cb))
+                    except Exception:
+                        continue
+                if row:
+                    keyboard.append(row)
             
             text = self._with_support_footer("\n".join(lines), state=state)
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1914,10 +1968,7 @@ class TelegramCommandHandler:
         except Exception as e:
             logger.error(f"Error in _show_activity_menu: {e}", exc_info=True)
             keyboard = [
-                [
-                    InlineKeyboardButton("🎯 Signals", callback_data="action:recent_signals"),
-                    InlineKeyboardButton("📋 Active", callback_data="action:active_trades"),
-                ],
+                [InlineKeyboardButton("📋 Trades", callback_data="action:trades_overview")],
                 self._nav_back_row(),
             ]
             await self._safe_edit_or_send(query, "📊 Activity\n\nSelect an option:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -1925,9 +1976,15 @@ class TelegramCommandHandler:
     async def _show_analytics_menu(self, query: CallbackQuery) -> None:
         """Show performance analytics with session and hourly breakdown."""
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime, timezone, timedelta
             from collections import defaultdict
             import json
+            try:
+                from zoneinfo import ZoneInfo
+                et_tz = ZoneInfo("America/New_York")
+            except Exception:
+                # Fallback (no DST) — still safer than crashing
+                et_tz = timezone(timedelta(hours=-5))
             
             lines = ["🔬 *Performance Analytics*", ""]
             
@@ -1943,9 +2000,53 @@ class TelegramCommandHandler:
                 if not all_trades:
                     lines.append("No trades recorded yet.")
                 else:
+                    # Defensive: perf file should be a list; tolerate bad shapes.
+                    if not isinstance(all_trades, list):
+                        all_trades = []
+
+                    def _parse_dt(val) -> datetime | None:
+                        if not val:
+                            return None
+                        try:
+                            s = str(val).strip().replace("Z", "+00:00")
+                            # Strip fractional seconds when offset is present (fromisoformat can be finicky)
+                            if "." in s and "+" in s:
+                                parts = s.split("+", 1)
+                                base = parts[0].split(".", 1)[0]
+                                s = base + "+" + parts[1]
+                            dt = datetime.fromisoformat(s)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            return dt
+                        except Exception:
+                            return None
+
+                    # De-dupe by signal_id to prevent any double-counting in analytics
+                    # if the performance log ever accumulates duplicate exits.
+                    by_id: dict[str, dict] = {}
+                    no_id: list[dict] = []
+                    for t in all_trades:
+                        if not isinstance(t, dict):
+                            continue
+                        sid = str(t.get("signal_id") or "").strip()
+                        if not sid:
+                            no_id.append(t)
+                            continue
+                        prev = by_id.get(sid)
+                        if prev is None:
+                            by_id[sid] = t
+                            continue
+                        dt_new = _parse_dt(t.get("exit_time") or t.get("entry_time"))
+                        dt_old = _parse_dt(prev.get("exit_time") or prev.get("entry_time"))
+                        if dt_old is None and dt_new is not None:
+                            by_id[sid] = t
+                        elif dt_old is not None and dt_new is not None and dt_new > dt_old:
+                            by_id[sid] = t
+                    all_trades = list(by_id.values()) + no_id
+
                     total_trades = len(all_trades)
-                    total_wins = sum(1 for t in all_trades if t.get('is_win'))
-                    total_pnl = sum(float(t.get('pnl', 0) or 0) for t in all_trades)
+                    total_wins = sum(1 for t in all_trades if isinstance(t, dict) and t.get("is_win"))
+                    total_pnl = sum(float((t or {}).get("pnl", 0) or 0) for t in all_trades if isinstance(t, dict))
                     overall_wr = (total_wins / total_trades * 100) if total_trades > 0 else 0
                     
                     pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
@@ -1965,17 +2066,14 @@ class TelegramCommandHandler:
                     session_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
                     
                     for t in all_trades:
-                        time_str = t.get('exit_time') or t.get('entry_time')
-                        if not time_str:
+                        if not isinstance(t, dict):
+                            continue
+                        time_str = t.get("exit_time") or t.get("entry_time")
+                        dt = _parse_dt(time_str)
+                        if dt is None:
                             continue
                         try:
-                            time_str = str(time_str).replace('Z', '+00:00')
-                            if '.' in time_str and '+' in time_str:
-                                parts = time_str.split('+')
-                                base = parts[0].split('.')[0]
-                                time_str = base + '+' + parts[1]
-                            dt = datetime.fromisoformat(time_str)
-                            et_hour = (dt.hour - 5) % 24  # Convert UTC to ET
+                            et_hour = int(dt.astimezone(et_tz).hour)
                             
                             session_name = 'other'
                             for sname, (start, end) in sessions.items():
@@ -1987,11 +2085,11 @@ class TelegramCommandHandler:
                                     session_name = sname
                                     break
                             
-                            if t.get('is_win'):
+                            if t.get("is_win"):
                                 session_stats[session_name]['wins'] += 1
                             else:
                                 session_stats[session_name]['losses'] += 1
-                            session_stats[session_name]['pnl'] += float(t.get('pnl', 0) or 0)
+                            session_stats[session_name]['pnl'] += float(t.get("pnl", 0) or 0)
                         except Exception:
                             pass
                     
@@ -2018,23 +2116,20 @@ class TelegramCommandHandler:
                     # Top hours
                     hour_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
                     for t in all_trades:
-                        time_str = t.get('exit_time') or t.get('entry_time')
-                        if not time_str:
+                        if not isinstance(t, dict):
+                            continue
+                        time_str = t.get("exit_time") or t.get("entry_time")
+                        dt = _parse_dt(time_str)
+                        if dt is None:
                             continue
                         try:
-                            time_str = str(time_str).replace('Z', '+00:00')
-                            if '.' in time_str and '+' in time_str:
-                                parts = time_str.split('+')
-                                base = parts[0].split('.')[0]
-                                time_str = base + '+' + parts[1]
-                            dt = datetime.fromisoformat(time_str)
-                            et_hour = (dt.hour - 5) % 24
+                            et_hour = int(dt.astimezone(et_tz).hour)
                             
-                            if t.get('is_win'):
+                            if t.get("is_win"):
                                 hour_stats[et_hour]['wins'] += 1
                             else:
                                 hour_stats[et_hour]['losses'] += 1
-                            hour_stats[et_hour]['pnl'] += float(t.get('pnl', 0) or 0)
+                            hour_stats[et_hour]['pnl'] += float(t.get("pnl", 0) or 0)
                         except Exception:
                             pass
                     
@@ -2065,7 +2160,9 @@ class TelegramCommandHandler:
                     lines.append("")
                     duration_stats = defaultdict(lambda: {'wins': 0, 'losses': 0, 'pnl': 0.0})
                     for t in all_trades:
-                        hold_mins = t.get('hold_duration_minutes', 0) or 0
+                        if not isinstance(t, dict):
+                            continue
+                        hold_mins = t.get("hold_duration_minutes", 0) or 0
                         if hold_mins < 30:
                             bucket = 'Quick (<30m)'
                         elif hold_mins < 60:
@@ -2073,11 +2170,11 @@ class TelegramCommandHandler:
                         else:
                             bucket = 'Long (60m+)'
                         
-                        if t.get('is_win'):
+                        if t.get("is_win"):
                             duration_stats[bucket]['wins'] += 1
                         else:
                             duration_stats[bucket]['losses'] += 1
-                        duration_stats[bucket]['pnl'] += float(t.get('pnl', 0) or 0)
+                        duration_stats[bucket]['pnl'] += float(t.get("pnl", 0) or 0)
                     
                     lines.append("*⏱️ Hold Duration:*")
                     for bucket in ['Quick (<30m)', 'Medium (30-60m)', 'Long (60m+)']:
@@ -2115,10 +2212,6 @@ class TelegramCommandHandler:
                 f"🔬 Analytics\n\n❌ Error loading analytics: {str(e)[:100]}", 
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
-
-    async def _show_signals_menu(self, query: CallbackQuery) -> None:
-        """Legacy signals menu - redirects to Activity menu."""
-        await self._show_activity_menu(query)
 
     async def _show_performance_menu(self, query: CallbackQuery) -> None:
         """Show performance submenu with trends, comparisons, and insights."""
@@ -3005,18 +3098,16 @@ class TelegramCommandHandler:
                 sub_action = action_type.split(":", 1)[1]
                 await self._handle_ui_doctor_action(query, sub_action)
                 return
-            elif action_type == "recent_signals":
-                await self._handle_recent_signals(query, reply_markup)
-            elif action_type == "active_trades":
-                await self._handle_active_trades(query, reply_markup)
+            elif action_type == "trades_overview":
+                await self._handle_trades_overview(query, reply_markup)
             elif action_type == "signal_history":
                 await self._handle_signal_history(query, reply_markup)
             elif action_type == "signal_details":
                 await query.edit_message_text(
-                    "🔍 *Signal Details*\n\n"
-                    "To view details for a specific signal:\n\n"
-                    "1. Go to *Signals & Trades* → *Recent Signals*\n"
-                    "2. Tap the *ℹ️ Details* button on entry/exit notifications\n\n"
+                    "🔍 *Trade Details*\n\n"
+                    "To view details for a specific trade:\n\n"
+                    "1. Go to *Activity* → *Trades*\n"
+                    "2. Tap the *ℹ️ Details* button\n\n"
                     "💡 Enable *Dashboard Buttons* in Settings to see Details buttons on trade alerts.",
                     reply_markup=reply_markup,
                     parse_mode="Markdown"
@@ -3206,19 +3297,19 @@ class TelegramCommandHandler:
                     daily_trades = state.get("daily_trades", 0) or 0
                     unrealized_pnl = float(state.get("active_trades_unrealized_pnl", 0.0) or 0.0)
                 
-                lines = ["🚫 *Close All Virtual Trades*", ""]
+                lines = ["🚫 *Close All Trades*", ""]
                 
                 if virtual_positions == 0:
                     lines.extend([
-                        "✅ *No open virtual trades*",
+                        "✅ *No open trades*",
                         "",
-                        "There are currently no virtual trades to close.",
+                        "There are currently no open trades to close.",
                     ])
                     keyboard = [self._nav_back_row()]
                 else:
                     lines.extend([
-                        "📊 *Virtual Position Summary:*",
-                        f"• Open Virtual Trades: {virtual_positions}",
+                        "📊 *Position Summary:*",
+                        f"• Open Trades: {virtual_positions}",
                         f"• Completed Trades Today: {daily_trades}",
                     ])
                     
@@ -3236,9 +3327,9 @@ class TelegramCommandHandler:
                     lines.extend([
                         "",
                         "⚠️ *This will:*",
-                        f"• Close all {virtual_positions} virtual trade(s) at market price",
+                        f"• Close all {virtual_positions} trade(s) at market price",
                         "• Agent will continue running",
-                        "• Can still generate new signals",
+                        "• Can still generate new trade alerts",
                         "",
                         "📝 *Note:* These are simulated trades, not broker positions",
                     ])
@@ -3249,7 +3340,7 @@ class TelegramCommandHandler:
                     elif unrealized_pnl < -50:
                         lines.append("⚠️ *Notice:* Closing with unrealized loss - review strategy")
                     
-                    lines.extend(["", "*Confirm to close all virtual trades:*"])
+                    lines.extend(["", "*Confirm to close all trades:*"])
                     
                     keyboard = [
                         [InlineKeyboardButton(f"✅ Yes - Close All ({virtual_positions})", callback_data="confirm:close_all_trades")],
@@ -3303,10 +3394,6 @@ class TelegramCommandHandler:
             elif action_type.startswith("confirm:"):
                 # Handle confirm: prefix - delegate to confirm handler
                 await self._handle_confirm_action(query, action_type[8:])  # Remove "confirm:" prefix
-                return
-            elif action_type == "activity":
-                # Legacy activity callback
-                await self._show_signals_menu(query)
                 return
             elif action_type == "status":
                 # Legacy status callback
@@ -3501,8 +3588,8 @@ class TelegramCommandHandler:
                             self._nav_back_row(),
                         ]
                         await query.edit_message_text(
-                            f"✅ Close All Virtual Trades Request Sent\n\n"
-                            f"Closing {virtual_count} virtual trade(s) at next opportunity (~5 seconds).\n\n"
+                            f"✅ Close All Trades Request Sent\n\n"
+                            f"Closing {virtual_count} trade(s) at next opportunity (~5 seconds).\n\n"
                             "Tap 'Check Activity' to verify positions are closed.",
                             reply_markup=InlineKeyboardMarkup(keyboard)
                         )
@@ -4158,6 +4245,22 @@ class TelegramCommandHandler:
                             t for t in perf_trades 
                             if today_str in str(t.get('exit_time', ''))
                         ]
+
+                        # De-dupe by signal_id to avoid any double-counting if performance.json
+                        # ever accumulates duplicate exits.
+                        try:
+                            by_id = {}
+                            no_id = []
+                            for t in today_trades_list:
+                                sid = str(t.get("signal_id") or "").strip() if isinstance(t, dict) else ""
+                                if not sid:
+                                    no_id.append(t)
+                                    continue
+                                by_id[sid] = t  # keep most recent occurrence
+                            if by_id:
+                                today_trades_list = list(by_id.values()) + no_id
+                        except Exception:
+                            pass
                         
                         if today_trades_list:
                             # Basic metrics (fallback if not in state)
@@ -4254,11 +4357,27 @@ class TelegramCommandHandler:
                                 ts = str(t.get("exit_time", "") or "")
                                 if not ts:
                                     continue
-                                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                                dt = parse_utc_timestamp(ts)
                                 if dt >= cutoff:
                                     trades_72h.append(t)
                             except Exception:
                                 continue
+
+                        # Defensive: de-dupe by signal_id to avoid any double-counting if the
+                        # performance log ever accumulates duplicate exits.
+                        try:
+                            by_id = {}
+                            no_id = []
+                            for t in trades_72h:
+                                sid = str(t.get("signal_id") or "").strip() if isinstance(t, dict) else ""
+                                if not sid:
+                                    no_id.append(t)
+                                    continue
+                                by_id[sid] = t  # keep most recent occurrence (append-only)
+                            if by_id:
+                                trades_72h = list(by_id.values()) + no_id
+                        except Exception:
+                            pass
 
                         if trades_72h:
                             pnl_72h = sum(float(t.get("pnl", 0) or 0) for t in trades_72h)
@@ -4511,128 +4630,141 @@ class TelegramCommandHandler:
             logger.error(f"Error formatting status: {e}", exc_info=True)
             await query.edit_message_text(f"❌ Error displaying status: {e}", reply_markup=reply_markup)
 
-    async def _handle_active_trades(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display active virtual trades."""
+    async def _handle_trades_overview(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
+        """Unified Trades view (Virtual entry/exit history + drill-down)."""
         state = self._read_state()
         if not state:
-            await query.edit_message_text("❌ Could not read system state.", reply_markup=self._activity_nav_keyboard())
+            await self._safe_edit_or_send(
+                query,
+                "❌ Could not read system state.\n\nState file not found or invalid.",
+                reply_markup=self._activity_nav_keyboard(),
+                parse_mode="Markdown",
+            )
             return
-        
-        # Get virtual trades from state (signals with status=entered)
-        virtual_trades_count = state.get("active_trades_count", 0) or 0
-        active_trades_unrealized_pnl = state.get("active_trades_unrealized_pnl")
-        
-        text = "📋 *Active Virtual Trades*\n\n"
-        
-        if virtual_trades_count == 0:
-            text += "No active virtual trades.\n"
-            text += "\n_Virtual trades track simulated P&L from signals._"
-        else:
-            text += f"📊 *Virtual Trades:* {virtual_trades_count}\n"
-            
-            if active_trades_unrealized_pnl is not None:
-                pnl_emoji = "💰" if active_trades_unrealized_pnl >= 0 else "📉"
-                pnl_sign = "+" if active_trades_unrealized_pnl >= 0 else ""
-                text += f"{pnl_emoji} *Unrealized P&L:* {pnl_sign}${active_trades_unrealized_pnl:,.2f}\n"
-            
-            text += "\n_These are simulated trades, not broker positions._"
-        
-        # Try to get detailed trade info from signals
-        recent_signals = self._read_recent_signals(limit=50)
-        active_signals = [s for s in recent_signals if s.get("status") == "entered"]
-        
-        keyboard_rows = []
-        if active_signals:
-            text += f"\n\n*Open Virtual Positions ({len(active_signals)}):*\n"
-            for i, signal in enumerate(active_signals[-5:], 1):  # Show last 5
-                signal_id = signal.get("signal_id", "unknown")[:8]
-                direction = signal.get("direction", "").upper()
-                entry_price = signal.get("entry_price", 0)
-                signal_type = signal.get("type", "unknown")
-                text += f"\n{i}. {direction} {signal_type}\n"
-                text += f"   ID: `{signal_id}`\n"
-                if entry_price:
-                    text += f"   Entry: ${entry_price:,.2f}\n"
-        
-            # Add Close All button if trades exist
-            if virtual_trades_count > 0:
-                keyboard_rows.append([
-                    InlineKeyboardButton(f"🚫 Close All ({virtual_trades_count})", callback_data="action:close_all_trades"),
-                ])
-        
-        # Add navigation
-        keyboard_rows.append([
-            InlineKeyboardButton("🔄 Refresh", callback_data="action:active_trades"),
-            InlineKeyboardButton("📊 Activity", callback_data="menu:activity"),
-            InlineKeyboardButton("🏠 Menu", callback_data="back"),
-        ])
-        
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard_rows), parse_mode="Markdown")
 
-    async def _handle_recent_signals(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display recent signals with detail buttons."""
-        signals = self._read_recent_signals(limit=10)
-        
-        text = "🎯 *Recent Signals*\n\n"
-        
-        keyboard_rows = []
-        if not signals:
-            text += "No signals found.\n"
+        # Open virtual trades (signals with status=entered)
+        virtual_trades_count = int(state.get("active_trades_count", 0) or 0)
+        active_trades_unrealized_pnl = state.get("active_trades_unrealized_pnl")
+
+        # Recent records (unified)
+        recent_signals = self._read_recent_signals(limit=50)
+        recent_10 = recent_signals[-10:] if recent_signals else []
+        active_signals = [s for s in recent_signals if s.get("status") == "entered"]
+
+        lines: list[str] = ["📋 *Trades* (Virtual)", ""]
+        lines.append(f"Open: *{virtual_trades_count}*")
+        if active_trades_unrealized_pnl is not None:
+            try:
+                upnl = float(active_trades_unrealized_pnl)
+                pnl_emoji = "💰" if upnl >= 0 else "📉"
+                pnl_sign = "+" if upnl >= 0 else ""
+                lines.append(f"{pnl_emoji} Unrealized: {pnl_sign}${abs(upnl):,.2f}")
+            except Exception:
+                pass
+
+        lines.append("")
+        lines.append("_Virtual trades are simulated (not broker positions)._")
+
+        if active_signals:
+            lines.append("")
+            lines.append(f"*Open Positions ({len(active_signals)}):*")
+            for i, signal in enumerate(active_signals[-5:], 1):  # Show last 5
+                signal_id_short = str(signal.get("signal_id") or "unknown")[:8]
+                direction = str(signal.get("direction") or "").upper()
+                signal_type = str(signal.get("type") or "unknown")
+                lines.append(f"{i}. {direction} {signal_type}  `{signal_id_short}`")
+                entry_price = signal.get("entry_price")
+                if entry_price:
+                    try:
+                        lines.append(f"   Entry: ${float(entry_price):,.2f}")
+                    except Exception:
+                        pass
+
+        lines.append("")
+        if not recent_10:
+            lines.append("*Recent:* none")
         else:
-            text += f"Showing last {len(signals)} signals:\n\n"
-            detail_buttons = []
-            for i, signal in enumerate(reversed(signals[-10:]), 1):  # Most recent first
-                signal_id = signal.get("signal_id", "unknown")
+            lines.append(f"*Recent ({len(recent_10)}):*")
+            for i, signal in enumerate(reversed(recent_10), 1):  # Most recent first
+                signal_id = str(signal.get("signal_id") or "unknown")
                 signal_id_short = signal_id[:8]
-                direction = signal.get("direction", "").upper()
-                signal_type = signal.get("type", "unknown")
-                status = signal.get("status", "unknown")
+                direction = str(signal.get("direction") or "").upper()
+                signal_type = str(signal.get("type") or "unknown")
+                status = str(signal.get("status") or "unknown")
                 entry_price = signal.get("entry_price")
                 pnl = signal.get("pnl")
                 timestamp = signal.get("timestamp", "")
-                
-                # Format timestamp
+
+                # Format timestamp (best-effort)
                 time_str = ""
                 if timestamp:
                     try:
                         ts = parse_utc_timestamp(timestamp) if isinstance(timestamp, str) else timestamp
-                        time_str = ts.strftime("%H:%M") if hasattr(ts, 'strftime') else str(timestamp)[:5]
+                        time_str = ts.strftime("%H:%M") if hasattr(ts, "strftime") else str(timestamp)[:5]
                     except Exception:
                         time_str = str(timestamp)[:5] if timestamp else ""
-                
-                # Status emoji
-                status_emoji = {"entered": "🟢", "exited": "⚪", "generated": "🟡"}.get(status, "⚪")
-                
-                # Direction emoji
-                dir_emoji = "📈" if direction == "LONG" else "📉" if direction == "SHORT" else ""
-                
-                text += f"{i}. {dir_emoji} {direction} {signal_type} {status_emoji}\n"
-                if entry_price:
-                    text += f"   Entry: ${entry_price:,.2f}"
-                if time_str:
-                    text += f" @ {time_str}"
-                if pnl is not None and status == "exited":
-                    pnl_emoji = "🟢" if float(pnl) >= 0 else "🔴"
-                    text += f" | {pnl_emoji} ${float(pnl):+.2f}"
-                text += f"\n   `{signal_id_short}`\n\n"
-                
-                # Add detail button (2 per row)
-                detail_buttons.append(
-                    InlineKeyboardButton(f"ℹ️ {signal_id_short}", callback_data=f"signal_detail:{signal_id[:16]}")
+
+                status_emoji = {"entered": "🟢", "exited": "⚪", "generated": "🟡", "cancelled": "❌"}.get(
+                    status, "⚪"
                 )
-            
-            # Group detail buttons into rows of 2
-            for i in range(0, len(detail_buttons), 2):
-                keyboard_rows.append(detail_buttons[i:i+2])
-        
-        # Add navigation
-        keyboard_rows.append([
-            InlineKeyboardButton("🔄 Refresh", callback_data="action:recent_signals"),
-            InlineKeyboardButton("📊 Activity", callback_data="menu:activity"),
-            InlineKeyboardButton("🏠 Menu", callback_data="back"),
-        ])
-        
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard_rows), parse_mode="Markdown")
+                dir_emoji = "📈" if direction == "LONG" else "📉" if direction == "SHORT" else ""
+
+                line = f"{i}. {dir_emoji} {direction} {signal_type} {status_emoji}"
+                if entry_price:
+                    try:
+                        line += f"  ${float(entry_price):,.2f}"
+                    except Exception:
+                        pass
+                if time_str:
+                    line += f" @ {time_str}"
+                if pnl is not None and status == "exited":
+                    try:
+                        pnl_val = float(pnl)
+                        pe = "🟢" if pnl_val >= 0 else "🔴"
+                        line += f" | {pe} ${pnl_val:+.2f}"
+                    except Exception:
+                        pass
+
+                lines.append(line)
+                lines.append(f"   `{signal_id_short}`")
+
+        text = "\n".join(lines)
+
+        keyboard_rows: list[list[InlineKeyboardButton]] = []
+
+        # Quick action when trades exist
+        if virtual_trades_count > 0:
+            keyboard_rows.append(
+                [InlineKeyboardButton(f"🚫 Close All ({virtual_trades_count})", callback_data="action:close_all_trades")]
+            )
+
+        # Detail buttons for recent signals (2 per row)
+        detail_buttons: list[InlineKeyboardButton] = []
+        for signal in reversed(recent_10):
+            sig_id = str(signal.get("signal_id") or "").strip()
+            if not sig_id:
+                continue
+            sid_short = sig_id[:8]
+            detail_buttons.append(InlineKeyboardButton(f"ℹ️ {sid_short}", callback_data=f"signal_detail:{sig_id[:16]}"))
+
+        for i in range(0, len(detail_buttons), 2):
+            keyboard_rows.append(detail_buttons[i : i + 2])
+
+        # Navigation
+        keyboard_rows.append(
+            [
+                InlineKeyboardButton("🔄 Refresh", callback_data="action:trades_overview"),
+                InlineKeyboardButton("📊 Activity", callback_data="menu:activity"),
+                InlineKeyboardButton("🏠 Menu", callback_data="back"),
+            ]
+        )
+
+        await self._safe_edit_or_send(
+            query,
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard_rows),
+            parse_mode="Markdown",
+        )
 
     def _build_ai_coach_report(self, *, state: dict | None = None) -> str:
         """
@@ -4670,13 +4802,27 @@ class TelegramCommandHandler:
             if not ts:
                 continue
             try:
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                dt = parse_utc_timestamp(ts)
             except Exception:
                 continue
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
             if dt >= cutoff_72:
                 trades_72h.append(t)
+
+        # Defensive: de-dupe by signal_id to avoid any double-counting if the
+        # performance log ever accumulates duplicate exits.
+        try:
+            by_id = {}
+            no_id = []
+            for t in trades_72h:
+                sid = str(t.get("signal_id") or "").strip() if isinstance(t, dict) else ""
+                if not sid:
+                    no_id.append(t)
+                    continue
+                by_id[sid] = t  # keep most recent occurrence (append-only)
+            if by_id:
+                trades_72h = list(by_id.values()) + no_id
+        except Exception:
+            pass
 
         def _pnl_sum(trades: list[dict]) -> float:
             total = 0.0
@@ -5320,6 +5466,8 @@ class TelegramCommandHandler:
             if perf_file.exists():
                 with open(perf_file, 'r') as f:
                     all_trades = json.load(f)
+                if not isinstance(all_trades, list):
+                    all_trades = []
                 
                 if all_trades:
                     # 72-hour metrics
@@ -5329,14 +5477,26 @@ class TelegramCommandHandler:
                         try:
                             ts = t.get("exit_time") or t.get("entry_time")
                             if ts:
-                                ts_str = str(ts).replace('Z', '+00:00')
-                                dt = datetime.fromisoformat(ts_str.split('.')[0] + '+00:00' if '.' in ts_str and '+' not in ts_str else ts_str)
-                                if dt.tzinfo is None:
-                                    dt = dt.replace(tzinfo=timezone.utc)
+                                dt = parse_utc_timestamp(str(ts))
                                 if dt >= cutoff_72h:
                                     trades_72h.append(t)
                         except Exception:
                             pass
+
+                    # De-dupe by signal_id to prevent any double-counting.
+                    try:
+                        by_id = {}
+                        no_id = []
+                        for t in trades_72h:
+                            sid = str(t.get("signal_id") or "").strip() if isinstance(t, dict) else ""
+                            if not sid:
+                                no_id.append(t)
+                                continue
+                            by_id[sid] = t  # keep most recent occurrence (append-only)
+                        if by_id:
+                            trades_72h = list(by_id.values()) + no_id
+                    except Exception:
+                        pass
                     
                     if trades_72h:
                         pnl_72h = sum(float(t.get('pnl', 0) or 0) for t in trades_72h)
@@ -5351,14 +5511,26 @@ class TelegramCommandHandler:
                         try:
                             ts = t.get("exit_time") or t.get("entry_time")
                             if ts:
-                                ts_str = str(ts).replace('Z', '+00:00')
-                                dt = datetime.fromisoformat(ts_str.split('.')[0] + '+00:00' if '.' in ts_str and '+' not in ts_str else ts_str)
-                                if dt.tzinfo is None:
-                                    dt = dt.replace(tzinfo=timezone.utc)
+                                dt = parse_utc_timestamp(str(ts))
                                 if dt >= cutoff_30d:
                                     trades_30d.append(t)
                         except Exception:
                             pass
+
+                    # De-dupe by signal_id to prevent any double-counting.
+                    try:
+                        by_id = {}
+                        no_id = []
+                        for t in trades_30d:
+                            sid = str(t.get("signal_id") or "").strip() if isinstance(t, dict) else ""
+                            if not sid:
+                                no_id.append(t)
+                                continue
+                            by_id[sid] = t  # keep most recent occurrence (append-only)
+                        if by_id:
+                            trades_30d = list(by_id.values()) + no_id
+                    except Exception:
+                        pass
                     
                     if trades_30d:
                         pnl_30d = sum(float(t.get('pnl', 0) or 0) for t in trades_30d)
@@ -5637,13 +5809,13 @@ class TelegramCommandHandler:
         return response
 
     async def _handle_signal_history(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display signal history summary."""
+        """Display trade history summary."""
         signals = self._read_recent_signals(limit=100)
         
-        text = "📊 *Signal History*\n\n"
+        text = "📊 *Trade History*\n\n"
         
         if not signals:
-            text += "No signals in history.\n"
+            text += "No trades in history.\n"
         else:
             # Count by status
             status_counts = {}
@@ -5666,7 +5838,7 @@ class TelegramCommandHandler:
             exited_count = status_counts.get("exited", 0)
             pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
             
-            text += f"*Total Signals:* {len(signals)}\n"
+            text += f"*Total Trades:* {len(signals)}\n"
             if exited_count > 0:
                 text += f"*Total P&L:* {pnl_emoji} ${total_pnl:,.2f}\n"
             text += "\n"
@@ -5699,21 +5871,21 @@ class TelegramCommandHandler:
 
     async def _handle_signal_detail(self, query: CallbackQuery, signal_id_prefix: str) -> None:
         """
-        Display detailed signal information for a specific signal.
+        Display detailed trade information for a specific trade.
         
         Args:
             query: Callback query from button press
-            signal_id_prefix: First characters of the signal ID to look up
+            signal_id_prefix: First characters of the trade (signal) ID to look up
         """
         keyboard = [
-            [InlineKeyboardButton("🎯 Back to Signals", callback_data="menu:signals")],
+            [InlineKeyboardButton("📋 Back to Trades", callback_data="action:trades_overview")],
             self._nav_back_row(),
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         if not signal_id_prefix:
             await query.edit_message_text(
-                "❌ No signal ID provided.",
+                "❌ No trade ID provided.",
                 reply_markup=reply_markup,
                 parse_mode="Markdown"
             )
@@ -5724,8 +5896,8 @@ class TelegramCommandHandler:
         
         if not signal:
             await query.edit_message_text(
-                f"❌ Signal not found: `{signal_id_prefix}...`\n\n"
-                "Signal may have expired or ID prefix is incorrect.",
+                f"❌ Trade not found: `{signal_id_prefix}...`\n\n"
+                "Trade may have expired or ID prefix is incorrect.",
                 reply_markup=reply_markup,
                 parse_mode="Markdown"
             )
@@ -5777,12 +5949,12 @@ class TelegramCommandHandler:
         signal = self._find_signal_by_prefix(signal_id_prefix)
         if not signal:
             keyboard = [
-                [InlineKeyboardButton("🎯 Back to Signals", callback_data="menu:signals")],
+                [InlineKeyboardButton("📋 Back to Trades", callback_data="action:trades_overview")],
                 self._nav_back_row(),
             ]
             await self._safe_edit_or_send(
                 query,
-                f"❌ Signal not found: `{signal_id_prefix}...`",
+                f"❌ Trade not found: `{signal_id_prefix}...`",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown",
             )
@@ -5793,7 +5965,7 @@ class TelegramCommandHandler:
         if not chart_path.exists():
             keyboard = [
                 [InlineKeyboardButton("🔍 Details", callback_data=f"signal_detail:{signal_id_prefix}")],
-                [InlineKeyboardButton("🎯 Back to Signals", callback_data="menu:signals")],
+                [InlineKeyboardButton("📋 Back to Trades", callback_data="action:trades_overview")],
                 self._nav_back_row(),
             ]
             await self._safe_edit_or_send(
@@ -5952,7 +6124,7 @@ class TelegramCommandHandler:
         
         # Build message
         lines = [
-            "🔍 *Signal Detail*",
+            "🔍 *Trade Detail*",
             "",
             f"*{symbol} {dir_emoji} {dir_label}* | {signal_type}",
             f"{status_emoji} Status: *{status_label}*",
@@ -6194,7 +6366,7 @@ class TelegramCommandHandler:
             pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
             
             text += "*Today's Activity:*\n"
-            text += f"  Signals: {len(today_signals)} total\n"
+            text += f"  Alerts: {len(today_signals)} total\n"
             text += f"  • Generated: {generated}\n"
             text += f"  • Active: {entered}\n"
             text += f"  • Exited: {exited}\n"
@@ -6204,7 +6376,7 @@ class TelegramCommandHandler:
                 text += f"  {pnl_emoji} ${total_pnl:,.2f}\n"
                 text += f"  Trades: {wins}W / {losses}L\n"
         else:
-            text += "No signals generated today.\n"
+            text += "No alerts generated today.\n"
         
         # Add state info
         if state:
@@ -6235,7 +6407,7 @@ class TelegramCommandHandler:
             
             pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
             
-            text += "*Signal Statistics:*\n"
+            text += "*Alert Statistics:*\n"
             text += f"  Total Generated: {total_signals}\n"
             text += f"  Completed: {exited_signals}\n"
             
@@ -7138,7 +7310,7 @@ class TelegramCommandHandler:
 
         signals_file = get_signals_file(Path(state_dir))
         if not signals_file.exists():
-            await self._send_message_or_edit(update, context, "⚡ Signals\n\nNo signals file found.")
+            await self._send_message_or_edit(update, context, "📋 Trades\n\nNo trade history file found yet.")
             return
 
         raw_lines = []
@@ -7158,12 +7330,12 @@ class TelegramCommandHandler:
                 continue
 
         if not signals:
-            await self._send_message_or_edit(update, context, "⚡ Signals\n\nNo signals yet.")
+            await self._send_message_or_edit(update, context, "📋 Trades\n\nNo trades yet.")
             return
 
         # Render a compact summary (keep under Telegram limit)
         shown = signals[-10:]
-        lines = ["🎯 Recent Signals"]
+        lines = ["📋 Recent Trades"]
         for s in shown:
             try:
                 direction = format_signal_direction(str(s.get("direction") or s.get("signal", {}).get("direction") or ""))

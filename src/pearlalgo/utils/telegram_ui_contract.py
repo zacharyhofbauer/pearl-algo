@@ -39,7 +39,8 @@ PREFIX_AIOPS = "aiops:"
 # Menu IDs (used with menu: prefix)
 # ---------------------------------------------------------------------------
 MENU_MAIN = "main"  # Main menu / home
-MENU_SIGNALS = "signals"  # Signals & Trades
+MENU_ACTIVITY = "activity"  # Trades (virtual) + history + P&L
+MENU_ANALYTICS = "analytics"
 MENU_PERFORMANCE = "performance"
 MENU_STATUS = "status"
 MENU_SYSTEM = "system"
@@ -57,9 +58,8 @@ ACTION_GATEWAY_STATUS = "gateway_status"
 ACTION_CONNECTION_STATUS = "connection_status"
 ACTION_DATA_QUALITY = "data_quality"
 
-# Signals & Trades
-ACTION_RECENT_SIGNALS = "recent_signals"
-ACTION_ACTIVE_TRADES = "active_trades"
+# Trades (virtual) + history
+ACTION_TRADES_OVERVIEW = "trades_overview"
 ACTION_SIGNAL_HISTORY = "signal_history"
 ACTION_SIGNAL_DETAILS = "signal_details"
 ACTION_CLOSE_ALL_TRADES = "close_all_trades"
@@ -95,9 +95,10 @@ ACTION_TOGGLE_CHART = "toggle_chart"
 LEGACY_CALLBACK_ALIASES: dict[str, str] = {
     # Navigation shortcuts (legacy raw callbacks)
     "start": "menu:main",
-    "signals": "menu:signals",
+    # Signals/Virtual were unified into Activity/Trades. Keep legacy callbacks working.
+    "signals": "menu:activity",
     "status": "menu:status",
-    "activity": "menu:signals",
+    "activity": "menu:activity",
     "menu": "menu:main",
     
     # Action shortcuts (legacy raw callbacks without prefix)
@@ -105,8 +106,8 @@ LEGACY_CALLBACK_ALIASES: dict[str, str] = {
     "gateway_status": "action:gateway_status",
     "connection_status": "action:connection_status",
     "system_status": "action:system_status",
-    "active_trades": "action:active_trades",
-    "recent_signals": "action:recent_signals",
+    "active_trades": "action:trades_overview",
+    "recent_signals": "action:trades_overview",
     
     # Restart actions (legacy without confirm: prefix)
     "restart_agent": "confirm:restart_agent",
@@ -129,8 +130,8 @@ def resolve_callback(callback_data: str) -> str:
         'menu:main'
         >>> resolve_callback("data_quality")
         'action:data_quality'
-        >>> resolve_callback("menu:signals")
-        'menu:signals'
+        >>> resolve_callback("signals")  # legacy alias
+        'menu:activity'
         >>> resolve_callback("signal_detail_abc123")
         'signal_detail:abc123'
     """
@@ -140,6 +141,13 @@ def resolve_callback(callback_data: str) -> str:
     # Check for legacy alias
     if callback_data in LEGACY_CALLBACK_ALIASES:
         return LEGACY_CALLBACK_ALIASES[callback_data]
+
+    # Canonical backwards compatibility: unify old menu/actions into the new routes.
+    # Old messages cannot be edited, so we normalize at callback resolution time.
+    if callback_data == "menu:signals":
+        return "menu:activity"
+    if callback_data in {"action:active_trades", "action:recent_signals"}:
+        return "action:trades_overview"
     
     # Handle signal_detail_<id> format (legacy uses underscore, canonical uses colon)
     if callback_data.startswith("signal_detail_"):
@@ -164,8 +172,8 @@ def parse_callback(callback_data: str) -> Tuple[str, str, Optional[str]]:
         - param: Optional parameter (e.g., signal ID, preference key)
         
     Examples:
-        >>> parse_callback("menu:signals")
-        ('menu', 'signals', None)
+        >>> parse_callback("menu:activity")
+        ('menu', 'activity', None)
         >>> parse_callback("action:toggle_pref:auto_chart_on_signal")
         ('action', 'toggle_pref', 'auto_chart_on_signal')
         >>> parse_callback("signal_detail:abc123")
@@ -224,8 +232,8 @@ def build_callback(callback_type: str, action: str, param: Optional[str] = None)
         Canonical callback_data string
         
     Examples:
-        >>> build_callback("menu", "signals")
-        'menu:signals'
+        >>> build_callback("menu", "activity")
+        'menu:activity'
         >>> build_callback("action", "toggle_pref", "auto_chart_on_signal")
         'action:toggle_pref:auto_chart_on_signal'
         >>> build_callback("signal_detail", "abc123")

@@ -164,87 +164,6 @@ class MarketAgentTelegramNotifier:
             # Fall back to the instance prefs (best-effort).
             return self.prefs
 
-    async def send_signal(self, signal: Dict, buffer_data: Optional[pd.DataFrame] = None) -> bool:
-        """
-        Send a trading signal to Telegram using professional desk alert format.
-        
-        Args:
-            signal: Signal dictionary with regime, MTF, VWAP context
-            buffer_data: Optional DataFrame with OHLCV data for chart generation
-            
-        Returns:
-            True if sent successfully
-        """
-        if not self.enabled:
-            logger.warning("Telegram notifier is disabled - signal not sent")
-            return False
-        
-        if not self.telegram:
-            logger.error(
-                "Telegram notifier not initialized - signal not sent. "
-                "Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID environment variables."
-            )
-            return False
-
-        try:
-            # Use ultra-compact 3-line format for mobile-first glanceability
-            message = self._format_ultra_compact_signal(signal)
-            
-            # Add drill-down buttons when command handler is running
-            reply_markup = None
-            signal_id = str(signal.get("signal_id") or "")
-            if _is_command_handler_running() and signal_id:
-                try:
-                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                    keyboard = [
-                        [
-                            InlineKeyboardButton("🔍 Details", callback_data=callback_signal_detail(signal_id[:16])),
-                            InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
-                        ]
-                    ]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                except ImportError:
-                    pass
-            
-            success = await self.telegram.send_message(
-                message,
-                parse_mode="Markdown",
-                dedupe=False,
-                reply_markup=reply_markup,
-            )
-
-            # Optional: persist an entry chart for later review (preference-gated).
-            # Operator preference: don't send charts in notifications.
-            # Fire-and-forget so chart rendering doesn't block the scan loop.
-            try:
-                prefs = self._get_prefs()
-                auto_chart = bool(getattr(prefs, "auto_chart_on_signal", False))
-            except Exception:
-                auto_chart = False
-
-            if (
-                auto_chart
-                and self.chart_generator is not None
-                and buffer_data is not None
-                and not buffer_data.empty
-            ):
-                asyncio.create_task(self._save_signal_entry_chart(signal, buffer_data))
-            
-            if success:
-                return True
-
-            # Fallback: send a minimal, guaranteed-short signal summary.
-            fallback = self._format_minimal_signal(signal)
-            fallback_ok = await self.telegram.send_message(
-                fallback,
-                parse_mode=None,
-                dedupe=False,
-            )
-            return bool(fallback_ok)
-        except Exception as e:
-            ErrorHandler.handle_telegram_error(e, "send_signal")
-            return False
-
     def _trade_charts_dir(self) -> Path:
         """Directory for per-trade charts persisted to disk."""
         d = Path(self.state_dir) / "exports" / "trade_charts"
@@ -281,92 +200,6 @@ class MarketAgentTelegramNotifier:
             return dest if dest.exists() else None
         except Exception:
             return None
-
-    async def _save_signal_entry_chart(self, signal: Dict, buffer_data: pd.DataFrame) -> None:
-        """Generate + persist an entry chart for a signal (best-effort, non-blocking)."""
-        if not self.enabled or not self.telegram:
-            return
-        if self.chart_generator is None:
-            return
-        if buffer_data is None or buffer_data.empty:
-            return
-
-        symbol = str(signal.get("symbol") or "MNQ")
-        chart_path: Optional[Path] = None
-        try:
-            chart_path = await asyncio.to_thread(
-                self.chart_generator.generate_entry_chart,
-                signal=signal,
-                buffer_data=buffer_data,
-                symbol=symbol,
-                timeframe=None,
-            )
-        except Exception as e:
-            logger.warning(f"Could not generate entry chart: {e}")
-            return
-
-        if not chart_path or not chart_path.exists():
-            return
-
-        try:
-            persisted = self._persist_trade_chart(
-                chart_path=chart_path,
-                signal_id=str(signal.get("signal_id") or ""),
-                kind="entry",
-            )
-            if persisted:
-                logger.debug(f"Saved entry chart: {persisted}")
-        finally:
-            try:
-                chart_path.unlink()
-            except Exception:
-                pass
-
-    def _format_minimal_signal(self, signal: Dict) -> str:
-        """Format a minimal signal message (plain text, bounded)."""
-        symbol = str(signal.get("symbol") or "MNQ")
-        sig_type = str(signal.get("type") or "unknown").replace("_", " ").title()
-        direction = str(signal.get("direction") or "long").upper()
-        try:
-            entry = float(signal.get("entry_price") or 0.0)
-        except Exception:
-            entry = 0.0
-        try:
-            stop = float(signal.get("stop_loss") or 0.0)
-        except Exception:
-            stop = 0.0
-        try:
-            target = float(signal.get("take_profit") or 0.0)
-        except Exception:
-            target = 0.0
-        try:
-            conf = float(signal.get("confidence") or 0.0)
-        except Exception:
-            conf = 0.0
-
-        sid = str(signal.get("signal_id") or "")
-        sid_short = (sid[:16] + "…") if sid else ""
-
-        # Check if this is a test signal (won't be saved to database/menu)
-        is_test = signal.get("_is_test", False) or str(signal.get("reason", "")).lower().startswith("test")
-        test_prefix = "🧪 [TEST - NOT TRACKED] " if is_test else ""
-
-        # Keep this compact and robust to Markdown parsing issues.
-        lines = [
-            f"{test_prefix}SIGNAL {symbol} {direction} | {sig_type}",
-            f"entry={entry:.2f} stop={stop:.2f} target={target:.2f} conf={conf:.0%}",
-        ]
-        reason = str(signal.get("reason") or "").strip()
-        if reason:
-            # Keep only first 2 lines and hard-cap length.
-            parts = [p.strip() for p in reason.splitlines() if p.strip()]
-            short = " | ".join(parts[:2])
-            if len(short) > 220:
-                short = short[:217] + "..."
-            lines.append(f"reason={short}")
-        if sid_short:
-            lines.append(f"id={sid_short}")
-        return "\n".join(lines)
 
     def _format_compact_signal(self, signal: Dict) -> str:
         """
@@ -536,84 +369,6 @@ class MarketAgentTelegramNotifier:
             message += f"\n`{signal_id[:12]}`"
 
         return message
-
-    def _format_ultra_compact_signal(self, signal: Dict) -> str:
-        """
-        Format signal as ultra-compact 3-line notification.
-        
-        Layout (mobile-first, glanceable):
-        Line 1: DIRECTION SYMBOL @ PRICE
-        Line 2: SL | TP | R:R
-        Line 3: Confidence | Session
-        
-        Full details accessible via drill-down button.
-        
-        Args:
-            signal: Signal dictionary
-            
-        Returns:
-            Formatted 3-line message string
-        """
-        symbol = str(signal.get("symbol") or "MNQ")
-        try:
-            entry_price = float(signal.get("entry_price") or 0.0)
-        except Exception:
-            entry_price = 0.0
-        try:
-            stop_loss = float(signal.get("stop_loss") or 0.0)
-        except Exception:
-            stop_loss = 0.0
-        try:
-            take_profit = float(signal.get("take_profit") or 0.0)
-        except Exception:
-            take_profit = 0.0
-        try:
-            confidence = float(signal.get("confidence") or 0.0)
-        except Exception:
-            confidence = 0.0
-
-        # Direction
-        dir_emoji, dir_label = format_signal_direction(signal.get("direction", "long"))
-        
-        # Calculate R:R
-        rr_str = ""
-        if entry_price > 0 and stop_loss > 0 and take_profit > 0:
-            if dir_label == "LONG":
-                risk = entry_price - stop_loss
-                reward = take_profit - entry_price
-            else:
-                risk = stop_loss - entry_price
-                reward = entry_price - take_profit
-            if risk > 0:
-                rr = reward / risk
-                rr_str = f"{rr:.1f}R"
-
-        # Confidence tier
-        conf_emoji, conf_tier = format_signal_confidence_tier(confidence)
-        
-        # Session from regime
-        regime = signal.get("regime", {}) or {}
-        session = str(regime.get("session", "")).replace("_", " ").title() if regime.get("session") else ""
-
-        # Build compact message
-        lines = []
-        
-        # Line 1: Direction + Symbol @ Price
-        lines.append(f"{dir_emoji} *{dir_label} {symbol}* @ ${entry_price:,.2f}")
-        
-        # Line 2: SL | TP | R:R
-        sl_str = f"SL ${stop_loss:,.2f}" if stop_loss else ""
-        tp_str = f"TP ${take_profit:,.2f}" if take_profit else ""
-        line2_parts = [p for p in [sl_str, tp_str, rr_str] if p]
-        lines.append(" | ".join(line2_parts))
-        
-        # Line 3: Confidence | Session
-        line3_parts = [f"{conf_emoji} {confidence:.0%} {conf_tier}"]
-        if session:
-            line3_parts.append(session)
-        lines.append(" | ".join(line3_parts))
-
-        return "\n".join(lines)
     
     async def _send_photo(
         self,
@@ -962,28 +717,32 @@ class MarketAgentTelegramNotifier:
                 if risk_amount:
                     size_risk_parts.append(f"Risk: ${risk_amount:,.0f}")
                 message += f"Size: {' • '.join(size_risk_parts)}"
+
+            # Preserve key context from the signal alert (so ENTRY can be canonical without losing info)
+            try:
+                confidence = float(signal.get("confidence") or 0.0)
+            except Exception:
+                confidence = 0.0
+            try:
+                conf_emoji, conf_tier = format_signal_confidence_tier(confidence)
+                regime = signal.get("regime", {}) or {}
+                session = (
+                    str(regime.get("session", "")).replace("_", " ").title()
+                    if isinstance(regime, dict) and regime.get("session")
+                    else ""
+                )
+                if confidence > 0:
+                    if not message.endswith("\n"):
+                        message += "\n"
+                    message += f"\n{conf_emoji} Conf: {confidence:.0%} {conf_tier}"
+                    if session:
+                        message += f" | {session}"
+            except Exception:
+                pass
             
-            # Build inline buttons (no chart, so include nav here)
-            reply_markup = None
-            if _is_command_handler_running():
-                try:
-                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                    keyboard = [
-                        [
-                            InlineKeyboardButton("ℹ️ Details", callback_data=callback_signal_detail(signal_id[:16])),
-                            InlineKeyboardButton("🚫 Close All", callback_data=callback_action("close_all_trades")),
-                        ],
-                        [
-                            InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
-                        ],
-                    ]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                except Exception:
-                    reply_markup = None
-            
-            # Send message
+            # Send message - no inline buttons, all actions accessible via /start menu
             # Entry notifications are high-signal; never dedupe.
-            success = await self.telegram.send_message(message, reply_markup=reply_markup, dedupe=False)
+            success = await self.telegram.send_message(message, dedupe=False)
             
             # Persist entry chart for later review (do NOT send charts in notifications).
             try:
@@ -1096,29 +855,9 @@ class MarketAgentTelegramNotifier:
             reason_icon = exit_icons.get(exit_reason.lower(), "ℹ️")
             message += f"{reason_icon} {exit_reason_display}"
             
-            handler_running = _is_command_handler_running()
-            
-            # Build inline buttons (with quick Close All for locking in profits)
-            reply_markup = None
-            if handler_running:
-                try:
-                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-                    keyboard = [
-                        [
-                            InlineKeyboardButton("ℹ️ Details", callback_data=callback_signal_detail(signal_id[:16])),
-                            InlineKeyboardButton("🚫 Close All", callback_data=callback_action("close_all_trades")),
-                        ],
-                        [
-                            InlineKeyboardButton("🏠 Menu", callback_data=callback_menu(MENU_MAIN)),
-                        ],
-                    ]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                except Exception:
-                    reply_markup = None
-            
-            # Send message
+            # Send message - no inline buttons, all actions accessible via /start menu
             # Exit notifications are high-signal; never dedupe.
-            success = await self.telegram.send_message(message, reply_markup=reply_markup, dedupe=False)
+            success = await self.telegram.send_message(message, dedupe=False)
             
             # Generate and persist exit chart if available (do NOT send charts in notifications)
             chart_path = None
@@ -1826,13 +1565,28 @@ class MarketAgentTelegramNotifier:
                             ts = str(t.get("exit_time", "") or "")
                             if not ts:
                                 continue
-                            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                            if dt.tzinfo is None:
-                                dt = dt.replace(tzinfo=timezone.utc)
+                            from pearlalgo.utils.paths import parse_utc_timestamp
+
+                            dt = parse_utc_timestamp(ts)
                             if dt >= cutoff:
                                 trades_72h.append(t)
                         except Exception:
                             continue
+                    # Defensive: de-dupe by signal_id to avoid any double-counting if the
+                    # performance log ever accumulates duplicate exits.
+                    try:
+                        by_id = {}
+                        no_id = []
+                        for t in trades_72h:
+                            sid = str(t.get("signal_id") or "").strip() if isinstance(t, dict) else ""
+                            if not sid:
+                                no_id.append(t)
+                                continue
+                            by_id[sid] = t  # keep most recent occurrence (append-only)
+                        if by_id:
+                            trades_72h = list(by_id.values()) + no_id
+                    except Exception:
+                        pass
                     if trades_72h:
                         pnl_72h = sum(float(t.get("pnl", 0) or 0) for t in trades_72h)
                         wins_72h = sum(1 for t in trades_72h if t.get("is_win"))

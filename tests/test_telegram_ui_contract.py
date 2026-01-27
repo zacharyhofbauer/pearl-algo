@@ -35,11 +35,11 @@ class TestCallbackResolution:
         assert result == "menu:main"
 
     def test_resolve_legacy_signals(self):
-        """Legacy 'signals' callback resolves to menu:signals."""
+        """Legacy 'signals' callback resolves to menu:activity."""
         from pearlalgo.utils.telegram_ui_contract import resolve_callback
         
         result = resolve_callback("signals")
-        assert result == "menu:signals"
+        assert result == "menu:activity"
 
     def test_resolve_legacy_status(self):
         """Legacy 'status' callback resolves to menu:status."""
@@ -73,7 +73,9 @@ class TestCallbackResolution:
         """Canonical callbacks pass through unchanged."""
         from pearlalgo.utils.telegram_ui_contract import resolve_callback
         
-        assert resolve_callback("menu:signals") == "menu:signals"
+        assert resolve_callback("menu:activity") == "menu:activity"
+        # Backward compat: old menu should normalize to activity.
+        assert resolve_callback("menu:signals") == "menu:activity"
         assert resolve_callback("action:data_quality") == "action:data_quality"
         assert resolve_callback("back") == "back"
         assert resolve_callback("confirm:restart_agent") == "confirm:restart_agent"
@@ -98,9 +100,9 @@ class TestCallbackParsing:
         """Menu callbacks parse correctly."""
         from pearlalgo.utils.telegram_ui_contract import parse_callback
         
-        callback_type, action, param = parse_callback("menu:signals")
+        callback_type, action, param = parse_callback("menu:activity")
         assert callback_type == "menu"
-        assert action == "signals"
+        assert action == "activity"
         assert param is None
 
     def test_parse_action_callback(self):
@@ -157,7 +159,7 @@ class TestCallbackBuilders:
         from pearlalgo.utils.telegram_ui_contract import callback_menu
         
         assert callback_menu("main") == "menu:main"
-        assert callback_menu("signals") == "menu:signals"
+        assert callback_menu("activity") == "menu:activity"
         assert callback_menu("status") == "menu:status"
 
     def test_build_action_callback(self):
@@ -329,19 +331,19 @@ class TestNotifierCallbackFormat:
 
     def test_callback_menu_format(self):
         """Verify callback_menu produces correct format for notifier use."""
-        from pearlalgo.utils.telegram_ui_contract import callback_menu, MENU_MAIN, MENU_SIGNALS
+        from pearlalgo.utils.telegram_ui_contract import callback_menu, MENU_MAIN, MENU_ACTIVITY
         
         # These are the values notifier should use
         main_cb = callback_menu(MENU_MAIN)
-        signals_cb = callback_menu(MENU_SIGNALS)
+        activity_cb = callback_menu(MENU_ACTIVITY)
         
         assert main_cb == "menu:main"
-        assert signals_cb == "menu:signals"
+        assert activity_cb == "menu:activity"
         
         # Verify they resolve to themselves (already canonical)
         from pearlalgo.utils.telegram_ui_contract import resolve_callback
         assert resolve_callback(main_cb) == main_cb
-        assert resolve_callback(signals_cb) == signals_cb
+        assert resolve_callback(activity_cb) == activity_cb
 
     def test_callback_action_format(self):
         """Verify callback_action produces correct format for notifier use."""
@@ -427,10 +429,10 @@ class TestCallbackRouting:
                 assert cb_type == "menu"
                 assert action == "main"
             
-            # signals -> menu:signals
+            # signals -> menu:activity
             elif legacy == "signals":
                 assert cb_type == "menu"
-                assert action == "signals"
+                assert action == "activity"
             
             # data_quality -> action:data_quality
             elif legacy == "data_quality":

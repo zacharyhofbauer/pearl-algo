@@ -50,13 +50,13 @@ A great chart feels boring — because the trader never has to wonder whether it
 | Element | Hex | Usage |
 |---------|-----|-------|
 | VWAP | `#2196f3` | VWAP line and bands — blue family |
-| MA[0] | `#2196f3` | First MA (e.g., EMA9) — blue |
-| MA[1] | `#2196f3` | Second MA (e.g., EMA20) — blue |
-| MA[2] | `#9c27b0` | Third MA (e.g., EMA50) — purple |
-| MA[3] | `#f44336` | Fourth MA (e.g., EMA200) — red |
+| MA[0] | `#00bcd4` | First MA (EMA9) — cyan (distinct from VWAP) |
+| MA[1] | `#2196f3` | Second MA (EMA20) — blue |
+| MA[2] | `#9c27b0` | Third MA (EMA50) — purple |
+| MA[3] | `#f44336` | Fourth MA (EMA200) — red |
 | RSI | `#b388ff` | RSI line in sub-panel — light purple |
 
-**Contract**: MA colors are assigned in order (default: [9, 20, 50, 200]). Blue for fast EMAs, purple for medium, red for slow. Changing the order changes visual meaning.
+**Contract**: Each EMA has a unique color for clear visual distinction. Default periods: [9, 20, 50, 200]. Colors: Cyan (fast) → Blue → Purple → Red (slow). Changing the order changes visual meaning.
 
 ### TBT Trendline Colors (Configurable)
 
@@ -190,8 +190,27 @@ The merged label uses the **top-priority level's exact price** (not averaged).
 
 ### Collision Prevention
 
-Labels closer than `min_label_spacing_pts` (8 points default) are de-duplicated.
-Lower-priority labels are dropped to prevent visual clutter.
+Labels closer than `min_label_spacing_pts` (10 points default) are collision-detected.
+
+**Desktop Mode**: Lower-priority labels may be dropped to prevent visual clutter.
+
+**Telegram/Mobile Mode**: Collision-free stacking with leader lines:
+- Overlapping labels are shifted vertically (stacked)
+- A subtle leader line connects the shifted label back to its true price
+- Dynamic max label count based on available axis height
+- Labels clamped to stay within visible (ymin, ymax) range
+
+### Hybrid Label Policy (Telegram)
+
+For Telegram charts, a hybrid labeling policy reduces clutter while preserving key information:
+
+| Label Kind | Behavior | Rationale |
+|------------|----------|-----------|
+| `trade` | Always labeled | Entry/Stop/Target are critical |
+| `key_level` | Always labeled | PDH, DO, RTH Open, etc. provide context |
+| `vwap` | **No label** (line only) | VWAP visible on chart; label adds clutter |
+
+**Contract**: VWAP lines/bands are still drawn (visible on chart); only the right-side text labels are filtered out.
 
 ---
 
@@ -372,6 +391,33 @@ then re-run the visual regression tests to confirm.
 
 ## Optional Configuration
 
+### Telegram Render Profile
+
+For Telegram dashboard charts, a special render profile is automatically applied for mobile-optimized, no-overlap visuals:
+
+**Automatically Enabled**:
+- `mobile_mode=True` (all mobile optimizations)
+- `compact_labels=True` (reduced label clutter)
+- `show_session_range_stats=False` (session names only, no Range/Avg text)
+- `max_right_labels=6` (fewer right-side labels)
+- `ylabel=""` (removes "Price ($)" axis label to avoid collision with right labels)
+
+**Hybrid Label Policy (No VWAP Right Labels)**:
+- VWAP lines and bands are still drawn on the chart
+- VWAP right-side text labels are hidden (filtered by `kind="vwap"`)
+- Key levels (Entry, Stop, Target, PDH, DO, etc.) are always labeled
+- Reduces visual clutter while preserving important price reference lines
+
+**Collision-Free Label Stacking**:
+- Labels that would overlap are automatically stacked vertically
+- Subtle leader lines connect shifted labels back to their true price level
+- Dynamic max label count based on available axis height
+- Labels clamped to stay within visible y-range
+
+**Session Labels**:
+- Name-only (no "Range: X, Avg: Y" stats)
+- Positioned 8% above ymin (vs 3% desktop) to avoid RR-box overlap
+
 ### Mobile Mode (Consolidated)
 
 Enable all mobile-friendly optimizations with a single flag:
@@ -518,6 +564,14 @@ chart_path = generator.generate_dashboard_chart(
 
 | Date | Change | Author |
 |------|--------|--------|
+| 2026-01-27 | Added Telegram render profile with collision-free label stacking and leader lines | AI Agent |
+| 2026-01-27 | Implemented hybrid label policy: no VWAP right labels for Telegram (lines still drawn) | AI Agent |
+| 2026-01-27 | Removed ylabel='Price ($)' for Telegram mode to avoid collision with right labels | AI Agent |
+| 2026-01-27 | Added kind tag to level candidates (trade, vwap, key_level) for filtering | AI Agent |
+| 2026-01-27 | Session labels repositioned higher (8% vs 3%) in mobile mode to avoid RR-box overlap | AI Agent |
+| 2026-01-27 | Changed EMA9 color to cyan (#00bcd4) for unique visual distinction from VWAP | AI Agent |
+| 2026-01-27 | Improved legend layout with ncol=2, better positioning, and tighter spacing | AI Agent |
+| 2026-01-27 | Increased min_label_spacing_pts from 8.0 to 10.0 for better readability | AI Agent |
 | 2026-01-27 | Added mobile_mode consolidated flag for all mobile optimizations | AI Agent |
 | 2026-01-27 | Added show_power_readout option (independent of power channel zones) | AI Agent |
 | 2026-01-27 | Added vwap_fill_bands option for VWAP band fills | AI Agent |

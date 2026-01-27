@@ -173,8 +173,8 @@ def test_compact_signal_template_under_limit() -> None:
     assert len(message) < 2000, f"Message should be compact: {len(message)} chars"
 
 
-def test_minimal_signal_template_under_limit() -> None:
-    """Test that the minimal signal template stays well under Telegram's limit."""
+def test_compact_signal_template_under_limit() -> None:
+    """Test that the compact signal template stays well under Telegram's limit."""
     from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
     
     signal = {
@@ -189,10 +189,10 @@ def test_minimal_signal_template_under_limit() -> None:
     }
     
     notifier = MarketAgentTelegramNotifier.__new__(MarketAgentTelegramNotifier)
-    message = notifier._format_minimal_signal(signal)
+    message = notifier._format_compact_signal(signal)
     
-    # Minimal should be very short
-    assert len(message) < 500, f"Minimal message too long: {len(message)} chars"
+    # Compact should be reasonably short
+    assert len(message) < 1500, f"Compact message too long: {len(message)} chars"
 
 
 def test_professional_signal_template_under_limit() -> None:

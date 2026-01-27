@@ -21,7 +21,7 @@ Usage:
     await queue.start()
 
     # Queue notifications (non-blocking)
-    await queue.enqueue_signal(signal, priority=Priority.HIGH)
+    await queue.enqueue_entry(signal_id, entry_price, signal, priority=Priority.HIGH)
     await queue.enqueue_status(status, priority=Priority.LOW)
 
     # Graceful shutdown
@@ -148,7 +148,8 @@ class NotificationQueue:
 
     async def _process_loop(self) -> None:
         """Main processing loop for notifications."""
-        while self._running:
+        # When stopping, continue draining queued items so shutdown is graceful.
+        while self._running or not self._queue.empty():
             try:
                 # Get next notification (with timeout to check running state)
                 try:
@@ -211,12 +212,7 @@ class NotificationQueue:
             ntype = notification.notification_type
             payload = notification.payload
 
-            if ntype == "signal":
-                return await self.notifier.send_signal(
-                    payload.get("signal"),
-                    buffer_data=payload.get("buffer_data"),
-                )
-            elif ntype == "message":
+            if ntype == "message":
                 await self.notifier.send_message(payload.get("message", ""))
                 return True
             elif ntype == "status":
@@ -335,19 +331,6 @@ class NotificationQueue:
             self._stats["dropped"] += 1
             logger.warning(f"Notification dropped (queue full): {notification_type}")
             return False
-
-    async def enqueue_signal(
-        self,
-        signal: Any,
-        buffer_data: Optional[Any] = None,
-        priority: Priority = Priority.HIGH,
-    ) -> bool:
-        """Convenience method to enqueue a signal notification."""
-        return await self.enqueue(
-            "signal",
-            {"signal": signal, "buffer_data": buffer_data},
-            priority=priority,
-        )
 
     async def enqueue_message(
         self,
