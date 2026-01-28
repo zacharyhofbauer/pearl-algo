@@ -1270,6 +1270,22 @@ def generate_signals(
     else:  # "avoid"
         regime_multiplier = 0.5  # Reduce confidence by 50%
     
+    # Set dynamic SL/TP multipliers based on regime
+    base_sl_mult = float(config.get("stop_loss_atr_mult", 3.5))
+    base_tp_mult = float(config.get("take_profit_atr_mult", 5.0))
+    
+    if market_regime.regime == "volatile":
+        # Wider stops in volatile markets to avoid wicks
+        dynamic_sl_mult = base_sl_mult * 1.2
+        dynamic_tp_mult = base_tp_mult * 1.2
+    elif market_regime.regime == "ranging":
+        # Tighter targets in ranging markets
+        dynamic_sl_mult = base_sl_mult * 0.9
+        dynamic_tp_mult = base_tp_mult * 0.8
+    else:
+        dynamic_sl_mult = base_sl_mult
+        dynamic_tp_mult = base_tp_mult
+    
     # Combine signals with confidence scoring
     signal_candidates = []
     

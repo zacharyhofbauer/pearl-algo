@@ -1084,9 +1084,9 @@ class TelegramCommandHandler:
             try:
                 message_text = await self._build_status_dashboard_message(state)
                 
-                # Add Pearl suggestion text if present
-                if pearl_suggestion:
-                    message_text += f"\n\n💬 Pearl: \"{pearl_suggestion.message}\""
+                # Pearl suggestion text is now sent as a separate notification
+                # if pearl_suggestion:
+                #     message_text += f"\n\n💬 Pearl: \"{pearl_suggestion.message}\""
                 
                 chart_path = await self._generate_or_get_chart(state, force_refresh=force_chart_refresh)
 
@@ -1232,6 +1232,15 @@ class TelegramCommandHandler:
             else:
                 await query.edit_message_text(text=text, reply_markup=reply_markup)
 
+        # Send Pearl suggestion as separate notification if present
+        if pearl_suggestion:
+            try:
+                # Use a slightly different format for standalone messages
+                pearl_msg = f"💬 Pearl: \"{pearl_suggestion.message}\""
+                await query.message.chat.send_message(pearl_msg)
+            except Exception as e:
+                logger.debug(f"Could not send Pearl notification: {e}")
+
     async def _toggle_chart_display(self, query: CallbackQuery) -> None:
         """Toggle chart display on/off."""
         try:
@@ -1295,9 +1304,9 @@ class TelegramCommandHandler:
         try:
             message_text = await self._build_status_dashboard_message(state)
             
-            # Add Pearl suggestion text if present
-            if pearl_suggestion:
-                message_text += f"\n\n💬 Pearl: \"{pearl_suggestion.message}\""
+            # Pearl suggestion text is now sent as a separate notification
+            # if pearl_suggestion:
+            #    message_text += f"\n\n💬 Pearl: \"{pearl_suggestion.message}\""
             
             chart_path = await self._generate_or_get_chart(state)
 
@@ -1348,6 +1357,14 @@ class TelegramCommandHandler:
                 "🎯 Pearl Algo Bot's\n\nSelect an option:",
                 reply_markup=reply_markup
             )
+
+        # Send Pearl suggestion as separate notification if present
+        if pearl_suggestion:
+            try:
+                pearl_msg = f"💬 Pearl: \"{pearl_suggestion.message}\""
+                await message_obj.chat.send_message(pearl_msg)
+            except Exception as e:
+                logger.debug(f"Could not send Pearl notification: {e}")
 
     async def _generate_or_get_chart(self, state: dict, force_refresh: bool = False) -> Optional[Path]:
         """
