@@ -273,120 +273,29 @@ def main() -> int:
 
     # Variants: show multiple trade overlay encodings, and compare portrait vs landscape.
     outputs: List[Path] = []
-    figsizes = {
-        "portrait": (8, 12),
-        "landscape": (16, 7),
-        # Middle-ground Telegram candidates (neither portrait nor landscape).
-        "mid_4x3": (12, 9),
-        "mid_6x5": (12, 10),
-        "mid_10x9": (10, 9),
-    }
-    trade_views = {
-        # Current conservative pairing: triangles+circles+connector, no letters.
-        "pairs": dict(show_entry=True, show_exit=True, show_path=True, show_letters=False),
-        # Markers only: triangles+circles, no connector (reduces line spaghetti).
-        "markers_only": dict(show_entry=True, show_exit=True, show_path=False, show_letters=False),
-        # Entries only: triangles only (lowest clutter, weakest lifecycle context).
-        "entry_only": dict(show_entry=True, show_exit=False, show_path=False, show_letters=False),
-        # Paths only: connector lines only (no markers; endpoints are tiny dots).
-        "path_only": dict(show_entry=False, show_exit=False, show_path=True, show_letters=False),
-        # Path-only with TradingView-inspired detail.
-        "path_only_detailed": dict(show_entry=False, show_exit=False, show_path=True, show_letters=False),
-    }
+    # Approved Telegram template size (4:3).
 
-    for scenario_name, trades in [("dense", dense_trades), ("normal", normal_trades)]:
-        for aspect_name, fs in figsizes.items():
-            for view_name, flags in trade_views.items():
-                # Enable path-only enhancements only for the dedicated detailed variant.
-                if view_name == "path_only_detailed":
-                    generator.config.smart_marker_path_arrowheads = True
-                    generator.config.smart_marker_path_fade_by_age = True
-                    generator.config.smart_marker_path_label_last_pnl = True
-                else:
-                    generator.config.smart_marker_path_arrowheads = False
-                    generator.config.smart_marker_path_fade_by_age = False
-                    generator.config.smart_marker_path_label_last_pnl = False
-                outputs.append(
-                    render_dashboard_variant(
-                        generator=generator,
-                        data=data,
-                        trades=trades,
-                        output_path=artifacts_dir / f"{scenario_name}_{aspect_name}_{view_name}_max20.png",
-                        title_time="15:46 UTC",
-                        lookback_bars=lookback,
-                        range_label="8h",
-                        trade_markers_max=20,
-                        figsize=fs,
-                        **flags,
-                    )
-                )
-
-            # Clean mode sample (last 3 trades) for the most common pair encoding.
-            outputs.append(
-                render_dashboard_variant(
-                    generator=generator,
-                    data=data,
-                    trades=trades,
-                    output_path=artifacts_dir / f"{scenario_name}_{aspect_name}_pairs_clean3.png",
-                    title_time="15:46 UTC",
-                    lookback_bars=lookback,
-                    range_label="8h",
-                    trade_markers_max=3,
-                    figsize=fs,
-                    **trade_views["pairs"],
-                )
-            )
-
-        # Also produce a distinguished P&L/equity chart (separate image) for the same trade list.
-        # This uses the production ChartGenerator method `generate_equity_curve_chart`.
-        try:
-            closed = [t for t in trades if isinstance(t, dict) and t.get("exit_time") and t.get("pnl") is not None]
-            if closed:
-                wins = 0
-                pnls = []
-                # Sort by exit_time for stable curve
-                closed_sorted = sorted(closed, key=lambda t: pd.Timestamp(t.get("exit_time")))
-                for t in closed_sorted:
-                    try:
-                        v = float(t.get("pnl") or 0.0)
-                    except Exception:
-                        v = 0.0
-                    pnls.append(v)
-                    if v > 0:
-                        wins += 1
-                total_pnl = float(sum(pnls))
-                total_trades = int(len(pnls))
-                win_rate = float(wins / total_trades) if total_trades > 0 else 0.0
-                # Approx max drawdown from cumulative curve
-                cum = pd.Series(pnls).cumsum()
-                dd = cum - cum.cummax()
-                max_dd = float(abs(dd.min())) if len(dd) else 0.0
-
-                perf = {
-                    "total_trades": total_trades,
-                    "win_rate": win_rate,
-                    "total_pnl": total_pnl,
-                    "max_drawdown": max_dd,
-                    "sharpe_ratio": 0.0,
-                }
-                tmp_eq = generator.generate_equity_curve_chart(
-                    trades=closed_sorted,
-                    symbol="MNQ",
-                    title=f"MNQ {scenario_name.title()} Trades • Equity & Drawdown",
-                    performance_data=perf,
-                    figsize=(16, 7),
-                    dpi=200,
-                )
-                if tmp_eq:
-                    out_eq = artifacts_dir / f"{scenario_name}_equity_curve.png"
-                    out_eq.write_bytes(Path(tmp_eq).read_bytes())
-                    try:
-                        Path(tmp_eq).unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                    outputs.append(out_eq)
-        except Exception:
-            pass
+    # Single approved Telegram mock (dense, 4:3, detailed path-only).
+    generator.config.smart_marker_path_arrowheads = True
+    generator.config.smart_marker_path_fade_by_age = True
+    generator.config.smart_marker_path_label_last_pnl = True
+    outputs.append(
+        render_dashboard_variant(
+            generator=generator,
+            data=data,
+            trades=dense_trades,
+            output_path=artifacts_dir / "dense_mid_4x3_path_only_detailed_max20.png",
+            title_time="15:46 UTC",
+            lookback_bars=lookback,
+            range_label="8h",
+            trade_markers_max=20,
+            figsize=(12, 9),
+            show_entry=False,
+            show_exit=False,
+            show_path=True,
+            show_letters=False,
+        )
+    )
 
     # Print paths for convenience when running from terminal.
     for p in outputs:

@@ -2499,6 +2499,90 @@ class ChartGenerator:
         except Exception:
             return
 
+    def _draw_rsi_divergence_labels(self, ax_rsi, rsi_series: pd.Series, df: pd.DataFrame) -> None:
+        """Draw RSI divergence labels (bull/bear) to match Pine script behavior."""
+        if ax_rsi is None or rsi_series is None or rsi_series.empty:
+            return
+        if df is None or df.empty or "Low" not in df.columns or "High" not in df.columns:
+            return
+
+        try:
+            rsi_vals = rsi_series.to_numpy()
+            lows = pd.to_numeric(df["Low"], errors="coerce").to_numpy()
+            highs = pd.to_numeric(df["High"], errors="coerce").to_numpy()
+            n = len(rsi_vals)
+            if n < 20:
+                return
+
+            lookback_left = 5
+            lookback_right = 5
+            range_upper = 60
+            range_lower = 5
+
+            pivot_low = np.zeros(n, dtype=bool)
+            pivot_high = np.zeros(n, dtype=bool)
+
+            for i in range(lookback_left, n - lookback_right):
+                window = rsi_vals[i - lookback_left : i + lookback_right + 1]
+                if np.isnan(rsi_vals[i]) or np.isnan(window).all():
+                    continue
+                min_val = np.nanmin(window)
+                max_val = np.nanmax(window)
+                if rsi_vals[i] == min_val and np.count_nonzero(window == min_val) == 1:
+                    pivot_low[i] = True
+                if rsi_vals[i] == max_val and np.count_nonzero(window == max_val) == 1:
+                    pivot_high[i] = True
+
+            last_low_idx = None
+            last_high_idx = None
+            labels = []
+
+            for i in range(n):
+                if pivot_low[i]:
+                    if last_low_idx is not None:
+                        bars = i - last_low_idx
+                        if range_lower <= bars <= range_upper:
+                            rsi_hl = rsi_vals[i] > rsi_vals[last_low_idx]
+                            price_ll = lows[i] < lows[last_low_idx]
+                            if rsi_hl and price_ll:
+                                labels.append((i, rsi_vals[i], "Bull", SIGNAL_LONG))
+                    last_low_idx = i
+
+                if pivot_high[i]:
+                    if last_high_idx is not None:
+                        bars = i - last_high_idx
+                        if range_lower <= bars <= range_upper:
+                            rsi_lh = rsi_vals[i] < rsi_vals[last_high_idx]
+                            price_hh = highs[i] > highs[last_high_idx]
+                            if rsi_lh and price_hh:
+                                labels.append((i, rsi_vals[i], "Bear", SIGNAL_SHORT))
+                    last_high_idx = i
+
+            if not labels:
+                return
+
+            # Limit to most recent labels to reduce clutter.
+            labels = labels[-20:]
+            for x_idx, y_val, text, color in labels:
+                ax_rsi.text(
+                    x_idx,
+                    y_val,
+                    f" {text} ",
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    color=TEXT_PRIMARY,
+                    bbox=dict(
+                        boxstyle="round,pad=0.2",
+                        facecolor=color,
+                        edgecolor="none",
+                        alpha=0.9,
+                    ),
+                    zorder=ZORDER_TEXT_LABELS,
+                )
+        except Exception:
+            return
+
     def _draw_power_channel_overlay(self, ax, hud: Dict) -> None:
         """Draw ChartPrime-style power channel with explicit z-order.
         
@@ -3605,6 +3689,7 @@ class ChartGenerator:
                             ax_rsi = axlist[potential_idx]
                     if ax_rsi is not None:
                         self._draw_rsi_overbought_oversold_shading(ax_rsi, rsi_series_for_shading)
+                        self._draw_rsi_divergence_labels(ax_rsi, rsi_series_for_shading, df)
                 except Exception:
                     pass
 
@@ -3820,6 +3905,7 @@ class ChartGenerator:
                             ax_rsi = axlist[potential_idx]
                     if ax_rsi is not None:
                         self._draw_rsi_overbought_oversold_shading(ax_rsi, rsi_series_for_shading)
+                        self._draw_rsi_divergence_labels(ax_rsi, rsi_series_for_shading, df)
                 except Exception:
                     pass
 
@@ -4114,6 +4200,7 @@ class ChartGenerator:
                             ax_rsi = axlist[potential_idx]
                     if ax_rsi is not None:
                         self._draw_rsi_overbought_oversold_shading(ax_rsi, rsi_series_for_shading)
+                        self._draw_rsi_divergence_labels(ax_rsi, rsi_series_for_shading, df)
                 except Exception:
                     pass
 
@@ -5378,6 +5465,7 @@ class ChartGenerator:
                             ax_rsi = axlist[potential_idx]
                     if ax_rsi is not None:
                         self._draw_rsi_overbought_oversold_shading(ax_rsi, rsi_series_for_shading)
+                        self._draw_rsi_divergence_labels(ax_rsi, rsi_series_for_shading, df)
                 except Exception as e:
                     logger.debug(f"Error adding RSI shading: {e}")
 
