@@ -63,6 +63,9 @@ Scripts for repository hygiene and cleanup operations.
   - **Role**: Safe cleanup of runtime/build artifacts (data, logs, telemetry, tmp images, `__pycache__`, egg-info).
   - **Behavior**: Requires explicit `--yes` flag to execute deletions. Supports `--dry-run` to preview what would be removed.
 
+- `reset_30d_performance.py`
+  - **Role**: Reset 30-day performance metrics (testing/debugging).
+
 ## Monitoring (`scripts/monitoring/`)
 
 External safety nets intended for cron/systemd timers. These scripts validate runtime health/state;

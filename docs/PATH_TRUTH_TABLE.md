@@ -120,7 +120,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Shell scripts** (`scripts/maintenance/`):
   - `purge_runtime_artifacts.sh` – safe cleanup of runtime/build artifacts (requires `--yes` flag)
 - **Python scripts**:
-  - `scripts/reset_30d_performance.py` – reset 30-day performance (testing/debugging)
+  - `scripts/maintenance/reset_30d_performance.py` – reset 30-day performance (testing/debugging)
 - **Docs**:
   - `docs/SCRIPTS_TAXONOMY.md` (maintenance section)
 
@@ -165,6 +165,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.utils.openai_client` – OpenAI client wrapper
   - `pearlalgo.utils.service_controller` – Shell/script orchestration (remote control)
   - `pearlalgo.utils.absolute_mode` – Absolute mode utilities
+  - `pearlalgo.utils.pearl_suggestions` – Pearl suggestions engine (JARVIS-like)
 - **Docs**:
   - `docs/PROJECT_SUMMARY.md` (components and cross‑cutting sections)
 
