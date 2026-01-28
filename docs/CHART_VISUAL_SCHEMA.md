@@ -137,6 +137,16 @@ On dashboard charts, historical trades are overlaid with outcome-colored markers
 
 **Contract**: Marker SHAPE indicates direction (up=long, down=short). Marker COLOR indicates outcome (green=win, red=loss).
 
+#### Dashboard Trade Paths (Telegram Profile)
+
+For Telegram/mobile dashboard charts, recent trades are additionally visualized with a **paired entry→exit path**:
+
+- A thin line connects each trade’s entry to its exit
+- **Color indicates outcome**: green = win, red = loss, gray = unknown/open
+- The path is capped to a small number of recent trades to avoid clutter
+
+**Contract**: The trade path is informational and must never obscure candles (light alpha, behind text labels).
+
 #### EMA Crossover Markers (Dashboard Only)
 
 Dashboard charts include EMA 9/20 crossover markers with **distinct colors** to avoid confusion with trade markers:
@@ -149,6 +159,8 @@ Dashboard charts include EMA 9/20 crossover markers with **distinct colors** to 
 **WARNING - Semantic Ambiguity Risk**: EMA crossover markers use the same SHAPES (`^`/`v`) as trade markers but DIFFERENT COLORS (cyan/pink vs green/red). Traders must rely on color to distinguish indicator signals from trade markers.
 
 **Contract**: EMA crossover colors (cyan/pink) must NEVER match trade marker colors (green/red).
+
+**Telegram Profile Note**: Telegram dashboard exports disable EMA crossover markers by default to reduce marker ambiguity on mobile.
 
 ### Boxes/Zones
 
@@ -401,6 +413,16 @@ For Telegram dashboard charts, a special render profile is automatically applied
 - `show_session_range_stats=False` (session names only, no Range/Avg text)
 - `max_right_labels=6` (fewer right-side labels)
 - `ylabel=""` (removes "Price ($)" axis label to avoid collision with right labels)
+
+**Telegram-Only Dashboard Enhancements (Service-Controlled Render Params)**:
+- Trade clarity:
+  - EMA crossover markers **disabled** (reduces arrow ambiguity with trades)
+  - Trade paths **enabled** (paired entry→exit line, outcome-colored)
+  - Compact overlay legend **enabled** (decodes trade overlays at a glance)
+- Pixel utilization / preview stability:
+  - Reduced PNG save padding (less dead space around the chart)
+  - Slightly reduced top headroom (more price area while keeping title readable)
+  - Optional lossless PNG optimization (smaller payload for faster preview load)
 
 **Hybrid Label Policy (No VWAP Right Labels)**:
 - VWAP lines and bands are still drawn on the chart

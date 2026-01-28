@@ -1274,7 +1274,15 @@ class ChartGenerator:
         )
     
     @staticmethod
-    def _save_png(fig, path: Path, *, dpi: int, render_mode: str = "telegram") -> None:
+    def _save_png(
+        fig,
+        path: Path,
+        *,
+        dpi: int,
+        render_mode: str = "telegram",
+        pad_inches: float = 0.25,
+        optimize: bool = False,
+    ) -> None:
         """
         Save a chart PNG for Telegram/mobile delivery.
 
@@ -1283,15 +1291,34 @@ class ChartGenerator:
           and to keep charts readable on phones.
         - `render_mode` is kept for backwards compatibility but is intentionally ignored.
         """
+        try:
+            pad = float(pad_inches)
+        except Exception:
+            pad = 0.25
+        # Bound pad_inches to avoid accidental huge whitespace.
+        pad = max(0.0, min(1.0, pad))
+
         fig.savefig(
             str(path),
             dpi=int(dpi),
             facecolor=DARK_BG,
             edgecolor="none",
             bbox_inches="tight",
-            pad_inches=0.25,
+            pad_inches=pad,
         )
-    
+
+        # Optional: lossless PNG optimization to reduce payload size.
+        # This can improve Telegram preview load behavior on slow clients.
+        if optimize:
+            try:
+                from PIL import Image  # type: ignore
+
+                with Image.open(str(path)) as im:
+                    im.save(str(path), format="PNG", optimize=True, compress_level=9)
+            except Exception:
+                # Best-effort only; keep the already-saved PNG.
+                pass
+
     def _limit_yaxis_ticks(self, ax, max_ticks: int = 8) -> None:
         """Limit y-axis ticks to prevent overlapping labels.
         
@@ -2655,6 +2682,151 @@ class ChartGenerator:
         except Exception:
             pass
 
+    def _draw_trade_paths(self, ax, df: pd.DataFrame, trades: list[dict], *, max_trades: int = 6) -> None:
+        """Draw paired entry→exit paths for recent trades on the dashboard chart.
+
+        This is a Telegram/mobile readability aid. It is intentionally light (thin lines, low alpha)
+        and capped to avoid clutter.
+        """
+        if df is None or df.empty or not isinstance(df.index, pd.DatetimeIndex):
+            return
+        if not trades:
+            return
+
+        try:
+            max_n = int(max_trades)
+        except Exception:
+            max_n = 6
+        max_n = max(1, min(20, max_n))
+
+        idx_series = df.index
+        idx_tz = getattr(idx_series, "tz", None)
+
+        def _align_ts(raw):
+            if not raw:
+                return None
+            try:
+                tsx = pd.Timestamp(raw)
+            except Exception:
+                return None
+            try:
+                if idx_tz is None:
+                    # Normalize to naive UTC for matching.
+                    if tsx.tzinfo is not None:
+                        tsx = tsx.tz_convert("UTC").tz_localize(None)
+                    else:
+                        tsx = tsx.tz_localize(None) if hasattr(tsx, "tz_localize") else tsx
+                else:
+                    # Normalize to the chart index timezone.
+                    if tsx.tzinfo is None:
+                        tsx = tsx.tz_localize("UTC").tz_convert(idx_tz)
+                    else:
+                        tsx = tsx.tz_convert(idx_tz)
+            except Exception:
+                return None
+            return tsx
+
+        # Keep only the most recent N (stable ordering: last trades win)
+        recent = [t for t in trades if isinstance(t, dict)]
+        recent = recent[-max_n:]
+
+        for tr in recent:
+            et = _align_ts(tr.get("entry_time"))
+            xt = _align_ts(tr.get("exit_time"))
+            try:
+                entry_price = float(tr.get("entry_price") or 0.0)
+            except Exception:
+                entry_price = 0.0
+            try:
+                exit_price = float(tr.get("exit_price") or 0.0)
+            except Exception:
+                exit_price = 0.0
+
+            if et is None or xt is None or entry_price <= 0 or exit_price <= 0:
+                continue
+
+            try:
+                x0 = int(idx_series.get_indexer([et], method="nearest")[0])
+                x1 = int(idx_series.get_indexer([xt], method="nearest")[0])
+            except Exception:
+                continue
+
+            if x0 < 0 or x1 < 0 or x0 >= len(idx_series) or x1 >= len(idx_series):
+                continue
+
+            # Ensure left-to-right ordering
+            if x1 < x0:
+                x0, x1 = x1, x0
+                entry_price, exit_price = exit_price, entry_price
+
+            # Outcome color
+            pnl_val = tr.get("pnl", None)
+            is_win = None
+            if pnl_val is not None:
+                try:
+                    is_win = float(pnl_val) > 0
+                except Exception:
+                    is_win = None
+            if is_win is True:
+                col = SIGNAL_LONG
+                ls = "-"
+                a = 0.55
+            elif is_win is False:
+                col = SIGNAL_SHORT
+                ls = "-"
+                a = 0.55
+            else:
+                col = TEXT_SECONDARY
+                ls = "--"
+                a = 0.45
+
+            try:
+                ax.plot(
+                    [float(x0), float(x1)],
+                    [float(entry_price), float(exit_price)],
+                    color=col,
+                    linestyle=ls,
+                    linewidth=1.6,
+                    alpha=a,
+                    zorder=ZORDER_LEVEL_LINES,
+                )
+            except Exception:
+                continue
+
+    def _draw_trade_overlay_legend(self, ax, *, ema_crossovers_shown: bool) -> None:
+        """Draw a compact legend explaining trade overlays on the dashboard chart."""
+        try:
+            lines = [
+                "Trade overlay",
+                "Path: win/lose line",
+                "Entry: ▲/▼   Exit: ○",
+            ]
+            if ema_crossovers_shown:
+                lines.append("EMA cross: cyan/pink")
+            else:
+                lines.append("EMA cross: hidden")
+
+            ax.text(
+                0.01,
+                0.84,
+                "\n".join(lines),
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=FONT_SIZE_LEGEND,
+                color=TEXT_PRIMARY,
+                alpha=0.92,
+                zorder=ZORDER_TEXT_LABELS,
+                bbox=dict(
+                    facecolor=DARK_BG,
+                    alpha=ALPHA_LEGEND_BG,
+                    edgecolor=GRID_COLOR,
+                    boxstyle="round,pad=0.3",
+                ),
+            )
+        except Exception:
+            return
+
     def _draw_rr_box(self, ax, idx: pd.DatetimeIndex, signal: Dict, direction: str) -> Optional[float]:
         """Draw TradingView-like risk/reward box to the right of the last bar."""
         if not self.config.show_rr_box:
@@ -3902,6 +4074,14 @@ class ChartGenerator:
         # UX overlay options (mobile-first)
         pnl_overlay: Optional[Dict[str, Any]] = None,  # {"daily_pnl": float, "trades": int, "win_rate": float}
         session_label: Optional[str] = None,  # e.g., "NY Session"
+        # Telegram/dashboard render tuning (service-controlled; defaults preserve baselines)
+        show_ema_crossover_markers: bool = True,
+        show_trade_paths: bool = False,
+        trade_paths_max: int = 6,
+        show_trade_overlay_legend: bool = False,
+        save_pad_inches: float = 0.25,
+        telegram_top_headroom_pct: float = 0.06,
+        optimize_png: bool = False,
     ) -> Optional[Path]:
         """
         Generate a TradingView-style dashboard chart.
@@ -4003,50 +4183,51 @@ class ChartGenerator:
                         )
 
                 # EMA crossover markers (9/20) — kept visually light to avoid mobile clutter
-                try:
-                    fast, slow = 9, 20
-                    if fast <= len(df) and slow <= len(df):
-                        ema_fast = df["Close"].ewm(span=fast, adjust=False).mean()
-                        ema_slow = df["Close"].ewm(span=slow, adjust=False).mean()
-                        cross_up = (ema_fast > ema_slow) & (ema_fast.shift(1) <= ema_slow.shift(1))
-                        cross_dn = (ema_fast < ema_slow) & (ema_fast.shift(1) >= ema_slow.shift(1))
+                if show_ema_crossover_markers:
+                    try:
+                        fast, slow = 9, 20
+                        if fast <= len(df) and slow <= len(df):
+                            ema_fast = df["Close"].ewm(span=fast, adjust=False).mean()
+                            ema_slow = df["Close"].ewm(span=slow, adjust=False).mean()
+                            cross_up = (ema_fast > ema_slow) & (ema_fast.shift(1) <= ema_slow.shift(1))
+                            cross_dn = (ema_fast < ema_slow) & (ema_fast.shift(1) >= ema_slow.shift(1))
 
-                        max_markers = 12
-                        up_idx = np.where(cross_up.fillna(False).to_numpy(dtype=bool))[0]
-                        dn_idx = np.where(cross_dn.fillna(False).to_numpy(dtype=bool))[0]
-                        if len(up_idx) > max_markers:
-                            up_idx = up_idx[-max_markers:]
-                        if len(dn_idx) > max_markers:
-                            dn_idx = dn_idx[-max_markers:]
+                            max_markers = 12
+                            up_idx = np.where(cross_up.fillna(False).to_numpy(dtype=bool))[0]
+                            dn_idx = np.where(cross_dn.fillna(False).to_numpy(dtype=bool))[0]
+                            if len(up_idx) > max_markers:
+                                up_idx = up_idx[-max_markers:]
+                            if len(dn_idx) > max_markers:
+                                dn_idx = dn_idx[-max_markers:]
 
-                        if len(up_idx) > 0:
-                            y_up = pd.Series(np.nan, index=df.index)
-                            y_up.iloc[up_idx] = df["Low"].iloc[up_idx] * 0.999
-                            addplot.append(
-                                mpf.make_addplot(
-                                    y_up,
-                                    type="scatter",
-                                    marker="^",
-                                    markersize=55,
-                                    color="#00bcd4",  # cyan (distinct from trade markers)
-                                    alpha=0.65,
+                            if len(up_idx) > 0:
+                                y_up = pd.Series(np.nan, index=df.index)
+                                y_up.iloc[up_idx] = df["Low"].iloc[up_idx] * 0.999
+                                addplot.append(
+                                    mpf.make_addplot(
+                                        y_up,
+                                        type="scatter",
+                                        marker="^",
+                                        markersize=55,
+                                        color="#00bcd4",  # cyan (distinct from trade markers)
+                                        alpha=0.65,
+                                    )
                                 )
-                            )
-                        if len(dn_idx) > 0:
-                            y_dn = pd.Series(np.nan, index=df.index)
-                            y_dn.iloc[dn_idx] = df["High"].iloc[dn_idx] * 1.001
-                            addplot.append(
-                                mpf.make_addplot(
-                                    y_dn,
-                                    type="scatter",
-                                    marker="v",
-                                    markersize=55,
-                                    color="#e91e63",  # pink (distinct from trade markers)
-                                    alpha=0.65,
+                            if len(dn_idx) > 0:
+                                y_dn = pd.Series(np.nan, index=df.index)
+                                y_dn.iloc[dn_idx] = df["High"].iloc[dn_idx] * 1.001
+                                addplot.append(
+                                    mpf.make_addplot(
+                                        y_dn,
+                                        type="scatter",
+                                        marker="v",
+                                        markersize=55,
+                                        color="#e91e63",  # pink (distinct from trade markers)
+                                        alpha=0.65,
+                                    )
                                 )
-                            )
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
 
             # VWAP (anchored) + bands (VWAP AA-style)
             if show_vwap and ("Volume" in df.columns):
@@ -4578,8 +4759,28 @@ class ChartGenerator:
                         try:
                             ymin, ymax = ax_price.get_ylim()
                             y_range = ymax - ymin
-                            top_padding = y_range * 0.06  # 6% headroom for title/legend
+                            try:
+                                top_headroom_pct = float(telegram_top_headroom_pct)
+                            except Exception:
+                                top_headroom_pct = 0.06
+                            top_headroom_pct = max(0.0, min(0.15, top_headroom_pct))
+                            top_padding = y_range * top_headroom_pct
                             ax_price.set_ylim(ymin, ymax + top_padding)
+                        except Exception:
+                            pass
+
+
+                    # Paired entry→exit trade paths (Telegram/mobile readability)
+                    if show_trade_paths and trades:
+                        try:
+                            self._draw_trade_paths(ax_price, df, trades, max_trades=int(trade_paths_max))
+                        except Exception:
+                            pass
+
+                    # Compact overlay legend (Telegram/mobile)
+                    if show_trade_overlay_legend:
+                        try:
+                            self._draw_trade_overlay_legend(ax_price, ema_crossovers_shown=bool(show_ema_crossover_markers))
                         except Exception:
                             pass
 
@@ -4689,7 +4890,7 @@ class ChartGenerator:
             except Exception as e:
                 logger.debug(f"Error applying HUD to dashboard chart: {e}")
 
-            self._save_png(fig, temp_path, dpi=dpi, render_mode=render_mode)
+            self._save_png(fig, temp_path, dpi=dpi, render_mode=render_mode, pad_inches=save_pad_inches, optimize=optimize_png)
             plt.close(fig)
 
             # Optional: emit render manifest for semantic regression checks

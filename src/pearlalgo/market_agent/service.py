@@ -2492,6 +2492,15 @@ class MarketAgentService:
                 show_pressure=bool(self.dashboard_chart_show_pressure),
                 # Overlay recent trades (entries/exits) for transparency.
                 trades=self._get_trades_for_chart(chart_data),
+                # Telegram-only dashboard enhancements (fixed render profile)
+                show_ema_crossover_markers=False,
+                show_trade_paths=True,
+                trade_paths_max=6,
+                show_trade_overlay_legend=True,
+                # Use more pixels (less dead space) and reduce preview artifacts
+                save_pad_inches=0.12,
+                telegram_top_headroom_pct=0.045,
+                optimize_png=True,
             )
             
             if chart_path and chart_path.exists():
