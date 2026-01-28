@@ -513,7 +513,7 @@ class MarketAgentService:
         )
         
         # Initialize Pearl suggestion engine
-        self.suggestion_engine = get_suggestion_engine(state_dir=str(self.state_dir))
+        self.suggestion_engine = get_suggestion_engine(state_dir=str(self.state_manager.state_dir))
         
         # New-bar gating: skip heavy analysis when df hasn't advanced (performance optimization).
         # This is high leverage when using 5m bars with 30s scan interval (5 of 6 cycles are repeats).
