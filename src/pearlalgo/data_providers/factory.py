@@ -6,15 +6,13 @@ IBKR-only data provider factory for live/paper trading.
 
 from __future__ import annotations
 
-import logging
 from typing import Dict, Optional, Type
 
 from pearlalgo.config.settings import Settings, get_settings
+from pearlalgo.utils.logger import logger
 
 from .base import DataProvider
 from .ibkr.ibkr_provider import IBKRProvider
-
-logger = logging.getLogger(__name__)
 
 # Registry of available providers
 # IBKR is the only provider for live/paper trading

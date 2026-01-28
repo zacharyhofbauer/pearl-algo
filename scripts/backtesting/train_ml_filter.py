@@ -2,7 +2,8 @@
 """
 Train ML Signal Filter from historical signals.jsonl outcomes.
 
-This is intended for paper-mode gating to reduce drawdown.
+This produces a pickle-serialized model artifact aligned with config defaults
+(`ml_filter.model_path` in config/config.yaml).
 """
 
 from __future__ import annotations
@@ -131,7 +132,7 @@ def main() -> int:
     parser.add_argument(
         "--model-path",
         type=Path,
-        default=Path("models/signal_filter_single.pkl"),
+        default=Path("models/signal_filter_v1.joblib"),
         help="Where to save the trained model",
     )
     parser.add_argument(

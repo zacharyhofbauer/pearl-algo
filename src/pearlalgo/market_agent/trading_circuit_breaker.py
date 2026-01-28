@@ -23,9 +23,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Tuple
-import logging
 
-logger = logging.getLogger(__name__)
+from pearlalgo.utils.logger import logger
+from pearlalgo.utils.market_hours import ET
 
 
 @dataclass
@@ -726,16 +726,16 @@ class TradingCircuitBreaker:
         
         return CircuitBreakerDecision(allowed=True, reason="volatility_ok")
     
-    def _get_current_session(self) -> Tuple[str, int]:
+    def _get_current_session(self, now: Optional[datetime] = None) -> Tuple[str, int]:
         """
         Get the current trading session based on Eastern Time.
         
         Returns:
             Tuple of (session_name, et_hour)
         """
-        now = datetime.now(timezone.utc)
-        # Convert UTC to ET (UTC-5, simplified - doesn't account for DST)
-        et_hour = (now.hour - 5) % 24
+        now = now or datetime.now(timezone.utc)
+        et_dt = now.astimezone(ET)
+        et_hour = et_dt.hour
         
         # Session definitions (in ET hours)
         sessions = {

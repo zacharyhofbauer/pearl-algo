@@ -400,12 +400,12 @@ pearlalgo-dev-ai-agents/
 │   │       └── tasks.py        # Order placement/cancellation tasks
 │   ├── learning/               # Adaptive Learning Layer (shadow mode by default)
 │   │   ├── bandit_policy.py    # Thompson sampling policy
-│   │   └── policy_state.py     # Policy statistics persistence
-│   │   ├── monitor_service.py  # Main monitor service loop
-│   │   ├── analysis_engine.py  # Analysis orchestration
-│   │   ├── analyzers/          # Domain-specific analyzers (signal, system, market, code)
-│   │   ├── suggestion_engine.py # Configuration suggestions
-│   │   └── alert_manager.py    # Alert deduplication and delivery
+│   │   ├── policy_state.py     # Policy statistics persistence
+│   │   ├── contextual_bandit.py # Contextual bandit scoring
+│   │   ├── feature_engineer.py # Feature extraction for ML
+│   │   ├── ensemble_scorer.py  # Ensemble scoring logic
+│   │   ├── ml_signal_filter.py # ML signal filter (shadow mode)
+│   │   └── trade_database.py   # Trade database for learning
 │   ├── data_providers/         # Data Providers
 │   │   ├── base.py             # Abstract interface
 │   │   ├── factory.py          # Provider factory
@@ -762,7 +762,7 @@ In practice:
    - `test_all.py`: Unified runner (telegram / signals / short-run service / arch)
    - `check_architecture_boundaries.py`: Module boundary enforcement (warn-only by default)
    - `smoke_test_ibkr.py`: IBKR connectivity + entitlement smoke test
-   - `smoke_multi_market.py`: Multi-market config/state isolation smoke
+   - `smoke_multi_market.py`: Multi-market config + state isolation smoke
    - `check_no_secrets.py`: Secret detection guardrail
 
 ### Running Tests

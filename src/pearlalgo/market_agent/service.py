@@ -4925,7 +4925,7 @@ class MarketAgentService:
             from importlib.metadata import version as get_version
             version = get_version("pearlalgo-dev-ai-agents")
         except Exception:
-            version = "0.2.2"  # Fallback to known version
+            version = "0.2.3"  # Fallback to known version
 
         # Market + trading bot identity for multi-market observability (Telegram/UI/ops)
         market_label = None

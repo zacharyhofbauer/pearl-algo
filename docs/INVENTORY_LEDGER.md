@@ -29,21 +29,10 @@ Purpose: File-by-file keep/delete decisions grounded in the current tree.
 
 Note: `trading_bots/` contains only `pearl_bot_auto.py` — all other strategy variants have been consolidated into this single implementation.
 
-### Removed Packages (DELETE)
+### Current Tree Only (NO DELETE ENTRIES)
 
-| Path | Decision | Reason |
-|------|----------|--------|
-| `agentic/*` | DELETE | Optional subsystem; untested; removed to reduce surface area |
-| `monitor/*` | DELETE | Desktop UI not referenced or tested |
-| `prop_firm/*` | DELETE | Optional guardrails not active; removed to reduce surface area |
-| `policy/*` | DELETE | Removed - signal logic now in pearl_bot_auto.py |
-| `strategies/nq_intraday/*` | DELETE | Removed - replaced by pearl_bot_auto.py |
-| `execution/tradovate/*` | DELETE | Unused adapter; IBKR-only execution |
-| `learning/meta_learner.py` | DELETE | Unwired scaffold |
-| `learning/regime_adaptive.py` | DELETE | Unwired scaffold |
-| `learning/risk_metrics.py` | DELETE | Unwired scaffold |
-| `backtesting/*` | DELETE | Unused package (scripts do not import) |
-| `utils/features.py` | DELETE | Unreferenced |
+This ledger tracks the **current tree** only. Historical deletions are recorded in VCS history,
+not in this document.
 
 ---
 
@@ -72,15 +61,50 @@ Non-canonical docs (e.g., GitHub Actions guide, TODO ledger) were removed.
 
 ---
 
+## Models (`models/`)
+
+| Path | Decision | Role |
+|------|----------|------|
+| `signal_filter_v1.joblib` | KEEP | ML filter artifact (shadow mode) |
+
+---
+
+## Resources (`resources/`)
+
+| Path | Decision | Role |
+|------|----------|------|
+| `misc/pearlLogo.png` | KEEP | Branding asset for docs/visuals |
+| `pinescript/pearlbot/*` | KEEP | Source Pine scripts for strategy lineage |
+
+---
+
+## Dev Environment (`.devcontainer/`)
+
+| Path | Decision | Role |
+|------|----------|------|
+| `devcontainer.json` | KEEP | Dev container configuration |
+| `Dockerfile` | KEEP | Dev container image definition |
+
+---
+
+## CI / Automation (`.github/`)
+
+| Path | Decision | Role |
+|------|----------|------|
+| `workflows/ci.yml` | KEEP | CI pipeline |
+| `dependabot.yml` | KEEP | Dependency update policy |
+
+---
+
 ## Tests (`tests/`)
 
-All tests are retained except `tests/test_trading_bot_routing.py` (removed with runtime trading-bot routing).
+All tests under `tests/` are retained as part of the canonical suite.
 
 ---
 
 ## Root Files (KEEP)
 
-`README.md`, `pyproject.toml`, `pytest.ini`, `env.example`, `Dockerfile`, `.gitignore`, `.cursorignore`
+`README.md`, `pyproject.toml`, `Makefile`, `mypy.ini`, `pytest.ini`, `env.example`, `Dockerfile`, `.gitignore`, `.cursorignore`
 
 ---
 

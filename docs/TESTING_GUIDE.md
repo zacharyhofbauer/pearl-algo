@@ -40,7 +40,7 @@ PEARLALGO_ARCH_ENFORCE=1 python3 scripts/testing/test_all.py arch
 
 ### Option 2: Multi-market smoke check
 ```bash
-# Verify config/state isolation across NQ/ES/GC
+# Verify config + state isolation across NQ/ES/GC
 python3 scripts/testing/smoke_multi_market.py
 ```
 
@@ -523,12 +523,12 @@ python3 scripts/testing/check_architecture_boundaries.py --verbose
 
 The boundary checker scans all Python files under `src/pearlalgo/` and verifies that:
 
-- `utils/` does not import from `config`, `data_providers`, `strategies`, `execution`, `learning`, or `market_agent`
-- `config/` does not import from `data_providers`, `strategies`, `execution`, `learning`, or `market_agent`
-- `data_providers/` does not import from `strategies`, `execution`, `learning`, or `market_agent`
-- `strategies/` does not import from `data_providers`, `execution`, `learning`, or `market_agent`
-- `execution/` does not import from `data_providers`, `strategies`, `learning`, or `market_agent`
-- `learning/` does not import from `data_providers`, `strategies`, `execution`, or `market_agent`
+- `utils/` does not import from `config`, `data_providers`, `trading_bots`, `execution`, `learning`, or `market_agent`
+- `config/` does not import from `data_providers`, `trading_bots`, `execution`, `learning`, or `market_agent`
+- `data_providers/` does not import from `trading_bots`, `execution`, `learning`, or `market_agent`
+- `trading_bots/` does not import from `data_providers`, `execution`, `learning`, or `market_agent`
+- `execution/` does not import from `data_providers`, `trading_bots`, `learning`, or `market_agent`
+- `learning/` does not import from `data_providers`, `trading_bots`, `execution`, or `market_agent`
 - `market_agent/` may import from any internal layer (it's the orchestration layer)
 
 ### When to Run
@@ -536,23 +536,6 @@ The boundary checker scans all Python files under `src/pearlalgo/` and verifies 
 - **Before committing**: Run `python3 scripts/testing/test_all.py arch` to catch accidental cross-layer imports
 - **In CI**: Set `PEARLALGO_ARCH_ENFORCE=1` to fail builds on violations
 - **During code review**: Reviewers can run the check to verify architectural compliance
-
-### Alternative: import-linter (Optional)
-
-For teams preferring an industry-standard tool, `import-linter` is available as an optional dependency:
-
-```bash
-# Install with lint extras
-pip install -e .[lint]
-
-# Run import-linter
-lint-imports
-```
-
-The import-linter configuration in `pyproject.toml` mirrors the same boundary rules as the stdlib checker.
-Both tools can be run side-by-side; choose whichever fits your workflow.
-
----
 
 ## 🔍 Type Checking with mypy
 
@@ -860,9 +843,10 @@ python3 scripts/testing/smoke_multi_market.py
 ### Key Files
 - `scripts/testing/test_all.py` - Unified test runner
 - `scripts/testing/check_architecture_boundaries.py` - Module boundary enforcement
-- `scripts/testing/smoke_multi_market.py` - Multi-market config/state smoke
+- `scripts/testing/smoke_multi_market.py` - Multi-market config + state smoke
 - `scripts/testing/smoke_test_ibkr.py` - IBKR connectivity smoke
 - `scripts/testing/check_no_secrets.py` - Secret detection guardrail
+- `scripts/testing/check_doc_references.py` - Doc path/reference audit
 - `tests/test_edge_cases.py` - Edge-case coverage (market hours/data quality/service)
 - `tests/test_error_recovery.py` - Circuit breaker and recovery behaviors
 - `tests/mock_data_provider.py` - Mock data provider
@@ -900,8 +884,9 @@ This section summarizes the current test coverage and highlights areas for futur
 #### Tests under `scripts/testing/`
 
 - `smoke_test_ibkr.py` – IBKR connectivity smoke test
-- `smoke_multi_market.py` – multi-market config/state isolation smoke test
+- `smoke_multi_market.py` – multi-market config + state isolation smoke test
 - `check_no_secrets.py` – secret detection guardrail
+- `check_doc_references.py` – documentation path reference audit
 
 #### Tests under `tests/`
 

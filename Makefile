@@ -1,4 +1,4 @@
-.PHONY: help install test coverage arch secrets smoke ruff ruff-bugs audit ci
+.PHONY: help install test coverage arch secrets smoke ruff ruff-bugs audit docs ci
 
 # Prefer the project virtualenv when present.
 PYTHON := $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
@@ -6,7 +6,7 @@ PIP := $(PYTHON) -m pip
 
 help:
 	@echo "Common commands:"
-	@echo "  make install   - Install package in editable mode (dev + lint extras)"
+	@echo "  make install   - Install package in editable mode (dev extras)"
 	@echo "  make test      - Run pytest (skips IBKR/Telegram-credential tests)"
 	@echo "  make coverage  - Generate coverage.xml + coverage badge"
 	@echo "  make arch      - Enforce architecture boundary rules"
@@ -15,11 +15,12 @@ help:
 	@echo "  make ruff-bugs - Run Ruff bug-catching subset (matches CI gate)"
 	@echo "  make ruff      - Run Ruff (may report pre-existing issues)"
 	@echo "  make audit     - Run pip-audit dependency scan"
+	@echo "  make docs      - Validate documentation path references"
 	@echo "  make ci        - Run the same checks CI runs"
 
 install:
 	$(PIP) install --upgrade pip
-	$(PIP) install -e ".[dev,lint]"
+	$(PIP) install -e ".[dev]"
 
 test:
 	MPLBACKEND=Agg ./scripts/testing/run_tests.sh -m "not requires_ibkr and not requires_telegram"
@@ -47,5 +48,8 @@ audit:
 	$(PYTHON) -m pip install --quiet --upgrade pip-audit
 	$(PYTHON) -m pip_audit .
 
-ci: ruff-bugs arch secrets smoke audit test
+docs:
+	$(PYTHON) scripts/testing/check_doc_references.py
+
+ci: ruff-bugs arch secrets docs smoke audit test
 

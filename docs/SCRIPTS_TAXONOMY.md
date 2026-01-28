@@ -54,6 +54,8 @@ Backtesting scripts for strategy validation on historical data.
   - **Role**: Multi-market state/config isolation smoke test (NQ/ES/GC).
 - `check_no_secrets.py`
   - **Role**: Secret detection guardrail; scans codebase for accidentally committed secrets/tokens.
+- `check_doc_references.py`
+  - **Role**: Documentation reference audit; verifies doc paths exist in repo.
 
 ## Maintenance (`scripts/maintenance/`)
 

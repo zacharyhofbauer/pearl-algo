@@ -4,7 +4,7 @@ This repo is a **trading platform** with three hard requirements:
 
 - **Safety-first**: execution is guarded (dry_run/paper/live + arming + risk caps).
 - **Observable**: every decision should be explainable from logs + persisted state.
-- **Extensible**: new strategies/indicators/data/execution adapters should plug in without rewiring the service.
+- **Extensible**: new strategies, indicators, data providers, and execution adapters should plug in without rewiring the service.
 
 ### What runs in production
 
