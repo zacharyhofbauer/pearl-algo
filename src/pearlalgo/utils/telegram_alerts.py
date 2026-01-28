@@ -1873,6 +1873,7 @@ class TelegramPrefs:
     # Design policy (operator UX):
     # - Keep navigation buttons ON by default so operators can always jump back to Menu/Health.
     # - Keep pinned/edit-in-place dashboards OFF by default (optional; reduces chat spam).
+    # - Pearl suggestions are ON by default (JARVIS-like proactive help).
     DEFAULTS = {
         "dashboard_buttons": True,          # Show inline buttons on push dashboards + trade alerts
         "dashboard_edit_in_place": False,   # Keep a single dashboard message updated (optional)
@@ -1883,6 +1884,10 @@ class TelegramPrefs:
         "snooze_noncritical_alerts": False, # Temporarily suppress non-critical data alerts
         "snooze_until": None,               # ISO timestamp when snooze expires (if snoozed)
         "interval_notifications": True,     # Enable hourly interval notifications (chart + status)
+        # Pearl JARVIS preferences
+        "pearl_suggestions_enabled": True,        # Master toggle for proactive suggestions
+        "pearl_suggestion_cooldown_minutes": 30,  # Min time between similar suggestions
+        "pearl_greeting_enabled": True,           # Morning/evening greetings
     }
     
     # Human-readable labels for settings UI
@@ -1893,6 +1898,8 @@ class TelegramPrefs:
         "auto_chart_on_signal": "Auto-Chart on Signal",
         "snooze_noncritical_alerts": "Snooze Non-Critical Alerts",
         "interval_notifications": "Interval Notifications",
+        "pearl_suggestions_enabled": "Pearl Suggestions",
+        "pearl_greeting_enabled": "Pearl Greetings",
     }
     
     # Descriptions for settings UI
@@ -1903,6 +1910,8 @@ class TelegramPrefs:
         "auto_chart_on_signal": "Automatically generate and send chart with each signal alert",
         "snooze_noncritical_alerts": "Temporarily suppress non-critical data quality alerts (1 hour)",
         "interval_notifications": "Hourly chart + status notifications (toggle off to disable)",
+        "pearl_suggestions_enabled": "Pearl proactively offers help on dashboard (dismissible)",
+        "pearl_greeting_enabled": "Pearl greets you in the morning with overnight summary",
     }
     
     def __init__(self, state_dir=None):
@@ -2047,6 +2056,30 @@ class TelegramPrefs:
         self._prefs["snooze_noncritical_alerts"] = False
         self._prefs["snooze_until"] = None
         self._save()
+    
+    # Pearl JARVIS preferences
+    @property
+    def pearl_suggestions_enabled(self) -> bool:
+        """Whether Pearl shows proactive suggestions on dashboard."""
+        return self._prefs.get("pearl_suggestions_enabled", True)
+    
+    @property
+    def pearl_suggestion_cooldown_minutes(self) -> int:
+        """Minimum minutes between similar suggestions."""
+        return self._prefs.get("pearl_suggestion_cooldown_minutes", 30)
+    
+    @property
+    def pearl_greeting_enabled(self) -> bool:
+        """Whether Pearl shows morning greetings."""
+        return self._prefs.get("pearl_greeting_enabled", True)
+    
+    def get_pearl_prefs(self) -> dict:
+        """Get all Pearl-related preferences as a dict."""
+        return {
+            "pearl_suggestions_enabled": self.pearl_suggestions_enabled,
+            "pearl_suggestion_cooldown_minutes": self.pearl_suggestion_cooldown_minutes,
+            "pearl_greeting_enabled": self.pearl_greeting_enabled,
+        }
 
 
 class TelegramAlerts:

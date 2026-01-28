@@ -40,14 +40,53 @@ python3 scripts/telegram/set_bot_commands.py
 The command handler intentionally keeps slash commands minimal:
 
 - `/start`: Show the main dashboard (menu)
+- `/pearl`: Talk to Pearl (JARVIS-like assistant)
 
 Everything else is accessed via the button menus (safer and easier to operate on mobile).
 
+## Pearl - Your JARVIS-like Assistant
+
+Pearl is a conversational AI assistant that can help you manage your trading system naturally.
+
+### How to use Pearl
+
+1. **Type `/pearl`** to enter Pearl chat mode
+2. **Talk naturally** - ask questions, request actions, or just chat
+3. **Type `/start`** to return to the dashboard
+
+### What Pearl can do
+
+- **Check status**: "how am I doing today?", "what's my P&L?"
+- **Execute actions**: "restart the agent", "show my trades"
+- **Diagnose issues**: "what's wrong?", "why is the gateway down?"
+- **Answer questions**: "when does the session open?", "how many signals today?"
+
+### Pearl Suggestions (Proactive Help)
+
+Pearl can proactively suggest helpful actions on your dashboard:
+
+- **Problem alerts**: "Gateway disconnected - want me to reconnect?"
+- **Performance milestones**: "You're up $300 today - want to see what's working?"
+- **Morning greetings**: "Good morning! Agent ran smoothly overnight."
+
+**All suggestions are dismissible** - tap `[Dismiss]` and they disappear. The same suggestion won't repeat for 30+ minutes.
+
+### Disabling Pearl Suggestions
+
+If you prefer the old menu-only style:
+
+1. Go to **Settings**
+2. Find **Pearl Suggestions**
+3. Toggle OFF
+
+Or tell Pearl: "turn off suggestions"
+
 ## UI policy (do not drift)
 
-- **Single entrypoint**: `/start` is the dashboard and the menu.
-- **No additional slash commands**: keep operations behind inline buttons (mobile-first + safer).
-- **BotFather command list**: should only show `/start`. If other commands appear, re-run `python3 scripts/telegram/set_bot_commands.py` and restart the handler.
+- **Two commands only**: `/start` (dashboard) and `/pearl` (JARVIS assistant).
+- **Menus for quick actions**: keep operations behind inline buttons (mobile-first + safer).
+- **Pearl for everything else**: conversational commands, diagnostics, help.
+- **BotFather command list**: should show `/start` and `/pearl`. If other commands appear, re-run `python3 scripts/telegram/set_bot_commands.py` and restart the handler.
 
 ## Status semantics (how to read the dashboard)
 

@@ -43,12 +43,20 @@ from pearlalgo.utils.telegram_ui_contract import (
     parse_callback,
     callback_action,
     callback_menu,
+    callback_pearl,
+    callback_pearl_dismiss,
     connection_status_to_label,
     ACTION_GATEWAY_STATUS,
     ACTION_CONNECTION_STATUS,
     ACTION_DATA_QUALITY,
     ACTION_SYSTEM_STATUS,
     MENU_STATUS,
+    PEARL_DISMISS,
+)
+from pearlalgo.utils.pearl_suggestions import (
+    PearlSuggestion,
+    PearlSuggestionEngine,
+    get_suggestion_engine,
 )
 
 try:
@@ -154,10 +162,11 @@ class TelegramCommandHandler:
 
     async def _post_init(self, application: Application) -> None:
         """Runs once after the Telegram application initializes."""
-        # Keep the slash-command surface minimal: /start is the dashboard/menu.
+        # Keep the slash-command surface minimal: /start is the dashboard/menu, /pearl is JARVIS.
         try:
             await application.bot.set_my_commands([
                 BotCommand("start", "Show main dashboard"),
+                BotCommand("pearl", "Talk to Pearl (JARVIS-like assistant)"),
             ])
         except Exception as e:
             logger.debug(f"Could not set bot commands: {e}")
@@ -167,8 +176,9 @@ class TelegramCommandHandler:
         logger.info("Command handler ready - user can use /start for dashboard")
 
     def _register_handlers(self) -> None:
-        # Minimal command surface: /start is the menu.
+        # Minimal command surface: /start is the menu, /pearl is the JARVIS assistant.
         self.application.add_handler(CommandHandler("start", self.handle_menu))
+        self.application.add_handler(CommandHandler("pearl", self.handle_pearl_command))
 
         # Optional aliases (kept for backwards-compatibility; not advertised).
         self.application.add_handler(CommandHandler("menu", self.handle_menu))
@@ -204,7 +214,7 @@ class TelegramCommandHandler:
             logger.warning(f"Error counting open challenge positions: {e}")
             return 0
 
-    def _get_main_menu_keyboard(self) -> list:
+    def _get_main_menu_keyboard(self, pearl_suggestion: Optional[PearlSuggestion] = None) -> list:
         """
         Main menu keyboard - 4 distinct sections, no overlap.
         
@@ -216,6 +226,8 @@ class TelegramCommandHandler:
         │  🛡️ Health    │  Connection, data quality, diagnostics │
         │  ⚙️ Settings  │  Preferences, markets, AI tools        │
         └─────────────────────────────────────────────────────────┘
+        
+        If pearl_suggestion is provided, adds suggestion buttons above the menu.
         """
         state = self._read_state()
         total_active = 0
@@ -386,8 +398,16 @@ class TelegramCommandHandler:
         
         # ─────────────────────────────────────────────────────────────────
         # Clean 4-button menu (2x2 grid) - each leads to unique submenu
+        # If Pearl has a suggestion, add suggestion buttons first
         # ─────────────────────────────────────────────────────────────────
-        return [
+        keyboard = []
+        
+        # Pearl suggestion row (if present)
+        if pearl_suggestion:
+            keyboard.append(self._build_pearl_suggestion_keyboard_row(pearl_suggestion))
+        
+        # Main menu buttons
+        keyboard.extend([
             [
                 InlineKeyboardButton(activity_label, callback_data="menu:activity"),
                 InlineKeyboardButton(system_label, callback_data="menu:system"),
@@ -400,7 +420,9 @@ class TelegramCommandHandler:
                 InlineKeyboardButton("🔄 Refresh", callback_data="action:refresh_dashboard"),
                 InlineKeyboardButton(chart_button_label, callback_data="action:refresh_chart"),
             ],
-        ]
+        ])
+        
+        return keyboard
 
     # =========================================================================
     # CENTRALIZED NAVIGATION HELPERS - Single source of truth for all menus
@@ -810,6 +832,8 @@ class TelegramCommandHandler:
                 await self._handle_patch_callback(query, callback_data)
             elif callback_type == "aiops":
                 await self._handle_ai_ops_callback(query, callback_data)
+            elif callback_type == "pearl":
+                await self._handle_pearl_callback(query, action)
             elif callback_type == "confirm":
                 # Confirmations are handled inside _handle_action
                 await self._handle_action(query, callback_data)
@@ -1049,13 +1073,21 @@ class TelegramCommandHandler:
 
     async def _show_main_menu_with_chart(self, query: CallbackQuery, force_chart_refresh: bool = False) -> None:
         """Show the main menu with chart displayed above the menu text."""
-        keyboard = self._get_main_menu_keyboard()
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
         state = self._read_state()
+        
+        # Get Pearl suggestion (if any)
+        pearl_suggestion = self._get_pearl_suggestion(state) if state else None
+        
+        keyboard = self._get_main_menu_keyboard(pearl_suggestion=pearl_suggestion)
+        reply_markup = InlineKeyboardMarkup(keyboard)
         if state:
             try:
                 message_text = await self._build_status_dashboard_message(state)
+                
+                # Add Pearl suggestion text if present
+                if pearl_suggestion:
+                    message_text += f"\n\n💬 Pearl: \"{pearl_suggestion.message}\""
+                
                 chart_path = await self._generate_or_get_chart(state, force_refresh=force_chart_refresh)
 
                 # Add a compact support footer to make any screenshot/share self-diagnostic.
@@ -1245,10 +1277,14 @@ class TelegramCommandHandler:
         This is the primary dashboard view - always includes chart when available.
         Used for initial messages (not callback edits).
         """
-        keyboard = self._get_main_menu_keyboard()
+        state = self._read_state()
+        
+        # Get Pearl suggestion (if any)
+        pearl_suggestion = self._get_pearl_suggestion(state) if state else None
+        
+        keyboard = self._get_main_menu_keyboard(pearl_suggestion=pearl_suggestion)
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        state = self._read_state()
         if not state:
             await message_obj.reply_text(
                 "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:",
@@ -1258,6 +1294,11 @@ class TelegramCommandHandler:
         
         try:
             message_text = await self._build_status_dashboard_message(state)
+            
+            # Add Pearl suggestion text if present
+            if pearl_suggestion:
+                message_text += f"\n\n💬 Pearl: \"{pearl_suggestion.message}\""
+            
             chart_path = await self._generate_or_get_chart(state)
 
             # Always include the support footer on the primary dashboard.
@@ -3018,6 +3059,214 @@ class TelegramCommandHandler:
         keyboard = [self._nav_back_row()]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await self._safe_edit_or_send(query, help_text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    # =========================================================================
+    # Pearl JARVIS Assistant
+    # =========================================================================
+
+    async def handle_pearl_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /pearl command - enter Pearl chat mode (JARVIS-style)."""
+        if not update.message:
+            return
+        if not await self._check_authorized(update):
+            await update.message.reply_text("❌ Unauthorized access")
+            return
+
+        logger.info("Received /pearl - entering Pearl chat mode")
+        
+        # Check OpenAI availability first
+        if not OPENAI_AVAILABLE:
+            await update.message.reply_text(
+                "💬 *Pearl*\n\n"
+                "I need OpenAI to chat with you, but it's not configured.\n\n"
+                "Set `OPENAI_API_KEY` in your environment to enable me.\n\n"
+                "Type /start to go back to the dashboard.",
+                parse_mode="Markdown"
+            )
+            return
+
+        # Activate Pearl chat mode
+        self._pearl_chat_active = True
+        self._pearl_chat_last_activity = datetime.now(timezone.utc)
+
+        # JARVIS-style intro (friendlier than the menu-based version)
+        intro = (
+            "💬 *Hey! Pearl here.*\n\n"
+            "Talk to me naturally - I can check trades, restart services, "
+            "explain what's happening, or just chat.\n\n"
+            "*Try:*\n"
+            "• \"how did I do today?\"\n"
+            "• \"restart the agent\"\n"
+            "• \"what's wrong?\"\n"
+            "• \"show my trades\"\n\n"
+            "Type /start to go back to the dashboard."
+        )
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("🚪 Exit Chat", callback_data="action:exit_pearl"),
+                InlineKeyboardButton("🏠 Dashboard", callback_data="back"),
+            ]
+        ]
+        await update.message.reply_text(
+            intro, 
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    async def _handle_pearl_callback(self, query: CallbackQuery, action: str) -> None:
+        """Handle Pearl JARVIS callback actions."""
+        logger.info(f"Handling Pearl callback: {action}")
+        
+        prefs = TelegramPrefs(self.state_dir)
+        
+        # Handle dismiss - just go back to main menu
+        if action == PEARL_DISMISS:
+            # Mark dismissed in suggestion engine to start cooldown
+            try:
+                engine = get_suggestion_engine(str(self.state_dir))
+                # Use a generic cooldown key since we don't track which suggestion was shown
+                engine.mark_dismissed("last_suggestion")
+            except Exception as e:
+                logger.debug(f"Could not mark suggestion dismissed: {e}")
+            
+            # Return to main menu without the suggestion
+            await self._show_main_menu_with_chart(query)
+            return
+        
+        # Handle Pearl actions that require confirmation
+        if action == "reconnect_gateway":
+            await self._pearl_confirm_action(
+                query,
+                "I'll try to reconnect the gateway. This may take ~30 seconds.",
+                "confirm:restart_gateway"
+            )
+        elif action == "start_agent":
+            await self._pearl_confirm_action(
+                query,
+                "I'll start the agent for you.",
+                "confirm:start_agent"
+            )
+        elif action == "check_data":
+            # Show data quality view
+            await self._handle_action(query, "action:data_quality")
+        elif action == "show_overnight":
+            # Show overnight summary (activity/performance)
+            await self._show_activity_menu(query)
+        elif action == "show_performance":
+            # Show performance breakdown
+            await self._show_performance_menu(query)
+        elif action == "show_daily_summary":
+            # Show daily summary
+            await self._show_analytics_menu(query)
+        else:
+            # Unknown action - just go back to menu
+            logger.warning(f"Unknown Pearl action: {action}")
+            await self._show_main_menu_with_chart(query)
+
+    async def _pearl_confirm_action(
+        self, 
+        query: CallbackQuery, 
+        message: str, 
+        confirm_callback: str
+    ) -> None:
+        """Show Pearl confirmation for an action."""
+        text = f"💬 Pearl: \"{message}\"\n\nReady to proceed?"
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Yes", callback_data=confirm_callback),
+                InlineKeyboardButton("❌ Cancel", callback_data="back"),
+            ]
+        ]
+        await self._safe_edit_or_send(
+            query, 
+            text, 
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    def _get_pearl_suggestion(self, state: dict) -> Optional[PearlSuggestion]:
+        """Get a Pearl suggestion based on current state."""
+        try:
+            prefs = TelegramPrefs(self.state_dir)
+            if not prefs.pearl_suggestions_enabled:
+                return None
+            
+            engine = get_suggestion_engine(str(self.state_dir))
+            
+            # Build state dict for suggestion engine
+            suggestion_state = {
+                "agent_running": self._is_agent_process_running(),
+                "gateway_running": False,
+                "data_stale": False,
+                "data_age_minutes": 0,
+                "daily_pnl": 0,
+                "wins_today": 0,
+                "losses_today": 0,
+                "win_streak": 0,
+                "signals_today": 0,
+                "last_signal_minutes": 0,
+                "session_open": False,
+                "futures_open": False,
+                "agent_uptime_hours": 0,
+                "overnight_pnl": 0,
+            }
+            
+            if state:
+                # Agent/Gateway status
+                try:
+                    sc = getattr(self, "service_controller", None)
+                    if sc:
+                        gw_status = sc.get_gateway_status() or {}
+                        suggestion_state["gateway_running"] = bool(
+                            gw_status.get("process_running") and gw_status.get("port_listening")
+                        )
+                except Exception:
+                    pass
+                
+                # Data freshness
+                try:
+                    data_age = state.get("latest_bar_age_minutes", 0)
+                    thr = state.get("data_stale_threshold_minutes", 10)
+                    suggestion_state["data_age_minutes"] = float(data_age or 0)
+                    suggestion_state["data_stale"] = float(data_age or 0) > float(thr or 10)
+                except Exception:
+                    pass
+                
+                # P&L and performance
+                suggestion_state["daily_pnl"] = float(state.get("daily_pnl", 0) or 0)
+                suggestion_state["wins_today"] = int(state.get("wins_today", 0) or 0)
+                suggestion_state["losses_today"] = int(state.get("losses_today", 0) or 0)
+                suggestion_state["win_streak"] = int(state.get("win_streak", 0) or 0)
+                
+                # Session status
+                suggestion_state["session_open"] = bool(state.get("strategy_session_open"))
+                suggestion_state["futures_open"] = bool(state.get("futures_market_open"))
+                
+                # Agent uptime
+                try:
+                    uptime_sec = state.get("agent_uptime_seconds", 0)
+                    suggestion_state["agent_uptime_hours"] = float(uptime_sec or 0) / 3600.0
+                except Exception:
+                    pass
+            
+            return engine.generate_suggestion(
+                suggestion_state,
+                prefs.get_pearl_prefs(),
+            )
+        except Exception as e:
+            logger.debug(f"Could not generate Pearl suggestion: {e}")
+            return None
+
+    def _build_pearl_suggestion_keyboard_row(
+        self, 
+        suggestion: PearlSuggestion
+    ) -> list:
+        """Build keyboard row for Pearl suggestion buttons."""
+        return [
+            InlineKeyboardButton(suggestion.accept_label, callback_data=suggestion.accept_action),
+            InlineKeyboardButton(suggestion.decline_label, callback_data=callback_pearl_dismiss()),
+        ]
 
     async def _handle_action(self, query: CallbackQuery, action: str) -> None:
         """Handle action button presses."""

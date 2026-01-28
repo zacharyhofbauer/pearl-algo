@@ -34,6 +34,7 @@ PREFIX_CONFIRM = "confirm:"
 PREFIX_SIGNAL_DETAIL = "signal_detail:"
 PREFIX_PATCH = "patch:"
 PREFIX_AIOPS = "aiops:"
+PREFIX_PEARL = "pearl:"  # Pearl JARVIS suggestions and actions
 
 # ---------------------------------------------------------------------------
 # Menu IDs (used with menu: prefix)
@@ -86,6 +87,18 @@ ACTION_LOGS = "logs"
 # UI Actions
 ACTION_REFRESH_DASHBOARD = "refresh_dashboard"
 ACTION_TOGGLE_CHART = "toggle_chart"
+
+# ---------------------------------------------------------------------------
+# Pearl JARVIS Actions (used with pearl: prefix)
+# ---------------------------------------------------------------------------
+# Pearl suggestion responses
+PEARL_DISMISS = "dismiss"                    # User dismissed suggestion
+PEARL_RECONNECT_GATEWAY = "reconnect_gateway"  # Reconnect gateway
+PEARL_CHECK_DATA = "check_data"              # Check data connection
+PEARL_START_AGENT = "start_agent"            # Start agent
+PEARL_SHOW_OVERNIGHT = "show_overnight"      # Show overnight summary
+PEARL_SHOW_PERFORMANCE = "show_performance"  # Show performance breakdown
+PEARL_SHOW_DAILY_SUMMARY = "show_daily_summary"  # Show daily summary
 
 # ---------------------------------------------------------------------------
 # Connection status helpers
@@ -249,6 +262,10 @@ def parse_callback(callback_data: str) -> Tuple[str, str, Optional[str]]:
         rest = callback_data[len(PREFIX_AIOPS):]
         return ("aiops", rest, None)
     
+    if callback_data.startswith(PREFIX_PEARL):
+        rest = callback_data[len(PREFIX_PEARL):]
+        return ("pearl", rest, None)
+    
     # Unrecognized format
     return ("other", callback_data, None)
 
@@ -320,3 +337,13 @@ def callback_confirm(action_id: str) -> str:
 def callback_back() -> str:
     """Build a back navigation callback."""
     return "back"
+
+
+def callback_pearl(action: str) -> str:
+    """Build a Pearl JARVIS action callback."""
+    return f"{PREFIX_PEARL}{action}"
+
+
+def callback_pearl_dismiss() -> str:
+    """Build the Pearl dismiss callback."""
+    return f"{PREFIX_PEARL}{PEARL_DISMISS}"
