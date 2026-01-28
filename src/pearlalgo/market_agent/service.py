@@ -2509,11 +2509,8 @@ class MarketAgentService:
                 regime_info=regime_info,
                 # Telegram-only dashboard enhancements (fixed render profile)
                 show_ema_crossover_markers=False,
-                # Option A: lettered trade pairs (clear pairing on mobile)
-                show_trade_paths=False,
-                show_trade_pair_numbers=True,
-                trade_pair_numbers_max=6,
-                trade_markers_max=6,
+                # Smart markers are now the default/only implementation
+                # Legacy options (show_trade_paths, show_trade_pair_numbers) are removed
                 show_trade_overlay_legend=True,
                 # Use more pixels (less dead space) and reduce preview artifacts
                 save_pad_inches=0.12,

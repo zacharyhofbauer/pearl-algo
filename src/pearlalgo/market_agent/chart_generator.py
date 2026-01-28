@@ -1026,6 +1026,13 @@ class ChartConfig:
     # auto-compact labels, and reduced max_right_labels
     mobile_mode: bool = False
 
+    # Smart Trade Markers (P8 from visual integrity plan)
+    # Replaces standard triangle/circle markers with cohesive "smart" markers:
+    # - Entry: Large triangle with pair letter (A, B, C)
+    # - Exit: Circle/Square with pair letter (A, B, C)
+    # - Outcome: Color-coded (Green=Win, Red=Loss, Gray=Open)
+    smart_marker_size: int = 300
+
     @classmethod
     def from_strategy_config(cls, strategy_config) -> "ChartConfig":
         """Create ChartConfig from config dict (or any object with hud_* attrs)."""
@@ -1070,6 +1077,7 @@ class ChartConfig:
             "hud_rr_box_font_size": "rr_box_font_size",
             "hud_compact_labels": "compact_labels",
             "hud_mobile_mode": "mobile_mode",
+            "hud_smart_marker_size": "smart_marker_size",
         }
         
         for src_attr, dst_attr in attr_map.items():
@@ -2684,124 +2692,14 @@ class ChartGenerator:
         except Exception:
             pass
 
-    def _draw_trade_paths(self, ax, df: pd.DataFrame, trades: list[dict], *, max_trades: int = 6) -> None:
-        """Draw paired entry→exit paths for recent trades on the dashboard chart.
-
-        This is a Telegram/mobile readability aid. It is intentionally light (thin lines, low alpha)
-        and capped to avoid clutter.
-        """
-        if df is None or df.empty or not isinstance(df.index, pd.DatetimeIndex):
-            return
-        if not trades:
-            return
-
-        try:
-            max_n = int(max_trades)
-        except Exception:
-            max_n = 6
-        max_n = max(1, min(20, max_n))
-
-        idx_series = df.index
-        idx_tz = getattr(idx_series, "tz", None)
-
-        def _align_ts(raw):
-            if not raw:
-                return None
-            try:
-                tsx = pd.Timestamp(raw)
-            except Exception:
-                return None
-            try:
-                if idx_tz is None:
-                    # Normalize to naive UTC for matching.
-                    if tsx.tzinfo is not None:
-                        tsx = tsx.tz_convert("UTC").tz_localize(None)
-                    else:
-                        tsx = tsx.tz_localize(None) if hasattr(tsx, "tz_localize") else tsx
-                else:
-                    # Normalize to the chart index timezone.
-                    if tsx.tzinfo is None:
-                        tsx = tsx.tz_localize("UTC").tz_convert(idx_tz)
-                    else:
-                        tsx = tsx.tz_convert(idx_tz)
-            except Exception:
-                return None
-            return tsx
-
-        # Keep only the most recent N (stable ordering: last trades win)
-        recent = [t for t in trades if isinstance(t, dict)]
-        recent = recent[-max_n:]
-
-        for tr in recent:
-            et = _align_ts(tr.get("entry_time"))
-            xt = _align_ts(tr.get("exit_time"))
-            try:
-                entry_price = float(tr.get("entry_price") or 0.0)
-            except Exception:
-                entry_price = 0.0
-            try:
-                exit_price = float(tr.get("exit_price") or 0.0)
-            except Exception:
-                exit_price = 0.0
-
-            if et is None or xt is None or entry_price <= 0 or exit_price <= 0:
-                continue
-
-            try:
-                x0 = int(idx_series.get_indexer([et], method="nearest")[0])
-                x1 = int(idx_series.get_indexer([xt], method="nearest")[0])
-            except Exception:
-                continue
-
-            if x0 < 0 or x1 < 0 or x0 >= len(idx_series) or x1 >= len(idx_series):
-                continue
-
-            # Ensure left-to-right ordering
-            if x1 < x0:
-                x0, x1 = x1, x0
-                entry_price, exit_price = exit_price, entry_price
-
-            # Outcome color
-            pnl_val = tr.get("pnl", None)
-            is_win = None
-            if pnl_val is not None:
-                try:
-                    is_win = float(pnl_val) > 0
-                except Exception:
-                    is_win = None
-            if is_win is True:
-                col = SIGNAL_LONG
-                ls = "-"
-                a = 0.55
-            elif is_win is False:
-                col = SIGNAL_SHORT
-                ls = "-"
-                a = 0.55
-            else:
-                col = TEXT_SECONDARY
-                ls = "--"
-                a = 0.45
-
-            try:
-                ax.plot(
-                    [float(x0), float(x1)],
-                    [float(entry_price), float(exit_price)],
-                    color=col,
-                    linestyle=ls,
-                    linewidth=1.6,
-                    alpha=a,
-                    zorder=ZORDER_LEVEL_LINES,
-                )
-            except Exception:
-                continue
-
-    def _draw_trade_pair_numbers(self, ax, df: pd.DataFrame, trades: list[dict], *, max_trades: int = 6) -> None:
-        """Draw lettered entry/exit badges to visually pair full trades on the dashboard chart.
-
-        This is designed for mobile/Telegram readability:
-        - Matching letters pair an entry marker with its corresponding exit marker.
-        - Badges are outcome-colored (green win / red loss / gray unknown).
-        - Capped to avoid clutter.
+    def _draw_trade_markers(self, ax, df: pd.DataFrame, trades: list[dict], *, max_trades: int = 6) -> None:
+        """Draw cohesive 'smart' markers that combine entry/exit/outcome in a single visual element.
+        
+        Design:
+        - Entry: Large triangle with pair letter (A, B, C)
+        - Exit: Circle/Square with pair letter (A, B, C)
+        - Outcome: Color-coded (Green=Win, Red=Loss, Gray=Open)
+        - Path: Subtle dashed line connecting the pair
         """
         if df is None or df.empty or not isinstance(df.index, pd.DatetimeIndex):
             return
@@ -2839,6 +2737,7 @@ class ChartGenerator:
                 return None
             return tsx
 
+        # 1. Collect valid trades with coordinates
         items: list[dict] = []
         for tr in [t for t in trades if isinstance(t, dict)]:
             direction = str(tr.get("direction") or "long").lower()
@@ -2852,20 +2751,15 @@ class ChartGenerator:
             if xe < 0 or xe >= len(idx_series):
                 continue
 
-            # Entry y should track the marker placement (near candle extremes).
+            # Entry y
             try:
-                if direction == "short":
-                    ye = float(df["High"].iloc[xe]) * 1.001
-                else:
-                    ye = float(df["Low"].iloc[xe]) * 0.999
+                ye = float(tr.get("entry_price") or 0.0)
             except Exception:
-                try:
-                    ye = float(tr.get("entry_price") or 0.0)
-                except Exception:
-                    ye = 0.0
+                ye = 0.0
             if ye <= 0:
                 continue
 
+            # Exit coordinates
             xt = _align_ts(tr.get("exit_time"))
             xx = None
             yx = None
@@ -2883,6 +2777,7 @@ class ChartGenerator:
                 if yx is not None and yx <= 0:
                     yx = None
 
+            # Outcome color
             pnl_val = tr.get("pnl", None)
             is_win: Optional[bool] = None
             if pnl_val is not None:
@@ -2905,40 +2800,12 @@ class ChartGenerator:
         if not items:
             return
 
-        # Select the most recent N trades by entry position, then number left→right for readability.
+        # 2. Sort and limit
         items.sort(key=lambda d: int(d.get("xe", 0)))
         items = items[-max_n:]
-        n = len(items)
-        if n <= 0:
-            return
 
-        try:
-            ymin, ymax = ax.get_ylim()
-            ymid = (float(ymin) + float(ymax)) / 2.0
-        except Exception:
-            ymid = None
-
-        def _dx(x: int) -> int:
-            try:
-                return -18 if float(x) > float(len(idx_series)) * 0.86 else 8
-            except Exception:
-                return 8
-
-        def _dy(y: float, *, direction: str) -> int:
-            # Prefer placing labels away from chart edges.
-            if direction == "short":
-                base = -14
-            else:
-                base = 8
-            try:
-                if ymid is not None and float(y) > float(ymid):
-                    return -14
-            except Exception:
-                pass
-            return base
-
+        # 3. Draw markers
         def _to_letters(n: int) -> str:
-            """Excel-style 1-indexed letters: 1->A, 2->B, ..., 26->Z, 27->AA, ..."""
             try:
                 n = int(n)
             except Exception:
@@ -2951,54 +2818,85 @@ class ChartGenerator:
                 out = chr(65 + int(r)) + out
             return out
 
+        marker_size = self.config.smart_marker_size
+
         for i, it in enumerate(items, start=1):
             label = _to_letters(i)
             col = it.get("col", TEXT_PRIMARY)
             direction = str(it.get("direction") or "long")
+            xe, ye = it["xe"], it["ye"]
+            xx, yx = it.get("xx"), it.get("yx")
 
+            # Draw Ghost Path first (behind markers)
+            if xx is not None and yx is not None:
+                try:
+                    ax.plot(
+                        [float(xe), float(xx)],
+                        [float(ye), float(yx)],
+                        color=col,
+                        linestyle="--",
+                        linewidth=1.2,
+                        alpha=0.4,
+                        zorder=ZORDER_LEVEL_LINES,
+                    )
+                except Exception:
+                    pass
+
+            # Draw Entry Marker (Triangle with Letter)
             try:
-                ax.annotate(
+                # Up triangle for Long, Down for Short
+                marker_shape = "^" if direction == "long" else "v"
+                
+                # Draw the colored shape background
+                ax.scatter(
+                    [xe], [ye],
+                    marker=marker_shape,
+                    s=marker_size,
+                    color=col,
+                    edgecolors=DARK_BG,
+                    linewidths=1.5,
+                    zorder=ZORDER_TEXT_LABELS,
+                    alpha=0.95
+                )
+                
+                # Draw the letter inside (white text)
+                ax.text(
+                    xe, ye,
                     label,
-                    xy=(float(it["xe"]), float(it["ye"])),
-                    xytext=(_dx(int(it["xe"])), _dy(float(it["ye"]), direction=direction)),
-                    textcoords="offset points",
                     ha="center",
                     va="center",
-                    fontsize=FONT_SIZE_LEGEND,
+                    fontsize=8,
                     fontweight="bold",
-                    color=col,
-                    alpha=0.95,
-                    zorder=ZORDER_TEXT_LABELS,
-                    bbox=dict(
-                        facecolor=DARK_BG,
-                        alpha=0.85,
-                        edgecolor=col,
-                        boxstyle="round,pad=0.20",
-                    ),
+                    color="white", # Always white for contrast against colored marker
+                    zorder=ZORDER_TEXT_LABELS + 1,
                 )
             except Exception:
                 pass
 
-            if it.get("xx") is not None and it.get("yx") is not None:
+            # Draw Exit Marker (Circle with Letter)
+            if xx is not None and yx is not None:
                 try:
-                    ax.annotate(
+                    # Circle for exit
+                    ax.scatter(
+                        [xx], [yx],
+                        marker="o",
+                        s=marker_size * 0.8, # Slightly smaller than entry
+                        color=col,
+                        edgecolors=DARK_BG,
+                        linewidths=1.5,
+                        zorder=ZORDER_TEXT_LABELS,
+                        alpha=0.95
+                    )
+                    
+                    ax.text(
+                        xx, yx,
                         label,
-                        xy=(float(it["xx"]), float(it["yx"])),
-                        xytext=(_dx(int(it["xx"])), _dy(float(it["yx"]), direction="long")),
-                        textcoords="offset points",
                         ha="center",
                         va="center",
-                        fontsize=FONT_SIZE_LEGEND,
+                        fontsize=7,
                         fontweight="bold",
-                        color=col,
-                        alpha=0.95,
-                        zorder=ZORDER_TEXT_LABELS,
-                        bbox=dict(
-                            facecolor=DARK_BG,
-                            alpha=0.85,
-                            edgecolor=col,
-                            boxstyle="round,pad=0.20",
-                        ),
+                        color="white",
+                        zorder=ZORDER_TEXT_LABELS + 1,
                     )
                 except Exception:
                     pass
@@ -3008,19 +2906,14 @@ class ChartGenerator:
         ax,
         *,
         ema_crossovers_shown: bool,
-        trade_paths_shown: bool = False,
-        trade_numbers_shown: bool = False,
     ) -> None:
         """Draw a compact legend explaining trade overlays on the dashboard chart."""
         try:
             lines = ["Trade overlay"]
-            if trade_numbers_shown:
-                lines.append("Pair: same letter entry/exit")
-            if trade_paths_shown:
-                lines.append("Path: green win / red loss / gray")
-            else:
-                lines.append("Color: green win / red loss / gray")
-            lines.append("Entry: ▲/▼   Exit: ○")
+            lines.append("Marker: Letter pairs entry/exit")
+            lines.append("Color: green win / red loss")
+            lines.append("Shape: ▲ Entry / ● Exit")
+            
             if ema_crossovers_shown:
                 lines.append("EMA cross: cyan/pink")
             else:
@@ -3785,31 +3678,18 @@ class ChartGenerator:
                     ymin, ymax = ax_price.get_ylim()
                     marker_offset = (ymax - ymin) * 0.015
 
-                    # Entry marker (triangle pointing in trade direction)
-                    if 0 <= entry_x < len(df):
-                        entry_marker = "^" if direction == "long" else "v"
-                        entry_marker_y = entry_price - marker_offset if direction == "long" else entry_price + marker_offset
-                        ax_price.scatter(
-                            [entry_x], [entry_marker_y],
-                            marker=entry_marker,
-                            s=200,
-                            color=ENTRY_COLOR,
-                            zorder=ZORDER_TEXT_LABELS,
-                            edgecolors='white',
-                            linewidths=1.0,
-                        )
-
-                    # Exit marker (X)
-                    if 0 <= exit_x < len(df) and exit_price > 0:
-                        ax_price.scatter(
-                            [exit_x], [exit_price],
-                            marker='X',
-                            s=180,
-                            color=MA_COLORS[0],
-                            zorder=ZORDER_TEXT_LABELS,
-                            edgecolors='white',
-                            linewidths=1.0,
-                        )
+                    # Smart Trade Markers (P8) - cohesive entry/exit/outcome visualization
+                    # Build a synthetic trade list for _draw_trade_markers
+                    trade_rec = {
+                        "entry_time": trade.get("entry_time"),
+                        "exit_time": trade.get("exit_time"),
+                        "entry_price": entry_price,
+                        "exit_price": exit_price,
+                        "direction": direction,
+                        "pnl": pnl,
+                        "is_win": float(pnl) > 0 if pnl is not None else None
+                    }
+                    self._draw_trade_markers(ax_price, df, [trade_rec], max_trades=1)
                 except Exception:
                     pass
 
@@ -5029,18 +4909,12 @@ class ChartGenerator:
 
                     trades_for_overlay = overlay_trades if overlay_trades else (trades or [])
 
-                    # Optional: paired entry→exit trade paths (Telegram/mobile readability)
-                    if show_trade_paths and trades_for_overlay:
+                    # Smart Trade Markers (P8) - cohesive entry/exit/outcome visualization
+                    # Replaces legacy trade paths and numbered pairs
+                    if trades_for_overlay:
                         try:
-                            self._draw_trade_paths(ax_price, df, trades_for_overlay, max_trades=int(trade_paths_max))
-                        except Exception:
-                            pass
-
-                    # Option A: numbered entry/exit pairing (Telegram/mobile readability)
-                    if show_trade_pair_numbers and trades_for_overlay:
-                        try:
-                            self._draw_trade_pair_numbers(
-                                ax_price, df, trades_for_overlay, max_trades=int(trade_pair_numbers_max)
+                            self._draw_trade_markers(
+                                ax_price, df, trades_for_overlay, max_trades=int(trade_markers_max)
                             )
                         except Exception:
                             pass
@@ -5051,8 +4925,6 @@ class ChartGenerator:
                             self._draw_trade_overlay_legend(
                                 ax_price,
                                 ema_crossovers_shown=bool(show_ema_crossover_markers),
-                                trade_paths_shown=bool(show_trade_paths and trades_for_overlay),
-                                trade_numbers_shown=bool(show_trade_pair_numbers and trades_for_overlay),
                             )
                         except Exception:
                             pass
