@@ -162,11 +162,11 @@ class TelegramCommandHandler:
 
     async def _post_init(self, application: Application) -> None:
         """Runs once after the Telegram application initializes."""
-        # Keep the slash-command surface minimal: /start is the dashboard/menu, /pearl is JARVIS.
+        # Keep the slash-command surface minimal: /start is the dashboard/menu, /pearl is Pearl.
         try:
             await application.bot.set_my_commands([
                 BotCommand("start", "Show main dashboard"),
-                BotCommand("pearl", "Talk to Pearl (JARVIS-like assistant)"),
+                BotCommand("pearl", "Talk to Pearl (assistant)"),
             ])
         except Exception as e:
             logger.debug(f"Could not set bot commands: {e}")
@@ -184,7 +184,7 @@ class TelegramCommandHandler:
             logger.info("Command handler ready - user can use /start for dashboard")
 
     def _register_handlers(self) -> None:
-        # Minimal command surface: /start is the menu, /pearl is the JARVIS assistant.
+        # Minimal command surface: /start is the menu, /pearl is Pearl assistant.
         self.application.add_handler(CommandHandler("start", self.handle_menu))
         self.application.add_handler(CommandHandler("pearl", self.handle_pearl_command))
 
@@ -235,7 +235,7 @@ class TelegramCommandHandler:
         │  ⚙️ Settings  │  Preferences, markets, AI tools        │
         └─────────────────────────────────────────────────────────┘
         
-        If pearl_suggestion is provided, adds suggestion buttons above the menu.
+        If pearl_suggestion is provided, it will be sent as a separate message.
         """
         state = self._read_state()
         total_active = 0
@@ -410,10 +410,6 @@ class TelegramCommandHandler:
         # ─────────────────────────────────────────────────────────────────
         keyboard = []
         
-        # Pearl suggestion row (if present)
-        if pearl_suggestion:
-            keyboard.append(self._build_pearl_suggestion_keyboard_row(pearl_suggestion))
-        
         # Main menu buttons
         keyboard.extend([
             [
@@ -514,7 +510,7 @@ class TelegramCommandHandler:
         return InlineKeyboardMarkup(keyboard)
 
     async def handle_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Send visual dashboard with 12h chart and compact navigation menu."""
+        """Send visual dashboard with latest chart and compact navigation menu."""
         if not update.message:
             return
         if not await self._check_authorized(update):
@@ -1096,7 +1092,11 @@ class TelegramCommandHandler:
                 # if pearl_suggestion:
                 #     message_text += f"\n\n💬 Pearl: \"{pearl_suggestion.message}\""
                 
-                chart_path = await self._generate_or_get_chart(state, force_refresh=force_chart_refresh)
+                chart_path = await self._generate_or_get_chart(
+                    state,
+                    force_refresh=force_chart_refresh,
+                    allow_refresh=force_chart_refresh,
+                )
 
                 # Add a compact support footer to make any screenshot/share self-diagnostic.
                 caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
@@ -1245,7 +1245,10 @@ class TelegramCommandHandler:
             try:
                 # Use a slightly different format for standalone messages
                 pearl_msg = f"💬 Pearl: \"{pearl_suggestion.message}\""
-                await query.message.chat.send_message(pearl_msg)
+                pearl_keyboard = InlineKeyboardMarkup(
+                    [self._build_pearl_suggestion_keyboard_row(pearl_suggestion)]
+                )
+                await query.message.chat.send_message(pearl_msg, reply_markup=pearl_keyboard)
             except Exception as e:
                 logger.debug(f"Could not send Pearl notification: {e}")
 
@@ -1316,7 +1319,7 @@ class TelegramCommandHandler:
             # if pearl_suggestion:
             #    message_text += f"\n\n💬 Pearl: \"{pearl_suggestion.message}\""
             
-            chart_path = await self._generate_or_get_chart(state)
+            chart_path = await self._generate_or_get_chart(state, allow_refresh=False)
 
             # Always include the support footer on the primary dashboard.
             caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
@@ -1370,7 +1373,10 @@ class TelegramCommandHandler:
         if pearl_suggestion:
             try:
                 pearl_msg = f"💬 Pearl: \"{pearl_suggestion.message}\""
-                await message_obj.chat.send_message(pearl_msg)
+                pearl_keyboard = InlineKeyboardMarkup(
+                    [self._build_pearl_suggestion_keyboard_row(pearl_suggestion)]
+                )
+                await message_obj.chat.send_message(pearl_msg, reply_markup=pearl_keyboard)
             except Exception as e:
                 logger.debug(f"Could not send Pearl notification: {e}")
 
@@ -1397,7 +1403,7 @@ class TelegramCommandHandler:
 
         try:
             message_text = await self._build_status_dashboard_message(state)
-            chart_path = await self._generate_or_get_chart(state)
+            chart_path = await self._generate_or_get_chart(state, allow_refresh=False)
             
             caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
             text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
@@ -1446,14 +1452,26 @@ class TelegramCommandHandler:
             if pearl_suggestion:
                 try:
                     pearl_msg = f"💬 Pearl: \"{pearl_suggestion.message}\""
-                    await self.application.bot.send_message(chat_id=self.chat_id, text=pearl_msg)
+                    pearl_keyboard = InlineKeyboardMarkup(
+                        [self._build_pearl_suggestion_keyboard_row(pearl_suggestion)]
+                    )
+                    await self.application.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=pearl_msg,
+                        reply_markup=pearl_keyboard,
+                    )
                 except Exception as e:
                     logger.debug(f"Could not send Pearl notification: {e}")
 
         except Exception as e:
             logger.error(f"Error sending startup dashboard: {e}", exc_info=True)
 
-    async def _generate_or_get_chart(self, state: dict, force_refresh: bool = False) -> Optional[Path]:
+    async def _generate_or_get_chart(
+        self,
+        state: dict,
+        force_refresh: bool = False,
+        allow_refresh: bool = False,
+    ) -> Optional[Path]:
         """
         Use the latest exported dashboard chart.
 
@@ -1466,6 +1484,10 @@ class TelegramCommandHandler:
         showing stale/incorrect aspect ratios on mobile.
         """
         telegram_chart = self.exports_dir / "dashboard_telegram_latest.png"
+
+        # If refresh is disabled for this call, use latest on disk only.
+        if not allow_refresh:
+            return telegram_chart if telegram_chart.exists() else None
 
         # If the agent isn't running, we can't request generation—just return whatever exists.
         try:
@@ -3165,11 +3187,11 @@ class TelegramCommandHandler:
         await self._safe_edit_or_send(query, help_text, reply_markup=reply_markup, parse_mode="Markdown")
 
     # =========================================================================
-    # Pearl JARVIS Assistant
+    # Pearl Assistant
     # =========================================================================
 
     async def handle_pearl_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /pearl command - enter Pearl chat mode (JARVIS-style)."""
+        """Handle /pearl command - enter Pearl chat mode."""
         if not update.message:
             return
         if not await self._check_authorized(update):
@@ -3193,14 +3215,13 @@ class TelegramCommandHandler:
         self._pearl_chat_active = True
         self._pearl_chat_last_activity = datetime.now(timezone.utc)
 
-        # JARVIS-style intro (friendlier than the menu-based version)
+        # Friendly intro (friendlier than the menu-based version)
         intro = (
             "💬 *Hey! Pearl here.*\n\n"
-            "Talk to me naturally - I can check trades, restart services, "
-            "explain what's happening, or just chat.\n\n"
+            "Talk to me naturally - I can explain what's happening, summarize trades, "
+            "and guide you to the right buttons.\n\n"
             "*Try:*\n"
             "• \"how did I do today?\"\n"
-            "• \"restart the agent\"\n"
             "• \"what's wrong?\"\n"
             "• \"show my trades\"\n\n"
             "Type /start to go back to the dashboard."
@@ -3219,7 +3240,7 @@ class TelegramCommandHandler:
         )
 
     async def _handle_pearl_callback(self, query: CallbackQuery, action: str) -> None:
-        """Handle Pearl JARVIS callback actions."""
+        """Handle Pearl callback actions."""
         logger.info(f"Handling Pearl callback: {action}")
         
         prefs = TelegramPrefs(self.state_dir)
@@ -5619,7 +5640,7 @@ class TelegramCommandHandler:
         )
 
     # =========================================================================
-    # PEARL CHAT (Jarvis-style read-only assistant)
+    # PEARL CHAT (Pearl-style read-only assistant)
     # =========================================================================
 
     def _pearl_memory_file(self) -> Path:
@@ -6131,7 +6152,7 @@ class TelegramCommandHandler:
 
     async def _get_pearl_response(self, user_text: str) -> str:
         """
-        Get a response from Pearl (Jarvis-style assistant).
+        Get a response from Pearl (Pearl-style assistant).
         
         Uses OpenAI chat completion with:
         - System snapshot (performance, trades, ML status)
@@ -6156,15 +6177,16 @@ class TelegramCommandHandler:
 
         # Build Pearl-specific system prompt
         pearl_persona = (
-            "You are Pearl, a Jarvis-style trading assistant for PearlAlgo. "
+            "You are Pearl, a trading assistant for PearlAlgo. "
             "You are friendly, professional, and data-driven.\n\n"
             "CRITICAL RULES:\n"
             "1. You are READ-ONLY. You CANNOT execute trades, restart services, change settings, or apply patches.\n"
             "2. If asked to perform an action, explain what menu button to use instead (e.g., 'Use 🎛️ System > Restart Agent').\n"
             "3. Base all answers on the SYSTEM SNAPSHOT data provided. If data is missing, say so.\n"
-            "4. Be concise but helpful. Use bullet points for lists.\n"
-            "5. When discussing performance, cite specific numbers from the snapshot.\n"
-            "6. Never make up data or trades that aren't in the snapshot.\n"
+            "4. Address the user directly as 'you' and 'your'.\n"
+            "5. Be concise but helpful. Use bullet points for lists.\n"
+            "6. When discussing performance, cite specific numbers from the snapshot.\n"
+            "7. Never make up data or trades that aren't in the snapshot.\n"
         )
 
         base_prompt = build_chat_system_prompt(
@@ -7065,10 +7087,11 @@ class TelegramCommandHandler:
             wr = perf.get("win_rate", 0.0) * 100
             progress = perf.get("progress_pct", 0)
             dd_risk = perf.get("drawdown_risk_pct", 0)
-            attempt_id = perf.get("attempt_id", 1)
+            attempt_id = tracker.get_display_attempt_id()
             
             # Get history summary
             history = tracker.get_history(limit=100)
+            history = [h for h in history if h.get("outcome") in ("pass", "fail")]
             total_passes = sum(1 for h in history if h.get("outcome") == "pass")
             total_fails = sum(1 for h in history if h.get("outcome") == "fail")
             
@@ -7123,6 +7146,7 @@ class TelegramCommandHandler:
             
             tracker = ChallengeTracker(state_dir=self.state_dir)
             history = tracker.get_history(limit=20)
+            history = [h for h in history if h.get("outcome") in ("pass", "fail")]
             
             if not history:
                 text = (
@@ -7136,13 +7160,9 @@ class TelegramCommandHandler:
                 # Count totals
                 total_passes = sum(1 for h in history if h.get("outcome") == "pass")
                 total_fails = sum(1 for h in history if h.get("outcome") == "fail")
-                total_manual = sum(1 for h in history if h.get("outcome", "").startswith("reset"))
                 
                 text = f"📊 *Challenge History*\n\n"
-                text += f"*Summary:* {total_passes} Wins ✅ | {total_fails} Losses ❌"
-                if total_manual > 0:
-                    text += f" | {total_manual} Resets 🔄"
-                text += "\n\n"
+                text += f"*Summary:* {total_passes} Wins ✅ | {total_fails} Losses ❌\n\n"
                 
                 # Show last 10 attempts
                 text += "*Recent Attempts:*\n"
@@ -7162,9 +7182,6 @@ class TelegramCommandHandler:
                     elif outcome == "fail":
                         outcome_emoji = "❌ LOSS"
                         pnl_str = f"-${abs(pnl):.0f}"
-                    elif outcome.startswith("reset"):
-                        outcome_emoji = "🔄 Reset"
-                        pnl_str = f"${pnl:+.0f}" if pnl != 0 else "$0"
                     else:
                         outcome_emoji = "⚪ " + outcome
                         pnl_str = f"${pnl:+.0f}"

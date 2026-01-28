@@ -1,5 +1,5 @@
 """
-Pearl Suggestions Engine - JARVIS-like proactive suggestions for the Telegram bot.
+Pearl Suggestions Engine - Pearl-style proactive suggestions for the Telegram bot.
 
 Pearl can proactively suggest helpful actions based on system state, but:
 - Always asks permission before taking action
@@ -241,7 +241,7 @@ class PearlSuggestionEngine:
             if not self._is_on_cooldown(key, self.PROBLEM_COOLDOWN_MINUTES):
                 age_str = f"{int(data_age)}m" if data_age < 60 else f"{data_age/60:.1f}h"
                 return PearlSuggestion(
-                    message=f"Data hasn't updated in {age_str}. Agent is paused. Want me to check the connection?",
+                    message=f"Data hasn't updated in {age_str}. Want me to check the connection?",
                     accept_label="Yes, check it",
                     accept_action="pearl:check_data",
                     priority=SuggestionPriority.CRITICAL,

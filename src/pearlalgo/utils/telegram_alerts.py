@@ -1873,7 +1873,7 @@ class TelegramPrefs:
     # Design policy (operator UX):
     # - Keep navigation buttons ON by default so operators can always jump back to Menu/Health.
     # - Keep pinned/edit-in-place dashboards OFF by default (optional; reduces chat spam).
-    # - Pearl suggestions are ON by default (JARVIS-like proactive help).
+    # - Pearl suggestions are ON by default (Pearl-style proactive help).
     DEFAULTS = {
         "dashboard_buttons": True,          # Show inline buttons on push dashboards + trade alerts
         "dashboard_edit_in_place": False,   # Keep a single dashboard message updated (optional)
@@ -1884,11 +1884,11 @@ class TelegramPrefs:
         "snooze_noncritical_alerts": False, # Temporarily suppress non-critical data alerts
         "snooze_until": None,               # ISO timestamp when snooze expires (if snoozed)
         "interval_notifications": True,     # Enable hourly interval notifications (chart + status)
-        # Pearl JARVIS preferences
+        # Pearl preferences
         "pearl_suggestions_enabled": True,        # Master toggle for proactive suggestions
         "pearl_suggestion_cooldown_minutes": 30,  # Min time between similar suggestions
         "pearl_greeting_enabled": True,           # Morning/evening greetings
-        "pearl_review_enabled": True,             # Periodic Jarvis-style reviews
+        "pearl_review_enabled": True,             # Periodic Pearl-style reviews
         "pearl_review_interval_minutes": 30,      # Min minutes between reviews
         "pearl_review_last_sent_at": None,        # Internal: ISO timestamp of last review
     }
@@ -1916,7 +1916,7 @@ class TelegramPrefs:
         "interval_notifications": "Hourly chart + status notifications (toggle off to disable)",
         "pearl_suggestions_enabled": "Pearl proactively offers help on dashboard (dismissible)",
         "pearl_greeting_enabled": "Pearl greets you in the morning with overnight summary",
-        "pearl_review_enabled": "Pearl sends periodic Jarvis-style status reviews",
+        "pearl_review_enabled": "Pearl sends periodic status reviews",
     }
     
     def __init__(self, state_dir=None):
@@ -2062,7 +2062,7 @@ class TelegramPrefs:
         self._prefs["snooze_until"] = None
         self._save()
     
-    # Pearl JARVIS preferences
+    # Pearl preferences
     @property
     def pearl_suggestions_enabled(self) -> bool:
         """Whether Pearl shows proactive suggestions on dashboard."""

@@ -2397,7 +2397,7 @@ class MarketAgentService:
                 logger.info(f"Sending proactive Pearl suggestion: {suggestion.message}")
                 await self.telegram_notifier.send_pearl_notification(suggestion.message)
 
-            # Periodic Jarvis-style review (status + ML snapshot)
+            # Periodic Pearl-style review (status + ML snapshot)
             if prefs.get("pearl_review_enabled", True):
                 try:
                     last_sent = prefs.get("pearl_review_last_sent_at")
@@ -2428,7 +2428,7 @@ class MarketAgentService:
             logger.warning(f"Error checking Pearl suggestions: {e}")
 
     def _build_pearl_review_message(self, state: Dict[str, Any]) -> Optional[str]:
-        """Build a concise Jarvis-style review message."""
+        """Build a concise Pearl-style review message."""
         try:
             running = "running" if state.get("agent_running") else "stopped"
             session_open = "open" if state.get("session_open") else "closed"
@@ -2457,7 +2457,7 @@ class MarketAgentService:
                 ml_summary = ""
 
             lines = [
-                f"Jarvis check-in: agent {running}, session {session_open}, futures {futures_open}.",
+                f"Pearl check-in: I'm {running}, session {session_open}, futures {futures_open}.",
                 f"Data age: {data_status}. Last signal: {last_sig_min:.0f}m ago.",
                 f"Daily P&L: {pnl_sign}${abs(daily_pnl):.2f}.",
             ]
@@ -2766,6 +2766,17 @@ class MarketAgentService:
                 cg.config.show_session_range_stats = False  # Session names only (no Range/Avg text)
                 cg.config.max_right_labels = 6  # Fewer labels for cleaner mobile view
                 cg.config.right_label_merge_ticks = 6  # More aggressive merging
+                # Conservative trade overlay: reduce clutter by removing per-trade letters.
+                # Pairing is preserved via the subtle entry→exit connector line.
+                cg.config.smart_marker_show_letters = False
+                # Path-only trade history (minimal clutter): connectors + endcaps only.
+                cg.config.smart_marker_show_entry = False
+                cg.config.smart_marker_show_exit = False
+                cg.config.smart_marker_show_path = True
+                # Path-only (clean): no arrows/fading/labels by default.
+                cg.config.smart_marker_path_arrowheads = False
+                cg.config.smart_marker_path_fade_by_age = False
+                cg.config.smart_marker_path_label_last_pnl = False
                 # Optimized panel ratios: more price space, less sub-panel space
                 cg.config.panel_ratio_price = 9.0   # Increased from 8.0 for more price area
                 cg.config.panel_ratio_volume = 1.5  # Reduced from 1.8
@@ -2784,16 +2795,84 @@ class MarketAgentService:
                         regime_info = mr.to_dict() if hasattr(mr, "to_dict") else {}
             except Exception:
                 pass
+
+            # Build trades overlay once (used both for marker overlay and P&L card/sparkline).
+            trades_for_chart = self._get_trades_for_chart(chart_data)
+            pnl_overlay = None
+            try:
+                # Use exited trades only for realized P&L.
+                closed = [t for t in trades_for_chart if isinstance(t, dict) and t.get("pnl") is not None]
+                # Sort by exit_time when available (fallback to entry_time).
+                def _ts(x):
+                    try:
+                        return pd.Timestamp(x)
+                    except Exception:
+                        return pd.Timestamp.min
+                closed.sort(key=lambda t: _ts(t.get("exit_time") or t.get("entry_time")))
+
+                pnl_vals = []
+                wins = 0
+                for t in closed:
+                    try:
+                        v = float(t.get("pnl") or 0.0)
+                    except Exception:
+                        v = 0.0
+                    pnl_vals.append(v)
+                    if v > 0:
+                        wins += 1
+                total_pnl = float(sum(pnl_vals)) if pnl_vals else 0.0
+                trades_count = int(len(pnl_vals))
+                win_rate = float((wins / trades_count) * 100.0) if trades_count > 0 else 0.0
+                curve = []
+                run = 0.0
+                for v in pnl_vals:
+                    run += float(v)
+                    curve.append(run)
+
+                # Label the window to avoid “what period is this?” ambiguity.
+                try:
+                    pnl_label = f"{str(range_label)} PnL" if range_label else "PnL"
+                except Exception:
+                    pnl_label = "PnL"
+
+                # Only show the P&L overlay when at least one trade closed in-window.
+                if trades_count > 0:
+                    pnl_overlay = {
+                        "daily_pnl": total_pnl,
+                        "trades": trades_count,
+                        "win_rate": win_rate,
+                        "label": pnl_label,
+                        # Optional: sparkline data (cumulative realized P&L across the displayed trades)
+                        "pnl_curve": curve,
+                        # Telegram-only: render a dedicated in-chart performance section.
+                        "detailed": True,
+                    }
+            except Exception:
+                pnl_overlay = None
             
+            chart_generator = self.telegram_notifier.chart_generator
+            cfg = getattr(chart_generator, "config", None)
+            prev_entry = None
+            prev_path = None
+            if cfg is not None:
+                try:
+                    prev_entry = bool(getattr(cfg, "smart_marker_show_entry", True))
+                    prev_path = bool(getattr(cfg, "smart_marker_show_path", True))
+                    cfg.smart_marker_show_entry = False
+                    cfg.smart_marker_show_path = False
+                except Exception:
+                    prev_entry = None
+                    prev_path = None
+
             chart_path = await asyncio.to_thread(
-                self.telegram_notifier.chart_generator.generate_dashboard_chart,
+                chart_generator.generate_dashboard_chart,
                 data=chart_data,
                 symbol=self.config.symbol,
                 timeframe=chosen_tf,
                 lookback_bars=min(int(bars_target), len(chart_data)),
                 range_label=range_label,
-                # Mobile-first: portrait + high DPI for phone readability.
-                figsize=(8, 12),
+                # Mobile-first portrait aspect for iPhone readability in Telegram.
+                figsize=(9, 16),
                 dpi=200,
                 render_mode="telegram",  # Explicit Telegram render mode
                 show_sessions=True,
@@ -2804,7 +2883,8 @@ class MarketAgentService:
                 show_rsi=True,
                 show_pressure=bool(self.dashboard_chart_show_pressure),
                 # Overlay recent trades (entries/exits) for transparency.
-                trades=self._get_trades_for_chart(chart_data),
+                trades=trades_for_chart,
+                pnl_overlay=pnl_overlay,
                 regime_info=regime_info,
                 # Telegram-only dashboard enhancements (fixed render profile)
                 show_ema_crossover_markers=False,
@@ -2816,6 +2896,12 @@ class MarketAgentService:
                 telegram_top_headroom_pct=0.045,
                 optimize_png=True,
             )
+            if cfg is not None and prev_entry is not None and prev_path is not None:
+                try:
+                    cfg.smart_marker_show_entry = prev_entry
+                    cfg.smart_marker_show_path = prev_path
+                except Exception:
+                    pass
             
             if chart_path and chart_path.exists():
                 # Export chart for on-demand access (Telegram command handler reuses this).
@@ -3236,9 +3322,9 @@ class MarketAgentService:
 
     def _get_trades_for_chart(self, chart_data: Optional[pd.DataFrame]) -> list[dict]:
         """
-        Build a compact list of recent trades (entries/exits) that fall within the chart window.
+        Build a compact list of recent **completed** trades within the chart window.
 
-        Used to overlay trade markers on the periodic dashboard chart for transparency.
+        Used to overlay trade history markers on the periodic dashboard chart.
         """
         try:
             if chart_data is None or not isinstance(chart_data, pd.DataFrame) or chart_data.empty:
@@ -3295,7 +3381,7 @@ class MarketAgentService:
                 if not isinstance(rec, dict):
                     continue
                 status = str(rec.get("status") or "").lower()
-                if status not in ("entered", "exited"):
+                if status not in ("exited",):
                     continue
                 sig = rec.get("signal", {}) or {}
                 sym = str(sig.get("symbol") or symbol_norm).upper()
@@ -4982,6 +5068,16 @@ class MarketAgentService:
                     total_pnl += float(perf.get("pnl") or 0.0)
                 except Exception:
                     pass
+
+        # Best-effort: update state immediately so the dashboard doesn't show stale active count.
+        try:
+            state = self.state_manager.load_state() if self.state_manager else {}
+            if isinstance(state, dict):
+                state["active_trades_count"] = 0
+                state["active_trades_unrealized_pnl"] = 0.0
+                self.state_manager.save_state(state)
+        except Exception:
+            pass
 
         self._last_close_all_at = now.isoformat()
         self._last_close_all_reason = str(reason)

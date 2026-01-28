@@ -395,6 +395,34 @@ class ChallengeTracker:
         # Return most recent first
         return list(reversed(history[-limit:]))
 
+    def get_outcome_counts(self) -> Dict[str, int]:
+        """Return counts of pass/fail outcomes from history."""
+        passes = 0
+        fails = 0
+        if self.history_file.exists():
+            try:
+                with open(self.history_file) as f:
+                    history = json.load(f)
+                if isinstance(history, list):
+                    for attempt in history:
+                        outcome = str(attempt.get("outcome", "")).lower()
+                        if outcome == "pass":
+                            passes += 1
+                        elif outcome == "fail":
+                            fails += 1
+            except Exception:
+                pass
+        return {"passed": passes, "failed": fails}
+
+    def get_display_attempt_id(self) -> int:
+        """Return attempt number based on completed outcomes (ignores resets)."""
+        counts = self.get_outcome_counts()
+        outcome = str(getattr(self.current_attempt, "outcome", "active") or "active").lower()
+        attempt_display = counts["passed"] + counts["failed"]
+        if outcome == "active":
+            attempt_display += 1
+        return max(1, int(attempt_display))
+
     def get_status_summary(self, *, bot_label: Optional[str] = None, unrealized_pnl: Optional[float] = None) -> str:
         """
         Get challenge status as a formatted string for Telegram.
@@ -425,10 +453,16 @@ class ChallengeTracker:
         if bot_label:
             header += f" ({bot_label})"
 
+        counts = self.get_outcome_counts()
+        header += f" — Attempt #{self.get_display_attempt_id()}"
+
+        totals_line = f"History — Passed: {counts['passed']} | Failed: {counts['failed']}"
+
         return (
             f"{header}\n"
             f"Balance: `${p['current_balance']:,.2f}` | {pnl_emoji} {pnl_str}\n"
             f"{target_str}\n"
-            f"Trades: {p['exited_signals']} | WR: {p['win_rate'] * 100:.0f}%"
+            f"Trades: {p['exited_signals']} | WR: {p['win_rate'] * 100:.0f}%\n"
+            f"{totals_line}"
         )
 

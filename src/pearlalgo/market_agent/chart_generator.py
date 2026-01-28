@@ -1031,7 +1031,21 @@ class ChartConfig:
     # - Entry: Large triangle with pair letter (A, B, C)
     # - Exit: Circle/Square with pair letter (A, B, C)
     # - Outcome: Color-coded (Green=Win, Red=Loss, Gray=Open)
+    # Lettering is helpful at low density, but can overwhelm dense charts.
+    # Default True to preserve current trusted behavior.
     smart_marker_size: int = 300
+    smart_marker_show_letters: bool = True
+    # Optional decluttering controls (default True to preserve current meaning)
+    smart_marker_show_entry: bool = True
+    smart_marker_show_exit: bool = True
+    smart_marker_show_path: bool = True
+    # Path-only enhancements (default off for baseline stability)
+    # - Arrowheads emulate TradingView's arrow line styles.
+    # - Fade-by-age keeps the most recent trades visually dominant.
+    # - Label last P&L adds detail without cluttering the full history.
+    smart_marker_path_arrowheads: bool = False
+    smart_marker_path_fade_by_age: bool = False
+    smart_marker_path_label_last_pnl: bool = False
 
     @classmethod
     def from_strategy_config(cls, strategy_config) -> "ChartConfig":
@@ -2795,7 +2809,17 @@ class ChartGenerator:
             else:
                 col = TEXT_SECONDARY
 
-            items.append({"xe": xe, "ye": ye, "xx": xx, "yx": yx, "col": col, "direction": direction})
+            items.append(
+                {
+                    "xe": xe,
+                    "ye": ye,
+                    "xx": xx,
+                    "yx": yx,
+                    "col": col,
+                    "direction": direction,
+                    "pnl": tr.get("pnl"),
+                }
+            )
 
         if not items:
             return
@@ -2819,6 +2843,34 @@ class ChartGenerator:
             return out
 
         marker_size = self.config.smart_marker_size
+        try:
+            show_letters = bool(getattr(self.config, "smart_marker_show_letters", True))
+        except Exception:
+            show_letters = True
+        try:
+            show_entry = bool(getattr(self.config, "smart_marker_show_entry", True))
+        except Exception:
+            show_entry = True
+        try:
+            show_exit = bool(getattr(self.config, "smart_marker_show_exit", True))
+        except Exception:
+            show_exit = True
+        try:
+            show_path = bool(getattr(self.config, "smart_marker_show_path", True))
+        except Exception:
+            show_path = True
+        try:
+            path_arrowheads = bool(getattr(self.config, "smart_marker_path_arrowheads", False))
+        except Exception:
+            path_arrowheads = False
+        try:
+            path_fade_by_age = bool(getattr(self.config, "smart_marker_path_fade_by_age", False))
+        except Exception:
+            path_fade_by_age = False
+        try:
+            path_label_last_pnl = bool(getattr(self.config, "smart_marker_path_label_last_pnl", False))
+        except Exception:
+            path_label_last_pnl = False
 
         for i, it in enumerate(items, start=1):
             label = _to_letters(i)
@@ -2826,55 +2878,138 @@ class ChartGenerator:
             direction = str(it.get("direction") or "long")
             xe, ye = it["xe"], it["ye"]
             xx, yx = it.get("xx"), it.get("yx")
+            pnl = it.get("pnl")
+
+            # Age-based emphasis: newest trades more visible.
+            if path_fade_by_age and len(items) > 1:
+                t = float(i - 1) / float(max(1, len(items) - 1))  # 0 oldest → 1 newest
+                alpha_path = 0.18 + (0.55 - 0.18) * t
+                lw_path = 0.9 + (1.7 - 0.9) * t
+            else:
+                alpha_path = 0.40
+                lw_path = 1.2
 
             # Draw Ghost Path first (behind markers)
-            if xx is not None and yx is not None:
+            if show_path and xx is not None and yx is not None:
                 try:
-                    ax.plot(
-                        [float(xe), float(xx)],
-                        [float(ye), float(yx)],
+                    if path_arrowheads:
+                        # TradingView-inspired arrow line style (arrowhead at the exit).
+                        from matplotlib.patches import FancyArrowPatch
+
+                        patch = FancyArrowPatch(
+                            (float(xe), float(ye)),
+                            (float(xx), float(yx)),
+                            arrowstyle="-|>",
+                            mutation_scale=9.0,
+                            linewidth=lw_path,
+                            linestyle="--",
+                            color=col,
+                            alpha=alpha_path,
+                            zorder=ZORDER_LEVEL_LINES,
+                        )
+                        ax.add_patch(patch)
+                    else:
+                        ax.plot(
+                            [float(xe), float(xx)],
+                            [float(ye), float(yx)],
+                            color=col,
+                            linestyle="--",
+                            linewidth=lw_path,
+                            alpha=alpha_path,
+                            zorder=ZORDER_LEVEL_LINES,
+                        )
+                except Exception:
+                    pass
+                # If we're in "path-only" mode (no entry/exit markers), draw small endcaps:
+                # - Entry: hollow circle
+                # - Exit: filled circle (slightly larger)
+                if (not show_entry) and (not show_exit):
+                    try:
+                        ax.scatter(
+                            [xe],
+                            [ye],
+                            s=24,
+                            facecolors="none",
+                            edgecolors=col,
+                            linewidths=1.2,
+                            alpha=min(1.0, alpha_path + 0.10),
+                            zorder=ZORDER_TEXT_LABELS,
+                        )
+                        ax.scatter(
+                            [xx],
+                            [yx],
+                            s=34,
+                            color=col,
+                            edgecolors=DARK_BG,
+                            linewidths=0.9,
+                            alpha=min(1.0, alpha_path + 0.15),
+                            zorder=ZORDER_TEXT_LABELS,
+                        )
+                    except Exception:
+                        pass
+
+                # Optional: label only the MOST RECENT trade's P&L at the exit.
+                if path_label_last_pnl and i == len(items):
+                    try:
+                        if pnl is not None:
+                            pnl_f = float(pnl)
+                            sign = "+" if pnl_f >= 0 else ""
+                            txt = f"{sign}${pnl_f:,.0f}"
+                            ax.text(
+                                float(xx) + 1.0,
+                                float(yx),
+                                txt,
+                                ha="left",
+                                va="center",
+                                fontsize=8,
+                                color=col,
+                                alpha=0.92,
+                                zorder=ZORDER_TEXT_LABELS,
+                                bbox=dict(
+                                    boxstyle="round,pad=0.15",
+                                    facecolor=DARK_BG,
+                                    edgecolor=col,
+                                    alpha=ALPHA_LEGEND_BG,
+                                ),
+                            )
+                    except Exception:
+                        pass
+
+            # Draw Entry Marker (Triangle with Letter)
+            if show_entry:
+                try:
+                    # Up triangle for Long, Down for Short
+                    marker_shape = "^" if direction == "long" else "v"
+                    
+                    # Draw the colored shape background
+                    ax.scatter(
+                        [xe], [ye],
+                        marker=marker_shape,
+                        s=marker_size,
                         color=col,
-                        linestyle="--",
-                        linewidth=1.2,
-                        alpha=0.4,
-                        zorder=ZORDER_LEVEL_LINES,
+                        edgecolors=DARK_BG,
+                        linewidths=1.5,
+                        zorder=ZORDER_TEXT_LABELS,
+                        alpha=0.95
                     )
+                    
+                    if show_letters:
+                        # Draw the letter inside (white text)
+                        ax.text(
+                            xe, ye,
+                            label,
+                            ha="center",
+                            va="center",
+                            fontsize=8,
+                            fontweight="bold",
+                            color="white",  # Always white for contrast against colored marker
+                            zorder=ZORDER_TEXT_LABELS + 1,
+                        )
                 except Exception:
                     pass
 
-            # Draw Entry Marker (Triangle with Letter)
-            try:
-                # Up triangle for Long, Down for Short
-                marker_shape = "^" if direction == "long" else "v"
-                
-                # Draw the colored shape background
-                ax.scatter(
-                    [xe], [ye],
-                    marker=marker_shape,
-                    s=marker_size,
-                    color=col,
-                    edgecolors=DARK_BG,
-                    linewidths=1.5,
-                    zorder=ZORDER_TEXT_LABELS,
-                    alpha=0.95
-                )
-                
-                # Draw the letter inside (white text)
-                ax.text(
-                    xe, ye,
-                    label,
-                    ha="center",
-                    va="center",
-                    fontsize=8,
-                    fontweight="bold",
-                    color="white", # Always white for contrast against colored marker
-                    zorder=ZORDER_TEXT_LABELS + 1,
-                )
-            except Exception:
-                pass
-
             # Draw Exit Marker (Circle with Letter)
-            if xx is not None and yx is not None:
+            if show_exit and xx is not None and yx is not None:
                 try:
                     # Circle for exit
                     ax.scatter(
@@ -2888,16 +3023,17 @@ class ChartGenerator:
                         alpha=0.95
                     )
                     
-                    ax.text(
-                        xx, yx,
-                        label,
-                        ha="center",
-                        va="center",
-                        fontsize=7,
-                        fontweight="bold",
-                        color="white",
-                        zorder=ZORDER_TEXT_LABELS + 1,
-                    )
+                    if show_letters:
+                        ax.text(
+                            xx, yx,
+                            label,
+                            ha="center",
+                            va="center",
+                            fontsize=7,
+                            fontweight="bold",
+                            color="white",
+                            zorder=ZORDER_TEXT_LABELS + 1,
+                        )
                 except Exception:
                     pass
 
@@ -2910,9 +3046,64 @@ class ChartGenerator:
         """Draw a compact legend explaining trade overlays on the dashboard chart."""
         try:
             lines = ["Trade overlay"]
-            lines.append("Marker: Letter pairs entry/exit")
+            try:
+                show_letters = bool(getattr(self.config, "smart_marker_show_letters", True))
+            except Exception:
+                show_letters = True
+            try:
+                show_entry = bool(getattr(self.config, "smart_marker_show_entry", True))
+            except Exception:
+                show_entry = True
+            try:
+                show_exit = bool(getattr(self.config, "smart_marker_show_exit", True))
+            except Exception:
+                show_exit = True
+            try:
+                show_path = bool(getattr(self.config, "smart_marker_show_path", True))
+            except Exception:
+                show_path = True
+
+            if show_letters and show_entry and show_exit:
+                lines.append("Marker: Letter pairs entry/exit")
+            else:
+                if show_entry and show_exit:
+                    lines.append("Marker: Entry/Exit pairs (no letters)")
+                elif show_entry and not show_exit:
+                    lines.append("Marker: Entries only")
+                elif show_exit and not show_entry:
+                    lines.append("Marker: Exits only")
+                else:
+                    lines.append("Marker: Paths only")
             lines.append("Color: green win / red loss")
-            lines.append("Shape: ▲ Entry / ● Exit")
+            if show_entry and show_exit:
+                lines.append("Shape: ▲ Entry / ● Exit")
+            elif show_entry and not show_exit:
+                lines.append("Shape: ▲ Entry")
+            elif show_exit and not show_entry:
+                lines.append("Shape: ● Exit")
+            if show_path:
+                lines.append("Path: dashed connector")
+            else:
+                lines.append("Path: hidden")
+            # Path-only enhancements (kept compact; static Telegram-friendly)
+            try:
+                path_arrow = bool(getattr(self.config, "smart_marker_path_arrowheads", False))
+            except Exception:
+                path_arrow = False
+            try:
+                path_fade = bool(getattr(self.config, "smart_marker_path_fade_by_age", False))
+            except Exception:
+                path_fade = False
+            try:
+                path_last = bool(getattr(self.config, "smart_marker_path_label_last_pnl", False))
+            except Exception:
+                path_last = False
+            if path_arrow and show_path:
+                lines.append("Arrow: entry→exit")
+            if path_fade and show_path:
+                lines.append("Opacity: newer brighter")
+            if path_last and show_path:
+                lines.append("Label: last P&L")
             
             if ema_crossovers_shown:
                 lines.append("EMA cross: cyan/pink")
@@ -4205,6 +4396,7 @@ class ChartGenerator:
         show_ema_crossover_markers: bool = True,
         show_trade_paths: bool = False,
         show_trade_pair_numbers: bool = False,
+        use_addplot_trade_markers: bool = False,
         trade_paths_max: int = 6,
         trade_pair_numbers_max: int = 6,
         trade_markers_max: int = 20,
@@ -5004,31 +5196,198 @@ class ChartGenerator:
                             daily_pnl = pnl_overlay.get("daily_pnl", 0.0)
                             trades_count = pnl_overlay.get("trades", 0)
                             win_rate = pnl_overlay.get("win_rate", 0.0)
+                            label = str(pnl_overlay.get("label") or "").strip()
+                            detailed = bool(pnl_overlay.get("detailed", False))
                             
                             pnl_color = CANDLE_UP if daily_pnl >= 0 else CANDLE_DOWN
                             pnl_sign = "+" if daily_pnl >= 0 else ""
                             
                             pnl_lines = [f"{pnl_sign}${daily_pnl:,.2f}"]
+                            meta_parts: List[str] = []
+                            if label:
+                                meta_parts.append(label)
                             if trades_count > 0:
-                                pnl_lines.append(f"{trades_count} trades | {win_rate:.0f}% WR")
-                            
-                            ax_price.text(
-                                0.98, 0.03,
-                                "\n".join(pnl_lines),
-                                transform=ax_price.transAxes,
-                                fontsize=FONT_SIZE_SUMMARY,
-                                color=pnl_color,
-                                alpha=0.9,
-                                verticalalignment='bottom',
-                                horizontalalignment='right',
-                                bbox=dict(
-                                    boxstyle='round,pad=0.3',
-                                    facecolor=DARK_BG,
-                                    edgecolor=pnl_color,
-                                    alpha=ALPHA_LEGEND_BG,
-                                ),
-                                zorder=ZORDER_TEXT_LABELS,
-                            )
+                                meta_parts.append(f"{trades_count} trades")
+                                meta_parts.append(f"{win_rate:.0f}% WR")
+                            if meta_parts:
+                                pnl_lines.append(" | ".join(meta_parts))
+
+                            # Optional: in-chart performance section (larger than the sparkline).
+                            # Enabled only when `pnl_curve` is provided to avoid changing default charts.
+                            curve_raw = pnl_overlay.get("pnl_curve")
+                            if detailed and isinstance(curve_raw, (list, tuple)) and len(curve_raw) >= 2:
+                                try:
+                                    y_vals = [float(v) for v in curve_raw if v is not None]
+                                except Exception:
+                                    y_vals = []
+                                if len(y_vals) >= 2:
+                                    try:
+                                        y = np.array(y_vals, dtype=float)
+                                        x = np.arange(len(y), dtype=float)
+                                        cummax = np.maximum.accumulate(y)
+                                        dd = y - cummax
+                                        max_dd = float(abs(np.min(dd))) if len(dd) else 0.0
+
+                                        # Dedicated panel in the bottom-right of the PRICE panel.
+                                        ax_panel = ax_price.inset_axes([0.63, 0.03, 0.35, 0.22])
+                                        ax_panel.set_zorder(ZORDER_TEXT_LABELS)
+                                        ax_panel.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.45))
+                                        ax_panel.set_xticks([])
+                                        ax_panel.set_yticks([])
+
+                                        # Border in P&L color for quick sign recognition.
+                                        try:
+                                            for sp in ax_panel.spines.values():
+                                                sp.set_visible(True)
+                                                sp.set_edgecolor(pnl_color)
+                                                sp.set_alpha(0.55)
+                                                sp.set_linewidth(1.0)
+                                        except Exception:
+                                            pass
+
+                                        # Title/metrics inside the panel (top-left)
+                                        stats_lines = [
+                                            f"{pnl_sign}${daily_pnl:,.2f}  •  {label}".strip(),
+                                            f"{trades_count} trades  •  {win_rate:.0f}% WR  •  MaxDD ${max_dd:,.0f}",
+                                        ]
+                                        ax_panel.text(
+                                            0.04,
+                                            0.96,
+                                            "\n".join([s for s in stats_lines if s]),
+                                            transform=ax_panel.transAxes,
+                                            ha="left",
+                                            va="top",
+                                            fontsize=8,
+                                            color=TEXT_PRIMARY,
+                                            alpha=0.92,
+                                        )
+
+                                        # Equity sub-plot (top area)
+                                        ax_eq = ax_panel.inset_axes([0.05, 0.38, 0.92, 0.54])
+                                        ax_eq.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
+                                        ax_eq.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.7)
+                                        ax_eq.plot(x, y, color=TEXT_PRIMARY, linewidth=1.2, alpha=0.9)
+                                        ax_eq.fill_between(x, 0.0, y, where=(y >= 0), color=CANDLE_UP, alpha=0.22)
+                                        ax_eq.fill_between(x, 0.0, y, where=(y < 0), color=CANDLE_DOWN, alpha=0.22)
+                                        ax_eq.scatter(
+                                            [x[-1]],
+                                            [y[-1]],
+                                            s=20,
+                                            color=pnl_color,
+                                            edgecolors=DARK_BG,
+                                            linewidths=0.8,
+                                            zorder=ZORDER_TEXT_LABELS,
+                                        )
+
+                                        # Drawdown sub-plot (bottom area)
+                                        ax_dd = ax_panel.inset_axes([0.05, 0.10, 0.92, 0.22])
+                                        ax_dd.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
+                                        ax_dd.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.7)
+                                        ax_dd.fill_between(x, 0.0, dd, color=CANDLE_DOWN, alpha=0.30)
+
+                                        # Tight framing
+                                        try:
+                                            ymin = float(np.min(y))
+                                            ymax = float(np.max(y))
+                                            yr = ymax - ymin
+                                            pad = (yr * 0.12) if yr > 0 else max(
+                                                1.0, abs(ymax) * 0.15, abs(ymin) * 0.15
+                                            )
+                                            ax_eq.set_xlim(float(x[0]), float(x[-1]))
+                                            ax_eq.set_ylim(ymin - pad, ymax + pad)
+                                            ddmin = float(np.min(dd)) if len(dd) else 0.0
+                                            ax_dd.set_xlim(float(x[0]), float(x[-1]))
+                                            ax_dd.set_ylim(ddmin * 1.15, 0.0 + max(1.0, abs(ddmin) * 0.05))
+                                        except Exception:
+                                            pass
+
+                                        for ax_small in (ax_eq, ax_dd):
+                                            ax_small.set_xticks([])
+                                            ax_small.set_yticks([])
+                                            try:
+                                                for sp in ax_small.spines.values():
+                                                    sp.set_visible(False)
+                                            except Exception:
+                                                pass
+                                    except Exception:
+                                        pass
+                            else:
+                                # Default (compact): text card + small sparkline above it.
+                                ax_price.text(
+                                    0.98, 0.03,
+                                    "\n".join(pnl_lines),
+                                    transform=ax_price.transAxes,
+                                    fontsize=FONT_SIZE_SUMMARY,
+                                    color=pnl_color,
+                                    alpha=0.9,
+                                    verticalalignment='bottom',
+                                    horizontalalignment='right',
+                                    bbox=dict(
+                                        boxstyle='round,pad=0.3',
+                                        facecolor=DARK_BG,
+                                        edgecolor=pnl_color,
+                                        alpha=ALPHA_LEGEND_BG,
+                                    ),
+                                    zorder=ZORDER_TEXT_LABELS,
+                                )
+
+                                if isinstance(curve_raw, (list, tuple)) and len(curve_raw) >= 2:
+                                    try:
+                                        y_vals = [float(v) for v in curve_raw if v is not None]
+                                    except Exception:
+                                        y_vals = []
+                                    if len(y_vals) >= 2:
+                                        try:
+                                            y = np.array(y_vals, dtype=float)
+                                            x = np.arange(len(y), dtype=float)
+
+                                            # Place sparkline just above the P&L text card (bottom-right).
+                                            ax_pnl = ax_price.inset_axes([0.70, 0.12, 0.28, 0.10])
+                                            ax_pnl.set_zorder(ZORDER_TEXT_LABELS)
+                                            ax_pnl.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.40))
+
+                                            # Border in P&L color for quick sign recognition.
+                                            try:
+                                                for sp in ax_pnl.spines.values():
+                                                    sp.set_visible(True)
+                                                    sp.set_edgecolor(pnl_color)
+                                                    sp.set_alpha(0.55)
+                                                    sp.set_linewidth(1.0)
+                                            except Exception:
+                                                pass
+
+                                            # Core sparkline + 0 baseline
+                                            ax_pnl.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.7)
+                                            ax_pnl.plot(x, y, color=TEXT_PRIMARY, linewidth=1.2, alpha=0.9)
+                                            ax_pnl.fill_between(x, 0.0, y, where=(y >= 0), color=CANDLE_UP, alpha=0.22)
+                                            ax_pnl.fill_between(x, 0.0, y, where=(y < 0), color=CANDLE_DOWN, alpha=0.22)
+
+                                            # Last point marker
+                                            ax_pnl.scatter(
+                                                [x[-1]],
+                                                [y[-1]],
+                                                s=22,
+                                                color=pnl_color,
+                                                edgecolors=DARK_BG,
+                                                linewidths=0.8,
+                                                zorder=ZORDER_TEXT_LABELS,
+                                            )
+
+                                            # Tight framing with padding
+                                            ymin = float(np.min(y))
+                                            ymax = float(np.max(y))
+                                            yr = ymax - ymin
+                                            pad = (yr * 0.12) if yr > 0 else max(
+                                                1.0, abs(ymax) * 0.15, abs(ymin) * 0.15
+                                            )
+                                            ax_pnl.set_xlim(float(x[0]), float(x[-1]))
+                                            ax_pnl.set_ylim(ymin - pad, ymax + pad)
+
+                                            # No ticks/labels (sparkline only)
+                                            ax_pnl.set_xticks([])
+                                            ax_pnl.set_yticks([])
+                                        except Exception:
+                                            pass
                         except Exception as e:
                             logger.debug(f"Error adding P&L overlay: {e}")
 

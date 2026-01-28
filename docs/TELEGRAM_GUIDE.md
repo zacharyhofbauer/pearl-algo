@@ -40,11 +40,11 @@ python3 scripts/telegram/set_bot_commands.py
 The command handler intentionally keeps slash commands minimal:
 
 - `/start`: Show the main dashboard (menu)
-- `/pearl`: Talk to Pearl (JARVIS-like assistant)
+- `/pearl`: Talk to Pearl (assistant)
 
 Everything else is accessed via the button menus (safer and easier to operate on mobile).
 
-## Pearl - Your JARVIS-like Assistant
+## Pearl - Your Assistant
 
 Pearl is a conversational AI assistant that can help you manage your trading system naturally.
 
@@ -83,7 +83,7 @@ Or tell Pearl: "turn off suggestions"
 
 ## UI policy (do not drift)
 
-- **Two commands only**: `/start` (dashboard) and `/pearl` (JARVIS assistant).
+- **Two commands only**: `/start` (dashboard) and `/pearl` (assistant).
 - **Menus for quick actions**: keep operations behind inline buttons (mobile-first + safer).
 - **Pearl for everything else**: conversational commands, diagnostics, help.
 - **BotFather command list**: should show `/start` and `/pearl`. If other commands appear, re-run `python3 scripts/telegram/set_bot_commands.py` and restart the handler.

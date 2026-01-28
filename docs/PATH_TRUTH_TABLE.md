@@ -168,7 +168,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.utils.openai_client` – OpenAI client wrapper
   - `pearlalgo.utils.service_controller` – Shell/script orchestration (remote control)
   - `pearlalgo.utils.absolute_mode` – Absolute mode utilities
-  - `pearlalgo.utils.pearl_suggestions` – Pearl suggestions engine (JARVIS-like)
+  - `pearlalgo.utils.pearl_suggestions` – Pearl suggestions engine
 - **Docs**:
   - `docs/PROJECT_SUMMARY.md` (components and cross‑cutting sections)
 

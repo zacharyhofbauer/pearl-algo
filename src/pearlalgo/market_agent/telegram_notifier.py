@@ -1288,7 +1288,7 @@ class MarketAgentTelegramNotifier:
 
     async def send_pearl_notification(self, message: str) -> bool:
         """
-        Send a standalone Pearl (Jarvis) notification.
+        Send a standalone Pearl notification.
         
         Args:
             message: The message text (e.g. "Good morning...")

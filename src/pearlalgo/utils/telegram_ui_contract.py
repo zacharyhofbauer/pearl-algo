@@ -34,7 +34,7 @@ PREFIX_CONFIRM = "confirm:"
 PREFIX_SIGNAL_DETAIL = "signal_detail:"
 PREFIX_PATCH = "patch:"
 PREFIX_AIOPS = "aiops:"
-PREFIX_PEARL = "pearl:"  # Pearl JARVIS suggestions and actions
+PREFIX_PEARL = "pearl:"  # Pearl suggestions and actions
 
 # ---------------------------------------------------------------------------
 # Menu IDs (used with menu: prefix)
@@ -89,7 +89,7 @@ ACTION_REFRESH_DASHBOARD = "refresh_dashboard"
 ACTION_TOGGLE_CHART = "toggle_chart"
 
 # ---------------------------------------------------------------------------
-# Pearl JARVIS Actions (used with pearl: prefix)
+# Pearl Actions (used with pearl: prefix)
 # ---------------------------------------------------------------------------
 # Pearl suggestion responses
 PEARL_DISMISS = "dismiss"                    # User dismissed suggestion
@@ -340,7 +340,7 @@ def callback_back() -> str:
 
 
 def callback_pearl(action: str) -> str:
-    """Build a Pearl JARVIS action callback."""
+    """Build a Pearl action callback."""
     return f"{PREFIX_PEARL}{action}"
 
 

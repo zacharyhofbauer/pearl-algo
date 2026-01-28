@@ -44,6 +44,27 @@ service:
   velocity_mode_enabled: true
   velocity_atr_expansion_threshold: 1.2
   velocity_volume_spike_threshold: 2.0
+learning:
+  enabled: true
+  mode: shadow
+  min_samples_per_type: 10
+  explore_rate: 0.1
+  decision_threshold: 0.3
+  max_size_multiplier: 1.5
+  min_size_multiplier: 0.5
+ml_filter:
+  enabled: true
+  mode: shadow
+  # Shadow-only pass/fail labeling for lift measurement (no trading impact).
+  shadow_threshold: 0.8
+  training_max_samples: 2000
+  min_training_samples: 30
+  retrain_interval_days: 7
+  min_probability: 0.55
+  high_probability: 0.70
+  require_lift_to_block: true
+  lift_min_trades: 50
+  lift_min_winrate_delta: 0.05
 circuit_breaker:
   max_consecutive_errors: 10
   max_connection_failures: 10
