@@ -30,8 +30,6 @@ except Exception:
     SQLITE_AVAILABLE = False
     TradeDatabase = None  # type: ignore
 
-# Import get_utc_timestamp is already in the import above
-
 
 def _to_json_safe(obj):
     """

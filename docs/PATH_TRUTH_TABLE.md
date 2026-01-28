@@ -7,6 +7,16 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Logical component**: Market Agent Service (one process per market; production trading loop)
 - **Python entry module**: `pearlalgo.market_agent.main`
 - **Primary service class**: `pearlalgo.market_agent.service.MarketAgentService`
+- **Supporting modules**:
+  - `pearlalgo.market_agent.data_fetcher` – Data fetching and buffer management
+  - `pearlalgo.market_agent.state_manager` – State persistence (JSON/JSONL)
+  - `pearlalgo.market_agent.performance_tracker` – Performance metrics tracking
+  - `pearlalgo.market_agent.telegram_notifier` – Telegram notifications
+  - `pearlalgo.market_agent.health_monitor` – Health monitoring
+  - `pearlalgo.market_agent.chart_generator` – mplfinance chart generation
+  - `pearlalgo.market_agent.challenge_tracker` – Challenge/competition tracking
+  - `pearlalgo.market_agent.notification_queue` – Notification queuing
+  - `pearlalgo.market_agent.trading_circuit_breaker` – Circuit breaker logic
 - **Lifecycle scripts**:
   - `scripts/lifecycle/agent.sh` (start/stop/restart/status; `--market NQ|ES|GC`)
   - `scripts/lifecycle/check_agent_status.sh` (state summary; `--market NQ|ES|GC`)
@@ -31,8 +41,10 @@ Canonical mapping between logical components, Python entry points, shell scripts
 
 - **Logical component**: IBKR Gateway + API connectivity
 - **Python modules**:
-  - `pearlalgo.data_providers.ibkr.ibkr_provider`
-  - `pearlalgo.data_providers.ibkr_executor`
+  - `pearlalgo.data_providers.base` – Abstract data provider interface
+  - `pearlalgo.data_providers.factory` – Provider factory (creates provider instances)
+  - `pearlalgo.data_providers.ibkr.ibkr_provider` – IBKR data provider implementation
+  - `pearlalgo.data_providers.ibkr_executor` – Thread-safe IBKR executor
 - **Shell scripts** (`scripts/gateway/`):
   - Canonical entry: `gateway.sh` (subcommands for start/stop/status/2FA/VNC/setup)
 - **Docs**:
@@ -56,6 +68,8 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `smoke_test_ibkr.py`
   - `smoke_multi_market.py`
   - `check_no_secrets.py` – secret detection guardrail
+  - `generate_coverage_badge.py` – coverage badge generation
+  - `regenerate_chart_baselines.py` – chart visual regression baselines
 - **Docs**:
   - `docs/TESTING_GUIDE.md`
   - `docs/MOCK_DATA_WARNING.md`
@@ -64,14 +78,21 @@ Canonical mapping between logical components, Python entry points, shell scripts
 ## Execution (ATS)
 
 - **Logical component**: Automated Trading System (execution + learning)
-- **Python modules**:
+- **Python modules** (Execution layer):
   - `pearlalgo.execution.base` – ExecutionAdapter interface, ExecutionConfig
   - `pearlalgo.execution.ibkr.adapter` – IBKR bracket order implementation
   - `pearlalgo.execution.ibkr.tasks` – Order placement tasks
+- **Python modules** (Learning layer):
   - `pearlalgo.learning.bandit_policy` – Thompson sampling policy
   - `pearlalgo.learning.policy_state` – Policy statistics persistence
+  - `pearlalgo.learning.contextual_bandit` – Contextual bandit learning
+  - `pearlalgo.learning.feature_engineer` – Feature engineering for ML
+  - `pearlalgo.learning.ensemble_scorer` – Ensemble scoring system
+  - `pearlalgo.learning.ml_signal_filter` – ML-based signal filtering
+  - `pearlalgo.learning.trade_database` – Trade database for learning
 - **State files** (in `data/agent_state/<MARKET>/`):
   - `policy_state.json` – Per-signal-type bandit statistics
+  - `trades.db` – SQLite trade database
 - **Docs**:
   - `docs/ATS_ROLLOUT_GUIDE.md` – Safe rollout procedures
 
@@ -80,13 +101,17 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Logical component**: Configuration and settings
 - **Config files**:
   - `config/config.yaml` – primary service + strategy configuration
+  - `config/markets/*.yaml` – per-market configuration overlays
   - `.env` (from `env.example`) – environment variables (Telegram, IBKR, provider selection)
 - **Python modules**:
   - `pearlalgo.config.config_file` – unified YAML loader with env substitution
   - `pearlalgo.config.config_loader` – service config with defaults
+  - `pearlalgo.config.config_schema` – configuration schema validation
+  - `pearlalgo.config.config_view` – configuration view/access layer
   - `pearlalgo.config.settings` – Pydantic settings for infrastructure
 - **Docs**:
   - `docs/PROJECT_SUMMARY.md` (configuration section)
+  - `docs/CONFIGURATION_MAP.md`
   - `docs/MARKET_AGENT_GUIDE.md` (configuration snippets)
 
 ## Maintenance
@@ -94,6 +119,8 @@ Canonical mapping between logical components, Python entry points, shell scripts
 - **Logical component**: Repository hygiene and cleanup
 - **Shell scripts** (`scripts/maintenance/`):
   - `purge_runtime_artifacts.sh` – safe cleanup of runtime/build artifacts (requires `--yes` flag)
+- **Python scripts**:
+  - `scripts/reset_30d_performance.py` – reset 30-day performance (testing/debugging)
 - **Docs**:
   - `docs/SCRIPTS_TAXONOMY.md` (maintenance section)
 
@@ -110,18 +137,34 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `docs/PROJECT_SUMMARY.md` (status server section)
   - `docs/SCRIPTS_TAXONOMY.md` (monitoring section)
 
+## Storage
+
+- **Logical component**: Persistence layer
+- **Python modules**:
+  - `pearlalgo.storage.async_sqlite_queue` – Async SQLite queue for state management
+- **State directories**:
+  - `data/agent_state/<MARKET>/` – Per-market service state
+
 ## Utilities / Cross‑cutting Concerns
 
-- **Logical component**: Logging, error handling, retry, paths, data quality
+- **Logical component**: Logging, error handling, retry, paths, data quality, and shared helpers
 - **Python modules**:
-  - `pearlalgo.utils.logger`, `pearlalgo.utils.logging_config`
-  - `pearlalgo.utils.error_handler`
-  - `pearlalgo.utils.retry`
-  - `pearlalgo.utils.paths`
-  - `pearlalgo.utils.data_quality`
-  - `pearlalgo.utils.market_hours`
-  - `pearlalgo.utils.vwap`
-  - `pearlalgo.utils.telegram_alerts`
+  - `pearlalgo.utils.logger` – Shared logger instance (loguru-backed)
+  - `pearlalgo.utils.logging_config` – Logging setup helpers
+  - `pearlalgo.utils.error_handler` – Error classification and handling
+  - `pearlalgo.utils.retry` – Async retry with exponential backoff
+  - `pearlalgo.utils.paths` – Path and timestamp helpers
+  - `pearlalgo.utils.data_quality` – Data freshness and validation
+  - `pearlalgo.utils.market_hours` – Market hours logic (CME)
+  - `pearlalgo.utils.vwap` – VWAP computation
+  - `pearlalgo.utils.cadence` – Cadence scheduler and metrics
+  - `pearlalgo.utils.sparkline` – Progress bar rendering helpers
+  - `pearlalgo.utils.volume_pressure` – Signed-volume pressure computations
+  - `pearlalgo.utils.telegram_alerts` – Core Telegram messaging
+  - `pearlalgo.utils.telegram_ui_contract` – Telegram UI contract
+  - `pearlalgo.utils.openai_client` – OpenAI client wrapper
+  - `pearlalgo.utils.service_controller` – Shell/script orchestration (remote control)
+  - `pearlalgo.utils.absolute_mode` – Absolute mode utilities
 - **Docs**:
   - `docs/PROJECT_SUMMARY.md` (components and cross‑cutting sections)
 

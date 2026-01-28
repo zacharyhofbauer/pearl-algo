@@ -537,8 +537,6 @@ class MarketAgentTelegramNotifier:
             if bid_depth > 0 or ask_depth > 0:
                 message += f"  Bid Depth: {bid_depth:,} | Ask Depth: {ask_depth:,}\n"
         
-        # TODO: Add historical edge when available
-        # message += f"*EDGE:* {historical_wr:.0%} Historical WR\n\n"
         message += "\n"
 
         # Context section

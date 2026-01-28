@@ -242,43 +242,6 @@ class CadenceScheduler:
         return (self._velocity_mode_active, self._velocity_reason)
 
 
-def compute_sleep_time_fixed_cadence(
-    cycle_start_mono: float,
-    interval_seconds: float,
-    next_scheduled: Optional[float] = None,
-) -> tuple[float, float, int]:
-    """
-    Pure function version for testing without scheduler state.
-    
-    Args:
-        cycle_start_mono: Monotonic time when cycle started
-        interval_seconds: Target interval in seconds
-        next_scheduled: Previous scheduled time (None for first cycle)
-    
-    Returns:
-        Tuple of (sleep_time, new_next_scheduled, missed_cycles)
-    """
-    now_mono = time.monotonic()
-    
-    if next_scheduled is None:
-        # First cycle
-        new_next = now_mono + interval_seconds
-        return (interval_seconds, new_next, 0)
-    
-    # Fixed cadence
-    new_next = next_scheduled + interval_seconds
-    missed = 0
-    
-    while new_next < now_mono:
-        new_next += interval_seconds
-        missed += 1
-    
-    sleep_time = max(0.0, new_next - now_mono)
-    return (sleep_time, new_next, missed)
-
-
-
-
 
 
 

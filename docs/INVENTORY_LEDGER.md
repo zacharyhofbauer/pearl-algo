@@ -1,6 +1,7 @@
 # Repository Inventory Ledger
 
 Generated: 2026-01-21  
+Updated: 2026-01-28  
 Purpose: File-by-file keep/delete decisions grounded in the current tree.
 
 ## Decision Legend
@@ -20,12 +21,13 @@ Purpose: File-by-file keep/delete decisions grounded in the current tree.
 | `data_providers/*` | KEEP | IBKR data provider + executor |
 | `market_agent/*` | KEEP | Main service loop + Telegram UI + state |
 | `trading_bots/pearl_bot_auto.py` | KEEP | Main runtime strategy (single-file, from Pine Scripts) |
-| `trading_bots/*` | KEEP | Additional trading bot variants |
 | `execution/base.py` | KEEP | Execution interfaces |
 | `execution/ibkr/*` | KEEP | IBKR execution adapter |
 | `learning/*` | KEEP | Bandit + contextual learning + ML filter + trade DB |
 | `storage/*` | KEEP | Async SQLite queue (enabled in config) |
 | `utils/*` | KEEP | Cross-cutting helpers |
+
+Note: `trading_bots/` contains only `pearl_bot_auto.py` — all other strategy variants have been consolidated into this single implementation.
 
 ### Removed Packages (DELETE)
 
