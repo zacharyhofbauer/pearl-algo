@@ -298,6 +298,24 @@ class MarketAgentTelegramNotifier:
         # Confidence (single line)
         message += f"\n{conf_emoji} {confidence:.0%} confidence ({conf_tier})\n"
 
+        # ML Confidence (if available)
+        ml_pred = signal.get("_ml_prediction")
+        if isinstance(ml_pred, dict):
+            try:
+                ml_prob = float(ml_pred.get("win_probability", 0.0) or 0.0)
+                ml_pass = bool(ml_pred.get("pass_filter", True))
+                
+                ml_emoji = "🧠"
+                if ml_prob >= 0.7:
+                    ml_emoji = "🔥"
+                elif ml_prob < 0.55:
+                    ml_emoji = "⚠️"
+                
+                ml_status = "High" if ml_prob >= 0.7 else "Med" if ml_prob >= 0.55 else "Low"
+                message += f"{ml_emoji} ML Confidence: {ml_prob:.0%} ({ml_status})\n"
+            except Exception:
+                pass
+
         # Learning / policy (compact, always safe to omit)
         policy = signal.get("_policy")
         if isinstance(policy, dict) and policy.get("signal_type"):

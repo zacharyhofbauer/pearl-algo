@@ -1385,8 +1385,9 @@ def generate_signals(
         
         if confidence >= config["min_confidence"]:
             entry_price = close
-            sl_mult = config.get("stop_loss_atr_mult", 3.5)  # WIDE stops
-            tp_mult = config.get("take_profit_atr_mult", 5.0)  # Let winners run
+            # Use dynamic regime-adaptive parameters
+            sl_mult = dynamic_sl_mult
+            tp_mult = dynamic_tp_mult
             stop_loss = entry_price - (atr * sl_mult)
             take_profit = entry_price + (atr * tp_mult)
             
@@ -1535,8 +1536,9 @@ def generate_signals(
         
         if confidence >= config["min_confidence"]:
             entry_price = close
-            sl_mult = config.get("stop_loss_atr_mult", 3.5)  # WIDE stops
-            tp_mult = config.get("take_profit_atr_mult", 5.0)  # Let winners run
+            # Use dynamic regime-adaptive parameters
+            sl_mult = dynamic_sl_mult
+            tp_mult = dynamic_tp_mult
             stop_loss = entry_price + (atr * sl_mult)
             take_profit = entry_price - (atr * tp_mult)
             
