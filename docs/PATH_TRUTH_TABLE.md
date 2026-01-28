@@ -70,6 +70,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `smoke_multi_market.py`
   - `check_no_secrets.py` – secret detection guardrail
   - `check_doc_references.py` – documentation path reference audit
+  - `report_orphan_modules.py` – orphan module report (reachability from entrypoints/tests)
   - `generate_coverage_badge.py` – coverage badge generation
   - `regenerate_chart_baselines.py` – chart visual regression baselines
 - **Docs**:

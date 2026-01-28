@@ -1190,6 +1190,16 @@ Use this document as the canonical reference for improvement iterations.
 
 ---
 
+## Trust Assessment (2026-01-28)
+
+- **Status**: High trust after cleanup and verification.
+- **Evidence**:
+  - CI guardrails enforced (doc reference audit, boundary checks, secrets scan, smoke tests, unit tests).
+  - IBKR Gateway install externalized with CI guard against re-vendoring.
+  - All unit tests pass (`make ci`), with coverage above the 40% gate.
+
+---
+
 ## Quick Reference
 
 ### Essential Commands

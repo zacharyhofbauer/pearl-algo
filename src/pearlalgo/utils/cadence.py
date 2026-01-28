@@ -242,6 +242,39 @@ class CadenceScheduler:
         return (self._velocity_mode_active, self._velocity_reason)
 
 
+def compute_sleep_time_fixed_cadence(
+    cycle_start_mono: float,
+    interval_seconds: float,
+    next_scheduled: Optional[float],
+) -> tuple[float, float, int]:
+    """
+    Pure helper for fixed-cadence scheduling.
+
+    Args:
+        cycle_start_mono: Monotonic start time of the current cycle.
+        interval_seconds: Target cadence interval in seconds.
+        next_scheduled: Next scheduled start time (monotonic), or None for first cycle.
+
+    Returns:
+        Tuple of (sleep_time_seconds, next_scheduled_seconds, missed_cycles).
+    """
+    if interval_seconds <= 0:
+        raise ValueError(f"Interval must be positive, got {interval_seconds}")
+
+    if next_scheduled is None:
+        next_scheduled = cycle_start_mono + interval_seconds
+        return interval_seconds, next_scheduled, 0
+
+    next_scheduled += interval_seconds
+    missed = 0
+    while next_scheduled < cycle_start_mono:
+        next_scheduled += interval_seconds
+        missed += 1
+
+    sleep_time = max(0.0, next_scheduled - cycle_start_mono)
+    return sleep_time, next_scheduled, missed
+
+
 
 
 

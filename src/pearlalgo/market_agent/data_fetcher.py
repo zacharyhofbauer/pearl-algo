@@ -374,6 +374,8 @@ class MarketAgentDataFetcher:
                 if not df.empty:
                     # Use centralized normalization to avoid double-reset_index issues
                     self._data_buffer = self._normalize_to_strategy_buffer(df, self._buffer_size)
+            if self._data_buffer is None:
+                self._data_buffer = pd.DataFrame()
 
             # Fetch multi-timeframe data (optionally cached)
             df_5m, df_15m = await self._fetch_multitimeframe_data(end)

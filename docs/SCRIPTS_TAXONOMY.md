@@ -56,6 +56,8 @@ Backtesting scripts for strategy validation on historical data.
   - **Role**: Secret detection guardrail; scans codebase for accidentally committed secrets/tokens.
 - `check_doc_references.py`
   - **Role**: Documentation reference audit; verifies doc paths exist in repo.
+- `report_orphan_modules.py`
+  - **Role**: Orphan-module report; lists src modules not reachable from entry points/tests/scripts.
 
 ## Maintenance (`scripts/maintenance/`)
 
