@@ -1,5 +1,4 @@
 # Large vendored binaries - exclude from Cursor searches
-# Use /ibkr/ to only match the root-level Gateway install, not src/**/ibkr/
-/ibkr/
-
-
+# Keep the root visible for README/.gitkeep, but hide vendor subtrees.
+/ibkr/ibc/
+/ibkr/Jts/

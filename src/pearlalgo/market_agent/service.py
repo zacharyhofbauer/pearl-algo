@@ -196,6 +196,8 @@ class MarketAgentService:
         data_settings = service_config.get("data", {})
         telegram_ui_settings = service_config.get("telegram_ui", {}) or {}
         auto_flat_settings = service_config.get("auto_flat", {}) or {}
+        self._risk_settings = service_config.get("risk", {}) or {}
+        self._strategy_settings = service_config.get("strategy", {}) or {}
         
         # ==========================================================================
         # TRADING CIRCUIT BREAKER (risk management for consecutive losses/drawdown)
@@ -327,6 +329,19 @@ class MarketAgentService:
         self._ml_blocking_allowed: bool = False
         self._ml_lift_metrics: Dict[str, Any] = {}
         self._ml_lift_last_eval_at: Optional[datetime] = None
+
+        # ML sizing/priority adjustments (shadow-safe; does not bypass risk gates)
+        self._ml_adjust_sizing = bool(ml_cfg.get("adjust_sizing", False))
+        try:
+            self._ml_size_multiplier_min = float(ml_cfg.get("size_multiplier_min", 1.0) or 1.0)
+            self._ml_size_multiplier_max = float(ml_cfg.get("size_multiplier_max", 1.5) or 1.5)
+        except Exception:
+            self._ml_size_multiplier_min = 1.0
+            self._ml_size_multiplier_max = 1.5
+        try:
+            self._ml_size_threshold = float(ml_cfg.get("high_probability", 0.7) or 0.7)
+        except Exception:
+            self._ml_size_threshold = 0.7
 
         # ML signal filter (shadow-only measurement by default; never blocks unless explicitly enabled elsewhere)
         self._ml_filter_enabled: bool = bool(ml_cfg.get("enabled", False))
@@ -1587,6 +1602,14 @@ class MarketAgentService:
                         signal["_ml_prediction"] = None
             except Exception as e:
                 logger.debug(f"ML prediction failed (non-fatal): {e}")
+
+            # ==========================================================================
+            # ML OPPORTUNITY SIZING (shadow-safe): adjust size/priority within risk gates
+            # ==========================================================================
+            try:
+                self._apply_ml_opportunity_sizing(signal)
+            except Exception as e:
+                logger.debug(f"ML sizing adjustment failed (non-fatal): {e}")
             
             # Track signal generation (delegates to state_manager for persistence)
             signal_id = self.performance_tracker.track_signal_generated(signal)
@@ -1747,12 +1770,18 @@ class MarketAgentService:
             logger.info(f"Processing signal: {signal_type} {signal_direction}")
 
             # Always send entry notification as the canonical alert
+            entry_priority = Priority.HIGH
+            try:
+                if bool(signal.get("_ml_priority") == "critical"):
+                    entry_priority = Priority.CRITICAL
+            except Exception:
+                entry_priority = Priority.HIGH
             queued = await self.notification_queue.enqueue_entry(
                 signal_id=str(signal_id),
                 entry_price=float(entry_price),
                 signal=signal,
                 buffer_data=buffer_data,
-                priority=Priority.HIGH,
+                priority=entry_priority,
             )
             if queued:
                 logger.info(f"✅ Entry queued for Telegram: {signal_type} {signal_direction}")
@@ -1776,6 +1805,114 @@ class MarketAgentService:
         except Exception as e:
             logger.error(f"Error processing signal: {e}", exc_info=True)
             self.error_count += 1
+
+    def _compute_base_position_size(self, signal: Dict) -> int:
+        """Compute a base position size from config + signal confidence."""
+        try:
+            existing = signal.get("position_size")
+            if existing is not None:
+                return max(1, int(float(existing)))
+        except Exception:
+            pass
+
+        cfg = self._strategy_settings or {}
+        enable_dynamic = bool(cfg.get("enable_dynamic_sizing", False))
+        base_contracts = int(cfg.get("base_contracts", 1) or 1)
+        high_contracts = int(cfg.get("high_conf_contracts", base_contracts) or base_contracts)
+        max_contracts = int(cfg.get("max_conf_contracts", high_contracts) or high_contracts)
+        try:
+            conf = float(signal.get("confidence") or 0.0)
+        except Exception:
+            conf = 0.0
+        try:
+            high_th = float(cfg.get("high_conf_threshold", 0.8) or 0.8)
+        except Exception:
+            high_th = 0.8
+        try:
+            max_th = float(cfg.get("max_conf_threshold", 0.9) or 0.9)
+        except Exception:
+            max_th = 0.9
+
+        size = base_contracts
+        if enable_dynamic:
+            if conf >= max_th:
+                size = max_contracts
+            elif conf >= high_th:
+                size = high_contracts
+            else:
+                size = base_contracts
+
+        # Optional per-signal-type sizing multiplier (strategy settings)
+        try:
+            multipliers = cfg.get("signal_type_size_multipliers", {}) or {}
+            sig_type = str(signal.get("type") or "")
+            if sig_type in multipliers:
+                size = int(round(size * float(multipliers.get(sig_type) or 1.0)))
+        except Exception:
+            pass
+
+        # Clamp to risk min/max
+        try:
+            min_size = int(self._risk_settings.get("min_position_size", 1) or 1)
+        except Exception:
+            min_size = 1
+        try:
+            max_size = int(self._risk_settings.get("max_position_size", size) or size)
+        except Exception:
+            max_size = size
+
+        size = max(min_size, min(max_size, size))
+        return max(1, size)
+
+    def _apply_ml_opportunity_sizing(self, signal: Dict) -> None:
+        """Adjust size and priority based on ML opportunity signal."""
+        if not getattr(self, "_ml_adjust_sizing", False):
+            return
+
+        pred = signal.get("_ml_prediction") or {}
+        try:
+            win_prob = float(pred.get("win_probability"))
+        except Exception:
+            return
+
+        base_size = self._compute_base_position_size(signal)
+        multiplier = (
+            self._ml_size_multiplier_max
+            if win_prob >= getattr(self, "_ml_size_threshold", 0.7)
+            else self._ml_size_multiplier_min
+        )
+        try:
+            adjusted = int(round(base_size * float(multiplier)))
+        except Exception:
+            adjusted = base_size
+
+        # Clamp to risk min/max
+        try:
+            min_size = int(self._risk_settings.get("min_position_size", 1) or 1)
+        except Exception:
+            min_size = 1
+        try:
+            max_size = int(self._risk_settings.get("max_position_size", adjusted) or adjusted)
+        except Exception:
+            max_size = adjusted
+
+        adjusted = max(min_size, min(max_size, adjusted))
+        adjusted = max(1, adjusted)
+
+        signal["position_size"] = adjusted
+        signal["_ml_size_multiplier"] = float(multiplier)
+        signal["_ml_size_adjusted"] = True
+
+        if win_prob >= getattr(self, "_ml_size_threshold", 0.7):
+            signal["_ml_priority"] = "critical"
+        else:
+            signal["_ml_priority"] = "high"
+
+        if adjusted != base_size:
+            logger.info(
+                f"ML sizing adjusted position size: {base_size} -> {adjusted} "
+                f"(p={win_prob:.2f}, mult={multiplier:.2f})"
+            )
 
     def _update_virtual_trade_exits(self, market_data: Dict) -> None:
         """

@@ -336,6 +336,9 @@ ml_filter:
   min_probability: 0.55
   shadow_threshold: 0.80  # shadow-only pass/fail split for lift measurement
   high_probability: 0.7
+  adjust_sizing: true
+  size_multiplier_min: 1.0
+  size_multiplier_max: 1.5
   min_training_samples: 30
   retrain_interval_days: 7
   n_estimators: 100

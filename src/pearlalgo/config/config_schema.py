@@ -372,6 +372,9 @@ class MLFilterConfig(BaseModel):
     model_version: str = "v1.0.0"
     min_probability: float = Field(default=0.55, ge=0, le=1)
     high_probability: float = Field(default=0.7, ge=0, le=1)
+    adjust_sizing: bool = False
+    size_multiplier_min: float = Field(default=1.0, ge=0.1)
+    size_multiplier_max: float = Field(default=1.5, ge=1.0)
     min_training_samples: int = Field(default=30, ge=10)
     retrain_interval_days: int = Field(default=7, ge=1)
     n_estimators: int = Field(default=100, ge=10)

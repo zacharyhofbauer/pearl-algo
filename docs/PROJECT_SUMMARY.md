@@ -491,7 +491,7 @@ pearlalgo-dev-ai-agents/
 ├── logs/                        # PID + handler logs (runtime artifacts; gitignored)
 │   └── agent_NQ.pid            # Process ID (per market: agent_<MARKET>.pid)
 │
-├── ibkr/                        # IBKR Gateway files
+├── ibkr/                        # Placeholder only; external install via PEARLALGO_IBKR_HOME
 │   ├── ibc/                    # IBC (Interactive Brokers Controller)
 │   └── Jts/                    # Gateway installation
 │
@@ -891,7 +891,7 @@ sudo systemctl status pearlalgo-mnq.service
 
 ### Docker Deployment (optional)
 
-A minimal `Dockerfile` is provided in the project root. To build and run:
+A minimal `Dockerfile` is provided in the project root (runtime deps only; not intended for development). To build and run:
 
 ```bash
 cd /path/to/pearlalgo-dev-ai-agents

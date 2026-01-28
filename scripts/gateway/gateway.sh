@@ -32,10 +32,44 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-IBC_DIR="$PROJECT_DIR/ibkr/ibc"
-IBC_LOG_DIR="$PROJECT_DIR/ibkr/ibc/logs"
-JTS_DIR="$PROJECT_DIR/ibkr/Jts"
+IBKR_HOME_DEFAULT="$PROJECT_DIR/ibkr"
+IBKR_HOME="${PEARLALGO_IBKR_HOME:-$IBKR_HOME_DEFAULT}"
+IBC_DIR=""
+IBC_LOG_DIR=""
+JTS_DIR=""
 API_PORT=4002
+
+
+_set_ibkr_paths() {
+  IBC_DIR="$IBKR_HOME/ibc"
+  IBC_LOG_DIR="$IBKR_HOME/ibc/logs"
+  JTS_DIR="$IBKR_HOME/Jts"
+}
+
+
+_require_ibkr_home() {
+  if [ ! -d "$IBKR_HOME" ]; then
+    echo "❌ IBKR home not found: $IBKR_HOME"
+    echo "   Set PEARLALGO_IBKR_HOME or pass --ibkr-home."
+    echo "   Example: PEARLALGO_IBKR_HOME=/opt/ibkr ./scripts/gateway/gateway.sh status"
+    exit 1
+  fi
+}
+
+
+_set_ibkr_paths
+
+
+_ensure_ibkr_install() {
+  _require_ibkr_home
+
+  if [ ! -d "$IBC_DIR" ] || [ ! -f "$IBC_DIR/gatewaystart.sh" ]; then
+    echo "❌ IBC install not found under: $IBC_DIR"
+    echo "   Expected gatewaystart.sh in $IBC_DIR"
+    echo "   Run: ./scripts/gateway/gateway.sh install-info"
+    exit 1
+  fi
+}
 
 
 _pick_python() {
@@ -93,6 +127,7 @@ cmd_start() {
   cd "$PROJECT_DIR"
   echo "=== Starting IB Gateway with IBC (Read-Only Mode) ==="
   echo ""
+  _ensure_ibkr_install
 
   if _gateway_running; then
     echo "⚠️  IB Gateway is already running!"
@@ -181,6 +216,7 @@ cmd_start_vnc() {
   cd "$PROJECT_DIR"
   echo "=== Starting IB Gateway with IBC on VNC Display ==="
   echo ""
+  _ensure_ibkr_install
 
   _ensure_vnc
   echo "✅ VNC server is running on :1"
@@ -227,6 +263,7 @@ cmd_stop() {
   cd "$PROJECT_DIR"
   echo "=== Stopping IB Gateway ==="
   echo ""
+  _ensure_ibkr_install
 
   GATEWAY_PID="$(_gateway_pid)"
   if [ -z "$GATEWAY_PID" ]; then
@@ -237,9 +274,9 @@ cmd_stop() {
   echo "Found Gateway process: $GATEWAY_PID"
   echo "Stopping Gateway..."
 
-  if [ -f "$PROJECT_DIR/ibkr/ibc/stop.sh" ]; then
+  if [ -f "$IBC_DIR/stop.sh" ]; then
     echo "Using IBC stop script..."
-    cd "$PROJECT_DIR/ibkr/ibc"
+    cd "$IBC_DIR"
     ./stop.sh 2>/dev/null || true
     sleep 3
   else
@@ -267,6 +304,7 @@ cmd_status() {
   cd "$PROJECT_DIR"
   echo "=== IBKR Gateway Status ==="
   echo ""
+  _ensure_ibkr_install
 
   if _gateway_running; then
     echo "✅ Gateway Process: RUNNING"
@@ -310,6 +348,7 @@ cmd_api_ready() {
   cd "$PROJECT_DIR"
   echo "Checking Gateway API status..."
   echo ""
+  _ensure_ibkr_install
 
   if ! _gateway_running; then
     echo "❌ Gateway is not running"
@@ -348,6 +387,7 @@ cmd_monitor() {
   cd "$PROJECT_DIR"
   echo "=== Monitoring Gateway until API is ready ==="
   echo ""
+  _ensure_ibkr_install
 
   MAX_WAIT=300
   CHECK_INTERVAL=5
@@ -446,6 +486,7 @@ cmd_test_api() {
   cd "$PROJECT_DIR"
   echo "=== Testing API Connection ==="
   echo ""
+  _ensure_ibkr_install
 
   if ! _gateway_running; then
     echo "❌ Gateway is not running"
@@ -503,6 +544,7 @@ cmd_2fa_status() {
   cd "$PROJECT_DIR"
   echo "=== IBKR Gateway 2FA Status Check ==="
   echo ""
+  _ensure_ibkr_install
 
   if _gateway_running; then
     GATEWAY_PID="$(_gateway_pid)"
@@ -547,7 +589,7 @@ cmd_2fa_status() {
   echo ""
   echo "=== Quick Commands ==="
   echo "Check API port: ss -tuln | grep ${API_PORT}"
-  echo "View Gateway logs: tail -f ibkr/ibc/logs/ibc-*.txt"
+  echo "View Gateway logs: tail -f $IBC_LOG_DIR/ibc-*.txt"
   echo "Check Gateway process: ps aux | grep IBC.jar"
 }
 
@@ -556,6 +598,7 @@ cmd_wait_2fa() {
   cd "$PROJECT_DIR"
   echo "=== Waiting for IBKR Mobile App 2FA Approval ==="
   echo ""
+  _ensure_ibkr_install
 
   if ! _gateway_running; then
     echo "❌ IB Gateway is not running!"
@@ -639,6 +682,7 @@ cmd_complete_2fa() {
   cd "$PROJECT_DIR"
   echo "=== Complete 2FA Authentication for IBKR Gateway ==="
   echo ""
+  _ensure_ibkr_install
 
   if ! _gateway_running; then
     echo "❌ IB Gateway is not running!"
@@ -686,6 +730,7 @@ cmd_auto_2fa() {
 
   echo "=== Auto 2FA Entry for IBKR Gateway ==="
   echo ""
+  _ensure_ibkr_install
 
   if ! _gateway_running; then
     echo "❌ IB Gateway is not running!"
@@ -839,7 +884,7 @@ cmd_vnc_setup() {
   echo "=== Connection Instructions ==="
   echo "1. Connect via VNC: vncviewer $SERVER_IP:5901"
   echo "2. In VNC, start Gateway:"
-  echo "   cd $PROJECT_DIR/ibkr/ibc"
+  echo "   cd $IBC_DIR"
   echo "   export DISPLAY=:1"
   echo "   ./gatewaystart.sh"
   echo "3. Complete login + 2FA"
@@ -896,6 +941,18 @@ cmd_setup() {
   echo "Mode: $mode"
   echo "IBC Configuration: $ibc_mode"
   echo ""
+
+  if [ ! -d "$IBKR_HOME" ]; then
+    echo "Creating IBKR home directory: $IBKR_HOME"
+    mkdir -p "$IBKR_HOME"
+  fi
+
+  if [ ! -d "$IBC_DIR" ]; then
+    echo "❌ IBC directory not found: $IBC_DIR"
+    echo "   Install IB Gateway + IBC into IBKR home first."
+    echo "   Run: ./scripts/gateway/gateway.sh install-info"
+    exit 1
+  fi
 
   echo "1. Configuring jts.ini for API access..."
   mkdir -p "$JTS_DIR"
@@ -1037,10 +1094,31 @@ EOF
   echo "⚠️  Note: Some changes may require a reboot to take full effect."
 }
 
+
+cmd_install_info() {
+  cd "$PROJECT_DIR"
+  echo "=== IBKR Gateway Install Info ==="
+  echo ""
+  echo "IBKR home: $IBKR_HOME"
+  echo ""
+  echo "Expected layout:"
+  echo "  $IBKR_HOME/ibc"
+  echo "  $IBKR_HOME/Jts"
+  echo ""
+  echo "Configure the location with:"
+  echo "  export PEARLALGO_IBKR_HOME=/opt/ibkr"
+  echo "  ./scripts/gateway/gateway.sh --ibkr-home /opt/ibkr status"
+  echo ""
+  echo "If these folders are missing, install IB Gateway + IBC into IBKR home"
+  echo "and then run:"
+  echo "  ./scripts/gateway/gateway.sh setup"
+}
+
+
 print_help() {
   cat <<'EOF'
 Usage:
-  ./scripts/gateway/gateway.sh <command>
+  ./scripts/gateway/gateway.sh [--ibkr-home PATH] <command>
 
 Commands:
   start               Start Gateway headless via IBC (Xvfb DISPLAY=:99)
@@ -1055,6 +1133,7 @@ Commands:
   wait-2fa            Wait for 2FA approval (mobile; max 10 minutes)
   complete-2fa        Start VNC (if needed) and print 2FA entry instructions
   auto-2fa [CODE]     Attempt to auto-enter 2FA code (requires xdotool)
+  install-info        Print IBKR install expectations and paths
   setup [mode] [ibc]  One-time gateway + IBC setup (mode=readonly/full, ibc=yes/no)
   vnc-setup           One-time VNC setup for manual login
   vnc-config-api      One-time API config guidance via VNC
@@ -1062,6 +1141,31 @@ Commands:
   help            Show this help
 EOF
 }
+
+ARGS=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --ibkr-home)
+      if [ -z "${2:-}" ]; then
+        echo "❌ Missing value for --ibkr-home"
+        exit 1
+      fi
+      IBKR_HOME="$2"
+      shift 2
+      ;;
+    --ibkr-home=*)
+      IBKR_HOME="${1#*=}"
+      shift
+      ;;
+    *)
+      ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+set -- "${ARGS[@]}"
+_set_ibkr_paths
 
 cmd="${1:-help}"
 shift || true
@@ -1091,6 +1195,9 @@ case "$cmd" in
     ;;
   test-api)
     cmd_test_api "$@"
+    ;;
+  install-info)
+    cmd_install_info "$@"
     ;;
   2fa-status)
     cmd_2fa_status "$@"

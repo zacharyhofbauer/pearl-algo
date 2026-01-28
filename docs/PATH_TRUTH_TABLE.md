@@ -40,6 +40,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
 ## IBKR Gateway / API
 
 - **Logical component**: IBKR Gateway + API connectivity
+- **Install location**: `PEARLALGO_IBKR_HOME` (external install path; required if not using repo-local `ibkr/`)
 - **Python modules**:
   - `pearlalgo.data_providers.base` – Abstract data provider interface
   - `pearlalgo.data_providers.factory` – Provider factory (creates provider instances)

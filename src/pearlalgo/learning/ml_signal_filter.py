@@ -82,6 +82,11 @@ class MLFilterConfig:
     # Prediction thresholds
     min_probability: float = 0.55      # Minimum P(win) to pass filter
     high_probability: float = 0.70     # High confidence threshold
+
+    # Optional sizing adjustments (shadow-safe; does not bypass risk gates)
+    adjust_sizing: bool = False
+    size_multiplier_min: float = 1.0
+    size_multiplier_max: float = 1.5
     
     # Training settings
     min_training_samples: int = 30     # Minimum samples to train
@@ -113,6 +118,9 @@ class MLFilterConfig:
             lift_min_winrate_delta=float(ml_config.get("lift_min_winrate_delta", 0.05)),
             min_probability=ml_config.get("min_probability", 0.55),
             high_probability=ml_config.get("high_probability", 0.70),
+            adjust_sizing=bool(ml_config.get("adjust_sizing", False)),
+            size_multiplier_min=float(ml_config.get("size_multiplier_min", 1.0)),
+            size_multiplier_max=float(ml_config.get("size_multiplier_max", 1.5)),
             min_training_samples=ml_config.get("min_training_samples", 30),
             retrain_interval_days=ml_config.get("retrain_interval_days", 7),
             n_estimators=ml_config.get("n_estimators", 100),

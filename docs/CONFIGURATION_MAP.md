@@ -81,6 +81,14 @@ Key sections and their consumers:
   - **Used by**: `pearlalgo.learning.bandit_policy`, `pearlalgo.market_agent.service`
   - **Purpose**: Adaptive learning policy configuration (mode, thresholds, priors).
   - **Defaults**: `enabled: true`, `mode: shadow`
+- `ml_filter.*` (shadow mode by default)
+  - **Used by**: `pearlalgo.learning.ml_signal_filter`, `pearlalgo.market_agent.service`
+  - **Purpose**: ML scoring, lift measurement, and optional sizing/priority adjustments.
+  - **Key fields**:
+    - `mode`: `shadow` or `live` (blocking only in `live`)
+    - `high_probability`: threshold for “high opportunity”
+    - `adjust_sizing`: enable ML-driven sizing/priority (no gate bypass)
+    - `size_multiplier_min`, `size_multiplier_max`: bounds for ML sizing multiplier
 
 Notes:
 - Base config `config/config.yaml` is merged with optional overlays from `PEARLALGO_CONFIG_PATH`

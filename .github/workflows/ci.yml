@@ -25,6 +25,29 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: IBKR vendor guard
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          ibkr = Path("ibkr")
+          allowed = {"README.md", ".gitkeep"}
+          extras = []
+          if ibkr.exists():
+              for path in ibkr.rglob("*"):
+                  if path.is_dir():
+                      continue
+                  rel = path.relative_to(ibkr).as_posix()
+                  if rel in allowed:
+                      continue
+                  extras.append(rel)
+          if extras:
+              print("Unexpected files under ibkr/:")
+              for item in extras:
+                  print(f"  - {item}")
+              raise SystemExit(1)
+          print("IBKR vendor guard passed")
+          PY
+
       - name: Byte-compile source (sanity)
         run: |
           python -m compileall src/pearlalgo

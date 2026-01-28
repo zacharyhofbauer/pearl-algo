@@ -11,9 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy project
 COPY . /app
 
-# Install in editable-like mode
+# Install runtime dependencies only
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e .[dev]
+    pip install --no-cache-dir .
 
 # Default env (override in docker-compose or runtime)
 ENV PYTHONUNBUFFERED=1 \

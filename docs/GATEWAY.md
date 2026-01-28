@@ -3,7 +3,10 @@
 ## Prerequisites
 
 - **Java 17+** installed and available on `$PATH` (required by IB Gateway/IBC).
-- IB Gateway and IBC installed under `ibkr/` per `scripts/gateway/gateway.sh setup`.
+- IB Gateway and IBC installed under **IBKR home** (default: repo-local `ibkr/`, recommended: external path).
+  - Set `PEARLALGO_IBKR_HOME` to point at your installation (example: `/opt/ibkr`).
+  - Verify with: `./scripts/gateway/gateway.sh install-info`
+  - Override per-command: `./scripts/gateway/gateway.sh --ibkr-home /opt/ibkr status`
 
 ## 🚀 Start Gateway (Headless)
 
@@ -86,7 +89,7 @@ Instead of using a VNC terminal, run commands from your main terminal:
 ssh <user>@<server> "./scripts/gateway/gateway.sh tws-conflict"
 
 # Check if 2FA is needed
-ssh <user>@<server> "tail -20 ibkr/ibc/logs/ibc-*.txt | grep -i '2fa\\|authentication'"
+ssh <user>@<server> "tail -20 $PEARLALGO_IBKR_HOME/ibc/logs/ibc-*.txt | grep -i '2fa\\|authentication'"
 
 # Check if API port is ready
 ssh <user>@<server> "ss -tuln | grep 4002"
@@ -121,7 +124,7 @@ ss -tuln | grep 4002
 vncserver :1
 
 # 3. Connect via VNC client, then in VNC terminal:
-cd /path/to/pearlalgo-dev-ai-agents/ibkr/ibc
+cd $PEARLALGO_IBKR_HOME/ibc
 export DISPLAY=:1
 ./gatewaystart.sh -inline
 
@@ -133,10 +136,10 @@ export DISPLAY=:1
 
 ```bash
 # Latest IBC log
-tail -f ibkr/ibc/logs/ibc-*.txt
+tail -f $PEARLALGO_IBKR_HOME/ibc/logs/ibc-*.txt
 
 # Latest Gateway log
-tail -f ibkr/ibc/logs/gateway_*.log
+tail -f $PEARLALGO_IBKR_HOME/ibc/logs/gateway_*.log
 ```
 
 ## 🔍 Quick Status Checks
@@ -165,7 +168,7 @@ sleep 3
 
 ### Gateway running but API not ready
 - Wait 30-60 seconds (authentication takes time)
-- Check logs: `tail -f ibkr/ibc/logs/ibc-*.txt`
+- Check logs: `tail -f $PEARLALGO_IBKR_HOME/ibc/logs/ibc-*.txt`
 
 ### Error 354 (market data subscription)
 
@@ -176,7 +179,7 @@ If the API is up but live market data requests return **Error 354** (“not subs
 ### Multiple autorestart files (causes login issues)
 ```bash
 # Remove all, then do manual VNC login to recreate
-find ibkr/Jts -name "autorestart" -type f -delete
+find $PEARLALGO_IBKR_HOME/Jts -name "autorestart" -type f -delete
 ```
 
 ## 🎯 Common Workflows

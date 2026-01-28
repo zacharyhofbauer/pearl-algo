@@ -33,6 +33,9 @@
   IBKR_CLIENT_ID=10
   IBKR_DATA_CLIENT_ID=11
 
+  # Optional: external IBKR Gateway install location
+  # PEARLALGO_IBKR_HOME=/opt/ibkr
+
   PEARLALGO_DATA_PROVIDER=ibkr
   ```
 

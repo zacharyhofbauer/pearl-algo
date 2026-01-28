@@ -31,6 +31,7 @@ for compatibility with existing Telegram/mobile views.
 ### Quick operational checklist
 
 - **Gateway**: `./scripts/gateway/gateway.sh start`
+  - If Gateway is installed outside the repo, set `PEARLALGO_IBKR_HOME` first (example: `/opt/ibkr`).
 - **Agent**: `./scripts/lifecycle/agent.sh start --market NQ --background`
 - **Status**: `./scripts/lifecycle/check_agent_status.sh --market NQ`
 
