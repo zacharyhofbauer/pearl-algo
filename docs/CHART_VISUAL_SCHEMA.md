@@ -417,7 +417,7 @@ For Telegram dashboard charts, a special render profile is automatically applied
 **Telegram-Only Dashboard Enhancements (Service-Controlled Render Params)**:
 - Trade clarity:
   - EMA crossover markers **disabled** (reduces arrow ambiguity with trades)
-  - Numbered trade pairs **enabled** (entry+exit share the same # for pairing)
+  - Lettered trade pairs **enabled** (entry+exit share the same letter for pairing)
   - Compact overlay legend **enabled** (decodes trade overlays at a glance)
 - Pixel utilization / preview stability:
   - Reduced PNG save padding (less dead space around the chart)

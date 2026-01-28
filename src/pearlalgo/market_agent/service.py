@@ -2494,7 +2494,7 @@ class MarketAgentService:
                 trades=self._get_trades_for_chart(chart_data),
                 # Telegram-only dashboard enhancements (fixed render profile)
                 show_ema_crossover_markers=False,
-                # Option A: numbered trade pairs (clear pairing on mobile)
+                # Option A: lettered trade pairs (clear pairing on mobile)
                 show_trade_paths=False,
                 show_trade_pair_numbers=True,
                 trade_pair_numbers_max=6,

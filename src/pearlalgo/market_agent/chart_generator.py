@@ -2794,11 +2794,11 @@ class ChartGenerator:
                 continue
 
     def _draw_trade_pair_numbers(self, ax, df: pd.DataFrame, trades: list[dict], *, max_trades: int = 6) -> None:
-        """Draw numbered entry/exit badges to visually pair full trades on the dashboard chart.
+        """Draw lettered entry/exit badges to visually pair full trades on the dashboard chart.
 
         This is designed for mobile/Telegram readability:
-        - Matching numbers pair an entry marker with its corresponding exit marker.
-        - Numbers are outcome-colored (green win / red loss / gray unknown).
+        - Matching letters pair an entry marker with its corresponding exit marker.
+        - Badges are outcome-colored (green win / red loss / gray unknown).
         - Capped to avoid clutter.
         """
         if df is None or df.empty or not isinstance(df.index, pd.DatetimeIndex):
@@ -2935,8 +2935,22 @@ class ChartGenerator:
                 pass
             return base
 
+        def _to_letters(n: int) -> str:
+            """Excel-style 1-indexed letters: 1->A, 2->B, ..., 26->Z, 27->AA, ..."""
+            try:
+                n = int(n)
+            except Exception:
+                return "?"
+            if n <= 0:
+                return "?"
+            out = ""
+            while n > 0:
+                n, r = divmod(n - 1, 26)
+                out = chr(65 + int(r)) + out
+            return out
+
         for i, it in enumerate(items, start=1):
-            label = str(i)
+            label = _to_letters(i)
             col = it.get("col", TEXT_PRIMARY)
             direction = str(it.get("direction") or "long")
 
@@ -2999,11 +3013,11 @@ class ChartGenerator:
         try:
             lines = ["Trade overlay"]
             if trade_numbers_shown:
-                lines.append("Pair: same # entry/exit")
+                lines.append("Pair: same letter entry/exit")
             if trade_paths_shown:
-                lines.append("Path: green win / red loss")
+                lines.append("Path: green win / red loss / gray")
             else:
-                lines.append("Color: green win / red loss")
+                lines.append("Color: green win / red loss / gray")
             lines.append("Entry: ▲/▼   Exit: ○")
             if ema_crossovers_shown:
                 lines.append("EMA cross: cyan/pink")
