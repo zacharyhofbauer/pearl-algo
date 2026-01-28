@@ -45,6 +45,7 @@ from pearlalgo.utils.volume_pressure import (
     format_volume_pressure,
     timeframe_to_minutes,
 )
+from pearlalgo.utils.pearl_suggestions import get_suggestion_engine
 
 # Execution layer imports (optional - only used if execution.enabled)
 try:
@@ -510,6 +511,9 @@ class MarketAgentService:
         self.data_quality_checker = DataQualityChecker(
             stale_data_threshold_minutes=self.stale_data_threshold_minutes
         )
+        
+        # Initialize Pearl suggestion engine
+        self.suggestion_engine = get_suggestion_engine(state_dir=str(self.state_dir))
         
         # New-bar gating: skip heavy analysis when df hasn't advanced (performance optimization).
         # This is high leverage when using 5m bars with 30s scan interval (5 of 6 cycles are repeats).
@@ -1076,6 +1080,9 @@ class MarketAgentService:
                         },
                     )
                     
+                    # Check for proactive Pearl suggestions (agentic)
+                    await self._check_pearl_suggestions()
+
                     # Still emit dashboard even when quiet (observability)
                     await self._check_dashboard(market_data, quiet_reason=quiet_reason)
                     self.cycle_count += 1
@@ -1268,6 +1275,9 @@ class MarketAgentService:
                     diagnostics_raw=signal_diagnostics_raw,
                 )
                 
+                # Check for proactive Pearl suggestions (agentic)
+                await self._check_pearl_suggestions()
+
                 await self._check_dashboard(market_data, quiet_reason=quiet_reason, signal_diagnostics=signal_diagnostics)
                 try:
                     self.state_manager.append_event(
@@ -2167,6 +2177,89 @@ class MarketAgentService:
                             logger.debug(f"Could not send streak alert: {streak_err}")
             except Exception:
                 continue
+
+    def _get_status_snapshot(self) -> Dict[str, Any]:
+        """Get current status snapshot for Pearl suggestions."""
+        # Calculate uptime
+        uptime_hours = 0.0
+        if self.start_time:
+            uptime_hours = (datetime.now(timezone.utc) - self.start_time).total_seconds() / 3600.0
+            
+        # Calculate data age
+        data_age_minutes = 0.0
+        data_stale = False
+        try:
+            last_market_data = getattr(self.data_fetcher, "_last_market_data", None) or {}
+            freshness = self.data_quality_checker.check_data_freshness(
+                last_market_data.get("latest_bar"),
+                last_market_data.get("df")
+            )
+            data_age_minutes = float(freshness.get("age_minutes", 0.0))
+            data_stale = not bool(freshness.get("is_fresh", False))
+        except Exception:
+            pass
+            
+        # Get performance stats
+        daily_pnl = 0.0
+        wins_today = 0
+        losses_today = 0
+        try:
+            perf = self.performance_tracker.get_daily_performance()
+            daily_pnl = perf.get("total_pnl", 0.0)
+            wins_today = perf.get("wins", 0)
+            losses_today = perf.get("losses", 0)
+        except Exception:
+            pass
+            
+        # Get market status
+        futures_open = False
+        session_open = False
+        try:
+            futures_open = bool(get_market_hours().is_market_open())
+            from pearlalgo.trading_bots.pearl_bot_auto import check_trading_session
+            session_open = check_trading_session(datetime.now(timezone.utc), self.config)
+        except Exception:
+            pass
+
+        return {
+            "agent_running": self.running and not self.paused,
+            "gateway_running": self.connection_failures < self.max_connection_failures,
+            "data_stale": data_stale,
+            "data_age_minutes": data_age_minutes,
+            "daily_pnl": daily_pnl,
+            "wins_today": wins_today,
+            "losses_today": losses_today,
+            "signals_today": self.signal_count,
+            "last_signal_minutes": self._compute_quiet_period_minutes(),
+            "session_open": session_open,
+            "futures_open": futures_open,
+            "agent_uptime_hours": uptime_hours,
+            "win_streak": getattr(self, "_streak_count", 0) if getattr(self, "_streak_type", "") == "win" else 0,
+        }
+
+    async def _check_pearl_suggestions(self) -> None:
+        """
+        Check for proactive Pearl suggestions and send them if appropriate.
+        """
+        if not self.telegram_notifier.enabled:
+            return
+
+        try:
+            # Get current state for suggestion engine
+            state = self._get_status_snapshot()
+            
+            # Generate suggestion (engine handles cooldowns)
+            suggestion = self.suggestion_engine.generate_suggestion(
+                state, 
+                prefs=self.telegram_notifier._get_prefs().all()
+            )
+            
+            if suggestion:
+                logger.info(f"Sending proactive Pearl suggestion: {suggestion.message}")
+                await self.telegram_notifier.send_pearl_notification(suggestion.message)
+                
+        except Exception as e:
+            logger.warning(f"Error checking Pearl suggestions: {e}")
 
     async def _check_dashboard(
         self,

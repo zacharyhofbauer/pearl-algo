@@ -1286,6 +1286,27 @@ class MarketAgentTelegramNotifier:
             ErrorHandler.handle_telegram_error(e, "send_heartbeat")
             return False
 
+    async def send_pearl_notification(self, message: str) -> bool:
+        """
+        Send a standalone Pearl (Jarvis) notification.
+        
+        Args:
+            message: The message text (e.g. "Good morning...")
+            
+        Returns:
+            True if sent successfully
+        """
+        if not self.enabled or not self.telegram:
+            return False
+            
+        try:
+            # Format as a Pearl message
+            formatted_msg = f"💬 Pearl: \"{message}\""
+            return await self.telegram.send_message(formatted_msg)
+        except Exception as e:
+            ErrorHandler.handle_telegram_error(e, "send_pearl_notification")
+            return False
+
     async def send_dashboard(self, status: Dict, chart_path: Optional[Path] = None) -> bool:
         """
         Send the main dashboard (canonical).
