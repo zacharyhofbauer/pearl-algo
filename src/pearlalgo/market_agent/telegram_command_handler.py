@@ -2569,7 +2569,7 @@ class TelegramCommandHandler:
             ],
             # Row 4: Advanced
             [
-                InlineKeyboardButton("🏆 Challenge", callback_data="action:reset_challenge"),
+                InlineKeyboardButton("🏆 Challenge", callback_data="action:challenge_menu"),
                 InlineKeyboardButton("🧹 Cache", callback_data="action:clear_cache"),
             ],
         ]
@@ -3493,10 +3493,16 @@ class TelegramCommandHandler:
                 await self._handle_config_view(query, reply_markup)
             elif action_type == "logs":
                 await self._handle_logs_view(query, reply_markup)
+            elif action_type == "challenge_menu":
+                # Show challenge submenu with current status and options
+                await self._show_challenge_menu(query)
+            elif action_type == "challenge_history":
+                # Show challenge history (past wins/losses)
+                await self._show_challenge_history(query)
             elif action_type == "reset_challenge":
                 keyboard = [
                     [InlineKeyboardButton("✅ Confirm Reset", callback_data="confirm:reset_challenge")],
-                    [InlineKeyboardButton("❌ Cancel", callback_data="back")],
+                    [InlineKeyboardButton("❌ Cancel", callback_data="action:challenge_menu")],
                 ]
                 await query.edit_message_text(
                     "🔄 Reset Challenge\n\n"
@@ -6936,6 +6942,146 @@ class TelegramCommandHandler:
                     text += f"*Last Error:* {safe_label(last_error)}\n"
         
         await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _show_challenge_menu(self, query: CallbackQuery) -> None:
+        """Show challenge submenu with current status and options."""
+        try:
+            from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
+            
+            tracker = ChallengeTracker(state_dir=self.state_dir)
+            tracker.refresh()
+            
+            # Get current attempt performance
+            perf = tracker.get_attempt_performance()
+            pnl = perf.get("total_pnl", 0.0)
+            balance = perf.get("current_balance", 50000.0)
+            trades = perf.get("exited_signals", 0)
+            wins = perf.get("wins", 0)
+            losses = perf.get("losses", 0)
+            wr = perf.get("win_rate", 0.0) * 100
+            progress = perf.get("progress_pct", 0)
+            dd_risk = perf.get("drawdown_risk_pct", 0)
+            attempt_id = perf.get("attempt_id", 1)
+            
+            # Get history summary
+            history = tracker.get_history(limit=100)
+            total_passes = sum(1 for h in history if h.get("outcome") == "pass")
+            total_fails = sum(1 for h in history if h.get("outcome") == "fail")
+            
+            pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+            pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+            
+            # Progress bar
+            if pnl >= 0:
+                bar_filled = min(10, int(progress / 10))
+                bar = "▓" * bar_filled + "░" * (10 - bar_filled)
+                target_line = f"Target (+$3k): {bar} {progress:.0f}%"
+            else:
+                bar_filled = min(10, int(dd_risk / 10))
+                bar = "▓" * bar_filled + "░" * (10 - bar_filled)
+                target_line = f"DD Risk (-$2k): {bar} {dd_risk:.0f}%"
+            
+            text = (
+                f"🏆 *50k Challenge*\n\n"
+                f"*Current Attempt:* #{attempt_id}\n"
+                f"Balance: `${balance:,.2f}` | {pnl_emoji} {pnl_str}\n"
+                f"{target_line}\n"
+                f"Trades: {trades} ({wins}W / {losses}L) | WR: {wr:.0f}%\n\n"
+                f"*Rules:*\n"
+                f"• Start: $50,000\n"
+                f"• Win: +$3,000 profit\n"
+                f"• Lose: -$2,000 drawdown\n\n"
+                f"*History:* {total_passes} Wins ✅ | {total_fails} Losses ❌"
+            )
+            
+            keyboard = [
+                [InlineKeyboardButton("📊 View History", callback_data="action:challenge_history")],
+                [InlineKeyboardButton("🔄 Reset Challenge", callback_data="action:reset_challenge")],
+                [InlineKeyboardButton("🎛️ System", callback_data="menu:system")],
+                self._nav_back_row(),
+            ]
+            
+            await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error showing challenge menu: {e}", exc_info=True)
+            keyboard = [self._nav_back_row()]
+            await self._safe_edit_or_send(
+                query, 
+                f"🏆 Challenge\n\n❌ Error loading challenge data: {str(e)[:100]}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+    async def _show_challenge_history(self, query: CallbackQuery) -> None:
+        """Show challenge history - past wins and losses."""
+        try:
+            from pearlalgo.market_agent.challenge_tracker import ChallengeTracker
+            
+            tracker = ChallengeTracker(state_dir=self.state_dir)
+            history = tracker.get_history(limit=20)
+            
+            if not history:
+                text = (
+                    "📊 *Challenge History*\n\n"
+                    "No completed attempts yet.\n\n"
+                    "Complete an attempt to see it here:\n"
+                    "• Win: +$3,000 profit\n"
+                    "• Lose: -$2,000 drawdown"
+                )
+            else:
+                # Count totals
+                total_passes = sum(1 for h in history if h.get("outcome") == "pass")
+                total_fails = sum(1 for h in history if h.get("outcome") == "fail")
+                total_manual = sum(1 for h in history if h.get("outcome", "").startswith("reset"))
+                
+                text = f"📊 *Challenge History*\n\n"
+                text += f"*Summary:* {total_passes} Wins ✅ | {total_fails} Losses ❌"
+                if total_manual > 0:
+                    text += f" | {total_manual} Resets 🔄"
+                text += "\n\n"
+                
+                # Show last 10 attempts
+                text += "*Recent Attempts:*\n"
+                for attempt in history[:10]:
+                    attempt_id = attempt.get("attempt_id", "?")
+                    outcome = attempt.get("outcome", "unknown")
+                    pnl = attempt.get("pnl", 0.0)
+                    trades = attempt.get("trades", 0)
+                    wins = attempt.get("wins", 0)
+                    losses = attempt.get("losses", 0)
+                    wr = attempt.get("win_rate", 0.0)
+                    
+                    # Outcome emoji
+                    if outcome == "pass":
+                        outcome_emoji = "✅ WIN"
+                        pnl_str = f"+${pnl:.0f}"
+                    elif outcome == "fail":
+                        outcome_emoji = "❌ LOSS"
+                        pnl_str = f"-${abs(pnl):.0f}"
+                    elif outcome.startswith("reset"):
+                        outcome_emoji = "🔄 Reset"
+                        pnl_str = f"${pnl:+.0f}" if pnl != 0 else "$0"
+                    else:
+                        outcome_emoji = "⚪ " + outcome
+                        pnl_str = f"${pnl:+.0f}"
+                    
+                    text += f"#{attempt_id}: {outcome_emoji} | {pnl_str} | {trades}T ({wins}W/{losses}L) | {wr:.0f}%\n"
+            
+            keyboard = [
+                [InlineKeyboardButton("🏆 Challenge Menu", callback_data="action:challenge_menu")],
+                self._nav_back_row(),
+            ]
+            
+            await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error showing challenge history: {e}", exc_info=True)
+            keyboard = [self._nav_back_row()]
+            await self._safe_edit_or_send(
+                query, 
+                f"📊 Challenge History\n\n❌ Error loading history: {str(e)[:100]}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
     async def _handle_gateway_status(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display gateway service status (process + port)."""
