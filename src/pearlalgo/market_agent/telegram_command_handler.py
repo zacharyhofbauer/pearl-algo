@@ -356,6 +356,27 @@ class TelegramCommandHandler:
         settings_label = "⚙️ Settings"
 
         # ─────────────────────────────────────────────────────────────────
+        # Chart age indicator for the refresh button
+        # ─────────────────────────────────────────────────────────────────
+        chart_age_label = ""
+        try:
+            chart_file = self.exports_dir / "dashboard_telegram_latest.png"
+            if chart_file.exists():
+                chart_mtime = datetime.fromtimestamp(chart_file.stat().st_mtime, tz=timezone.utc)
+                age_seconds = (datetime.now(timezone.utc) - chart_mtime).total_seconds()
+                stale_warning = "⚠️" if age_seconds >= 1800 else ""  # 30+ min = stale
+                if age_seconds < 60:
+                    chart_age_label = f"({stale_warning}{int(age_seconds)}s)"
+                elif age_seconds < 3600:
+                    chart_age_label = f"({stale_warning}{int(age_seconds / 60)}m)"
+                else:
+                    chart_age_label = f"({stale_warning}{int(age_seconds / 3600)}h)"
+        except Exception:
+            chart_age_label = ""
+        
+        chart_button_label = f"🔄📈{chart_age_label}" if chart_age_label else "🔄📈"
+        
+        # ─────────────────────────────────────────────────────────────────
         # Clean 4-button menu (2x2 grid) - each leads to unique submenu
         # ─────────────────────────────────────────────────────────────────
         return [
@@ -369,7 +390,7 @@ class TelegramCommandHandler:
             ],
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data="action:refresh_dashboard"),
-                InlineKeyboardButton("🔄📈", callback_data="action:refresh_chart"),
+                InlineKeyboardButton(chart_button_label, callback_data="action:refresh_chart"),
             ],
         ]
 
