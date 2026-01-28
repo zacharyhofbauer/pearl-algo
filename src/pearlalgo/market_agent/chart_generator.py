@@ -2798,7 +2798,7 @@ class ChartGenerator:
         try:
             lines = [
                 "Trade overlay",
-                "Path: win/lose line",
+                "Path: green win / red loss",
                 "Entry: ▲/▼   Exit: ○",
             ]
             if ema_crossovers_shown:

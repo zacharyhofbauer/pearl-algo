@@ -1752,6 +1752,7 @@ class MarketAgentTelegramNotifier:
                         ],
                         [
                             InlineKeyboardButton("🔄 Refresh", callback_data=callback_action(ACTION_REFRESH_DASHBOARD)),
+                            InlineKeyboardButton("🔄📈", callback_data="action:refresh_chart"),
                         ],
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
