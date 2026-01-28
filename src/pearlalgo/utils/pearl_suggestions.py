@@ -368,8 +368,8 @@ class PearlSuggestionEngine:
         except Exception:
             return None
         
-        # End of day window: 3:45 PM - 4:15 PM ET
-        if not (15 <= hour <= 16 and (hour == 15 and minute >= 45 or hour == 16 and minute <= 15)):
+        # End of day window: 3:45 PM - 3:55 PM ET
+        if not (hour == 15 and 45 <= minute <= 55):
             return None
         
         key = "eod_summary"
@@ -384,9 +384,18 @@ class PearlSuggestionEngine:
         if trades > 0:
             wr = (wins / trades) * 100
             sign = "+" if daily_pnl >= 0 else ""
-            msg = f"Session's winding down. Today: {trades} trades, {sign}${daily_pnl:.0f}, {wr:.0f}% WR. Want the summary?"
+            msg = (
+                "Safety window active: stop new trades after 3:45 PM ET; "
+                "flatten by 3:55 PM ET. "
+                f"Today: {trades} trades, {sign}${daily_pnl:.0f}, {wr:.0f}% WR. "
+                "Want the summary?"
+            )
         else:
-            msg = "Session's ending soon. No trades today. Want to review the signals?"
+            msg = (
+                "Safety window active: stop new trades after 3:45 PM ET; "
+                "flatten by 3:55 PM ET. "
+                "No trades today. Want to review the signals?"
+            )
         
         return PearlSuggestion(
             message=msg,

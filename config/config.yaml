@@ -3,7 +3,7 @@ timeframe: 1m
 scan_interval: 30
 session:
   start_time: '18:00'
-  end_time: '16:10'
+  end_time: '15:45'
 telegram:
   enabled: true
   bot_token: ${TELEGRAM_BOT_TOKEN}
@@ -44,6 +44,14 @@ service:
   velocity_mode_enabled: true
   velocity_atr_expansion_threshold: 1.2
   velocity_volume_spike_threshold: 2.0
+auto_flat:
+  enabled: true
+  daily_enabled: true
+  daily_time: '15:55'
+  friday_enabled: false
+  weekend_enabled: true
+  timezone: America/New_York
+  notify: true
 learning:
   enabled: true
   mode: shadow

@@ -26,6 +26,11 @@ from pearlalgo.config.config_view import ConfigView
 from pearlalgo.data_providers.base import DataProvider
 from pearlalgo.market_agent.data_fetcher import MarketAgentDataFetcher
 from pearlalgo.market_agent.health_monitor import HealthMonitor
+from pearlalgo.market_agent.chart_profiles import (
+    apply_telegram_unified_profile,
+    apply_telegram_trade_overlay_defaults,
+    telegram_unified_render_kwargs,
+)
 from pearlalgo.market_agent.performance_tracker import PerformanceTracker
 from pearlalgo.market_agent.state_manager import MarketAgentStateManager
 from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
@@ -377,18 +382,24 @@ class MarketAgentService:
                     self._ml_filter_enabled = False
 
         # ==========================================================================
-        # AUTO-FLAT (Virtual trades) - Friday/Weekend safety
+        # AUTO-FLAT (Virtual trades) - Daily + Friday/Weekend safety
         # ==========================================================================
         self._auto_flat_enabled = bool(auto_flat_settings.get("enabled", False))
+        self._auto_flat_daily_enabled = bool(auto_flat_settings.get("daily_enabled", False))
         self._auto_flat_friday_enabled = bool(auto_flat_settings.get("friday_enabled", True))
         self._auto_flat_weekend_enabled = bool(auto_flat_settings.get("weekend_enabled", True))
         self._auto_flat_timezone = str(auto_flat_settings.get("timezone", "America/New_York") or "America/New_York")
         self._auto_flat_notify = bool(auto_flat_settings.get("notify", True))
+        self._auto_flat_daily_time = self._parse_hhmm(
+            auto_flat_settings.get("daily_time"),
+            default=(15, 55),
+        )
         self._auto_flat_friday_time = self._parse_hhmm(
             auto_flat_settings.get("friday_time"),
             default=(16, 55),
         )
         self._auto_flat_last_dates: Dict[str, Optional[date]] = {
+            "daily_auto_flat": None,
             "friday_auto_flat": None,
             "weekend_auto_flat": None,
         }
@@ -506,7 +517,7 @@ class MarketAgentService:
         self._streak_alert_threshold = 3  # Alert at 3+ streak
         self._last_streak_alert_count = 0  # Avoid duplicate alerts
         
-        # Daily summary tracking (sent at market close 4:15 PM ET)
+        # Daily summary tracking (sent at safety close 3:55 PM ET)
         self._daily_summary_sent_date: Optional[str] = None
         self.last_connection_failure_alert: Optional[datetime] = None
         self.last_successful_cycle: Optional[datetime] = None
@@ -895,7 +906,7 @@ class MarketAgentService:
             # Reset execution daily counters if new trading day
             self._check_daily_reset()
             
-            # Check for market close daily summary (4:15 PM ET)
+            # Check for safety close daily summary (3:55 PM ET)
             await self._check_market_close_summary()
             
             # Check execution adapter connection health and alert on issues
@@ -2472,6 +2483,21 @@ class MarketAgentService:
                     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     today_trades = [t for t in perf_trades if today_str in str(t.get("exit_time", "") or "")]
                     
+                    # De-duplicate by signal_id to avoid double-counting
+                    try:
+                        by_id = {}
+                        no_id = []
+                        for t in today_trades:
+                            sid = str(t.get("signal_id") or "").strip() if isinstance(t, dict) else ""
+                            if not sid:
+                                no_id.append(t)
+                                continue
+                            by_id[sid] = t  # keep most recent occurrence
+                        if by_id:
+                            today_trades = list(by_id.values()) + no_id
+                    except Exception:
+                        pass
+                    
                     # Calculate daily P&L from actual trades (not state which may be stale)
                     if today_trades:
                         daily_pnl = sum(float(t.get("pnl", 0) or 0) for t in today_trades)
@@ -2549,7 +2575,8 @@ class MarketAgentService:
             # Add performance if there are trades
             if trades_today > 0:
                 lines.append("")
-                pnl_line = f"{pnl_icon} Today: {pnl_sign}${abs(daily_pnl):.2f} ({trades_today} trades, {wr_today:.0f}% WR)"
+                trades_word = "trade" if trades_today == 1 else "trades"
+                pnl_line = f"{pnl_icon} Today: {pnl_sign}${abs(daily_pnl):,.2f} ({trades_today} {trades_word}, {wr_today:.0f}% WR)"
                 lines.append(pnl_line)
             
             # Add streak if notable
@@ -2600,9 +2627,9 @@ class MarketAgentService:
             wr = (wins / trades_count * 100) if trades_count > 0 else 0
             
             if daily_pnl > 100:
-                return f"Great day! Up ${daily_pnl:.0f}. Consider protecting these gains."
+                return f"Great day! Up ${daily_pnl:,.0f}. Consider protecting these gains."
             elif daily_pnl < -100:
-                return f"Tough day, down ${abs(daily_pnl):.0f}. Stay disciplined."
+                return f"Tough day, down ${abs(daily_pnl):,.0f}. Stay disciplined."
             elif wr >= 70 and trades_count >= 3:
                 return f"Strong {wr:.0f}% win rate today. Execution is sharp!"
             elif wr < 40 and trades_count >= 3:
@@ -2904,34 +2931,11 @@ class MarketAgentService:
             # Run chart generation in thread pool to avoid blocking the event loop.
             # This allows asyncio.wait_for timeouts to work properly.
             
-            # Apply Telegram render profile for mobile-optimized visuals (no-overlap labels).
-            # This sets mobile_mode=True, compact_labels=True, and disables verbose session stats.
+            # Apply unified Telegram profile for mobile-optimized visuals.
             cg = self.telegram_notifier.chart_generator
             if cg and hasattr(cg, "config"):
-                cg.config.mobile_mode = True
-                cg.config.compact_labels = True
-                cg.config.show_session_range_stats = False  # Session names only (no Range/Avg text)
-                cg.config.max_right_labels = 6  # Fewer labels for cleaner mobile view
-                cg.config.right_label_merge_ticks = 6  # More aggressive merging
-                # Conservative trade overlay: reduce clutter by removing per-trade letters.
-                # Pairing is preserved via the subtle entry→exit connector line.
-                cg.config.smart_marker_show_letters = False
-                # Path-only trade history (minimal clutter): connectors + endcaps only.
-                cg.config.smart_marker_show_entry = False
-                cg.config.smart_marker_show_exit = False
-                cg.config.smart_marker_show_path = True
-                # Path-only (clean): no arrows/fading/labels by default.
-                cg.config.smart_marker_path_arrowheads = False
-                cg.config.smart_marker_path_fade_by_age = False
-                cg.config.smart_marker_path_label_last_pnl = False
-                # Optimized panel ratios: more price space, less sub-panel space
-                cg.config.panel_ratio_price = 9.0   # Increased from 8.0 for more price area
-                cg.config.panel_ratio_volume = 1.5  # Reduced from 1.8
-                cg.config.panel_ratio_sub = 1.0     # Reduced from 1.2 (applies to pressure + RSI)
-                
-                # Enable ML/Regime visualization
-                cg.config.show_regime_label = True
-                cg.config.show_ml_confidence = True
+                apply_telegram_unified_profile(cg.config)
+                apply_telegram_trade_overlay_defaults(cg.config)
 
             # Detect regime for chart visualization
             regime_info = {}
@@ -3011,6 +3015,7 @@ class MarketAgentService:
                     prev_entry = None
                     prev_path = None
 
+            render_kwargs = telegram_unified_render_kwargs()
             chart_path = await asyncio.to_thread(
                 chart_generator.generate_dashboard_chart,
                 data=chart_data,
@@ -3018,9 +3023,7 @@ class MarketAgentService:
                 timeframe=chosen_tf,
                 lookback_bars=min(int(bars_target), len(chart_data)),
                 range_label=range_label,
-                # Mobile-first portrait aspect for iPhone readability in Telegram.
-                figsize=(9, 16),
-                dpi=200,
+                **render_kwargs,
                 render_mode="telegram",  # Explicit Telegram render mode
                 show_sessions=True,
                 show_key_levels=True,
@@ -3029,6 +3032,7 @@ class MarketAgentService:
                 ma_periods=[20, 50, 200],  # Common MA periods
                 show_rsi=True,
                 show_pressure=bool(self.dashboard_chart_show_pressure),
+                show_trade_recap=True,
                 # Overlay recent trades (entries/exits) for transparency.
                 trades=trades_for_chart,
                 pnl_overlay=pnl_overlay,
@@ -3038,9 +3042,7 @@ class MarketAgentService:
                 # Smart markers are now the default/only implementation
                 # Legacy options (show_trade_paths, show_trade_pair_numbers) are removed
                 show_trade_overlay_legend=True,
-                # Use more pixels (less dead space) and reduce preview artifacts
-                save_pad_inches=0.12,
-                telegram_top_headroom_pct=0.045,
+                trade_markers_max=12,
                 optimize_png=True,
             )
             if cfg is not None and prev_entry is not None and prev_path is not None:
@@ -3999,9 +4001,9 @@ class MarketAgentService:
 
     async def _check_market_close_summary(self) -> None:
         """
-        Send daily performance summary at market close (4:15 PM ET).
+        Send daily performance summary at safety close (3:55 PM ET).
         
-        Automatically sends once per day when the time hits 4:15-4:30 PM ET.
+        Automatically sends once per day when the time hits 3:55-4:05 PM ET.
         """
         if not self.telegram_notifier or not self.telegram_notifier.enabled:
             return
@@ -4026,8 +4028,8 @@ class MarketAgentService:
             if self._daily_summary_sent_date == today_str:
                 return
             
-            # Send between 4:15 PM and 4:30 PM ET (market close window)
-            if not (et_hour == 16 and 15 <= et_minute <= 30):
+            # Send between 3:55 PM and 4:05 PM ET (safety close window)
+            if not ((et_hour == 15 and et_minute >= 55) or (et_hour == 16 and et_minute <= 5)):
                 return
             
             # Mark as sent for today
@@ -4058,7 +4060,7 @@ class MarketAgentService:
                 msg = (
                     f"📊 *Daily Summary* • {now_et.strftime('%b %d')}\n\n"
                     "No trades today.\n"
-                    "_Markets closed at 4:00 PM ET_"
+                    "_Session safety close at 3:55 PM ET_"
                 )
             else:
                 # Calculate metrics
@@ -4075,7 +4077,7 @@ class MarketAgentService:
                     f"{pnl_emoji} *P&L:* {pnl_sign}${total_pnl:,.2f}\n"
                     f"📈 *Trades:* {len(today_trades)} ({wins}W/{losses}L)\n"
                     f"🎯 *Win Rate:* {win_rate:.0f}%\n\n"
-                    "_Markets closed at 4:00 PM ET_"
+                    "_Session safety close at 3:55 PM ET_"
                 )
             
             asyncio.create_task(
@@ -5136,7 +5138,7 @@ class MarketAgentService:
         }
 
     def _auto_flat_due(self, now_utc: datetime, *, market_open: Optional[bool]) -> Optional[str]:
-        """Return auto-flat reason if Friday/weekend rule should trigger."""
+        """Return auto-flat reason if daily/Friday/weekend rule should trigger."""
         if not self._auto_flat_enabled:
             return None
         try:
@@ -5146,6 +5148,12 @@ class MarketAgentService:
 
         local_now = now_utc.astimezone(tz)
         weekday = local_now.weekday()  # 0=Mon .. 6=Sun
+
+        if self._auto_flat_daily_enabled:
+            dh, dm = self._auto_flat_daily_time
+            if local_now.time() >= time(dh, dm):
+                if self._auto_flat_last_dates.get("daily_auto_flat") != local_now.date():
+                    return "daily_auto_flat"
 
         if self._auto_flat_friday_enabled and weekday == 4:
             fh, fm = self._auto_flat_friday_time
@@ -5297,7 +5305,7 @@ class MarketAgentService:
             await self._close_all_virtual_trades(market_data=market_data, reason="close_all_requested")
             self._clear_close_all_flag()
 
-        # Auto-flat rules (Friday + weekend safety)
+        # Auto-flat rules (daily + Friday + weekend safety)
         try:
             market_open = bool(get_market_hours().is_market_open())
         except Exception:

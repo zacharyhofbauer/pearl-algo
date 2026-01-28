@@ -25,6 +25,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from pearlalgo.market_agent.chart_generator import ChartConfig, ChartGenerator  # noqa: E402
+from pearlalgo.market_agent.chart_profiles import apply_telegram_unified_profile  # noqa: E402
 from tests.fixtures.deterministic_data import (  # noqa: E402
     FIXED_TITLE_TIME,
     generate_deterministic_ohlcv,
@@ -37,19 +38,7 @@ def _apply_telegram_profile(generator: ChartGenerator) -> None:
 
     We intentionally mutate the generator's config, mirroring production usage.
     """
-    cfg = generator.config
-    cfg.mobile_mode = True
-    cfg.compact_labels = True
-    cfg.show_session_range_stats = False
-    cfg.max_right_labels = 6
-    cfg.right_label_merge_ticks = 6
-    cfg.panel_ratio_price = 9.0
-    cfg.panel_ratio_volume = 1.5
-    cfg.panel_ratio_sub = 1.0
-
-    # Optional overlays (kept on for visual parity with Telegram profile)
-    cfg.show_regime_label = True
-    cfg.show_ml_confidence = True
+    apply_telegram_unified_profile(generator.config)
 
 
 def _make_trade(
@@ -287,6 +276,10 @@ def main() -> int:
     figsizes = {
         "portrait": (8, 12),
         "landscape": (16, 7),
+        # Middle-ground Telegram candidates (neither portrait nor landscape).
+        "mid_4x3": (12, 9),
+        "mid_6x5": (12, 10),
+        "mid_10x9": (10, 9),
     }
     trade_views = {
         # Current conservative pairing: triangles+circles+connector, no letters.

@@ -37,6 +37,13 @@ def main() -> int:
         generate_deterministic_ohlcv,
     )
     from pearlalgo.market_agent.chart_generator import ChartConfig, ChartGenerator  # noqa: WPS433
+    from pearlalgo.market_agent.chart_profiles import (  # noqa: WPS433
+        apply_telegram_trade_overlay_defaults,
+        apply_telegram_unified_profile,
+        TELEGRAM_UNIFIED_DPI,
+        TELEGRAM_UNIFIED_FIGSIZE,
+    )
+    from tests.fixtures.trade_overlay_fixtures import build_trade_list  # noqa: WPS433
 
     cfg = ChartConfig()
     gen = ChartGenerator(cfg)
@@ -93,6 +100,92 @@ def main() -> int:
         raise RuntimeError("Failed to generate mobile dashboard baseline")
     _copy(Path(mobile_path), fixtures_dir / "mobile_dashboard_baseline.png")
     Path(mobile_path).unlink(missing_ok=True)
+
+    # -----------------------------
+    # Telegram unified dashboard baseline (8h)
+    # -----------------------------
+    unified_cfg = ChartConfig()
+    unified_gen = ChartGenerator(unified_cfg)
+    apply_telegram_unified_profile(unified_cfg)
+    apply_telegram_trade_overlay_defaults(unified_cfg)
+    unified_data = generate_deterministic_ohlcv(num_bars=220, base_price=26300.0)
+    lookback = 8 * 60 // 5
+    trades = build_trade_list(
+        unified_data,
+        lookback_bars=lookback,
+        num_trades=6,
+        spacing_bars=14,
+        hold_bars=8,
+        start_offset_into_window=8,
+    )
+    # Build P&L overlay for recap panel
+    pnl_overlay = None
+    try:
+        closed = [t for t in trades if isinstance(t, dict) and t.get("pnl") is not None]
+        if closed:
+            def _ts(x):
+                try:
+                    return x if x is not None else ""
+                except Exception:
+                    return ""
+            closed.sort(key=lambda t: _ts(t.get("exit_time") or t.get("entry_time")))
+            pnl_vals = []
+            wins = 0
+            for t in closed:
+                try:
+                    v = float(t.get("pnl") or 0.0)
+                except Exception:
+                    v = 0.0
+                pnl_vals.append(v)
+                if v > 0:
+                    wins += 1
+            total_pnl = float(sum(pnl_vals)) if pnl_vals else 0.0
+            trades_count = int(len(pnl_vals))
+            win_rate = float((wins / trades_count) * 100.0) if trades_count > 0 else 0.0
+            curve = []
+            run = 0.0
+            for v in pnl_vals:
+                run += float(v)
+                curve.append(run)
+            pnl_overlay = {
+                "daily_pnl": total_pnl,
+                "trades": trades_count,
+                "win_rate": win_rate,
+                "label": "8h PnL",
+                "pnl_curve": curve,
+                "detailed": True,
+            }
+    except Exception:
+        pnl_overlay = None
+
+    unified_path = unified_gen.generate_dashboard_chart(
+        data=unified_data,
+        symbol="MNQ",
+        timeframe="5m",
+        lookback_bars=lookback,
+        range_label="8h",
+        figsize=TELEGRAM_UNIFIED_FIGSIZE,
+        dpi=TELEGRAM_UNIFIED_DPI,
+        render_mode="telegram",
+        show_sessions=True,
+        show_key_levels=True,
+        show_vwap=True,
+        show_ma=True,
+        ma_periods=[20, 50, 200],
+        show_rsi=True,
+        show_pressure=False,
+        show_trade_recap=True,
+        title_time=FIXED_TITLE_TIME,
+        trades=trades,
+        pnl_overlay=pnl_overlay,
+        show_ema_crossover_markers=False,
+        show_trade_overlay_legend=True,
+        trade_markers_max=12,
+    )
+    if unified_path is None or not Path(unified_path).exists():
+        raise RuntimeError("Failed to generate unified Telegram dashboard baseline")
+    _copy(Path(unified_path), fixtures_dir / "telegram_unified_dashboard_baseline.png")
+    Path(unified_path).unlink(missing_ok=True)
 
     # -----------------------------
     # On-demand baseline (12h)

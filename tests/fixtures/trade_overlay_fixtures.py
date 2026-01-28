@@ -15,6 +15,10 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+from pearlalgo.market_agent.chart_profiles import (
+    apply_telegram_trade_overlay_defaults,
+    apply_telegram_unified_profile,
+)
 
 def apply_telegram_render_profile(cfg: Any) -> None:
     """
@@ -23,29 +27,8 @@ def apply_telegram_render_profile(cfg: Any) -> None:
     This mirrors the service-layer Telegram profile (without requiring the service).
     """
 
-    # Mobile-first layout and decluttering defaults.
-    desired: Dict[str, Any] = {
-        "mobile_mode": True,
-        "compact_labels": True,
-        "show_session_range_stats": False,
-        "max_right_labels": 6,
-        "right_label_merge_ticks": 6,
-        # Panel ratios: allocate more space to price for Telegram.
-        "panel_ratio_price": 9.0,
-        "panel_ratio_volume": 1.5,
-        "panel_ratio_sub": 1.0,
-        # Optional badges (only render if regime_info is provided)
-        "show_regime_label": True,
-        "show_ml_confidence": True,
-    }
-
-    for k, v in desired.items():
-        try:
-            if hasattr(cfg, k):
-                setattr(cfg, k, v)
-        except Exception:
-            # Best-effort; config fields can differ by version.
-            pass
+    apply_telegram_unified_profile(cfg)
+    apply_telegram_trade_overlay_defaults(cfg)
 
 
 def _make_trade(

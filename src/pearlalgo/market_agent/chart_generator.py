@@ -995,6 +995,8 @@ class ChartConfig:
     # Panel visibility options (allows hiding panels for more price space)
     show_pressure_panel: bool = True  # Pressure panel (signed volume histogram)
     show_volume_panel: bool = True    # Volume panel (can disable for cleaner charts)
+    # Trade recap panel (replaces pressure panel when enabled)
+    show_trade_recap_panel: bool = False
 
     # Panel ratio configuration (advanced - controls vertical space allocation)
     # Default optimized ratios give ~66% to price panel when all sub-panels enabled
@@ -1046,6 +1048,18 @@ class ChartConfig:
     smart_marker_path_arrowheads: bool = False
     smart_marker_path_fade_by_age: bool = False
     smart_marker_path_label_last_pnl: bool = False
+    
+    # Trade overlay profiles (reference mapping to config knobs):
+    # - path_only_clean:
+    #   show_entry=False, show_exit=False, show_path=True, arrowheads=False, fade=False, last_pnl=False
+    # - path_only_detailed:
+    #   show_entry=False, show_exit=False, show_path=True, arrowheads=True, fade=True, last_pnl=True
+    # - entry_exit_no_letters:
+    #   show_entry=True, show_exit=True, show_path=True, show_letters=False
+    # - lettered_pairs:
+    #   show_entry=True, show_exit=True, show_path=True, show_letters=True
+    # - entries_only / exits_only:
+    #   show_entry=True, show_exit=False OR show_entry=False, show_exit=True (path optional)
 
     @classmethod
     def from_strategy_config(cls, strategy_config) -> "ChartConfig":
@@ -1080,6 +1094,7 @@ class ChartConfig:
             "hud_rsi_period": "rsi_period",
             "hud_rsi_overbought_oversold_shading": "rsi_overbought_oversold_shading",
             "hud_show_pressure_panel": "show_pressure_panel",
+            "hud_show_trade_recap_panel": "show_trade_recap_panel",
             "hud_show_volume_panel": "show_volume_panel",
             "hud_panel_ratio_price": "panel_ratio_price",
             "hud_panel_ratio_volume": "panel_ratio_volume",
@@ -3081,6 +3096,8 @@ class ChartGenerator:
                 lines.append("Shape: ▲ Entry")
             elif show_exit and not show_entry:
                 lines.append("Shape: ● Exit")
+            elif show_path:
+                lines.append("Endcaps: entry/exit dots")
             if show_path:
                 lines.append("Path: dashed connector")
             else:
@@ -3110,9 +3127,16 @@ class ChartGenerator:
             else:
                 lines.append("EMA cross: hidden")
 
+            try:
+                legend_y = 0.84 if self.config.mobile_mode else 0.88
+                if bool(getattr(self.config, "show_power_readout", True)):
+                    legend_y -= 0.06
+            except Exception:
+                legend_y = 0.84
+
             ax.text(
                 0.01,
-                0.84,
+                legend_y,
                 "\n".join(lines),
                 transform=ax.transAxes,
                 ha="left",
@@ -3128,6 +3152,173 @@ class ChartGenerator:
                     boxstyle="round,pad=0.3",
                 ),
             )
+        except Exception:
+            return
+
+    def _draw_trade_recap_panel(
+        self,
+        ax,
+        pnl_overlay: Optional[Dict[str, Any]],
+        *,
+        range_label: Optional[str] = None,
+    ) -> None:
+        """Draw a compact Trade Recap panel (equity + drawdown + summary stats)."""
+        if ax is None:
+            return
+
+        try:
+            ax.set_xticks([])
+            ax.set_yticks([])
+            try:
+                for sp in ax.spines.values():
+                    sp.set_visible(False)
+            except Exception:
+                pass
+            ax.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
+
+            title = str(range_label or "Trade Recap").strip()
+            if not pnl_overlay or not isinstance(pnl_overlay, dict):
+                ax.text(
+                    0.02,
+                    0.92,
+                    title,
+                    transform=ax.transAxes,
+                    ha="left",
+                    va="top",
+                    fontsize=FONT_SIZE_LEGEND,
+                    color=TEXT_PRIMARY,
+                    alpha=0.9,
+                )
+                ax.text(
+                    0.02,
+                    0.65,
+                    "No closed trades in window",
+                    transform=ax.transAxes,
+                    ha="left",
+                    va="top",
+                    fontsize=FONT_SIZE_SUMMARY,
+                    color=TEXT_SECONDARY,
+                    alpha=0.85,
+                )
+                return
+
+            daily_pnl = float(pnl_overlay.get("daily_pnl") or 0.0)
+            trades_count = int(pnl_overlay.get("trades") or 0)
+            win_rate = float(pnl_overlay.get("win_rate") or 0.0)
+            label = str(pnl_overlay.get("label") or title).strip()
+            curve_raw = pnl_overlay.get("pnl_curve")
+
+            if not isinstance(curve_raw, (list, tuple)) or len(curve_raw) < 2:
+                ax.text(
+                    0.02,
+                    0.92,
+                    label,
+                    transform=ax.transAxes,
+                    ha="left",
+                    va="top",
+                    fontsize=FONT_SIZE_LEGEND,
+                    color=TEXT_PRIMARY,
+                    alpha=0.9,
+                )
+                ax.text(
+                    0.02,
+                    0.65,
+                    "No closed trades in window",
+                    transform=ax.transAxes,
+                    ha="left",
+                    va="top",
+                    fontsize=FONT_SIZE_SUMMARY,
+                    color=TEXT_SECONDARY,
+                    alpha=0.85,
+                )
+                return
+
+            try:
+                y_vals = [float(v) for v in curve_raw if v is not None]
+            except Exception:
+                y_vals = []
+            if len(y_vals) < 2:
+                return
+
+            y = np.array(y_vals, dtype=float)
+            x = np.arange(len(y), dtype=float)
+            cummax = np.maximum.accumulate(y)
+            dd = y - cummax
+            max_dd = float(abs(np.min(dd))) if len(dd) else 0.0
+
+            pnl_color = CANDLE_UP if daily_pnl >= 0 else CANDLE_DOWN
+            pnl_sign = "+" if daily_pnl >= 0 else ""
+
+            # Header text
+            header = f"{label} • {trades_count} trades • {win_rate:.0f}% WR • MaxDD ${max_dd:,.0f}"
+            ax.text(
+                0.02,
+                0.96,
+                header,
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=FONT_SIZE_LEGEND,
+                color=TEXT_PRIMARY,
+                alpha=0.92,
+            )
+            ax.text(
+                0.02,
+                0.80,
+                f"{pnl_sign}${daily_pnl:,.2f}",
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=FONT_SIZE_SUMMARY,
+                color=pnl_color,
+                alpha=0.95,
+            )
+
+            # Equity subplot
+            ax_eq = ax.inset_axes([0.02, 0.25, 0.96, 0.50])
+            ax_eq.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
+            ax_eq.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.7)
+            ax_eq.plot(x, y, color=TEXT_PRIMARY, linewidth=1.2, alpha=0.9)
+            ax_eq.fill_between(x, 0.0, y, where=(y >= 0), color=CANDLE_UP, alpha=0.22)
+            ax_eq.fill_between(x, 0.0, y, where=(y < 0), color=CANDLE_DOWN, alpha=0.22)
+            ax_eq.scatter(
+                [x[-1]],
+                [y[-1]],
+                s=18,
+                color=pnl_color,
+                edgecolors=DARK_BG,
+                linewidths=0.8,
+                zorder=ZORDER_TEXT_LABELS,
+            )
+
+            # Drawdown subplot
+            ax_dd = ax.inset_axes([0.02, 0.08, 0.96, 0.12])
+            ax_dd.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
+            ax_dd.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.7)
+            ax_dd.fill_between(x, 0.0, dd, color=CANDLE_DOWN, alpha=0.30)
+
+            # Tight framing
+            try:
+                ymin = float(np.min(y))
+                ymax = float(np.max(y))
+                yr = ymax - ymin
+                pad = (yr * 0.12) if yr > 0 else max(1.0, abs(ymax) * 0.15, abs(ymin) * 0.15)
+                ax_eq.set_xlim(float(x[0]), float(x[-1]))
+                ax_eq.set_ylim(ymin - pad, ymax + pad)
+                ddmin = float(np.min(dd)) if len(dd) else 0.0
+                ax_dd.set_xlim(float(x[0]), float(x[-1]))
+                ax_dd.set_ylim(ddmin * 1.15, 0.0 + max(1.0, abs(ddmin) * 0.05))
+            except Exception:
+                pass
+
+            for ax_small in (ax_eq, ax_dd):
+                ax_small.set_xticks([])
+                ax_small.set_yticks([])
+                try:
+                    for sp in ax_small.spines.values():
+                        sp.set_visible(False)
+                except Exception:
+                    pass
         except Exception:
             return
 
@@ -3273,6 +3464,9 @@ class ChartGenerator:
         buffer_data: pd.DataFrame,
         symbol: str = "MNQ",
         timeframe: Optional[str] = None,
+        *,
+        figsize: Optional[Tuple[float, float]] = None,
+        dpi: Optional[int] = None,
     ) -> Optional[Path]:
         """Generate entry chart using mplfinance."""
         if not MPLFINANCE_AVAILABLE:
@@ -3360,7 +3554,7 @@ class ChartGenerator:
                 title=title,
                 ylabel=ylabel_str,
                 ylabel_lower='Volume',
-                figsize=(14, 9),
+                figsize=figsize or (14, 9),
                 show_nontrading=False,
                 tight_layout=True,
                 returnfig=True,
@@ -3437,7 +3631,7 @@ class ChartGenerator:
             # Save + cleanup
             fig.savefig(
                 str(temp_path),
-                dpi=self.dpi,
+                dpi=int(dpi or self.dpi),
                 facecolor=DARK_BG,
                 edgecolor="none",
                 bbox_inches="tight",
@@ -3461,6 +3655,9 @@ class ChartGenerator:
         buffer_data: pd.DataFrame,
         symbol: str = "MNQ",
         timeframe: Optional[str] = None,
+        *,
+        figsize: Optional[Tuple[float, float]] = None,
+        dpi: Optional[int] = None,
     ) -> Optional[Path]:
         """Generate exit chart using mplfinance."""
         if not MPLFINANCE_AVAILABLE:
@@ -3555,7 +3752,7 @@ class ChartGenerator:
                 title=title,
                 ylabel=ylabel_str,
                 ylabel_lower='Volume',
-                figsize=(14, 9),
+                figsize=figsize or (14, 9),
                 show_nontrading=False,
                 tight_layout=True,
                 returnfig=True,
@@ -3619,7 +3816,7 @@ class ChartGenerator:
 
             fig.savefig(
                 str(temp_path),
-                dpi=self.dpi,
+                dpi=int(dpi or self.dpi),
                 facecolor=DARK_BG,
                 edgecolor="none",
                 bbox_inches="tight",
@@ -4384,6 +4581,7 @@ class ChartGenerator:
         ma_periods: Optional[List[int]] = None,
         show_rsi: bool = True,
         show_pressure: bool = True,
+        show_trade_recap: bool = False,
         title_time: Optional[str] = None,
         right_pad_bars: Optional[int] = None,
         trades: Optional[List[Dict[str, Any]]] = None,
@@ -4658,9 +4856,12 @@ class ChartGenerator:
                     pass
 
             volume_on = "Volume" in df.columns and self.config.show_volume_panel
+            # Trade recap panel (replaces pressure panel when enabled)
+            recap_enabled = bool(show_trade_recap and self.config.show_trade_recap_panel)
+            recap_panel_idx = (2 if volume_on else 1) if recap_enabled else None
             # Pressure panel (buy/sell proxy): signed volume histogram (+vol for up candles, -vol for down candles)
-            # Respects both function parameter and config option
-            pressure_enabled = bool(show_pressure and volume_on and self.config.show_pressure_panel)
+            # Respects both function parameter and config option, but is disabled when recap is active.
+            pressure_enabled = bool(show_pressure and volume_on and self.config.show_pressure_panel and not recap_enabled)
             if pressure_enabled:
                 try:
                     close = df["Close"]
@@ -4686,6 +4887,21 @@ class ChartGenerator:
                     pressure_enabled = False
                     logger.debug(f"Error adding pressure panel to dashboard chart: {e}")
 
+            # Reserve a panel slot for the Trade Recap panel (no visible plot).
+            if recap_enabled and recap_panel_idx is not None:
+                try:
+                    recap_stub = pd.Series([0.0] * len(df), index=df.index)
+                    addplot.append(
+                        mpf.make_addplot(
+                            recap_stub,
+                            panel=recap_panel_idx,
+                            color=TEXT_SECONDARY,
+                            alpha=0.0,
+                        )
+                    )
+                except Exception as e:
+                    logger.debug(f"Error reserving trade recap panel: {e}")
+
             # RSI panel (shift down if pressure is enabled)
             # Uses Wilder's smoothing (EMA with alpha=1/period) for standard RSI
             panel_ratios = None
@@ -4704,9 +4920,15 @@ class ChartGenerator:
                     # Panel allocation:
                     # - price: 0
                     # - volume: 1 (built-in)
-                    # - pressure: 2 (optional)
-                    # - rsi: 3 (if pressure enabled) else 2
-                    rsi_panel = 3 if (volume_on and pressure_enabled) else (2 if volume_on else 1)
+                    # - recap: 2 (optional)
+                    # - pressure: 2 (optional, only if recap disabled)
+                    # - rsi: 3 (if volume+recap/pressure) else 2 if volume else 1
+                    if volume_on:
+                        recap_panel_idx = 2 if recap_enabled else None
+                        rsi_panel = 3 if (recap_enabled or pressure_enabled) else 2
+                    else:
+                        recap_panel_idx = 1 if recap_enabled else None
+                        rsi_panel = 2 if recap_enabled else 1
                     addplot.append(
                         mpf.make_addplot(
                             rsi,
@@ -4732,10 +4954,17 @@ class ChartGenerator:
                     pr_price = self.config.panel_ratio_price
                     pr_vol = self.config.panel_ratio_volume
                     pr_sub = self.config.panel_ratio_sub
-                    if volume_on and pressure_enabled:
-                        panel_ratios = (pr_price, pr_vol, pr_sub, pr_sub)
+                    sub_panels = int(recap_enabled or pressure_enabled) + int(show_rsi)
+                    if volume_on:
+                        if sub_panels >= 2:
+                            panel_ratios = (pr_price, pr_vol, pr_sub, pr_sub)
+                        elif sub_panels == 1:
+                            panel_ratios = (pr_price, pr_vol, pr_sub + 0.2)
                     else:
-                        panel_ratios = (pr_price, pr_vol, pr_sub + 0.2) if volume_on else (pr_price, pr_sub + 0.8)
+                        if sub_panels >= 2:
+                            panel_ratios = (pr_price, pr_sub + 0.4, pr_sub + 0.4)
+                        elif sub_panels == 1:
+                            panel_ratios = (pr_price, pr_sub + 0.8)
                     
                     # Store for overbought/oversold shading (applied after mpf.plot)
                     rsi_series_for_shading = rsi
@@ -4744,7 +4973,7 @@ class ChartGenerator:
                     logger.debug(f"Error adding RSI to dashboard chart: {e}")
 
             # If RSI is off but pressure is on, still provide panel ratios for stable layout
-            if panel_ratios is None and volume_on and pressure_enabled:
+            if panel_ratios is None and volume_on and (recap_enabled or pressure_enabled):
                 pr_price = self.config.panel_ratio_price
                 pr_vol = self.config.panel_ratio_volume
                 pr_sub = self.config.panel_ratio_sub
@@ -5067,6 +5296,19 @@ class ChartGenerator:
                 except Exception as e:
                     logger.debug(f"Error adding RSI shading: {e}")
 
+            # Trade Recap panel (equity + drawdown) - rendered after mpf.plot.
+            if recap_enabled and recap_panel_idx is not None:
+                try:
+                    ax_recap = None
+                    if isinstance(axlist, list):
+                        potential_idx = recap_panel_idx * 2 if volume_on else recap_panel_idx
+                        if potential_idx < len(axlist):
+                            ax_recap = axlist[potential_idx]
+                    if ax_recap is not None:
+                        self._draw_trade_recap_panel(ax_recap, pnl_overlay, range_label=range_label)
+                except Exception as e:
+                    logger.debug(f"Error adding trade recap panel: {e}")
+
             # HUD overlays (sessions, key levels, legend)
             try:
                 ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
@@ -5190,8 +5432,8 @@ class ChartGenerator:
                         except Exception as e:
                             logger.debug(f"Error adding session label: {e}")
                     
-                    # P&L overlay (bottom-right corner)
-                    if pnl_overlay and isinstance(pnl_overlay, dict):
+                    # P&L overlay (bottom-right corner) - only when recap panel is off.
+                    if (not recap_enabled) and pnl_overlay and isinstance(pnl_overlay, dict):
                         try:
                             daily_pnl = pnl_overlay.get("daily_pnl", 0.0)
                             trades_count = pnl_overlay.get("trades", 0)

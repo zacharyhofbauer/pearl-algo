@@ -247,6 +247,23 @@ For Telegram charts, a hybrid labeling policy reduces clutter while preserving k
 └─────────────────────────────────────────────────────┘
 ```
 
+### Telegram Unified Dashboard (Trade Recap)
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Price Panel (ratio: 9.0)                           │
+│  - Candlesticks, MAs, VWAP, zones, levels           │
+│  - Right labels                                     │
+├─────────────────────────────────────────────────────┤
+│  Volume Panel (ratio: 1.5)                          │
+├─────────────────────────────────────────────────────┤
+│  Trade Recap Panel (ratio: 1.0)                     │
+│  - Equity curve + drawdown + summary stats          │
+├─────────────────────────────────────────────────────┤
+│  RSI Panel (ratio: 1.0) [optional]                  │
+└─────────────────────────────────────────────────────┘
+```
+
 ### Entry/Exit Charts
 
 Same structure as dashboard, plus:
@@ -415,10 +432,16 @@ For Telegram dashboard charts, a special render profile is automatically applied
 - `ylabel=""` (removes "Price ($)" axis label to avoid collision with right labels)
 
 **Telegram-Only Dashboard Enhancements (Service-Controlled Render Params)**:
+- Template:
+  - Unified template size: **12×9 @ 200dpi** (4:3 middle ground)
 - Trade clarity:
   - EMA crossover markers **disabled** (reduces arrow ambiguity with trades)
-  - Lettered trade pairs **enabled** (entry+exit share the same letter for pairing)
+  - Trade overlay defaults to **path-only detailed** (arrowheads + fade-by-age + last P&L label)
+  - Per-trade letters **disabled** (reduces clutter)
   - Compact overlay legend **enabled** (decodes trade overlays at a glance)
+  - Safe cap: `trade_markers_max=12`
+- Panel layout:
+  - **Trade Recap panel replaces Pressure** (equity + drawdown + summary stats)
 - Pixel utilization / preview stability:
   - Reduced PNG save padding (less dead space around the chart)
   - Slightly reduced top headroom (more price area while keeping title readable)
@@ -475,6 +498,17 @@ Reduce label clutter on range-bound days:
 ```python
 config = ChartConfig(
     compact_labels=True,  # Reduces max_right_labels to 6, merge_ticks to 6
+)
+```
+
+### Trade Recap Panel (Telegram)
+
+Replace the Pressure panel with a Trade Recap panel (equity + drawdown + stats):
+
+```python
+config = ChartConfig(
+    show_trade_recap_panel=True,
+    show_pressure_panel=False,
 )
 ```
 

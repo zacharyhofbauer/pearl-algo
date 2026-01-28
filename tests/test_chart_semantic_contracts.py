@@ -493,6 +493,11 @@ class TestChartConfigContracts:
         config = self.ChartConfig()
         assert config.compact_labels is False
 
+    def test_trade_recap_panel_off_by_default(self):
+        """Trade recap panel should be OFF by default for baseline stability."""
+        config = self.ChartConfig()
+        assert config.show_trade_recap_panel is False
+
 
 class TestRenderManifest:
     """

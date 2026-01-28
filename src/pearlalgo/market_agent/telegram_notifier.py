@@ -53,6 +53,11 @@ from pearlalgo.utils.telegram_ui_contract import (
     ACTION_DATA_QUALITY,
     ACTION_GATEWAY_STATUS,
 )
+from pearlalgo.market_agent.chart_profiles import (
+    apply_telegram_unified_profile,
+    TELEGRAM_UNIFIED_DPI,
+    TELEGRAM_UNIFIED_FIGSIZE,
+)
 
 try:
     from pearlalgo.market_agent.chart_generator import ChartGenerator
@@ -767,11 +772,26 @@ class MarketAgentTelegramNotifier:
                     and buffer_data is not None
                     and not buffer_data.empty
                 ):
-                    # Enable ML visualization
-                    _prev_regime = self.chart_generator.config.show_regime_label
-                    _prev_ml = self.chart_generator.config.show_ml_confidence
-                    self.chart_generator.config.show_regime_label = True
-                    self.chart_generator.config.show_ml_confidence = True
+                    cfg = getattr(self.chart_generator, "config", None)
+                    prev_cfg = {}
+                    if cfg is not None:
+                        for key in (
+                            "mobile_mode",
+                            "compact_labels",
+                            "show_session_range_stats",
+                            "max_right_labels",
+                            "right_label_merge_ticks",
+                            "panel_ratio_price",
+                            "panel_ratio_volume",
+                            "panel_ratio_sub",
+                            "show_regime_label",
+                            "show_ml_confidence",
+                        ):
+                            try:
+                                prev_cfg[key] = getattr(cfg, key)
+                            except Exception:
+                                pass
+                        apply_telegram_unified_profile(cfg)
 
                     try:
                         chart_path = await asyncio.to_thread(
@@ -780,10 +800,16 @@ class MarketAgentTelegramNotifier:
                             buffer_data=buffer_data,
                             symbol=str(signal.get("symbol") or "MNQ"),
                             timeframe=None,
+                            figsize=TELEGRAM_UNIFIED_FIGSIZE,
+                            dpi=TELEGRAM_UNIFIED_DPI,
                         )
                     finally:
-                        self.chart_generator.config.show_regime_label = _prev_regime
-                        self.chart_generator.config.show_ml_confidence = _prev_ml
+                        if cfg is not None:
+                            for key, value in prev_cfg.items():
+                                try:
+                                    setattr(cfg, key, value)
+                                except Exception:
+                                    pass
 
                     if chart_path and Path(chart_path).exists():
                         persisted = self._persist_trade_chart(
@@ -889,6 +915,26 @@ class MarketAgentTelegramNotifier:
             # Generate and persist exit chart if available (do NOT send charts in notifications)
             chart_path = None
             if self.chart_generator and buffer_data is not None and not buffer_data.empty:
+                cfg = getattr(self.chart_generator, "config", None)
+                prev_cfg = {}
+                if cfg is not None:
+                    for key in (
+                        "mobile_mode",
+                        "compact_labels",
+                        "show_session_range_stats",
+                        "max_right_labels",
+                        "right_label_merge_ticks",
+                        "panel_ratio_price",
+                        "panel_ratio_volume",
+                        "panel_ratio_sub",
+                        "show_regime_label",
+                        "show_ml_confidence",
+                    ):
+                        try:
+                            prev_cfg[key] = getattr(cfg, key)
+                        except Exception:
+                            pass
+                    apply_telegram_unified_profile(cfg)
                 try:
                     chart_path = await asyncio.to_thread(
                         self.chart_generator.generate_exit_chart,
@@ -898,9 +944,18 @@ class MarketAgentTelegramNotifier:
                         pnl,
                         buffer_data,
                         symbol,
+                        figsize=TELEGRAM_UNIFIED_FIGSIZE,
+                        dpi=TELEGRAM_UNIFIED_DPI,
                     )
                 except Exception as e:
                     logger.warning(f"Could not generate exit chart: {e}")
+                finally:
+                    if cfg is not None:
+                        for key, value in prev_cfg.items():
+                            try:
+                                setattr(cfg, key, value)
+                            except Exception:
+                                pass
             
             if chart_path and chart_path.exists():
                 try:
