@@ -970,6 +970,8 @@ class ChartConfig:
     show_power_readout: bool = True  # Show Power buy/sell ratio in top-left corner
     show_tbt_targets: bool = True
     show_key_levels: bool = True
+    show_regime_label: bool = False
+    show_ml_confidence: bool = False
 
     # Key level timeframes to display (SpacemanBTC style)
     # Options: "4h", "daily", "weekly", "monthly", "monday"
@@ -3313,6 +3315,32 @@ class ChartGenerator:
                         self.config.show_power_channel = False
                         self.config.show_tbt_targets = False
                         self._apply_hud(fig, ax_price, df, signal, direction)
+
+                        # ML Confidence Badge (Top-Right)
+                        if self.config.show_ml_confidence:
+                            try:
+                                ml_conf = float(signal.get("confidence", 0.0))
+                                if ml_conf > 0:
+                                    ml_color = SIGNAL_LONG if ml_conf > 0.6 else (SIGNAL_SHORT if ml_conf < 0.4 else TEXT_SECONDARY)
+                                    ax_price.text(
+                                        0.98, 0.95,
+                                        f"ML: {ml_conf:.0%}",
+                                        transform=ax_price.transAxes,
+                                        ha="right", va="top",
+                                        fontsize=FONT_SIZE_LEGEND,
+                                        color=ml_color,
+                                        fontweight="bold",
+                                        bbox=dict(
+                                            boxstyle='round,pad=0.2',
+                                            facecolor=DARK_BG,
+                                            edgecolor=ml_color,
+                                            alpha=ALPHA_LEGEND_BG,
+                                        ),
+                                        zorder=ZORDER_TEXT_LABELS
+                                    )
+                            except Exception as e:
+                                logger.debug(f"Error adding ML confidence badge: {e}")
+
                     finally:
                         for k, v in _prev.items():
                             try:
@@ -4288,6 +4316,7 @@ class ChartGenerator:
         title_time: Optional[str] = None,
         right_pad_bars: Optional[int] = None,
         trades: Optional[List[Dict[str, Any]]] = None,
+        regime_info: Optional[Dict[str, Any]] = None,
         manifest_path: Optional[Path] = None,
         # UX overlay options (mobile-first)
         pnl_overlay: Optional[Dict[str, Any]] = None,  # {"daily_pnl": float, "trades": int, "win_rate": float}
@@ -5130,6 +5159,48 @@ class ChartGenerator:
                             )
                         except Exception as e:
                             logger.debug(f"Error adding P&L overlay: {e}")
+
+                    # Regime Label (Top-Center)
+                    if self.config.show_regime_label and regime_info:
+                        try:
+                            regime_type = str(regime_info.get("regime", "Unknown")).replace("_", " ").title()
+                            ax_price.text(
+                                0.5, 0.97,
+                                f"Regime: {regime_type}",
+                                transform=ax_price.transAxes,
+                                ha="center", va="top",
+                                fontsize=FONT_SIZE_TITLE_MOBILE,
+                                color=TEXT_SECONDARY,
+                                alpha=0.8,
+                                zorder=ZORDER_TEXT_LABELS
+                            )
+                        except Exception as e:
+                            logger.debug(f"Error adding regime label: {e}")
+
+                    # ML Confidence Badge (Top-Right, below Legend)
+                    if self.config.show_ml_confidence and regime_info:
+                        try:
+                            ml_conf = float(regime_info.get("confidence", 0.0))
+                            if ml_conf > 0:
+                                ml_color = SIGNAL_LONG if ml_conf > 0.6 else (SIGNAL_SHORT if ml_conf < 0.4 else TEXT_SECONDARY)
+                                ax_price.text(
+                                    0.98, 0.82 if self.config.mobile_mode else 0.88,
+                                    f"ML: {ml_conf:.0%}",
+                                    transform=ax_price.transAxes,
+                                    ha="right", va="top",
+                                    fontsize=FONT_SIZE_LEGEND,
+                                    color=ml_color,
+                                    fontweight="bold",
+                                    bbox=dict(
+                                        boxstyle='round,pad=0.2',
+                                        facecolor=DARK_BG,
+                                        edgecolor=ml_color,
+                                        alpha=ALPHA_LEGEND_BG,
+                                    ),
+                                    zorder=ZORDER_TEXT_LABELS
+                                )
+                        except Exception as e:
+                            logger.debug(f"Error adding ML confidence badge: {e}")
                     
             except Exception as e:
                 logger.debug(f"Error applying HUD to dashboard chart: {e}")

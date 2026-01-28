@@ -767,13 +767,24 @@ class MarketAgentTelegramNotifier:
                     and buffer_data is not None
                     and not buffer_data.empty
                 ):
-                    chart_path = await asyncio.to_thread(
-                        self.chart_generator.generate_entry_chart,
-                        signal=signal,
-                        buffer_data=buffer_data,
-                        symbol=str(signal.get("symbol") or "MNQ"),
-                        timeframe=None,
-                    )
+                    # Enable ML visualization
+                    _prev_regime = self.chart_generator.config.show_regime_label
+                    _prev_ml = self.chart_generator.config.show_ml_confidence
+                    self.chart_generator.config.show_regime_label = True
+                    self.chart_generator.config.show_ml_confidence = True
+
+                    try:
+                        chart_path = await asyncio.to_thread(
+                            self.chart_generator.generate_entry_chart,
+                            signal=signal,
+                            buffer_data=buffer_data,
+                            symbol=str(signal.get("symbol") or "MNQ"),
+                            timeframe=None,
+                        )
+                    finally:
+                        self.chart_generator.config.show_regime_label = _prev_regime
+                        self.chart_generator.config.show_ml_confidence = _prev_ml
+
                     if chart_path and Path(chart_path).exists():
                         persisted = self._persist_trade_chart(
                             chart_path=Path(chart_path),

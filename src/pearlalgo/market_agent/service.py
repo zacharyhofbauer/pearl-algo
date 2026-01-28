@@ -2471,6 +2471,20 @@ class MarketAgentService:
                 cg.config.panel_ratio_price = 9.0   # Increased from 8.0 for more price area
                 cg.config.panel_ratio_volume = 1.5  # Reduced from 1.8
                 cg.config.panel_ratio_sub = 1.0     # Reduced from 1.2 (applies to pressure + RSI)
+                
+                # Enable ML/Regime visualization
+                cg.config.show_regime_label = True
+                cg.config.show_ml_confidence = True
+
+            # Detect regime for chart visualization
+            regime_info = {}
+            try:
+                if self.scanner and hasattr(self.scanner, "detect_market_regime"):
+                    mr = self.scanner.detect_market_regime(chart_data, lookback=50)
+                    if mr:
+                        regime_info = mr.to_dict() if hasattr(mr, "to_dict") else {}
+            except Exception:
+                pass
             
             chart_path = await asyncio.to_thread(
                 self.telegram_notifier.chart_generator.generate_dashboard_chart,
@@ -2492,6 +2506,7 @@ class MarketAgentService:
                 show_pressure=bool(self.dashboard_chart_show_pressure),
                 # Overlay recent trades (entries/exits) for transparency.
                 trades=self._get_trades_for_chart(chart_data),
+                regime_info=regime_info,
                 # Telegram-only dashboard enhancements (fixed render profile)
                 show_ema_crossover_markers=False,
                 # Option A: lettered trade pairs (clear pairing on mobile)
