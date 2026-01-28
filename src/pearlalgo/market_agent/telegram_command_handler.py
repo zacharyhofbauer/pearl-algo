@@ -173,7 +173,15 @@ class TelegramCommandHandler:
 
         # Skip auto-dashboard on startup - user uses /start for full dashboard
         # This keeps startup clean and gives user control
-        logger.info("Command handler ready - user can use /start for dashboard")
+        # logger.info("Command handler ready - user can use /start for dashboard")
+        
+        # Auto-dashboard on startup if configured
+        if self._startup_ping:
+            logger.info("Sending startup dashboard...")
+            # Schedule dashboard send (async)
+            asyncio.create_task(self._send_startup_dashboard())
+        else:
+            logger.info("Command handler ready - user can use /start for dashboard")
 
     def _register_handlers(self) -> None:
         # Minimal command surface: /start is the menu, /pearl is the JARVIS assistant.
@@ -1365,6 +1373,85 @@ class TelegramCommandHandler:
                 await message_obj.chat.send_message(pearl_msg)
             except Exception as e:
                 logger.debug(f"Could not send Pearl notification: {e}")
+
+    async def _send_startup_dashboard(self) -> None:
+        """Send visual dashboard on startup (programmatic trigger)."""
+        if not self.chat_id:
+            return
+
+        state = self._read_state()
+        pearl_suggestion = self._get_pearl_suggestion(state) if state else None
+        keyboard = self._get_main_menu_keyboard(pearl_suggestion=pearl_suggestion)
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        if not state:
+            try:
+                await self.application.bot.send_message(
+                    chat_id=self.chat_id,
+                    text="🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:",
+                    reply_markup=reply_markup
+                )
+            except Exception as e:
+                logger.error(f"Error sending startup message: {e}")
+            return
+
+        try:
+            message_text = await self._build_status_dashboard_message(state)
+            chart_path = await self._generate_or_get_chart(state)
+            
+            caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
+            text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
+            caption_md = sanitize_telegram_markdown(caption_text)
+            text_md = sanitize_telegram_markdown(text_only)
+            
+            if chart_path and chart_path.exists():
+                try:
+                    with open(chart_path, 'rb') as f:
+                        await self.application.bot.send_photo(
+                            chat_id=self.chat_id,
+                            photo=f,
+                            caption=caption_md,
+                            reply_markup=reply_markup,
+                            parse_mode="Markdown"
+                        )
+                except Exception:
+                    # Fallback
+                    caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
+                    with open(chart_path, 'rb') as f:
+                        await self.application.bot.send_photo(
+                            chat_id=self.chat_id,
+                            photo=f,
+                            caption=caption_plain,
+                            reply_markup=reply_markup,
+                            parse_mode=None
+                        )
+            else:
+                try:
+                    await self.application.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=text_md,
+                        reply_markup=reply_markup,
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                    await self.application.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=text_plain,
+                        reply_markup=reply_markup,
+                        parse_mode=None
+                    )
+            
+            # Send Pearl suggestion as separate notification if present
+            if pearl_suggestion:
+                try:
+                    pearl_msg = f"💬 Pearl: \"{pearl_suggestion.message}\""
+                    await self.application.bot.send_message(chat_id=self.chat_id, text=pearl_msg)
+                except Exception as e:
+                    logger.debug(f"Could not send Pearl notification: {e}")
+
+        except Exception as e:
+            logger.error(f"Error sending startup dashboard: {e}", exc_info=True)
 
     async def _generate_or_get_chart(self, state: dict, force_refresh: bool = False) -> Optional[Path]:
         """
