@@ -38,9 +38,13 @@ def apply_telegram_unified_profile(cfg: Any) -> None:
         "panel_ratio_price": 9.0,
         "panel_ratio_volume": 1.5,
         "panel_ratio_sub": 1.0,
+        # Keep only the long-term EMA for cleaner Telegram charts.
+        "ma_periods": [200],
         # Trade recap replaces pressure panel on Telegram.
         "show_trade_recap_panel": True,
         "show_pressure_panel": False,
+        # Hide VWAP bands (keep main VWAP line).
+        "vwap_show_bands": False,
         # Optional badges (only render if regime_info is provided).
         "show_regime_label": True,
         "show_ml_confidence": True,

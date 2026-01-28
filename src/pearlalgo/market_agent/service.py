@@ -3029,7 +3029,7 @@ class MarketAgentService:
                 show_key_levels=True,
                 show_vwap=True,
                 show_ma=True,  # Show moving averages to match TradingView-style chart
-                ma_periods=[20, 50, 200],  # Common MA periods
+                ma_periods=[200],  # Telegram: keep only EMA200 for clarity
                 show_rsi=True,
                 show_pressure=bool(self.dashboard_chart_show_pressure),
                 show_trade_recap=True,

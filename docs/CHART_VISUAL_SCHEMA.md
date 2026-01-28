@@ -440,6 +440,7 @@ For Telegram dashboard charts, a special render profile is automatically applied
   - Per-trade letters **disabled** (reduces clutter)
   - Compact overlay legend **enabled** (decodes trade overlays at a glance)
   - Safe cap: `trade_markers_max=12`
+- VWAP bands **hidden** (keep main VWAP line only)
 - Panel layout:
   - **Trade Recap panel replaces Pressure** (equity + drawdown + summary stats)
 - Pixel utilization / preview stability:

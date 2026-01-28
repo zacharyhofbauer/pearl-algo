@@ -133,7 +133,7 @@ class TestTelegramUnifiedDashboardVisualRegression:
             show_key_levels=True,
             show_vwap=True,
             show_ma=True,
-            ma_periods=[20, 50, 200],
+            ma_periods=[200],
             show_rsi=True,
             show_pressure=False,
             show_trade_recap=True,

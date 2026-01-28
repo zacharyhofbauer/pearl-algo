@@ -46,6 +46,8 @@ VWAP_COLOR = "#2196f3"
 # MA colors: supports up to 4 EMAs (9, 20, 50, 200) with unique colors
 # Cyan for EMA9, Blue for EMA20, Purple for EMA50, Red for EMA200
 MA_COLORS = ['#00bcd4', '#2196f3', '#9c27b0', '#f44336']
+RSI_LINE_COLOR = "#7E57C2"
+RSI_BAND_COLOR = "#787b86"
 
 # TBT Trendline colors (configurable via ChartConfig)
 TBT_RESISTANCE_COLOR = "#ffc107"  # Amber/yellow for resistance trendlines
@@ -1004,7 +1006,8 @@ class ChartConfig:
     panel_ratio_volume: float = 1.8   # Volume panel ratio
     panel_ratio_sub: float = 1.2      # Sub-panel ratio (applied to pressure and RSI)
 
-    # VWAP band fill option (visual enhancement)
+    # VWAP band options (visual enhancement)
+    vwap_show_bands: bool = True   # Show VWAP ±1σ/±2σ lines
     vwap_fill_bands: bool = False  # Fill between VWAP and ±1σ bands
 
     # Legend display option
@@ -1101,6 +1104,7 @@ class ChartConfig:
             "hud_panel_ratio_sub": "panel_ratio_sub",
             "hud_key_level_timeframes": "key_level_timeframes",
             "hud_vwap_fill_bands": "vwap_fill_bands",
+            "hud_vwap_show_bands": "vwap_show_bands",
             "hud_show_legend": "show_legend",
             "hud_mobile_enhanced_fonts": "mobile_enhanced_fonts",
             "hud_rr_box_font_size": "rr_box_font_size",
@@ -2430,12 +2434,7 @@ class ChartGenerator:
             return
 
     def _draw_rsi_overbought_oversold_shading(self, ax_rsi, rsi_series: pd.Series) -> None:
-        """Draw optional overbought/oversold shading on RSI panel.
-        
-        Adds subtle background shading:
-        - Green tint in oversold zone (RSI < 30)
-        - Red tint in overbought zone (RSI > 70)
-        """
+        """Draw TradingView-style RSI shading + gradients on RSI panel."""
         if not self.config.rsi_overbought_oversold_shading:
             return
         
@@ -2444,32 +2443,56 @@ class ChartGenerator:
         
         try:
             x_coords = np.arange(len(rsi_series))
-            rsi_vals = rsi_series.fillna(50).values  # Default to 50 for NaN
-            
-            # Oversold zone shading (RSI < 30) - green tint
-            oversold_mask = rsi_vals < 30
-            if oversold_mask.any():
+            rsi_vals = rsi_series.fillna(50).to_numpy()
+
+            # Ensure classic RSI panel bounds.
+            try:
+                ax_rsi.set_ylim(0, 100)
+            except Exception:
+                pass
+
+            # Background fill between 30 and 70 (purple tint).
+            ax_rsi.axhspan(
+                30,
+                70,
+                facecolor=RSI_LINE_COLOR,
+                alpha=0.12,
+                edgecolor="none",
+                zorder=0,
+            )
+
+            # Gradient-style fills (stacked bands for a soft gradient look).
+            steps = 6
+            # Overbought: RSI > 70, green gradient toward higher values.
+            for i, lvl in enumerate(np.linspace(70, 100, steps + 1)[:-1]):
+                mask = rsi_vals >= lvl
+                if not mask.any():
+                    continue
+                alpha = 0.04 + (0.20 * (i + 1) / steps)
                 ax_rsi.fill_between(
                     x_coords,
-                    0,
-                    30,
-                    where=oversold_mask,
-                    color=SIGNAL_LONG,  # Green
-                    alpha=0.08,
+                    50,
+                    rsi_vals,
+                    where=mask,
+                    color=SIGNAL_LONG,
+                    alpha=alpha,
                     zorder=0,
                     linewidth=0,
                 )
-            
-            # Overbought zone shading (RSI > 70) - red tint
-            overbought_mask = rsi_vals > 70
-            if overbought_mask.any():
+
+            # Oversold: RSI < 30, red gradient toward lower values.
+            for i, lvl in enumerate(np.linspace(30, 0, steps + 1)[:-1]):
+                mask = rsi_vals <= lvl
+                if not mask.any():
+                    continue
+                alpha = 0.04 + (0.20 * (i + 1) / steps)
                 ax_rsi.fill_between(
                     x_coords,
-                    70,
-                    100,
-                    where=overbought_mask,
-                    color=SIGNAL_SHORT,  # Red
-                    alpha=0.08,
+                    rsi_vals,
+                    50,
+                    where=mask,
+                    color=SIGNAL_SHORT,
+                    alpha=alpha,
                     zorder=0,
                     linewidth=0,
                 )
@@ -3513,6 +3536,8 @@ class ChartGenerator:
             
             # Plot with mplfinance (return fig so we can draw HUD overlays)
             volume_on = True if 'Volume' in df.columns else False
+            rsi_series_for_shading = None
+            rsi_panel_idx = None
             if self.config.show_rsi:
                 # RSI is plotted in a separate panel below volume.
                 # Uses Wilder's smoothing (EMA with alpha=1/period) for standard RSI
@@ -3526,19 +3551,21 @@ class ChartGenerator:
 
                 rsi_panel = 2 if volume_on else 1
                 addplot.append(
-                    mpf.make_addplot(rsi, panel=rsi_panel, color="#b388ff", width=1.2, ylabel="RSI", alpha=0.9)
+                    mpf.make_addplot(rsi, panel=rsi_panel, color=RSI_LINE_COLOR, width=1.2, ylabel="RSI", alpha=0.9)
                 )
-                for lvl, a in ((30, 0.25), (50, 0.18), (70, 0.25)):
+                for lvl, a in ((70, 0.9), (50, 0.5), (30, 0.9)):
                     addplot.append(
                         mpf.make_addplot(
                             pd.Series([lvl] * len(df), index=df.index),
                             panel=rsi_panel,
-                            color=TEXT_SECONDARY,
+                            color=RSI_BAND_COLOR,
                             width=1.0,
-                            linestyle="--",
+                            linestyle="-",
                             alpha=a,
                         )
                     )
+                rsi_series_for_shading = rsi
+                rsi_panel_idx = rsi_panel
 
                 panel_ratios = (8, 1.8, 1.4) if volume_on else (8, 2)  # Optimized: ~71% price
 
@@ -3567,6 +3594,19 @@ class ChartGenerator:
                 plot_kwargs['panel_ratios'] = panel_ratios
 
             fig, axlist = mpf.plot(df, **plot_kwargs)
+
+            # RSI shading (after mpf.plot)
+            if rsi_series_for_shading is not None and rsi_panel_idx is not None:
+                try:
+                    ax_rsi = None
+                    if isinstance(axlist, list):
+                        potential_idx = rsi_panel_idx * 2 if volume_on else rsi_panel_idx
+                        if potential_idx < len(axlist):
+                            ax_rsi = axlist[potential_idx]
+                    if ax_rsi is not None:
+                        self._draw_rsi_overbought_oversold_shading(ax_rsi, rsi_series_for_shading)
+                except Exception:
+                    pass
 
             # Apply HUD overlays on the price axis.
             try:
@@ -3713,6 +3753,8 @@ class ChartGenerator:
             temp_file.close()
             
             volume_on = True if 'Volume' in df.columns else False
+            rsi_series_for_shading = None
+            rsi_panel_idx = None
             if self.config.show_rsi:
                 # Uses Wilder's smoothing (EMA with alpha=1/period) for standard RSI
                 close = df["Close"]
@@ -3725,19 +3767,21 @@ class ChartGenerator:
 
                 rsi_panel = 2 if volume_on else 1
                 addplot.append(
-                    mpf.make_addplot(rsi, panel=rsi_panel, color="#b388ff", width=1.2, ylabel="RSI", alpha=0.9)
+                    mpf.make_addplot(rsi, panel=rsi_panel, color=RSI_LINE_COLOR, width=1.2, ylabel="RSI", alpha=0.9)
                 )
-                for lvl, a in ((30, 0.25), (50, 0.18), (70, 0.25)):
+                for lvl, a in ((70, 0.9), (50, 0.5), (30, 0.9)):
                     addplot.append(
                         mpf.make_addplot(
                             pd.Series([lvl] * len(df), index=df.index),
                             panel=rsi_panel,
-                            color=TEXT_SECONDARY,
+                            color=RSI_BAND_COLOR,
                             width=1.0,
-                            linestyle="--",
+                            linestyle="-",
                             alpha=a,
                         )
                     )
+                rsi_series_for_shading = rsi
+                rsi_panel_idx = rsi_panel
                 panel_ratios = (8, 1.8, 1.4) if volume_on else (8, 2)  # Optimized: ~71% price
 
             # Wider candles + thicker wicks for Telegram visibility
@@ -3765,6 +3809,19 @@ class ChartGenerator:
                 plot_kwargs['panel_ratios'] = panel_ratios
 
             fig, axlist = mpf.plot(df, **plot_kwargs)
+
+            # RSI shading (after mpf.plot)
+            if rsi_series_for_shading is not None and rsi_panel_idx is not None:
+                try:
+                    ax_rsi = None
+                    if isinstance(axlist, list):
+                        potential_idx = rsi_panel_idx * 2 if volume_on else rsi_panel_idx
+                        if potential_idx < len(axlist):
+                            ax_rsi = axlist[potential_idx]
+                    if ax_rsi is not None:
+                        self._draw_rsi_overbought_oversold_shading(ax_rsi, rsi_series_for_shading)
+                except Exception:
+                    pass
 
             # Apply HUD overlays, including an Exit right-label.
             try:
@@ -3978,6 +4035,8 @@ class ChartGenerator:
 
             # RSI panel - Uses Wilder's smoothing (EMA with alpha=1/period) for standard RSI
             volume_on = "Volume" in df.columns
+            rsi_series_for_shading = None
+            rsi_panel_idx = None
             panel_ratios = None
             if self.config.show_rsi:
                 close = df["Close"]
@@ -3990,19 +4049,21 @@ class ChartGenerator:
 
                 rsi_panel = 2 if volume_on else 1
                 addplot.append(
-                    mpf.make_addplot(rsi, panel=rsi_panel, color="#b388ff", width=1.2, ylabel="RSI", alpha=0.9)
+                    mpf.make_addplot(rsi, panel=rsi_panel, color=RSI_LINE_COLOR, width=1.2, ylabel="RSI", alpha=0.9)
                 )
-                for lvl, a in ((30, 0.25), (50, 0.18), (70, 0.25)):
+                for lvl, a in ((70, 0.9), (50, 0.5), (30, 0.9)):
                     addplot.append(
                         mpf.make_addplot(
                             pd.Series([lvl] * len(df), index=df.index),
                             panel=rsi_panel,
-                            color=TEXT_SECONDARY,
+                            color=RSI_BAND_COLOR,
                             width=1.0,
-                            linestyle="--",
+                            linestyle="-",
                             alpha=a,
                         )
                     )
+                rsi_series_for_shading = rsi
+                rsi_panel_idx = rsi_panel
                 panel_ratios = (6, 2, 2) if volume_on else (7, 3)
 
             # Title
@@ -4042,6 +4103,19 @@ class ChartGenerator:
                 plot_kwargs['panel_ratios'] = panel_ratios
 
             fig, axlist = mpf.plot(df, **plot_kwargs)
+
+            # RSI shading (after mpf.plot)
+            if rsi_series_for_shading is not None and rsi_panel_idx is not None:
+                try:
+                    ax_rsi = None
+                    if isinstance(axlist, list):
+                        potential_idx = rsi_panel_idx * 2 if volume_on else rsi_panel_idx
+                        if potential_idx < len(axlist):
+                            ax_rsi = axlist[potential_idx]
+                    if ax_rsi is not None:
+                        self._draw_rsi_overbought_oversold_shading(ax_rsi, rsi_series_for_shading)
+                except Exception:
+                    pass
 
             # Get price axis
             ax_price = axlist[0] if isinstance(axlist, list) and axlist else None
@@ -4649,6 +4723,8 @@ class ChartGenerator:
                 logger.warning("Cannot generate dashboard chart: prepared data is empty")
                 return None
 
+            is_telegram = render_mode == "telegram" or self.config.mobile_mode
+
             # Build HUD context for overlays
             hud: Dict[str, Any] = {}
             try:
@@ -4672,6 +4748,7 @@ class ChartGenerator:
 
             # Addplots
             addplot: List = []
+            vwap_series_for_axes = None
 
             # Moving averages (EMA-style) + crossover markers (to match TradingView scripts)
             if show_ma:
@@ -4784,56 +4861,65 @@ class ChartGenerator:
                     vwap_series = (cum_vp / cum_vol.replace(0.0, np.nan)).astype(float)
 
                     if not vwap_series.isna().all():
-                        addplot.append(
-                            mpf.make_addplot(
-                                vwap_series,
-                                color=VWAP_COLOR,
-                                width=1.8,
-                                alpha=0.80,
-                                label="VWAP",
-                            )
-                        )
-
-                        # VWAP AA bands: rolling stdev around VWAP (±1σ, ±2σ)
-                        stdev = close.rolling(window=20, min_periods=5).std()
-                        upper1 = vwap_series + stdev
-                        lower1 = vwap_series - stdev
-                        upper2 = vwap_series + (stdev * 2.0)
-                        lower2 = vwap_series - (stdev * 2.0)
-
-                        for band, a in (
-                            (upper1, ALPHA_VWAP_BAND_1),
-                            (lower1, ALPHA_VWAP_BAND_1),
-                            (upper2, ALPHA_VWAP_BAND_2),
-                            (lower2, ALPHA_VWAP_BAND_2),
-                        ):
-                            if band is None or band.isna().all():
-                                continue
+                        if is_telegram:
+                            vwap_series_for_axes = vwap_series
+                        else:
                             addplot.append(
                                 mpf.make_addplot(
-                                    band,
+                                    vwap_series,
                                     color=VWAP_COLOR,
-                                    width=1.0,
-                                    linestyle="--",
-                                    alpha=a,
+                                    width=1.8,
+                                    alpha=0.80,
+                                    label="VWAP",
                                 )
                             )
+
+                        upper1 = lower1 = upper2 = lower2 = None
+                        if bool(getattr(self.config, "vwap_show_bands", True)):
+                            # VWAP AA bands: rolling stdev around VWAP (±1σ, ±2σ)
+                            stdev = close.rolling(window=20, min_periods=5).std()
+                            upper1 = vwap_series + stdev
+                            lower1 = vwap_series - stdev
+                            upper2 = vwap_series + (stdev * 2.0)
+                            lower2 = vwap_series - (stdev * 2.0)
+
+                            for band, a in (
+                                (upper1, ALPHA_VWAP_BAND_1),
+                                (lower1, ALPHA_VWAP_BAND_1),
+                                (upper2, ALPHA_VWAP_BAND_2),
+                                (lower2, ALPHA_VWAP_BAND_2),
+                            ):
+                                if band is None or band.isna().all():
+                                    continue
+                                if not is_telegram:
+                                    addplot.append(
+                                        mpf.make_addplot(
+                                            band,
+                                            color=VWAP_COLOR,
+                                            width=1.0,
+                                            linestyle="--",
+                                            alpha=a,
+                                        )
+                                    )
 
                         # Feed into HUD so right labels can include VWAP + bands
                         try:
                             last_vwap = float(vwap_series.dropna().iloc[-1])
-                            hud["vwap"] = {
-                                "vwap": last_vwap,
-                                "vwap_upper_1": float(upper1.dropna().iloc[-1]) if not upper1.isna().all() else last_vwap,
-                                "vwap_lower_1": float(lower1.dropna().iloc[-1]) if not lower1.isna().all() else last_vwap,
-                                "vwap_upper_2": float(upper2.dropna().iloc[-1]) if not upper2.isna().all() else last_vwap,
-                                "vwap_lower_2": float(lower2.dropna().iloc[-1]) if not lower2.isna().all() else last_vwap,
-                            }
-                            # Store full series for fill_between when enabled
-                            if self.config.vwap_fill_bands:
-                                hud["vwap"]["_series"] = vwap_series
-                                hud["vwap"]["_upper1"] = upper1
-                                hud["vwap"]["_lower1"] = lower1
+                            hud["vwap"] = {"vwap": last_vwap}
+                            if upper1 is not None and lower1 is not None and upper2 is not None and lower2 is not None:
+                                hud["vwap"].update(
+                                    {
+                                        "vwap_upper_1": float(upper1.dropna().iloc[-1]) if not upper1.isna().all() else last_vwap,
+                                        "vwap_lower_1": float(lower1.dropna().iloc[-1]) if not lower1.isna().all() else last_vwap,
+                                        "vwap_upper_2": float(upper2.dropna().iloc[-1]) if not upper2.isna().all() else last_vwap,
+                                        "vwap_lower_2": float(lower2.dropna().iloc[-1]) if not lower2.isna().all() else last_vwap,
+                                    }
+                                )
+                                # Store full series for fill_between when enabled
+                                if self.config.vwap_fill_bands:
+                                    hud["vwap"]["_series"] = vwap_series
+                                    hud["vwap"]["_upper1"] = upper1
+                                    hud["vwap"]["_lower1"] = lower1
                         except Exception:
                             pass
                 except Exception as e:
@@ -4933,20 +5019,20 @@ class ChartGenerator:
                         mpf.make_addplot(
                             rsi,
                             panel=rsi_panel,
-                            color="#b388ff",
+                            color=RSI_LINE_COLOR,
                             width=1.2,
                             ylabel="RSI",
                             alpha=0.9,
                         )
                     )
-                    for lvl, a in ((30, 0.25), (50, 0.18), (70, 0.25)):
+                    for lvl, a in ((70, 0.9), (50, 0.5), (30, 0.9)):
                         addplot.append(
                             mpf.make_addplot(
                                 pd.Series([lvl] * len(df), index=df.index),
                                 panel=rsi_panel,
-                                color=TEXT_SECONDARY,
+                                color=RSI_BAND_COLOR,
                                 width=1.0,
-                                linestyle="--",
+                                linestyle="-",
                                 alpha=a,
                             )
                         )
@@ -5229,7 +5315,6 @@ class ChartGenerator:
             # Wider candles for Telegram visibility
             # Build kwargs - only include panel_ratios if RSI added successfully (mplfinance rejects None)
             # Blank ylabel for mobile/Telegram to avoid collision with right labels
-            is_telegram = render_mode == "telegram" or self.config.mobile_mode
             ylabel_str = "" if is_telegram else "Price ($)"
             
             # For Telegram/mobile: use figure-level suptitle (not axes title) to save chart space
@@ -5365,6 +5450,20 @@ class ChartGenerator:
 
                     # Limit y-axis ticks to prevent overlapping labels
                     self._limit_yaxis_ticks(ax_price, max_ticks=8)
+                    # VWAP: draw behind candles for Telegram to preserve price prominence.
+                    if vwap_series_for_axes is not None:
+                        try:
+                            x_coords = np.arange(len(df))
+                            ax_price.plot(
+                                x_coords,
+                                vwap_series_for_axes.values if hasattr(vwap_series_for_axes, "values") else vwap_series_for_axes,
+                                color=VWAP_COLOR,
+                                linewidth=1.8,
+                                alpha=0.80,
+                                zorder=ZORDER_LEVEL_LINES,
+                            )
+                        except Exception:
+                            pass
                     # Sessions shading
                     if show_sessions:
                         self._draw_sessions_overlay(ax_price, hud, idx=df.index if isinstance(df.index, pd.DatetimeIndex) else None)
