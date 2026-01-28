@@ -1888,6 +1888,9 @@ class TelegramPrefs:
         "pearl_suggestions_enabled": True,        # Master toggle for proactive suggestions
         "pearl_suggestion_cooldown_minutes": 30,  # Min time between similar suggestions
         "pearl_greeting_enabled": True,           # Morning/evening greetings
+        "pearl_review_enabled": True,             # Periodic Jarvis-style reviews
+        "pearl_review_interval_minutes": 30,      # Min minutes between reviews
+        "pearl_review_last_sent_at": None,        # Internal: ISO timestamp of last review
     }
     
     # Human-readable labels for settings UI
@@ -1900,6 +1903,7 @@ class TelegramPrefs:
         "interval_notifications": "Interval Notifications",
         "pearl_suggestions_enabled": "Pearl Suggestions",
         "pearl_greeting_enabled": "Pearl Greetings",
+        "pearl_review_enabled": "Pearl Reviews",
     }
     
     # Descriptions for settings UI
@@ -1912,6 +1916,7 @@ class TelegramPrefs:
         "interval_notifications": "Hourly chart + status notifications (toggle off to disable)",
         "pearl_suggestions_enabled": "Pearl proactively offers help on dashboard (dismissible)",
         "pearl_greeting_enabled": "Pearl greets you in the morning with overnight summary",
+        "pearl_review_enabled": "Pearl sends periodic Jarvis-style status reviews",
     }
     
     def __init__(self, state_dir=None):

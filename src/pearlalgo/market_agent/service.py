@@ -2384,19 +2384,88 @@ class MarketAgentService:
         try:
             # Get current state for suggestion engine
             state = self._get_status_snapshot()
+            prefs_obj = self.telegram_notifier._get_prefs()
+            prefs = prefs_obj.all()
             
             # Generate suggestion (engine handles cooldowns)
             suggestion = self.suggestion_engine.generate_suggestion(
                 state, 
-                prefs=self.telegram_notifier._get_prefs().all()
+                prefs=prefs
             )
             
             if suggestion:
                 logger.info(f"Sending proactive Pearl suggestion: {suggestion.message}")
                 await self.telegram_notifier.send_pearl_notification(suggestion.message)
+
+            # Periodic Jarvis-style review (status + ML snapshot)
+            if prefs.get("pearl_review_enabled", True):
+                try:
+                    last_sent = prefs.get("pearl_review_last_sent_at")
+                    interval_min = float(prefs.get("pearl_review_interval_minutes", 15) or 15)
+                    due = True
+                    if last_sent:
+                        try:
+                            last_dt = parse_utc_timestamp(str(last_sent))
+                            if last_dt and last_dt.tzinfo is None:
+                                last_dt = last_dt.replace(tzinfo=timezone.utc)
+                            if last_dt:
+                                elapsed = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60.0
+                                due = elapsed >= interval_min
+                        except Exception:
+                            due = True
+                    if due:
+                        review = self._build_pearl_review_message(state)
+                        if review:
+                            await self.telegram_notifier.send_pearl_notification(review)
+                            try:
+                                prefs_obj.set("pearl_review_last_sent_at", datetime.now(timezone.utc).isoformat())
+                            except Exception:
+                                pass
+                except Exception as e:
+                    logger.debug(f"Pearl review check failed (non-fatal): {e}")
                 
         except Exception as e:
             logger.warning(f"Error checking Pearl suggestions: {e}")
+
+    def _build_pearl_review_message(self, state: Dict[str, Any]) -> Optional[str]:
+        """Build a concise Jarvis-style review message."""
+        try:
+            running = "running" if state.get("agent_running") else "stopped"
+            session_open = "open" if state.get("session_open") else "closed"
+            futures_open = "open" if state.get("futures_open") else "closed"
+            data_age = float(state.get("data_age_minutes") or 0.0)
+            data_stale = bool(state.get("data_stale"))
+            data_status = "stale" if data_stale else f"{data_age:.1f}m"
+            last_sig_min = float(state.get("last_signal_minutes") or 0.0)
+            daily_pnl = float(state.get("daily_pnl") or 0.0)
+            pnl_sign = "+" if daily_pnl >= 0 else ""
+
+            ml_summary = ""
+            try:
+                ml = {
+                    "enabled": getattr(self, "_ml_filter_enabled", False),
+                    "mode": getattr(self, "_ml_filter_mode", "shadow"),
+                }
+                lift = getattr(self, "_ml_lift_metrics", {}) or {}
+                if ml.get("enabled"):
+                    ml_summary = (
+                        f"ML: {ml.get('mode')} | lift "
+                        f"{(lift.get('lift_win_rate') or 0.0):.2f} | "
+                        f"pass WR {(lift.get('win_rate_pass') or 0.0):.2f}"
+                    )
+            except Exception:
+                ml_summary = ""
+
+            lines = [
+                f"Jarvis check-in: agent {running}, session {session_open}, futures {futures_open}.",
+                f"Data age: {data_status}. Last signal: {last_sig_min:.0f}m ago.",
+                f"Daily P&L: {pnl_sign}${abs(daily_pnl):.2f}.",
+            ]
+            if ml_summary:
+                lines.append(ml_summary)
+            return "\n".join(lines)
+        except Exception:
+            return None
 
     async def _check_dashboard(
         self,
