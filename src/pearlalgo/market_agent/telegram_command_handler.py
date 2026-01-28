@@ -369,6 +369,7 @@ class TelegramCommandHandler:
             ],
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data="action:refresh_dashboard"),
+                InlineKeyboardButton("🔄📈", callback_data="action:refresh_chart"),
             ],
         ]
 
@@ -3389,6 +3390,9 @@ class TelegramCommandHandler:
             elif action_type == "export_performance":
                 await self._handle_export_performance(query)
             elif action_type == "refresh_dashboard":
+                # Fast refresh: reuse cached chart unless missing/stale (auto-if-stale behavior).
+                await self._show_main_menu_with_chart(query, force_chart_refresh=False)
+            elif action_type == "refresh_chart":
                 # Force regenerate the exported Telegram chart via the agent service flag.
                 try:
                     await query.answer("⏳ Refreshing chart...")
