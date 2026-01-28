@@ -41,6 +41,14 @@ from pearlalgo.utils.telegram_alerts import (
 from pearlalgo.utils.telegram_ui_contract import (
     resolve_callback,
     parse_callback,
+    callback_action,
+    callback_menu,
+    connection_status_to_label,
+    ACTION_GATEWAY_STATUS,
+    ACTION_CONNECTION_STATUS,
+    ACTION_DATA_QUALITY,
+    ACTION_SYSTEM_STATUS,
+    MENU_STATUS,
 )
 
 try:
@@ -1439,13 +1447,7 @@ class TelegramCommandHandler:
 
             # Connection: prefer explicit state when present; fall back to data_fresh.
             if "connection_status" in state:
-                cs = state.get("connection_status")
-                if cs == "connected":
-                    conn_status = "🟢"
-                elif cs == "disconnected":
-                    conn_status = "🔴"
-                else:
-                    conn_status = "⚪"
+                _, conn_status = connection_status_to_label(state.get("connection_status"))
             elif "data_fresh" in state:
                 conn_status = "🟢" if bool(state.get("data_fresh")) else "🔴"
             else:
@@ -1490,14 +1492,14 @@ class TelegramCommandHandler:
         
         keyboard = [
             [
-                InlineKeyboardButton("🔌 Gateway", callback_data="action:gateway_status"),
-                InlineKeyboardButton("📡 Connection", callback_data="action:connection_status"),
+                InlineKeyboardButton("🔌 Gateway", callback_data=callback_action(ACTION_GATEWAY_STATUS)),
+                InlineKeyboardButton("📡 Connection", callback_data=callback_action(ACTION_CONNECTION_STATUS)),
             ],
             [
-                InlineKeyboardButton("📊 Data", callback_data="action:data_quality"),
-                InlineKeyboardButton("📋 Status", callback_data="action:system_status"),
+                InlineKeyboardButton("📊 Data", callback_data=callback_action(ACTION_DATA_QUALITY)),
+                InlineKeyboardButton("📋 Status", callback_data=callback_action(ACTION_SYSTEM_STATUS)),
             ],
-            [InlineKeyboardButton("🩺 Doctor", callback_data="action:ui_doctor")],
+            [InlineKeyboardButton("🩺 Doctor", callback_data=callback_action("ui_doctor"))],
             self._nav_back_row(),
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1613,12 +1615,12 @@ class TelegramCommandHandler:
 
         keyboard = [
             [
-                InlineKeyboardButton("🎛 System", callback_data="menu:system"),
-                InlineKeyboardButton("⚙️ Settings", callback_data="menu:settings"),
+                InlineKeyboardButton("🎛 System", callback_data=callback_menu("system")),
+                InlineKeyboardButton("⚙️ Settings", callback_data=callback_menu("settings")),
             ],
             [
-                InlineKeyboardButton("🧪 Tests", callback_data="action:ui_doctor:tests"),
-                InlineKeyboardButton("🛡 Back", callback_data="menu:status"),
+                InlineKeyboardButton("🧪 Tests", callback_data=callback_action("ui_doctor", "tests")),
+                InlineKeyboardButton("🛡 Back", callback_data=callback_menu(MENU_STATUS)),
             ],
             self._nav_back_row(),
         ]
@@ -1657,12 +1659,12 @@ class TelegramCommandHandler:
             ]
             keyboard = [
                 [
-                    InlineKeyboardButton("🧪 Dashboard", callback_data="action:ui_doctor:test_dashboard"),
-                    InlineKeyboardButton("⚠️ Risk Alert", callback_data="action:ui_doctor:test_risk"),
+                    InlineKeyboardButton("🧪 Dashboard", callback_data=callback_action("ui_doctor", "test_dashboard")),
+                    InlineKeyboardButton("⚠️ Risk Alert", callback_data=callback_action("ui_doctor", "test_risk")),
                 ],
-                [InlineKeyboardButton("🧪 Signal", callback_data="action:ui_doctor:test_signal")],
+                [InlineKeyboardButton("🧪 Signal", callback_data=callback_action("ui_doctor", "test_signal"))],
                 [
-                    InlineKeyboardButton("🩺 Doctor", callback_data="action:ui_doctor"),
+                    InlineKeyboardButton("🩺 Doctor", callback_data=callback_action("ui_doctor")),
                     self._nav_back_row()[0],
                 ],
             ]
@@ -6643,7 +6645,7 @@ class TelegramCommandHandler:
         except Exception as e:
             text += f"❌ Could not load config: {e}\n"
         
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+        await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _handle_logs_view(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display logs information."""
@@ -6687,59 +6689,96 @@ class TelegramCommandHandler:
         await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _handle_gateway_status(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display gateway status."""
-        state = self._read_state()
-        if not state:
-            await self._safe_edit_or_send(query, "❌ Could not read system state.", reply_markup=reply_markup)
-            return
+        """Display gateway service status (process + port)."""
+        # Read state (best-effort; gateway status is still meaningful without state).
+        state = self._read_state() or {}
         
-        # Gateway service status (process + port)
-        gw_status = {"process_running": False, "port_listening": False}
+        # Gateway service status (process + port).
+        gw_proc = False
+        gw_port = False
+        gw_unknown = True
         try:
             sc = getattr(self, "service_controller", None)
             if sc:
-                gw_status = sc.get_gateway_status() or gw_status
+                gw_status = sc.get_gateway_status() or {}
+                gw_proc = bool(gw_status.get("process_running", False))
+                gw_port = bool(gw_status.get("port_listening", False))
+                gw_unknown = False
         except Exception:
             pass
 
-        gw_proc = bool(gw_status.get("process_running", False))
-        gw_port = bool(gw_status.get("port_listening", False))
         gw_ok = gw_proc and gw_port
 
-        # Agent-reported connection status (when available)
-        raw_conn = state.get("connection_status", None)
-        conn_failures = int(state.get("connection_failures", 0) or 0)
-
-        conn_label = "UNKNOWN"
-        try:
-            if raw_conn in (True, "connected", "CONNECTED", "ok", "OK"):
-                conn_label = "CONNECTED"
-            elif raw_conn in (False, "disconnected", "DISCONNECTED", "down", "DOWN"):
-                conn_label = "DISCONNECTED"
-            elif raw_conn is None:
-                conn_label = "UNKNOWN"
-            else:
-                conn_label = str(raw_conn).upper()
-        except Exception:
-            conn_label = "UNKNOWN"
-
-        text = "🔌 *Gateway*\n\n"
-        text += f"{'🟢' if gw_ok else '🔴'} *Service:* {'ONLINE' if gw_ok else 'OFFLINE'} (proc={gw_proc}, port={gw_port})\n"
-        text += f"{'🟢' if conn_label == 'CONNECTED' else ('🔴' if conn_label == 'DISCONNECTED' else '⚪')} *Connection:* {conn_label}\n"
-        if conn_failures > 0:
-            text += f"⚠️ *Conn failures:* {conn_failures}\n"
-
-        # Data source info
-        latest_bar = state.get("latest_bar", {}) or {}
-        data_level = latest_bar.get("_data_level", None)
-        if data_level:
-            text += f"\n📊 *Data Level:* {data_level}\n"
+        text = "🔌 *Gateway Service*\n\n"
+        if gw_unknown:
+            text += "⚪ *Status:* Unknown\n"
+            text += "_Could not query gateway service._\n"
+        else:
+            text += f"{'🟢' if gw_ok else '🔴'} *Status:* {'ONLINE' if gw_ok else 'OFFLINE'}\n"
+            text += f"• Process: {'running' if gw_proc else 'stopped'}\n"
+            text += f"• API port: {'listening' if gw_port else 'closed'}\n"
+            
+            if not gw_ok:
+                text += "\n💡 *Tip:* Use 🎛️ System → Gateway to start/restart.\n"
 
         await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _handle_connection_status(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
-        """Display connection status."""
-        await self._handle_gateway_status(query, reply_markup)  # Same as gateway status
+        """Display data feed connection status (from agent state)."""
+        state = self._read_state()
+        if not state:
+            await self._safe_edit_or_send(
+                query,
+                "📡 *Connection Status*\n\n"
+                "❌ Could not read system state.\n\n"
+                "_Agent may not be running._",
+                reply_markup=reply_markup,
+                parse_mode="Markdown",
+            )
+            return
+
+        # Connection status from agent.
+        raw_conn = state.get("connection_status", None)
+        conn_failures = int(state.get("connection_failures", 0) or 0)
+        data_fetch_errors = int(state.get("data_fetch_errors", 0) or 0)
+        data_fresh = state.get("data_fresh")
+        
+        # Determine connection label using canonical helper.
+        try:
+            conn_label, conn_emoji = connection_status_to_label(raw_conn)
+            # Extended logic: infer from data_fresh when status is unknown.
+            if raw_conn is None:
+                if data_fresh is True:
+                    conn_label = "OK (inferred)"
+                    conn_emoji = "🟢"
+                elif data_fresh is False:
+                    conn_label = "DEGRADED (stale data)"
+                    conn_emoji = "🟡"
+        except Exception:
+            conn_label = "UNKNOWN"
+            conn_emoji = "⚪"
+
+        text = "📡 *Connection Status*\n\n"
+        text += f"{conn_emoji} *Feed:* {conn_label}\n"
+        
+        if conn_failures > 0:
+            text += f"⚠️ *Connection failures:* {conn_failures}\n"
+        if data_fetch_errors > 0:
+            text += f"⚠️ *Data fetch errors:* {data_fetch_errors}\n"
+
+        # Data source info.
+        latest_bar = state.get("latest_bar", {}) or {}
+        data_level = latest_bar.get("_data_level", None)
+        if data_level:
+            text += f"\n📊 *Data Level:* {data_level}\n"
+        
+        # Data freshness.
+        if data_fresh is True:
+            text += "✅ Data is fresh\n"
+        elif data_fresh is False:
+            text += "⚠️ Data is stale\n"
+
+        await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _handle_data_quality(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display data quality information."""
@@ -6748,114 +6787,119 @@ class TelegramCommandHandler:
             await self._safe_edit_or_send(query, "❌ Could not read system state.", reply_markup=reply_markup)
             return
         
-        text = "💾 *Data Quality*\n\n"
+        text = "📊 *Data Quality*\n\n"
         
-        # Get threshold from config
-        data_stale_threshold_minutes = 10.0
+        # Use persisted threshold from state.json (set by agent from config); fall back to default.
         try:
-            import yaml
-            config_path = Path("config/config.yaml")
-            if config_path.exists():
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f) or {}
-                    data_config = config.get("data", {})
-                    data_stale_threshold_minutes = float(data_config.get("stale_data_threshold_minutes", 10.0))
+            data_stale_threshold_minutes = float(state.get("data_stale_threshold_minutes") or 10.0)
         except Exception:
-            pass
+            data_stale_threshold_minutes = 10.0
         
         latest_bar = state.get("latest_bar", {}) or {}
-        agent_running = bool(self._is_agent_process_running())
+        
+        # Guard agent process check with try/except like other Health code.
+        try:
+            agent_running = bool(self._is_agent_process_running())
+        except Exception:
+            agent_running = False
+        
         paused = bool(state.get("paused", False))
+        pause_reason = state.get("pause_reason") or ""
         futures_market_open = state.get("futures_market_open")
         strategy_session_open = state.get("strategy_session_open")
         
+        # Determine if we're in "expected stale" conditions (off-hours or paused).
+        off_hours = (futures_market_open is False) and (strategy_session_open is False)
+        expected_stale = (not agent_running) or paused or off_hours
+        
         if latest_bar:
             data_level = latest_bar.get("_data_level", "unknown")
-            text += f"📊 *Data Level:* {data_level}\n"
+            text += f"*Data Level:* {data_level}\n"
             
-            # Check data age
-            age_minutes = None
+            # Use persisted age if available; otherwise compute from timestamp.
+            age_minutes = state.get("latest_bar_age_minutes")
             timestamp = latest_bar.get("timestamp")
-            if timestamp:
+            if age_minutes is None and timestamp:
                 try:
-                    from datetime import datetime, timezone
                     bar_time = parse_utc_timestamp(timestamp) if isinstance(timestamp, str) else timestamp
                     if bar_time:
-                        now = datetime.now(timezone.utc)
-                        if isinstance(bar_time, str):
-                            bar_time = parse_utc_timestamp(bar_time)
                         if hasattr(bar_time, 'tzinfo') and bar_time.tzinfo is None:
                             bar_time = bar_time.replace(tzinfo=timezone.utc)
-                        age_seconds = (now - bar_time).total_seconds()
-                        age_minutes = age_seconds / 60
-                        
-                        text += f"\n⏰ *Data Age:* {age_minutes:.1f} minutes\n"
-                        text += f"📏 *Threshold:* {data_stale_threshold_minutes:.0f} minutes\n\n"
-                        
-                        # Explain why it might be stale
-                        if age_minutes > data_stale_threshold_minutes:
-                            text += "⚠️ *Data is stale*\n\n"
-                            text += "*Possible reasons:*\n"
-                            if not agent_running or paused:
-                                text += "• Agent is not running\n"
-                            if futures_market_open is False:
-                                text += "• Futures market is closed\n"
-                            if strategy_session_open is False:
-                                text += "• Trading session is closed\n"
-                            if agent_running and not paused and (futures_market_open is True or strategy_session_open is True):
-                                text += "• Data fetcher may not be working\n"
-                                text += "• Check gateway connection\n"
-                                text += "• Check data provider status\n"
-                        else:
-                            text += "🟢 *Data is fresh*\n"
-                except Exception as e:
-                    text += f"\n⚠️ Could not calculate data age: {e}\n"
+                        age_seconds = (datetime.now(timezone.utc) - bar_time).total_seconds()
+                        age_minutes = age_seconds / 60.0
+                except Exception:
+                    age_minutes = None
+            
+            if age_minutes is not None:
+                text += f"*Data Age:* {age_minutes:.1f} min\n"
+                text += f"*Threshold:* {data_stale_threshold_minutes:.0f} min\n\n"
+                
+                is_stale = age_minutes > data_stale_threshold_minutes
+                
+                if is_stale:
+                    if expected_stale:
+                        # Stale but expected - explain why without alarm.
+                        text += "⚪ *Data is stale (expected)*\n\n"
+                        text += "*Reason:*\n"
+                        if not agent_running:
+                            text += "• Agent is stopped\n"
+                        elif paused:
+                            text += f"• Agent is paused{' (' + pause_reason + ')' if pause_reason else ''}\n"
+                        if off_hours:
+                            text += "• Market/session is closed\n"
+                    else:
+                        # Stale and unexpected - alert.
+                        text += "🔴 *Data is stale*\n\n"
+                        text += "*Possible issues:*\n"
+                        text += "• Data fetcher may not be working\n"
+                        text += "• Check gateway connection\n"
+                        text += "• Check data provider status\n"
+                else:
+                    text += "🟢 *Data is fresh*\n"
+            else:
+                text += "⚠️ Could not determine data age\n"
             
             # Buffer info
             buffer_size = state.get("buffer_size", 0)
             buffer_target = state.get("buffer_size_target")
             if buffer_size or buffer_target:
-                text += f"\n📊 *Buffer:* {buffer_size}"
+                text += f"\n*Buffer:* {buffer_size}"
                 if buffer_target:
                     text += f" / {buffer_target} (target)"
                 text += "\n"
             
-            # Diagnostic info for stale data
-            if age_minutes is not None and age_minutes > data_stale_threshold_minutes and agent_running and not paused:
+            # Diagnostic info for unexpected stale data.
+            if age_minutes is not None and age_minutes > data_stale_threshold_minutes and not expected_stale:
                 data_fetch_errors = state.get("data_fetch_errors", 0)
                 raw_conn = state.get("connection_status", None)
                 connection_failures = int(state.get("connection_failures", 0) or 0)
 
-                conn_diag = "unknown"
                 try:
-                    if raw_conn in (True, "connected", "CONNECTED", "ok", "OK"):
-                        conn_diag = "connected"
-                    elif raw_conn in (False, "disconnected", "DISCONNECTED", "down", "DOWN"):
-                        conn_diag = "disconnected"
-                    elif raw_conn is None:
-                        conn_diag = "unknown"
-                    else:
-                        conn_diag = str(raw_conn)
+                    conn_diag, _ = connection_status_to_label(raw_conn)
+                    conn_diag = conn_diag.lower()
                 except Exception:
                     conn_diag = "unknown"
                 
                 text += "\n🔍 *Diagnostics:*\n"
-                # If the agent isn't explicitly reporting connection status, infer from staleness.
                 if conn_diag == "unknown":
                     text += "• Connection: unknown (agent not reporting)\n"
                     text += "• Inference: data is stale → likely feed/connection issue\n"
                 else:
                     text += f"• Connection: {conn_diag}\n"
-                if data_fetch_errors > 0:
+                if data_fetch_errors:
                     text += f"• Data fetch errors: {data_fetch_errors}\n"
                 if connection_failures > 0:
                     text += f"• Connection failures: {connection_failures}\n"
         else:
-            text += "❌ No data available\n"
-            text += "\n*Possible reasons:*\n"
-            text += "• Agent not running\n"
-            text += "• Data fetcher not initialized\n"
-            text += "• No market data received yet\n"
+            text += "❌ No data available\n\n"
+            text += "*Possible reasons:*\n"
+            if not agent_running:
+                text += "• Agent is stopped\n"
+            elif paused:
+                text += f"• Agent is paused{' (' + pause_reason + ')' if pause_reason else ''}\n"
+            else:
+                text += "• Data fetcher not initialized\n"
+                text += "• No market data received yet\n"
         
         await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 

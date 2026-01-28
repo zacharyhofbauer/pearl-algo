@@ -443,3 +443,95 @@ class TestCallbackRouting:
             elif legacy == "status":
                 assert cb_type == "menu"
                 assert action == "status"
+
+
+# ---------------------------------------------------------------------------
+# Tests for Connection Status Helper
+# ---------------------------------------------------------------------------
+
+class TestConnectionStatusToLabel:
+    """Test the connection_status_to_label helper function."""
+
+    def test_true_value_returns_connected(self):
+        """Boolean True returns CONNECTED with green emoji."""
+        from pearlalgo.utils.telegram_ui_contract import connection_status_to_label
+        
+        label, emoji = connection_status_to_label(True)
+        assert label == "CONNECTED"
+        assert emoji == "🟢"
+
+    def test_connected_string_returns_connected(self):
+        """String 'connected' returns CONNECTED with green emoji."""
+        from pearlalgo.utils.telegram_ui_contract import connection_status_to_label
+        
+        label, emoji = connection_status_to_label("connected")
+        assert label == "CONNECTED"
+        assert emoji == "🟢"
+
+    def test_uppercase_connected_returns_connected(self):
+        """String 'CONNECTED' returns CONNECTED with green emoji."""
+        from pearlalgo.utils.telegram_ui_contract import connection_status_to_label
+        
+        label, emoji = connection_status_to_label("CONNECTED")
+        assert label == "CONNECTED"
+        assert emoji == "🟢"
+
+    def test_ok_string_returns_connected(self):
+        """String 'ok' or 'OK' returns CONNECTED with green emoji."""
+        from pearlalgo.utils.telegram_ui_contract import connection_status_to_label
+        
+        label, emoji = connection_status_to_label("ok")
+        assert label == "CONNECTED"
+        assert emoji == "🟢"
+        
+        label, emoji = connection_status_to_label("OK")
+        assert label == "CONNECTED"
+        assert emoji == "🟢"
+
+    def test_false_value_returns_disconnected(self):
+        """Boolean False returns DISCONNECTED with red emoji."""
+        from pearlalgo.utils.telegram_ui_contract import connection_status_to_label
+        
+        label, emoji = connection_status_to_label(False)
+        assert label == "DISCONNECTED"
+        assert emoji == "🔴"
+
+    def test_disconnected_string_returns_disconnected(self):
+        """String 'disconnected' returns DISCONNECTED with red emoji."""
+        from pearlalgo.utils.telegram_ui_contract import connection_status_to_label
+        
+        label, emoji = connection_status_to_label("disconnected")
+        assert label == "DISCONNECTED"
+        assert emoji == "🔴"
+
+    def test_down_string_returns_disconnected(self):
+        """String 'down' or 'DOWN' returns DISCONNECTED with red emoji."""
+        from pearlalgo.utils.telegram_ui_contract import connection_status_to_label
+        
+        label, emoji = connection_status_to_label("down")
+        assert label == "DISCONNECTED"
+        assert emoji == "🔴"
+        
+        label, emoji = connection_status_to_label("DOWN")
+        assert label == "DISCONNECTED"
+        assert emoji == "🔴"
+
+    def test_none_returns_unknown(self):
+        """None returns UNKNOWN with white emoji."""
+        from pearlalgo.utils.telegram_ui_contract import connection_status_to_label
+        
+        label, emoji = connection_status_to_label(None)
+        assert label == "UNKNOWN"
+        assert emoji == "⚪"
+
+    def test_unknown_string_returns_uppercase(self):
+        """Unknown strings return uppercase version with white emoji."""
+        from pearlalgo.utils.telegram_ui_contract import connection_status_to_label
+        
+        label, emoji = connection_status_to_label("pending")
+        assert label == "PENDING"
+        assert emoji == "⚪"
+        
+        label, emoji = connection_status_to_label("reconnecting")
+        assert label == "RECONNECTING"
+        assert emoji == "⚪"

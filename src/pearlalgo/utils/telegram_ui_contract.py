@@ -88,6 +88,40 @@ ACTION_REFRESH_DASHBOARD = "refresh_dashboard"
 ACTION_TOGGLE_CHART = "toggle_chart"
 
 # ---------------------------------------------------------------------------
+# Connection status helpers
+# ---------------------------------------------------------------------------
+
+
+def connection_status_to_label(raw_conn) -> tuple[str, str]:
+    """
+    Map raw connection_status value to (label, emoji).
+    
+    Args:
+        raw_conn: Raw connection status from state (True, False, None, or string).
+        
+    Returns:
+        Tuple of (label, emoji) e.g., ("CONNECTED", "🟢")
+        
+    Examples:
+        >>> connection_status_to_label(True)
+        ('CONNECTED', '🟢')
+        >>> connection_status_to_label("disconnected")
+        ('DISCONNECTED', '🔴')
+        >>> connection_status_to_label(None)
+        ('UNKNOWN', '⚪')
+    """
+    if raw_conn in (True, "connected", "CONNECTED", "ok", "OK"):
+        return ("CONNECTED", "🟢")
+    elif raw_conn in (False, "disconnected", "DISCONNECTED", "down", "DOWN"):
+        return ("DISCONNECTED", "🔴")
+    elif raw_conn is None:
+        return ("UNKNOWN", "⚪")
+    else:
+        # Unknown string value - show as-is
+        return (str(raw_conn).upper(), "⚪")
+
+
+# ---------------------------------------------------------------------------
 # Legacy callback aliases (raw callbacks -> canonical routes)
 # ---------------------------------------------------------------------------
 # These map old/raw callback_data values to canonical routes.

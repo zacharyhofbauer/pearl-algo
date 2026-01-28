@@ -230,6 +230,20 @@ class ServiceController:
             extra={"background": background, "market": market},
         )
 
+        # Safety checks (consistent with _run_script)
+        if not script.exists():
+            return {
+                "success": False,
+                "message": f"❌ Agent script not found ({market})",
+                "details": f"Script not found: {script}",
+            }
+        if not script.is_file():
+            return {
+                "success": False,
+                "message": f"❌ Agent script invalid ({market})",
+                "details": f"Not a file: {script}",
+            }
+
         # Check if already running
         if self._is_agent_running(market=market):
             return {
@@ -250,8 +264,9 @@ class ServiceController:
             args.append("--background")
 
         try:
-            script_path = str(script)
-            cmd = [script_path] + args
+            # Make script executable (consistent with _run_script)
+            script.chmod(0o755)
+            cmd = [str(script)] + args
 
             result = subprocess.run(
                 cmd,
@@ -363,9 +378,9 @@ class ServiceController:
         except Exception:
             return False
 
-    def is_agent_process_running(self) -> bool:
-        """Public wrapper: check if Agent process is running."""
-        return self._is_agent_running()
+    def is_agent_process_running(self, market: str = "NQ") -> bool:
+        """Public wrapper: check if Agent process is running for a market."""
+        return self._is_agent_running(market=market)
 
     def get_agent_status(self, market: str = "NQ") -> Dict[str, Any]:
         """Get market-specific Agent Service status.

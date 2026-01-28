@@ -47,19 +47,39 @@ class HealthMonitor:
             Health status dictionary
         """
         try:
-            # Check if provider has connection method
-            if hasattr(data_provider, 'validate_connection'):
-                # This would be async in real implementation, simplified here
+            # Try to get actual connection status from executor if available.
+            executor = getattr(data_provider, "_executor", None)
+            if executor is not None:
+                is_connected_fn = getattr(executor, "is_connected", None)
+                if callable(is_connected_fn):
+                    try:
+                        if is_connected_fn():
+                            return {
+                                "healthy": True,
+                                "status": "Connected",
+                                "last_check": get_utc_timestamp(),
+                            }
+                        else:
+                            return {
+                                "healthy": False,
+                                "status": "Disconnected",
+                                "last_check": get_utc_timestamp(),
+                            }
+                    except Exception:
+                        pass  # Fall through to unknown.
+            
+            # Provider exists but we can't verify connection status.
+            # Be honest: label as "Present" rather than claiming "Connected".
+            if data_provider is not None:
                 return {
                     "healthy": True,
-                    "status": "Connected",
+                    "status": "Present (connection unverified)",
                     "last_check": get_utc_timestamp(),
                 }
             else:
-                # Assume healthy if no validation method
                 return {
-                    "healthy": True,
-                    "status": "Unknown",
+                    "healthy": False,
+                    "status": "Not initialized",
                     "last_check": get_utc_timestamp(),
                 }
         except Exception as e:

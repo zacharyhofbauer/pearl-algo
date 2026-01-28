@@ -629,3 +629,330 @@ class TestReportsCallbackDataSafety:
                 if getattr(btn, "callback_data", None):
                     assert len(btn.callback_data.encode("utf-8")) <= 64
 
+
+# ---------------------------------------------------------------------------
+# Mock classes for callback-based tests
+# ---------------------------------------------------------------------------
+
+class MockCallbackQuery:
+    """Mock Telegram callback query object for button press tests."""
+    def __init__(self, chat_id: int = 123, data: str = ""):
+        self.data = data
+        self.message = MockMessage(chat_id)
+        self.answer = AsyncMock()
+        self.edit_message_text = AsyncMock()
+
+
+# ---------------------------------------------------------------------------
+# System Menu Tests
+# ---------------------------------------------------------------------------
+
+class TestSystemMenu:
+    """Test System menu rendering and actions."""
+
+    @pytest.mark.asyncio
+    async def test_system_menu_shows_agent_running_status(self, handler_with_mocks, temp_state_dir):
+        """Test that System menu shows correct status when agent is running."""
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+        handler.state_dir = temp_state_dir
+        handler.active_market = "NQ"
+        
+        # Mock service controller to return agent running
+        handler.service_controller.get_agent_status.return_value = {"running": True}
+        handler.service_controller.get_gateway_status.return_value = {
+            "process_running": True,
+            "port_listening": True,
+        }
+        
+        # Create state file
+        state_file = temp_state_dir / "state.json"
+        state_file.write_text('{"active_trades_count": 0}')
+        
+        query = MockCallbackQuery(chat_id=123, data="menu:system")
+        
+        # Capture the edit call
+        captured_text = None
+        captured_markup = None
+        
+        async def mock_safe_edit(q, text, reply_markup=None, parse_mode=None):
+            nonlocal captured_text, captured_markup
+            captured_text = text
+            captured_markup = reply_markup
+        
+        with patch.object(handler, '_safe_edit_or_send', side_effect=mock_safe_edit):
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
+            await TelegramCommandHandler._show_system_menu(handler, query)
+        
+        assert captured_text is not None
+        assert "🎛️ *System*" in captured_text
+        assert "🟢 ON" in captured_text  # Agent should show ON
+        
+        # Check buttons include Stop Agent (not Start) since agent is running
+        assert captured_markup is not None
+        buttons = []
+        for row in captured_markup.inline_keyboard:
+            for btn in row:
+                buttons.append(btn.text)
+        
+        assert "🛑 Stop Agent" in buttons
+
+    @pytest.mark.asyncio
+    async def test_system_menu_shows_agent_stopped_status(self, handler_with_mocks, temp_state_dir):
+        """Test that System menu shows correct status when agent is stopped."""
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+        handler.state_dir = temp_state_dir
+        handler.active_market = "NQ"
+        
+        # Mock service controller to return agent stopped
+        handler.service_controller.get_agent_status.return_value = {"running": False}
+        handler.service_controller.get_gateway_status.return_value = {
+            "process_running": False,
+            "port_listening": False,
+        }
+        
+        # Create state file
+        state_file = temp_state_dir / "state.json"
+        state_file.write_text('{"active_trades_count": 0}')
+        
+        query = MockCallbackQuery(chat_id=123, data="menu:system")
+        
+        captured_text = None
+        captured_markup = None
+        
+        async def mock_safe_edit(q, text, reply_markup=None, parse_mode=None):
+            nonlocal captured_text, captured_markup
+            captured_text = text
+            captured_markup = reply_markup
+        
+        with patch.object(handler, '_safe_edit_or_send', side_effect=mock_safe_edit):
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
+            await TelegramCommandHandler._show_system_menu(handler, query)
+        
+        assert captured_text is not None
+        assert "🎛️ *System*" in captured_text
+        assert "🔴 OFF" in captured_text  # Agent should show OFF
+        
+        # Check buttons include Start Agent (not Stop) since agent is stopped
+        assert captured_markup is not None
+        buttons = []
+        for row in captured_markup.inline_keyboard:
+            for btn in row:
+                buttons.append(btn.text)
+        
+        assert "🚀 Start Agent" in buttons
+
+    @pytest.mark.asyncio
+    async def test_system_menu_shows_emergency_button_with_positions(self, handler_with_mocks, temp_state_dir):
+        """Test that Emergency button appears when there are open positions."""
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+        handler.state_dir = temp_state_dir
+        handler.active_market = "NQ"
+        
+        handler.service_controller.get_agent_status.return_value = {"running": True}
+        handler.service_controller.get_gateway_status.return_value = {
+            "process_running": True,
+            "port_listening": True,
+        }
+        
+        # Create state file with positions
+        state_file = temp_state_dir / "state.json"
+        state_file.write_text('{"active_trades_count": 2, "execution": {"positions": 1}}')
+        
+        query = MockCallbackQuery(chat_id=123, data="menu:system")
+        
+        captured_markup = None
+        
+        async def mock_safe_edit(q, text, reply_markup=None, parse_mode=None):
+            nonlocal captured_markup
+            captured_markup = reply_markup
+        
+        with patch.object(handler, '_safe_edit_or_send', side_effect=mock_safe_edit):
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
+            await TelegramCommandHandler._show_system_menu(handler, query)
+        
+        # Check Emergency button is present
+        assert captured_markup is not None
+        buttons = []
+        for row in captured_markup.inline_keyboard:
+            for btn in row:
+                buttons.append(btn.text)
+        
+        # Emergency button should be present with count
+        emergency_found = any("Emergency" in btn for btn in buttons)
+        assert emergency_found, f"Emergency button not found in buttons: {buttons}"
+
+    @pytest.mark.asyncio
+    async def test_system_menu_has_all_expected_buttons(self, handler_with_mocks, temp_state_dir):
+        """Test that System menu has all expected buttons."""
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+        handler.state_dir = temp_state_dir
+        handler.active_market = "NQ"
+        
+        handler.service_controller.get_agent_status.return_value = {"running": False}
+        handler.service_controller.get_gateway_status.return_value = {
+            "process_running": False,
+            "port_listening": False,
+        }
+        
+        state_file = temp_state_dir / "state.json"
+        state_file.write_text('{"active_trades_count": 0}')
+        
+        query = MockCallbackQuery(chat_id=123, data="menu:system")
+        
+        captured_markup = None
+        
+        async def mock_safe_edit(q, text, reply_markup=None, parse_mode=None):
+            nonlocal captured_markup
+            captured_markup = reply_markup
+        
+        with patch.object(handler, '_safe_edit_or_send', side_effect=mock_safe_edit):
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
+            await TelegramCommandHandler._show_system_menu(handler, query)
+        
+        assert captured_markup is not None
+        buttons = []
+        callbacks = []
+        for row in captured_markup.inline_keyboard:
+            for btn in row:
+                buttons.append(btn.text)
+                callbacks.append(btn.callback_data)
+        
+        # Check for expected buttons (at minimum)
+        assert "🔄 Restart Agent" in buttons
+        assert "🔄 Restart GW" in buttons
+        assert "📋 Logs" in buttons
+        assert "⚙️ Config" in buttons
+        assert "🏆 Challenge" in buttons
+        assert "🧹 Cache" in buttons
+        assert "🏠 Menu" in buttons  # Back button
+        
+        # Check callback data format
+        assert "action:restart_agent" in callbacks
+        assert "action:restart_gateway" in callbacks
+        assert "action:logs" in callbacks
+        assert "action:config" in callbacks
+
+
+class TestSystemMenuConfirmActions:
+    """Test System menu confirmation action flows."""
+
+    @pytest.mark.asyncio
+    async def test_confirm_restart_agent_calls_service_controller(self, handler_with_mocks, temp_state_dir):
+        """Test that confirming restart agent calls the service controller."""
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+        handler.state_dir = temp_state_dir
+        handler.active_market = "NQ"
+        
+        # Mock restart_agent to return success
+        handler.service_controller.restart_agent = AsyncMock(return_value={
+            "success": True,
+            "message": "✅ Agent restarted successfully",
+            "details": "Agent process is running",
+        })
+        
+        query = MockCallbackQuery(chat_id=123, data="confirm:restart_agent")
+        
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
+        await TelegramCommandHandler._handle_confirm_action(handler, query, "restart_agent")
+        
+        # Verify service controller was called with correct market
+        handler.service_controller.restart_agent.assert_called_once_with(
+            background=True, market="NQ"
+        )
+
+    @pytest.mark.asyncio
+    async def test_confirm_stop_agent_calls_service_controller(self, handler_with_mocks, temp_state_dir):
+        """Test that confirming stop agent calls the service controller."""
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+        handler.state_dir = temp_state_dir
+        handler.active_market = "ES"  # Test with different market
+        
+        handler.service_controller.stop_agent = AsyncMock(return_value={
+            "success": True,
+            "message": "✅ Agent stopped successfully (ES)",
+        })
+        
+        query = MockCallbackQuery(chat_id=123, data="confirm:stop_agent")
+        
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
+        await TelegramCommandHandler._handle_confirm_action(handler, query, "stop_agent")
+        
+        # Verify service controller was called with correct market
+        handler.service_controller.stop_agent.assert_called_once_with(market="ES")
+
+    @pytest.mark.asyncio
+    async def test_confirm_start_gateway_calls_service_controller(self, handler_with_mocks, temp_state_dir):
+        """Test that confirming start gateway calls the service controller."""
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+        handler.state_dir = temp_state_dir
+        
+        handler.service_controller.start_gateway = AsyncMock(return_value={
+            "success": True,
+            "message": "✅ IBKR Gateway started successfully",
+        })
+        
+        query = MockCallbackQuery(chat_id=123, data="confirm:start_gateway")
+        
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
+        await TelegramCommandHandler._handle_confirm_action(handler, query, "start_gateway")
+        
+        handler.service_controller.start_gateway.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_confirm_restart_gateway_calls_service_controller(self, handler_with_mocks, temp_state_dir):
+        """Test that confirming restart gateway calls the service controller."""
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+        handler.state_dir = temp_state_dir
+        
+        handler.service_controller.restart_gateway = AsyncMock(return_value={
+            "success": True,
+            "message": "✅ Gateway restarted successfully",
+        })
+        
+        query = MockCallbackQuery(chat_id=123, data="confirm:restart_gateway")
+        
+        from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
+        await TelegramCommandHandler._handle_confirm_action(handler, query, "restart_gateway")
+        
+        handler.service_controller.restart_gateway.assert_called_once()
+
+
+class TestSystemMenuMarketScoping:
+    """Test that System menu respects active_market."""
+
+    @pytest.mark.asyncio
+    async def test_system_uses_active_market_for_agent_status(self, handler_with_mocks, temp_state_dir):
+        """Test that System menu uses active_market when checking agent status."""
+        handler = handler_with_mocks
+        handler.chat_id = "123"
+        handler.state_dir = temp_state_dir
+        handler.active_market = "GC"  # Gold market
+        
+        handler.service_controller.get_agent_status.return_value = {"running": True}
+        handler.service_controller.get_gateway_status.return_value = {
+            "process_running": True,
+            "port_listening": True,
+        }
+        
+        state_file = temp_state_dir / "state.json"
+        state_file.write_text('{}')
+        
+        query = MockCallbackQuery(chat_id=123, data="menu:system")
+        
+        async def mock_safe_edit(q, text, reply_markup=None, parse_mode=None):
+            pass
+        
+        with patch.object(handler, '_safe_edit_or_send', side_effect=mock_safe_edit):
+            from pearlalgo.market_agent.telegram_command_handler import TelegramCommandHandler
+            await TelegramCommandHandler._show_system_menu(handler, query)
+        
+        # Verify get_agent_status was called with correct market
+        handler.service_controller.get_agent_status.assert_called_with(market="GC")

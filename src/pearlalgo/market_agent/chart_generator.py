@@ -2793,14 +2793,218 @@ class ChartGenerator:
             except Exception:
                 continue
 
-    def _draw_trade_overlay_legend(self, ax, *, ema_crossovers_shown: bool) -> None:
+    def _draw_trade_pair_numbers(self, ax, df: pd.DataFrame, trades: list[dict], *, max_trades: int = 6) -> None:
+        """Draw numbered entry/exit badges to visually pair full trades on the dashboard chart.
+
+        This is designed for mobile/Telegram readability:
+        - Matching numbers pair an entry marker with its corresponding exit marker.
+        - Numbers are outcome-colored (green win / red loss / gray unknown).
+        - Capped to avoid clutter.
+        """
+        if df is None or df.empty or not isinstance(df.index, pd.DatetimeIndex):
+            return
+        if not trades:
+            return
+
+        try:
+            max_n = int(max_trades)
+        except Exception:
+            max_n = 6
+        max_n = max(1, min(20, max_n))
+
+        idx_series = df.index
+        idx_tz = getattr(idx_series, "tz", None)
+
+        def _align_ts(raw):
+            if not raw:
+                return None
+            try:
+                tsx = pd.Timestamp(raw)
+            except Exception:
+                return None
+            try:
+                if idx_tz is None:
+                    if tsx.tzinfo is not None:
+                        tsx = tsx.tz_convert("UTC").tz_localize(None)
+                    else:
+                        tsx = tsx.tz_localize(None) if hasattr(tsx, "tz_localize") else tsx
+                else:
+                    if tsx.tzinfo is None:
+                        tsx = tsx.tz_localize("UTC").tz_convert(idx_tz)
+                    else:
+                        tsx = tsx.tz_convert(idx_tz)
+            except Exception:
+                return None
+            return tsx
+
+        items: list[dict] = []
+        for tr in [t for t in trades if isinstance(t, dict)]:
+            direction = str(tr.get("direction") or "long").lower()
+            et = _align_ts(tr.get("entry_time"))
+            if et is None:
+                continue
+            try:
+                xe = int(idx_series.get_indexer([et], method="nearest")[0])
+            except Exception:
+                continue
+            if xe < 0 or xe >= len(idx_series):
+                continue
+
+            # Entry y should track the marker placement (near candle extremes).
+            try:
+                if direction == "short":
+                    ye = float(df["High"].iloc[xe]) * 1.001
+                else:
+                    ye = float(df["Low"].iloc[xe]) * 0.999
+            except Exception:
+                try:
+                    ye = float(tr.get("entry_price") or 0.0)
+                except Exception:
+                    ye = 0.0
+            if ye <= 0:
+                continue
+
+            xt = _align_ts(tr.get("exit_time"))
+            xx = None
+            yx = None
+            if xt is not None and tr.get("exit_price") is not None:
+                try:
+                    xx = int(idx_series.get_indexer([xt], method="nearest")[0])
+                except Exception:
+                    xx = None
+                try:
+                    yx = float(tr.get("exit_price") or 0.0)
+                except Exception:
+                    yx = None
+                if xx is not None and (xx < 0 or xx >= len(idx_series)):
+                    xx = None
+                if yx is not None and yx <= 0:
+                    yx = None
+
+            pnl_val = tr.get("pnl", None)
+            is_win: Optional[bool] = None
+            if pnl_val is not None:
+                try:
+                    is_win = float(pnl_val) > 0
+                except Exception:
+                    is_win = None
+            if is_win is None and isinstance(tr.get("is_win"), bool):
+                is_win = bool(tr.get("is_win"))
+
+            if is_win is True:
+                col = SIGNAL_LONG
+            elif is_win is False:
+                col = SIGNAL_SHORT
+            else:
+                col = TEXT_SECONDARY
+
+            items.append({"xe": xe, "ye": ye, "xx": xx, "yx": yx, "col": col, "direction": direction})
+
+        if not items:
+            return
+
+        # Select the most recent N trades by entry position, then number left→right for readability.
+        items.sort(key=lambda d: int(d.get("xe", 0)))
+        items = items[-max_n:]
+        n = len(items)
+        if n <= 0:
+            return
+
+        try:
+            ymin, ymax = ax.get_ylim()
+            ymid = (float(ymin) + float(ymax)) / 2.0
+        except Exception:
+            ymid = None
+
+        def _dx(x: int) -> int:
+            try:
+                return -18 if float(x) > float(len(idx_series)) * 0.86 else 8
+            except Exception:
+                return 8
+
+        def _dy(y: float, *, direction: str) -> int:
+            # Prefer placing labels away from chart edges.
+            if direction == "short":
+                base = -14
+            else:
+                base = 8
+            try:
+                if ymid is not None and float(y) > float(ymid):
+                    return -14
+            except Exception:
+                pass
+            return base
+
+        for i, it in enumerate(items, start=1):
+            label = str(i)
+            col = it.get("col", TEXT_PRIMARY)
+            direction = str(it.get("direction") or "long")
+
+            try:
+                ax.annotate(
+                    label,
+                    xy=(float(it["xe"]), float(it["ye"])),
+                    xytext=(_dx(int(it["xe"])), _dy(float(it["ye"]), direction=direction)),
+                    textcoords="offset points",
+                    ha="center",
+                    va="center",
+                    fontsize=FONT_SIZE_LEGEND,
+                    fontweight="bold",
+                    color=col,
+                    alpha=0.95,
+                    zorder=ZORDER_TEXT_LABELS,
+                    bbox=dict(
+                        facecolor=DARK_BG,
+                        alpha=0.85,
+                        edgecolor=col,
+                        boxstyle="round,pad=0.20",
+                    ),
+                )
+            except Exception:
+                pass
+
+            if it.get("xx") is not None and it.get("yx") is not None:
+                try:
+                    ax.annotate(
+                        label,
+                        xy=(float(it["xx"]), float(it["yx"])),
+                        xytext=(_dx(int(it["xx"])), _dy(float(it["yx"]), direction="long")),
+                        textcoords="offset points",
+                        ha="center",
+                        va="center",
+                        fontsize=FONT_SIZE_LEGEND,
+                        fontweight="bold",
+                        color=col,
+                        alpha=0.95,
+                        zorder=ZORDER_TEXT_LABELS,
+                        bbox=dict(
+                            facecolor=DARK_BG,
+                            alpha=0.85,
+                            edgecolor=col,
+                            boxstyle="round,pad=0.20",
+                        ),
+                    )
+                except Exception:
+                    pass
+
+    def _draw_trade_overlay_legend(
+        self,
+        ax,
+        *,
+        ema_crossovers_shown: bool,
+        trade_paths_shown: bool = False,
+        trade_numbers_shown: bool = False,
+    ) -> None:
         """Draw a compact legend explaining trade overlays on the dashboard chart."""
         try:
-            lines = [
-                "Trade overlay",
-                "Path: green win / red loss",
-                "Entry: ▲/▼   Exit: ○",
-            ]
+            lines = ["Trade overlay"]
+            if trade_numbers_shown:
+                lines.append("Pair: same # entry/exit")
+            if trade_paths_shown:
+                lines.append("Path: green win / red loss")
+            else:
+                lines.append("Color: green win / red loss")
+            lines.append("Entry: ▲/▼   Exit: ○")
             if ema_crossovers_shown:
                 lines.append("EMA cross: cyan/pink")
             else:
@@ -4077,7 +4281,10 @@ class ChartGenerator:
         # Telegram/dashboard render tuning (service-controlled; defaults preserve baselines)
         show_ema_crossover_markers: bool = True,
         show_trade_paths: bool = False,
+        show_trade_pair_numbers: bool = False,
         trade_paths_max: int = 6,
+        trade_pair_numbers_max: int = 6,
+        trade_markers_max: int = 20,
         show_trade_overlay_legend: bool = False,
         save_pad_inches: float = 0.25,
         telegram_top_headroom_pct: float = 0.06,
@@ -4430,8 +4637,17 @@ class ChartGenerator:
 
             # Trade markers overlay (entries/exits) for transparency on push dashboards.
             # NOTE: Keep this visually light; too many markers will clutter mobile charts.
+            overlay_trades: List[Dict[str, Any]] = []
             if trades:
                 try:
+                    overlay_trades = [t for t in trades if isinstance(t, dict)]
+                    try:
+                        max_m = int(trade_markers_max)
+                    except Exception:
+                        max_m = 20
+                    max_m = max(1, min(30, max_m))
+                    overlay_trades = overlay_trades[-max_m:]
+
                     idx = df.index
                     idx_tz = getattr(idx, "tz", None)
 
@@ -4477,13 +4693,11 @@ class ChartGenerator:
                     exit_y = pd.Series(np.nan, index=idx)  # unknown outcome / missing pnl
 
                     # Dynamic sizing (avoid clutter when many markers).
-                    n_trades = max(1, min(20, len([t for t in trades if isinstance(t, dict)])))
+                    n_trades = max(1, min(20, len(overlay_trades)))
                     entry_size = int(max(55.0, min(90.0, 90.0 * math.sqrt(10.0 / float(n_trades)))))
                     exit_size = int(max(45.0, min(70.0, 65.0 * math.sqrt(10.0 / float(n_trades)))))
 
-                    for tr in trades[:20]:
-                        if not isinstance(tr, dict):
-                            continue
+                    for tr in overlay_trades:
                         direction = str(tr.get("direction") or "long").lower()
 
                         # Outcome (prefer pnl if available; fall back to is_win bool if present)
@@ -4770,17 +4984,33 @@ class ChartGenerator:
                             pass
 
 
-                    # Paired entry→exit trade paths (Telegram/mobile readability)
-                    if show_trade_paths and trades:
+                    trades_for_overlay = overlay_trades if overlay_trades else (trades or [])
+
+                    # Optional: paired entry→exit trade paths (Telegram/mobile readability)
+                    if show_trade_paths and trades_for_overlay:
                         try:
-                            self._draw_trade_paths(ax_price, df, trades, max_trades=int(trade_paths_max))
+                            self._draw_trade_paths(ax_price, df, trades_for_overlay, max_trades=int(trade_paths_max))
+                        except Exception:
+                            pass
+
+                    # Option A: numbered entry/exit pairing (Telegram/mobile readability)
+                    if show_trade_pair_numbers and trades_for_overlay:
+                        try:
+                            self._draw_trade_pair_numbers(
+                                ax_price, df, trades_for_overlay, max_trades=int(trade_pair_numbers_max)
+                            )
                         except Exception:
                             pass
 
                     # Compact overlay legend (Telegram/mobile)
                     if show_trade_overlay_legend:
                         try:
-                            self._draw_trade_overlay_legend(ax_price, ema_crossovers_shown=bool(show_ema_crossover_markers))
+                            self._draw_trade_overlay_legend(
+                                ax_price,
+                                ema_crossovers_shown=bool(show_ema_crossover_markers),
+                                trade_paths_shown=bool(show_trade_paths and trades_for_overlay),
+                                trade_numbers_shown=bool(show_trade_pair_numbers and trades_for_overlay),
+                            )
                         except Exception:
                             pass
 

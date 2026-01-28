@@ -22,11 +22,12 @@ class TestHealthMonitor:
         assert monitor.state_dir == state_dir
         assert monitor.last_check is None
 
-    def test_check_data_provider_health_with_validate(self):
-        """Should check data provider with validate_connection method."""
+    def test_check_data_provider_health_with_connected_executor(self):
+        """Should check data provider with connected executor."""
         monitor = HealthMonitor()
         provider = Mock()
-        provider.validate_connection = Mock(return_value=True)
+        provider._executor = Mock()
+        provider._executor.is_connected = Mock(return_value=True)
         
         health = monitor.check_data_provider_health(provider)
         
@@ -34,26 +35,41 @@ class TestHealthMonitor:
         assert health["status"] == "Connected"
         assert "last_check" in health
 
-    def test_check_data_provider_health_without_validate(self):
-        """Should assume healthy if no validate method."""
+    def test_check_data_provider_health_with_disconnected_executor(self):
+        """Should report disconnected when executor is disconnected."""
         monitor = HealthMonitor()
-        provider = Mock(spec=[])  # No methods
+        provider = Mock()
+        provider._executor = Mock()
+        provider._executor.is_connected = Mock(return_value=False)
+        
+        health = monitor.check_data_provider_health(provider)
+        
+        assert health["healthy"] is False
+        assert health["status"] == "Disconnected"
+        assert "last_check" in health
+
+    def test_check_data_provider_health_without_executor(self):
+        """Should report unverified if no executor to check."""
+        monitor = HealthMonitor()
+        provider = Mock(spec=[])  # No _executor attribute
         
         health = monitor.check_data_provider_health(provider)
         
         assert health["healthy"] is True
-        assert health["status"] == "Unknown"
+        assert health["status"] == "Present (connection unverified)"
 
     def test_check_data_provider_health_with_error(self):
         """Should handle errors gracefully."""
         monitor = HealthMonitor()
         provider = Mock()
-        provider.validate_connection = Mock(side_effect=Exception("Connection failed"))
+        provider._executor = Mock()
+        provider._executor.is_connected = Mock(side_effect=Exception("Connection failed"))
         
-        # Since we don't call validate_connection in the current impl,
-        # it will still return healthy. This tests the exception handling.
+        # When is_connected raises, should fall through to "Present (connection unverified)"
         health = monitor.check_data_provider_health(provider)
         
+        assert health["healthy"] is True
+        assert health["status"] == "Present (connection unverified)"
         assert "last_check" in health
 
     def test_check_telegram_health_disabled(self):
