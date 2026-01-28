@@ -2453,13 +2453,13 @@ class MarketAgentService:
             is_running = state.get("agent_running")
             is_session_open = state.get("session_open")
             is_futures_open = state.get("futures_open")
-            daily_pnl = float(state.get("daily_pnl") or 0.0)
             
             # Load performance data for deeper insights
             perf_trades = []
             today_trades = []
             streak_info = ""
             time_since_trade = ""
+            daily_pnl = 0.0
             
             try:
                 perf_file = self.state_manager.state_dir / "performance.json"
@@ -2471,6 +2471,10 @@ class MarketAgentService:
                     # Today's trades
                     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     today_trades = [t for t in perf_trades if today_str in str(t.get("exit_time", "") or "")]
+                    
+                    # Calculate daily P&L from actual trades (not state which may be stale)
+                    if today_trades:
+                        daily_pnl = sum(float(t.get("pnl", 0) or 0) for t in today_trades)
                     
                     # Calculate streak
                     if today_trades:

@@ -1235,12 +1235,14 @@ class TelegramCommandHandler:
                                 pass
                             try:
                                 await message.chat.send_message(
-                                    text=text_md,
+                                    text=text_md_v2,
                                     reply_markup=reply_markup,
-                                    parse_mode="Markdown"
+                                    parse_mode="MarkdownV2"
                                 )
                             except Exception:
-                                text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                                import re
+                                text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
+                                text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
                                 await message.chat.send_message(
                                     text=text_plain,
                                     reply_markup=reply_markup,
@@ -1249,9 +1251,11 @@ class TelegramCommandHandler:
                             await query.answer()
                         else:
                             try:
-                                await query.edit_message_text(text_md, reply_markup=reply_markup, parse_mode="Markdown")
+                                await query.edit_message_text(text_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
                             except Exception:
-                                text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                                import re
+                                text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
+                                text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
                                 await query.edit_message_text(text_plain, reply_markup=reply_markup, parse_mode=None)
                 else:
                     # No chart available - just show text menu quickly
@@ -1264,12 +1268,14 @@ class TelegramCommandHandler:
                             pass
                         try:
                             await message.chat.send_message(
-                                text=text_md,
+                                text=text_md_v2,
                                 reply_markup=reply_markup,
-                                parse_mode="Markdown"
+                                parse_mode="MarkdownV2"
                             )
                         except Exception:
-                            text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                            import re
+                            text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
+                            text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
                             await message.chat.send_message(
                                 text=text_plain,
                                 reply_markup=reply_markup,
@@ -1278,9 +1284,11 @@ class TelegramCommandHandler:
                         await query.answer()
                     else:
                         try:
-                            await query.edit_message_text(text_md, reply_markup=reply_markup, parse_mode="Markdown")
+                            await query.edit_message_text(text_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
                         except Exception:
-                            text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                            import re
+                            text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
+                            text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
                             await query.edit_message_text(text_plain, reply_markup=reply_markup, parse_mode=None)
             except Exception as e:
                 logger.error(f"Error showing main menu with chart: {e}", exc_info=True)
@@ -1484,19 +1492,25 @@ class TelegramCommandHandler:
             caption_md = sanitize_telegram_markdown(caption_text)
             text_md = sanitize_telegram_markdown(text_only)
             
+            # Convert to MarkdownV2 with custom PEARL emoji
+            caption_md_v2 = self._convert_to_markdown_v2_with_pearl(caption_md)
+            text_md_v2 = self._convert_to_markdown_v2_with_pearl(text_md)
+            
             if chart_path and chart_path.exists():
                 try:
                     with open(chart_path, 'rb') as f:
                         await self.application.bot.send_photo(
                             chat_id=self.chat_id,
                             photo=f,
-                            caption=caption_md,
+                            caption=caption_md_v2,
                             reply_markup=reply_markup,
-                            parse_mode="Markdown"
+                            parse_mode="MarkdownV2"
                         )
                 except Exception:
                     # Fallback
-                    caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
+                    import re
+                    caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
+                    caption_plain = caption_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
                     with open(chart_path, 'rb') as f:
                         await self.application.bot.send_photo(
                             chat_id=self.chat_id,
@@ -1509,12 +1523,14 @@ class TelegramCommandHandler:
                 try:
                     await self.application.bot.send_message(
                         chat_id=self.chat_id,
-                        text=text_md,
+                        text=text_md_v2,
                         reply_markup=reply_markup,
-                        parse_mode="Markdown"
+                        parse_mode="MarkdownV2"
                     )
                 except Exception:
-                    text_plain = text_md.replace("*", "").replace("_", "").replace("`", "")
+                    import re
+                    text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', text_md)
+                    text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
                     await self.application.bot.send_message(
                         chat_id=self.chat_id,
                         text=text_plain,
@@ -4256,7 +4272,15 @@ class TelegramCommandHandler:
         
         message_text = await self._build_status_dashboard_message(state)
         message_text = self._with_support_footer(message_text, state=state, max_chars=4096)
-        await message_obj.reply_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
+        message_md = sanitize_telegram_markdown(message_text)
+        message_md_v2 = self._convert_to_markdown_v2_with_pearl(message_md)
+        try:
+            await message_obj.reply_text(message_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
+        except Exception:
+            import re
+            plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', message_md)
+            plain = plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
+            await message_obj.reply_text(plain, reply_markup=reply_markup, parse_mode=None)
 
     async def _build_status_dashboard_message(self, state: dict) -> str:
         """Build the comprehensive status dashboard message from state."""
@@ -5115,7 +5139,15 @@ class TelegramCommandHandler:
         
         try:
             message_text = await self._build_status_dashboard_message(state)
-            await query.edit_message_text(message_text, reply_markup=reply_markup, parse_mode="Markdown")
+            message_md = sanitize_telegram_markdown(message_text)
+            message_md_v2 = self._convert_to_markdown_v2_with_pearl(message_md)
+            try:
+                await query.edit_message_text(message_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
+            except Exception:
+                import re
+                plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', message_md)
+                plain = plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
+                await query.edit_message_text(plain, reply_markup=reply_markup, parse_mode=None)
             return
             
         except Exception as e:
