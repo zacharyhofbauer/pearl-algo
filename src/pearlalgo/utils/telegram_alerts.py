@@ -1801,7 +1801,8 @@ def format_glanceable_card(
     lines = []
     bot_display = format_bot_name(trading_bot or "scanner")
     
-    # Header: Symbol + Time
+    # PEARL branded header
+    lines.append("🐚 *PEARL*")
     lines.append(f"*{symbol}* • {time_str}")
     
     # Status line: Bot + Services
@@ -1888,8 +1889,8 @@ class TelegramPrefs:
         "pearl_suggestions_enabled": True,        # Master toggle for proactive suggestions
         "pearl_suggestion_cooldown_minutes": 30,  # Min time between similar suggestions
         "pearl_greeting_enabled": True,           # Morning/evening greetings
-        "pearl_review_enabled": True,             # Periodic Pearl-style reviews
-        "pearl_review_interval_minutes": 30,      # Min minutes between reviews
+        "pearl_review_enabled": True,             # Periodic PEARL-style reviews
+        "pearl_review_interval_minutes": 60,      # Min minutes between reviews (hourly)
         "pearl_review_last_sent_at": None,        # Internal: ISO timestamp of last review
     }
     
@@ -1903,7 +1904,7 @@ class TelegramPrefs:
         "interval_notifications": "Interval Notifications",
         "pearl_suggestions_enabled": "Pearl Suggestions",
         "pearl_greeting_enabled": "Pearl Greetings",
-        "pearl_review_enabled": "Pearl Reviews",
+        "pearl_review_enabled": "PEARL Reviews",
     }
     
     # Descriptions for settings UI
@@ -1916,7 +1917,7 @@ class TelegramPrefs:
         "interval_notifications": "Hourly chart + status notifications (toggle off to disable)",
         "pearl_suggestions_enabled": "Pearl proactively offers help on dashboard (dismissible)",
         "pearl_greeting_enabled": "Pearl greets you in the morning with overnight summary",
-        "pearl_review_enabled": "Pearl sends periodic status reviews",
+        "pearl_review_enabled": "PEARL sends hourly check-ins with insights",
     }
     
     def __init__(self, state_dir=None):

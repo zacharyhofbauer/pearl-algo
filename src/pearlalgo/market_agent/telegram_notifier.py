@@ -1286,12 +1286,86 @@ class MarketAgentTelegramNotifier:
             ErrorHandler.handle_telegram_error(e, "send_heartbeat")
             return False
 
-    async def send_pearl_notification(self, message: str) -> bool:
+    # Custom PEARL emoji ID (created via @PEARLalgobot sticker pack)
+    PEARL_EMOJI_ID = "5177134388684523561"
+
+    @staticmethod
+    def _escape_markdown_v2(text: str) -> str:
+        """Escape special characters for MarkdownV2."""
+        # Characters that need escaping: _ * [ ] ( ) ~ ` > # + - = | { } . !
+        escape_chars = r'_*[]()~`>#+-=|{}.!'
+        result = ""
+        for char in text:
+            if char in escape_chars:
+                result += f"\\{char}"
+            else:
+                result += char
+        return result
+
+    @classmethod
+    def _convert_to_markdown_v2_with_pearl(cls, text: str) -> str:
+        """Convert Markdown text to MarkdownV2 with custom PEARL emoji header.
+        
+        Handles:
+        - Replaces "🐚 *PEARL*" with custom emoji syntax
+        - Escapes special chars while preserving *bold* and `code` formatting
         """
-        Send a standalone Pearl notification.
+        import re
+        
+        # Custom PEARL emoji header
+        pearl_header = f"![🐚](tg://emoji?id={cls.PEARL_EMOJI_ID}) *PEARL*"
+        
+        # Replace the shell emoji PEARL header with custom emoji version
+        text = re.sub(r'🐚 \*PEARL\*', pearl_header, text)
+        
+        # Escape special characters for MarkdownV2, preserving formatting
+        # We need to escape: _ [ ] ( ) ~ > # + - = | { } . !
+        # But preserve * for bold and ` for code
+        escape_chars = r'_[]()~>#+-=|{}.!'
+        
+        result = []
+        i = 0
+        while i < len(text):
+            char = text[i]
+            
+            # Skip already-escaped chars
+            if char == '\\' and i + 1 < len(text):
+                result.append(char)
+                result.append(text[i + 1])
+                i += 2
+                continue
+            
+            # Don't escape inside the emoji syntax ![...](tg://emoji?id=...)
+            if text[i:i+2] == '![':
+                # Find the end of the emoji syntax
+                end = text.find(')', i)
+                if end != -1:
+                    result.append(text[i:end+1])
+                    i = end + 1
+                    continue
+            
+            # Escape special chars
+            if char in escape_chars:
+                result.append(f"\\{char}")
+            else:
+                result.append(char)
+            i += 1
+        
+        return "".join(result)
+
+    async def send_pearl_notification(
+        self, 
+        message: str, 
+        message_type: str = "Check-In",
+        use_header: bool = True
+    ) -> bool:
+        """
+        Send a PEARL notification with consistent branding header.
         
         Args:
-            message: The message text (e.g. "Good morning...")
+            message: The message content (plain text - will be escaped for MarkdownV2)
+            message_type: Type of message (Check-In, Suggestion, Alert, etc.)
+            use_header: If True, prepends the PEARL header
             
         Returns:
             True if sent successfully
@@ -1300,10 +1374,25 @@ class MarketAgentTelegramNotifier:
             return False
             
         try:
-            # Format as a Pearl message
-            formatted_msg = f"💬 Pearl: \"{message}\""
-            return await self.telegram.send_message(formatted_msg)
+            if use_header:
+                # Escape message content for MarkdownV2
+                escaped_message = self._escape_markdown_v2(message)
+                escaped_type = self._escape_markdown_v2(message_type)
+                
+                # Build PEARL branded message with custom emoji
+                header = f"![🐚](tg://emoji?id={self.PEARL_EMOJI_ID}) *PEARL*\n{escaped_type}\n"
+                formatted_msg = header + "\n" + escaped_message
+            else:
+                formatted_msg = self._escape_markdown_v2(message)
+            
+            return await self.telegram.send_message(formatted_msg, parse_mode="MarkdownV2")
         except Exception as e:
+            # Try plain text fallback
+            try:
+                plain_header = f"🐚 PEARL\n{message_type}\n\n" if use_header else ""
+                return await self.telegram.send_message(plain_header + message)
+            except Exception:
+                pass
             ErrorHandler.handle_telegram_error(e, "send_pearl_notification")
             return False
 
@@ -1828,6 +1917,10 @@ class MarketAgentTelegramNotifier:
 
             # For visual dashboards, Telegram captions are capped at 1024 chars.
             caption_md = _truncate_telegram_text(sanitize_telegram_markdown(message), limit=1024)
+            
+            # Convert to MarkdownV2 with custom PEARL emoji for branded header
+            caption_md_v2 = self._convert_to_markdown_v2_with_pearl(caption_md)
+            
             has_chart = bool(chart_path and isinstance(chart_path, Path) and chart_path.exists())
 
             def _persist(mid: int | None) -> None:
@@ -1844,11 +1937,11 @@ class MarketAgentTelegramNotifier:
                 try:
                     mid = int(message_id)
                     if has_chart:
-                        # Preferred: update photo + caption together.
+                        # Preferred: update photo + caption together with custom emoji.
                         try:
                             from telegram import InputMediaPhoto
                             with open(chart_path, "rb") as photo:
-                                media = InputMediaPhoto(media=photo, caption=caption_md, parse_mode="Markdown")
+                                media = InputMediaPhoto(media=photo, caption=caption_md_v2, parse_mode="MarkdownV2")
                                 await bot.edit_message_media(
                                     chat_id=self.chat_id,
                                     message_id=mid,
@@ -1861,8 +1954,8 @@ class MarketAgentTelegramNotifier:
                                 await bot.edit_message_caption(
                                     chat_id=self.chat_id,
                                     message_id=mid,
-                                    caption=caption_md,
-                                    parse_mode="Markdown",
+                                    caption=caption_md_v2,
+                                    parse_mode="MarkdownV2",
                                     reply_markup=reply_markup,
                                 )
                             except Exception:
@@ -1874,16 +1967,16 @@ class MarketAgentTelegramNotifier:
                             await bot.edit_message_caption(
                                 chat_id=self.chat_id,
                                 message_id=mid,
-                                caption=caption_md,
-                                parse_mode="Markdown",
+                                caption=caption_md_v2,
+                                parse_mode="MarkdownV2",
                                 reply_markup=reply_markup,
                             )
                         except Exception:
                             await bot.edit_message_text(
                                 chat_id=self.chat_id,
                                 message_id=mid,
-                                text=message,
-                                parse_mode="Markdown",
+                                text=caption_md_v2,
+                                parse_mode="MarkdownV2",
                                 reply_markup=reply_markup,
                             )
 
@@ -1913,13 +2006,15 @@ class MarketAgentTelegramNotifier:
                         msg_obj = await bot.send_photo(
                             chat_id=self.chat_id,
                             photo=photo,
-                            caption=caption_md,
-                            parse_mode="Markdown",
+                            caption=caption_md_v2,
+                            parse_mode="MarkdownV2",
                             reply_markup=reply_markup,
                         )
                 except Exception:
-                    # Plain-text fallback if Markdown caption fails.
-                    caption_plain = caption_md.replace("*", "").replace("_", "").replace("`", "")
+                    # Plain-text fallback if MarkdownV2 caption fails.
+                    import re
+                    caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)  # Replace emoji syntax
+                    caption_plain = caption_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
                     with open(chart_path, "rb") as photo:
                         msg_obj = await bot.send_photo(
                             chat_id=self.chat_id,
@@ -1932,14 +2027,18 @@ class MarketAgentTelegramNotifier:
                 try:
                     msg_obj = await bot.send_message(
                         chat_id=self.chat_id,
-                        text=message,
-                        parse_mode="Markdown",
+                        text=caption_md_v2,
+                        parse_mode="MarkdownV2",
                         reply_markup=reply_markup,
                     )
                 except Exception:
+                    # Plain text fallback
+                    import re
+                    text_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
+                    text_plain = text_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
                     msg_obj = await bot.send_message(
                         chat_id=self.chat_id,
-                        text=message,
+                        text=text_plain,
                         parse_mode=None,
                         reply_markup=reply_markup,
                     )

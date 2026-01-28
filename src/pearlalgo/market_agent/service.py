@@ -2394,8 +2394,9 @@ class MarketAgentService:
             )
             
             if suggestion:
-                logger.info(f"Sending proactive Pearl suggestion: {suggestion.message}")
-                await self.telegram_notifier.send_pearl_notification(suggestion.message)
+                logger.info(f"Sending proactive PEARL suggestion: {suggestion.message}")
+                # Pass plain text - send_pearl_notification will escape for MarkdownV2
+                await self.telegram_notifier.send_pearl_notification(suggestion.message, message_type="Suggestion")
 
             # Periodic Pearl-style review (status + ML snapshot)
             if prefs.get("pearl_review_enabled", True):
@@ -2416,7 +2417,7 @@ class MarketAgentService:
                     if due:
                         review = self._build_pearl_review_message(state)
                         if review:
-                            await self.telegram_notifier.send_pearl_notification(review)
+                            await self.telegram_notifier.send_pearl_notification(review, message_type="Check-In")
                             try:
                                 prefs_obj.set("pearl_review_last_sent_at", datetime.now(timezone.utc).isoformat())
                             except Exception:
@@ -2427,45 +2428,187 @@ class MarketAgentService:
         except Exception as e:
             logger.warning(f"Error checking Pearl suggestions: {e}")
 
+    @staticmethod
+    def _escape_markdown_v2(text: str) -> str:
+        """Escape special characters for MarkdownV2."""
+        escape_chars = r'_*[]()~`>#+-=|{}.!'
+        result = ""
+        for char in text:
+            if char in escape_chars:
+                result += f"\\{char}"
+            else:
+                result += char
+        return result
+
     def _build_pearl_review_message(self, state: Dict[str, Any]) -> Optional[str]:
-        """Build a concise Pearl-style review message."""
+        """Build PEARL check-in content (plain text, will be converted to MarkdownV2 by sender).
+        
+        Returns the message body only - header is added by send_pearl_notification.
+        Focus on unique insights: streaks, observations, recommendations.
+        """
         try:
-            running = "running" if state.get("agent_running") else "stopped"
-            session_open = "open" if state.get("session_open") else "closed"
-            futures_open = "open" if state.get("futures_open") else "closed"
-            data_age = float(state.get("data_age_minutes") or 0.0)
-            data_stale = bool(state.get("data_stale"))
-            data_status = "stale" if data_stale else f"{data_age:.1f}m"
-            last_sig_min = float(state.get("last_signal_minutes") or 0.0)
+            import json
+            
+            # Basic state
+            is_running = state.get("agent_running")
+            is_session_open = state.get("session_open")
+            is_futures_open = state.get("futures_open")
             daily_pnl = float(state.get("daily_pnl") or 0.0)
-            pnl_sign = "+" if daily_pnl >= 0 else ""
-
-            ml_summary = ""
+            
+            # Load performance data for deeper insights
+            perf_trades = []
+            today_trades = []
+            streak_info = ""
+            time_since_trade = ""
+            
             try:
-                ml = {
-                    "enabled": getattr(self, "_ml_filter_enabled", False),
-                    "mode": getattr(self, "_ml_filter_mode", "shadow"),
-                }
-                lift = getattr(self, "_ml_lift_metrics", {}) or {}
-                if ml.get("enabled"):
-                    ml_summary = (
-                        f"ML: {ml.get('mode')} | lift "
-                        f"{(lift.get('lift_win_rate') or 0.0):.2f} | "
-                        f"pass WR {(lift.get('win_rate_pass') or 0.0):.2f}"
-                    )
+                perf_file = self.state_manager.state_dir / "performance.json"
+                if perf_file.exists():
+                    perf_trades = json.loads(perf_file.read_text(encoding="utf-8"))
+                    if not isinstance(perf_trades, list):
+                        perf_trades = []
+                    
+                    # Today's trades
+                    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                    today_trades = [t for t in perf_trades if today_str in str(t.get("exit_time", "") or "")]
+                    
+                    # Calculate streak
+                    if today_trades:
+                        sorted_trades = sorted(today_trades, key=lambda t: str(t.get("exit_time", "") or ""), reverse=True)
+                        streak = 0
+                        streak_type = None
+                        for t in sorted_trades:
+                            is_win = t.get("is_win", False)
+                            if streak_type is None:
+                                streak_type = "W" if is_win else "L"
+                                streak = 1
+                            elif (is_win and streak_type == "W") or (not is_win and streak_type == "L"):
+                                streak += 1
+                            else:
+                                break
+                        if streak >= 2:
+                            streak_icon = "🔥" if streak_type == "W" else "❄️"
+                            streak_word = "wins" if streak_type == "W" else "losses"
+                            streak_info = f"{streak_icon} Streak: {streak} {streak_word} in a row"
+                    
+                    # Time since last trade
+                    if perf_trades:
+                        last_trade = max(perf_trades, key=lambda t: str(t.get("exit_time", "") or ""), default=None)
+                        if last_trade and last_trade.get("exit_time"):
+                            try:
+                                last_exit = datetime.fromisoformat(str(last_trade["exit_time"]).replace("Z", "+00:00"))
+                                mins_ago = (datetime.now(timezone.utc) - last_exit).total_seconds() / 60
+                                if mins_ago > 60:
+                                    hours = int(mins_ago / 60)
+                                    time_since_trade = f"⏰ Last Trade: {hours}h ago"
+                                else:
+                                    time_since_trade = f"⏰ Last Trade: {int(mins_ago)}m ago"
+                            except Exception:
+                                pass
             except Exception:
-                ml_summary = ""
+                pass
+            
+            # Generate PEARL insight (context-aware observation)
+            insight = self._generate_pearl_insight(
+                is_running=is_running,
+                is_session_open=is_session_open,
+                is_futures_open=is_futures_open,
+                daily_pnl=daily_pnl,
+                today_trades=today_trades,
+            )
+            
+            # Build status line (plain text)
+            status_parts = []
+            if is_running:
+                status_parts.append("🟢 Running")
+            else:
+                status_parts.append("🔴 Stopped")
+            if is_session_open and is_futures_open:
+                status_parts.append("📊 Markets Open")
+            elif not is_futures_open:
+                status_parts.append("🌙 Futures Closed")
+            else:
+                status_parts.append("⏸️ Session Closed")
+            
+            status_line = " • ".join(status_parts)
+            
+            # P&L summary (plain text)
+            pnl_sign = "+" if daily_pnl >= 0 else "-"
+            pnl_icon = "📈" if daily_pnl > 0 else ("📉" if daily_pnl < 0 else "➖")
+            trades_today = len(today_trades)
+            wins_today = sum(1 for t in today_trades if t.get("is_win"))
+            wr_today = (wins_today / trades_today * 100) if trades_today > 0 else 0
+            
+            # Build plain text message (will be escaped by sender)
+            lines = [status_line]
+            
+            # Add performance if there are trades
+            if trades_today > 0:
+                lines.append("")
+                pnl_line = f"{pnl_icon} Today: {pnl_sign}${abs(daily_pnl):.2f} ({trades_today} trades, {wr_today:.0f}% WR)"
+                lines.append(pnl_line)
+            
+            # Add streak if notable
+            if streak_info:
+                lines.append(streak_info)
+            
+            # Add time since last trade
+            if time_since_trade:
+                lines.append(time_since_trade)
+            
+            # Add PEARL's insight
+            if insight:
+                lines.append("")
+                lines.append(f"💬 {insight}")
 
-            lines = [
-                f"Pearl check-in: I'm {running}, session {session_open}, futures {futures_open}.",
-                f"Data age: {data_status}. Last signal: {last_sig_min:.0f}m ago.",
-                f"Daily P&L: {pnl_sign}${abs(daily_pnl):.2f}.",
-            ]
-            if ml_summary:
-                lines.append(ml_summary)
             return "\n".join(lines)
         except Exception:
             return None
+    
+    def _generate_pearl_insight(
+        self,
+        is_running: bool,
+        is_session_open: bool,
+        is_futures_open: bool,
+        daily_pnl: float,
+        today_trades: list,
+    ) -> str:
+        """Generate a contextual PEARL insight based on current state."""
+        try:
+            trades_count = len(today_trades)
+            wins = sum(1 for t in today_trades if t.get("is_win"))
+            losses = trades_count - wins
+            
+            # Session-based insights
+            if not is_futures_open:
+                return "Markets are closed. Rest up for the next session!"
+            
+            if not is_session_open:
+                return "Strategy session is paused. I'm watching but not trading."
+            
+            if not is_running:
+                return "I'm currently stopped. Start me when you're ready to trade."
+            
+            # Performance-based insights
+            if trades_count == 0:
+                return "No trades yet today. Waiting for the right setup..."
+            
+            wr = (wins / trades_count * 100) if trades_count > 0 else 0
+            
+            if daily_pnl > 100:
+                return f"Great day! Up ${daily_pnl:.0f}. Consider protecting these gains."
+            elif daily_pnl < -100:
+                return f"Tough day, down ${abs(daily_pnl):.0f}. Stay disciplined."
+            elif wr >= 70 and trades_count >= 3:
+                return f"Strong {wr:.0f}% win rate today. Execution is sharp!"
+            elif wr < 40 and trades_count >= 3:
+                return f"{wr:.0f}% WR so far. Market may be choppy."
+            elif losses >= 3 and wins == 0:
+                return "Multiple losses in a row. Consider taking a break."
+            else:
+                return "All systems normal. Scanning for opportunities..."
+        except Exception:
+            return "All systems normal."
 
     async def _check_dashboard(
         self,
