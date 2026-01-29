@@ -263,9 +263,10 @@ journalctl -u pearlalgo-mnq.service -p err
 
 ## 8. Live Main Chart
 
-A web-based TradingView-style chart with real-time market data, indicators, and trade markers.
+A web-based TradingView-style chart with **real-time IBKR data**, indicators, and trade markers.
 
-> **Requires:** Node.js 20.x + Market Agent running + IBKR Gateway connected for live data. Shows "No Data" otherwise.
+> ✅ **Data Source:** Live IBKR market data (often AHEAD of TradingView by 1-2 candles!)  
+> ⚠️ **Requires:** Node.js 20.x + IBKR Gateway connected. Shows "No Data" if IBKR is offline.
 
 **First-time setup (Node.js):**
 
@@ -282,7 +283,9 @@ sudo apt-get install -y nodejs
 ./scripts/live-chart/stop.sh                # Stop all
 ```
 
-**View:** http://localhost:3001
+**Access:**
+- **Local:** http://localhost:3001
+- **Public:** https://pearlalgo.io (via Cloudflare Tunnel)
 
 **Features:**
 
@@ -295,14 +298,16 @@ sudo apt-get install -y nodejs
 | **RSI Panel** | Separate RSI(14) panel with overbought/oversold lines |
 | **Trade Markers** | Entry arrows and Exit dots with hover tooltips showing signal details |
 
-**Environment Variables:**
+**Environment Variables (.env):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PEARL_LIVE_CHART_URL` | `http://localhost:3001` | URL for Playwright screenshot capture |
-| `PEARL_MINI_APP_URL` | *(unset)* | Public HTTPS URL for Telegram Mini App |
+| `IB_CLIENT_ID_LIVE_CHART` | `97` | IBKR client ID (must be unique!) |
+| `PEARL_MINI_APP_URL` | `https://pearlalgo.io/` | Public HTTPS URL |
 | `PEARL_API_PORT` | `8000` | API server port |
 | `PEARL_CHART_PORT` | `3001` | Chart web interface port |
+
+⚠️ **Client ID Conflicts:** If you see "Error 326: client id already in use", change `IB_CLIENT_ID_LIVE_CHART` to an unused ID (96, 95, etc.) and restart.
 
 **Telegram Screenshot** (optional):
 
@@ -312,41 +317,25 @@ The dashboard can include a chart screenshot at `data/agent_state/<MARKET>/expor
 pip install playwright && playwright install chromium
 ```
 
-### Cloudflare Tunnel (for Telegram Mini App)
+### Cloudflare Tunnel (Public Access)
 
-To expose the live chart as a Telegram Mini App, use a Cloudflare Tunnel for persistent HTTPS:
+The chart is accessible at **https://pearlalgo.io** via Cloudflare Tunnel.
 
-**One-time setup:**
+**Setup:**
+- Tunnel: Configured in Cloudflare Zero Trust Dashboard
+- Domain: `pearlalgo.io` → localhost:3001
+- Service: Automatically routes to Next.js frontend
 
+**Check tunnel status:**
 ```bash
-# Install cloudflared
-curl -L -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-chmod +x cloudflared && sudo mv cloudflared /usr/local/bin/
-
-# Login and create tunnel
-cloudflared tunnel login
-cloudflared tunnel create pearlalgo-miniapp
-cloudflared tunnel route dns pearlalgo-miniapp your-domain.com
-
-# Create config file
-cat > ~/.cloudflared/config.yml << 'EOF'
-tunnel: pearlalgo-miniapp
-credentials-file: /home/pearlalgo/.cloudflared/<tunnel-id>.json
-
-ingress:
-  - hostname: your-domain.com
-    service: http://localhost:3001
-  - service: http_status:404
-EOF
+# Tunnel runs automatically - check Zero Trust dashboard
+# Or test: curl https://pearlalgo.io
 ```
 
-**Run tunnel:**
-
-```bash
-cloudflared tunnel run pearlalgo-miniapp
-```
-
-Then set `PEARL_MINI_APP_URL=https://your-domain.com` in `.env` and configure BotFather.
+**Troubleshooting:**
+- Chart shows "No Data": IBKR Gateway is offline or disconnected
+- Chart not loading: Check if live-chart processes are running (`ps aux | grep -E "api_server|next"`)
+- Data delayed: This is normal! Chart often shows fresher data than TradingView
 
 ---
 

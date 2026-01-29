@@ -200,6 +200,17 @@ class TelegramCommandHandler:
                     i = end + 1
                     continue
             
+            # Don't escape inside markdown links [text](url)
+            if char == '[' and text[i:i+2] != '![':
+                # Find matching ] and then (url)
+                bracket_end = text.find(']', i)
+                if bracket_end != -1 and bracket_end + 1 < len(text) and text[bracket_end + 1] == '(':
+                    paren_end = text.find(')', bracket_end + 1)
+                    if paren_end != -1:
+                        result.append(text[i:paren_end+1])
+                        i = paren_end + 1
+                        continue
+            
             # Escape special chars
             if char in escape_chars:
                 result.append(f"\\{char}")
