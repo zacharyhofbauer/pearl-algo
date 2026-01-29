@@ -271,7 +271,7 @@ A web-based TradingView chart interface for real-time market visualization.
 ./scripts/live-chart/start.sh --market NQ
 ```
 
-**View in browser:** http://localhost:3000
+**View in browser:** http://localhost:3001
 
 **Stop the chart:**
 
@@ -291,9 +291,9 @@ export PEARL_USE_LIVE_CHART=1
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PEARL_USE_LIVE_CHART` | `0` | Set to `1` to capture screenshots from web chart |
-| `PEARL_LIVE_CHART_URL` | `http://localhost:3000` | URL of the Live Main Chart |
+| `PEARL_LIVE_CHART_URL` | `http://localhost:3001` | URL of the Live Main Chart |
 | `PEARL_API_PORT` | `8000` | Port for the chart API server |
-| `PEARL_CHART_PORT` | `3000` | Port for the chart web interface |
+| `PEARL_CHART_PORT` | `3001` | Port for the chart web interface |
 
 **Requirements:**
 - Node.js 18+ (for Next.js)

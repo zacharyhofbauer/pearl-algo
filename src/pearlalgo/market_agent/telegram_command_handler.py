@@ -1792,7 +1792,7 @@ class TelegramCommandHandler:
             Path to the screenshot file, or None if capture failed.
         """
         screenshot_path = self.exports_dir / "live_chart_screenshot.png"
-        chart_url = os.getenv("PEARL_LIVE_CHART_URL", "http://localhost:3000")
+        chart_url = os.getenv("PEARL_LIVE_CHART_URL", "http://localhost:3001")
         
         try:
             from playwright.async_api import async_playwright

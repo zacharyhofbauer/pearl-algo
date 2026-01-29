@@ -96,7 +96,7 @@ Web-based TradingView chart interface for real-time market visualization.
 - `start.sh`
   - **Role**: Start both the API server and the Next.js chart interface.
   - **Usage**: `./scripts/live-chart/start.sh [--market NQ] [--install]`
-  - **Ports**: API at `:8000`, Chart at `:3000`
+  - **Ports**: API at `:8000`, Chart at `:3001`
 - `stop.sh`
   - **Role**: Stop the Live Main Chart services.
   - **Usage**: `./scripts/live-chart/stop.sh`

@@ -8,6 +8,8 @@
   --accent-cyan: #00d4ff;
   --accent-green: #00e676;
   --accent-red: #ff5252;
+  --accent-yellow: #ffc107;
+  --accent-purple: #ab47bc;
   --border-color: #2a2a3a;
   --grid-color: #1e222d;
 }
@@ -33,8 +35,8 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  padding: 16px;
-  gap: 12px;
+  padding: 12px;
+  gap: 8px;
 }
 
 /* Header */
@@ -46,6 +48,16 @@ body {
   background: var(--bg-secondary);
   border-radius: 8px;
   border: 1px solid var(--border-color);
+}
+
+.header .title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header .logo {
+  border-radius: 4px;
 }
 
 .header h1 {
@@ -81,6 +93,101 @@ body {
   background: var(--accent-red);
 }
 
+/* Status Panel */
+.status-panel {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stat-value.positive {
+  color: var(--accent-green);
+}
+
+.stat-value.negative {
+  color: var(--accent-red);
+}
+
+.stat-value.highlight {
+  color: var(--accent-cyan);
+}
+
+.price-stat {
+  padding-right: 16px;
+  border-right: 1px solid var(--border-color);
+  margin-right: 8px;
+}
+
+.price-value {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+/* Indicator Legend */
+.indicator-legend {
+  display: flex;
+  gap: 16px;
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+
+.legend-color {
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.legend-color.ema9 {
+  background: var(--accent-cyan);
+}
+
+.legend-color.ema21 {
+  background: var(--accent-yellow);
+}
+
+.legend-color.vwap {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--accent-purple) 0px,
+    var(--accent-purple) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  height: 2px;
+}
+
 /* Chart container */
 .chart-container {
   flex: 1;
@@ -89,6 +196,33 @@ body {
   border: 1px solid var(--border-color);
   overflow: hidden;
   min-height: 400px;
+}
+
+/* RSI Panel */
+.rsi-panel {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  height: 120px;
+}
+
+.rsi-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.rsi-label {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  z-index: 10;
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 /* Loading state */
@@ -109,4 +243,21 @@ body {
   height: 100%;
   color: var(--accent-red);
   font-size: 14px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .status-panel {
+    gap: 16px;
+  }
+  
+  .indicator-legend {
+    margin-left: 0;
+    width: 100%;
+    margin-top: 8px;
+  }
+  
+  .header h1 {
+    font-size: 14px;
+  }
 }
