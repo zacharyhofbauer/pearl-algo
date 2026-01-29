@@ -259,9 +259,9 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
         let x = param.point.x + 15
         let y = param.point.y - 10
 
-        // Clamp to container bounds
-        const tooltipWidth = 240
-        const tooltipHeight = 160
+        // Responsive tooltip dimensions
+        const tooltipWidth = Math.min(240, window.innerWidth - 40)
+        const tooltipHeight = Math.min(160, window.innerHeight * 0.25)
         if (x + tooltipWidth > containerRect.width) {
           x = param.point.x - tooltipWidth - 15
         }
@@ -465,11 +465,16 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
 
   const pairedMarker = tooltip.marker ? findPairedMarker(tooltip.marker) : null
 
+  // Responsive min-height based on viewport
+  const minHeight = typeof window !== 'undefined'
+    ? Math.max(300, window.innerHeight * 0.5)
+    : 500
+
   return (
-    <div 
-      ref={containerRef} 
+    <div
+      ref={containerRef}
       className={`chart-container-inner ${activeSignalId ? 'trade-focused' : ''}`}
-      style={{ width: '100%', height: '100%', minHeight: 500, position: 'relative' }}
+      style={{ width: '100%', height: '100%', minHeight, position: 'relative' }}
     >
       {/* Marker Tooltip */}
       {tooltip.visible && tooltip.marker && (

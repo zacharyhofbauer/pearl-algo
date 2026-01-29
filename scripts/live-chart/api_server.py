@@ -362,7 +362,7 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
     
     try:
         # Read all signals (we need to check all for today's trades)
-        signals = _load_jsonl_file(signals_file, max_lines=500)
+        signals = _load_jsonl_file(signals_file, max_lines=2000)
         for s in signals:
             if s.get("status") != "exited":
                 continue
@@ -489,14 +489,14 @@ def _snap_to_bar(timestamp: float, bar_seconds: int = 300) -> int:
 
 @app.get("/api/markers")
 async def get_markers(
-    hours: int = Query(default=6, ge=1, le=24, description="Hours of markers to return"),
+    hours: int = Query(default=24, ge=1, le=72, description="Hours of markers to return"),
 ):
     """Get trade entry/exit markers for chart overlay with tooltip metadata."""
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
-    
+
     signals_file = _state_dir / "signals.jsonl"
-    signals = _load_jsonl_file(signals_file, max_lines=200)
+    signals = _load_jsonl_file(signals_file, max_lines=2000)
     
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=hours)

@@ -65,8 +65,8 @@ const TIMEFRAME_HOURS: Record<Timeframe, number> = {
   '1h': 48,   // 48 hours = 48 bars
 }
 
-// Always fetch 24 hours of markers so all of today's trades show up
-const MARKER_HOURS = 24
+// Fetch 72 hours (3 days) of markers for complete trade history
+const MARKER_HOURS = 72
 
 export default function LiveMainChart() {
   const [candles, setCandles] = useState<CandleData[]>([])
@@ -79,14 +79,21 @@ export default function LiveMainChart() {
   const [isLive, setIsLive] = useState(false)
   const [timeframe, setTimeframe] = useState<Timeframe>('5m')
   const [barCount, setBarCount] = useState(MIN_BARS)
+  const [barSpacing, setBarSpacing] = useState(10)
   const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
   const lastDataHash = useRef<string>('')
+
+  // Responsive bar spacing - smaller on mobile
+  const getBarSpacing = () => {
+    if (typeof window === 'undefined') return 10
+    return window.innerWidth < 768 ? 6 : 10
+  }
 
   // Calculate bar count based on viewport width - always request enough to fill chart
   const calculateBarCount = () => {
     if (typeof window === 'undefined') return MIN_BARS
     const width = window.innerWidth
-    const barSpacing = 10
+    const barSpacing = getBarSpacing()
     const priceScaleWidth = 60
     const availableWidth = width - priceScaleWidth - 40
     const visibleBars = Math.floor(availableWidth / barSpacing)
@@ -94,9 +101,12 @@ export default function LiveMainChart() {
     return Math.max(MIN_BARS, Math.floor(visibleBars * 1.5))
   }
 
-  // Update bar count on resize
+  // Update bar count and spacing on resize
   useEffect(() => {
-    const update = () => setBarCount(calculateBarCount())
+    const update = () => {
+      setBarSpacing(getBarSpacing())
+      setBarCount(calculateBarCount())
+    }
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
@@ -347,6 +357,7 @@ export default function LiveMainChart() {
               data={candles}
               indicators={indicators}
               markers={markers}
+              barSpacing={barSpacing}
               onChartReady={setMainChartApi}
             />
           )}
@@ -356,7 +367,7 @@ export default function LiveMainChart() {
       {/* RSI Panel */}
       {indicators.rsi && indicators.rsi.length > 0 && (
         <div className="rsi-panel">
-          <RSIChart data={indicators.rsi} />
+          <RSIChart data={indicators.rsi} barSpacing={barSpacing} />
         </div>
       )}
     </div>
@@ -364,17 +375,24 @@ export default function LiveMainChart() {
 }
 
 // Simple RSI Chart Component
-function RSIChart({ data }: { data: IndicatorData[] }) {
+function RSIChart({ data, barSpacing = 10 }: { data: IndicatorData[], barSpacing?: number }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<any>(null)
+
+  // Calculate responsive height
+  const getChartHeight = () => {
+    if (typeof window === 'undefined') return 120
+    return Math.max(80, Math.min(120, window.innerHeight * 0.12))
+  }
 
   useEffect(() => {
     if (!containerRef.current) return
 
+    const chartHeight = getChartHeight()
     const { createChart, ColorType } = require('lightweight-charts')
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: 120,  // Increased to accommodate x-axis labels
+      height: chartHeight,
       layout: {
         background: { type: ColorType.Solid, color: '#0a0a0f' },
         textColor: '#8a94a6',
@@ -393,7 +411,7 @@ function RSIChart({ data }: { data: IndicatorData[] }) {
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 8,  // Match main chart
-        barSpacing: 10,
+        barSpacing: barSpacing,
         tickMarkFormatter: (time: number) => {
           const date = new Date(time * 1000)
           const hours = date.getHours().toString().padStart(2, '0')
@@ -431,11 +449,16 @@ function RSIChart({ data }: { data: IndicatorData[] }) {
     chartRef.current = { chart, series, ob, os }
 
     const handleResize = () => {
-      if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth })
+      if (containerRef.current) {
+        chart.applyOptions({
+          width: containerRef.current.clientWidth,
+          height: getChartHeight(),
+        })
+      }
     }
     window.addEventListener('resize', handleResize)
     return () => { window.removeEventListener('resize', handleResize); chart.remove() }
-  }, [])
+  }, [barSpacing])
 
   useEffect(() => {
     if (!chartRef.current || !data?.length) return
@@ -451,7 +474,7 @@ function RSIChart({ data }: { data: IndicatorData[] }) {
   return (
     <div className="rsi-container">
       <span className="rsi-label">RSI(14)</span>
-      <div ref={containerRef} style={{ width: '100%', height: 120 }} />
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
     </div>
   )
 }
