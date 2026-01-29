@@ -8015,15 +8015,8 @@ class TelegramCommandHandler:
         """Append the chart link and support footer (always, by trimming when needed)."""
         base = (text or "").rstrip()
         
-        # Add chart link if available and not already present
+        # Chart link disabled - URL is now shown in PEARL header
         chart_link = ""
-        if include_chart_link:
-            try:
-                chart_url = self._get_chart_url()
-                if chart_url and "📊" not in base:
-                    chart_link = f"📊 [Live Chart]({chart_url})"
-            except Exception:
-                pass
         
         footer = ""
         try:

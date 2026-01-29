@@ -1802,7 +1802,7 @@ def format_glanceable_card(
     bot_display = format_bot_name(trading_bot or "scanner")
     
     # PEARL branded header
-    lines.append("🐚 *PEARL*")
+    lines.append("🐚 *PEARL* - [localhost:3001](http://localhost:3001/)")
     lines.append(f"*{symbol}* • {time_str}")
     
     # Status line: Bot + Services
