@@ -40,7 +40,7 @@ except ImportError:
 
 
 DEFAULT_MODEL = "claude-sonnet-4-20250514"
-DEFAULT_MAX_TOKENS = 4096
+DEFAULT_MAX_TOKENS = 16000  # Must be > thinking_budget when thinking enabled
 DEFAULT_THINKING_BUDGET = 8192
 
 
@@ -271,14 +271,14 @@ class ClaudeProvider(AIProvider):
                 elif block.type == "thinking":
                     thinking_blocks.append(ThinkingBlock(
                         content=block.thinking,
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(timezone.utc),
                     ))
                 elif block.type == "tool_use":
                     tool_calls.append(ToolCall(
                         id=block.id,
                         name=block.name,
                         arguments=block.input,
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(timezone.utc),
                     ))
             
             return AIResponse(
@@ -296,20 +296,20 @@ class ClaudeProvider(AIProvider):
         
         except anthropic.RateLimitError as e:
             logger.error(f"Claude rate limit: {e}")
-            raise AIProviderRateLimitError(str(e))
-        
+            raise AIProviderRateLimitError(str(e)) from e
+
         except anthropic.APIStatusError as e:
             error_msg = str(e).lower()
             if "insufficient" in error_msg or "billing" in error_msg or "quota" in error_msg:
                 logger.error(f"Claude quota error: {e}")
                 self._disable_for(6 * 3600, str(e))
-                raise AIProviderQuotaError(str(e))
+                raise AIProviderQuotaError(str(e)) from e
             logger.error(f"Claude API error: {e}")
-            raise AIProviderAPIError(str(e), getattr(e, "status_code", None))
-        
+            raise AIProviderAPIError(str(e), getattr(e, "status_code", None)) from e
+
         except Exception as e:
             logger.error(f"Unexpected Claude error: {e}")
-            raise AIProviderAPIError(str(e))
+            raise AIProviderAPIError(str(e)) from e
     
     async def stream(
         self,
@@ -357,11 +357,11 @@ class ClaudeProvider(AIProvider):
         
         except anthropic.RateLimitError as e:
             logger.error(f"Claude rate limit during stream: {e}")
-            raise AIProviderRateLimitError(str(e))
-        
+            raise AIProviderRateLimitError(str(e)) from e
+
         except Exception as e:
             logger.error(f"Claude stream error: {e}")
-            raise AIProviderAPIError(str(e))
+            raise AIProviderAPIError(str(e)) from e
 
 
 def get_claude_provider() -> Optional[ClaudeProvider]:

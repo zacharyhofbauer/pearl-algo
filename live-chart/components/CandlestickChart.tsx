@@ -169,13 +169,13 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       crosshairMarkerVisible: false,
     })
 
-    // Candlestick series
+    // Candlestick series - bright green/red
     const candleSeries = chart.addCandlestickSeries({
-      upColor: '#089981',
-      downColor: '#f23645',
+      upColor: '#00e676',
+      downColor: '#ff5252',
       borderVisible: false,
-      wickUpColor: '#089981',
-      wickDownColor: '#f23645',
+      wickUpColor: '#00e676',
+      wickDownColor: '#ff5252',
       priceFormat: { type: 'price', precision: 2, minMove: 0.25 },
       lastValueVisible: true,
       priceLineVisible: true,
@@ -231,7 +231,8 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       onChartReady?.(null)
       chart.remove()
     }
-  }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barSpacing]) // onChartReady intentionally excluded to avoid recreation
 
   // Subscribe to crosshair move for tooltip
   useEffect(() => {
@@ -310,7 +311,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     const volumeData = data.map((d) => ({
       time: d.time as Time,
       value: d.volume || 0,
-      color: d.close >= d.open ? 'rgba(8, 153, 129, 0.3)' : 'rgba(242, 54, 69, 0.3)',
+      color: d.close >= d.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
     }))
     volumeSeriesRef.current.setData(volumeData)
 
@@ -356,13 +357,35 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       }
       
       candleSeriesRef.current.setMarkers(
-        displayMarkers.map((m) => ({
-          time: m.time as any,
-          position: m.position,
-          color: m.color,
-          shape: m.shape,
-          text: m.text,
-        }))
+        displayMarkers.map((m) => {
+          // For exits: position based on trade direction for better visibility
+          // Long exits go above candles, Short exits go below candles
+          let position = m.position
+          if (m.kind === 'exit') {
+            position = m.direction === 'long' ? 'aboveBar' : 'belowBar'
+          }
+          
+          // Muted color scheme with opacity - markers blend better
+          // Entries: Semi-transparent white/gray
+          // Exits: Muted teal (win) / Muted coral (loss)
+          let color = m.color
+          if (m.kind === 'entry') {
+            color = 'rgba(180, 180, 180, 0.8)'  // Muted gray for entries
+          } else if (m.kind === 'exit') {
+            const isWin = (m.pnl || 0) >= 0
+            color = isWin ? 'rgba(100, 200, 180, 0.8)' : 'rgba(220, 140, 100, 0.8)'  // Muted teal/coral
+          }
+          
+          return {
+            time: m.time as any,
+            position,
+            color,
+            // Entries use arrows, exits use circles
+            shape: m.kind === 'exit' ? 'circle' : m.shape,
+            // Clean look - no text
+            text: '',
+          }
+        })
       )
     } catch (e) {
       console.warn('Failed to set markers:', e)

@@ -89,7 +89,7 @@ class AIProvider(ABC):
     async def health_check(self) -> bool:
         """
         Check if the provider is available and working.
-        
+
         Returns:
             True if provider is healthy, False otherwise
         """
@@ -101,6 +101,7 @@ class AIProvider(ABC):
             )
             return bool(response.content)
         except Exception:
+            # Health check failures are expected - don't log as errors
             return False
 
 

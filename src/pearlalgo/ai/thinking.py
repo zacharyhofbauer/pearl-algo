@@ -19,8 +19,6 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, AsyncIterator, Callable, Optional
 
-from pearlalgo.utils.logger import logger
-
 
 class ThinkingLevel(Enum):
     """Level of detail for thinking output."""

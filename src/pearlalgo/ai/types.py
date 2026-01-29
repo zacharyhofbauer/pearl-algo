@@ -5,7 +5,7 @@ AI Types - Data structures for the AI abstraction layer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -32,7 +32,7 @@ class MessageRole(Enum):
 class ThinkingBlock:
     """A block of thinking/reasoning from the AI."""
     content: str
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     def __str__(self) -> str:
         return f"[THINKING] {self.content}"
@@ -44,7 +44,7 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any]
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     def __str__(self) -> str:
         return f"[TOOL] {self.name}({self.arguments})"
@@ -112,14 +112,14 @@ class AIMessage:
 @dataclass
 class CompletionConfig:
     """Configuration for AI completion requests."""
-    max_tokens: int = 4096
+    max_tokens: int = 16000  # Must be > thinking_budget when thinking enabled
     temperature: float = 0.7
     top_p: float = 1.0
     stop_sequences: list[str] = field(default_factory=list)
     
     # Thinking/reasoning options
     enable_thinking: bool = True
-    thinking_budget: int = 8192  # Max tokens for thinking
+    thinking_budget: int = 8192  # Max tokens for thinking (must be < max_tokens)
     
     # Tool use options
     tools: list[dict[str, Any]] = field(default_factory=list)

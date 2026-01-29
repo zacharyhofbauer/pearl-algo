@@ -869,30 +869,68 @@ class MLSignalFilter:
     def load_model(self, path: str) -> bool:
         """
         Load model from file.
-        
+
         Args:
             path: Path to model file
-            
+
         Returns:
             True if successful
+
+        Security Note:
+            This uses pickle which can execute arbitrary code. Only load models
+            from trusted sources (files you or your training pipeline created).
         """
         try:
             import pickle
-            
-            with open(path, "rb") as f:
+            from pathlib import Path
+
+            model_path = Path(path).resolve()
+
+            # Security: Validate path is within expected directories
+            allowed_dirs = [
+                Path.cwd() / "models",
+                Path.cwd() / "data",
+                Path(__file__).parent.parent.parent.parent / "models",
+            ]
+            is_safe_path = any(
+                str(model_path).startswith(str(allowed.resolve()))
+                for allowed in allowed_dirs
+                if allowed.exists()
+            )
+
+            if not is_safe_path:
+                logger.warning(
+                    f"Model path '{path}' is outside expected directories. "
+                    "Ensure this file is from a trusted source."
+                )
+
+            if not model_path.exists():
+                logger.error(f"Model file not found: {path}")
+                return False
+
+            with open(model_path, "rb") as f:
                 model_state = pickle.load(f)
-            
+
+            # Validate expected structure
+            if not isinstance(model_state, dict):
+                logger.error("Invalid model file: expected dictionary structure")
+                return False
+
+            expected_keys = {"model"}
+            if not expected_keys.issubset(model_state.keys()):
+                logger.warning(f"Model file missing expected keys: {expected_keys - model_state.keys()}")
+
             self._model = model_state.get("model")
             self._calibrated_model = model_state.get("calibrated_model")
             self._feature_names = model_state.get("feature_names", [])
             self._is_fitted = self._model is not None
-            
+
             stats = model_state.get("stats", {})
             self._training_samples = stats.get("training_samples", 0)
-            
+
             logger.info(f"ML filter model loaded from {path}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
             return False

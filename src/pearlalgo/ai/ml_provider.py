@@ -8,7 +8,6 @@ ML-based predictions in the AI provider framework.
 from __future__ import annotations
 
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
@@ -175,8 +174,8 @@ class MLProvider(AIProvider):
         
         try:
             request = json.loads(user_message)
-        except json.JSONDecodeError:
-            raise AIProviderAPIError("User message must be valid JSON")
+        except json.JSONDecodeError as e:
+            raise AIProviderAPIError("User message must be valid JSON") from e
         
         task = request.get("task", "score_signal")
         features = request.get("features", {})

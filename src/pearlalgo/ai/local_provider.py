@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime
 from typing import AsyncIterator, Optional
 
 from pearlalgo.ai.base import (
@@ -162,16 +161,16 @@ class LocalProvider(AIProvider):
                 latency_ms=latency_ms,
             )
         
-        except httpx.ConnectError:
+        except httpx.ConnectError as e:
             raise AIProviderNotAvailableError(
                 f"Cannot connect to Ollama at {self._endpoint}. Is it running?"
-            )
-        
+            ) from e
+
         except httpx.HTTPStatusError as e:
-            raise AIProviderAPIError(f"Ollama error: {e}", e.response.status_code)
-        
+            raise AIProviderAPIError(f"Ollama error: {e}", e.response.status_code) from e
+
         except Exception as e:
-            raise AIProviderAPIError(f"Local model error: {e}")
+            raise AIProviderAPIError(f"Local model error: {e}") from e
     
     async def stream(
         self,
@@ -210,13 +209,13 @@ class LocalProvider(AIProvider):
                     elif data.get("message", {}).get("content"):
                         yield StreamChunk(content=data["message"]["content"])
         
-        except httpx.ConnectError:
+        except httpx.ConnectError as e:
             raise AIProviderNotAvailableError(
                 f"Cannot connect to Ollama at {self._endpoint}"
-            )
-        
+            ) from e
+
         except Exception as e:
-            raise AIProviderAPIError(f"Local model stream error: {e}")
+            raise AIProviderAPIError(f"Local model stream error: {e}") from e
     
     async def health_check(self) -> bool:
         """Check if Ollama is running and model is available."""

@@ -44,16 +44,16 @@ def _get_ml_provider():
 
 # Default routing configuration
 DEFAULT_ROUTING = {
-    AITaskType.REASONING: "openai",
-    AITaskType.CODE_GEN: "openai",
+    AITaskType.REASONING: "claude",
+    AITaskType.CODE_GEN: "claude",
     AITaskType.QUICK: "local",
     AITaskType.SIGNAL_SCORING: "ml",
-    AITaskType.CHAT: "openai",
-    AITaskType.ANALYSIS: "openai",
+    AITaskType.CHAT: "claude",
+    AITaskType.ANALYSIS: "claude",
 }
 
 # Fallback order when preferred provider is not available
-FALLBACK_ORDER = ["openai", "claude", "local"]
+FALLBACK_ORDER = ["claude", "openai", "local"]
 
 
 class AIRouter:
@@ -269,7 +269,8 @@ class AIRouter:
             else:
                 try:
                     results[name] = await provider.health_check()
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Health check failed for {name}: {e}")
                     results[name] = False
         
         return results

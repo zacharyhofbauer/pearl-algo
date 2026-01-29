@@ -345,6 +345,8 @@ def test_auto_flat_due_friday_and_weekend(tmp_path) -> None:
     """Auto-flat should trigger on Friday cutoff and weekend closure."""
     provider = MockDataProvider(base_price=17500.0, volatility=0.0, trend=0.0)
     service = MarketAgentService(data_provider=provider, config=PEARL_BOT_CONFIG.copy(), state_dir=tmp_path)
+    # Disable daily auto-flat to test Friday/weekend logic specifically
+    service._auto_flat_daily_enabled = False
 
     friday_after_cutoff = datetime(2026, 1, 23, 21, 56, tzinfo=timezone.utc)  # 16:56 ET
     assert service._auto_flat_due(friday_after_cutoff, market_open=True) == "friday_auto_flat"

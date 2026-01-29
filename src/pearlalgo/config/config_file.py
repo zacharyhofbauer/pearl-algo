@@ -188,6 +188,12 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     # Repo knowledge index + RAG integration
     "knowledge",
     "challenge",
+    # AI provider abstraction layer (Claude, OpenAI, local, ML routing)
+    "ai",
+    # Memory/context store for AI conversations
+    "memory",
+    # Opportunity tracking for missed/taken signals
+    "opportunity_tracker",
 })
 
 # Config keys expected to be specific types after env substitution

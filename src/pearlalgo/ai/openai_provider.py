@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator, Optional
 
 from pearlalgo.ai.base import (
@@ -248,7 +248,7 @@ class OpenAIProvider(AIProvider):
                             id=tc.id,
                             name=tc.function.name,
                             arguments=json.loads(tc.function.arguments) if tc.function.arguments else {},
-                            timestamp=datetime.utcnow(),
+                            timestamp=datetime.now(timezone.utc),
                         ))
             
             return AIResponse(
@@ -267,14 +267,14 @@ class OpenAIProvider(AIProvider):
             error_msg = str(e).lower()
             if "rate limit" in error_msg:
                 logger.error(f"OpenAI rate limit: {e}")
-                raise AIProviderRateLimitError(str(e))
+                raise AIProviderRateLimitError(str(e)) from e
             elif "insufficient_quota" in error_msg or "billing" in error_msg:
                 logger.error(f"OpenAI quota error: {e}")
                 self._disable_for(6 * 3600, str(e))
-                raise AIProviderQuotaError(str(e))
+                raise AIProviderQuotaError(str(e)) from e
             else:
                 logger.error(f"OpenAI error: {e}")
-                raise AIProviderAPIError(str(e))
+                raise AIProviderAPIError(str(e)) from e
     
     async def stream(
         self,
@@ -314,8 +314,8 @@ class OpenAIProvider(AIProvider):
         except Exception as e:
             error_msg = str(e).lower()
             if "rate limit" in error_msg:
-                raise AIProviderRateLimitError(str(e))
-            raise AIProviderAPIError(str(e))
+                raise AIProviderRateLimitError(str(e)) from e
+            raise AIProviderAPIError(str(e)) from e
 
 
 def get_openai_provider() -> Optional[OpenAIProvider]:

@@ -410,22 +410,40 @@ class EnsembleScorer:
         self._bandit_stats: Dict[str, Dict[str, int]] = {}  # {type: {wins, losses}}
     
     def _load_models(self) -> None:
-        """Load trained models from disk."""
+        """
+        Load trained models from disk.
+
+        Security Note:
+            This uses pickle which can execute arbitrary code. Models are only
+            loaded from the configured models_dir. Ensure this directory only
+            contains files created by your training pipeline.
+        """
         self.models_dir.mkdir(parents=True, exist_ok=True)
-        
+
+        # Security: Ensure models_dir is within expected project structure
+        resolved_dir = self.models_dir.resolve()
+        cwd = Path.cwd().resolve()
+        if not str(resolved_dir).startswith(str(cwd)):
+            logger.warning(
+                f"Models directory '{self.models_dir}' is outside project directory. "
+                "Ensure model files are from trusted sources."
+            )
+
         # Load logistic regression
         lr_path = self.models_dir / "logistic_model.pkl"
         if lr_path.exists():
             try:
                 with open(lr_path, "rb") as f:
                     data = pickle.load(f)
+                    if not isinstance(data, dict):
+                        raise ValueError("Invalid model format: expected dictionary")
                     self._logistic = data.get("model")
                     self._scaler = data.get("scaler")
                     self._logistic_fitted = True
                     logger.info("Loaded logistic regression model")
             except Exception as e:
                 logger.warning(f"Failed to load logistic model: {e}")
-        
+
         # Load GBM
         gbm_path = self.models_dir / "gbm_model.pkl"
         if gbm_path.exists():

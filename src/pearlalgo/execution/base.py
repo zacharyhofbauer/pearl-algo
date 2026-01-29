@@ -7,6 +7,7 @@ All execution adapters (IBKR, paper, dry-run) implement this interface.
 
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -79,15 +80,35 @@ class ExecutionConfig:
             "live": ExecutionMode.LIVE,
         }
         mode = mode_map.get(mode_str, ExecutionMode.DRY_RUN)
-        
+
+        # Parse and validate values
+        max_positions = int(config.get("max_positions", defaults.MAX_POSITIONS))
+        max_orders_per_day = int(config.get("max_orders_per_day", defaults.MAX_ORDERS_PER_DAY))
+        max_daily_loss = float(config.get("max_daily_loss", defaults.MAX_DAILY_LOSS))
+        cooldown_seconds = int(config.get("cooldown_seconds", defaults.COOLDOWN_SECONDS))
+
+        # Validate ranges to prevent disabled risk controls
+        if max_positions <= 0:
+            logger.warning(f"Invalid max_positions={max_positions}, using default {defaults.MAX_POSITIONS}")
+            max_positions = defaults.MAX_POSITIONS
+        if max_orders_per_day <= 0:
+            logger.warning(f"Invalid max_orders_per_day={max_orders_per_day}, using default {defaults.MAX_ORDERS_PER_DAY}")
+            max_orders_per_day = defaults.MAX_ORDERS_PER_DAY
+        if max_daily_loss <= 0:
+            logger.warning(f"Invalid max_daily_loss={max_daily_loss}, using default {defaults.MAX_DAILY_LOSS}")
+            max_daily_loss = defaults.MAX_DAILY_LOSS
+        if cooldown_seconds < 0:
+            logger.warning(f"Invalid cooldown_seconds={cooldown_seconds}, using default {defaults.COOLDOWN_SECONDS}")
+            cooldown_seconds = defaults.COOLDOWN_SECONDS
+
         return cls(
             enabled=bool(config.get("enabled", defaults.EXECUTION_ENABLED)),
             armed=bool(config.get("armed", defaults.EXECUTION_ARMED)),
             mode=mode,
-            max_positions=int(config.get("max_positions", defaults.MAX_POSITIONS)),
-            max_orders_per_day=int(config.get("max_orders_per_day", defaults.MAX_ORDERS_PER_DAY)),
-            max_daily_loss=float(config.get("max_daily_loss", defaults.MAX_DAILY_LOSS)),
-            cooldown_seconds=int(config.get("cooldown_seconds", defaults.COOLDOWN_SECONDS)),
+            max_positions=max_positions,
+            max_orders_per_day=max_orders_per_day,
+            max_daily_loss=max_daily_loss,
+            cooldown_seconds=cooldown_seconds,
             symbol_whitelist=list(config.get("symbol_whitelist", defaults.DEFAULT_SYMBOL_WHITELIST)),
             ibkr_trading_client_id=int(config.get("ibkr_trading_client_id", defaults.IBKR_TRADING_CLIENT_ID)),
             ibkr_host=str(config.get("ibkr_host", defaults.IBKR_HOST)),
@@ -247,6 +268,9 @@ class ExecutionAdapter(ABC):
         self._last_order_time: Dict[str, datetime] = {}  # signal_type -> last order time
         self._positions: Dict[str, Position] = {}  # symbol -> position
         self._pending_orders: Dict[str, Dict] = {}  # order_id -> order info
+
+        # Thread lock for concurrent access to counters
+        self._counter_lock = threading.Lock()
     
     @property
     def armed(self) -> bool:
@@ -499,13 +523,21 @@ class ExecutionAdapter(ABC):
     
     def reset_daily_counters(self) -> None:
         """Reset daily counters (call at start of each trading day)."""
-        self._orders_today = 0
-        self._daily_pnl = 0.0
-        self._last_order_time.clear()
-    
+        with self._counter_lock:
+            self._orders_today = 0
+            self._daily_pnl = 0.0
+            self._last_order_time.clear()
+
     def update_daily_pnl(self, pnl_change: float) -> None:
         """Update daily P&L tracking."""
-        self._daily_pnl += pnl_change
+        with self._counter_lock:
+            self._daily_pnl += pnl_change
+
+    def increment_order_count(self, signal_type: str) -> None:
+        """Increment order count and record last order time (thread-safe)."""
+        with self._counter_lock:
+            self._orders_today += 1
+            self._last_order_time[signal_type] = datetime.now(timezone.utc)
     
     def get_status(self) -> Dict[str, Any]:
         """Get current execution status for observability."""

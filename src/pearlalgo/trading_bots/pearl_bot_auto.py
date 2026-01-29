@@ -114,13 +114,22 @@ _key_levels_cache_max_size = 10
 
 
 def _get_key_levels_cache_key(df: pd.DataFrame) -> str:
-    """Generate cache key based on last bar timestamp and length."""
+    """Generate cache key based on date and data hash for effective caching."""
     if df.empty:
         return ""
     try:
-        # Use last bar timestamp and length as cache key
-        ts = df["timestamp"].iloc[-1] if "timestamp" in df.columns else df.index[-1]
-        return f"{ts}_{len(df)}"
+        # Use date (not full timestamp) + hash of OHLC to allow cache hits within same day
+        # when the same bar is re-processed
+        if "timestamp" in df.columns:
+            ts = df["timestamp"].iloc[-1]
+            date_str = str(ts)[:10] if hasattr(ts, '__str__') else str(ts)[:10]
+        else:
+            date_str = str(df.index[-1])[:10]
+
+        # Use hash of last few closes to detect data changes
+        last_closes = df["close"].iloc[-5:].tolist() if len(df) >= 5 else df["close"].tolist()
+        data_hash = hash(tuple(round(c, 2) for c in last_closes))
+        return f"{date_str}_{len(df)}_{data_hash}"
     except Exception:
         return ""
 
@@ -133,6 +142,40 @@ def _clear_key_levels_cache_if_needed() -> None:
         keys = list(_key_levels_cache.keys())
         for key in keys[:-_key_levels_cache_max_size]:
             del _key_levels_cache[key]
+
+
+def _safe_div(numerator: float, denominator: float, default: float = 0.0) -> float:
+    """
+    Safely divide two numbers, returning default if denominator is zero or near-zero.
+
+    Args:
+        numerator: The numerator
+        denominator: The denominator
+        default: Value to return if division is unsafe (default 0.0)
+
+    Returns:
+        Result of division or default value
+    """
+    if denominator == 0 or abs(denominator) < 1e-10:
+        return default
+    return numerator / denominator
+
+
+def _safe_pct(numerator: float, denominator: float, default: float = 0.0) -> float:
+    """
+    Safely calculate percentage: (numerator / denominator) * 100.
+
+    Args:
+        numerator: The numerator
+        denominator: The denominator
+        default: Value to return if division is unsafe (default 0.0)
+
+    Returns:
+        Percentage result or default value
+    """
+    if denominator == 0 or abs(denominator) < 1e-10:
+        return default
+    return (numerator / denominator) * 100
 
 
 # ============================================================================
@@ -218,21 +261,22 @@ def detect_market_regime(
     net_alignment = bullish_alignment - bearish_alignment
     
     # EMA spread as % of price (trend strength indicator)
-    ema_spread = abs(ema_fast_val - ema_slow_val) / current_close * 100
-    
+    ema_spread = _safe_pct(abs(ema_fast_val - ema_slow_val), current_close, default=0.0)
+
     # Volatility analysis
     high_low_range = recent["high"] - recent["low"]
     current_range = high_low_range.iloc[-1]
     avg_range = high_low_range.iloc[-volatility_window:].mean()
-    volatility_ratio = current_range / avg_range if avg_range > 0 else 1.0
-    
+    volatility_ratio = _safe_div(current_range, avg_range, default=1.0)
+
     # Price range analysis (for ranging detection)
     price_high = recent["high"].max()
     price_low = recent["low"].min()
-    price_range_pct = (price_high - price_low) / current_close * 100
-    
+    price_range_pct = _safe_pct(price_high - price_low, current_close, default=0.0)
+
     # Recent price movement (momentum)
-    price_change_pct = (current_close - recent["close"].iloc[0]) / recent["close"].iloc[0] * 100
+    first_close = recent["close"].iloc[0]
+    price_change_pct = _safe_pct(current_close - first_close, first_close, default=0.0)
     
     # Classify regime
     regime = "ranging"
@@ -294,7 +338,10 @@ def calculate_ema(df: pd.DataFrame, period: int, source: str = "close") -> pd.Se
 def calculate_vwap(df: pd.DataFrame) -> pd.Series:
     """VWAP - from VWAP_AA.pine"""
     typical_price = (df["high"] + df["low"] + df["close"]) / 3
-    vwap = (typical_price * df["volume"]).cumsum() / df["volume"].cumsum()
+    cumulative_tp_vol = (typical_price * df["volume"]).cumsum()
+    cumulative_vol = df["volume"].cumsum()
+    # Avoid division by zero when cumulative volume is zero
+    vwap = cumulative_tp_vol / cumulative_vol.replace(0, np.nan)
     return vwap.bfill()
 
 
@@ -753,15 +800,15 @@ def check_key_level_signals(
         nearest_support_name, nearest_support = support_levels[0]
         level_info["nearest_support"] = nearest_support
         level_info["nearest_support_name"] = nearest_support_name
-        level_info["support_distance_pct"] = abs(current_close - nearest_support) / current_close * 100
-    
+        level_info["support_distance_pct"] = _safe_pct(abs(current_close - nearest_support), current_close)
+
     nearest_resistance = None
     nearest_resistance_name = None
     if resistance_levels:
         nearest_resistance_name, nearest_resistance = resistance_levels[0]
         level_info["nearest_resistance"] = nearest_resistance
         level_info["nearest_resistance_name"] = nearest_resistance_name
-        level_info["resistance_distance_pct"] = abs(nearest_resistance - current_close) / current_close * 100
+        level_info["resistance_distance_pct"] = _safe_pct(abs(nearest_resistance - current_close), current_close)
     
     # =========================================================================
     # BOUNCE DETECTION (Reversal Signals)
@@ -769,8 +816,8 @@ def check_key_level_signals(
     
     # Support bounce: price dropped to support level and is now bouncing up
     if nearest_support is not None:
-        support_proximity = abs(current_low - nearest_support) / current_close
-        
+        support_proximity = _safe_div(abs(current_low - nearest_support), current_close)
+
         # Check if we touched/near support and closed higher (bounce)
         if support_proximity <= proximity_pct:
             # Touched support zone
@@ -780,14 +827,14 @@ def check_key_level_signals(
                 return "bounce_support_long", bounce_conf, level_info
             elif current_close < prev_close:
                 # Breaking down through support - bearish continuation
-                if (prev_close - current_close) / current_close > breakout_pct:
+                if _safe_div(prev_close - current_close, current_close) > breakout_pct:
                     level_info["level_interaction"] = f"breakout_support:{nearest_support_name}"
                     return "breakout_support_short", breakout_conf, level_info
-    
+
     # Resistance bounce: price rose to resistance level and is now rejecting down
     if nearest_resistance is not None:
-        resistance_proximity = abs(current_high - nearest_resistance) / current_close
-        
+        resistance_proximity = _safe_div(abs(current_high - nearest_resistance), current_close)
+
         # Check if we touched/near resistance and closed lower (rejection)
         if resistance_proximity <= proximity_pct:
             # Touched resistance zone
@@ -797,24 +844,24 @@ def check_key_level_signals(
                 return "bounce_resistance_short", bounce_conf, level_info
             elif current_close > prev_close:
                 # Breaking up through resistance - bullish continuation
-                if (current_close - prev_close) / current_close > breakout_pct:
+                if _safe_div(current_close - prev_close, current_close) > breakout_pct:
                     level_info["level_interaction"] = f"breakout_resistance:{nearest_resistance_name}"
                     return "breakout_resistance_long", breakout_conf, level_info
-    
+
     # =========================================================================
     # CAUTION SIGNALS (Reduce confidence when entering into levels)
     # =========================================================================
-    
+
     # Approaching resistance from below - caution for longs
     if nearest_resistance is not None:
-        resistance_distance = (nearest_resistance - current_close) / current_close
+        resistance_distance = _safe_div(nearest_resistance - current_close, current_close)
         if resistance_distance <= proximity_pct * 2 and current_close > prev_close:
             level_info["level_interaction"] = f"approaching_resistance:{nearest_resistance_name}"
             return "near_resistance_caution", -rejection_penalty, level_info
-    
+
     # Approaching support from above - caution for shorts
     if nearest_support is not None:
-        support_distance = (current_close - nearest_support) / current_close
+        support_distance = _safe_div(current_close - nearest_support, current_close)
         if support_distance <= proximity_pct * 2 and current_close < prev_close:
             level_info["level_interaction"] = f"approaching_support:{nearest_support_name}"
             return "near_support_caution", -rejection_penalty, level_info
@@ -1141,7 +1188,8 @@ def generate_signals(
             high = float(df["high"].iloc[-1])
             vwap_retest_long = bool(ema_bull_trend and (low <= vwap_curr) and (close > vwap_curr))
             vwap_retest_short = bool(ema_bear_trend and (high >= vwap_curr) and (close < vwap_curr))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"VWAP retest check failed: {e}")
             vwap_retest_long, vwap_retest_short = False, False
 
     # Trend breakout (new local high/low in direction of trend)
@@ -1155,7 +1203,8 @@ def generate_signals(
                 prev_low = float(prev_slice["low"].min())
                 trend_breakout_long = bool(ema_bull_trend and price_above_vwap and close > prev_high)
                 trend_breakout_short = bool(ema_bear_trend and price_below_vwap and close < prev_low)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Trend breakout check failed: {e}")
             trend_breakout_long, trend_breakout_short = False, False
 
     # Trend momentum (strong candle in direction of trend)
@@ -1166,7 +1215,8 @@ def generate_signals(
             move = close - prev_close
             trend_momentum_long = bool(ema_bull_trend and price_above_vwap and move >= float(atr) * mult)
             trend_momentum_short = bool(ema_bear_trend and price_below_vwap and (-move) >= float(atr) * mult)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Trend momentum check failed: {e}")
             trend_momentum_long, trend_momentum_short = False, False
     
     # 3. Volume confirmation (core - required)
@@ -1178,25 +1228,25 @@ def generate_signals(
     if len(df) >= sr_length:
         try:
             sr_signal, sr_confidence = check_sr_signals(df, config)
-        except Exception:
-            pass  # S&R is optional enhancement
-    
+        except Exception as e:
+            logger.debug(f"S&R signals check failed (optional): {e}")
+
     # 5. TBT Trendlines (extended - conditional on data availability)
     tbt_signal, tbt_confidence = None, 0.0
     tbt_period = config.get("tbt_period", 10)
     if len(df) >= tbt_period * 2:
         try:
             tbt_signal, tbt_confidence = check_tbt_signals(df, config)
-        except Exception:
-            pass  # TBT is optional enhancement
-    
+        except Exception as e:
+            logger.debug(f"TBT signals check failed (optional): {e}")
+
     # 6. Supply & Demand (extended - conditional, needs ~100 bars ideally)
     sd_signal, sd_confidence = None, 0.0
     if len(df) >= 20:
         try:
             sd_signal, sd_confidence = check_supply_demand_signals(df, config)
-        except Exception:
-            pass  # S&D is optional enhancement
+        except Exception as e:
+            logger.debug(f"Supply/Demand signals check failed (optional): {e}")
     
     # 7. SpacemanBTC Key Levels (extended - conditional)
     # These are CRITICAL for reversal/breakout detection
@@ -1367,34 +1417,34 @@ def generate_signals(
             # Check support levels (PDL, PWL, PML are major support)
             prev_day_low = key_levels.get("prev_day_low")
             prev_week_low = key_levels.get("prev_week_low")
-            
+
             # Big boost if bouncing off previous day low (PDL)
             if prev_day_low and close > prev_day_low:
-                distance_pct = (close - prev_day_low) / prev_day_low * 100
+                distance_pct = _safe_pct(close - prev_day_low, prev_day_low, default=100.0)
                 if distance_pct < 0.3:  # Very close to PDL
                     confidence += 0.10
                     active_indicators.append("PDL_BOUNCE")
-            
+
             # Big boost if bouncing off previous week low (PWL)
             if prev_week_low and close > prev_week_low:
-                distance_pct = (close - prev_week_low) / prev_week_low * 100
+                distance_pct = _safe_pct(close - prev_week_low, prev_week_low, default=100.0)
                 if distance_pct < 0.5:  # Close to PWL
                     confidence += 0.12
                     active_indicators.append("PWL_BOUNCE")
-            
+
             # Check resistance levels (PDH, PWH, PMH are major resistance)
             prev_day_high = key_levels.get("prev_day_high")
             prev_week_high = key_levels.get("prev_week_high")
-            
+
             # Reduce confidence if entering into nearby resistance
             if prev_day_high and close < prev_day_high:
-                distance_pct = (prev_day_high - close) / close * 100
+                distance_pct = _safe_pct(prev_day_high - close, close, default=100.0)
                 if distance_pct < 0.3:  # Very close to PDH
                     confidence -= 0.05
                     active_indicators.append("PDH_CAUTION")
-            
+
             if prev_week_high and close < prev_week_high:
-                distance_pct = (prev_week_high - close) / close * 100
+                distance_pct = _safe_pct(prev_week_high - close, close, default=100.0)
                 if distance_pct < 0.5:  # Close to PWH
                     confidence -= 0.07
                     active_indicators.append("PWH_CAUTION")
@@ -1408,10 +1458,11 @@ def generate_signals(
             take_profit = entry_price + (atr * tp_mult)
             
             # NaN guards: ensure valid SL/TP before calculating R:R
-            if pd.isna(stop_loss) or pd.isna(take_profit) or stop_loss >= entry_price:
+            risk_amount = entry_price - stop_loss
+            if pd.isna(stop_loss) or pd.isna(take_profit) or stop_loss >= entry_price or risk_amount <= 0:
                 pass  # Skip invalid signal
             else:
-                risk_reward = (take_profit - entry_price) / (entry_price - stop_loss)
+                risk_reward = _safe_div(take_profit - entry_price, risk_amount, default=0.0)
                 
                 if risk_reward >= config["min_risk_reward"] and not pd.isna(risk_reward):
                     # Use active_indicators for comprehensive reason
@@ -1518,34 +1569,34 @@ def generate_signals(
             # Check resistance levels (PDH, PWH, PMH are major resistance)
             prev_day_high = key_levels.get("prev_day_high")
             prev_week_high = key_levels.get("prev_week_high")
-            
+
             # Big boost if bouncing off previous day high (PDH)
             if prev_day_high and close < prev_day_high:
-                distance_pct = (prev_day_high - close) / prev_day_high * 100
+                distance_pct = _safe_pct(prev_day_high - close, prev_day_high, default=100.0)
                 if distance_pct < 0.3:  # Very close to PDH
                     confidence += 0.10
                     active_indicators.append("PDH_BOUNCE")
-            
+
             # Big boost if bouncing off previous week high (PWH)
             if prev_week_high and close < prev_week_high:
-                distance_pct = (prev_week_high - close) / prev_week_high * 100
+                distance_pct = _safe_pct(prev_week_high - close, prev_week_high, default=100.0)
                 if distance_pct < 0.5:  # Close to PWH
                     confidence += 0.12
                     active_indicators.append("PWH_BOUNCE")
-            
+
             # Check support levels (PDL, PWL are major support)
             prev_day_low = key_levels.get("prev_day_low")
             prev_week_low = key_levels.get("prev_week_low")
-            
+
             # Reduce confidence if entering into nearby support
             if prev_day_low and close > prev_day_low:
-                distance_pct = (close - prev_day_low) / close * 100
+                distance_pct = _safe_pct(close - prev_day_low, close, default=100.0)
                 if distance_pct < 0.3:  # Very close to PDL
                     confidence -= 0.05
                     active_indicators.append("PDL_CAUTION")
-            
+
             if prev_week_low and close > prev_week_low:
-                distance_pct = (close - prev_week_low) / close * 100
+                distance_pct = _safe_pct(close - prev_week_low, close, default=100.0)
                 if distance_pct < 0.5:  # Close to PWL
                     confidence -= 0.07
                     active_indicators.append("PWL_CAUTION")
@@ -1559,10 +1610,11 @@ def generate_signals(
             take_profit = entry_price - (atr * tp_mult)
             
             # NaN guards: ensure valid SL/TP before calculating R:R
-            if pd.isna(stop_loss) or pd.isna(take_profit) or stop_loss <= entry_price:
+            risk_amount = stop_loss - entry_price
+            if pd.isna(stop_loss) or pd.isna(take_profit) or stop_loss <= entry_price or risk_amount <= 0:
                 pass  # Skip invalid signal
             else:
-                risk_reward = (entry_price - take_profit) / (stop_loss - entry_price)
+                risk_reward = _safe_div(entry_price - take_profit, risk_amount, default=0.0)
                 
                 if risk_reward >= config["min_risk_reward"] and not pd.isna(risk_reward):
                     # Use active_indicators for comprehensive reason

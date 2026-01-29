@@ -276,19 +276,19 @@ body {
 }
 
 .marker-icon.entry-long {
-  color: var(--accent-green);
+  color: #b4b4b4;
 }
 
 .marker-icon.entry-short {
-  color: var(--accent-red);
+  color: #b4b4b4;
 }
 
 .marker-icon.exit-win {
-  color: var(--accent-green);
+  color: #64c8b4;
 }
 
 .marker-icon.exit-loss {
-  color: var(--accent-red);
+  color: #dc8c64;
 }
 
 /* Chart container */
