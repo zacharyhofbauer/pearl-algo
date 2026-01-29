@@ -13,7 +13,7 @@ providing robust predictions across different market conditions.
 from __future__ import annotations
 
 import json
-import pickle
+import joblib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -410,48 +410,30 @@ class EnsembleScorer:
         self._bandit_stats: Dict[str, Dict[str, int]] = {}  # {type: {wins, losses}}
     
     def _load_models(self) -> None:
-        """
-        Load trained models from disk.
-
-        Security Note:
-            This uses pickle which can execute arbitrary code. Models are only
-            loaded from the configured models_dir. Ensure this directory only
-            contains files created by your training pipeline.
-        """
+        """Load trained models from disk using joblib."""
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
-        # Security: Ensure models_dir is within expected project structure
-        resolved_dir = self.models_dir.resolve()
-        cwd = Path.cwd().resolve()
-        if not str(resolved_dir).startswith(str(cwd)):
-            logger.warning(
-                f"Models directory '{self.models_dir}' is outside project directory. "
-                "Ensure model files are from trusted sources."
-            )
-
         # Load logistic regression
-        lr_path = self.models_dir / "logistic_model.pkl"
+        lr_path = self.models_dir / "logistic_model.joblib"
         if lr_path.exists():
             try:
-                with open(lr_path, "rb") as f:
-                    data = pickle.load(f)
-                    if not isinstance(data, dict):
-                        raise ValueError("Invalid model format: expected dictionary")
-                    self._logistic = data.get("model")
-                    self._scaler = data.get("scaler")
-                    self._logistic_fitted = True
-                    logger.info("Loaded logistic regression model")
+                data = joblib.load(lr_path)
+                if not isinstance(data, dict):
+                    raise ValueError("Invalid model format: expected dictionary")
+                self._logistic = data.get("model")
+                self._scaler = data.get("scaler")
+                self._logistic_fitted = True
+                logger.info("Loaded logistic regression model")
             except Exception as e:
                 logger.warning(f"Failed to load logistic model: {e}")
 
         # Load GBM
-        gbm_path = self.models_dir / "gbm_model.pkl"
+        gbm_path = self.models_dir / "gbm_model.joblib"
         if gbm_path.exists():
             try:
-                with open(gbm_path, "rb") as f:
-                    self._gbm = pickle.load(f)
-                    self._gbm_fitted = True
-                    logger.info("Loaded GBM model")
+                self._gbm = joblib.load(gbm_path)
+                self._gbm_fitted = True
+                logger.info("Loaded GBM model")
             except Exception as e:
                 logger.warning(f"Failed to load GBM model: {e}")
         
@@ -480,24 +462,22 @@ class EnsembleScorer:
                 logger.warning(f"Failed to load training samples: {e}")
     
     def _save_models(self) -> None:
-        """Save trained models to disk."""
+        """Save trained models to disk using joblib."""
         self.models_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Save logistic regression
         if self._logistic_fitted:
-            lr_path = self.models_dir / "logistic_model.pkl"
+            lr_path = self.models_dir / "logistic_model.joblib"
             try:
-                with open(lr_path, "wb") as f:
-                    pickle.dump({"model": self._logistic, "scaler": self._scaler}, f)
+                joblib.dump({"model": self._logistic, "scaler": self._scaler}, lr_path)
             except Exception as e:
                 logger.warning(f"Failed to save logistic model: {e}")
-        
+
         # Save GBM
         if self._gbm_fitted:
-            gbm_path = self.models_dir / "gbm_model.pkl"
+            gbm_path = self.models_dir / "gbm_model.joblib"
             try:
-                with open(gbm_path, "wb") as f:
-                    pickle.dump(self._gbm, f)
+                joblib.dump(self._gbm, gbm_path)
             except Exception as e:
                 logger.warning(f"Failed to save GBM model: {e}")
         

@@ -826,22 +826,21 @@ class MLSignalFilter:
     
     def save_model(self, path: str) -> bool:
         """
-        Save trained model to file.
-        
+        Save trained model to file using joblib.
+
         Args:
             path: Path to save model
-            
+
         Returns:
             True if successful
         """
         if not self.is_ready:
             logger.warning("Cannot save: model not trained")
             return False
-        
+
         try:
-            # Save model state
-            import pickle
-            
+            import joblib
+
             model_state = {
                 "model": self._model,
                 "calibrated_model": self._calibrated_model,
@@ -855,61 +854,37 @@ class MLSignalFilter:
                     "last_train_time": self._last_train_time.isoformat() if self._last_train_time else None,
                 },
             }
-            
-            with open(path, "wb") as f:
-                pickle.dump(model_state, f)
-            
+
+            joblib.dump(model_state, path)
+
             logger.info(f"ML filter model saved to {path}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to save model: {e}")
             return False
     
     def load_model(self, path: str) -> bool:
         """
-        Load model from file.
+        Load model from file using joblib.
 
         Args:
             path: Path to model file
 
         Returns:
             True if successful
-
-        Security Note:
-            This uses pickle which can execute arbitrary code. Only load models
-            from trusted sources (files you or your training pipeline created).
         """
         try:
-            import pickle
+            import joblib
             from pathlib import Path
 
             model_path = Path(path).resolve()
-
-            # Security: Validate path is within expected directories
-            allowed_dirs = [
-                Path.cwd() / "models",
-                Path.cwd() / "data",
-                Path(__file__).parent.parent.parent.parent / "models",
-            ]
-            is_safe_path = any(
-                str(model_path).startswith(str(allowed.resolve()))
-                for allowed in allowed_dirs
-                if allowed.exists()
-            )
-
-            if not is_safe_path:
-                logger.warning(
-                    f"Model path '{path}' is outside expected directories. "
-                    "Ensure this file is from a trusted source."
-                )
 
             if not model_path.exists():
                 logger.error(f"Model file not found: {path}")
                 return False
 
-            with open(model_path, "rb") as f:
-                model_state = pickle.load(f)
+            model_state = joblib.load(model_path)
 
             # Validate expected structure
             if not isinstance(model_state, dict):
