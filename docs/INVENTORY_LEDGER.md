@@ -78,7 +78,7 @@ Purpose: File-by-file keep/rewrite/delete decisions grounded in the current tree
 | `docs/ATS_ROLLOUT_GUIDE.md` | KEEP | ATS rollout |
 | `docs/MOCK_DATA_WARNING.md` | KEEP | Mock data warning |
 | `docs/RESTART_GUIDE.md` | KEEP | Restart guide |
-| `docs/AI_PATCH_GUIDE.md` | KEEP | AI patch guide |
+| `docs/AI_PATCH_GUIDE.md` | REWRITE | AI features moved to CLI (deprecated) |
 | `docs/CODESPACES.md` | KEEP | Codespaces guide |
 | `docs/INVENTORY_LEDGER.md` | REWRITE | File-level ledger |
 | `docs/coverage-badge.svg` | KEEP | Coverage badge |

@@ -265,7 +265,7 @@ The MNQ Trading Agent is designed to:
 
 ### 6. Knowledge Module (`src/pearlalgo/knowledge/`)
 
-**Purpose**: RAG (Retrieval-Augmented Generation) system for knowledge indexing and retrieval, used by the `/ai_patch` Telegram command.
+**Purpose**: RAG (Retrieval-Augmented Generation) system for knowledge indexing and retrieval, used by CLI-based AI assistance.
 
 **Components**:
 - **Indexer** (`indexer.py`): Builds and maintains the knowledge index
@@ -282,7 +282,7 @@ The MNQ Trading Agent is designed to:
 - Semantic search via FAISS
 - Support for OpenAI embeddings
 - Configurable chunk sizes and overlap
-- Used by `/ai_patch` command for context-aware code suggestions
+- Used by CLI/terminal AI assistance for context-aware suggestions
 
 **Configuration** (in `config.yaml`):
 ```yaml
@@ -364,7 +364,7 @@ trading_circuit_breaker:
 
 **OpenAI Client** (`utils/openai_client.py`):
 - OpenAI API integration wrapper
-- Used by `/ai_patch` command for code generation
+- Used by CLI/terminal AI assistance
 - Supports streaming responses
 
 **Absolute Mode** (`utils/absolute_mode.py`):

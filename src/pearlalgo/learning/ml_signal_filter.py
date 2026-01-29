@@ -22,28 +22,14 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from pearlalgo.utils.logger import logger
-
-# Try to import ML libraries
-try:
-    import xgboost as xgb
-    XGBOOST_AVAILABLE = True
-except ImportError:
-    XGBOOST_AVAILABLE = False
-    xgb = None  # type: ignore
-
-try:
-    import lightgbm as lgb
-    LIGHTGBM_AVAILABLE = True
-except ImportError:
-    LIGHTGBM_AVAILABLE = False
-    lgb = None  # type: ignore
-
-try:
-    from sklearn.calibration import CalibratedClassifierCV
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-    CalibratedClassifierCV = None  # type: ignore
+from pearlalgo.utils.optional_imports import (
+    XGBOOST_AVAILABLE,
+    LIGHTGBM_AVAILABLE,
+    SKLEARN_AVAILABLE,
+    xgb,
+    lgb,
+    CalibratedClassifierCV,
+)
 
 # Import feature engineer if available
 try:

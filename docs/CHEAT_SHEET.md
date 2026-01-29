@@ -58,8 +58,8 @@
 
 2. **From Telegram, use the menu:**
    - Send `/start` to access the main control panel
-   - Tap buttons for: Start/Stop Agent, Gateway Status, System Status, Signals & Trades, Performance, Tools, AI Features
-   - **UI policy (don’t drift):** keep `/start` as the only slash command; keep ops behind buttons. If Telegram shows extra commands, run `python3 scripts/telegram/set_bot_commands.py` and restart the handler.
+   - Tap buttons for: Activity, System, Health, Settings
+   - **UI policy (don't drift):** keep `/start` as the only slash command; keep ops behind buttons. If Telegram shows extra commands, run `python3 scripts/telegram/set_bot_commands.py` and restart the handler.
    - **Status semantics:** Agent/Gateway dots = services; Health dot = data/connection (grey when agent is off). Footer shows `Agent: <uptime> | Gateway: OK/DOWN | Data: <age>`.
 
 ### Option B: From Terminal (Traditional)
@@ -97,15 +97,16 @@
 
 ## 3. Core Commands You Actually Use
 
-### From Telegram (AI Insights) ⭐
+### From Telegram (Notifications & Dashboard)
 
-- **AI Strategy Report:**
+- **Dashboard & Menu:**
   ```
-  /analyze           # Performance summary + strategy recommendation
   /start             # Open dashboard + menu buttons
   ```
 
-### From Terminal (Traditional)
+> **Note:** Telegram is for notifications and dashboard only. For AI assistance, use CLI/terminal with `/pearl`.
+
+### From Terminal (AI + Operations)
 
 - **Service lifecycle**
   ```bash
@@ -147,34 +148,15 @@
   - Real-time monitoring and status
   - Performance analytics and reporting
 
-### Backtesting (Telegram) ✅
+### Menu Handler Features
 
-- **Command**:
-  - `/backtest` → pick duration (1–6 months)
-- **Primary timeframe**: **1m** (default decision stream; configurable in `config.yaml`)
-- **MTF context**: 5m/15m used for trend alignment and dashboard charts
-- **Caching (important)**:
-  - Historical data is cached to: `data/historical/`
-  - Files look like: `MNQ_1m_2m.parquet`, `MNQ_1m_6m.parquet`
-  - The bot will **reuse cache first** and only hit IBKR if missing
-  - Smaller windows can be **derived from larger caches** (ex: 2m sliced from 6m)
-
-- **Offline quick-run** (fast sanity check):
-  ```bash
-  ls -1 data/historical/*.parquet
-  # Backtesting scripts removed - using pearl_bot_auto only
-  ```
-
-- **Requires command handler running:**
-  - **Commands (minimal by design):**
-    - `/start` – Main dashboard + button menus
-  - **Everything else is via buttons (recommended on mobile):**
-    - **Signals & Trades** → recent signals, active trades, details, close-all
-    - **Performance** → daily/weekly summaries and metrics
-    - **Health** → system status, gateway status, connection, data quality
-    - **System** → start/stop/restart agent, emergency stop
-    - **Markets** → switch NQ/ES/GC context
-    - **Bots** → bot selection/backtests/reports (if enabled)
+- **Commands (minimal by design):**
+  - `/start` – Main dashboard + button menus (the ONLY slash command)
+- **Everything else is via buttons (recommended on mobile):**
+  - **📊 Activity** → trades, signals, P&L, history
+  - **🎛️ System** → start/stop/restart agent, gateway controls
+  - **🛡️ Health** → connection status, data quality, diagnostics
+  - **⚙️ Settings** → markets, alert preferences, bots
 
 ---
 
@@ -339,42 +321,24 @@ The chart is accessible at **https://pearlalgo.io** via Cloudflare Tunnel.
 
 ---
 
-## 9. AI Patch Setup (Optional)
+## 9. AI Assistant (CLI/Terminal)
 
-Generate code patches from Telegram using OpenAI. Useful for quick fixes when mobile.
+Pearl AI assistant is available via CLI/terminal only. Telegram is for notifications and dashboard.
 
-> **Full guide:** See [AI_PATCH_GUIDE.md](AI_PATCH_GUIDE.md) for detailed documentation.
-
-**One-time setup:**
+**Usage:**
 
 ```bash
-# Install LLM extra
-pip install -e ".[llm]"
+# In terminal, use /pearl to chat with Pearl AI
+/pearl
 
-# Add to .env (get key from https://platform.openai.com/)
-# OPENAI_API_KEY=sk-...
-
-# Restart command handler
-./scripts/telegram/restart_command_handler.sh --background
+# Examples:
+# - "how am I doing today?"
+# - "what's my P&L?"
+# - "restart the agent"
+# - "show my trades"
 ```
 
-**Usage from Telegram (recommended):**
-
-- `/start` → **⚙️ Settings** → **🧩 AI Patch Wizard**
-- Pick a file (or “Other file (type path)”), then send the instruction text
-
-**Apply the patch:**
-
-```bash
-# Save the diff text from Telegram, then apply it locally.
-# If this repo is in git:
-git apply patch.diff
-#
-# If not using git:
-patch -p1 < patch.diff
-```
-
-**Blocked paths** (for security): `data/`, `logs/`, `.env`, `ibkr/`, `.venv/`
+> **Note:** AI features were removed from Telegram to keep the mobile interface clean and focused on notifications.
 
 ---
 

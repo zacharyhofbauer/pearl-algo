@@ -24,23 +24,14 @@ import numpy as np
 from pearlalgo.learning.feature_engineer import FeatureVector
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.model_integrity import save_model_hash, verify_model_hash
+from pearlalgo.utils.optional_imports import (
+    SKLEARN_AVAILABLE,
+    LIGHTGBM_AVAILABLE,
+    LogisticRegression,
+    StandardScaler,
+    lgb,
+)
 from pearlalgo.utils.paths import ensure_state_dir
-
-# Optional imports for ML libraries
-try:
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.preprocessing import StandardScaler
-    SKLEARN_AVAILABLE = True
-except ImportError:
-    SKLEARN_AVAILABLE = False
-    logger.warning("scikit-learn not available - ensemble will use simple models only")
-
-try:
-    import lightgbm as lgb
-    LIGHTGBM_AVAILABLE = True
-except ImportError:
-    LIGHTGBM_AVAILABLE = False
-    logger.warning("LightGBM not available - ensemble will not use gradient boosting")
 
 
 @dataclass

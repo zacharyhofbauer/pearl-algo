@@ -49,54 +49,18 @@ See `docs/LIVE_CHART.md` for deployment/tunnel options and CORS settings.
 
 The command handler intentionally keeps slash commands minimal:
 
-- `/start`: Show the main dashboard (menu)
-- `/pearl`: Talk to Pearl (assistant)
+- `/start`: Show the main dashboard (menu) - **the only command**
 
 Everything else is accessed via the button menus (safer and easier to operate on mobile).
 
-## Pearl - Your Assistant
-
-Pearl is a conversational AI assistant that can help you manage your trading system naturally.
-
-### How to use Pearl
-
-1. **Type `/pearl`** to enter Pearl chat mode
-2. **Talk naturally** - ask questions, request actions, or just chat
-3. **Type `/start`** to return to the dashboard
-
-### What Pearl can do
-
-- **Check status**: "how am I doing today?", "what's my P&L?"
-- **Execute actions**: "restart the agent", "show my trades"
-- **Diagnose issues**: "what's wrong?", "why is the gateway down?"
-- **Answer questions**: "when does the session open?", "how many signals today?"
-
-### Pearl Suggestions (Proactive Help)
-
-Pearl can proactively suggest helpful actions on your dashboard:
-
-- **Problem alerts**: "Gateway disconnected - want me to reconnect?"
-- **Performance milestones**: "You're up $300 today - want to see what's working?"
-- **Morning greetings**: "Good morning! Agent ran smoothly overnight."
-
-**All suggestions are dismissible** - tap `[Dismiss]` and they disappear. The same suggestion won't repeat for 30+ minutes.
-
-### Disabling Pearl Suggestions
-
-If you prefer the old menu-only style:
-
-1. Go to **Settings**
-2. Find **Pearl Suggestions**
-3. Toggle OFF
-
-Or tell Pearl: "turn off suggestions"
+> **Note:** Pearl AI chat was removed from Telegram. For AI assistance, use CLI/terminal with `/pearl`.
 
 ## UI policy (do not drift)
 
-- **Two commands only**: `/start` (dashboard) and `/pearl` (assistant).
+- **One command only**: `/start` (dashboard).
 - **Menus for quick actions**: keep operations behind inline buttons (mobile-first + safer).
-- **Pearl for everything else**: conversational commands, diagnostics, help.
-- **BotFather command list**: should show `/start` and `/pearl`. If other commands appear, re-run `python3 scripts/telegram/set_bot_commands.py` and restart the handler.
+- **AI via CLI**: For conversational commands, diagnostics, and help - use terminal with `/pearl`.
+- **BotFather command list**: should show only `/start`. If other commands appear, re-run `python3 scripts/telegram/set_bot_commands.py` and restart the handler.
 
 ## Status semantics (how to read the dashboard)
 
@@ -116,13 +80,12 @@ Tip: Use **🛡️ Health → 🩺 Doctor** for a one-screen diagnostic rollup (
 
 ## Menu map (operator-facing)
 
-- **Signals & Trades**: recent signals, active trades, signal details
-- **Performance**: rollups, exports, diagnostics
-- **Health**: agent + gateway connectivity, state freshness, data quality
-- **System**: start/stop/restart agent, gateway controls, logs (read-only)
-- **Bots**: backtests and report browsing
-- **Markets**: select NQ/ES/GC (one UI controlling one market at a time)
-- **Settings**: alert/UI preferences and the AI Patch Wizard (if enabled)
+The main dashboard has 4 sections:
+
+- **📊 Activity**: trades, signals, P&L, history, performance metrics
+- **🎛️ System**: start/stop/restart agent, gateway controls
+- **🛡️ Health**: connectivity, data quality, diagnostics
+- **⚙️ Settings**: markets, alert preferences, bots
 
 ## Multi-market usage
 
@@ -133,7 +96,6 @@ The command handler can control multiple market agents (NQ/ES/GC) from one UI:
 ## Safety & authorization
 
 - The handler **only responds to the configured chat ID** (`TELEGRAM_CHAT_ID`). Other chats are blocked.
-- AI patching blocks sensitive paths (`data/`, `logs/`, `.env`, `.venv/`, `.git/`, etc).
 
 ## Troubleshooting
 
@@ -143,8 +105,7 @@ The command handler can control multiple market agents (NQ/ES/GC) from one UI:
 ./scripts/telegram/restart_command_handler.sh --background
 ```
 
-- If you expect backtest recommendations, generate the selection export:
+## Architecture Summary
 
-```bash
-python3 scripts/backtesting/strategy_selection.py
-```
+- **Telegram** → Notifications and dashboard (one-way alerts + interactive menu)
+- **CLI/Terminal** → AI assistance with `/pearl` command

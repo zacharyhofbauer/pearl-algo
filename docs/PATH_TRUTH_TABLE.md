@@ -166,7 +166,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `watch_repo.py` – Watch repository for changes and re-index
 - **Configuration**: `config.yaml` → `knowledge.*`
 - **Docs**:
-  - `docs/AI_PATCH_GUIDE.md` – AI patch feature documentation
+  - `docs/AI_PATCH_GUIDE.md` – AI patch feature documentation *(deprecated - AI features moved to CLI)*
 
 ## Utilities / Cross‑cutting Concerns
 

@@ -150,10 +150,7 @@ class MarketAgentService:
             "timeframe": self.timeframe,
         }
         self.data_fetcher = MarketAgentDataFetcher(data_provider, config=nq_config_dict)
-        
-        # TradeManager removed (was part of nq_intraday)
-        self.trade_manager = None
-        
+
         self.state_manager = MarketAgentStateManager(state_dir=state_dir)
         self.performance_tracker = PerformanceTracker(
             state_dir=state_dir,
@@ -1242,7 +1239,6 @@ class MarketAgentService:
                             except Exception:
                                 pass  # Non-fatal
                         
-                        # TradeManager removed (was part of nq_intraday)
                         # Get buffer data for chart generation
                         buffer_data = market_data.get("df", pd.DataFrame())
                         try:
@@ -1267,8 +1263,6 @@ class MarketAgentService:
                 else:
                     logger.debug(f"No signals generated in cycle {self.cycle_count}")
 
-                # TradeManager removed: trailing stop management handled via virtual exits.
-                
                 # Virtual PnL lifecycle: exit signals when TP/SL is touched (no Telegram spam).
                 # This grades signal quality without auto-trading.
                 try:
@@ -1288,10 +1282,6 @@ class MarketAgentService:
                 signal_diagnostics = None
                 signal_diagnostics_raw = None
 
-                # Signal diagnostics removed with pearl_bot_auto (simpler signal generation)
-                signal_diagnostics = None
-                signal_diagnostics_raw = None
-                
                 # Persist to instance variables for _save_state() (surfaced in /status)
                 self._last_quiet_reason = quiet_reason
                 self._last_signal_diagnostics = signal_diagnostics
@@ -1669,8 +1659,6 @@ class MarketAgentService:
                     entry_tracked = True
             except Exception as e:
                 logger.debug(f"Could not track virtual entry for {signal_id}: {e}")
-
-            # TradeManager removed (was part of nq_intraday) - virtual broker handles trades
 
             # ==========================================================================
             # BANDIT POLICY: Evaluate signal type and decide whether to execute
@@ -2783,10 +2771,6 @@ class MarketAgentService:
         # Fallback: return whatever exists on disk (may be stale) for resiliency.
         return export_path if export_path.exists() else None
 
-    async def _check_monitor_export(self, market_data: Optional[Dict] = None) -> None:
-        """Deprecated: monitor export removed (mobile-first charts only)."""
-        return
-
     async def _send_dashboard(
         self,
         market_data: Optional[Dict] = None,
@@ -3386,20 +3370,6 @@ class MarketAgentService:
         except Exception as e:
             logger.debug(f"Could not determine quiet reason: {e}")
             return "Unknown"
-
-    async def _check_status_update(self) -> None:
-        """Send periodic status updates to Telegram (legacy, now uses dashboard)."""
-        # Kept for backward compatibility - now handled by _check_dashboard
-        pass
-
-    async def _send_status_update(self) -> None:
-        """Send status update to Telegram (legacy, now uses dashboard)."""
-        try:
-            # Use enhanced status with performance metrics
-            status = self.get_status()
-            await self.notification_queue.enqueue_status(status, priority=Priority.LOW)
-        except Exception as e:
-            logger.error(f"Error queuing status update: {e}", exc_info=True)
 
     def pause(self) -> None:
         """Pause the service."""
@@ -4931,7 +4901,6 @@ class MarketAgentService:
         except Exception:
             state["strategy_session_open"] = None
 
-        # Regime detection removed with nq_intraday
         state["regime"] = None
         state["regime_timestamp"] = None
 

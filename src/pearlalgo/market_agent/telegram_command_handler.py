@@ -38,6 +38,11 @@ from pearlalgo.utils.telegram_alerts import (
     format_time_ago,
     safe_label,
 )
+from pearlalgo.market_agent.telegram_utils import (
+    PEARL_EMOJI_ID,
+    escape_markdown_v2,
+    convert_to_markdown_v2_with_pearl,
+)
 from pearlalgo.utils.telegram_ui_contract import (
     resolve_callback,
     parse_callback,
@@ -131,75 +136,6 @@ class TelegramCommandHandler:
         self.service_controller = ServiceController()
         self._register_handlers()
 
-    # Custom PEARL emoji ID (created via @PEARLalgobot sticker pack)
-    PEARL_EMOJI_ID = "5177134388684523561"
-
-    @classmethod
-    def _convert_to_markdown_v2_with_pearl(cls, text: str) -> str:
-        """Convert Markdown text to MarkdownV2 with custom PEARL emoji header."""
-        import re
-        
-        # Custom PEARL emoji header
-        pearl_header = f"![🐚](tg://emoji?id={cls.PEARL_EMOJI_ID}) *PEARL*"
-        
-        # Replace the shell emoji PEARL header with custom emoji version
-        text = re.sub(r'🐚 \*PEARL\*', pearl_header, text)
-        
-        # Escape special characters for MarkdownV2, preserving * and ` formatting
-        escape_chars = r'_[]()~>#+-=|{}.!'
-        
-        result = []
-        i = 0
-        while i < len(text):
-            char = text[i]
-            
-            # Skip already-escaped chars
-            if char == '\\' and i + 1 < len(text):
-                result.append(char)
-                result.append(text[i + 1])
-                i += 2
-                continue
-            
-            # Don't escape inside the emoji syntax ![...](tg://emoji?id=...)
-            if text[i:i+2] == '![':
-                end = text.find(')', i)
-                if end != -1:
-                    result.append(text[i:end+1])
-                    i = end + 1
-                    continue
-            
-            # Don't escape inside markdown links [text](url)
-            if char == '[' and text[i:i+2] != '![':
-                # Find matching ] and then (url)
-                bracket_end = text.find(']', i)
-                if bracket_end != -1 and bracket_end + 1 < len(text) and text[bracket_end + 1] == '(':
-                    paren_end = text.find(')', bracket_end + 1)
-                    if paren_end != -1:
-                        result.append(text[i:paren_end+1])
-                        i = paren_end + 1
-                        continue
-            
-            # Escape special chars
-            if char in escape_chars:
-                result.append(f"\\{char}")
-            else:
-                result.append(char)
-            i += 1
-        
-        return "".join(result)
-
-    @staticmethod
-    def _escape_markdown_v2(text: str) -> str:
-        """Escape special characters for MarkdownV2."""
-        escape_chars = r'_*[]()~`>#+-=|{}.!'
-        result = ""
-        for char in text:
-            if char in escape_chars:
-                result += f"\\{char}"
-            else:
-                result += char
-        return result
-
     def _state_dir_path_for_market(self, market: str) -> Path:
         """Absolute state dir path for a given market (does not create it)."""
         market_upper = str(market or "NQ").strip().upper()
@@ -234,11 +170,11 @@ class TelegramCommandHandler:
 
     async def _post_init(self, application: Application) -> None:
         """Runs once after the Telegram application initializes."""
-        # Keep the slash-command surface minimal: /start is the dashboard/menu, /pearl is Pearl.
+        # Minimal command surface: /start is the only command.
+        # Pearl AI chat removed from Telegram - use CLI/terminal instead.
         try:
             await application.bot.set_my_commands([
                 BotCommand("start", "Show main dashboard"),
-                BotCommand("pearl", "Talk to Pearl (assistant)"),
             ])
         except Exception as e:
             logger.debug(f"Could not set bot commands: {e}")
@@ -256,9 +192,9 @@ class TelegramCommandHandler:
             logger.info("Command handler ready - user can use /start for dashboard")
 
     def _register_handlers(self) -> None:
-        # Minimal command surface: /start is the menu, /pearl is Pearl assistant.
+        # Minimal command surface: /start is the only command.
+        # Pearl AI chat removed from Telegram - use CLI/terminal instead.
         self.application.add_handler(CommandHandler("start", self.handle_menu))
-        self.application.add_handler(CommandHandler("pearl", self.handle_pearl_command))
 
         # Optional aliases (kept for backwards-compatibility; not advertised).
         self.application.add_handler(CommandHandler("menu", self.handle_menu))
@@ -304,7 +240,7 @@ class TelegramCommandHandler:
         │  📊 Activity  │  Trades, signals, P&L, history         │
         │  🎛️ System    │  Agent/Gateway start/stop, config      │
         │  🛡️ Health    │  Connection, data quality, diagnostics │
-        │  ⚙️ Settings  │  Preferences, markets, AI tools        │
+        │  ⚙️ Settings  │  Preferences, markets, bots             │
         └─────────────────────────────────────────────────────────┘
         
         If pearl_suggestion is provided, it will be sent as a separate message.
@@ -1237,8 +1173,8 @@ class TelegramCommandHandler:
                 text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
                 caption_md = sanitize_telegram_markdown(caption_text)
                 text_md = sanitize_telegram_markdown(text_only)
-                caption_md_v2 = self._convert_to_markdown_v2_with_pearl(caption_md)
-                text_md_v2 = self._convert_to_markdown_v2_with_pearl(text_md)
+                caption_md_v2 = convert_to_markdown_v2_with_pearl(caption_md)
+                text_md_v2 = convert_to_markdown_v2_with_pearl(text_md)
                 
                 if chart_path and chart_path.exists():
                     try:
@@ -1437,7 +1373,7 @@ class TelegramCommandHandler:
                     try:
                         message_text = await self._build_status_dashboard_message(state)
                         message_text = self._with_support_footer(message_text, state=state, max_chars=4096)
-                        message_v2 = self._convert_to_markdown_v2_with_pearl(message_text)
+                        message_v2 = convert_to_markdown_v2_with_pearl(message_text)
                         await message.chat.send_message(
                             text=message_v2,
                             reply_markup=reply_markup,
@@ -1495,8 +1431,8 @@ class TelegramCommandHandler:
             text_md = sanitize_telegram_markdown(text_only)
             
             # Convert to MarkdownV2 with custom PEARL emoji
-            caption_md_v2 = self._convert_to_markdown_v2_with_pearl(caption_md)
-            text_md_v2 = self._convert_to_markdown_v2_with_pearl(text_md)
+            caption_md_v2 = convert_to_markdown_v2_with_pearl(caption_md)
+            text_md_v2 = convert_to_markdown_v2_with_pearl(text_md)
             
             if chart_path and chart_path.exists():
                 # Send photo with caption
@@ -1559,8 +1495,8 @@ class TelegramCommandHandler:
         # Send Pearl suggestion as separate notification if present
         if pearl_suggestion:
             try:
-                escaped_msg = self._escape_markdown_v2(pearl_suggestion.message)
-                pearl_msg = f"![🐚](tg://emoji?id={self.PEARL_EMOJI_ID}) *PEARL*\nSuggestion\n\n💬 {escaped_msg}"
+                escaped_msg = escape_markdown_v2(pearl_suggestion.message)
+                pearl_msg = f"![🐚](tg://emoji?id={PEARL_EMOJI_ID}) *PEARL*\nSuggestion\n\n💬 {escaped_msg}"
                 pearl_keyboard = InlineKeyboardMarkup(
                     self._build_pearl_suggestion_keyboard_row(pearl_suggestion)
                 )
@@ -1599,8 +1535,8 @@ class TelegramCommandHandler:
             text_md = sanitize_telegram_markdown(text_only)
             
             # Convert to MarkdownV2 with custom PEARL emoji
-            caption_md_v2 = self._convert_to_markdown_v2_with_pearl(caption_md)
-            text_md_v2 = self._convert_to_markdown_v2_with_pearl(text_md)
+            caption_md_v2 = convert_to_markdown_v2_with_pearl(caption_md)
+            text_md_v2 = convert_to_markdown_v2_with_pearl(text_md)
             
             if chart_path and chart_path.exists():
                 try:
@@ -1647,8 +1583,8 @@ class TelegramCommandHandler:
             # Send Pearl suggestion as separate notification if present
             if pearl_suggestion:
                 try:
-                    escaped_msg = self._escape_markdown_v2(pearl_suggestion.message)
-                    pearl_msg = f"![🐚](tg://emoji?id={self.PEARL_EMOJI_ID}) *PEARL*\nSuggestion\n\n💬 {escaped_msg}"
+                    escaped_msg = escape_markdown_v2(pearl_suggestion.message)
+                    pearl_msg = f"![🐚](tg://emoji?id={PEARL_EMOJI_ID}) *PEARL*\nSuggestion\n\n💬 {escaped_msg}"
                     pearl_keyboard = InlineKeyboardMarkup(
                         self._build_pearl_suggestion_keyboard_row(pearl_suggestion)
                     )
@@ -3860,7 +3796,7 @@ class TelegramCommandHandler:
         message_text = await self._build_status_dashboard_message(state)
         message_text = self._with_support_footer(message_text, state=state, max_chars=4096)
         message_md = sanitize_telegram_markdown(message_text)
-        message_md_v2 = self._convert_to_markdown_v2_with_pearl(message_md)
+        message_md_v2 = convert_to_markdown_v2_with_pearl(message_md)
         try:
             await message_obj.reply_text(message_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
         except Exception:
@@ -4718,7 +4654,7 @@ class TelegramCommandHandler:
         try:
             message_text = await self._build_status_dashboard_message(state)
             message_md = sanitize_telegram_markdown(message_text)
-            message_md_v2 = self._convert_to_markdown_v2_with_pearl(message_md)
+            message_md_v2 = convert_to_markdown_v2_with_pearl(message_md)
             try:
                 await query.edit_message_text(message_md_v2, reply_markup=reply_markup, parse_mode="MarkdownV2")
             except Exception:
