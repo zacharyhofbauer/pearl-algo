@@ -69,7 +69,8 @@ trap cleanup SIGINT SIGTERM
 if [[ "$CHART_ONLY" == "false" ]]; then
     echo "Starting API server..."
     cd "$PROJECT_ROOT"
-    python scripts/live-chart/api_server.py --market "$MARKET" --port "$API_PORT" > "$LOG_DIR/live_chart_api.log" 2>&1 &
+    source .venv/bin/activate 2>/dev/null || true
+    python3 scripts/live-chart/api_server.py --market "$MARKET" --port "$API_PORT" > "$LOG_DIR/live_chart_api.log" 2>&1 &
     API_PID=$!
     echo "  API PID: $API_PID"
     sleep 2

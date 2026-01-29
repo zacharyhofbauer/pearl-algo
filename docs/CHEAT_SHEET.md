@@ -265,7 +265,15 @@ journalctl -u pearlalgo-mnq.service -p err
 
 A web-based TradingView-style chart with real-time market data, indicators, and trade markers.
 
-> **Requires:** Market Agent running + IBKR Gateway connected for live data. Shows "No Data" otherwise.
+> **Requires:** Node.js 20.x + Market Agent running + IBKR Gateway connected for live data. Shows "No Data" otherwise.
+
+**First-time setup (Node.js):**
+
+```bash
+# Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
 
 **Start/Stop:**
 
@@ -303,6 +311,42 @@ The dashboard can include a chart screenshot at `data/agent_state/<MARKET>/expor
 ```bash
 pip install playwright && playwright install chromium
 ```
+
+### Cloudflare Tunnel (for Telegram Mini App)
+
+To expose the live chart as a Telegram Mini App, use a Cloudflare Tunnel for persistent HTTPS:
+
+**One-time setup:**
+
+```bash
+# Install cloudflared
+curl -L -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+chmod +x cloudflared && sudo mv cloudflared /usr/local/bin/
+
+# Login and create tunnel
+cloudflared tunnel login
+cloudflared tunnel create pearlalgo-miniapp
+cloudflared tunnel route dns pearlalgo-miniapp your-domain.com
+
+# Create config file
+cat > ~/.cloudflared/config.yml << 'EOF'
+tunnel: pearlalgo-miniapp
+credentials-file: /home/pearlalgo/.cloudflared/<tunnel-id>.json
+
+ingress:
+  - hostname: your-domain.com
+    service: http://localhost:3001
+  - service: http_status:404
+EOF
+```
+
+**Run tunnel:**
+
+```bash
+cloudflared tunnel run pearlalgo-miniapp
+```
+
+Then set `PEARL_MINI_APP_URL=https://your-domain.com` in `.env` and configure BotFather.
 
 ---
 
@@ -503,7 +547,36 @@ After enabling any phase:
 
 ---
 
-## 15. Troubleshooting & Maintenance
+## 15. Maintenance Scripts
+
+### Reset 30-Day Performance
+
+Reset the 30-day performance to a specific value (useful for prop firm account resets):
+
+```bash
+# Reset to $41.14 for market NQ
+python3 scripts/maintenance/reset_30d_performance.py 41.14 NQ
+```
+
+This:
+1. Deletes all trades from the last 30 days
+2. Inserts a single trade with the specified PNL to set the 30d performance
+
+### Purge Runtime Artifacts
+
+Clean up runtime files (logs, PID files, cache):
+
+```bash
+# Dry run (see what would be deleted)
+./scripts/maintenance/purge_runtime_artifacts.sh
+
+# Actually delete (requires --yes)
+./scripts/maintenance/purge_runtime_artifacts.sh --yes
+```
+
+---
+
+## 16. Troubleshooting & Maintenance
 
 ### Clearing Telegram Chat History
 

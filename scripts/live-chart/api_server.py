@@ -15,12 +15,18 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Thread pool for running blocking data provider calls
+_executor = ThreadPoolExecutor(max_workers=2)
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -110,15 +116,13 @@ def _get_data_provider():
         return None
     
     try:
-        from pearlalgo.data_providers.factory import create_provider
+        from pearlalgo.data_providers.factory import create_data_provider
         
-        provider = create_provider(
-            provider_type="ibkr",
-            config={
-                "host": os.getenv("IB_HOST", "127.0.0.1"),
-                "port": int(os.getenv("IB_PORT", "4002")),
-                "client_id": int(os.getenv("IB_CLIENT_ID_LIVE_CHART", "99")),
-            }
+        provider = create_data_provider(
+            "ibkr",
+            host=os.getenv("IB_HOST", "127.0.0.1"),
+            port=int(os.getenv("IB_PORT", "4002")),
+            client_id=int(os.getenv("IB_CLIENT_ID_LIVE_CHART", "99")),
         )
         _data_provider = provider
         return provider
@@ -127,7 +131,7 @@ def _get_data_provider():
         return None
 
 
-def _fetch_candles(
+async def _fetch_candles(
     symbol: str,
     timeframe: str = "5m",
     bars: int = 72,
@@ -157,11 +161,17 @@ def _fetch_candles(
         end = datetime.now(timezone.utc)
         start = end - timedelta(minutes=tf_minutes * bars * 1.5)  # Extra buffer
         
-        df = provider.fetch_historical(
-            symbol=symbol,
-            start=start,
-            end=end,
-            timeframe=timeframe,
+        # Run blocking fetch_historical in thread pool to avoid event loop issues
+        loop = asyncio.get_event_loop()
+        df = await loop.run_in_executor(
+            _executor,
+            partial(
+                provider.fetch_historical,
+                symbol=symbol,
+                start=start,
+                end=end,
+                timeframe=timeframe,
+            )
         )
         
         if df is not None and not df.empty:
@@ -323,7 +333,7 @@ async def get_candles(
     [{"time": 1706500000, "open": 26200, "high": 26210, "low": 26195, "close": 26205}, ...]
     """
     try:
-        candles = _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars)
+        candles = await _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars)
         return JSONResponse(content=candles)
     except DataUnavailableError as e:
         raise HTTPException(
@@ -402,7 +412,7 @@ async def get_indicators(
     Returns 503 if real data is unavailable.
     """
     try:
-        candles = _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars)
+        candles = await _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars)
         indicators = _calculate_indicators(candles)
         return JSONResponse(content=indicators)
     except DataUnavailableError as e:

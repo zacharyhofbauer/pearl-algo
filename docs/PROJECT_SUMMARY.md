@@ -1,7 +1,7 @@
 # Project Summary - PearlAlgo MNQ Trading Agent
 
-**Version:** 0.2.3  
-**Last Updated:** 2026-01-27 (Type Checking, Prometheus Metrics Expansion, Test Coverage)  
+**Version:** 0.2.4  
+**Last Updated:** 2026-01-29 (Live Chart Enhancements, Cloudflare Tunnel, Maintenance Scripts)  
 **Status:** Production-Ready  
 **Trading Style:** Prop Firm - Intraday Swings & Quick Scalps
 
@@ -447,7 +447,8 @@ pearlalgo-dev-ai-agents/
 │   │   ├── watchdog_agent.py            # State freshness watchdog (cron/systemd timer)
 │   │   └── serve_agent_status.py        # Localhost /healthz + /metrics sidecar (optional)
 │   ├── maintenance/                # Maintenance/hygiene scripts
-│   │   └── purge_runtime_artifacts.sh   # Safe cleanup (requires --yes)
+│   │   ├── purge_runtime_artifacts.sh   # Safe cleanup (requires --yes)
+│   │   └── reset_30d_performance.py     # Reset 30-day performance to specific value
 │   ├── backtesting/               # Backtesting scripts
 │   │   ├── strategy_selection.py       # Strategy selection exports
 │   │   └── train_ml_filter.py          # Offline ML filter training
@@ -1310,12 +1311,44 @@ The system is ready for production use and optimized for prop firm trading with 
 - `docs/GATEWAY.md` - IBKR Gateway setup
 - `docs/MARKET_DATA_SUBSCRIPTION.md` - How to get live market data (fix Error 354)
 
-**Last Updated:** 2026-01-27  
+**Last Updated:** 2026-01-29  
 **Current Configuration:** MNQ (Mini NQ) - Prop Firm Style Trading
 
 ---
 
-## Recent Updates (v0.2.3)
+## Recent Updates (v0.2.4)
+
+### Live Chart Enhancements (2026-01-29)
+- **Web-based TradingView-style chart** using lightweight-charts library
+- **Features:**
+  - Timeframe selector (1m, 5m, 15m, 1h)
+  - Dynamic viewport (bar count adjusts to screen width automatically)
+  - Fit All / Go Live buttons for quick navigation
+  - EMA9 (cyan), EMA21 (yellow), VWAP (purple dashed) indicators
+  - RSI(14) panel with overbought/oversold lines
+  - Trade markers with hover tooltips showing signal details
+- **Port change:** Now runs on port 3001 (was 3000)
+- **Requires:** Node.js 20.x for Next.js 14.1.0
+
+### Cloudflare Tunnel Integration
+- **Named tunnel support** for persistent HTTPS URLs (Telegram Mini App)
+- Setup guide: Create tunnel, route DNS, configure ingress
+- Example domain: `pearlalgo.io` and `www.pearlalgo.io`
+- Config file: `~/.cloudflared/config.yml`
+
+### New Maintenance Scripts
+- **`reset_30d_performance.py`**: Reset 30-day performance to a specific value
+  - Deletes all trades from the last 30 days
+  - Inserts a single trade with the specified PNL
+  - Useful for prop firm account resets
+
+### Infrastructure
+- Node.js 20.x now required for live-chart (Next.js 14)
+- Cloudflared installed for tunnel management
+
+---
+
+## Previous Updates (v0.2.3)
 
 ### Type Checking (mypy)
 - Added mypy configuration (`mypy.ini`) for static type checking
