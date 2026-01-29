@@ -114,6 +114,9 @@ if [ "$COMMAND" = "status" ]; then
 fi
 
 if [ "$COMMAND" = "stop" ]; then
+    STOPPED=false
+    
+    # First, try the PID file
     if [ -f "$PID_FILE" ]; then
         PID=$(cat "$PID_FILE")
         if ps -p "$PID" > /dev/null 2>&1; then
@@ -122,12 +125,32 @@ if [ "$COMMAND" = "stop" ]; then
             if ps -p "$PID" > /dev/null 2>&1; then
                 kill -9 "$PID" 2>/dev/null || true
             fi
+            STOPPED=true
         fi
         rm -f "$PID_FILE"
+    fi
+    
+    # Also kill any orphan processes matching the market agent pattern
+    # This catches stale processes that weren't started via this script
+    ORPHAN_PIDS=$(pgrep -f "pearlalgo.market_agent.main" 2>/dev/null || true)
+    if [ -n "$ORPHAN_PIDS" ]; then
+        for OPID in $ORPHAN_PIDS; do
+            echo "🧹 Killing orphan agent process (PID: $OPID)"
+            kill "$OPID" 2>/dev/null || true
+            sleep 1
+            if ps -p "$OPID" > /dev/null 2>&1; then
+                kill -9 "$OPID" 2>/dev/null || true
+            fi
+            STOPPED=true
+        done
+    fi
+    
+    if [ "$STOPPED" = true ]; then
         echo "✅ Agent $MARKET_UPPER stopped"
         exit 0
     fi
-    echo "⚠️  Agent $MARKET_UPPER not running (no PID file)"
+    
+    echo "⚠️  Agent $MARKET_UPPER not running (no PID file or processes found)"
     exit 1
 fi
 
@@ -140,6 +163,23 @@ if ! pgrep -f "java.*IBC.jar" > /dev/null; then
     echo "❌ IBKR Gateway doesn't appear to be running"
     echo "   Start it with: ./scripts/gateway/gateway.sh start"
     exit 1
+fi
+
+# Pre-start cleanup: kill any stale agent processes to prevent IBKR client ID conflicts
+ORPHAN_PIDS=$(pgrep -f "pearlalgo.market_agent.main" 2>/dev/null || true)
+if [ -n "$ORPHAN_PIDS" ]; then
+    echo "🧹 Cleaning up stale agent processes before start..."
+    for OPID in $ORPHAN_PIDS; do
+        echo "   Killing PID: $OPID"
+        kill "$OPID" 2>/dev/null || true
+        sleep 1
+        if ps -p "$OPID" > /dev/null 2>&1; then
+            kill -9 "$OPID" 2>/dev/null || true
+        fi
+    done
+    # Wait for IBKR to release the client ID
+    echo "   Waiting for IBKR connection cleanup..."
+    sleep 3
 fi
 
 if [ -f "$PID_FILE" ]; then

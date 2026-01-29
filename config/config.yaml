@@ -91,9 +91,10 @@ trading_circuit_breaker:
   enable_session_filter: true
   allowed_sessions:
     - overnight    # 6PM-4AM ET: 63% WR, +$3,144
+    - morning      # 6AM-10AM ET: Added 2026-01-29 per user request
     - midday       # 10AM-2PM ET: 45% WR, +$1,105
     - close        # 5PM-6PM ET: 78% WR, +$341
-  # Blocked sessions (not listed above): premarket (4-6AM), morning (6-10AM), afternoon (2-5PM)
+  # Blocked sessions (not listed above): premarket (4-6AM), afternoon (2-5PM)
   
   # =========================================================================
   # Phase 1: Direction gating by market regime (ENABLED by default)
