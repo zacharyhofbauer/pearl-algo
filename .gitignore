@@ -43,6 +43,12 @@ Jts/
 ibc/
 ibgateway-latest-standalone-linux-x64.sh
 
+# Node.js (live-chart dashboard)
+node_modules/
+.next/
+live-chart/.next/
+live-chart/node_modules/
+
 # Editors/OS
 .DS_Store
 .idea/

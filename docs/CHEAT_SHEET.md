@@ -261,7 +261,47 @@ journalctl -u pearlalgo-mnq.service -p err
 
 ---
 
-## 8. AI Patch Setup (Optional)
+## 8. Live Main Chart (Optional)
+
+A web-based TradingView chart interface for real-time market visualization.
+
+**Start the Live Main Chart:**
+
+```bash
+./scripts/live-chart/start.sh --market NQ
+```
+
+**View in browser:** http://localhost:3000
+
+**Stop the chart:**
+
+```bash
+./scripts/live-chart/stop.sh
+```
+
+**Enable Telegram screenshot capture** (uses the web chart instead of matplotlib):
+
+```bash
+export PEARL_USE_LIVE_CHART=1
+./scripts/telegram/restart_command_handler.sh --background
+```
+
+**Environment variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PEARL_USE_LIVE_CHART` | `0` | Set to `1` to capture screenshots from web chart |
+| `PEARL_LIVE_CHART_URL` | `http://localhost:3000` | URL of the Live Main Chart |
+| `PEARL_API_PORT` | `8000` | Port for the chart API server |
+| `PEARL_CHART_PORT` | `3000` | Port for the chart web interface |
+
+**Requirements:**
+- Node.js 18+ (for Next.js)
+- Playwright (`pip install playwright && playwright install chromium`) for screenshot capture
+
+---
+
+## 9. AI Patch Setup (Optional)
 
 Generate code patches from Telegram using OpenAI. Useful for quick fixes when mobile.
 
@@ -300,7 +340,7 @@ patch -p1 < patch.diff
 
 ---
 
-## 9. Quick Health Check (2-Minute Checklist)
+## 10. Quick Health Check (2-Minute Checklist)
 
 Run the health check script for a fast sanity check:
 
@@ -335,7 +375,7 @@ grep "$(date -u +%Y-%m-%d)" data/agent_state/NQ/signals.jsonl | wc -l
 
 ---
 
-## 10. Restart Commands Quick Reference
+## 11. Restart Commands Quick Reference
 
 | Service | Stop | Start | Restart |
 |---------|------|-------|---------|
@@ -359,7 +399,7 @@ pkill -f telegram_command_handler
 
 ---
 
-## 11. Safe Optimization Workflow (No Opportunity Loss)
+## 12. Safe Optimization Workflow (No Opportunity Loss)
 
 > **Golden Rule:** Never tighten filters that reduce signal count without backtesting.
 
@@ -409,7 +449,7 @@ cat data/agent_state/NQ/state.json | jq '.signal_diagnostics_raw'
 
 ---
 
-## 12. Key Config Paths (config/config.yaml)
+## 13. Key Config Paths (config/config.yaml)
 
 | Path | Impact | Safe to Tune? |
 |------|--------|---------------|
@@ -421,7 +461,7 @@ cat data/agent_state/NQ/state.json | jq '.signal_diagnostics_raw'
 
 ---
 
-## 13. Direction Gating & Risk Phases (config/config.yaml)
+## 14. Direction Gating & Risk Phases (config/config.yaml)
 
 The trading circuit breaker includes multiple phases of risk control that can be individually enabled/disabled.
 
@@ -458,7 +498,7 @@ After enabling any phase:
 
 ---
 
-## 14. Troubleshooting & Maintenance
+## 15. Troubleshooting & Maintenance
 
 ### Clearing Telegram Chat History
 

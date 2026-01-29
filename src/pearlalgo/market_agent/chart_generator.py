@@ -46,9 +46,11 @@ VWAP_COLOR = "#2196f3"
 # MA colors: supports up to 4 EMAs (9, 20, 50, 200) with unique colors
 # Cyan for EMA9, Blue for EMA20, Purple for EMA50, Red for EMA200
 MA_COLORS = ['#00bcd4', '#2196f3', '#9c27b0', '#f44336']
-RSI_LINE_COLOR = "#b388ff"
-RSI_SIGNAL_COLOR = "#f6c453"
-RSI_BAND_COLOR = "#8a94a6"
+RSI_LINE_COLOR = "#9c7cf4"       # Softer purple for main RSI line
+RSI_SIGNAL_COLOR = "#f0b429"    # Warm gold for signal line  
+RSI_BAND_COLOR = "#4a5568"      # Muted gray for 30/50/70 levels
+RSI_OVERBOUGHT_COLOR = "#10b981"  # Teal green for overbought zone
+RSI_OVERSOLD_COLOR = "#ef4444"    # Red for oversold zone
 
 # TBT Trendline colors (configurable via ChartConfig)
 TBT_RESISTANCE_COLOR = "#ffc107"  # Amber/yellow for resistance trendlines
@@ -1387,60 +1389,57 @@ class ChartGenerator:
             pass  # If it fails, continue without limiting ticks
 
     def _raise_candle_zorder(self, ax) -> None:
-        """Raise z-order of candle elements so they appear in front of indicator lines.
+        """Ensure candles appear in front of indicator lines.
         
         mplfinance draws candles first, then addplots (indicators) on top.
-        This function finds the candle body patches and wick lines and raises
-        their z-order above indicator lines.
+        This function lowers indicator line z-order and raises candle elements
+        so candles are always visible in front.
         
         Args:
-            ax: The price axis containing candle elements
+            ax: The price axis containing candle and indicator elements
         """
         if ax is None:
             return
         try:
-            # In mplfinance, candles consist of:
-            # - Rectangle patches for bodies (colored green/red)
-            # - Line2D objects for wicks (thin vertical lines)
-            # Indicator lines are also Line2D but typically have different widths/styles.
+            # Strategy: Lower indicator lines to z-order 1 (behind candles at 3+)
+            # Indicator lines from make_addplot have linewidth >= 1.4
+            # Candle wicks from mplfinance are thin (~0.8-1.2) or part of collections
+            indicator_zorder = ZORDER_ZONES  # 1, behind candles
+            candle_zorder = ZORDER_CANDLES + 2  # 5, in front of everything except labels
             
-            # Raise z-order of patches (candle bodies) above indicator lines.
-            # Indicator lines are typically drawn at default z-order (2).
-            # Set candle bodies to ZORDER_CANDLES + 2 to ensure they're above indicators.
-            candle_body_zorder = ZORDER_CANDLES + 2  # 5, above indicator lines
-            candle_wick_zorder = ZORDER_CANDLES + 1  # 4, wicks slightly behind bodies
-            
-            for patch in ax.patches:
-                try:
-                    # Candle bodies are rectangles; check if it's a candle body by color
-                    fc = patch.get_facecolor()
-                    # Candle colors are CANDLE_UP/CANDLE_DOWN - typically green/red
-                    # Only raise patches that look like candle bodies (not session shading, etc.)
-                    if fc is not None and len(fc) >= 3:
-                        patch.set_zorder(candle_body_zorder)
-                except Exception:
-                    pass
-            
-            # Raise z-order of wick lines (thin vertical lines at candle x positions).
-            # Wicks are typically Line2D with linewidth ~1 and vertical orientation.
+            # Lower z-order of thick lines (indicators: EMA, VWAP, etc.)
             for line in ax.lines:
                 try:
                     lw = line.get_linewidth()
-                    # Wicks are thin (~1pt), indicators are thicker (~1.4+).
-                    # Check if this line could be a wick by linewidth.
-                    if lw is not None and float(lw) <= 1.3:
-                        # This is likely a wick - raise its z-order
-                        line.set_zorder(candle_wick_zorder)
-                    # Also catch mplfinance candle wicks which may have specific patterns
-                    xdata = line.get_xdata()
-                    if xdata is not None and len(xdata) == 2:
-                        # Two-point vertical lines are typically wicks
-                        if xdata[0] == xdata[1]:  # Vertical line
-                            line.set_zorder(candle_wick_zorder)
+                    if lw is not None and float(lw) >= 1.3:
+                        # This is likely an indicator line - lower its z-order
+                        line.set_zorder(indicator_zorder)
+                except Exception:
+                    pass
+            
+            # Raise z-order of candle-related collections (mplfinance uses these)
+            # LineCollection for wicks, PolyCollection for bodies
+            for coll in ax.collections:
+                try:
+                    coll.set_zorder(candle_zorder)
+                except Exception:
+                    pass
+            
+            # Also raise patches that might be candle bodies (backup approach)
+            for patch in ax.patches:
+                try:
+                    # Check if it's likely a candle body by checking if it's a small rectangle
+                    # Session shading spans the full width; candle bodies are narrow
+                    bbox = patch.get_bbox()
+                    if bbox is not None:
+                        width = bbox.width
+                        # Candle bodies are narrow (< 2 units typically)
+                        if width < 2.0:
+                            patch.set_zorder(candle_zorder)
                 except Exception:
                     pass
         except Exception:
-            # Best-effort; if it fails, candles stay at default z-order
+            # Best-effort; if it fails, keep default z-order
             pass
     
     def _add_price_labels_to_xaxis(self, ax, df: pd.DataFrame) -> None:
@@ -2516,7 +2515,7 @@ class ChartGenerator:
             return
 
     def _draw_rsi_overbought_oversold_shading(self, ax_rsi, rsi_series: pd.Series) -> None:
-        """Draw TradingView-style RSI shading + gradients on RSI panel."""
+        """Draw clean TradingView-style RSI shading on RSI panel."""
         if not self.config.rsi_overbought_oversold_shading:
             return
         
@@ -2527,57 +2526,73 @@ class ChartGenerator:
             x_coords = np.arange(len(rsi_series))
             rsi_vals = rsi_series.fillna(50).to_numpy()
 
-            # Ensure classic RSI panel bounds.
+            # Ensure classic RSI panel bounds
             try:
                 ax_rsi.set_ylim(0, 100)
             except Exception:
                 pass
 
-            # Background fill between 30 and 70 (purple tint).
+            # Clean panel background
+            ax_rsi.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.3))
+
+            # Overbought zone (70-100) - subtle teal/green tint
             ax_rsi.axhspan(
-                30,
                 70,
-                facecolor=RSI_LINE_COLOR,
-                alpha=0.10,
+                100,
+                facecolor=RSI_OVERBOUGHT_COLOR,
+                alpha=0.08,
                 edgecolor="none",
                 zorder=0,
             )
 
-            # Gradient-style fills (stacked bands for a soft gradient look).
-            steps = 6
-            # Overbought: RSI > 70, green gradient toward higher values.
-            for i, lvl in enumerate(np.linspace(70, 100, steps + 1)[:-1]):
-                mask = rsi_vals >= lvl
-                if not mask.any():
-                    continue
-                alpha = 0.03 + (0.15 * (i + 1) / steps)
-                ax_rsi.fill_between(
-                    x_coords,
-                    50,
-                    rsi_vals,
-                    where=mask,
-                    color=SIGNAL_LONG,
-                    alpha=alpha,
-                    zorder=0,
-                    linewidth=0,
-                )
+            # Oversold zone (0-30) - subtle red tint
+            ax_rsi.axhspan(
+                0,
+                30,
+                facecolor=RSI_OVERSOLD_COLOR,
+                alpha=0.08,
+                edgecolor="none",
+                zorder=0,
+            )
 
-            # Oversold: RSI < 30, red gradient toward lower values.
-            for i, lvl in enumerate(np.linspace(30, 0, steps + 1)[:-1]):
-                mask = rsi_vals <= lvl
-                if not mask.any():
-                    continue
-                alpha = 0.03 + (0.15 * (i + 1) / steps)
-                ax_rsi.fill_between(
-                    x_coords,
-                    rsi_vals,
-                    50,
-                    where=mask,
-                    color=SIGNAL_SHORT,
-                    alpha=alpha,
-                    zorder=0,
-                    linewidth=0,
-                )
+            # Neutral zone (30-70) - very subtle purple hint
+            ax_rsi.axhspan(
+                30,
+                70,
+                facecolor=RSI_LINE_COLOR,
+                alpha=0.04,
+                edgecolor="none",
+                zorder=0,
+            )
+
+            # Fill under RSI line when overbought (>70)
+            ax_rsi.fill_between(
+                x_coords,
+                70,
+                rsi_vals,
+                where=(rsi_vals > 70),
+                color=RSI_OVERBOUGHT_COLOR,
+                alpha=0.25,
+                zorder=1,
+                linewidth=0,
+            )
+
+            # Fill under RSI line when oversold (<30)
+            ax_rsi.fill_between(
+                x_coords,
+                rsi_vals,
+                30,
+                where=(rsi_vals < 30),
+                color=RSI_OVERSOLD_COLOR,
+                alpha=0.25,
+                zorder=1,
+                linewidth=0,
+            )
+
+            # Horizontal reference lines with cleaner styling
+            for lvl, alpha, lw in [(70, 0.50, 0.8), (50, 0.30, 0.6), (30, 0.50, 0.8)]:
+                ax_rsi.axhline(lvl, color=RSI_BAND_COLOR, linewidth=lw, linestyle="--", alpha=alpha, zorder=0)
+
         except Exception:
             return
 
@@ -3249,12 +3264,12 @@ class ChartGenerator:
         *,
         ema_crossovers_shown: bool,
     ) -> None:
-        """Draw a compact chart key explaining overlays on the dashboard chart."""
+        """Draw a compact horizontal chart key at top-left of the dashboard chart."""
         try:
-            lines = ["CHART KEY"]
-            lines.append("")  # Blank line for spacing
+            # Build horizontal key parts
+            parts = []
 
-            # Indicators section
+            # Indicators
             try:
                 show_vwap = bool(getattr(self.config, "show_vwap", True))
             except Exception:
@@ -3263,83 +3278,58 @@ class ChartGenerator:
                 show_ma = bool(getattr(self.config, "show_ma", True))
             except Exception:
                 show_ma = True
-            indicator_lines = []
+            
+            indicator_items = []
             if show_vwap:
-                indicator_lines.append("VWAP")
+                indicator_items.append("VWAP")
             if show_ma:
-                indicator_lines.append("EMA")
-            if indicator_lines:
-                lines.append("Indicators:")
-                lines.append("  " + " + ".join(indicator_lines))
+                # Get configured MA periods
+                ma_periods = getattr(self.config, "ma_periods", [9, 20, 200])
+                if ma_periods:
+                    for p in ma_periods[:3]:  # Max 3 for space
+                        indicator_items.append(f"EMA{p}")
+            if indicator_items:
+                parts.append("Indicators: " + " • ".join(indicator_items))
 
-            if bool(getattr(self.config, "show_rsi", False)):
-                rsi_note = "line"
-                if bool(getattr(self.config, "show_rsi_signal", False)):
-                    rsi_note = "line + signal"
-                lines.append(f"  RSI {rsi_note}")
-
-            # Overlays section
-            overlay_parts = []
+            # Overlays
+            overlay_items = []
             if bool(getattr(self.config, "show_sessions", False)):
-                overlay_parts.append("Sessions")
+                overlay_items.append("Sessions")
             if bool(getattr(self.config, "show_supply_demand", False)) or bool(getattr(self.config, "show_power_channel", False)):
-                overlay_parts.append("Zones")
-            if overlay_parts:
-                lines.append("")
-                lines.append("Overlays:")
-                for part in overlay_parts:
-                    lines.append(f"  {part}")
+                overlay_items.append("Zones")
+            if overlay_items:
+                parts.append("Overlays: " + " • ".join(overlay_items))
 
-            # Trades section
-            try:
-                show_letters = bool(getattr(self.config, "smart_marker_show_letters", True))
-            except Exception:
-                show_letters = True
-            try:
-                show_entry = bool(getattr(self.config, "smart_marker_show_entry", True))
-            except Exception:
-                show_entry = True
-            try:
-                show_exit = bool(getattr(self.config, "smart_marker_show_exit", True))
-            except Exception:
-                show_exit = True
+            # Trades
             try:
                 show_path = bool(getattr(self.config, "smart_marker_show_path", True))
             except Exception:
                 show_path = True
-
-            lines.append("")
-            lines.append("Trades:")
             if show_path:
-                lines.append("  Paths (win/loss)")
-            elif show_entry and show_exit:
-                lines.append("  ▲ Entry / ● Exit")
-            elif show_entry:
-                lines.append("  ▲ Entry")
-            elif show_exit:
-                lines.append("  ● Exit")
+                parts.append("Trades: Paths")
             else:
-                lines.append("  Markers")
+                parts.append("Trades: Markers")
 
-            # Position in bottom-left; high enough so box isn't cut off (mobile has less space)
-            legend_y = 0.36 if self.config.mobile_mode else 0.38
+            # Join with separator
+            key_text = "  |  ".join(parts)
 
+            # Position at top-left, below title
             ax.text(
                 0.01,
-                legend_y,
-                "\n".join(lines),
+                0.96,
+                key_text,
                 transform=ax.transAxes,
                 ha="left",
-                va="bottom",
-                fontsize=FONT_SIZE_LEGEND + 0.5,
-                color=TEXT_PRIMARY,
-                alpha=0.90,
+                va="top",
+                fontsize=FONT_SIZE_LEGEND - 0.5,
+                color=TEXT_SECONDARY,
+                alpha=0.85,
                 zorder=ZORDER_TEXT_LABELS,
                 bbox=dict(
-                    facecolor=DARK_BG,
-                    alpha=ALPHA_LEGEND_BG + 0.05,
+                    facecolor=mcolors.to_rgba(DARK_BG, alpha=0.70),
                     edgecolor=GRID_COLOR,
-                    boxstyle="round,pad=0.35",
+                    boxstyle="round,pad=0.25",
+                    linewidth=0.5,
                 ),
             )
         except Exception:
@@ -3352,7 +3342,7 @@ class ChartGenerator:
         *,
         range_label: Optional[str] = None,
     ) -> None:
-        """Draw a compact Trade Recap panel (equity + drawdown + summary stats)."""
+        """Draw AI Insights Panel - equity sparkline, PEARL AI suggestion, and confidence gauge."""
         if ax is None:
             return
 
@@ -3365,16 +3355,17 @@ class ChartGenerator:
             except Exception:
                 pass
             ax.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
-            # Subtle card background to separate recap from chart panels
+            
+            # Card background
             try:
-                from matplotlib.patches import FancyBboxPatch
+                from matplotlib.patches import FancyBboxPatch, Circle, Wedge
                 card = FancyBboxPatch(
                     (0.0, 0.0),
                     1.0,
                     1.0,
                     transform=ax.transAxes,
                     boxstyle="round,pad=0.02",
-                    facecolor=mcolors.to_rgba(DARK_BG, alpha=0.60),
+                    facecolor=mcolors.to_rgba(DARK_BG, alpha=0.70),
                     edgecolor=GRID_COLOR,
                     linewidth=0.8,
                     zorder=0,
@@ -3383,204 +3374,251 @@ class ChartGenerator:
             except Exception:
                 pass
 
-            title = str(range_label or "Trade Recap").strip()
-            if not pnl_overlay or not isinstance(pnl_overlay, dict):
-                ax.text(
-                    0.04,
-                    0.90,
-                    title,
-                    transform=ax.transAxes,
-                    ha="left",
-                    va="top",
-                    fontsize=FONT_SIZE_LEGEND,
-                    color=TEXT_PRIMARY,
-                    alpha=0.9,
-                )
-                ax.text(
-                    0.04,
-                    0.62,
-                    "No closed trades in window",
-                    transform=ax.transAxes,
-                    ha="left",
-                    va="top",
-                    fontsize=FONT_SIZE_SUMMARY,
-                    color=TEXT_SECONDARY,
-                    alpha=0.85,
-                )
-                return
-
-            daily_pnl = float(pnl_overlay.get("daily_pnl") or 0.0)
-            trades_count = int(pnl_overlay.get("trades") or 0)
-            win_rate = float(pnl_overlay.get("win_rate") or 0.0)
-            label = str(pnl_overlay.get("label") or title).strip()
-            curve_raw = pnl_overlay.get("pnl_curve")
-            status_label = str(pnl_overlay.get("status") or "").strip()
-            status_active = bool(pnl_overlay.get("status_active") or False)
-
-            if not isinstance(curve_raw, (list, tuple)) or len(curve_raw) < 2:
-                ax.text(
-                    0.04,
-                    0.90,
-                    label,
-                    transform=ax.transAxes,
-                    ha="left",
-                    va="top",
-                    fontsize=FONT_SIZE_LEGEND,
-                    color=TEXT_PRIMARY,
-                    alpha=0.9,
-                )
-                ax.text(
-                    0.04,
-                    0.62,
-                    "No closed trades in window",
-                    transform=ax.transAxes,
-                    ha="left",
-                    va="top",
-                    fontsize=FONT_SIZE_SUMMARY,
-                    color=TEXT_SECONDARY,
-                    alpha=0.85,
-                )
-                return
-
-            try:
-                y_vals = [float(v) for v in curve_raw if v is not None]
-            except Exception:
-                y_vals = []
-            if len(y_vals) < 2:
-                return
-
-            y = np.array(y_vals, dtype=float)
-            x = np.arange(len(y), dtype=float)
-            cummax = np.maximum.accumulate(y)
-            dd = y - cummax
-            max_dd = float(abs(np.min(dd))) if len(dd) else 0.0
-            overlay_avg = pnl_overlay.get("avg_trade")
-            if overlay_avg is not None:
-                try:
-                    avg_trade = float(overlay_avg)
-                except Exception:
-                    avg_trade = float(daily_pnl / trades_count) if trades_count > 0 else 0.0
-            else:
-                avg_trade = float(daily_pnl / trades_count) if trades_count > 0 else 0.0
-            profit_factor = pnl_overlay.get("profit_factor")
+            # Extract data
+            daily_pnl = 0.0
+            trades_count = 0
+            win_rate = 0.0
+            y_vals = []
+            status_active = False
+            ai_suggestion = ""
+            confidence = 0
+            market_bias = "Neutral"
+            
+            if pnl_overlay and isinstance(pnl_overlay, dict):
+                daily_pnl = float(pnl_overlay.get("daily_pnl") or 0.0)
+                trades_count = int(pnl_overlay.get("trades") or 0)
+                win_rate = float(pnl_overlay.get("win_rate") or 0.0)
+                status_active = bool(pnl_overlay.get("status_active") or False)
+                curve_raw = pnl_overlay.get("pnl_curve")
+                if isinstance(curve_raw, (list, tuple)):
+                    try:
+                        y_vals = [float(v) for v in curve_raw if v is not None]
+                    except Exception:
+                        y_vals = []
+                
+                # AI-related data (may come from service state)
+                ai_suggestion = str(pnl_overlay.get("ai_suggestion") or "").strip()
+                confidence = int(pnl_overlay.get("ai_confidence") or 0)
+                market_bias = str(pnl_overlay.get("market_bias") or "Neutral").strip()
 
             pnl_color = CANDLE_UP if daily_pnl >= 0 else CANDLE_DOWN
             pnl_sign = "+" if daily_pnl >= 0 else ""
 
-            # QuantVue-style footer: label + big PnL + stats; equity + drawdown full width
+            # ============ LEFT SECTION (0.02-0.32): Equity sparkline + PnL ============
+            # Label
+            label_text = str(range_label or "6h") + " PnL"
             ax.text(
-                0.04,
-                0.94,
-                label,
+                0.02,
+                0.92,
+                label_text,
                 transform=ax.transAxes,
                 ha="left",
                 va="top",
-                fontsize=FONT_SIZE_LEGEND - 0.5,
+                fontsize=FONT_SIZE_LEGEND - 1,
                 color=TEXT_SECONDARY,
-                alpha=0.9,
+                alpha=0.85,
             )
-            if status_label:
-                status_color = CANDLE_UP if status_active else TEXT_SECONDARY
-                ax.text(
-                    0.96,
-                    0.94,
-                    status_label,
-                    transform=ax.transAxes,
-                    ha="right",
-                    va="top",
-                    fontsize=FONT_SIZE_LEGEND - 0.3,
-                    color=status_color,
-                    alpha=0.95,
-                    bbox=dict(
-                        facecolor=mcolors.to_rgba(DARK_BG, alpha=0.7),
-                        edgecolor=GRID_COLOR,
-                        boxstyle="round,pad=0.2",
-                    ),
-                )
+            
+            # Big PnL number
             ax.text(
-                0.04,
-                0.80,
+                0.02,
+                0.78,
                 f"{pnl_sign}${daily_pnl:,.2f}",
                 transform=ax.transAxes,
                 ha="left",
                 va="top",
-                fontsize=20,
+                fontsize=16,
                 fontweight="bold",
                 color=pnl_color,
                 alpha=0.98,
             )
-            metrics_parts = [f"{trades_count} trades", f"{win_rate:.0f}% WR"]
-            try:
-                pf_val = float(profit_factor) if profit_factor is not None else None
-            except Exception:
-                pf_val = None
-            if pf_val is not None and pf_val > 0:
-                metrics_parts.append(f"PF {pf_val:.2f}")
+            
+            # Stats line
+            stats_text = f"{trades_count} trades • {win_rate:.0f}% WR"
             ax.text(
-                0.04,
-                0.66,
-                " • ".join(metrics_parts),
+                0.02,
+                0.58,
+                stats_text,
                 transform=ax.transAxes,
                 ha="left",
+                va="top",
+                fontsize=FONT_SIZE_LEGEND - 1,
+                color=TEXT_SECONDARY,
+                alpha=0.80,
+            )
+
+            # Equity sparkline (left section)
+            if len(y_vals) >= 2:
+                ax_spark = ax.inset_axes([0.02, 0.08, 0.28, 0.42])
+                ax_spark.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
+                y = np.array(y_vals, dtype=float)
+                x = np.arange(len(y), dtype=float)
+                ax_spark.axhline(0.0, color=GRID_COLOR, linewidth=0.5, linestyle="--", alpha=0.4)
+                ax_spark.plot(x, y, color=TEXT_PRIMARY, linewidth=1.2, alpha=0.90)
+                ax_spark.fill_between(x, 0.0, y, where=(y >= 0), color=CANDLE_UP, alpha=0.30)
+                ax_spark.fill_between(x, 0.0, y, where=(y < 0), color=CANDLE_DOWN, alpha=0.30)
+                ax_spark.scatter([x[-1]], [y[-1]], s=12, color=pnl_color, edgecolors=TEXT_PRIMARY, linewidths=0.4, zorder=5)
+                try:
+                    ymin, ymax = float(np.min(y)), float(np.max(y))
+                    yr = ymax - ymin
+                    pad = (yr * 0.15) if yr > 0 else max(1.0, abs(ymax) * 0.15)
+                    ax_spark.set_xlim(float(x[0]), float(x[-1]))
+                    ax_spark.set_ylim(ymin - pad, ymax + pad)
+                except Exception:
+                    pass
+                ax_spark.set_xticks([])
+                ax_spark.set_yticks([])
+                try:
+                    for sp in ax_spark.spines.values():
+                        sp.set_visible(False)
+                except Exception:
+                    pass
+
+            # ============ CENTER SECTION (0.34-0.68): PEARL AI suggestion ============
+            # PEARL AI header
+            ax.text(
+                0.51,
+                0.92,
+                "PEARL AI",
+                transform=ax.transAxes,
+                ha="center",
                 va="top",
                 fontsize=FONT_SIZE_LEGEND,
-                color=TEXT_SECONDARY,
-                alpha=0.88,
+                fontweight="bold",
+                color="#00d4ff",  # Cyan accent
+                alpha=0.95,
             )
+            
+            # AI suggestion text (multi-line if needed)
+            if not ai_suggestion:
+                # Generate a default suggestion based on performance
+                if trades_count == 0:
+                    ai_suggestion = "Waiting for trade signals..."
+                elif win_rate >= 60:
+                    ai_suggestion = "Strong performance. Consider maintaining current strategy."
+                elif win_rate >= 40:
+                    ai_suggestion = "Mixed results. Monitor for trend confirmation."
+                elif daily_pnl < -100:
+                    ai_suggestion = "Elevated drawdown. Consider reducing position size."
+                else:
+                    ai_suggestion = "Performance below target. Review entry criteria."
+            
+            # Wrap text for display (max ~35 chars per line)
+            import textwrap
+            wrapped = textwrap.wrap(ai_suggestion, width=32)
+            suggestion_display = "\n".join(wrapped[:3])  # Max 3 lines
+            
             ax.text(
-                0.04,
-                0.58,
-                f"Avg ${avg_trade:,.0f} • MaxDD ${max_dd:,.0f}",
+                0.51,
+                0.72,
+                suggestion_display,
                 transform=ax.transAxes,
-                ha="left",
+                ha="center",
                 va="top",
                 fontsize=FONT_SIZE_LEGEND - 0.5,
-                color=TEXT_SECONDARY,
+                color=TEXT_PRIMARY,
+                alpha=0.90,
+                linespacing=1.3,
+            )
+            
+            # Market bias indicator
+            bias_color = CANDLE_UP if "bull" in market_bias.lower() else (CANDLE_DOWN if "bear" in market_bias.lower() else TEXT_SECONDARY)
+            bias_arrow = "↗" if "bull" in market_bias.lower() else ("↘" if "bear" in market_bias.lower() else "→")
+            ax.text(
+                0.51,
+                0.18,
+                f"Market: {market_bias} {bias_arrow}",
+                transform=ax.transAxes,
+                ha="center",
+                va="top",
+                fontsize=FONT_SIZE_LEGEND - 1,
+                color=bias_color,
                 alpha=0.85,
             )
 
-            # Equity curve (full width)
-            ax_eq = ax.inset_axes([0.04, 0.28, 0.92, 0.50])
-            ax_eq.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
-            ax_eq.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.5)
-            ax_eq.plot(x, y, color=TEXT_PRIMARY, linewidth=1.4, alpha=0.92)
-            ax_eq.fill_between(x, 0.0, y, where=(y >= 0), color=CANDLE_UP, alpha=0.25)
-            ax_eq.fill_between(x, 0.0, y, where=(y < 0), color=CANDLE_DOWN, alpha=0.25)
-            ax_eq.scatter([x[-1]], [y[-1]], s=20, color=pnl_color, edgecolors=TEXT_PRIMARY, linewidths=0.6, zorder=ZORDER_TEXT_LABELS)
+            # ============ RIGHT SECTION (0.70-0.98): Confidence gauge ============
+            # Confidence label
+            ax.text(
+                0.84,
+                0.92,
+                "Confidence",
+                transform=ax.transAxes,
+                ha="center",
+                va="top",
+                fontsize=FONT_SIZE_LEGEND - 1,
+                color=TEXT_SECONDARY,
+                alpha=0.85,
+            )
+            
+            # Calculate confidence if not provided
+            if confidence == 0 and trades_count > 0:
+                # Simple heuristic: based on win rate and number of trades
+                confidence = min(95, max(10, int(win_rate * 0.8 + trades_count * 2)))
+            elif confidence == 0:
+                confidence = 50  # Default when no data
+            
+            # Draw circular gauge using inset axes
+            ax_gauge = ax.inset_axes([0.70, 0.15, 0.26, 0.65])
+            ax_gauge.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
+            ax_gauge.set_aspect('equal')
+            ax_gauge.set_xlim(-1.2, 1.2)
+            ax_gauge.set_ylim(-1.2, 1.2)
+            ax_gauge.set_xticks([])
+            ax_gauge.set_yticks([])
             try:
-                ymin, ymax = float(np.min(y)), float(np.max(y))
-                yr = ymax - ymin
-                pad = (yr * 0.1) if yr > 0 else max(1.0, abs(ymax) * 0.1, abs(ymin) * 0.1)
-                ax_eq.set_xlim(float(x[0]), float(x[-1]))
-                ax_eq.set_ylim(ymin - pad, ymax + pad)
-            except Exception:
-                pass
-            ax_eq.set_xticks([])
-            ax_eq.set_yticks([])
-            try:
-                for sp in ax_eq.spines.values():
+                for sp in ax_gauge.spines.values():
                     sp.set_visible(False)
             except Exception:
                 pass
+            
+            # Background circle (gray)
+            bg_circle = Circle((0, 0), 0.9, fill=False, edgecolor=GRID_COLOR, linewidth=6, alpha=0.4)
+            ax_gauge.add_patch(bg_circle)
+            
+            # Confidence arc (cyan) - using wedge for arc effect
+            conf_color = "#00d4ff" if confidence >= 50 else (CANDLE_DOWN if confidence < 30 else "#ffaa00")
+            # Draw arc using multiple line segments
+            theta_start = 90  # Start at top
+            theta_end = 90 - (confidence / 100) * 360  # Clockwise
+            theta = np.linspace(np.radians(theta_start), np.radians(theta_end), 50)
+            arc_x = 0.9 * np.cos(theta)
+            arc_y = 0.9 * np.sin(theta)
+            ax_gauge.plot(arc_x, arc_y, color=conf_color, linewidth=6, solid_capstyle='round', alpha=0.95)
+            
+            # Confidence percentage text in center
+            ax_gauge.text(
+                0,
+                0.05,
+                f"{confidence}%",
+                ha="center",
+                va="center",
+                fontsize=14,
+                fontweight="bold",
+                color=conf_color,
+                alpha=0.98,
+            )
+            
+            # Status indicator below gauge
+            status_text = "Active" if status_active else "Paused"
+            status_color = CANDLE_UP if status_active else TEXT_SECONDARY
+            ax.text(
+                0.84,
+                0.08,
+                status_text,
+                transform=ax.transAxes,
+                ha="center",
+                va="top",
+                fontsize=FONT_SIZE_LEGEND - 1,
+                color=status_color,
+                alpha=0.90,
+                bbox=dict(
+                    facecolor=mcolors.to_rgba(DARK_BG, alpha=0.6),
+                    edgecolor=status_color,
+                    boxstyle="round,pad=0.15",
+                    linewidth=0.5,
+                ),
+            )
 
-            # Drawdown strip (full width)
-            ax_dd = ax.inset_axes([0.04, 0.12, 0.92, 0.10])
-            ax_dd.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
-            ax_dd.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.5)
-            ax_dd.fill_between(x, 0.0, dd, color=CANDLE_DOWN, alpha=0.30)
-            try:
-                ddmin = float(np.min(dd)) if len(dd) else 0.0
-                ax_dd.set_xlim(float(x[0]), float(x[-1]))
-                ax_dd.set_ylim(ddmin * 1.15, 0.0 + max(1.0, abs(ddmin) * 0.05))
-            except Exception:
-                pass
-            ax_dd.set_xticks([])
-            ax_dd.set_yticks([])
-            try:
-                for sp in ax_dd.spines.values():
-                    sp.set_visible(False)
-            except Exception:
-                pass
         except Exception:
             return
 

@@ -89,6 +89,23 @@ they do **not** contain trading or strategy logic.
   - **Role**: Operator CLI “doctor” for a compact rollup of recent behavior (signals, rejects, sizing, stops).
   - **Usage**: `python3 scripts/monitoring/doctor_cli.py --hours 24`
 
+## Live Main Chart (`scripts/live-chart/`)
+
+Web-based TradingView chart interface for real-time market visualization.
+
+- `start.sh`
+  - **Role**: Start both the API server and the Next.js chart interface.
+  - **Usage**: `./scripts/live-chart/start.sh [--market NQ] [--install]`
+  - **Ports**: API at `:8000`, Chart at `:3000`
+- `stop.sh`
+  - **Role**: Stop the Live Main Chart services.
+  - **Usage**: `./scripts/live-chart/stop.sh`
+- `api_server.py`
+  - **Role**: FastAPI server providing OHLCV data, agent state, and recent trades to the chart frontend.
+  - **Endpoints**: `/api/candles`, `/api/state`, `/api/trades`, `/health`
+
+**Note**: The Live Main Chart is separate from the Telegram dashboard. It provides an interactive web view and can be used for Telegram screenshot captures via Playwright when `PEARL_USE_LIVE_CHART=1`.
+
 ## Ops Shortcuts (`scripts/`)
 
 - `health_check.sh`

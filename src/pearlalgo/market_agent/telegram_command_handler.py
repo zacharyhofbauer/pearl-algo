@@ -1779,6 +1779,88 @@ class TelegramCommandHandler:
 
         return telegram_chart if telegram_chart.exists() else None
 
+    async def _capture_live_chart_screenshot(self) -> Optional[Path]:
+        """
+        Capture a screenshot of the Live Main Chart using Playwright.
+        
+        This is an alternative to the matplotlib-generated charts.
+        Requires:
+          - Live Chart running at http://localhost:3000
+          - playwright installed (pip install playwright && playwright install chromium)
+        
+        Returns:
+            Path to the screenshot file, or None if capture failed.
+        """
+        screenshot_path = self.exports_dir / "live_chart_screenshot.png"
+        chart_url = os.getenv("PEARL_LIVE_CHART_URL", "http://localhost:3000")
+        
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            logger.warning("Playwright not installed. Run: pip install playwright && playwright install chromium")
+            return None
+        
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page(viewport={"width": 1200, "height": 800})
+                
+                # Navigate to Live Main Chart
+                await page.goto(chart_url, wait_until="networkidle", timeout=15000)
+                
+                # Wait for chart canvas to render
+                try:
+                    await page.wait_for_selector("canvas", timeout=10000)
+                    # Extra wait for chart data to load
+                    await asyncio.sleep(1.5)
+                except Exception:
+                    logger.warning("Chart canvas not found, taking screenshot anyway")
+                
+                # Capture screenshot
+                await page.screenshot(path=str(screenshot_path), type="png")
+                await browser.close()
+                
+            if screenshot_path.exists():
+                logger.info(f"Live chart screenshot captured: {screenshot_path}")
+                return screenshot_path
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to capture live chart screenshot: {e}")
+            return None
+
+    async def _get_chart_with_fallback(
+        self,
+        state: dict,
+        force_refresh: bool = False,
+        prefer_live_chart: bool = False,
+    ) -> Optional[Path]:
+        """
+        Get chart image, preferring Live Main Chart screenshot with matplotlib fallback.
+        
+        Args:
+            state: Current agent state dict
+            force_refresh: Force regeneration even if chart is fresh
+            prefer_live_chart: If True, try live chart screenshot first (set via PEARL_USE_LIVE_CHART=1)
+            
+        Returns:
+            Path to chart image, or None if unavailable.
+        """
+        # Check environment variable to enable Live Main Chart mode
+        use_live_chart = os.getenv("PEARL_USE_LIVE_CHART", "0") == "1" or prefer_live_chart
+        
+        # Try Live Main Chart screenshot first if enabled
+        if use_live_chart:
+            try:
+                chart_path = await self._capture_live_chart_screenshot()
+                if chart_path and chart_path.exists():
+                    return chart_path
+            except Exception as e:
+                logger.debug(f"Live chart screenshot failed, using matplotlib fallback: {e}")
+        
+        # Fallback to matplotlib-generated chart
+        return await self._generate_or_get_chart(state, force_refresh=force_refresh, allow_refresh=True)
+
     async def _show_status_menu(self, query: CallbackQuery) -> None:
         """Show health & diagnostics submenu."""
         state = self._read_state()
