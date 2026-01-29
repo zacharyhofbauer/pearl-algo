@@ -87,11 +87,16 @@ def _load_jsonl_file(path: Path, max_lines: int = 100) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Data Provider (simplified - reads from IBKR or returns mock data)
+# Data Provider (reads from IBKR - NO mock data fallback)
 # ---------------------------------------------------------------------------
 
 _data_provider = None
 _data_provider_error: Optional[str] = None
+
+
+class DataUnavailableError(Exception):
+    """Raised when real market data is not available."""
+    pass
 
 
 def _get_data_provider():
@@ -128,102 +133,56 @@ def _fetch_candles(
     bars: int = 72,
 ) -> List[Dict[str, Any]]:
     """
-    Fetch OHLCV candles from IBKR or return mock data.
+    Fetch OHLCV candles from IBKR.
+    
+    Raises DataUnavailableError if no real data is available.
+    NO mock/fake data is returned - real data only.
     
     Returns data in TradingView Lightweight Charts format:
     [{"time": 1706500000, "open": 26200, "high": 26210, "low": 26195, "close": 26205}, ...]
     """
     provider = _get_data_provider()
     
-    if provider is not None:
-        try:
-            # Calculate time range based on bars and timeframe
-            tf_minutes = {
-                "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440
-            }.get(timeframe, 5)
-            
-            end = datetime.now(timezone.utc)
-            start = end - timedelta(minutes=tf_minutes * bars * 1.5)  # Extra buffer
-            
-            df = provider.fetch_historical(
-                symbol=symbol,
-                start=start,
-                end=end,
-                timeframe=timeframe,
-            )
-            
-            if df is not None and not df.empty:
-                # Convert to TradingView format
-                candles = []
-                for idx, row in df.tail(bars).iterrows():
-                    ts = idx if isinstance(idx, (int, float)) else int(idx.timestamp())
-                    candles.append({
-                        "time": ts,
-                        "open": float(row.get("Open", row.get("open", 0))),
-                        "high": float(row.get("High", row.get("high", 0))),
-                        "low": float(row.get("Low", row.get("low", 0))),
-                        "close": float(row.get("Close", row.get("close", 0))),
-                    })
-                return candles
-        except Exception as e:
-            print(f"Warning: Failed to fetch from IBKR: {e}")
+    if provider is None:
+        raise DataUnavailableError(
+            f"Data provider not available: {_data_provider_error or 'Not connected'}"
+        )
     
-    # Return mock data as fallback
-    return _generate_mock_candles(bars)
-
-
-# Cache for mock data (to avoid regenerating on each request)
-_mock_candles_cache: List[Dict[str, Any]] = []
-_mock_candles_generated_at: float = 0
-
-def _generate_mock_candles(bars: int = 72) -> List[Dict[str, Any]]:
-    """Generate mock candle data for testing when IBKR is unavailable.
-    
-    Uses a seeded random generator and caches data to ensure consistency
-    across requests. Data regenerates only if the cache is stale (>5 min old).
-    """
-    import random
-    global _mock_candles_cache, _mock_candles_generated_at
-    
-    now = datetime.now(timezone.utc).timestamp()
-    
-    # Return cached data if fresh (regenerate every 5 minutes for "live" feel)
-    if _mock_candles_cache and (now - _mock_candles_generated_at) < 300:
-        return _mock_candles_cache
-    
-    # Seed random with current 5-minute window for consistency
-    seed = int(now // 300)
-    random.seed(seed)
-    
-    candles = []
-    base_time = int(now) - (bars * 300)  # 5m bars
-    price = 26200.0  # Starting price
-    
-    for i in range(bars):
-        ts = base_time + (i * 300)
+    try:
+        # Calculate time range based on bars and timeframe
+        tf_minutes = {
+            "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440
+        }.get(timeframe, 5)
         
-        # Random walk
-        change = random.uniform(-20, 20)
-        open_price = price
-        close_price = price + change
-        high_price = max(open_price, close_price) + random.uniform(0, 10)
-        low_price = min(open_price, close_price) - random.uniform(0, 10)
-        volume = int(random.uniform(500, 5000))  # Mock volume
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(minutes=tf_minutes * bars * 1.5)  # Extra buffer
         
-        candles.append({
-            "time": ts,
-            "open": round(open_price, 2),
-            "high": round(high_price, 2),
-            "low": round(low_price, 2),
-            "close": round(close_price, 2),
-            "volume": volume,
-        })
+        df = provider.fetch_historical(
+            symbol=symbol,
+            start=start,
+            end=end,
+            timeframe=timeframe,
+        )
         
-        price = close_price
-    
-    _mock_candles_cache = candles
-    _mock_candles_generated_at = now
-    return candles
+        if df is not None and not df.empty:
+            # Convert to TradingView format
+            candles = []
+            for idx, row in df.tail(bars).iterrows():
+                ts = idx if isinstance(idx, (int, float)) else int(idx.timestamp())
+                candles.append({
+                    "time": ts,
+                    "open": float(row.get("Open", row.get("open", 0))),
+                    "high": float(row.get("High", row.get("high", 0))),
+                    "low": float(row.get("Low", row.get("low", 0))),
+                    "close": float(row.get("Close", row.get("close", 0))),
+                })
+            return candles
+        
+        raise DataUnavailableError("No candle data returned from provider")
+    except DataUnavailableError:
+        raise
+    except Exception as e:
+        raise DataUnavailableError(f"Failed to fetch data: {e}")
 
 
 def _calculate_indicators(candles: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -357,12 +316,20 @@ async def get_candles(
     """
     Get OHLCV candle data for TradingView Lightweight Charts.
     
+    Returns 503 if real data is unavailable (agent not running, IBKR not connected).
+    NO mock/fake data is returned.
+    
     Returns data in format:
     [{"time": 1706500000, "open": 26200, "high": 26210, "low": 26195, "close": 26205}, ...]
     """
     try:
         candles = _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars)
         return JSONResponse(content=candles)
+    except DataUnavailableError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "data_unavailable", "message": str(e)}
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -430,11 +397,19 @@ async def get_indicators(
     timeframe: str = Query(default="5m", description="Timeframe"),
     bars: int = Query(default=72, ge=10, le=500, description="Number of bars"),
 ):
-    """Get technical indicators (EMA, VWAP, RSI) for overlay."""
+    """Get technical indicators (EMA, VWAP, RSI) for overlay.
+    
+    Returns 503 if real data is unavailable.
+    """
     try:
         candles = _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars)
         indicators = _calculate_indicators(candles)
         return JSONResponse(content=indicators)
+    except DataUnavailableError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "data_unavailable", "message": str(e)}
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

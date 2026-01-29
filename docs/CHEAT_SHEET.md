@@ -261,46 +261,48 @@ journalctl -u pearlalgo-mnq.service -p err
 
 ---
 
-## 8. Live Main Chart (Optional)
+## 8. Live Main Chart
 
-A web-based TradingView chart interface for real-time market visualization.
+A web-based TradingView-style chart with real-time market data, indicators, and trade markers.
 
-**Start the Live Main Chart:**
+> **Requires:** Market Agent running + IBKR Gateway connected for live data. Shows "No Data" otherwise.
 
-```bash
-./scripts/live-chart/start.sh --market NQ
-```
-
-**View in browser:** http://localhost:3001
-
-**Stop the chart:**
+**Start/Stop:**
 
 ```bash
-./scripts/live-chart/stop.sh
+./scripts/live-chart/start.sh --market NQ   # Start (API + Chart)
+./scripts/live-chart/stop.sh                # Stop all
 ```
 
-**Telegram dashboard screenshot**
+**View:** http://localhost:3001
 
-The Telegram dashboard uses a **Live Main Chart screenshot** saved at:
-`data/agent_state/<MARKET>/exports/dashboard_telegram_latest.png`
+**Features:**
 
-Requirements (only if you want the screenshot image in Telegram):
-- Playwright: `pip install playwright && playwright install chromium`
-- Live chart running and reachable at `PEARL_LIVE_CHART_URL`
+| Feature | Description |
+|---------|-------------|
+| **Timeframe Selector** | Switch between 1m, 5m, 15m, 1h (header buttons) |
+| **Dynamic Viewport** | Bar count adjusts to screen width automatically |
+| **Fit All / Go Live** | Quick buttons (top-right) to fit all data or jump to live edge |
+| **Indicators** | EMA9 (cyan), EMA21 (yellow), VWAP (purple dashed) |
+| **RSI Panel** | Separate RSI(14) panel with overbought/oversold lines |
+| **Trade Markers** | Entry arrows and Exit dots with hover tooltips showing signal details |
 
-**Environment variables:**
+**Environment Variables:**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PEARL_LIVE_CHART_URL` | `http://localhost:3001` | URL of the Live Main Chart |
-| `PEARL_MINI_APP_URL` | *(unset)* | Public HTTPS URL for the Telegram Mini App “📈 Live” button |
-| `PEARL_LIVE_CHART_ORIGINS` | *(unset)* | Comma-separated CORS origins for `scripts/live-chart/api_server.py` |
-| `PEARL_API_PORT` | `8000` | Port for the chart API server |
-| `PEARL_CHART_PORT` | `3001` | Port for the chart web interface |
+| `PEARL_LIVE_CHART_URL` | `http://localhost:3001` | URL for Playwright screenshot capture |
+| `PEARL_MINI_APP_URL` | *(unset)* | Public HTTPS URL for Telegram Mini App |
+| `PEARL_API_PORT` | `8000` | API server port |
+| `PEARL_CHART_PORT` | `3001` | Chart web interface port |
 
-**Requirements:**
-- Node.js 18+ (for Next.js)
-- Playwright (optional) for screenshot capture
+**Telegram Screenshot** (optional):
+
+The dashboard can include a chart screenshot at `data/agent_state/<MARKET>/exports/dashboard_telegram_latest.png`.
+
+```bash
+pip install playwright && playwright install chromium
+```
 
 ---
 

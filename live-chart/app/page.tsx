@@ -89,9 +89,12 @@ export default function LiveMainChart() {
     return () => window.removeEventListener('resize', update)
   }, [])
 
-  // Reset data hash when timeframe changes to force refresh
+  // Reset state when timeframe changes to force full refresh
   useEffect(() => {
     lastDataHash.current = ''
+    setLoading(true)
+    setCandles([])
+    setIndicators({})
   }, [timeframe])
 
   const fetchData = async (tf: Timeframe, bars: number) => {
@@ -105,7 +108,13 @@ export default function LiveMainChart() {
         fetch(`${API_URL}/api/state`),
       ])
 
-      if (!candlesRes.ok) throw new Error(`Candles API error: ${candlesRes.status}`)
+      // Handle 503 (data unavailable) specifically
+      if (candlesRes.status === 503) {
+        const errorData = await candlesRes.json().catch(() => ({}))
+        throw new Error(errorData?.detail?.message || 'No Data — Agent Not Running')
+      }
+
+      if (!candlesRes.ok) throw new Error(`API Error: ${candlesRes.status}`)
 
       const candlesData = await candlesRes.json()
       const indicatorsData = indicatorsRes.ok ? await indicatorsRes.json() : {}
@@ -130,7 +139,7 @@ export default function LiveMainChart() {
       setError(null)
     } catch (err) {
       console.error('Failed to fetch data:', err)
-      setError(err instanceof Error ? err.message : 'Failed to fetch data')
+      setError(err instanceof Error ? err.message : 'Failed to fetch')
       setIsLive(false)
     } finally {
       setLoading(false)
@@ -281,7 +290,16 @@ export default function LiveMainChart() {
         </div>
         <div className="chart-container">
           {loading && <div className="loading">Loading chart data...</div>}
-          {error && !loading && <div className="error">Error: {error}</div>}
+          {error && !loading && (
+            <div className="no-data-container">
+              <div className="no-data-icon">📊</div>
+              <div className="no-data-title">No Live Data</div>
+              <div className="no-data-message">{error}</div>
+              <div className="no-data-hint">
+                Start the Market Agent to see real-time data
+              </div>
+            </div>
+          )}
           {!loading && !error && candles.length > 0 && (
             <CandlestickChart
               data={candles}
