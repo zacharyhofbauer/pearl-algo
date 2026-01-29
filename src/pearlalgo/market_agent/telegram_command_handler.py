@@ -4124,6 +4124,9 @@ class TelegramCommandHandler:
                 except (ValueError, TypeError):
                     pnl_for_active_line = None
 
+            # AI readiness - always True (legacy field, AI features integrated)
+            ai_ready = True
+
             # Build glanceable dashboard message (concise, mobile-first)
             message = format_glanceable_card(
                 symbol=symbol,

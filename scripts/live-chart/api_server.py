@@ -122,7 +122,7 @@ def _get_data_provider():
             "ibkr",
             host=os.getenv("IB_HOST", "127.0.0.1"),
             port=int(os.getenv("IB_PORT", "4002")),
-            client_id=int(os.getenv("IB_CLIENT_ID_LIVE_CHART", "99")),
+            client_id=int(os.getenv("IB_CLIENT_ID_LIVE_CHART", "88")),
         )
         _data_provider = provider
         return provider
@@ -347,39 +347,66 @@ async def get_candles(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _get_trading_day_start() -> datetime:
+    """
+    Get the start of the current trading day (6pm ET previous calendar day).
+
+    Futures trading day runs from 6pm ET to 6pm ET next day.
+    Example: Trading day "Jan 29" starts at 6pm ET on Jan 28 and ends at 6pm ET on Jan 29.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    et_tz = ZoneInfo("America/New_York")
+    now_et = datetime.now(et_tz)
+
+    # If before 6pm ET, trading day started yesterday at 6pm
+    # If after 6pm ET, trading day started today at 6pm
+    if now_et.hour < 18:
+        # Before 6pm - use yesterday 6pm as start
+        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    else:
+        # After 6pm - use today 6pm as start
+        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
+
+    return trading_day_start.astimezone(timezone.utc)
+
+
 def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
-    """Compute daily P&L and trade stats from signals.jsonl."""
+    """Compute daily P&L and trade stats from signals.jsonl since 6pm ET."""
     signals_file = state_dir / "signals.jsonl"
     if not signals_file.exists():
         return {"daily_pnl": 0.0, "daily_trades": 0, "daily_wins": 0, "daily_losses": 0}
-    
-    # Get today's date in UTC
-    today = datetime.now(timezone.utc).date()
-    
+
+    # Get trading day start (6pm ET)
+    trading_day_start = _get_trading_day_start()
+
     daily_pnl = 0.0
     daily_wins = 0
     daily_losses = 0
-    
+
     try:
         # Read all signals (we need to check all for today's trades)
         signals = _load_jsonl_file(signals_file, max_lines=2000)
         for s in signals:
             if s.get("status") != "exited":
                 continue
-            
-            # Check if trade exited today (prefer exit_time, fallback to timestamp)
+
+            # Check if trade exited after trading day start (6pm ET)
             exit_time_str = s.get("exit_time") or s.get("timestamp")
             if not exit_time_str:
                 continue
-            
+
             try:
                 # Parse ISO format timestamp
                 exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
-                if exit_time.date() != today:
+                if exit_time < trading_day_start:
                     continue
             except (ValueError, AttributeError):
                 continue
-            
+
             # Count this trade
             pnl = s.get("pnl", 0.0)
             if pnl is not None:
@@ -390,7 +417,7 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
                     daily_losses += 1
     except Exception:
         pass
-    
+
     return {
         "daily_pnl": round(daily_pnl, 2),
         "daily_trades": daily_wins + daily_losses,

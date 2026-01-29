@@ -102,6 +102,29 @@ except ImportError:
     get_ml_signal_filter = None  # type: ignore
     MLSignalFilter = None  # type: ignore
 
+
+def get_trading_day_date() -> date:
+    """
+    Get the current trading day date based on 6pm ET boundary.
+
+    Futures trading day runs from 6pm ET to 6pm ET next day.
+    - Before 6pm ET: returns previous calendar day
+    - After 6pm ET: returns current calendar day
+
+    Example: At 5pm ET on Jan 29, returns Jan 28 (still in Jan 28's trading session).
+             At 7pm ET on Jan 29, returns Jan 29 (now in Jan 29's trading session).
+    """
+    et_tz = ZoneInfo("America/New_York")
+    now_et = datetime.now(et_tz)
+
+    if now_et.hour < 18:
+        # Before 6pm ET - still in previous day's trading session
+        return (now_et - timedelta(days=1)).date()
+    else:
+        # After 6pm ET - in current day's trading session
+        return now_et.date()
+
+
 class MarketAgentService:
     """
     24/7 service for NQ intraday trading strategy.
@@ -3462,20 +3485,21 @@ class MarketAgentService:
         """
         if self.execution_adapter is None:
             return
-        
-        today = datetime.now(timezone.utc).date()
-        
+
+        # Use 6pm ET as the trading day boundary
+        today = get_trading_day_date()
+
         if self._last_trading_day is None:
             # First cycle - initialize but don't reset (may be mid-day startup)
             self._last_trading_day = today
             return
-        
+
         if self._last_trading_day != today:
-            # New trading day - reset counters
+            # New trading day (6pm ET boundary crossed) - reset counters
             self.execution_adapter.reset_daily_counters()
             logger.info(
                 f"Execution daily counters reset for {today} "
-                f"(previous day: {self._last_trading_day})"
+                f"(previous day: {self._last_trading_day}) - 6pm ET boundary"
             )
             self._last_trading_day = today
 
