@@ -386,15 +386,30 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
         // Set line color based on win/loss - bright colors to stand out
         connectionLineRef.current.applyOptions({
           color: isWin ? '#00ff88' : '#ff3333',
-          lineWidth: 4,
-          lineStyle: 0, // solid
+          lineWidth: 2,
+          lineStyle: 2, // dotted
         })
         
-        // Draw line from entry to exit
-        connectionLineRef.current.setData([
-          { time: entry.time as Time, value: entryPrice },
-          { time: exit.time as Time, value: exitPrice },
-        ])
+        // Draw RIGHT ANGLE step line (doesn't cover candles)
+        // Pattern: entry → horizontal → vertical step → horizontal → exit
+        // Use entry time + small offset for vertical step to maintain ascending order
+        const stepTime = entry.time + 300 // 5 minutes after entry (one bar on 5m)
+        
+        // Only draw step line if there's enough time gap
+        if (exit.time > stepTime) {
+          connectionLineRef.current.setData([
+            { time: entry.time as Time, value: entryPrice },      // Start at entry
+            { time: stepTime as Time, value: entryPrice },        // Horizontal short distance
+            { time: (stepTime + 1) as Time, value: exitPrice },   // Vertical step (+1 sec for ascending)
+            { time: exit.time as Time, value: exitPrice },        // Horizontal to exit
+          ])
+        } else {
+          // If entry and exit are too close, just draw simple diagonal
+          connectionLineRef.current.setData([
+            { time: entry.time as Time, value: entryPrice },
+            { time: exit.time as Time, value: exitPrice },
+          ])
+        }
       } else {
         connectionLineRef.current.setData([])
       }

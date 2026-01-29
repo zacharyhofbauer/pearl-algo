@@ -546,17 +546,17 @@ async def get_markers(
                     is_win = pnl > 0 if pnl else False
                     # Snap to 5-minute bar boundary so marker aligns with candle
                     bar_time = _snap_to_bar(exit_ts, 300)
-                    # EXIT markers: All squares with X
-                    # Win: Green square
-                    # Loss: Dark red/maroon square
-                    exit_color = "#00c853" if is_win else "#b71c1c"
+                    # EXIT markers: Just X with color
+                    # Win: Bright green
+                    # Loss: Bright red
+                    exit_color = "#00ff88" if is_win else "#ff3333"
                     
                     markers.append({
                         # TradingView marker fields
                         "time": bar_time,
                         "position": "aboveBar" if direction == "long" else "belowBar",
                         "color": exit_color,
-                        "shape": "square",
+                        "shape": "circle",  # Small circle, X shows as text
                         "text": "✕",  # X marker for exits
                         # Tooltip metadata
                         "kind": "exit",
