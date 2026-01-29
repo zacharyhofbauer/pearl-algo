@@ -185,6 +185,19 @@ export default function LiveMainChart() {
             <span className="legend-item"><span className="legend-color ema21"></span>EMA21</span>
             <span className="legend-item"><span className="legend-color vwap"></span>VWAP</span>
           </div>
+          {/* Marker Legend */}
+          <div className="marker-legend">
+            <span className="legend-item">
+              <span className="marker-icon entry-long">▲</span>
+              <span className="marker-icon entry-short">▼</span>
+              Entry
+            </span>
+            <span className="legend-item">
+              <span className="marker-icon exit-win">●</span>
+              <span className="marker-icon exit-loss">●</span>
+              Exit
+            </span>
+          </div>
         </div>
       )}
 
@@ -218,7 +231,7 @@ function RSIChart({ data }: { data: IndicatorData[] }) {
     const { createChart, ColorType } = require('lightweight-charts')
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
-      height: 100,
+      height: 120,  // Increased to accommodate x-axis labels
       layout: {
         background: { type: ColorType.Solid, color: '#0a0a0f' },
         textColor: '#8a94a6',
@@ -231,7 +244,20 @@ function RSIChart({ data }: { data: IndicatorData[] }) {
         borderColor: '#2a2a3a',
         scaleMargins: { top: 0.1, bottom: 0.1 },
       },
-      timeScale: { visible: false },
+      timeScale: {
+        visible: true,
+        borderColor: '#2a2a3a',
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 8,  // Match main chart
+        barSpacing: 8,
+        tickMarkFormatter: (time: number) => {
+          const date = new Date(time * 1000)
+          const hours = date.getHours().toString().padStart(2, '0')
+          const minutes = date.getMinutes().toString().padStart(2, '0')
+          return `${hours}:${minutes}`
+        },
+      },
     })
 
     const series = chart.addLineSeries({
@@ -282,7 +308,7 @@ function RSIChart({ data }: { data: IndicatorData[] }) {
   return (
     <div className="rsi-container">
       <span className="rsi-label">RSI(14)</span>
-      <div ref={containerRef} style={{ width: '100%', height: 100 }} />
+      <div ref={containerRef} style={{ width: '100%', height: 120 }} />
     </div>
   )
 }

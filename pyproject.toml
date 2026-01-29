@@ -16,8 +16,6 @@ dependencies = [
     "PyYAML>=6.0,<7.0",
     "pytz>=2024.1",
     "ib-insync>=0.9.86,<1.0",
-    "matplotlib>=3.8.0,<4.0",
-    "mplfinance>=0.12.10b0,<0.13",
     "pyarrow>=16.0.0,<18.0",
 ]
 

@@ -13,7 +13,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.market_agent.performance_tracker` – Performance metrics tracking
   - `pearlalgo.market_agent.telegram_notifier` – Telegram notifications
   - `pearlalgo.market_agent.health_monitor` – Health monitoring
-  - `pearlalgo.market_agent.chart_generator` – mplfinance chart generation
+  - `pearlalgo.market_agent.live_chart_screenshot` – Live chart screenshot export (Playwright)
   - `pearlalgo.market_agent.challenge_tracker` – Challenge/competition tracking
   - `pearlalgo.market_agent.notification_queue` – Notification queuing
   - `pearlalgo.market_agent.trading_circuit_breaker` – Circuit breaker logic
@@ -72,7 +72,6 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `check_doc_references.py` – documentation path reference audit
   - `report_orphan_modules.py` – orphan module report (reachability from entrypoints/tests)
   - `generate_coverage_badge.py` – coverage badge generation
-  - `regenerate_chart_baselines.py` – chart visual regression baselines
 - **Docs**:
   - `docs/TESTING_GUIDE.md`
   - `docs/MOCK_DATA_WARNING.md`

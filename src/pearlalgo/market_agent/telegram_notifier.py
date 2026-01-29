@@ -53,18 +53,6 @@ from pearlalgo.utils.telegram_ui_contract import (
     ACTION_DATA_QUALITY,
     ACTION_GATEWAY_STATUS,
 )
-from pearlalgo.market_agent.chart_profiles import (
-    apply_telegram_unified_profile,
-    TELEGRAM_UNIFIED_DPI,
-    TELEGRAM_UNIFIED_FIGSIZE,
-)
-
-try:
-    from pearlalgo.market_agent.chart_generator import ChartGenerator
-    CHART_GENERATOR_AVAILABLE = True
-except ImportError:
-    CHART_GENERATOR_AVAILABLE = False
-    ChartGenerator = None
 
 TELEGRAM_AVAILABLE = importlib.util.find_spec("telegram") is not None
 if not TELEGRAM_AVAILABLE:
@@ -117,7 +105,6 @@ class MarketAgentTelegramNotifier:
         self.chat_id = chat_id
         self.state_dir = ensure_state_dir(state_dir)
         self.telegram: Optional[TelegramAlerts] = None
-        self.chart_generator: Optional[ChartGenerator] = None
         
         # Initialize Telegram UI preferences
         self.prefs = TelegramPrefs(state_dir=self.state_dir)
@@ -152,14 +139,6 @@ class MarketAgentTelegramNotifier:
             self.enabled = False
         else:
             logger.info("Telegram notifications disabled (enabled=False)")
-        
-        # Initialize chart generator if available
-        if CHART_GENERATOR_AVAILABLE and enabled:
-            try:
-                self.chart_generator = ChartGenerator()
-            except Exception as e:
-                logger.warning(f"Could not initialize ChartGenerator: {e}")
-                self.chart_generator = None
 
     def _get_prefs(self) -> TelegramPrefs:
         """Load latest Telegram preferences from disk (safe, small IO)."""
@@ -168,43 +147,6 @@ class MarketAgentTelegramNotifier:
         except Exception:
             # Fall back to the instance prefs (best-effort).
             return self.prefs
-
-    def _trade_charts_dir(self) -> Path:
-        """Directory for per-trade charts persisted to disk."""
-        d = Path(self.state_dir) / "exports" / "trade_charts"
-        try:
-            d.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-        return d
-
-    def _safe_chart_key(self, signal_id: str) -> str:
-        """Make a signal_id safe for filenames (no path separators)."""
-        s = str(signal_id or "").strip() or "unknown"
-        s = re.sub(r"[^A-Za-z0-9_.-]+", "_", s)
-        return s[:120]
-
-    def _persist_trade_chart(self, *, chart_path: Path, signal_id: str, kind: str) -> Optional[Path]:
-        """
-        Persist a generated chart under exports/trade_charts.
-
-        Returns the persisted path, or None on failure.
-        """
-        try:
-            if not chart_path or not Path(chart_path).exists():
-                return None
-            kind_norm = str(kind or "").strip().lower()
-            if kind_norm not in {"entry", "exit"}:
-                kind_norm = "chart"
-
-            dest = self._trade_charts_dir() / f"{self._safe_chart_key(signal_id)}_{kind_norm}.png"
-            try:
-                shutil.copy2(str(chart_path), str(dest))
-            except Exception:
-                shutil.copyfile(str(chart_path), str(dest))
-            return dest if dest.exists() else None
-        except Exception:
-            return None
 
     def _format_compact_signal(self, signal: Dict) -> str:
         """
@@ -764,69 +706,7 @@ class MarketAgentTelegramNotifier:
             # Send message - no inline buttons, all actions accessible via /start menu
             # Entry notifications are high-signal; never dedupe.
             success = await self.telegram.send_message(message, dedupe=False)
-            
-            # Persist entry chart for later review (do NOT send charts in notifications).
-            try:
-                if (
-                    self.chart_generator is not None
-                    and buffer_data is not None
-                    and not buffer_data.empty
-                ):
-                    cfg = getattr(self.chart_generator, "config", None)
-                    prev_cfg = {}
-                    if cfg is not None:
-                        for key in (
-                            "mobile_mode",
-                            "compact_labels",
-                            "show_session_range_stats",
-                            "max_right_labels",
-                            "right_label_merge_ticks",
-                            "panel_ratio_price",
-                            "panel_ratio_volume",
-                            "panel_ratio_sub",
-                            "show_regime_label",
-                            "show_ml_confidence",
-                        ):
-                            try:
-                                prev_cfg[key] = getattr(cfg, key)
-                            except Exception:
-                                pass
-                        apply_telegram_unified_profile(cfg)
 
-                    try:
-                        chart_path = await asyncio.to_thread(
-                            self.chart_generator.generate_entry_chart,
-                            signal=signal,
-                            buffer_data=buffer_data,
-                            symbol=str(signal.get("symbol") or "MNQ"),
-                            timeframe=None,
-                            figsize=TELEGRAM_UNIFIED_FIGSIZE,
-                            dpi=TELEGRAM_UNIFIED_DPI,
-                        )
-                    finally:
-                        if cfg is not None:
-                            for key, value in prev_cfg.items():
-                                try:
-                                    setattr(cfg, key, value)
-                                except Exception:
-                                    pass
-
-                    if chart_path and Path(chart_path).exists():
-                        persisted = self._persist_trade_chart(
-                            chart_path=Path(chart_path),
-                            signal_id=str(signal_id),
-                            kind="entry",
-                        )
-                        if persisted:
-                            logger.debug(f"Saved entry chart: {persisted}")
-                    try:
-                        if chart_path and Path(chart_path).exists():
-                            Path(chart_path).unlink()
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.debug(f"Could not persist entry chart for {str(signal_id)[:16]}: {e}")
-            
             return success
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_entry_notification")
@@ -911,68 +791,7 @@ class MarketAgentTelegramNotifier:
             # Send message - no inline buttons, all actions accessible via /start menu
             # Exit notifications are high-signal; never dedupe.
             success = await self.telegram.send_message(message, dedupe=False)
-            
-            # Generate and persist exit chart if available (do NOT send charts in notifications)
-            chart_path = None
-            if self.chart_generator and buffer_data is not None and not buffer_data.empty:
-                cfg = getattr(self.chart_generator, "config", None)
-                prev_cfg = {}
-                if cfg is not None:
-                    for key in (
-                        "mobile_mode",
-                        "compact_labels",
-                        "show_session_range_stats",
-                        "max_right_labels",
-                        "right_label_merge_ticks",
-                        "panel_ratio_price",
-                        "panel_ratio_volume",
-                        "panel_ratio_sub",
-                        "show_regime_label",
-                        "show_ml_confidence",
-                    ):
-                        try:
-                            prev_cfg[key] = getattr(cfg, key)
-                        except Exception:
-                            pass
-                    apply_telegram_unified_profile(cfg)
-                try:
-                    chart_path = await asyncio.to_thread(
-                        self.chart_generator.generate_exit_chart,
-                        signal,
-                        exit_price,
-                        exit_reason,
-                        pnl,
-                        buffer_data,
-                        symbol,
-                        figsize=TELEGRAM_UNIFIED_FIGSIZE,
-                        dpi=TELEGRAM_UNIFIED_DPI,
-                    )
-                except Exception as e:
-                    logger.warning(f"Could not generate exit chart: {e}")
-                finally:
-                    if cfg is not None:
-                        for key, value in prev_cfg.items():
-                            try:
-                                setattr(cfg, key, value)
-                            except Exception:
-                                pass
-            
-            if chart_path and chart_path.exists():
-                try:
-                    persisted = self._persist_trade_chart(
-                        chart_path=chart_path,
-                        signal_id=str(signal_id),
-                        kind="exit",
-                    )
-                    if persisted:
-                        logger.debug(f"Saved exit chart: {persisted}")
-                    try:
-                        chart_path.unlink()
-                    except Exception:
-                        pass
-                except Exception as e:
-                    logger.warning(f"Could not persist exit chart: {e}")
-            
+
             return success
         except Exception as e:
             ErrorHandler.handle_telegram_error(e, "send_exit_notification")

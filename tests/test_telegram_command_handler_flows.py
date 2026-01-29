@@ -121,9 +121,6 @@ def handler_with_mocks(temp_state_dir):
         "port_listening": True,
     }
     
-    # Mock chart generator
-    handler.chart_generator = None
-    
     # Mock data provider
     handler._data_provider = None
     handler._historical_cache_dir = temp_state_dir / "historical"

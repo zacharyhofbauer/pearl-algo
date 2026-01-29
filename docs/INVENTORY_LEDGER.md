@@ -64,14 +64,13 @@ Purpose: File-by-file keep/rewrite/delete decisions grounded in the current tree
 | `docs/DOC_HIERARCHY.md` | KEEP | Documentation hierarchy |
 | `docs/PROJECT_SUMMARY.md` | REWRITE | Source of truth; IBKR path clarification |
 | `docs/TESTING_GUIDE.md` | KEEP | Testing guide |
-| `docs/CHART_VISUAL_SCHEMA.md` | KEEP | Chart semantics |
 | `docs/PATH_TRUTH_TABLE.md` | REWRITE | Adds IBKR external path + orphan report |
 | `docs/START_HERE.md` | REWRITE | Gateway env var note |
 | `docs/CHEAT_SHEET.md` | REWRITE | Gateway env var note |
 | `docs/SCRIPTS_TAXONOMY.md` | REWRITE | Adds orphan report |
 | `docs/CONFIGURATION_MAP.md` | KEEP | Config mapping |
 | `docs/TRADING_BOT_GUIDE.md` | KEEP | Strategy guide |
-| `docs/MPLFINANCE_QUICK_START.md` | KEEP | Charting quick start |
+| `docs/LIVE_CHART.md` | KEEP | Live Main Chart + Telegram Mini App |
 | `docs/MARKET_AGENT_GUIDE.md` | KEEP | Operator guide |
 | `docs/TELEGRAM_GUIDE.md` | KEEP | Telegram guide |
 | `docs/GATEWAY.md` | REWRITE | External IBKR install guidance |
@@ -112,7 +111,6 @@ Purpose: File-by-file keep/rewrite/delete decisions grounded in the current tree
 | `scripts/testing/smoke_multi_market.py` | KEEP | Multi-market smoke |
 | `scripts/testing/smoke_test_ibkr.py` | KEEP | IBKR smoke |
 | `scripts/testing/generate_coverage_badge.py` | KEEP | Coverage badge |
-| `scripts/testing/regenerate_chart_baselines.py` | KEEP | Visual baselines |
 | `scripts/testing/report_orphan_modules.py` | KEEP | Orphan module report |
 | `scripts/health_check.sh` | KEEP | Fast health snapshot |
 
@@ -152,7 +150,7 @@ All source modules are retained.
 | `src/pearlalgo/learning/trade_database.py` | KEEP | Trade DB |
 | `src/pearlalgo/market_agent/__init__.py` | KEEP | Market agent |
 | `src/pearlalgo/market_agent/challenge_tracker.py` | KEEP | Challenge tracking |
-| `src/pearlalgo/market_agent/chart_generator.py` | KEEP | Chart generator |
+| `src/pearlalgo/market_agent/live_chart_screenshot.py` | KEEP | Live chart screenshot export |
 | `src/pearlalgo/market_agent/data_fetcher.py` | KEEP | Data fetcher |
 | `src/pearlalgo/market_agent/health_monitor.py` | KEEP | Health monitor |
 | `src/pearlalgo/market_agent/main.py` | KEEP | Agent entrypoint |
@@ -190,7 +188,8 @@ All source modules are retained.
 
 ## `tests/`
 
-All tests are retained.
+Core tests are retained. Legacy **mplfinance chart visual regression** suites were removed
+in favor of the web-based Live Main Chart.
 
 | Path | Decision | Role |
 |------|----------|------|
@@ -198,35 +197,21 @@ All tests are retained.
 | `tests/conftest.py` | KEEP | Pytest fixtures |
 | `tests/mock_data_provider.py` | KEEP | Mock data |
 | `tests/fixtures/__init__.py` | KEEP | Test fixtures |
-| `tests/fixtures/deterministic_data.py` | KEEP | Deterministic data |
-| `tests/fixtures/visual_regression_utils.py` | KEEP | Visual regression helpers |
-| `tests/fixtures/charts/dashboard_baseline.png` | KEEP | Visual baseline |
-| `tests/fixtures/charts/mobile_dashboard_baseline.png` | KEEP | Visual baseline |
-| `tests/fixtures/charts/on_demand_chart_12h_baseline.png` | KEEP | Visual baseline |
-| `tests/fixtures/charts/entry_baseline.png` | KEEP | Visual baseline |
-| `tests/fixtures/charts/exit_baseline.png` | KEEP | Visual baseline |
-| `tests/fixtures/charts/backtest_baseline.png` | KEEP | Visual baseline |
 | `tests/test_ai_patch.py` | KEEP | AI patch tests |
 | `tests/test_async_sqlite_queue.py` | KEEP | Async SQLite tests |
-| `tests/test_backtest_chart_visual_regression.py` | KEEP | Chart regression |
 | `tests/test_bandit_policy.py` | KEEP | Bandit tests |
 | `tests/test_base_cache.py` | KEEP | Cache tests |
 | `tests/test_cadence.py` | KEEP | Cadence tests |
-| `tests/test_chart_edge_cases.py` | KEEP | Chart edge cases |
-| `tests/test_chart_semantic_contracts.py` | KEEP | Chart contracts |
 | `tests/test_config_file.py` | KEEP | Config file tests |
 | `tests/test_config_loader.py` | KEEP | Config loader tests |
 | `tests/test_config_schema.py` | KEEP | Config schema tests |
 | `tests/test_config_wiring.py` | KEEP | Config wiring tests |
-| `tests/test_cross_timeframe_chart_consistency.py` | KEEP | Chart consistency |
 | `tests/test_data_level_dashboard.py` | KEEP | Data level UI |
 | `tests/test_data_level_state.py` | KEEP | Data level state |
 | `tests/test_data_provider_factory.py` | KEEP | Provider factory |
 | `tests/test_data_quality_checker.py` | KEEP | Data quality |
-| `tests/test_dashboard_chart_visual_regression.py` | KEEP | Chart regression |
 | `tests/test_dashboard_pressure_in_home_card.py` | KEEP | Dashboard pressure |
 | `tests/test_edge_cases.py` | KEEP | Edge cases |
-| `tests/test_entry_exit_chart_visual_regression.py` | KEEP | Entry/exit charts |
 | `tests/test_error_handler.py` | KEEP | Error handler |
 | `tests/test_error_recovery.py` | KEEP | Error recovery |
 | `tests/test_execution_adapter.py` | KEEP | Execution adapter |
@@ -240,10 +225,8 @@ All tests are retained.
 | `tests/test_ml_feature_engineer.py` | KEEP | ML feature engineer |
 | `tests/test_ml_filter_artifact.py` | KEEP | ML artifact |
 | `tests/test_ml_trade_database.py` | KEEP | ML trade DB |
-| `tests/test_mobile_chart_visual_regression.py` | KEEP | Mobile chart regression |
 | `tests/test_mtf_cache.py` | KEEP | MTF cache |
 | `tests/test_new_bar_gating.py` | KEEP | New bar gating |
-| `tests/test_on_demand_chart_visual_regression.py` | KEEP | On-demand charts |
 | `tests/test_paths.py` | KEEP | Paths tests |
 | `tests/test_prometheus_metrics.py` | KEEP | Metrics |
 | `tests/test_quiet_dashboard.py` | KEEP | Quiet dashboard |

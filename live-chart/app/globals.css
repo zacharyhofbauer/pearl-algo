@@ -188,6 +188,37 @@ body {
   height: 2px;
 }
 
+/* Marker Legend */
+.marker-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border-color);
+  margin-left: 12px;
+}
+
+.marker-icon {
+  font-size: 10px;
+  margin-right: 1px;
+}
+
+.marker-icon.entry-long {
+  color: var(--accent-green);
+}
+
+.marker-icon.entry-short {
+  color: var(--accent-red);
+}
+
+.marker-icon.exit-win {
+  color: var(--accent-green);
+}
+
+.marker-icon.exit-loss {
+  color: var(--accent-red);
+}
+
 /* Chart container */
 .chart-container {
   flex: 1;
@@ -204,7 +235,7 @@ body {
   border-radius: 8px;
   border: 1px solid var(--border-color);
   overflow: hidden;
-  height: 120px;
+  height: 140px;  /* Increased to accommodate x-axis labels */
 }
 
 .rsi-container {
@@ -223,6 +254,92 @@ body {
   background: var(--bg-secondary);
   padding: 2px 6px;
   border-radius: 4px;
+}
+
+/* Marker Tooltip */
+.marker-tooltip {
+  background: rgba(18, 18, 26, 0.95);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-width: 180px;
+  max-width: 220px;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  transition: opacity 0.15s ease;
+}
+
+.tooltip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tooltip-kind {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.tooltip-kind.entry {
+  color: var(--accent-cyan);
+}
+
+.tooltip-kind.exit {
+  color: var(--accent-purple);
+}
+
+.tooltip-direction {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.tooltip-direction.long {
+  background: rgba(0, 230, 118, 0.15);
+  color: var(--accent-green);
+}
+
+.tooltip-direction.short {
+  background: rgba(255, 82, 82, 0.15);
+  color: var(--accent-red);
+}
+
+.tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.tooltip-label {
+  color: var(--text-secondary);
+}
+
+.tooltip-value {
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.tooltip-value.positive {
+  color: var(--accent-green);
+}
+
+.tooltip-value.negative {
+  color: var(--accent-red);
+}
+
+.tooltip-reason {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.4;
+  word-wrap: break-word;
 }
 
 /* Loading state */

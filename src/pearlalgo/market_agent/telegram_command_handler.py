@@ -59,9 +59,14 @@ from pearlalgo.utils.pearl_suggestions import (
     get_suggestion_engine,
 )
 from pearlalgo.config.config_loader import load_service_config
+from pearlalgo.market_agent.live_chart_screenshot import capture_live_chart_screenshot
 
 try:
     from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+    try:
+        from telegram import WebAppInfo
+    except Exception:  # pragma: no cover
+        WebAppInfo = None  # type: ignore[assignment]
     from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
     try:
         from telegram.request import HTTPXRequest
@@ -70,6 +75,7 @@ try:
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
+    WebAppInfo = None  # type: ignore[assignment]
     logger.warning("python-telegram-bot not installed, command handler disabled")
 
 
@@ -498,20 +504,42 @@ class TelegramCommandHandler:
         keyboard = []
         
         # Main menu buttons
-        keyboard.extend([
+        keyboard.extend(
             [
-                InlineKeyboardButton(activity_label, callback_data="menu:activity"),
-                InlineKeyboardButton(system_label, callback_data="menu:system"),
-            ],
-            [
-                InlineKeyboardButton(health_label, callback_data="menu:status"),
-                InlineKeyboardButton(settings_label, callback_data="menu:settings"),
-            ],
+                [
+                    InlineKeyboardButton(activity_label, callback_data="menu:activity"),
+                    InlineKeyboardButton(system_label, callback_data="menu:system"),
+                ],
+                [
+                    InlineKeyboardButton(health_label, callback_data="menu:status"),
+                    InlineKeyboardButton(settings_label, callback_data="menu:settings"),
+                ],
+            ]
+        )
+
+        # Optional: in-Telegram Mini App (opens the Live Chart without leaving Telegram).
+        mini_app_url = (
+            os.getenv("PEARL_MINI_APP_URL")
+            or os.getenv("PEARL_MINIAPP_URL")
+            or os.getenv("PEARL_LIVE_CHART_PUBLIC_URL")
+        )
+        if mini_app_url:
+            try:
+                if WebAppInfo is not None:
+                    keyboard.append(
+                        [InlineKeyboardButton("📈 Live", web_app=WebAppInfo(url=str(mini_app_url)))]
+                    )
+                else:
+                    keyboard.append([InlineKeyboardButton("📈 Live", url=str(mini_app_url))])
+            except Exception:
+                pass
+
+        keyboard.append(
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data="action:refresh_dashboard"),
                 InlineKeyboardButton(chart_button_label, callback_data="action:refresh_chart"),
-            ],
-        ])
+            ]
+        )
         
         return keyboard
 
@@ -1672,29 +1700,27 @@ class TelegramCommandHandler:
         allow_refresh: bool = False,
     ) -> Optional[Path]:
         """
-        Use the latest exported dashboard chart.
+        Return a cached Live Main Chart screenshot for Telegram.
 
-        To keep the chart *fresh* without re-rendering constantly, the Telegram UI can
-        request an on-demand refresh from the running agent service via a simple flag
-        file (`dashboard_chart_refresh.flag`). The service owns chart generation and
-        updates `exports/dashboard_telegram_latest.png` atomically.
+        This stores the latest screenshot at:
+          `exports/dashboard_telegram_latest.png`
 
-        We intentionally do **not** fall back to any legacy dashboard filenames to avoid
-        showing stale/incorrect aspect ratios on mobile.
+        If `allow_refresh=True`, we refresh the screenshot when:
+        - it is missing, or
+        - it is stale vs `state.latest_bar_timestamp`, or
+        - `force_refresh=True`.
         """
         telegram_chart = self.exports_dir / "dashboard_telegram_latest.png"
 
-        # If refresh is disabled for this call, use latest on disk only.
-        if not allow_refresh:
-            return telegram_chart if telegram_chart.exists() else None
-
-        # If the agent isn't running, we can't request generation—just return whatever exists.
+        chart_exists = False
         try:
-            if not bool(self._is_agent_process_running()):
-                return telegram_chart if telegram_chart.exists() else None
+            chart_exists = telegram_chart.exists()
         except Exception:
-            # Best-effort: proceed without process check
-            pass
+            chart_exists = False
+
+        # Fast path: if we have a chart and refresh is disabled, return it.
+        if chart_exists and (not allow_refresh) and (not force_refresh):
+            return telegram_chart
 
         # Determine chart staleness using state.latest_bar_timestamp (UTC) vs chart file mtime (UTC).
         latest_bar_ts = None
@@ -1726,140 +1752,51 @@ class TelegramCommandHandler:
 
         prev_mtime = None
         try:
-            if telegram_chart.exists():
+            if chart_exists:
                 prev_mtime = float(telegram_chart.stat().st_mtime)
         except Exception:
             prev_mtime = None
 
-        should_request_refresh = bool(force_refresh)
-        if (not should_request_refresh) and data_is_fresh:
-            if not telegram_chart.exists():
-                should_request_refresh = True
-            else:
-                try:
-                    chart_mtime = datetime.fromtimestamp(float(prev_mtime or 0.0), tz=timezone.utc)
-                    # Refresh if chart is meaningfully behind the latest bar timestamp.
-                    # (90s buffer avoids regenerating on every minor state write.)
-                    if latest_bar_ts and (latest_bar_ts - chart_mtime).total_seconds() > 90.0:
-                        should_request_refresh = True
-                except Exception:
-                    should_request_refresh = False
-
-        if should_request_refresh:
-            flag_file = self.state_dir / "dashboard_chart_refresh.flag"
+        # Always capture if missing, optionally refresh when stale.
+        should_refresh = bool(force_refresh) or (not chart_exists)
+        if (not should_refresh) and allow_refresh and data_is_fresh and latest_bar_ts and prev_mtime is not None:
             try:
-                # Avoid flag spam: if a recent request exists, don't overwrite it.
-                fresh_flag = False
-                if flag_file.exists():
-                    try:
-                        mtime = datetime.fromtimestamp(flag_file.stat().st_mtime, tz=timezone.utc)
-                        fresh_flag = (datetime.now(timezone.utc) - mtime).total_seconds() < 15.0
-                    except Exception:
-                        fresh_flag = False
-                if not fresh_flag:
-                    flag_file.write_text(
-                        f"requested_at={datetime.now(timezone.utc).isoformat()}\nrequested_by=telegram_dashboard\nforce={1 if force_refresh else 0}\n",
-                        encoding="utf-8",
-                    )
+                chart_mtime = datetime.fromtimestamp(float(prev_mtime or 0.0), tz=timezone.utc)
+                # Refresh if chart is meaningfully behind the latest bar timestamp.
+                # (90s buffer avoids regenerating on every minor state write.)
+                if (latest_bar_ts - chart_mtime).total_seconds() > 90.0:
+                    should_refresh = True
+            except Exception:
+                should_refresh = False
+
+        # Basic rate-limit (prevents rapid refresh spam unless forced).
+        if should_refresh and (not force_refresh) and prev_mtime is not None:
+            try:
+                age_sec = (datetime.now(timezone.utc) - datetime.fromtimestamp(float(prev_mtime), tz=timezone.utc)).total_seconds()
+                if age_sec < 10.0:
+                    should_refresh = False
             except Exception:
                 pass
 
-            # Wait briefly for the agent to export the refreshed chart.
-            wait_seconds = 35 if force_refresh else 12
-            deadline = datetime.now(timezone.utc) + timedelta(seconds=wait_seconds)
-            while datetime.now(timezone.utc) < deadline:
-                try:
-                    if telegram_chart.exists():
-                        new_mtime = float(telegram_chart.stat().st_mtime)
-                        if prev_mtime is None or new_mtime > float(prev_mtime):
-                            break
-                except Exception:
-                    pass
-                await asyncio.sleep(0.5)
+        if should_refresh:
+            try:
+                captured = await self._capture_live_chart_screenshot(output_path=telegram_chart)
+                if captured and captured.exists():
+                    return captured
+            except Exception as e:
+                logger.debug(f"Live chart screenshot capture failed: {e}")
 
         return telegram_chart if telegram_chart.exists() else None
 
-    async def _capture_live_chart_screenshot(self) -> Optional[Path]:
+    async def _capture_live_chart_screenshot(self, *, output_path: Path) -> Optional[Path]:
         """
-        Capture a screenshot of the Live Main Chart using Playwright.
-        
-        This is an alternative to the matplotlib-generated charts.
-        Requires:
-          - Live Chart running at http://localhost:3000
-          - playwright installed (pip install playwright && playwright install chromium)
-        
-        Returns:
-            Path to the screenshot file, or None if capture failed.
-        """
-        screenshot_path = self.exports_dir / "live_chart_screenshot.png"
-        chart_url = os.getenv("PEARL_LIVE_CHART_URL", "http://localhost:3001")
-        
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError:
-            logger.warning("Playwright not installed. Run: pip install playwright && playwright install chromium")
-            return None
-        
-        try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                page = await browser.new_page(viewport={"width": 1200, "height": 800})
-                
-                # Navigate to Live Main Chart
-                await page.goto(chart_url, wait_until="networkidle", timeout=15000)
-                
-                # Wait for chart canvas to render
-                try:
-                    await page.wait_for_selector("canvas", timeout=10000)
-                    # Extra wait for chart data to load
-                    await asyncio.sleep(1.5)
-                except Exception:
-                    logger.warning("Chart canvas not found, taking screenshot anyway")
-                
-                # Capture screenshot
-                await page.screenshot(path=str(screenshot_path), type="png")
-                await browser.close()
-                
-            if screenshot_path.exists():
-                logger.info(f"Live chart screenshot captured: {screenshot_path}")
-                return screenshot_path
-            return None
-            
-        except Exception as e:
-            logger.error(f"Failed to capture live chart screenshot: {e}")
-            return None
+        Capture a screenshot of the Live Main Chart (PNG) for Telegram.
 
-    async def _get_chart_with_fallback(
-        self,
-        state: dict,
-        force_refresh: bool = False,
-        prefer_live_chart: bool = False,
-    ) -> Optional[Path]:
+        Requires Playwright:
+          pip install playwright && playwright install chromium
         """
-        Get chart image, preferring Live Main Chart screenshot with matplotlib fallback.
-        
-        Args:
-            state: Current agent state dict
-            force_refresh: Force regeneration even if chart is fresh
-            prefer_live_chart: If True, try live chart screenshot first (set via PEARL_USE_LIVE_CHART=1)
-            
-        Returns:
-            Path to chart image, or None if unavailable.
-        """
-        # Check environment variable to enable Live Main Chart mode
-        use_live_chart = os.getenv("PEARL_USE_LIVE_CHART", "0") == "1" or prefer_live_chart
-        
-        # Try Live Main Chart screenshot first if enabled
-        if use_live_chart:
-            try:
-                chart_path = await self._capture_live_chart_screenshot()
-                if chart_path and chart_path.exists():
-                    return chart_path
-            except Exception as e:
-                logger.debug(f"Live chart screenshot failed, using matplotlib fallback: {e}")
-        
-        # Fallback to matplotlib-generated chart
-        return await self._generate_or_get_chart(state, force_refresh=force_refresh, allow_refresh=True)
+        chart_url = os.getenv("PEARL_LIVE_CHART_URL", "http://localhost:3001")
+        return await capture_live_chart_screenshot(output_path=Path(output_path), url=str(chart_url))
 
     async def _show_status_menu(self, query: CallbackQuery) -> None:
         """Show health & diagnostics submenu."""
@@ -4181,7 +4118,7 @@ class TelegramCommandHandler:
                 # Fast refresh: reuse cached chart unless missing/stale (auto-if-stale behavior).
                 await self._show_main_menu_with_chart(query, force_chart_refresh=False)
             elif action_type == "refresh_chart":
-                # Force regenerate the exported Telegram chart via the agent service flag.
+                # Force recapture the Live Main Chart screenshot.
                 try:
                     await query.answer("⏳ Refreshing chart...")
                 except Exception:

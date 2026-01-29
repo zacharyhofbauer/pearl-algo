@@ -309,10 +309,29 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS middleware for local development
+def _cors_origins() -> list[str]:
+    """
+    Allowed web origins for the Live Chart UI.
+
+    - Local dev defaults include localhost ports.
+    - For Telegram Mini App / production deployments, set:
+        PEARL_LIVE_CHART_ORIGINS="https://your-domain.com,https://another-domain.com"
+    """
+    raw = str(os.getenv("PEARL_LIVE_CHART_ORIGINS") or "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    return [
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001", "http://127.0.0.1:3001", "http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -424,7 +443,7 @@ async def get_indicators(
 async def get_markers(
     hours: int = Query(default=6, ge=1, le=24, description="Hours of markers to return"),
 ):
-    """Get trade entry/exit markers for chart overlay."""
+    """Get trade entry/exit markers for chart overlay with tooltip metadata."""
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
     
@@ -437,6 +456,11 @@ async def get_markers(
     
     markers = []
     for s in signals:
+        direction = s.get("direction", "long")
+        signal_id = s.get("signal_id", "")
+        signal_data = s.get("signal", {})
+        reason = signal_data.get("reason", "") if isinstance(signal_data, dict) else ""
+        
         # Entry marker
         entry_time = s.get("entry_time")
         if entry_time:
@@ -444,11 +468,18 @@ async def get_markers(
                 entry_ts = datetime.fromisoformat(entry_time.replace("Z", "+00:00")).timestamp()
                 if entry_ts >= cutoff_ts:
                     markers.append({
+                        # TradingView marker fields
                         "time": int(entry_ts),
-                        "position": "belowBar" if s.get("direction") == "long" else "aboveBar",
-                        "color": "#00e676" if s.get("direction") == "long" else "#ff5252",
-                        "shape": "arrowUp" if s.get("direction") == "long" else "arrowDown",
-                        "text": f"Entry {s.get('signal_id', '')[:6]}",
+                        "position": "belowBar" if direction == "long" else "aboveBar",
+                        "color": "#00e676" if direction == "long" else "#ff5252",
+                        "shape": "arrowUp" if direction == "long" else "arrowDown",
+                        "text": "",  # Minimal - tooltip provides detail
+                        # Tooltip metadata
+                        "kind": "entry",
+                        "signal_id": signal_id,
+                        "direction": direction,
+                        "entry_price": s.get("entry_price"),
+                        "reason": reason,
                     })
             except Exception:
                 pass
@@ -460,13 +491,21 @@ async def get_markers(
                 exit_ts = datetime.fromisoformat(exit_time.replace("Z", "+00:00")).timestamp()
                 if exit_ts >= cutoff_ts:
                     pnl = s.get("pnl", 0)
-                    is_win = pnl > 0
+                    is_win = pnl > 0 if pnl else False
                     markers.append({
+                        # TradingView marker fields
                         "time": int(exit_ts),
-                        "position": "aboveBar" if s.get("direction") == "long" else "belowBar",
+                        "position": "aboveBar" if direction == "long" else "belowBar",
                         "color": "#00e676" if is_win else "#ff5252",
                         "shape": "circle",
-                        "text": f"Exit ${pnl:+.0f}" if pnl else "Exit",
+                        "text": "",  # Minimal - tooltip provides detail
+                        # Tooltip metadata
+                        "kind": "exit",
+                        "signal_id": signal_id,
+                        "direction": direction,
+                        "exit_price": s.get("exit_price"),
+                        "pnl": pnl,
+                        "exit_reason": s.get("exit_reason", ""),
                     })
             except Exception:
                 pass

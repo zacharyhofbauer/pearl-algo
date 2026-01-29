@@ -279,25 +279,28 @@ A web-based TradingView chart interface for real-time market visualization.
 ./scripts/live-chart/stop.sh
 ```
 
-**Enable Telegram screenshot capture** (uses the web chart instead of matplotlib):
+**Telegram dashboard screenshot**
 
-```bash
-export PEARL_USE_LIVE_CHART=1
-./scripts/telegram/restart_command_handler.sh --background
-```
+The Telegram dashboard uses a **Live Main Chart screenshot** saved at:
+`data/agent_state/<MARKET>/exports/dashboard_telegram_latest.png`
+
+Requirements (only if you want the screenshot image in Telegram):
+- Playwright: `pip install playwright && playwright install chromium`
+- Live chart running and reachable at `PEARL_LIVE_CHART_URL`
 
 **Environment variables:**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PEARL_USE_LIVE_CHART` | `0` | Set to `1` to capture screenshots from web chart |
 | `PEARL_LIVE_CHART_URL` | `http://localhost:3001` | URL of the Live Main Chart |
+| `PEARL_MINI_APP_URL` | *(unset)* | Public HTTPS URL for the Telegram Mini App “📈 Live” button |
+| `PEARL_LIVE_CHART_ORIGINS` | *(unset)* | Comma-separated CORS origins for `scripts/live-chart/api_server.py` |
 | `PEARL_API_PORT` | `8000` | Port for the chart API server |
 | `PEARL_CHART_PORT` | `3001` | Port for the chart web interface |
 
 **Requirements:**
 - Node.js 18+ (for Next.js)
-- Playwright (`pip install playwright && playwright install chromium`) for screenshot capture
+- Playwright (optional) for screenshot capture
 
 ---
 

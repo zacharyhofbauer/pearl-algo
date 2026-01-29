@@ -103,7 +103,6 @@ def test_home_card_active_trades_appends_unrealized_pnl_suffix() -> None:
 async def test_entry_exit_notifications_disable_dedupe() -> None:
     notifier = MarketAgentTelegramNotifier(enabled=False)
     notifier.enabled = True
-    notifier.chart_generator = None  # avoid chart generation in this unit test
     notifier.telegram = MagicMock()
     notifier.telegram.send_message = AsyncMock(return_value=True)
 

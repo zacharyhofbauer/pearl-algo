@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi } from 'lightweight-charts'
 
 interface CandleData {
@@ -23,6 +23,15 @@ interface MarkerData {
   color: string
   shape: 'arrowUp' | 'arrowDown' | 'circle'
   text: string
+  // Tooltip metadata
+  kind?: 'entry' | 'exit'
+  signal_id?: string
+  direction?: string
+  entry_price?: number
+  exit_price?: number
+  pnl?: number
+  reason?: string
+  exit_reason?: string
 }
 
 interface ChartProps {
@@ -36,6 +45,13 @@ interface ChartProps {
   markers?: MarkerData[]
 }
 
+interface TooltipState {
+  visible: boolean
+  x: number
+  y: number
+  marker: MarkerData | null
+}
+
 export default function CandlestickChart({ data, indicators, markers }: ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -44,6 +60,25 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
   const ema9SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const ema21SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  
+  const [tooltip, setTooltip] = useState<TooltipState>({
+    visible: false,
+    x: 0,
+    y: 0,
+    marker: null,
+  })
+
+  // Build a lookup map for markers by time
+  const markersByTime = useMemo(() => {
+    const map = new Map<number, MarkerData[]>()
+    if (!markers) return map
+    for (const m of markers) {
+      const existing = map.get(m.time) || []
+      existing.push(m)
+      map.set(m.time, existing)
+    }
+    return map
+  }, [markers])
 
   // Initialize chart
   useEffect(() => {
@@ -65,11 +100,12 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
         scaleMargins: { top: 0.1, bottom: 0.2 },
       },
       timeScale: {
+        visible: false,  // Hide x-axis - RSI panel shows the timeline
         borderColor: '#2a2a3a',
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 8,  // Empty space (bars) to the right of the last candle
-        barSpacing: 8,   // Space between bars
+        rightOffset: 8,
+        barSpacing: 8,
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -88,7 +124,7 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
       },
     })
 
-    // Candlestick series with price line extending to right
+    // Candlestick series
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#00e676',
       downColor: '#ff5252',
@@ -100,17 +136,17 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
       priceLineVisible: true,
       priceLineWidth: 1,
       priceLineColor: '#ff5252',
-      priceLineStyle: 2,  // Dashed line extending to right edge
+      priceLineStyle: 2,
     })
 
-    // Volume series (histogram at bottom - increased height)
+    // Volume series
     const volumeSeries = chart.addHistogramSeries({
       color: '#26a69a',
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
     })
     volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.75, bottom: 0 },  // Taller volume bars (was 0.85)
+      scaleMargins: { top: 0.75, bottom: 0 },
     })
 
     // EMA 9 line (cyan)
@@ -135,7 +171,7 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
     const vwapSeries = chart.addLineSeries({
       color: '#ab47bc',
       lineWidth: 2,
-      lineStyle: 2, // Dashed
+      lineStyle: 2,
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
@@ -165,13 +201,64 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
     }
   }, [])
 
+  // Subscribe to crosshair move for tooltip
+  useEffect(() => {
+    if (!chartRef.current || !containerRef.current) return
+
+    const chart = chartRef.current
+    const container = containerRef.current
+
+    const handleCrosshairMove = (param: any) => {
+      if (!param.time || !param.point) {
+        setTooltip((prev) => ({ ...prev, visible: false }))
+        return
+      }
+
+      const time = typeof param.time === 'object' ? param.time.valueOf() : param.time
+      const markersAtTime = markersByTime.get(time)
+
+      if (markersAtTime && markersAtTime.length > 0) {
+        // Show tooltip near the crosshair
+        const containerRect = container.getBoundingClientRect()
+        let x = param.point.x + 15
+        let y = param.point.y - 10
+
+        // Clamp to container bounds
+        const tooltipWidth = 220
+        const tooltipHeight = 120
+        if (x + tooltipWidth > containerRect.width) {
+          x = param.point.x - tooltipWidth - 15
+        }
+        if (y + tooltipHeight > containerRect.height) {
+          y = containerRect.height - tooltipHeight - 10
+        }
+        if (y < 10) y = 10
+        if (x < 10) x = 10
+
+        setTooltip({
+          visible: true,
+          x,
+          y,
+          marker: markersAtTime[0], // Show first marker if multiple
+        })
+      } else {
+        setTooltip((prev) => ({ ...prev, visible: false }))
+      }
+    }
+
+    chart.subscribeCrosshairMove(handleCrosshairMove)
+
+    return () => {
+      chart.unsubscribeCrosshairMove(handleCrosshairMove)
+    }
+  }, [markersByTime])
+
   // Update candle data
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !data?.length) return
 
     candleSeriesRef.current.setData(data)
 
-    // Volume data with color based on candle direction
     const volumeData = data.map((d) => ({
       time: d.time,
       value: d.volume || 0,
@@ -179,7 +266,6 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
     }))
     volumeSeriesRef.current.setData(volumeData)
 
-    // Scroll to show latest with right offset preserved
     chartRef.current?.timeScale().scrollToRealTime()
   }, [data])
 
@@ -201,7 +287,7 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
   // Update markers
   useEffect(() => {
     if (!candleSeriesRef.current || !markers?.length) return
-    
+
     try {
       candleSeriesRef.current.setMarkers(
         markers.map((m) => ({
@@ -217,7 +303,81 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
     }
   }, [markers])
 
+  // Format price
+  const formatPrice = (price?: number) => {
+    if (price === undefined || price === null) return '—'
+    return price.toFixed(2)
+  }
+
+  // Format PnL
+  const formatPnL = (pnl?: number) => {
+    if (pnl === undefined || pnl === null) return '—'
+    const sign = pnl >= 0 ? '+' : ''
+    return `${sign}$${pnl.toFixed(2)}`
+  }
+
+  // Truncate reason string
+  const truncateReason = (reason?: string, maxLen = 60) => {
+    if (!reason) return ''
+    if (reason.length <= maxLen) return reason
+    return reason.slice(0, maxLen) + '…'
+  }
+
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', minHeight: 500 }} />
+    <div ref={containerRef} style={{ width: '100%', height: '100%', minHeight: 500, position: 'relative' }}>
+      {/* Marker Tooltip */}
+      {tooltip.visible && tooltip.marker && (
+        <div
+          className="marker-tooltip"
+          style={{
+            position: 'absolute',
+            left: tooltip.x,
+            top: tooltip.y,
+            pointerEvents: 'none',
+          }}
+        >
+          <div className="tooltip-header">
+            <span className={`tooltip-kind ${tooltip.marker.kind}`}>
+              {tooltip.marker.kind === 'entry' ? '▶ Entry' : '◀ Exit'}
+            </span>
+            <span className={`tooltip-direction ${tooltip.marker.direction}`}>
+              {tooltip.marker.direction?.toUpperCase()}
+            </span>
+          </div>
+          <div className="tooltip-row">
+            <span className="tooltip-label">ID</span>
+            <span className="tooltip-value">{tooltip.marker.signal_id?.slice(0, 16)}…</span>
+          </div>
+          {tooltip.marker.kind === 'entry' && (
+            <>
+              <div className="tooltip-row">
+                <span className="tooltip-label">Price</span>
+                <span className="tooltip-value">{formatPrice(tooltip.marker.entry_price)}</span>
+              </div>
+              {tooltip.marker.reason && (
+                <div className="tooltip-reason">{truncateReason(tooltip.marker.reason)}</div>
+              )}
+            </>
+          )}
+          {tooltip.marker.kind === 'exit' && (
+            <>
+              <div className="tooltip-row">
+                <span className="tooltip-label">Price</span>
+                <span className="tooltip-value">{formatPrice(tooltip.marker.exit_price)}</span>
+              </div>
+              <div className="tooltip-row">
+                <span className="tooltip-label">P&L</span>
+                <span className={`tooltip-value ${(tooltip.marker.pnl || 0) >= 0 ? 'positive' : 'negative'}`}>
+                  {formatPnL(tooltip.marker.pnl)}
+                </span>
+              </div>
+              {tooltip.marker.exit_reason && (
+                <div className="tooltip-reason">{tooltip.marker.exit_reason}</div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
   )
 }

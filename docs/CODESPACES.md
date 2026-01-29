@@ -130,9 +130,14 @@ pgrep -f Xvfb || Xvfb :99 -screen 0 1024x768x24 &
 export DISPLAY=:99
 ```
 
-### Tests fail with matplotlib errors
+### Live chart screenshot capture (optional)
 
-Ensure `MPLBACKEND=Agg` is set (automatic in devcontainer).
+Telegram dashboard screenshots use Playwright:
+
+```bash
+pip install playwright
+playwright install chromium
+```
 
 ### Missing dependencies
 

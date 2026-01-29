@@ -353,9 +353,8 @@ Signal Count Incremented
 - **loguru**: 0.7.0+ (Logging)
 - **PyYAML**: 6.0+ (Configuration files)
 - **pytz**: 2024.1+ (Timezone handling)
-- **matplotlib**: 3.8+ (Charting backend)
-- **mplfinance**: 0.12+ (Financial charts)
 - **pyarrow**: 16.0+ (Parquet state persistence)
+- *(Optional)* **Playwright**: Telegram dashboard chart screenshots (`pip install playwright && playwright install chromium`)
 
 ### Development Dependencies
 
@@ -388,7 +387,7 @@ pearlalgo-dev-ai-agents/
 │   │   ├── performance_tracker.py  # Performance metrics
 │   │   ├── telegram_notifier.py    # Telegram notifications
 │   │   ├── telegram_command_handler.py  # Interactive Telegram bot commands (separate service)
-│   │   ├── chart_generator.py    # mplfinance chart generation (optional, Telegram)
+│   │   ├── live_chart_screenshot.py  # Live chart screenshot export (optional, Telegram)
 │   │   ├── health_monitor.py       # Health monitoring
 │   │   └── challenge_tracker.py    # Challenge tracking
 │   ├── trading_bots/ # Trading Bot Strategies
