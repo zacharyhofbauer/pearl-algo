@@ -54,6 +54,17 @@ interface TooltipState {
   marker: MarkerData | null
 }
 
+// Session times in UTC hours (futures trade almost 24h)
+// Overnight/Asian: 23:00 - 08:00 UTC (6pm-3am ET)
+// London: 08:00 - 13:00 UTC (3am-8am ET)  
+// NY RTH: 14:30 - 21:00 UTC (9:30am-4pm ET)
+const getSessionColor = (hour: number): string => {
+  if (hour >= 23 || hour < 8) return 'rgba(30, 60, 114, 0.15)' // Overnight - blue tint
+  if (hour >= 8 && hour < 14) return 'rgba(60, 40, 20, 0.15)' // London - brown tint
+  if (hour >= 14 && hour < 21) return 'rgba(40, 70, 40, 0.15)' // NY RTH - green tint
+  return 'transparent'
+}
+
 export default function CandlestickChart({ data, indicators, markers, barSpacing = 8, onChartReady }: ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -106,7 +117,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
         scaleMargins: { top: 0.1, bottom: 0.2 },
       },
       timeScale: {
-        visible: false,  // Hide x-axis - RSI panel shows the timeline
+        visible: false,
         borderColor: '#2a2a3a',
         timeVisible: true,
         secondsVisible: false,
@@ -130,7 +141,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       },
     })
 
-    // EMA 9 line (cyan) - add first so it's behind candles
+    // EMA 9 line (cyan)
     const ema9Series = chart.addLineSeries({
       color: '#00d4ff',
       lineWidth: 1,
@@ -139,7 +150,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       crosshairMarkerVisible: false,
     })
 
-    // EMA 21 line (yellow) - add second so it's behind candles
+    // EMA 21 line (yellow)
     const ema21Series = chart.addLineSeries({
       color: '#ffc107',
       lineWidth: 1,
@@ -148,7 +159,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       crosshairMarkerVisible: false,
     })
 
-    // VWAP line (purple, dashed) - add third so it's behind candles
+    // VWAP line (purple, dashed)
     const vwapSeries = chart.addLineSeries({
       color: '#ab47bc',
       lineWidth: 2,
@@ -158,18 +169,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       crosshairMarkerVisible: false,
     })
 
-    // Connection line for entry-exit visualization (hidden by default)
-    const connectionLine = chart.addLineSeries({
-      color: '#ffffff',
-      lineWidth: 2,
-      lineStyle: 2, // dashed
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    })
-    connectionLineRef.current = connectionLine
-
-    // Candlestick series - add AFTER indicators so candles render ON TOP
+    // Candlestick series
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#00e676',
       downColor: '#ff5252',
@@ -193,6 +193,17 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     volumeSeries.priceScale().applyOptions({
       scaleMargins: { top: 0.75, bottom: 0 },
     })
+
+    // Connection line - added LAST so it renders ON TOP of everything when hovering
+    const connectionLine = chart.addLineSeries({
+      color: '#00e676',
+      lineWidth: 4,
+      lineStyle: 0, // solid
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    connectionLineRef.current = connectionLine
 
     chartRef.current = chart
     candleSeriesRef.current = candleSeries
@@ -372,11 +383,11 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
         const exitPrice = exit.exit_price || 0
         const isWin = (exit.pnl || 0) >= 0
         
-        // Set line color based on win/loss
+        // Set line color based on win/loss - bright colors to stand out
         connectionLineRef.current.applyOptions({
-          color: isWin ? '#00e676' : '#ff4444',
-          lineWidth: 2,
-          lineStyle: 0, // solid when active
+          color: isWin ? '#00ff88' : '#ff3333',
+          lineWidth: 4,
+          lineStyle: 0, // solid
         })
         
         // Draw line from entry to exit
@@ -404,13 +415,6 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     if (pnl === undefined || pnl === null) return '—'
     const sign = pnl >= 0 ? '+' : ''
     return `${sign}$${pnl.toFixed(2)}`
-  }
-
-  // Truncate reason string
-  const truncateReason = (reason?: string, maxLen = 60) => {
-    if (!reason) return ''
-    if (reason.length <= maxLen) return reason
-    return reason.slice(0, maxLen) + '…'
   }
 
   // Find paired marker (entry finds exit, exit finds entry) for the same signal_id

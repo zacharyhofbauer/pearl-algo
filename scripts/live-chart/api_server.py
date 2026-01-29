@@ -504,9 +504,10 @@ async def get_markers(
     
     markers = []
     for s in signals:
-        direction = s.get("direction", "long")
-        signal_id = s.get("signal_id", "")
         signal_data = s.get("signal", {})
+        # Direction is nested inside signal object
+        direction = signal_data.get("direction", "long") if isinstance(signal_data, dict) else s.get("direction", "long")
+        signal_id = s.get("signal_id", "")
         reason = signal_data.get("reason", "") if isinstance(signal_data, dict) else ""
         
         # Entry marker
@@ -521,8 +522,8 @@ async def get_markers(
                         # TradingView marker fields
                         "time": bar_time,
                         "position": "belowBar" if direction == "long" else "aboveBar",
-                        # Distinct colors: cyan for long entry, magenta for short entry
-                        "color": "#00d4ff" if direction == "long" else "#ff6ec7",
+                        # ENTRY: Blue arrow up for LONG, Red arrow down for SHORT
+                        "color": "#2196F3" if direction == "long" else "#f44336",
                         "shape": "arrowUp" if direction == "long" else "arrowDown",
                         "text": "",  # Minimal - tooltip provides detail
                         # Tooltip metadata
@@ -545,28 +546,18 @@ async def get_markers(
                     is_win = pnl > 0 if pnl else False
                     # Snap to 5-minute bar boundary so marker aligns with candle
                     bar_time = _snap_to_bar(exit_ts, 300)
-                    # Exit colors use SAME COLOR FAMILY as entry to show connection:
-                    # LONG family (cyan/blue tones):
-                    #   Entry: Cyan (#00d4ff)
-                    #   Exit Win: Aquamarine (#7FFFD4) - light cyan = profit
-                    #   Exit Loss: Red (#ff4444) - clear loss indicator
-                    # SHORT family (pink/magenta tones):
-                    #   Entry: Magenta (#ff6ec7)
-                    #   Exit Win: Light Pink (#FFB6C1) - light pink = profit
-                    #   Exit Loss: Red (#ff4444) - clear loss indicator
-                    # Shape: Circle for wins, Square for losses (angular = bad)
-                    if direction == "long":
-                        exit_color = "#7FFFD4" if is_win else "#ff4444"
-                    else:
-                        exit_color = "#FFB6C1" if is_win else "#ff4444"
+                    # EXIT markers: All squares with X
+                    # Win: Green square
+                    # Loss: Dark red/maroon square
+                    exit_color = "#00c853" if is_win else "#b71c1c"
                     
                     markers.append({
                         # TradingView marker fields
                         "time": bar_time,
                         "position": "aboveBar" if direction == "long" else "belowBar",
                         "color": exit_color,
-                        "shape": "circle" if is_win else "square",  # Square = loss
-                        "text": "",  # Minimal - tooltip provides detail
+                        "shape": "square",
+                        "text": "✕",  # X marker for exits
                         # Tooltip metadata
                         "kind": "exit",
                         "signal_id": signal_id,

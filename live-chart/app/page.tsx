@@ -54,12 +54,15 @@ function getApiUrl(): string {
 const REFRESH_INTERVAL = 10000 // 10 seconds
 type Timeframe = '1m' | '5m' | '15m' | '1h'
 
+// Minimum bars to request for a full chart
+const MIN_BARS = 150
+
 // Calculate hours of candle data based on timeframe
 const TIMEFRAME_HOURS: Record<Timeframe, number> = {
-  '1m': 2,
-  '5m': 6,
-  '15m': 12,
-  '1h': 24,
+  '1m': 4,    // 4 hours = 240 bars
+  '5m': 12,   // 12 hours = 144 bars  
+  '15m': 24,  // 24 hours = 96 bars
+  '1h': 48,   // 48 hours = 48 bars
 }
 
 // Always fetch 24 hours of markers so all of today's trades show up
@@ -75,18 +78,20 @@ export default function LiveMainChart() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [isLive, setIsLive] = useState(false)
   const [timeframe, setTimeframe] = useState<Timeframe>('5m')
-  const [barCount, setBarCount] = useState(72)
+  const [barCount, setBarCount] = useState(MIN_BARS)
   const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
   const lastDataHash = useRef<string>('')
 
-  // Calculate bar count based on viewport width
+  // Calculate bar count based on viewport width - always request enough to fill chart
   const calculateBarCount = () => {
-    if (typeof window === 'undefined') return 72
+    if (typeof window === 'undefined') return MIN_BARS
     const width = window.innerWidth
     const barSpacing = 8
     const priceScaleWidth = 60
     const availableWidth = width - priceScaleWidth - 40
-    return Math.max(30, Math.min(200, Math.floor(availableWidth / barSpacing * 0.8)))
+    const visibleBars = Math.floor(availableWidth / barSpacing)
+    // Request 50% more bars than visible to allow scrolling, with minimum
+    return Math.max(MIN_BARS, Math.floor(visibleBars * 1.5))
   }
 
   // Update bar count on resize
@@ -107,11 +112,14 @@ export default function LiveMainChart() {
 
   const fetchData = async (tf: Timeframe, bars: number) => {
     try {
+      // Ensure we always request at least MIN_BARS
+      const requestBars = Math.max(MIN_BARS, bars)
+      
       // Fetch all data in parallel
       const apiUrl = getApiUrl()
       const [candlesRes, indicatorsRes, markersRes, stateRes] = await Promise.all([
-        fetch(`${apiUrl}/api/candles?symbol=MNQ&timeframe=${tf}&bars=${bars}`),
-        fetch(`${apiUrl}/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${bars}`),
+        fetch(`${apiUrl}/api/candles?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
+        fetch(`${apiUrl}/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
         fetch(`${apiUrl}/api/markers?hours=${MARKER_HOURS}`),
         fetch(`${apiUrl}/api/state`),
       ])
@@ -156,11 +164,15 @@ export default function LiveMainChart() {
       setLastUpdate(new Date())
       setIsLive(true)
       setError(null)
+      
+      // Only clear loading if we have sufficient data
+      if (candlesData.length >= MIN_BARS * 0.8) {
+        setLoading(false)
+      }
     } catch (err) {
       console.error('Failed to fetch data:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch')
       setIsLive(false)
-    } finally {
       setLoading(false)
     }
   }
