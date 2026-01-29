@@ -15,9 +15,9 @@ async def capture_live_chart_screenshot(
     output_path: Path,
     url: str,
     viewport: Tuple[int, int] = DEFAULT_VIEWPORT,
-    timeout_ms: int = 15_000,
-    wait_for_selector: str = "canvas",
-    extra_wait_seconds: float = 1.5,
+    timeout_ms: int = 20_000,
+    wait_for_selector: str = '[data-chart-ready="true"]',
+    extra_wait_seconds: float = 1.0,
 ) -> Optional[Path]:
     """
     Capture a PNG screenshot of the Live Main Chart.
@@ -28,6 +28,7 @@ async def capture_live_chart_screenshot(
     - Requires Playwright:
         pip install playwright && playwright install chromium
     - `url` must be reachable from this process.
+    - Waits for data-chart-ready="true" attribute which indicates chart data is loaded.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,10 +53,18 @@ async def capture_live_chart_screenshot(
             )
 
             await page.goto(url, wait_until="networkidle", timeout=int(timeout_ms))
+            
+            # Wait for chart to be fully loaded (data-chart-ready="true")
             try:
                 await page.wait_for_selector(wait_for_selector, timeout=int(timeout_ms))
+                logger.debug("Chart ready indicator found")
             except Exception:
-                logger.debug(f"Selector not found for screenshot: {wait_for_selector}")
+                # Fallback: wait for canvas if chart-ready not found
+                logger.debug(f"Chart ready selector not found, falling back to canvas")
+                try:
+                    await page.wait_for_selector("canvas", timeout=5000)
+                except Exception:
+                    pass
 
             if extra_wait_seconds and extra_wait_seconds > 0:
                 await asyncio.sleep(float(extra_wait_seconds))

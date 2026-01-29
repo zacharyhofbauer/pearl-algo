@@ -62,6 +62,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
   const ema9SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const ema21SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const connectionLineRef = useRef<ISeriesApi<'Line'> | null>(null)
   
   const [tooltip, setTooltip] = useState<TooltipState>({
     visible: false,
@@ -69,6 +70,9 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     y: 0,
     marker: null,
   })
+  
+  // Track the active signal for highlighting
+  const [activeSignalId, setActiveSignalId] = useState<string | null>(null)
 
   // Build a lookup map for markers by time
   const markersByTime = useMemo(() => {
@@ -154,6 +158,17 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       crosshairMarkerVisible: false,
     })
 
+    // Connection line for entry-exit visualization (hidden by default)
+    const connectionLine = chart.addLineSeries({
+      color: '#ffffff',
+      lineWidth: 2,
+      lineStyle: 2, // dashed
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+    connectionLineRef.current = connectionLine
+
     // Candlestick series - add AFTER indicators so candles render ON TOP
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#00e676',
@@ -217,6 +232,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     const handleCrosshairMove = (param: any) => {
       if (!param.time || !param.point) {
         setTooltip((prev) => ({ ...prev, visible: false }))
+        setActiveSignalId(null)
         return
       }
 
@@ -224,14 +240,16 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       const markersAtTime = markersByTime.get(time)
 
       if (markersAtTime && markersAtTime.length > 0) {
+        const marker = markersAtTime[0]
+        
         // Show tooltip near the crosshair
         const containerRect = container.getBoundingClientRect()
         let x = param.point.x + 15
         let y = param.point.y - 10
 
         // Clamp to container bounds
-        const tooltipWidth = 220
-        const tooltipHeight = 120
+        const tooltipWidth = 240
+        const tooltipHeight = 160
         if (x + tooltipWidth > containerRect.width) {
           x = param.point.x - tooltipWidth - 15
         }
@@ -245,10 +263,12 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
           visible: true,
           x,
           y,
-          marker: markersAtTime[0], // Show first marker if multiple
+          marker,
         })
+        setActiveSignalId(marker.signal_id || null)
       } else {
         setTooltip((prev) => ({ ...prev, visible: false }))
+        setActiveSignalId(null)
       }
     }
 
@@ -312,13 +332,20 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     }
   }, [indicators])
 
-  // Update markers
+  // Update markers - filter when hovering to show only active trade
   useEffect(() => {
     if (!candleSeriesRef.current || !markers?.length) return
 
     try {
+      let displayMarkers = markers
+      
+      // When hovering, only show the active trade pair (entry + exit)
+      if (activeSignalId) {
+        displayMarkers = markers.filter(m => m.signal_id === activeSignalId)
+      }
+      
       candleSeriesRef.current.setMarkers(
-        markers.map((m) => ({
+        displayMarkers.map((m) => ({
           time: m.time as any,
           position: m.position,
           color: m.color,
@@ -329,7 +356,42 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     } catch (e) {
       console.warn('Failed to set markers:', e)
     }
-  }, [markers])
+  }, [markers, activeSignalId])
+
+  // Draw connection line between entry and exit when hovering
+  useEffect(() => {
+    if (!connectionLineRef.current || !markers) return
+
+    if (activeSignalId) {
+      // Find entry and exit for this trade
+      const entry = markers.find(m => m.signal_id === activeSignalId && m.kind === 'entry')
+      const exit = markers.find(m => m.signal_id === activeSignalId && m.kind === 'exit')
+      
+      if (entry && exit) {
+        const entryPrice = entry.entry_price || 0
+        const exitPrice = exit.exit_price || 0
+        const isWin = (exit.pnl || 0) >= 0
+        
+        // Set line color based on win/loss
+        connectionLineRef.current.applyOptions({
+          color: isWin ? '#00e676' : '#ff4444',
+          lineWidth: 2,
+          lineStyle: 0, // solid when active
+        })
+        
+        // Draw line from entry to exit
+        connectionLineRef.current.setData([
+          { time: entry.time as Time, value: entryPrice },
+          { time: exit.time as Time, value: exitPrice },
+        ])
+      } else {
+        connectionLineRef.current.setData([])
+      }
+    } else {
+      // Clear connection line when not hovering
+      connectionLineRef.current.setData([])
+    }
+  }, [activeSignalId, markers])
 
   // Format price
   const formatPrice = (price?: number) => {
@@ -351,12 +413,26 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     return reason.slice(0, maxLen) + '…'
   }
 
+  // Find paired marker (entry finds exit, exit finds entry) for the same signal_id
+  const findPairedMarker = (marker: MarkerData) => {
+    if (!markers) return null
+    return markers.find(m => 
+      m.signal_id === marker.signal_id && m.kind !== marker.kind
+    ) || null
+  }
+
+  const pairedMarker = tooltip.marker ? findPairedMarker(tooltip.marker) : null
+
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', minHeight: 500, position: 'relative' }}>
+    <div 
+      ref={containerRef} 
+      className={`chart-container-inner ${activeSignalId ? 'trade-focused' : ''}`}
+      style={{ width: '100%', height: '100%', minHeight: 500, position: 'relative' }}
+    >
       {/* Marker Tooltip */}
       {tooltip.visible && tooltip.marker && (
         <div
-          className="marker-tooltip"
+          className={`marker-tooltip ${(tooltip.marker.pnl || pairedMarker?.pnl || 0) >= 0 ? 'win' : 'loss'}`}
           style={{
             position: 'absolute',
             left: tooltip.x,
@@ -364,46 +440,51 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
             pointerEvents: 'none',
           }}
         >
+          {/* Header */}
           <div className="tooltip-header">
-            <span className={`tooltip-kind ${tooltip.marker.kind}`}>
-              {tooltip.marker.kind === 'entry' ? '▶ Entry' : '◀ Exit'}
-            </span>
             <span className={`tooltip-direction ${tooltip.marker.direction}`}>
               {tooltip.marker.direction?.toUpperCase()}
             </span>
+            <span className={`tooltip-kind ${tooltip.marker.kind}`}>
+              {tooltip.marker.kind === 'entry' ? 'ENTRY' : 'EXIT'}
+            </span>
           </div>
-          <div className="tooltip-row">
-            <span className="tooltip-label">ID</span>
-            <span className="tooltip-value">{tooltip.marker.signal_id?.slice(0, 16)}…</span>
-          </div>
-          {tooltip.marker.kind === 'entry' && (
-            <>
+          
+          {/* Trade details - always show both entry and exit */}
+          <div className="tooltip-body">
+            <div className="tooltip-row">
+              <span className="tooltip-label">Entry</span>
+              <span className="tooltip-value">
+                {formatPrice(tooltip.marker.kind === 'entry' ? tooltip.marker.entry_price : pairedMarker?.entry_price)}
+              </span>
+            </div>
+            
+            {(tooltip.marker.kind === 'exit' || pairedMarker) && (
               <div className="tooltip-row">
-                <span className="tooltip-label">Price</span>
-                <span className="tooltip-value">{formatPrice(tooltip.marker.entry_price)}</span>
-              </div>
-              {tooltip.marker.reason && (
-                <div className="tooltip-reason">{truncateReason(tooltip.marker.reason)}</div>
-              )}
-            </>
-          )}
-          {tooltip.marker.kind === 'exit' && (
-            <>
-              <div className="tooltip-row">
-                <span className="tooltip-label">Price</span>
-                <span className="tooltip-value">{formatPrice(tooltip.marker.exit_price)}</span>
-              </div>
-              <div className="tooltip-row">
-                <span className="tooltip-label">P&L</span>
-                <span className={`tooltip-value ${(tooltip.marker.pnl || 0) >= 0 ? 'positive' : 'negative'}`}>
-                  {formatPnL(tooltip.marker.pnl)}
+                <span className="tooltip-label">Exit</span>
+                <span className="tooltip-value">
+                  {formatPrice(tooltip.marker.kind === 'exit' ? tooltip.marker.exit_price : pairedMarker?.exit_price)}
                 </span>
               </div>
-              {tooltip.marker.exit_reason && (
-                <div className="tooltip-reason">{tooltip.marker.exit_reason}</div>
-              )}
-            </>
-          )}
+            )}
+            
+            {/* P&L - prominent */}
+            {(tooltip.marker.pnl !== undefined || pairedMarker?.pnl !== undefined) && (
+              <div className={`tooltip-pnl ${((tooltip.marker.pnl || pairedMarker?.pnl || 0) >= 0) ? 'positive' : 'negative'}`}>
+                {formatPnL(tooltip.marker.pnl || pairedMarker?.pnl)}
+              </div>
+            )}
+            
+            {/* Exit reason badge */}
+            {(tooltip.marker.exit_reason || pairedMarker?.exit_reason) && (
+              <div className="tooltip-reason-badge">
+                {(tooltip.marker.exit_reason || pairedMarker?.exit_reason)?.replace(/_/g, ' ')}
+              </div>
+            )}
+          </div>
+          
+          {/* PEARL Logo */}
+          <img src="/pearl-emoji.png" alt="" className="tooltip-logo" />
         </div>
       )}
     </div>

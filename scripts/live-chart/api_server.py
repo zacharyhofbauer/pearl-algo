@@ -179,12 +179,15 @@ async def _fetch_candles(
             candles = []
             for idx, row in df.tail(bars).iterrows():
                 ts = idx if isinstance(idx, (int, float)) else int(idx.timestamp())
+                # Get volume - try different column name variations
+                vol = row.get("Volume", row.get("volume", row.get("vol", 0)))
                 candles.append({
                     "time": ts,
                     "open": float(row.get("Open", row.get("open", 0))),
                     "high": float(row.get("High", row.get("high", 0))),
                     "low": float(row.get("Low", row.get("low", 0))),
                     "close": float(row.get("Close", row.get("close", 0))),
+                    "volume": int(vol) if vol else 0,
                 })
             return candles
         
@@ -479,6 +482,11 @@ async def get_indicators(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _snap_to_bar(timestamp: float, bar_seconds: int = 300) -> int:
+    """Snap timestamp to nearest bar boundary (default 5-minute bars)."""
+    return int((timestamp // bar_seconds) * bar_seconds)
+
+
 @app.get("/api/markers")
 async def get_markers(
     hours: int = Query(default=6, ge=1, le=24, description="Hours of markers to return"),
@@ -507,11 +515,14 @@ async def get_markers(
             try:
                 entry_ts = datetime.fromisoformat(entry_time.replace("Z", "+00:00")).timestamp()
                 if entry_ts >= cutoff_ts:
+                    # Snap to 5-minute bar boundary so marker aligns with candle
+                    bar_time = _snap_to_bar(entry_ts, 300)
                     markers.append({
                         # TradingView marker fields
-                        "time": int(entry_ts),
+                        "time": bar_time,
                         "position": "belowBar" if direction == "long" else "aboveBar",
-                        "color": "#00e676" if direction == "long" else "#ff5252",
+                        # Distinct colors: cyan for long entry, magenta for short entry
+                        "color": "#00d4ff" if direction == "long" else "#ff6ec7",
                         "shape": "arrowUp" if direction == "long" else "arrowDown",
                         "text": "",  # Minimal - tooltip provides detail
                         # Tooltip metadata
@@ -532,12 +543,29 @@ async def get_markers(
                 if exit_ts >= cutoff_ts:
                     pnl = s.get("pnl", 0)
                     is_win = pnl > 0 if pnl else False
+                    # Snap to 5-minute bar boundary so marker aligns with candle
+                    bar_time = _snap_to_bar(exit_ts, 300)
+                    # Exit colors use SAME COLOR FAMILY as entry to show connection:
+                    # LONG family (cyan/blue tones):
+                    #   Entry: Cyan (#00d4ff)
+                    #   Exit Win: Aquamarine (#7FFFD4) - light cyan = profit
+                    #   Exit Loss: Red (#ff4444) - clear loss indicator
+                    # SHORT family (pink/magenta tones):
+                    #   Entry: Magenta (#ff6ec7)
+                    #   Exit Win: Light Pink (#FFB6C1) - light pink = profit
+                    #   Exit Loss: Red (#ff4444) - clear loss indicator
+                    # Shape: Circle for wins, Square for losses (angular = bad)
+                    if direction == "long":
+                        exit_color = "#7FFFD4" if is_win else "#ff4444"
+                    else:
+                        exit_color = "#FFB6C1" if is_win else "#ff4444"
+                    
                     markers.append({
                         # TradingView marker fields
-                        "time": int(exit_ts),
+                        "time": bar_time,
                         "position": "aboveBar" if direction == "long" else "belowBar",
-                        "color": "#00e676" if is_win else "#ff5252",
-                        "shape": "circle",
+                        "color": exit_color,
+                        "shape": "circle" if is_win else "square",  # Square = loss
                         "text": "",  # Minimal - tooltip provides detail
                         # Tooltip metadata
                         "kind": "exit",
@@ -549,6 +577,9 @@ async def get_markers(
                     })
             except Exception:
                 pass
+    
+    # Sort markers by time (required by Lightweight Charts)
+    markers.sort(key=lambda m: m["time"])
     
     return markers
 

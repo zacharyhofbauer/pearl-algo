@@ -129,13 +129,24 @@ export default function LiveMainChart() {
       const markersData = markersRes.ok ? await markersRes.json() : []
       const stateData = stateRes.ok ? await stateRes.json() : null
 
+      // Filter markers to only those within the candle time range
+      // This prevents markers from appearing at the edge when they're outside visible range
+      let filteredMarkers = markersData
+      if (candlesData.length > 0 && markersData.length > 0) {
+        const firstCandleTime = candlesData[0].time
+        const lastCandleTime = candlesData[candlesData.length - 1].time
+        filteredMarkers = markersData.filter(
+          (m: { time: number }) => m.time >= firstCandleTime && m.time <= lastCandleTime
+        )
+      }
+
       // Only update if data changed (include timeframe in hash to force update on tf change)
       const dataHash = `${tf}:${JSON.stringify(candlesData.slice(-3))}`
       if (dataHash !== lastDataHash.current) {
         lastDataHash.current = dataHash
         setCandles(candlesData)
         setIndicators(indicatorsData)
-        setMarkers(markersData)
+        setMarkers(filteredMarkers)
       }
 
       if (stateData && !stateData.error) {
@@ -181,8 +192,11 @@ export default function LiveMainChart() {
     return hours >= 24 ? `${hours / 24}d` : `${hours}h`
   }
 
+  // Track if chart is fully loaded (for screenshot detection)
+  const isChartReady = !loading && !error && candles.length > 0
+
   return (
-    <div className="dashboard">
+    <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
       {/* Header */}
       <header className="header">
         <div className="title-group">
@@ -297,10 +311,16 @@ export default function LiveMainChart() {
           </button>
         </div>
         <div className="chart-container">
-          {loading && <div className="loading">Loading chart data...</div>}
+          {loading && (
+            <div className="loading-screen">
+              <img src="/logo.png" alt="PEARL" className="loading-logo" />
+              <div className="loading-text">Loading Live Data...</div>
+              <div className="loading-spinner"></div>
+            </div>
+          )}
           {error && !loading && (
             <div className="no-data-container">
-              <div className="no-data-icon">📊</div>
+              <img src="/logo.png" alt="PEARL" className="no-data-logo" />
               <div className="no-data-title">No Live Data</div>
               <div className="no-data-message">{error}</div>
               <div className="no-data-hint">
