@@ -32,6 +32,47 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Load a single env var from .env (best-effort; avoids executing .env).
+_maybe_load_dotenv_var() {
+  local key="$1"
+  local env_file="$PROJECT_DIR/.env"
+
+  # If already set in the shell, do not override.
+  if [ -n "${!key-}" ]; then
+    return 0
+  fi
+
+  if [ ! -f "$env_file" ]; then
+    return 0
+  fi
+
+  local line=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Strip comments + surrounding whitespace.
+    line="${line%%#*}"
+    line="${line#"${line%%[![:space:]]*}"}"   # ltrim
+    line="${line%"${line##*[![:space:]]}"}"   # rtrim
+    [ -z "$line" ] && continue
+
+    if [[ "$line" == "$key="* ]]; then
+      local value="${line#*=}"
+      value="${value%\"}"; value="${value#\"}"
+      value="${value%\'}"; value="${value#\'}"
+      export "${key}=${value}"
+      return 0
+    fi
+  done < "$env_file"
+}
+
+# Allow .env to set the external IBKR home (recommended).
+_maybe_load_dotenv_var "PEARLALGO_IBKR_HOME"
+# Optional: allow .env to provide IBC login/config inputs (best-effort).
+_maybe_load_dotenv_var "IBKR_USERNAME"
+_maybe_load_dotenv_var "IBKR_PASSWORD"
+_maybe_load_dotenv_var "IBKR_ACCOUNT_TYPE"
+_maybe_load_dotenv_var "IBKR_READ_ONLY_API"
+
 IBKR_HOME_DEFAULT="$PROJECT_DIR/ibkr"
 IBKR_HOME="${PEARLALGO_IBKR_HOME:-$IBKR_HOME_DEFAULT}"
 IBC_DIR=""
@@ -122,6 +163,88 @@ _ensure_vnc() {
   export DISPLAY=:1
 }
 
+_patch_ibc_start_script() {
+  # Patch IBC start scripts (gatewaystart.sh / twsstart.sh) to match our install paths.
+  # These scripts are designed to be edited; we keep this targeted + idempotent.
+  local file="$1"
+  local tws_major="$2"
+  local ibc_ini="$3"
+  local ibc_path="$4"
+  local tws_path="$5"
+  local log_path="$6"
+
+  python3 - "$file" "$tws_major" "$ibc_ini" "$ibc_path" "$tws_path" "$log_path" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+tws_major = sys.argv[2]
+ibc_ini = sys.argv[3]
+ibc_path = sys.argv[4]
+tws_path = sys.argv[5]
+log_path = sys.argv[6]
+
+text = path.read_text(encoding="utf-8", errors="ignore")
+
+replacements = {
+    "TWS_MAJOR_VRSN": tws_major,
+    "IBC_INI": ibc_ini,
+    "IBC_PATH": ibc_path,
+    "TWS_PATH": tws_path,
+    "LOG_PATH": log_path,
+}
+
+for key, value in replacements.items():
+    pattern = re.compile(rf"^{re.escape(key)}=.*$", flags=re.M)
+    if pattern.search(text):
+        text = pattern.sub(f"{key}={value}", text, count=1)
+
+path.write_text(text, encoding="utf-8")
+PY
+}
+
+_patch_ibcstart_for_standalone_layout() {
+  # Newer IB Gateway standalone installers place `jars/` directly under TWS_PATH (eg, ~/Jts/jars),
+  # while IBC expects the "offline" layout (eg, ~/Jts/ibgateway/1037/jars). Patch IBC's script
+  # to accept either layout. Idempotent via marker.
+  local file="$1"
+  if [ ! -f "$file" ]; then
+    return 0
+  fi
+  if grep -q "standalone installs where jars live directly under tws_path" "$file" 2>/dev/null; then
+    return 0
+  fi
+
+  python3 - "$file" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8", errors="ignore")
+
+marker = "standalone installs where jars live directly under tws_path"
+if marker in text:
+    sys.exit(0)
+
+needle = '\t\ttws_program_path="${tws_path}/${tws_version}"\n\t\tgateway_program_path="${tws_path}/ibgateway/${tws_version}"'
+if needle not in text:
+    sys.exit(0)
+
+injected = (
+    needle
+    + '\n\t\t# Support newer standalone installs where jars live directly under tws_path'
+    + '\n\t\t# (instead of under ${tws_path}/ibgateway/${tws_version}).'
+    + '\n\t\tif [[ -d "${tws_path}/jars" ]]; then'
+    + '\n\t\t\ttws_program_path="${tws_path}"'
+    + '\n\t\t\tgateway_program_path="${tws_path}"'
+    + '\n\t\tfi'
+)
+
+path.write_text(text.replace(needle, injected), encoding="utf-8")
+PY
+}
+
 
 cmd_start() {
   cd "$PROJECT_DIR"
@@ -147,6 +270,9 @@ cmd_start() {
 
   echo "Starting IB Gateway..."
   cd "$IBC_DIR"
+
+  # Ensure log directory exists (IBC zip doesn't always include it).
+  mkdir -p "$IBC_LOG_DIR"
 
   LOG_FILE="logs/gateway_$(date +%Y%m%d_%H%M%S).log"
   nohup ./gatewaystart.sh -inline > "$LOG_FILE" 2>&1 &
@@ -239,6 +365,9 @@ cmd_start_vnc() {
   echo "Starting IB Gateway on VNC display :1..."
   cd "$IBC_DIR"
   export DISPLAY=:1
+
+  # Ensure log directory exists (IBC zip doesn't always include it).
+  mkdir -p "$IBC_LOG_DIR"
 
   LOG_FILE="logs/gateway_$(date +%Y%m%d_%H%M%S).log"
   nohup ./gatewaystart.sh -inline > "$LOG_FILE" 2>&1 &
@@ -979,19 +1108,50 @@ EOF
     echo "2. Configuring IBC (IB Controller)..."
     cd "$IBC_DIR" || exit 1
 
+    mkdir -p "$IBC_LOG_DIR"
+
     if [ -f config-auto.ini ]; then
       cp config-auto.ini "config-auto.ini.backup.$(date +%Y%m%d_%H%M%S)"
+    fi
+
+    # Derive the Gateway major version from the installed Jts jars (e.g., 1037).
+    tws_major=""
+    shopt -s nullglob
+    for jar in "$JTS_DIR/jars"/twslaunch-*.jar; do
+      base="$(basename "$jar")"
+      tws_major="${base#twslaunch-}"
+      tws_major="${tws_major%.jar}"
+      break
+    done
+    shopt -u nullglob
+    if [ -z "${tws_major:-}" ]; then
+      tws_major="1037"
+    fi
+
+    trading_mode="${IBKR_ACCOUNT_TYPE:-paper}"
+    trading_mode="$(echo "$trading_mode" | tr '[:upper:]' '[:lower:]')"
+    if [ "$trading_mode" != "paper" ] && [ "$trading_mode" != "live" ]; then
+      trading_mode="paper"
+    fi
+
+    read_only_api="yes"
+    if [ "$mode" = "full" ]; then
+      read_only_api="no"
     fi
 
     cat > config-auto.ini << EOF
 # IB Controller Configuration - Read-Only Data Access
 # This configuration enables API access for data retrieval only (no trading)
 
-# Trading Mode: paper trading account (safer for data access)
-TradingMode=paper
+# Credentials (from environment if available)
+IbLoginId=${IBKR_USERNAME:-}
+IbPassword=${IBKR_PASSWORD:-}
 
-# API Settings - READ ONLY
-ReadOnlyApi=yes
+# Trading mode: paper (recommended) or live
+TradingMode=${trading_mode}
+
+# API Settings
+ReadOnlyApi=${read_only_api}
 EnableAPI=yes
 
 # IB Directory (where Gateway settings are stored)
@@ -1008,6 +1168,16 @@ LogToFile=yes
 EOF
 
     echo "   ✅ IBC configured for read-only API access"
+
+    echo ""
+    echo "3. Patching IBC start scripts for this install path..."
+    ibc_ini_path="$IBC_DIR/config-auto.ini"
+    _patch_ibc_start_script "$IBC_DIR/gatewaystart.sh" "$tws_major" "$ibc_ini_path" "$IBC_DIR" "$JTS_DIR" "$IBC_LOG_DIR"
+    _patch_ibc_start_script "$IBC_DIR/twsstart.sh" "$tws_major" "$ibc_ini_path" "$IBC_DIR" "$JTS_DIR" "$IBC_LOG_DIR"
+    _patch_ibcstart_for_standalone_layout "$IBC_DIR/scripts/ibcstart.sh"
+    chmod +x "$IBC_DIR"/*.sh 2>/dev/null || true
+    chmod +x "$IBC_DIR/scripts"/*.sh 2>/dev/null || true
+    echo "   ✅ Start scripts updated"
   fi
 
   echo ""
@@ -1114,6 +1284,173 @@ cmd_install_info() {
   echo "  ./scripts/gateway/gateway.sh setup"
 }
 
+cmd_doctor() {
+  cd "$PROJECT_DIR"
+  echo "=== IBKR Gateway Doctor ==="
+  echo ""
+  echo "IBKR home: $IBKR_HOME"
+  echo "Expected:"
+  echo "  IBC: $IBC_DIR/gatewaystart.sh"
+  echo "  Jts: $JTS_DIR"
+  echo ""
+
+  if command -v java >/dev/null 2>&1; then
+    echo "✅ Java: $(java -version 2>&1 | head -1)"
+  else
+    echo "❌ Java not found on PATH (need Java 17+ for Gateway/IBC)"
+  fi
+
+  if command -v Xvfb >/dev/null 2>&1; then
+    echo "✅ Xvfb: installed"
+  else
+    echo "⚠️  Xvfb: not found (headless start may fail)"
+  fi
+
+  echo ""
+
+  if [ -f "$IBC_DIR/gatewaystart.sh" ]; then
+    echo "✅ IBC: gatewaystart.sh present"
+  else
+    echo "❌ IBC: missing gatewaystart.sh"
+  fi
+
+  if [ -d "$JTS_DIR" ]; then
+    echo "✅ Jts: directory present"
+  else
+    echo "❌ Jts: directory missing"
+  fi
+
+  echo ""
+  echo "Quick next steps:"
+  echo "  - Install: ./scripts/gateway/gateway.sh install"
+  echo "  - Configure: ./scripts/gateway/gateway.sh setup"
+  echo "  - Start: ./scripts/gateway/gateway.sh start"
+}
+
+_download_file() {
+  local url="$1"
+  local dest="$2"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -L --fail --retry 3 --retry-delay 2 -o "$dest" "$url"
+    return 0
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -O "$dest" "$url"
+    return 0
+  fi
+
+  echo "❌ Neither curl nor wget is available to download files"
+  return 1
+}
+
+cmd_install() {
+  variant="${1:-stable}"  # stable|latest
+  ibc_version="${2:-3.23.0}"
+
+  cd "$PROJECT_DIR"
+  echo "=== Installing IB Gateway + IBC ==="
+  echo ""
+  echo "IBKR home: $IBKR_HOME"
+  echo "Variant: $variant"
+  echo "IBC version: $ibc_version"
+  echo ""
+
+  mkdir -p "$IBKR_HOME" "$IBKR_HOME/ibc" "$IBKR_HOME/Jts"
+  _set_ibkr_paths
+
+  arch="$(uname -m 2>/dev/null || echo unknown)"
+  if [ "$arch" = "x86_64" ] || [ "$arch" = "amd64" ]; then
+    linux_arch="linux-x64"
+  elif [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
+    linux_arch="linux-arm"
+  else
+    echo "❌ Unsupported architecture for automated install: $arch"
+    echo "   Download the installer manually from:"
+    echo "   https://www.interactivebrokers.com/en/trading/ib-gateway-download.php"
+    exit 1
+  fi
+
+  if [ "$variant" != "stable" ] && [ "$variant" != "latest" ]; then
+    echo "❌ Unknown variant: $variant (use stable|latest)"
+    exit 1
+  fi
+
+  ibgw_file="ibgateway-${variant}-standalone-${linux_arch}.sh"
+  ibgw_url="https://download2.interactivebrokers.com/installers/ibgateway/${variant}-standalone/${ibgw_file}"
+  ibgw_installer="$IBKR_HOME/${ibgw_file}"
+
+  echo "1) Downloading IB Gateway installer..."
+  echo "   $ibgw_url"
+  if [ ! -f "$ibgw_installer" ]; then
+    _download_file "$ibgw_url" "$ibgw_installer"
+    chmod +x "$ibgw_installer" || true
+  else
+    echo "   ✅ Already downloaded: $ibgw_installer"
+  fi
+
+  echo ""
+  echo "2) Installing IB Gateway into: $JTS_DIR"
+  echo "   (This uses install4j unattended mode: -q -dir <path>)"
+  chmod +x "$ibgw_installer" 2>/dev/null || true
+  "$ibgw_installer" -q -dir "$JTS_DIR" -overwrite -console || {
+    echo ""
+    echo "❌ IB Gateway installer failed."
+    echo "   Try console mode for more detail:"
+    echo "     $ibgw_installer -c"
+    echo "   Or run GUI/VNC install and point it at: $JTS_DIR"
+    exit 1
+  }
+
+  echo ""
+  echo "3) Downloading IBC (IB Controller)..."
+  ibc_zip="IBCLinux-${ibc_version}.zip"
+  ibc_url="https://github.com/IbcAlpha/IBC/releases/download/${ibc_version}/${ibc_zip}"
+  ibc_zip_path="$IBKR_HOME/${ibc_zip}"
+  echo "   $ibc_url"
+  if [ ! -f "$ibc_zip_path" ]; then
+    _download_file "$ibc_url" "$ibc_zip_path"
+  else
+    echo "   ✅ Already downloaded: $ibc_zip_path"
+  fi
+
+  echo ""
+  echo "4) Installing IBC into: $IBC_DIR"
+  mkdir -p "$IBC_DIR"
+
+  # Preserve local configs if present.
+  ts="$(date +%Y%m%d_%H%M%S)"
+  if [ -f "$IBC_DIR/config.ini" ]; then
+    cp "$IBC_DIR/config.ini" "$IBC_DIR/config.ini.backup.${ts}" || true
+  fi
+  if [ -f "$IBC_DIR/config-auto.ini" ]; then
+    cp "$IBC_DIR/config-auto.ini" "$IBC_DIR/config-auto.ini.backup.${ts}" || true
+  fi
+
+  python3 -m zipfile -e "$ibc_zip_path" "$IBC_DIR" >/dev/null 2>&1 || {
+    echo "❌ Failed to extract IBC zip (need Python 3 with zipfile module)"
+    exit 1
+  }
+
+  chmod +x "$IBC_DIR"/*.sh 2>/dev/null || true
+  chmod +x "$IBC_DIR/scripts"/*.sh 2>/dev/null || true
+
+  if [ ! -f "$IBC_DIR/gatewaystart.sh" ]; then
+    echo "❌ IBC install did not produce gatewaystart.sh at: $IBC_DIR/gatewaystart.sh"
+    echo "   Check the extracted folder contents."
+    exit 1
+  fi
+
+  echo ""
+  echo "✅ Install complete."
+  echo ""
+  echo "Next:"
+  echo "  ./scripts/gateway/gateway.sh setup"
+  echo "  ./scripts/gateway/gateway.sh start"
+  echo "  ./scripts/gateway/gateway.sh status"
+}
+
 
 print_help() {
   cat <<'EOF'
@@ -1133,6 +1470,8 @@ Commands:
   wait-2fa            Wait for 2FA approval (mobile; max 10 minutes)
   complete-2fa        Start VNC (if needed) and print 2FA entry instructions
   auto-2fa [CODE]     Attempt to auto-enter 2FA code (requires xdotool)
+  doctor              Print environment + install diagnostics
+  install [variant]   Download/install IB Gateway + IBC into IBKR home (variant=stable|latest)
   install-info        Print IBKR install expectations and paths
   setup [mode] [ibc]  One-time gateway + IBC setup (mode=readonly/full, ibc=yes/no)
   vnc-setup           One-time VNC setup for manual login
@@ -1198,6 +1537,12 @@ case "$cmd" in
     ;;
   install-info)
     cmd_install_info "$@"
+    ;;
+  doctor)
+    cmd_doctor "$@"
+    ;;
+  install)
+    cmd_install "$@"
     ;;
   2fa-status)
     cmd_2fa_status "$@"

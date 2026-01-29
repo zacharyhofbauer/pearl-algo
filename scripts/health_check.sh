@@ -39,7 +39,7 @@ fi
 # 2. IBKR Gateway
 echo ""
 echo "🔌 Gateway:"
-if pgrep -f "ibgateway\\|IB Gateway\\|java.*jts" > /dev/null; then
+if pgrep -f "java.*IBC\\.jar|ibgateway|IB Gateway|java.*jts" > /dev/null; then
   echo "  ✅ IBKR Gateway: RUNNING"
 else
   echo "  ❌ IBKR Gateway: NOT RUNNING"

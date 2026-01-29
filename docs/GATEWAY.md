@@ -8,6 +8,21 @@
   - Verify with: `./scripts/gateway/gateway.sh install-info`
   - Override per-command: `./scripts/gateway/gateway.sh --ibkr-home /opt/ibkr status`
 
+## 🧰 One-time install (Linux)
+
+If you **don’t already have** IB Gateway + IBC installed under your IBKR home, you can use:
+
+```bash
+cd /path/to/pearlalgo-dev-ai-agents
+./scripts/gateway/gateway.sh doctor
+./scripts/gateway/gateway.sh install        # default: stable, IBC 3.23.0
+./scripts/gateway/gateway.sh setup
+```
+
+Notes:
+- `gateway.sh` will read `PEARLALGO_IBKR_HOME` from `.env` (if present), so you usually don’t need to export it manually.
+- `install` downloads the official IB Gateway installer and the IBC release zip, then installs them into your IBKR home.
+
 ## 🚀 Start Gateway (Headless)
 
 ```bash
