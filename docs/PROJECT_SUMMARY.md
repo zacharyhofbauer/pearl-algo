@@ -356,18 +356,7 @@ trading_circuit_breaker:
   - Prevents blocking the main event loop
   - Used by trade database and state persistence
 
-### 11. Chart Generator (`src/pearlalgo/market_agent/chart_generator.py`)
-
-**Purpose**: Generates chart images for Telegram dashboard updates.
-
-**Features**:
-- OHLCV candlestick charts
-- Technical indicator overlays (EMA, VWAP, RSI)
-- Trade markers with entry/exit annotations
-- Support for multiple timeframes
-- Dark theme optimized for Telegram
-
-### 12. Additional Utilities
+### 11. Additional Utilities
 
 **Pearl Suggestions** (`utils/pearl_suggestions.py`):
 - Contextual trading suggestions based on market conditions

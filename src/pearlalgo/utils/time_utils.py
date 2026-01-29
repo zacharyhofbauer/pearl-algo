@@ -69,9 +69,7 @@ def parse_hhmm_with_default(
 def parse_hhmm_compact(hhmm: str) -> Tuple[int, int]:
     """
     Parse a time string in compact HHMM format (no colon).
-    
-    This is used by chart_generator for session time parsing.
-    
+
     Args:
         hhmm: Time string in "HHMM" format (e.g., "0930", "1600")
         
