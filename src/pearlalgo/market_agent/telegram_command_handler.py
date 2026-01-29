@@ -741,12 +741,20 @@ class TelegramCommandHandler:
         logger.info("Received /help command")
 
         text = (
-            "🎯 PEARLalgo\n\n"
-            "Use /start to open the dashboard.\n\n"
-            "Everything else is accessed via the buttons:\n"
-            "📊 Activity • 🎛️ System • 🛡️ Health • ⚙️ Settings"
+            "🎯 *PEARLalgo Bot*\n\n"
+            "*Commands:*\n"
+            "/start - Open the dashboard\n"
+            "/pearl - Chat with Pearl AI assistant\n"
+            "/help - Show this help message\n\n"
+            "*Navigation:*\n"
+            "Everything is accessed via the menu buttons:\n"
+            "📊 Activity • 🎛️ System • 🛡️ Health • ⚙️ Settings\n\n"
+            "*Pearl AI:*\n"
+            "Ask Pearl questions about your trading performance, "
+            "get insights, and receive proactive suggestions. "
+            "Look for '💬 Chat with Pearl' buttons on suggestions!"
         )
-        await update.message.reply_text(text)
+        await update.message.reply_text(text, parse_mode="Markdown")
 
     async def handle_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show Telegram alert preferences (charts, notifications, UI)."""
@@ -1438,7 +1446,7 @@ class TelegramCommandHandler:
                 escaped_msg = self._escape_markdown_v2(pearl_suggestion.message)
                 pearl_msg = f"![🐚](tg://emoji?id={self.PEARL_EMOJI_ID}) *PEARL*\nSuggestion\n\n💬 {escaped_msg}"
                 pearl_keyboard = InlineKeyboardMarkup(
-                    [self._build_pearl_suggestion_keyboard_row(pearl_suggestion)]
+                    self._build_pearl_suggestion_keyboard_row(pearl_suggestion)
                 )
                 await query.message.chat.send_message(pearl_msg, reply_markup=pearl_keyboard, parse_mode="MarkdownV2")
             except Exception as e:
@@ -1589,7 +1597,7 @@ class TelegramCommandHandler:
                 escaped_msg = self._escape_markdown_v2(pearl_suggestion.message)
                 pearl_msg = f"![🐚](tg://emoji?id={self.PEARL_EMOJI_ID}) *PEARL*\nSuggestion\n\n💬 {escaped_msg}"
                 pearl_keyboard = InlineKeyboardMarkup(
-                    [self._build_pearl_suggestion_keyboard_row(pearl_suggestion)]
+                    self._build_pearl_suggestion_keyboard_row(pearl_suggestion)
                 )
                 await message_obj.chat.send_message(pearl_msg, reply_markup=pearl_keyboard, parse_mode="MarkdownV2")
             except Exception as e:
@@ -1677,7 +1685,7 @@ class TelegramCommandHandler:
                     escaped_msg = self._escape_markdown_v2(pearl_suggestion.message)
                     pearl_msg = f"![🐚](tg://emoji?id={self.PEARL_EMOJI_ID}) *PEARL*\nSuggestion\n\n💬 {escaped_msg}"
                     pearl_keyboard = InlineKeyboardMarkup(
-                        [self._build_pearl_suggestion_keyboard_row(pearl_suggestion)]
+                        self._build_pearl_suggestion_keyboard_row(pearl_suggestion)
                     )
                     await self.application.bot.send_message(
                         chat_id=self.chat_id,
@@ -3493,12 +3501,18 @@ class TelegramCommandHandler:
         help_text = (
             "🎯 PEARLalgo Command Handler\n\n"
             "*Quick Commands:*\n"
-            "/start - Show the dashboard\n\n"
+            "/start - Show the dashboard\n"
+            "/pearl - Chat with Pearl AI assistant\n\n"
             "*Menu Structure:*\n"
             "📊 Activity - Trades, signals, P&L, history\n"
             "🎛️ System - Start/stop agent + gateway, logs, config\n"
             "🛡️ Health - Connectivity, data, diagnostics\n"
             "⚙️ Settings - Markets + alert preferences\n\n"
+            "*Pearl AI Assistant:*\n"
+            "• Ask questions about your trading performance\n"
+            "• Get insights on market conditions and strategy\n"
+            "• Chat directly from Pearl suggestions\n"
+            "• Access via Settings menu or /pearl command\n\n"
             "*Quick Tips:*\n"
             "• Use '🏠 Menu' to return to the dashboard\n"
             "• Status indicators show active positions/trades\n"
@@ -3703,10 +3717,20 @@ class TelegramCommandHandler:
         self, 
         suggestion: PearlSuggestion
     ) -> list:
-        """Build keyboard row for Pearl suggestion buttons."""
+        """Build keyboard row for Pearl suggestion buttons.
+        
+        Returns a 2-row layout:
+        Row 1: [Accept] [Dismiss]
+        Row 2: [💬 Chat with Pearl] (new - allows direct conversation)
+        """
         return [
-            InlineKeyboardButton(suggestion.accept_label, callback_data=suggestion.accept_action),
-            InlineKeyboardButton(suggestion.decline_label, callback_data=callback_pearl_dismiss()),
+            [
+                InlineKeyboardButton(suggestion.accept_label, callback_data=suggestion.accept_action),
+                InlineKeyboardButton(suggestion.decline_label, callback_data=callback_pearl_dismiss()),
+            ],
+            [
+                InlineKeyboardButton("💬 Chat with Pearl", callback_data="action:ask_pearl"),
+            ],
         ]
 
     async def _handle_action(self, query: CallbackQuery, action: str) -> None:
@@ -6018,15 +6042,18 @@ class TelegramCommandHandler:
 
         text = (
             "💬 *Pearl Chat*\n\n"
-            "Hello! I'm Pearl, your trading assistant. I can answer questions about:\n"
-            "• Your recent performance and trades\n"
-            "• Market conditions and session analysis\n"
-            "• Strategy insights and ML filter status\n"
-            "• General trading guidance\n\n"
+            "Hi! I'm Pearl, your AI trading assistant. I'm here to help you understand your trading system.\n\n"
+            "*Ask me about:*\n"
+            "• Recent performance and trade analysis\n"
+            "• Market conditions and session status\n"
+            "• Strategy insights and ML filter effectiveness\n"
+            "• Risk management and drawdown analysis\n"
+            "• General trading questions and guidance\n\n"
             f"{memory_preview}"
-            "⚠️ *Note:* I'm read-only. I cannot execute trades, restart services, or change settings. "
-            "For actions, use the menu buttons.\n\n"
-            "*Just type your question and I'll respond!*"
+            "⚠️ *Important:* I'm a read-only assistant. For executing actions (restart, emergency stop, etc.), "
+            "use the menu buttons.\n\n"
+            "*💡 Tip:* Just type your question naturally, like you're talking to a colleague. "
+            "I'll provide insights based on your current system state and trading history."
         )
 
         keyboard = [

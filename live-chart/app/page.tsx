@@ -44,9 +44,14 @@ interface AgentState {
   active_trades_count: number
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+// API URL is determined at runtime based on where the page is loaded from
+function getApiUrl(): string {
+  if (typeof window === 'undefined') return 'http://localhost:8000' // SSR fallback
+  const hostname = window.location.hostname
+  // Use relative URLs on public domain (pearlalgo.io), localhost:8000 for local dev
+  return ['localhost', '127.0.0.1'].includes(hostname) ? 'http://localhost:8000' : ''
+}
 const REFRESH_INTERVAL = 10000 // 10 seconds
-
 type Timeframe = '1m' | '5m' | '15m' | '1h'
 
 // Calculate hours of marker data based on timeframe
@@ -101,11 +106,12 @@ export default function LiveMainChart() {
     const markerHours = TIMEFRAME_HOURS[tf]
     try {
       // Fetch all data in parallel
+      const apiUrl = getApiUrl()
       const [candlesRes, indicatorsRes, markersRes, stateRes] = await Promise.all([
-        fetch(`${API_URL}/api/candles?symbol=MNQ&timeframe=${tf}&bars=${bars}`),
-        fetch(`${API_URL}/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${bars}`),
-        fetch(`${API_URL}/api/markers?hours=${markerHours}`),
-        fetch(`${API_URL}/api/state`),
+        fetch(`${apiUrl}/api/candles?symbol=MNQ&timeframe=${tf}&bars=${bars}`),
+        fetch(`${apiUrl}/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${bars}`),
+        fetch(`${apiUrl}/api/markers?hours=${markerHours}`),
+        fetch(`${apiUrl}/api/state`),
       ])
 
       // Handle 503 (data unavailable) specifically
