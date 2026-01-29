@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
-# Universal Telegram template size (middle ground: neither portrait nor landscape).
-TELEGRAM_UNIFIED_FIGSIZE: Tuple[float, float] = (12.0, 9.0)  # 4:3 ratio
+# Universal Telegram template size - taller to accommodate bottom panels (RSI, PnL, Volume).
+# 12:10 aspect gives more vertical space for indicator panels while remaining mobile-friendly.
+TELEGRAM_UNIFIED_FIGSIZE: Tuple[float, float] = (12.0, 10.0)  # 6:5 ratio, taller for panels
 TELEGRAM_UNIFIED_DPI: int = 200
 
 # Telegram render framing (minimize dead space but preserve title/readability).
@@ -34,10 +35,11 @@ def apply_telegram_unified_profile(cfg: Any) -> None:
         "show_session_range_stats": False,
         "max_right_labels": 6,
         "right_label_merge_ticks": 6,
-        # Panel ratios: allocate more space to price for Telegram.
-        "panel_ratio_price": 9.0,
-        "panel_ratio_volume": 1.4,
-        "panel_ratio_sub": 1.4,
+        # Panel ratios: balance price prominence with readable indicator panels.
+        # Increased volume/sub ratios for better RSI/PnL visibility.
+        "panel_ratio_price": 8.0,
+        "panel_ratio_volume": 1.6,
+        "panel_ratio_sub": 1.8,
         # Keep only the long-term EMA for cleaner Telegram charts.
         "ma_periods": [200],
         # TradingView-style volume panel (bars + MA line).

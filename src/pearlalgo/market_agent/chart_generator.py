@@ -1385,6 +1385,63 @@ class ChartGenerator:
             ax.yaxis.set_major_locator(MaxNLocator(nbins=max_ticks, prune='both'))
         except Exception:
             pass  # If it fails, continue without limiting ticks
+
+    def _raise_candle_zorder(self, ax) -> None:
+        """Raise z-order of candle elements so they appear in front of indicator lines.
+        
+        mplfinance draws candles first, then addplots (indicators) on top.
+        This function finds the candle body patches and wick lines and raises
+        their z-order above indicator lines.
+        
+        Args:
+            ax: The price axis containing candle elements
+        """
+        if ax is None:
+            return
+        try:
+            # In mplfinance, candles consist of:
+            # - Rectangle patches for bodies (colored green/red)
+            # - Line2D objects for wicks (thin vertical lines)
+            # Indicator lines are also Line2D but typically have different widths/styles.
+            
+            # Raise z-order of patches (candle bodies) above indicator lines.
+            # Indicator lines are typically drawn at default z-order (2).
+            # Set candle bodies to ZORDER_CANDLES + 2 to ensure they're above indicators.
+            candle_body_zorder = ZORDER_CANDLES + 2  # 5, above indicator lines
+            candle_wick_zorder = ZORDER_CANDLES + 1  # 4, wicks slightly behind bodies
+            
+            for patch in ax.patches:
+                try:
+                    # Candle bodies are rectangles; check if it's a candle body by color
+                    fc = patch.get_facecolor()
+                    # Candle colors are CANDLE_UP/CANDLE_DOWN - typically green/red
+                    # Only raise patches that look like candle bodies (not session shading, etc.)
+                    if fc is not None and len(fc) >= 3:
+                        patch.set_zorder(candle_body_zorder)
+                except Exception:
+                    pass
+            
+            # Raise z-order of wick lines (thin vertical lines at candle x positions).
+            # Wicks are typically Line2D with linewidth ~1 and vertical orientation.
+            for line in ax.lines:
+                try:
+                    lw = line.get_linewidth()
+                    # Wicks are thin (~1pt), indicators are thicker (~1.4+).
+                    # Check if this line could be a wick by linewidth.
+                    if lw is not None and float(lw) <= 1.3:
+                        # This is likely a wick - raise its z-order
+                        line.set_zorder(candle_wick_zorder)
+                    # Also catch mplfinance candle wicks which may have specific patterns
+                    xdata = line.get_xdata()
+                    if xdata is not None and len(xdata) == 2:
+                        # Two-point vertical lines are typically wicks
+                        if xdata[0] == xdata[1]:  # Vertical line
+                            line.set_zorder(candle_wick_zorder)
+                except Exception:
+                    pass
+        except Exception:
+            # Best-effort; if it fails, candles stay at default z-order
+            pass
     
     def _add_price_labels_to_xaxis(self, ax, df: pd.DataFrame) -> None:
         """Add price numbers to the x-axis (bottom of chart).
@@ -3801,6 +3858,13 @@ class ChartGenerator:
 
             fig, axlist = mpf.plot(df, **plot_kwargs)
 
+            # Raise candle z-order so candles appear in front of indicator lines
+            try:
+                ax_price = axlist[0] if isinstance(axlist, list) and axlist else axlist
+                self._raise_candle_zorder(ax_price)
+            except Exception:
+                pass
+
             # RSI shading (after mpf.plot)
             if rsi_series_for_shading is not None and rsi_panel_idx is not None:
                 try:
@@ -4043,6 +4107,13 @@ class ChartGenerator:
                 plot_kwargs['panel_ratios'] = panel_ratios
 
             fig, axlist = mpf.plot(df, **plot_kwargs)
+
+            # Raise candle z-order so candles appear in front of indicator lines
+            try:
+                ax_price = axlist[0] if isinstance(axlist, list) and axlist else axlist
+                self._raise_candle_zorder(ax_price)
+            except Exception:
+                pass
 
             # RSI shading (after mpf.plot)
             if rsi_series_for_shading is not None and rsi_panel_idx is not None:
@@ -4365,6 +4436,13 @@ class ChartGenerator:
                 plot_kwargs['panel_ratios'] = panel_ratios
 
             fig, axlist = mpf.plot(df, **plot_kwargs)
+
+            # Raise candle z-order so candles appear in front of indicator lines
+            try:
+                ax_price = axlist[0] if isinstance(axlist, list) and axlist else axlist
+                self._raise_candle_zorder(ax_price)
+            except Exception:
+                pass
 
             # RSI shading (after mpf.plot)
             if rsi_series_for_shading is not None and rsi_panel_idx is not None:
@@ -4873,6 +4951,13 @@ class ChartGenerator:
             plot_kwargs['returnfig'] = True
             plot_kwargs.pop('savefig', None)  # Remove savefig to handle manually
             fig, axlist = mpf.plot(df, **plot_kwargs)
+
+            # Raise candle z-order so candles appear in front of indicator lines
+            try:
+                ax_price_for_zorder = axlist[0] if isinstance(axlist, list) and axlist else axlist
+                self._raise_candle_zorder(ax_price_for_zorder)
+            except Exception:
+                pass
             
             # Limit y-axis ticks to prevent overlapping labels
             try:
@@ -5657,6 +5742,13 @@ class ChartGenerator:
                 plot_kwargs['panel_ratios'] = panel_ratios
 
             fig, axlist = mpf.plot(df, **plot_kwargs)
+
+            # Raise candle z-order so candles appear in front of indicator lines
+            try:
+                ax_price = axlist[0] if isinstance(axlist, list) and axlist else axlist
+                self._raise_candle_zorder(ax_price)
+            except Exception:
+                pass
 
             # Soften volume panel to feel "behind" the chart (TradingView-like)
             if volume_on:
