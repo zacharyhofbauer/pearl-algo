@@ -43,6 +43,8 @@ interface ChartProps {
     rsi?: IndicatorData[]
   }
   markers?: MarkerData[]
+  barSpacing?: number
+  onChartReady?: (chart: IChartApi | null) => void
 }
 
 interface TooltipState {
@@ -52,7 +54,7 @@ interface TooltipState {
   marker: MarkerData | null
 }
 
-export default function CandlestickChart({ data, indicators, markers }: ChartProps) {
+export default function CandlestickChart({ data, indicators, markers, barSpacing = 8, onChartReady }: ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -105,7 +107,7 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 8,
-        barSpacing: 8,
+        barSpacing: barSpacing,
       },
       crosshair: {
         mode: CrosshairMode.Normal,
@@ -184,6 +186,9 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
     ema21SeriesRef.current = ema21Series
     vwapSeriesRef.current = vwapSeries
 
+    // Notify parent that chart is ready
+    onChartReady?.(chart)
+
     // Handle resize
     const handleResize = () => {
       if (containerRef.current) {
@@ -197,6 +202,7 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
 
     return () => {
       window.removeEventListener('resize', handleResize)
+      onChartReady?.(null)
       chart.remove()
     }
   }, [])
@@ -253,6 +259,9 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
     }
   }, [markersByTime])
 
+  // Track previous data length to detect major changes (like timeframe switch)
+  const prevDataLength = useRef(0)
+
   // Update candle data
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !data?.length) return
@@ -274,7 +283,15 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
     }))
     volumeSeriesRef.current.setData(volumeData)
 
-    chartRef.current?.timeScale().scrollToRealTime()
+    // Auto-fit when data length changes significantly (timeframe switch) or on initial load
+    if (chartRef.current) {
+      const lengthChanged = Math.abs(data.length - prevDataLength.current) > 5
+      if (lengthChanged || prevDataLength.current === 0) {
+        chartRef.current.timeScale().fitContent()
+      }
+      chartRef.current.timeScale().scrollToRealTime()
+      prevDataLength.current = data.length
+    }
   }, [data])
 
   // Update indicators

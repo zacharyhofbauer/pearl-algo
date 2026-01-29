@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
+import type { IChartApi } from 'lightweight-charts'
 
 interface CandleData {
   time: number
@@ -46,6 +47,16 @@ interface AgentState {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 const REFRESH_INTERVAL = 10000 // 10 seconds
 
+type Timeframe = '1m' | '5m' | '15m' | '1h'
+
+// Calculate hours of marker data based on timeframe
+const TIMEFRAME_HOURS: Record<Timeframe, number> = {
+  '1m': 2,
+  '5m': 6,
+  '15m': 12,
+  '1h': 24,
+}
+
 export default function LiveMainChart() {
   const [candles, setCandles] = useState<CandleData[]>([])
   const [indicators, setIndicators] = useState<Indicators>({})
@@ -55,15 +66,42 @@ export default function LiveMainChart() {
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [isLive, setIsLive] = useState(false)
+  const [timeframe, setTimeframe] = useState<Timeframe>('5m')
+  const [barCount, setBarCount] = useState(72)
+  const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
   const lastDataHash = useRef<string>('')
 
-  const fetchData = async () => {
+  // Calculate bar count based on viewport width
+  const calculateBarCount = () => {
+    if (typeof window === 'undefined') return 72
+    const width = window.innerWidth
+    const barSpacing = 8
+    const priceScaleWidth = 60
+    const availableWidth = width - priceScaleWidth - 40
+    return Math.max(30, Math.min(200, Math.floor(availableWidth / barSpacing * 0.8)))
+  }
+
+  // Update bar count on resize
+  useEffect(() => {
+    const update = () => setBarCount(calculateBarCount())
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+
+  // Reset data hash when timeframe changes to force refresh
+  useEffect(() => {
+    lastDataHash.current = ''
+  }, [timeframe])
+
+  const fetchData = async (tf: Timeframe, bars: number) => {
+    const markerHours = TIMEFRAME_HOURS[tf]
     try {
       // Fetch all data in parallel
       const [candlesRes, indicatorsRes, markersRes, stateRes] = await Promise.all([
-        fetch(`${API_URL}/api/candles?symbol=MNQ&timeframe=5m&bars=72`),
-        fetch(`${API_URL}/api/indicators?symbol=MNQ&timeframe=5m&bars=72`),
-        fetch(`${API_URL}/api/markers?hours=6`),
+        fetch(`${API_URL}/api/candles?symbol=MNQ&timeframe=${tf}&bars=${bars}`),
+        fetch(`${API_URL}/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${bars}`),
+        fetch(`${API_URL}/api/markers?hours=${markerHours}`),
         fetch(`${API_URL}/api/state`),
       ])
 
@@ -74,8 +112,8 @@ export default function LiveMainChart() {
       const markersData = markersRes.ok ? await markersRes.json() : []
       const stateData = stateRes.ok ? await stateRes.json() : null
 
-      // Only update if data changed
-      const dataHash = JSON.stringify(candlesData.slice(-3))
+      // Only update if data changed (include timeframe in hash to force update on tf change)
+      const dataHash = `${tf}:${JSON.stringify(candlesData.slice(-3))}`
       if (dataHash !== lastDataHash.current) {
         lastDataHash.current = dataHash
         setCandles(candlesData)
@@ -100,10 +138,10 @@ export default function LiveMainChart() {
   }
 
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, REFRESH_INTERVAL)
+    fetchData(timeframe, barCount)
+    const interval = setInterval(() => fetchData(timeframe, barCount), REFRESH_INTERVAL)
     return () => clearInterval(interval)
-  }, [])
+  }, [timeframe, barCount])
 
   const formatTime = (date: Date | null) => {
     if (!date) return '--:--'
@@ -120,6 +158,12 @@ export default function LiveMainChart() {
     return `${sign}$${pnl.toFixed(2)}`
   }
 
+  // Format display text for timeframe window
+  const getTimeframeDisplay = () => {
+    const hours = TIMEFRAME_HOURS[timeframe]
+    return hours >= 24 ? `${hours / 24}d` : `${hours}h`
+  }
+
   return (
     <div className="dashboard">
       {/* Header */}
@@ -128,8 +172,20 @@ export default function LiveMainChart() {
           <Image src="/logo.png" alt="PEARL" width={28} height={28} className="logo" priority />
           <h1>
             <span className="symbol">MNQ</span>
-            <span className="timeframe"> 6h (5m) • Live Main Chart</span>
+            <span className="timeframe"> {getTimeframeDisplay()} ({timeframe}) • Live Main Chart</span>
           </h1>
+        </div>
+        {/* Timeframe Selector */}
+        <div className="timeframe-selector">
+          {(['1m', '5m', '15m', '1h'] as Timeframe[]).map((tf) => (
+            <button
+              key={tf}
+              className={timeframe === tf ? 'active' : ''}
+              onClick={() => setTimeframe(tf)}
+            >
+              {tf}
+            </button>
+          ))}
         </div>
         <div className="status">
           <span className={`status-dot ${isLive ? '' : 'offline'}`}></span>
@@ -202,12 +258,39 @@ export default function LiveMainChart() {
       )}
 
       {/* Chart */}
-      <div className="chart-container">
-        {loading && <div className="loading">Loading chart data...</div>}
-        {error && !loading && <div className="error">Error: {error}</div>}
-        {!loading && !error && candles.length > 0 && (
-          <CandlestickChart data={candles} indicators={indicators} markers={markers} />
-        )}
+      <div className="chart-wrapper">
+        <div className="chart-actions">
+          <button
+            className="chart-action-btn"
+            onClick={() => mainChartApi?.timeScale().fitContent()}
+            title="Fit All"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+            </svg>
+          </button>
+          <button
+            className="chart-action-btn"
+            onClick={() => mainChartApi?.timeScale().scrollToRealTime()}
+            title="Go Live"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+          </button>
+        </div>
+        <div className="chart-container">
+          {loading && <div className="loading">Loading chart data...</div>}
+          {error && !loading && <div className="error">Error: {error}</div>}
+          {!loading && !error && candles.length > 0 && (
+            <CandlestickChart
+              data={candles}
+              indicators={indicators}
+              markers={markers}
+              onChartReady={setMainChartApi}
+            />
+          )}
+        </div>
       </div>
 
       {/* RSI Panel */}

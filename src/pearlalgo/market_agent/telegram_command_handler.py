@@ -1219,24 +1219,21 @@ class TelegramCommandHandler:
         """Show the main menu with chart displayed above the menu text."""
         state = self._read_state()
         
-        # Get Pearl suggestion (if any)
-        pearl_suggestion = self._get_pearl_suggestion(state) if state else None
-        
-        keyboard = self._get_main_menu_keyboard(pearl_suggestion=pearl_suggestion)
-        reply_markup = InlineKeyboardMarkup(keyboard)
         if state:
             try:
                 message_text = await self._build_status_dashboard_message(state)
                 
-                # Pearl suggestion text is now sent as a separate notification
-                # if pearl_suggestion:
-                #     message_text += f"\n\n💬 Pearl: \"{pearl_suggestion.message}\""
-                
+                # Generate chart FIRST so keyboard has fresh timestamp
                 chart_path = await self._generate_or_get_chart(
                     state,
                     force_refresh=force_chart_refresh,
                     allow_refresh=force_chart_refresh,
                 )
+                
+                # Get Pearl suggestion and build keyboard AFTER chart is generated
+                pearl_suggestion = self._get_pearl_suggestion(state) if state else None
+                keyboard = self._get_main_menu_keyboard(pearl_suggestion=pearl_suggestion)
+                reply_markup = InlineKeyboardMarkup(keyboard)
 
                 # Add a compact support footer to make any screenshot/share self-diagnostic.
                 caption_text = self._with_support_footer(message_text, state=state, max_chars=1024)
@@ -1402,6 +1399,11 @@ class TelegramCommandHandler:
                 logger.error(f"Error showing main menu with chart: {e}", exc_info=True)
                 await self._show_main_menu(query)
         else:
+            # No state - build keyboard without suggestion
+            keyboard = self._get_main_menu_keyboard(pearl_suggestion=None)
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            pearl_suggestion = None
+            
             text = self._with_support_footer(
                 "🎯 Pearl Algo Bot's\n\n❌ No state data available.\n\nSelect an option:",
                 state=None,
