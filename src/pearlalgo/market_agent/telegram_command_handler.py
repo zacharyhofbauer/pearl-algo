@@ -4389,23 +4389,25 @@ class TelegramCommandHandler:
                 daily_wins = int(daily_wins or 0)
                 daily_losses = int(daily_losses or 0)
                 
-                # Only show if there's activity today - condensed one-liner like 30d
-                if daily_trades > 0 or daily_pnl != 0:
-                    pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
-                    pnl_sign = "+" if daily_pnl >= 0 else "-"
-                    win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
-                    
-                    # Build streak indicator (only show if streak >= 3)
-                    streak_str = ""
-                    if current_streak >= 3:
-                        if streak_type == 'win':
-                            streak_str = f" • 🔥{current_streak}W"
-                        else:
-                            streak_str = f" • ❄️{current_streak}L"
-                    
+                # Always show 24h section - even with no trades (shows session is active)
+                pnl_emoji = "🟢" if daily_pnl >= 0 else "🔴"
+                pnl_sign = "+" if daily_pnl >= 0 else "-"
+                win_rate = (daily_wins / daily_trades * 100) if daily_trades > 0 else 0
+
+                # Build streak indicator (only show if streak >= 3)
+                streak_str = ""
+                if current_streak >= 3:
+                    if streak_type == 'win':
+                        streak_str = f" • 🔥{current_streak}W"
+                    else:
+                        streak_str = f" • ❄️{current_streak}L"
+
+                message += "\n\n*24h:*"
+                if daily_trades > 0:
                     # Condensed format: "24h: 🟢 +$2,375.00 (73W/74L • 50% WR) • ❄️3L"
-                    message += "\n\n*24h:*"
                     message += f"\n{pnl_emoji} {pnl_sign}${abs(daily_pnl):,.2f} ({daily_wins}W/{daily_losses}L • {win_rate:.0f}% WR){streak_str}"
+                else:
+                    message += f"\n⚪ $0.00 (new session)"
 
                 # ------------------------------------------------------------------
                 # 72-HOUR PERFORMANCE (rolling 72h)
