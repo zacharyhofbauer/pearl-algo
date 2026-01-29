@@ -41,6 +41,15 @@ from typing import Any, Dict, Mapping, Optional
 
 from pearlalgo.config.config_file import load_config_yaml, log_config_warnings
 from pearlalgo.config.config_view import ConfigView
+from pearlalgo.config import defaults
+from pearlalgo.config.adapters import (
+    build_strategy_config_from_yaml,
+    apply_execution_env_overrides as _apply_execution_env_overrides,
+    _get_env_bool,
+    _get_env_str,
+)
+from pearlalgo.utils.dict_utils import deep_merge_inplace as _deep_merge_dict
+from pearlalgo.utils.time_utils import parse_hhmm as _parse_hhmm
 from pearlalgo.utils.logger import logger
 
 # Schema validation (optional - only validates if explicitly requested)
@@ -58,16 +67,6 @@ _SERVICE_CONFIG_OVERRIDE: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
     "SERVICE_CONFIG_OVERRIDE",
     default=None,
 )
-
-
-def _deep_merge_dict(dst: Dict[str, Any], src: Mapping[str, Any]) -> Dict[str, Any]:
-    """Recursively merge src into dst (mutates dst)."""
-    for k, v in src.items():
-        if isinstance(v, dict) and isinstance(dst.get(k), dict):
-            _deep_merge_dict(dst[k], v)  # type: ignore[index]
-        else:
-            dst[k] = v
-    return dst
 
 
 @contextlib.contextmanager
@@ -88,51 +87,8 @@ def service_config_override(overrides: Dict[str, Any]):
             _SERVICE_CONFIG_OVERRIDE.set(None)
 
 
-# Environment override helpers (typed)
-_ENV_TRUE = {"1", "true", "yes", "y", "on"}
-_ENV_FALSE = {"0", "false", "no", "n", "off"}
-
-
-def _get_env_bool(name: str) -> Optional[bool]:
-    """
-    Read a boolean from the environment using tolerant parsing.
-
-    Returns None if the env var is not set (so config.yaml/defaults remain in control).
-    """
-    raw = os.getenv(name)
-    if raw is None:
-        return None
-    v = raw.strip().lower()
-    if v in _ENV_TRUE:
-        return True
-    if v in _ENV_FALSE:
-        return False
-    logger.warning(f"Invalid boolean for {name}={raw!r} (expected one of: {sorted(_ENV_TRUE | _ENV_FALSE)})")
-    return None
-
-
-def _get_env_str(name: str) -> Optional[str]:
-    raw = os.getenv(name)
-    if raw is None:
-        return None
-    v = raw.strip()
-    return v if v else None
-
-
-def _parse_hhmm(value: str) -> Optional[tuple[int, int]]:
-    try:
-        parts = value.strip().split(":")
-        if len(parts) != 2:
-            return None
-        hour = int(parts[0])
-        minute = int(parts[1])
-        if not (0 <= hour <= 23 and 0 <= minute <= 59):
-            return None
-        return hour, minute
-    except Exception:
-        return None
-
-
+# Delegate to adapters module for strategy config building
+# (kept here for backward compatibility)
 def build_strategy_config(
     base_strategy: Dict[str, Any],
     config_data: Mapping[str, Any],
@@ -142,182 +98,11 @@ def build_strategy_config(
 
     This maps config.yaml sections into the keys expected by
     `pearlalgo.trading_bots.pearl_bot_auto`.
+    
+    Note: Implementation delegated to pearlalgo.config.adapters module.
     """
-    strategy = dict(base_strategy or {})
+    return build_strategy_config_from_yaml(base_strategy, config_data)
 
-    # Top-level overrides
-    for key in ("symbol", "timeframe", "scan_interval"):
-        if key in config_data and config_data.get(key) is not None:
-            strategy[key] = config_data.get(key)
-
-    # Session window (HH:MM strings -> hour/minute ints)
-    session_cfg = config_data.get("session", {}) or {}
-    start = session_cfg.get("start_time")
-    end = session_cfg.get("end_time")
-    if isinstance(start, str):
-        parsed = _parse_hhmm(start)
-        if parsed:
-            strategy["start_hour"], strategy["start_minute"] = parsed
-    if isinstance(end, str):
-        parsed = _parse_hhmm(end)
-        if parsed:
-            strategy["end_hour"], strategy["end_minute"] = parsed
-
-    # Signal thresholds
-    signals_cfg = config_data.get("signals", {}) or {}
-    if "min_confidence" in signals_cfg:
-        try:
-            strategy["min_confidence"] = float(signals_cfg["min_confidence"])
-        except Exception:
-            pass
-    if "min_risk_reward" in signals_cfg:
-        try:
-            strategy["min_risk_reward"] = float(signals_cfg["min_risk_reward"])
-        except Exception:
-            pass
-
-    # Risk mapping: keep telemetry keys + derive ATR target multiplier
-    risk_cfg = config_data.get("risk", {}) or {}
-    stop_mult = risk_cfg.get("stop_loss_atr_multiplier")
-    if stop_mult is not None:
-        try:
-            stop_mult_f = float(stop_mult)
-            strategy["stop_loss_atr_mult"] = stop_mult_f
-            strategy["stop_loss_atr_multiplier"] = stop_mult_f
-        except Exception:
-            pass
-    rr = risk_cfg.get("take_profit_risk_reward")
-    if rr is not None:
-        try:
-            rr_f = float(rr)
-            strategy["take_profit_risk_reward"] = rr_f
-            if "stop_loss_atr_mult" in strategy:
-                strategy["take_profit_atr_mult"] = float(strategy["stop_loss_atr_mult"]) * rr_f
-        except Exception:
-            pass
-
-    if "max_risk_per_trade" in risk_cfg:
-        try:
-            strategy["max_risk_per_trade"] = float(risk_cfg["max_risk_per_trade"])
-        except Exception:
-            pass
-
-    # Strategy-specific overrides for pearl_bot_auto (indicator knobs, etc.)
-    # These keys map 1:1 to `pearlalgo.trading_bots.pearl_bot_auto.CONFIG`.
-    bot_cfg = config_data.get("pearl_bot_auto", {}) or {}
-    if isinstance(bot_cfg, dict):
-        def _coerce_bool(v: Any) -> bool:
-            if isinstance(v, bool):
-                return v
-            if isinstance(v, str):
-                t = v.strip().lower()
-                if t in ("1", "true", "yes", "y", "on"):
-                    return True
-                if t in ("0", "false", "no", "n", "off"):
-                    return False
-            return bool(v)
-
-        casts: Dict[str, Any] = {
-            # Core indicators
-            "ema_fast": int,
-            "ema_slow": int,
-            "volume_ma_length": int,
-            "vwap_std_dev": float,
-            "vwap_bands": int,
-            # Aggressive trigger knobs
-            "allow_vwap_cross_entries": _coerce_bool,
-            "allow_vwap_retest_entries": _coerce_bool,
-            "allow_trend_momentum_entries": _coerce_bool,
-            "trend_momentum_atr_mult": float,
-            "allow_trend_breakout_entries": _coerce_bool,
-            "trend_breakout_lookback_bars": int,
-            # Extended indicators
-            "sr_length": int,
-            "sr_extend": int,
-            "sr_atr_mult": float,
-            "tbt_period": int,
-            "tbt_trend_type": str,
-            "tbt_extend": int,
-            "sd_threshold_pct": float,
-            "sd_resolution": int,
-            # Key levels
-            "key_level_proximity_pct": float,
-            "key_level_breakout_pct": float,
-            "key_level_bounce_confidence": float,
-            "key_level_breakout_confidence": float,
-            "key_level_rejection_penalty": float,
-        }
-
-        for k, caster in casts.items():
-            if k not in bot_cfg:
-                continue
-            v = bot_cfg.get(k)
-            if v is None:
-                continue
-            try:
-                strategy[k] = caster(v)
-            except Exception:
-                # Best-effort: ignore invalid overrides.
-                pass
-
-    # Virtual PnL grading (strategy config keys used by pearl_bot_auto + MarketAgentService)
-    # Config.yaml shape:
-    #   virtual_pnl:
-    #     enabled: bool
-    #     notify_entry: bool
-    #     notify_exit: bool
-    #     intrabar_tiebreak: stop_loss|take_profit
-    vp_cfg = config_data.get("virtual_pnl", {}) or {}
-    if isinstance(vp_cfg, dict):
-        try:
-            if "enabled" in vp_cfg and vp_cfg.get("enabled") is not None:
-                strategy["virtual_pnl_enabled"] = bool(vp_cfg.get("enabled"))
-        except Exception:
-            pass
-        try:
-            if "notify_entry" in vp_cfg and vp_cfg.get("notify_entry") is not None:
-                strategy["virtual_pnl_notify_entry"] = bool(vp_cfg.get("notify_entry"))
-        except Exception:
-            pass
-        try:
-            if "notify_exit" in vp_cfg and vp_cfg.get("notify_exit") is not None:
-                strategy["virtual_pnl_notify_exit"] = bool(vp_cfg.get("notify_exit"))
-        except Exception:
-            pass
-        try:
-            # Strategy key is `virtual_pnl_tiebreak`, config uses `intrabar_tiebreak`.
-            tiebreak = vp_cfg.get("intrabar_tiebreak")
-            if tiebreak is not None:
-                strategy["virtual_pnl_tiebreak"] = str(tiebreak)
-        except Exception:
-            pass
-
-    return strategy
-
-
-def _apply_execution_env_overrides(execution_cfg: Dict[str, Any]) -> None:
-    """
-    Apply safe, typed environment overrides for execution rollout.
-
-    This avoids YAML `${ENV_VAR}` substitution for booleans, which would produce strings.
-    """
-    enabled = _get_env_bool("PEARLALGO_EXECUTION_ENABLED")
-    if enabled is not None:
-        execution_cfg["enabled"] = enabled
-
-    armed = _get_env_bool("PEARLALGO_EXECUTION_ARMED")
-    if armed is not None:
-        execution_cfg["armed"] = armed
-
-    mode = _get_env_str("PEARLALGO_EXECUTION_MODE")
-    if mode:
-        mode_norm = mode.lower()
-        if mode_norm in ("dry_run", "paper", "live"):
-            execution_cfg["mode"] = mode_norm
-        else:
-            logger.warning(
-                f"Invalid PEARLALGO_EXECUTION_MODE={mode!r} (expected: dry_run|paper|live); ignoring"
-            )
 
 # Default values for service configuration sections
 _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
@@ -500,22 +285,23 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
     # ==========================================================================
     # Controls automated order placement via IBKR.
     # SAFETY: Default is disabled + disarmed. Must explicitly enable and /arm to trade.
+    # NOTE: Canonical defaults are in pearlalgo.config.defaults module.
     "execution": {
-        "enabled": False,                   # Master toggle - must be true for any execution
-        "armed": False,                     # Runtime toggle - must be true to place orders
-        "mode": "dry_run",                  # "dry_run" (log only), "paper", or "live"
+        "enabled": defaults.EXECUTION_ENABLED,
+        "armed": defaults.EXECUTION_ARMED,
+        "mode": defaults.EXECUTION_MODE,
         "adapter": "ibkr",
         # Risk limits (hard caps)
-        "max_positions": 1,                 # Maximum concurrent positions
-        "max_orders_per_day": 20,           # Maximum orders per trading day
-        "max_daily_loss": 500.0,            # Kill switch: max daily loss in dollars
-        "cooldown_seconds": 60,             # Minimum seconds between orders for same signal type
+        "max_positions": defaults.MAX_POSITIONS,
+        "max_orders_per_day": defaults.MAX_ORDERS_PER_DAY,
+        "max_daily_loss": defaults.MAX_DAILY_LOSS,
+        "cooldown_seconds": defaults.COOLDOWN_SECONDS,
         # Symbol whitelist (empty = all symbols allowed)
-        "symbol_whitelist": ["MNQ"],
+        "symbol_whitelist": defaults.DEFAULT_SYMBOL_WHITELIST.copy(),
         # IBKR connection (separate client_id from data to avoid conflicts)
-        "ibkr_trading_client_id": 20,
-        "ibkr_host": "127.0.0.1",
-        "ibkr_port": 4002,
+        "ibkr_trading_client_id": defaults.IBKR_TRADING_CLIENT_ID,
+        "ibkr_host": defaults.IBKR_HOST,
+        "ibkr_port": defaults.IBKR_PORT,
     },
     # ==========================================================================
     # LEARNING (Adaptive Bandit Policy)
@@ -523,33 +309,34 @@ _SERVICE_DEFAULTS: Dict[str, Dict[str, Any]] = {
     # Adjusts execution decisions based on observed signal type performance.
     # Uses Thompson sampling (Beta-Bernoulli) per signal type.
     # SAFETY: Default is shadow mode - learns but does NOT affect execution.
+    # NOTE: Canonical defaults are in pearlalgo.config.defaults module.
     "learning": {
-        "enabled": True,                    # Master toggle for adaptive policy
-        "mode": "shadow",                   # "shadow" (observe only) or "live" (affects execution)
+        "enabled": defaults.LEARNING_ENABLED,
+        "mode": defaults.LEARNING_MODE,
         # Bandit configuration
-        "min_samples_per_type": 10,         # Minimum samples before policy has opinion
-        "explore_rate": 0.1,                # Random explore rate (epsilon-greedy component)
-        "decision_threshold": 0.3,          # Skip signal if P(win) < threshold
+        "min_samples_per_type": defaults.MIN_SAMPLES_PER_TYPE,
+        "explore_rate": defaults.EXPLORE_RATE,
+        "decision_threshold": defaults.DECISION_THRESHOLD,
         # Position sizing adjustment (when mode=live)
-        "max_size_multiplier": 1.5,         # Maximum size boost for high-confidence types
-        "min_size_multiplier": 0.5,         # Minimum size reduction for low-confidence types
+        "max_size_multiplier": defaults.MAX_SIZE_MULTIPLIER,
+        "min_size_multiplier": defaults.MIN_SIZE_MULTIPLIER,
         # Prior distribution (Beta distribution parameters)
-        # Start optimistic: alpha=2, beta=2 gives mean=0.5 with some uncertainty
-        "prior_alpha": 2.0,
-        "prior_beta": 2.0,
-        # Decay factor for older observations (0 = no decay, 1 = full weight to recent)
-        "decay_factor": 0.0,                # Disabled for now - all observations equal weight
+        "prior_alpha": defaults.PRIOR_ALPHA,
+        "prior_beta": defaults.PRIOR_BETA,
+        # Decay factor for older observations (0 = no decay)
+        "decay_factor": defaults.DECAY_FACTOR,
     },
     # ==========================================================================
     # 50K CHALLENGE TRACKER (Pass/Fail Rules)
     # ==========================================================================
+    # NOTE: Canonical defaults are in pearlalgo.config.defaults module.
     "challenge": {
-        "enabled": False,
-        "start_balance": 50000.0,
-        "max_drawdown": 2000.0,
-        "profit_target": 3000.0,
-        "auto_reset_on_pass": True,
-        "auto_reset_on_fail": True,
+        "enabled": defaults.CHALLENGE_ENABLED,
+        "start_balance": defaults.CHALLENGE_START_BALANCE,
+        "max_drawdown": defaults.CHALLENGE_MAX_DRAWDOWN,
+        "profit_target": defaults.CHALLENGE_PROFIT_TARGET,
+        "auto_reset_on_pass": defaults.CHALLENGE_AUTO_RESET_ON_PASS,
+        "auto_reset_on_fail": defaults.CHALLENGE_AUTO_RESET_ON_FAIL,
     },
 }
 

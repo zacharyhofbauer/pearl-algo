@@ -133,6 +133,7 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `scripts/monitoring/watchdog_agent.py` – cron/systemd-timer friendly watchdog for stalled state / silent failures (optional)
   - `scripts/monitoring/serve_agent_status.py` – localhost HTTP server exposing `/healthz` and `/metrics` (optional sidecar)
   - `scripts/monitoring/doctor_cli.py` – operator CLI rollup (signals, rejects, sizing, stops)
+  - `scripts/monitoring/incident_report.py` – incident report generation
   - `scripts/health_check.sh` – fast local health snapshot (requires `jq`)
 - **Docs**:
   - `docs/MARKET_AGENT_GUIDE.md` (monitoring section)
@@ -146,6 +147,26 @@ Canonical mapping between logical components, Python entry points, shell scripts
   - `pearlalgo.storage.async_sqlite_queue` – Async SQLite queue for state management
 - **State directories**:
   - `data/agent_state/<MARKET>/` – Per-market service state
+
+## Knowledge / RAG
+
+- **Logical component**: Knowledge indexing and retrieval for AI-assisted features
+- **Python modules**:
+  - `pearlalgo.knowledge.indexer` – Knowledge index builder
+  - `pearlalgo.knowledge.retriever` – Context retrieval for queries
+  - `pearlalgo.knowledge.chunker` – Document chunking
+  - `pearlalgo.knowledge.embeddings` – Embedding generation
+  - `pearlalgo.knowledge.scanner` – File system scanner
+  - `pearlalgo.knowledge.index_store` – FAISS index persistence
+  - `pearlalgo.knowledge.datasets` – Dataset management
+  - `pearlalgo.knowledge.types` – Shared types
+- **Scripts** (`scripts/knowledge/`):
+  - `build_index.py` – Build/rebuild knowledge index
+  - `export_datasets.py` – Export datasets for analysis
+  - `watch_repo.py` – Watch repository for changes and re-index
+- **Configuration**: `config.yaml` → `knowledge.*`
+- **Docs**:
+  - `docs/AI_PATCH_GUIDE.md` – AI patch feature documentation
 
 ## Utilities / Cross‑cutting Concerns
 

@@ -63,11 +63,12 @@ class Settings(BaseSettings):
         env_file=".env", env_prefix="PEARLALGO_", extra="ignore"
     )
 
-    # IBKR
-    ib_host: str = "127.0.0.1"
+    # IBKR - defaults imported from centralized defaults module
+    # Import here to avoid circular imports during module load
+    ib_host: str = "127.0.0.1"  # See config.defaults.IBKR_HOST
     # Default to IB Gateway paper port; TWS default is 7497.
-    ib_port: int = 4002
-    ib_client_id: int = 1
+    ib_port: int = 4002  # See config.defaults.IBKR_PORT
+    ib_client_id: int = 1  # See config.defaults.IBKR_CLIENT_ID
     # Optional separate client id for market data to avoid clashes with brokers/orders.
     ib_data_client_id: int | None = None
     @field_validator("ib_port")

@@ -12,9 +12,16 @@ Test Philosophy:
 - Each test targets a specific circuit breaker behavior
 - Tests are deterministic (no flaky timing)
 - Failure signals are explicit and observable
+
+Note: Marked as integration tests because they create full MarketAgentService instances.
 """
 
 from __future__ import annotations
+
+import pytest
+
+# Mark all tests in this module as integration tests
+pytestmark = pytest.mark.integration
 
 import asyncio
 from datetime import datetime, timezone

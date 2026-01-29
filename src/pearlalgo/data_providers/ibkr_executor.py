@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from ib_insync import IB, Future, Stock
 
 from pearlalgo.config.config_loader import load_service_config
+from pearlalgo.utils.formatting import fmt_price as _fmt_price, fmt_int as _fmt_int
 from pearlalgo.utils.logger import logger
 
 
@@ -52,47 +53,6 @@ def _is_valid_price(value: Any) -> bool:
         return not math.isnan(float_val) and float_val > 0
     except (ValueError, TypeError):
         return False
-
-
-def _fmt_price(value: Any, default: str = "N/A") -> str:
-    """
-    Safely format a price value for logging.
-    
-    Never raises - returns default string if value is invalid.
-    
-    Args:
-        value: Price value (may be None, NaN, or invalid)
-        default: String to return if value is invalid
-        
-    Returns:
-        Formatted price string (e.g., "$17500.25") or default
-    """
-    if value is None:
-        return default
-    try:
-        float_val = float(value)
-        if math.isnan(float_val) or math.isinf(float_val):
-            return default
-        return f"${float_val:.2f}"
-    except (ValueError, TypeError):
-        return default
-
-
-def _fmt_int(value: Any, default: str = "N/A") -> str:
-    """
-    Safely format an integer value for logging.
-    
-    Never raises - returns default string if value is invalid.
-    """
-    if value is None:
-        return default
-    try:
-        float_val = float(value)
-        if math.isnan(float_val) or math.isinf(float_val):
-            return default
-        return str(int(float_val))
-    except (ValueError, TypeError):
-        return default
 
 
 def _calculate_order_book_metrics(bids: List[Any], asks: List[Any]) -> Dict[str, Any]:
@@ -851,8 +811,6 @@ class GetHistoricalDataTask(Task):
             end = datetime.now(timezone.utc)
         else:
             end = self.end
-
-        bars = None
 
         bars = None
 

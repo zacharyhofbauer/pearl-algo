@@ -2,9 +2,14 @@
 Tests for Service Controller.
 
 Validates the service controller utilities for shell/script orchestration.
+
+Note: Marked as integration tests because they execute shell scripts.
 """
 
 import pytest
+
+# Mark all tests in this module as integration tests
+pytestmark = pytest.mark.integration
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import subprocess

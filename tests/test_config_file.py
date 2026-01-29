@@ -18,8 +18,6 @@ import pytest
 
 from pearlalgo.config.config_file import (
     _substitute_env_vars,
-    clear_config_cache,
-    get_config_yaml,
     load_config_yaml,
 )
 
@@ -233,21 +231,6 @@ class TestLoadConfigYaml:
         
         result = load_config_yaml(config_file)
         assert result == {}
-
-
-class TestConfigCache:
-    """Test the caching behavior of get_config_yaml."""
-
-    def test_cache_is_cleared(self) -> None:
-        """Test that clear_config_cache works."""
-        # This primarily tests that the function doesn't raise
-        clear_config_cache()
-
-    def test_get_config_yaml_returns_dict(self) -> None:
-        """Test that get_config_yaml returns a dict."""
-        clear_config_cache()
-        result = get_config_yaml()
-        assert isinstance(result, dict)
 
 
 class TestKnownConfigSections:

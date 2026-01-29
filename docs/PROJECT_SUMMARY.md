@@ -263,6 +263,125 @@ The MNQ Trading Agent is designed to:
 
 **Symbols**: Symbol definitions are in the strategy configuration (`src/pearlalgo/trading_bots/pearl_bot_auto.py` CONFIG). The system supports multiple markets (MNQ, ES, GC, etc.) via market-aware configuration.
 
+### 6. Knowledge Module (`src/pearlalgo/knowledge/`)
+
+**Purpose**: RAG (Retrieval-Augmented Generation) system for knowledge indexing and retrieval, used by the `/ai_patch` Telegram command.
+
+**Components**:
+- **Indexer** (`indexer.py`): Builds and maintains the knowledge index
+- **Retriever** (`retriever.py`): Retrieves relevant context for queries
+- **Chunker** (`chunker.py`): Splits documents into indexable chunks
+- **Embeddings** (`embeddings.py`): Embedding generation (OpenAI/local models)
+- **Scanner** (`scanner.py`): File system scanner for indexable content
+- **Index Store** (`index_store.py`): FAISS-based vector index persistence
+- **Datasets** (`datasets.py`): Dataset export and management
+- **Types** (`types.py`): Shared type definitions
+
+**Features**:
+- Automatic codebase indexing
+- Semantic search via FAISS
+- Support for OpenAI embeddings
+- Configurable chunk sizes and overlap
+- Used by `/ai_patch` command for context-aware code suggestions
+
+**Configuration** (in `config.yaml`):
+```yaml
+knowledge:
+  enabled: true
+  index_path: data/knowledge/index
+  chunk_size: 1000
+  chunk_overlap: 200
+```
+
+### 7. Challenge Tracker (`src/pearlalgo/market_agent/challenge_tracker.py`)
+
+**Purpose**: Prop firm challenge simulation and tracking (e.g., 50k challenge).
+
+**Features**:
+- Challenge state management (balance, profit target, drawdown limit)
+- Pass/fail rule evaluation
+- Automatic attempt reset on failure
+- Attempt history tracking
+- Integration with performance metrics
+
+**Configuration** (in `config.yaml`):
+```yaml
+challenge:
+  enabled: true
+  starting_balance: 50000
+  profit_target: 3000  # 6%
+  max_drawdown: 2500   # 5%
+```
+
+### 8. Trading Circuit Breaker (`src/pearlalgo/market_agent/trading_circuit_breaker.py`)
+
+**Purpose**: Risk management and trade gating based on session performance.
+
+**Features**:
+- **Consecutive loss limits**: Pauses trading after N consecutive losses
+- **Session drawdown limits**: Stops trading if session drawdown exceeds threshold
+- **Direction gating**: Can block long/short based on recent performance
+- **Session filters**: Configurable lunch lull avoidance
+- **Regime detection**: Avoids trading in unfavorable market conditions
+- **Cooldown periods**: Time-based pause after losses
+
+**Configuration** (in `config.yaml`):
+```yaml
+trading_circuit_breaker:
+  enabled: true
+  max_consecutive_losses: 3
+  session_drawdown_limit: 500
+  cooldown_minutes: 30
+```
+
+### 9. Notification Queue (`src/pearlalgo/market_agent/notification_queue.py`)
+
+**Purpose**: Async notification delivery with priority and retry logic.
+
+**Features**:
+- Priority queue (high/medium/low)
+- Automatic retry with exponential backoff
+- Rate limiting for Telegram API compliance
+- Decoupled delivery (non-blocking main loop)
+- Failure tracking and alerts
+
+### 10. Storage Module (`src/pearlalgo/storage/`)
+
+**Purpose**: Async SQLite persistence layer.
+
+**Components**:
+- **Async SQLite Queue** (`async_sqlite_queue.py`): Background write queue for SQLite operations
+  - Priority-based write queue
+  - Background worker thread
+  - Prevents blocking the main event loop
+  - Used by trade database and state persistence
+
+### 11. Chart Generator (`src/pearlalgo/market_agent/chart_generator.py`)
+
+**Purpose**: Generates chart images for Telegram dashboard updates.
+
+**Features**:
+- OHLCV candlestick charts
+- Technical indicator overlays (EMA, VWAP, RSI)
+- Trade markers with entry/exit annotations
+- Support for multiple timeframes
+- Dark theme optimized for Telegram
+
+### 12. Additional Utilities
+
+**Pearl Suggestions** (`utils/pearl_suggestions.py`):
+- Contextual trading suggestions based on market conditions
+- Used by Telegram command handler
+
+**OpenAI Client** (`utils/openai_client.py`):
+- OpenAI API integration wrapper
+- Used by `/ai_patch` command for code generation
+- Supports streaming responses
+
+**Absolute Mode** (`utils/absolute_mode.py`):
+- Utilities for absolute vs relative path handling
+- Cross-platform path normalization
+
 ---
 
 ## Data Flow

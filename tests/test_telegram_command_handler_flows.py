@@ -8,9 +8,16 @@ Tests the main command flows:
 
 Uses lightweight stubs for Update/Context to test handler logic
 without requiring a running Telegram bot.
+
+Note: Marked as integration tests due to complex handler flow testing.
 """
 
 from __future__ import annotations
+
+import pytest
+
+# Mark all tests in this module as integration tests
+pytestmark = pytest.mark.integration
 
 import asyncio
 import json

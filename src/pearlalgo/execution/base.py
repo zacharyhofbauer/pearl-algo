@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from pearlalgo.config import defaults
 from pearlalgo.utils.logger import logger
 
 
@@ -42,34 +43,36 @@ class ExecutionConfig:
     
     Safety defaults: enabled=False, armed=False, mode=dry_run
     This ensures no accidental order placement without explicit operator action.
+    
+    NOTE: Canonical defaults are in pearlalgo.config.defaults module.
     """
     # Master toggle - must be True for any execution to occur
-    enabled: bool = False
+    enabled: bool = defaults.EXECUTION_ENABLED
     
     # Arm/disarm - must be True to place orders (runtime toggle via /arm command)
-    armed: bool = False
+    armed: bool = defaults.EXECUTION_ARMED
     
     # Execution mode
     mode: ExecutionMode = ExecutionMode.DRY_RUN
     
     # Risk limits
-    max_positions: int = 1  # Maximum concurrent positions
-    max_orders_per_day: int = 20  # Maximum orders per trading day
-    max_daily_loss: float = 500.0  # Maximum daily loss in dollars before kill switch
-    cooldown_seconds: int = 60  # Minimum seconds between orders for same signal type
+    max_positions: int = defaults.MAX_POSITIONS
+    max_orders_per_day: int = defaults.MAX_ORDERS_PER_DAY
+    max_daily_loss: float = defaults.MAX_DAILY_LOSS
+    cooldown_seconds: int = defaults.COOLDOWN_SECONDS
     
     # Symbol whitelist (empty = all symbols allowed)
-    symbol_whitelist: List[str] = field(default_factory=lambda: ["MNQ"])
+    symbol_whitelist: List[str] = field(default_factory=lambda: defaults.DEFAULT_SYMBOL_WHITELIST.copy())
     
     # IBKR-specific
-    ibkr_trading_client_id: int = 20  # Separate from data client_id to avoid conflicts
-    ibkr_host: str = "127.0.0.1"
-    ibkr_port: int = 4002
+    ibkr_trading_client_id: int = defaults.IBKR_TRADING_CLIENT_ID
+    ibkr_host: str = defaults.IBKR_HOST
+    ibkr_port: int = defaults.IBKR_PORT
     
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "ExecutionConfig":
         """Create ExecutionConfig from a dictionary (e.g., from config.yaml)."""
-        mode_str = config.get("mode", "dry_run").lower()
+        mode_str = config.get("mode", defaults.EXECUTION_MODE).lower()
         mode_map = {
             "dry_run": ExecutionMode.DRY_RUN,
             "paper": ExecutionMode.PAPER,
@@ -78,17 +81,17 @@ class ExecutionConfig:
         mode = mode_map.get(mode_str, ExecutionMode.DRY_RUN)
         
         return cls(
-            enabled=bool(config.get("enabled", False)),
-            armed=bool(config.get("armed", False)),
+            enabled=bool(config.get("enabled", defaults.EXECUTION_ENABLED)),
+            armed=bool(config.get("armed", defaults.EXECUTION_ARMED)),
             mode=mode,
-            max_positions=int(config.get("max_positions", 1)),
-            max_orders_per_day=int(config.get("max_orders_per_day", 20)),
-            max_daily_loss=float(config.get("max_daily_loss", 500.0)),
-            cooldown_seconds=int(config.get("cooldown_seconds", 60)),
-            symbol_whitelist=list(config.get("symbol_whitelist", ["MNQ"])),
-            ibkr_trading_client_id=int(config.get("ibkr_trading_client_id", 20)),
-            ibkr_host=str(config.get("ibkr_host", "127.0.0.1")),
-            ibkr_port=int(config.get("ibkr_port", 4002)),
+            max_positions=int(config.get("max_positions", defaults.MAX_POSITIONS)),
+            max_orders_per_day=int(config.get("max_orders_per_day", defaults.MAX_ORDERS_PER_DAY)),
+            max_daily_loss=float(config.get("max_daily_loss", defaults.MAX_DAILY_LOSS)),
+            cooldown_seconds=int(config.get("cooldown_seconds", defaults.COOLDOWN_SECONDS)),
+            symbol_whitelist=list(config.get("symbol_whitelist", defaults.DEFAULT_SYMBOL_WHITELIST)),
+            ibkr_trading_client_id=int(config.get("ibkr_trading_client_id", defaults.IBKR_TRADING_CLIENT_ID)),
+            ibkr_host=str(config.get("ibkr_host", defaults.IBKR_HOST)),
+            ibkr_port=int(config.get("ibkr_port", defaults.IBKR_PORT)),
         )
     
     def to_dict(self) -> Dict[str, Any]:
