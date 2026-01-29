@@ -405,4 +405,3 @@ knowledge:
   embedding_dim: 384
   use_faiss: false
   top_k: 6
-

@@ -17,9 +17,35 @@ import re
 PEARL_EMOJI_ID = "5177134388684523561"
 
 
+def escape_markdown(text: str) -> str:
+    """
+    Escape characters that have special meaning in Telegram Markdown (v1).
+
+    Escapes: _ * ` [
+    For Markdown mode (not MarkdownV2), primarily _ and * matter.
+
+    Args:
+        text: Text to escape
+
+    Returns:
+        Escaped text safe for Markdown parsing
+    """
+    if not text:
+        return ""
+    result = str(text)
+    result = result.replace("_", "\\_")
+    result = result.replace("*", "\\*")
+    result = result.replace("`", "\\`")
+    result = result.replace("[", "\\[")
+    return result
+
+
 def escape_markdown_v2(text: str) -> str:
     """
     Escape special characters for Telegram MarkdownV2.
+
+    This is more comprehensive than escape_markdown() as MarkdownV2
+    has more special characters that need escaping.
 
     Args:
         text: Text to escape
@@ -35,6 +61,23 @@ def escape_markdown_v2(text: str) -> str:
         else:
             result += char
     return result
+
+
+def safe_label(text: str) -> str:
+    """
+    Make a dynamic string safe for Telegram Markdown labels.
+
+    Replaces underscores with spaces (more readable than escaping).
+
+    Args:
+        text: Text to make safe
+
+    Returns:
+        Safe text with underscores replaced by spaces
+    """
+    if not text:
+        return ""
+    return str(text).replace("_", " ")
 
 
 def convert_to_markdown_v2_with_pearl(text: str) -> str:

@@ -15,6 +15,12 @@ from pearlalgo.utils.formatting import (
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.sparkline import generate_progress_bar
 
+# Re-export markdown utilities from telegram_utils for backwards compatibility
+from pearlalgo.market_agent.telegram_utils import (
+    escape_markdown,
+    safe_label,
+)
+
 try:
     from telegram import Bot
     from telegram.error import TelegramError
@@ -476,33 +482,8 @@ def sanitize_telegram_markdown(text: str) -> str:
     return "".join(out)
 
 
-def escape_markdown(text: str) -> str:
-    """
-    Escape characters that have special meaning in Telegram Markdown.
-
-    Escapes: _ * [ ] ( ) ~ ` > # + - = | { } . !
-    For Markdown mode (not MarkdownV2), primarily _ and * matter.
-    """
-    if not text:
-        return ""
-    # For Telegram Markdown (not V2), escape underscores and asterisks
-    result = str(text)
-    result = result.replace("_", "\\_")
-    result = result.replace("*", "\\*")
-    result = result.replace("`", "\\`")
-    result = result.replace("[", "\\[")
-    return result
-
-
-def safe_label(text: str) -> str:
-    """
-    Make a dynamic string safe for Telegram Markdown labels.
-
-    Replaces underscores with spaces (more readable than escaping).
-    """
-    if not text:
-        return ""
-    return str(text).replace("_", " ")
+# NOTE: escape_markdown and safe_label are now imported from
+# pearlalgo.market_agent.telegram_utils and re-exported for backwards compatibility
 
 
 def format_bot_name(bot_id: str) -> str:
