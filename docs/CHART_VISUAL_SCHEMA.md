@@ -21,10 +21,10 @@ A great chart feels boring — because the trader never has to wonder whether it
 
 | Element | Hex | RGB | Meaning |
 |---------|-----|-----|---------|
-| Background | `#0e1013` | (14, 16, 19) | Dark canvas — reduces eye strain |
-| Grid | `#1e2127` | (30, 33, 39) | Subtle structure — doesn't compete with data |
-| Text Primary | `#d1d4dc` | (209, 212, 220) | High-contrast labels — always readable |
-| Text Secondary | `#787b86` | (120, 123, 134) | Subdued labels — contextual info |
+| Background | `#0b0f17` | (11, 15, 23) | Dark canvas — reduces eye strain |
+| Grid | `#242a33` | (36, 42, 51) | Subtle structure — doesn't compete with data |
+| Text Primary | `#e5e7ef` | (229, 231, 239) | High-contrast labels — always readable |
+| Text Secondary | `#9aa3b2` | (154, 163, 178) | Subdued labels — contextual info |
 
 ### Candle Colors
 
@@ -55,6 +55,7 @@ A great chart feels boring — because the trader never has to wonder whether it
 | MA[2] | `#9c27b0` | Third MA (EMA50) — purple |
 | MA[3] | `#f44336` | Fourth MA (EMA200) — red |
 | RSI | `#b388ff` | RSI line in sub-panel — light purple |
+| RSI Signal | `#f6c453` | RSI signal/MA line — warm yellow |
 
 **Contract**: Each EMA has a unique color for clear visual distinction. Default periods: [9, 20, 50, 200]. Colors: Cyan (fast) → Blue → Purple → Red (slow). Changing the order changes visual meaning.
 
@@ -146,6 +147,17 @@ For Telegram/mobile dashboard charts, recent trades are additionally visualized 
 - The path is capped to a small number of recent trades to avoid clutter
 
 **Contract**: The trade path is informational and must never obscure candles (light alpha, behind text labels).
+
+#### Chart Key (Dashboard)
+
+Telegram dashboard charts include a compact **Chart Key** overlay that summarizes:
+
+- Key line types (VWAP/EMA) — color swatches are in the top-right legend
+- RSI line + signal (when enabled)
+- Session shading and zone overlays
+- Trade overlay semantics (markers, colors, paths)
+
+**Contract**: Keep the chart key concise and non-overlapping with price data.
 
 #### EMA Crossover Markers (Dashboard Only)
 

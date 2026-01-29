@@ -32,11 +32,11 @@ except ImportError:
     MPLFINANCE_AVAILABLE = False
     logger.warning("mplfinance not installed. Install with: pip install mplfinance")
 
-# TradingView-style color constants
-DARK_BG = "#0e1013"
-GRID_COLOR = "#1e2127"
-TEXT_PRIMARY = "#d1d4dc"
-TEXT_SECONDARY = "#787b86"
+# TradingView-style color constants (tuned for clarity on Telegram)
+DARK_BG = "#0b0f17"
+GRID_COLOR = "#242a33"
+TEXT_PRIMARY = "#e5e7ef"
+TEXT_SECONDARY = "#9aa3b2"
 CANDLE_UP = "#26a69a"
 CANDLE_DOWN = "#ef5350"
 SIGNAL_LONG = "#26a69a"
@@ -46,8 +46,9 @@ VWAP_COLOR = "#2196f3"
 # MA colors: supports up to 4 EMAs (9, 20, 50, 200) with unique colors
 # Cyan for EMA9, Blue for EMA20, Purple for EMA50, Red for EMA200
 MA_COLORS = ['#00bcd4', '#2196f3', '#9c27b0', '#f44336']
-RSI_LINE_COLOR = "#7E57C2"
-RSI_BAND_COLOR = "#787b86"
+RSI_LINE_COLOR = "#b388ff"
+RSI_SIGNAL_COLOR = "#f6c453"
+RSI_BAND_COLOR = "#8a94a6"
 
 # TBT Trendline colors (configurable via ChartConfig)
 TBT_RESISTANCE_COLOR = "#ffc107"  # Amber/yellow for resistance trendlines
@@ -91,14 +92,14 @@ ALPHA_ZONE_SUPPLY_DEMAND = 0.18  # Supply/demand zone fills
 ALPHA_ZONE_POWER_CHANNEL = 0.10  # Power channel zone fills
 ALPHA_ZONE_RR_BOX_PROFIT = 0.20  # RR box profit zone
 ALPHA_ZONE_RR_BOX_RISK = 0.22    # RR box risk zone
-ALPHA_SESSION_SHADING = 0.08     # Session background shading
-ALPHA_VWAP_BAND_FILL = 0.12      # VWAP band fill between VWAP and ±1σ (subtle but visible)
-ALPHA_LINE_PRIMARY = 0.9         # Entry line, primary levels
-ALPHA_LINE_SECONDARY = 0.7       # Stop/target, secondary levels
-ALPHA_LINE_CONTEXTUAL = 0.55     # S/R, session averages
-ALPHA_VWAP_BAND_1 = 0.35         # VWAP ±1 sigma bands
-ALPHA_VWAP_BAND_2 = 0.25         # VWAP ±2 sigma bands
-ALPHA_LEGEND_BG = 0.6            # Legend background
+ALPHA_SESSION_SHADING = 0.10     # Session background shading
+ALPHA_VWAP_BAND_FILL = 0.10      # VWAP band fill between VWAP and ±1σ
+ALPHA_LINE_PRIMARY = 0.95        # Entry line, primary levels
+ALPHA_LINE_SECONDARY = 0.80      # Stop/target, secondary levels
+ALPHA_LINE_CONTEXTUAL = 0.60     # S/R, session averages
+ALPHA_VWAP_BAND_1 = 0.40         # VWAP ±1 sigma bands
+ALPHA_VWAP_BAND_2 = 0.30         # VWAP ±2 sigma bands
+ALPHA_LEGEND_BG = 0.70           # Legend background
 
 
 def _stabilize_matplotlib_rcparams() -> None:
@@ -952,7 +953,8 @@ class ChartConfig:
     show_performance_metrics: bool = True
     timeframe: str = "5m"  # Default to 5m for better visual context (HTF/LTF still used for analysis)
     show_entry_sl_tp_bands: bool = True
-    candle_width: float = 0.8  # mplfinance uses 0.8 as default (80% of interval)
+    candle_width: float = 0.7  # Slightly thinner for clearer spacing on Telegram
+    candle_linewidth: float = 1.2  # Wick/body edge thickness for clarity
 
     # TradingView-style HUD layers
     show_hud: bool = True
@@ -993,6 +995,10 @@ class ChartConfig:
     show_rsi: bool = True
     rsi_period: int = 14
     rsi_overbought_oversold_shading: bool = True  # Shade overbought (>70) and oversold (<30) zones
+    show_rsi_signal: bool = True
+    rsi_signal_period: int = 9
+    rsi_signal_type: str = "ema"  # "ema" or "sma"
+    rsi_signal_linewidth: float = 1.0
 
     # Panel visibility options (allows hiding panels for more price space)
     show_pressure_panel: bool = True  # Pressure panel (signed volume histogram)
@@ -1297,13 +1303,14 @@ class ChartGenerator:
         self.style = mpf.make_mpf_style(
             marketcolors=mc,
             base_mpl_style='dark_background',  # Start with dark theme
-            gridstyle='--',                     # Dashed grid lines
+            gridstyle='-',                      # Subtle solid grid lines
             gridcolor=GRID_COLOR,               # Subtle grid color
             facecolor=DARK_BG,                  # Chart background
             edgecolor=GRID_COLOR,               # Edge color
             figcolor=DARK_BG,                   # Figure background
             y_on_right=True,                    # Price axis on right (TradingView style)
             rc={
+                'grid.alpha': 0.35,
                 'axes.labelcolor': TEXT_PRIMARY,
                 'axes.edgecolor': GRID_COLOR,
                 'axes.spines.top': False,       # Remove top spine
@@ -1509,8 +1516,8 @@ class ChartGenerator:
                     indicators.append(mpf.make_addplot(
                         data['Close'].ewm(span=period, adjust=False).mean(),
                         color=color,
-                        width=1.2,
-                        alpha=0.7,
+                        width=1.4,
+                        alpha=0.82,
                         label=f'EMA{period}'
                     ))
         
@@ -1537,8 +1544,8 @@ class ChartGenerator:
                     indicators.append(mpf.make_addplot(
                         vwap_series,
                         color=VWAP_COLOR,
-                        width=1.5,
-                        alpha=0.7,
+                        width=1.7,
+                        alpha=0.85,
                         label='VWAP'
                     ))
             except Exception as e:
@@ -1558,7 +1565,7 @@ class ChartGenerator:
             color=ENTRY_COLOR,
             width=2.5,
             linestyle='-',
-            alpha=0.9,
+            alpha=ALPHA_LINE_PRIMARY,
             label=f'Entry: ${entry_price:.2f}'
         ))
         
@@ -1570,7 +1577,7 @@ class ChartGenerator:
                 color=SIGNAL_SHORT,
                 width=2,
                 linestyle='--',
-                alpha=0.7,
+                alpha=ALPHA_LINE_SECONDARY,
                 label=f'Stop: ${stop_loss:.2f}'
             ))
         
@@ -1582,7 +1589,7 @@ class ChartGenerator:
                 color=SIGNAL_LONG,
                 width=2,
                 linestyle='--',
-                alpha=0.7,
+                alpha=ALPHA_LINE_SECONDARY,
                 label=f'TP: ${take_profit:.2f}'
             ))
         
@@ -2456,7 +2463,7 @@ class ChartGenerator:
                 30,
                 70,
                 facecolor=RSI_LINE_COLOR,
-                alpha=0.12,
+                alpha=0.10,
                 edgecolor="none",
                 zorder=0,
             )
@@ -2468,7 +2475,7 @@ class ChartGenerator:
                 mask = rsi_vals >= lvl
                 if not mask.any():
                     continue
-                alpha = 0.04 + (0.20 * (i + 1) / steps)
+                alpha = 0.03 + (0.15 * (i + 1) / steps)
                 ax_rsi.fill_between(
                     x_coords,
                     50,
@@ -2485,7 +2492,7 @@ class ChartGenerator:
                 mask = rsi_vals <= lvl
                 if not mask.any():
                     continue
-                alpha = 0.04 + (0.20 * (i + 1) / steps)
+                alpha = 0.03 + (0.15 * (i + 1) / steps)
                 ax_rsi.fill_between(
                     x_coords,
                     rsi_vals,
@@ -3165,9 +3172,40 @@ class ChartGenerator:
         *,
         ema_crossovers_shown: bool,
     ) -> None:
-        """Draw a compact legend explaining trade overlays on the dashboard chart."""
+        """Draw a compact chart key explaining overlays on the dashboard chart."""
         try:
-            lines = ["Trade overlay"]
+            lines = ["Chart Key"]
+
+            # Indicator summary (line swatches still live in the top-right legend).
+            try:
+                show_vwap = bool(getattr(self.config, "show_vwap", True))
+            except Exception:
+                show_vwap = True
+            try:
+                show_ma = bool(getattr(self.config, "show_ma", True))
+            except Exception:
+                show_ma = True
+            if show_vwap or show_ma:
+                parts = []
+                if show_vwap:
+                    parts.append("VWAP")
+                if show_ma:
+                    parts.append("EMA")
+                if parts:
+                    lines.append(f"Lines: {' + '.join(parts)}")
+
+            if bool(getattr(self.config, "show_rsi", False)):
+                rsi_note = "line"
+                if bool(getattr(self.config, "show_rsi_signal", False)):
+                    rsi_note = "line + signal"
+                lines.append(f"RSI: {rsi_note}")
+
+            if bool(getattr(self.config, "show_sessions", False)):
+                lines.append("Sessions: shaded blocks")
+            if bool(getattr(self.config, "show_supply_demand", False)) or bool(getattr(self.config, "show_power_channel", False)):
+                lines.append("Zones: supply/demand")
+
+            # Trade overlay summary
             try:
                 show_letters = bool(getattr(self.config, "smart_marker_show_letters", True))
             except Exception:
@@ -3186,16 +3224,16 @@ class ChartGenerator:
                 show_path = True
 
             if show_letters and show_entry and show_exit:
-                lines.append("Marker: Letter pairs entry/exit")
+                lines.append("Trades: lettered entry/exit pairs")
             else:
                 if show_entry and show_exit:
-                    lines.append("Marker: Entry/Exit pairs (no letters)")
+                    lines.append("Trades: entry/exit pairs")
                 elif show_entry and not show_exit:
-                    lines.append("Marker: Entries only")
+                    lines.append("Trades: entries only")
                 elif show_exit and not show_entry:
-                    lines.append("Marker: Exits only")
+                    lines.append("Trades: exits only")
                 else:
-                    lines.append("Marker: Paths only")
+                    lines.append("Trades: paths only")
             lines.append("Color: green win / red loss")
             if show_entry and show_exit:
                 lines.append("Shape: ▲ Entry / ● Exit")
@@ -3209,6 +3247,7 @@ class ChartGenerator:
                 lines.append("Path: dashed connector")
             else:
                 lines.append("Path: hidden")
+
             # Path-only enhancements (kept compact; static Telegram-friendly)
             try:
                 path_arrow = bool(getattr(self.config, "smart_marker_path_arrowheads", False))
@@ -3228,18 +3267,16 @@ class ChartGenerator:
                 lines.append("Opacity: newer brighter")
             if path_last and show_path:
                 lines.append("Label: last P&L")
-            
+
             if ema_crossovers_shown:
                 lines.append("EMA cross: cyan/pink")
-            else:
-                lines.append("EMA cross: hidden")
 
             try:
-                legend_y = 0.84 if self.config.mobile_mode else 0.88
+                legend_y = 0.82 if self.config.mobile_mode else 0.88
                 if bool(getattr(self.config, "show_power_readout", True)):
                     legend_y -= 0.06
             except Exception:
-                legend_y = 0.84
+                legend_y = 0.82
 
             ax.text(
                 0.01,
@@ -3282,12 +3319,29 @@ class ChartGenerator:
             except Exception:
                 pass
             ax.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
+            # Subtle card background to separate recap from chart panels
+            try:
+                from matplotlib.patches import FancyBboxPatch
+                card = FancyBboxPatch(
+                    (0.0, 0.0),
+                    1.0,
+                    1.0,
+                    transform=ax.transAxes,
+                    boxstyle="round,pad=0.02",
+                    facecolor=mcolors.to_rgba(DARK_BG, alpha=0.35),
+                    edgecolor=GRID_COLOR,
+                    linewidth=0.8,
+                    zorder=0,
+                )
+                ax.add_patch(card)
+            except Exception:
+                pass
 
             title = str(range_label or "Trade Recap").strip()
             if not pnl_overlay or not isinstance(pnl_overlay, dict):
                 ax.text(
-                    0.02,
-                    0.92,
+                    0.04,
+                    0.90,
                     title,
                     transform=ax.transAxes,
                     ha="left",
@@ -3297,8 +3351,8 @@ class ChartGenerator:
                     alpha=0.9,
                 )
                 ax.text(
-                    0.02,
-                    0.65,
+                    0.04,
+                    0.62,
                     "No closed trades in window",
                     transform=ax.transAxes,
                     ha="left",
@@ -3317,8 +3371,8 @@ class ChartGenerator:
 
             if not isinstance(curve_raw, (list, tuple)) or len(curve_raw) < 2:
                 ax.text(
-                    0.02,
-                    0.92,
+                    0.04,
+                    0.90,
                     label,
                     transform=ax.transAxes,
                     ha="left",
@@ -3328,8 +3382,8 @@ class ChartGenerator:
                     alpha=0.9,
                 )
                 ax.text(
-                    0.02,
-                    0.65,
+                    0.04,
+                    0.62,
                     "No closed trades in window",
                     transform=ax.transAxes,
                     ha="left",
@@ -3352,16 +3406,16 @@ class ChartGenerator:
             cummax = np.maximum.accumulate(y)
             dd = y - cummax
             max_dd = float(abs(np.min(dd))) if len(dd) else 0.0
+            avg_trade = float(daily_pnl / trades_count) if trades_count > 0 else 0.0
 
             pnl_color = CANDLE_UP if daily_pnl >= 0 else CANDLE_DOWN
             pnl_sign = "+" if daily_pnl >= 0 else ""
 
-            # Header text
-            header = f"{label} • {trades_count} trades • {win_rate:.0f}% WR • MaxDD ${max_dd:,.0f}"
+            # Header + stats text
             ax.text(
-                0.02,
-                0.96,
-                header,
+                0.04,
+                0.93,
+                label,
                 transform=ax.transAxes,
                 ha="left",
                 va="top",
@@ -3370,39 +3424,52 @@ class ChartGenerator:
                 alpha=0.92,
             )
             ax.text(
-                0.02,
-                0.80,
+                0.04,
+                0.76,
                 f"{pnl_sign}${daily_pnl:,.2f}",
                 transform=ax.transAxes,
                 ha="left",
                 va="top",
-                fontsize=FONT_SIZE_SUMMARY,
+                fontsize=12,
+                fontweight="bold",
                 color=pnl_color,
-                alpha=0.95,
+                alpha=0.98,
+            )
+            stats = f"{trades_count} trades • {win_rate:.0f}% WR • Avg ${avg_trade:,.0f} • MaxDD ${max_dd:,.0f}"
+            ax.text(
+                0.04,
+                0.63,
+                stats,
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=FONT_SIZE_LEGEND,
+                color=TEXT_SECONDARY,
+                alpha=0.9,
             )
 
             # Equity subplot
-            ax_eq = ax.inset_axes([0.02, 0.25, 0.96, 0.50])
+            ax_eq = ax.inset_axes([0.04, 0.26, 0.92, 0.36])
             ax_eq.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
-            ax_eq.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.7)
-            ax_eq.plot(x, y, color=TEXT_PRIMARY, linewidth=1.2, alpha=0.9)
-            ax_eq.fill_between(x, 0.0, y, where=(y >= 0), color=CANDLE_UP, alpha=0.22)
-            ax_eq.fill_between(x, 0.0, y, where=(y < 0), color=CANDLE_DOWN, alpha=0.22)
+            ax_eq.axhline(0.0, color=GRID_COLOR, linewidth=0.9, linestyle="--", alpha=0.6)
+            ax_eq.plot(x, y, color=TEXT_PRIMARY, linewidth=1.4, alpha=0.9)
+            ax_eq.fill_between(x, 0.0, y, where=(y >= 0), color=CANDLE_UP, alpha=0.26)
+            ax_eq.fill_between(x, 0.0, y, where=(y < 0), color=CANDLE_DOWN, alpha=0.26)
             ax_eq.scatter(
                 [x[-1]],
                 [y[-1]],
-                s=18,
+                s=22,
                 color=pnl_color,
                 edgecolors=DARK_BG,
-                linewidths=0.8,
+                linewidths=0.6,
                 zorder=ZORDER_TEXT_LABELS,
             )
 
             # Drawdown subplot
-            ax_dd = ax.inset_axes([0.02, 0.08, 0.96, 0.12])
+            ax_dd = ax.inset_axes([0.04, 0.08, 0.92, 0.12])
             ax_dd.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
-            ax_dd.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.7)
-            ax_dd.fill_between(x, 0.0, dd, color=CANDLE_DOWN, alpha=0.30)
+            ax_dd.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.6)
+            ax_dd.fill_between(x, 0.0, dd, color=CANDLE_DOWN, alpha=0.35)
 
             # Tight framing
             try:
@@ -3635,16 +3702,40 @@ class ChartGenerator:
 
                 rsi_panel = 2 if volume_on else 1
                 addplot.append(
-                    mpf.make_addplot(rsi, panel=rsi_panel, color=RSI_LINE_COLOR, width=1.2, ylabel="RSI", alpha=0.9)
+                    mpf.make_addplot(
+                        rsi,
+                        panel=rsi_panel,
+                        color=RSI_LINE_COLOR,
+                        width=1.3,
+                        ylabel="RSI",
+                        alpha=0.95
+                    )
                 )
-                for lvl, a in ((70, 0.9), (50, 0.5), (30, 0.9)):
+                if self.config.show_rsi_signal and self.config.rsi_signal_period > 1:
+                    try:
+                        if str(self.config.rsi_signal_type).lower() == "sma":
+                            rsi_signal = rsi.rolling(self.config.rsi_signal_period).mean()
+                        else:
+                            rsi_signal = rsi.ewm(span=self.config.rsi_signal_period, adjust=False).mean()
+                        addplot.append(
+                            mpf.make_addplot(
+                                rsi_signal,
+                                panel=rsi_panel,
+                                color=RSI_SIGNAL_COLOR,
+                                width=float(self.config.rsi_signal_linewidth),
+                                alpha=0.85,
+                            )
+                        )
+                    except Exception:
+                        pass
+                for lvl, a, ls in ((70, 0.85, "--"), (50, 0.55, ":"), (30, 0.85, "--")):
                     addplot.append(
                         mpf.make_addplot(
                             pd.Series([lvl] * len(df), index=df.index),
                             panel=rsi_panel,
                             color=RSI_BAND_COLOR,
-                            width=1.0,
-                            linestyle="-",
+                            width=0.9,
+                            linestyle=ls,
                             alpha=a,
                         )
                     )
@@ -3822,7 +3913,7 @@ class ChartGenerator:
                 color=MA_COLORS[0],
                 width=2.5,
                 linestyle='-',
-                alpha=0.9,
+                alpha=ALPHA_LINE_PRIMARY,
                 label=f'Exit: ${exit_price:.2f} ({exit_reason})'
             ))
             
@@ -3852,16 +3943,40 @@ class ChartGenerator:
 
                 rsi_panel = 2 if volume_on else 1
                 addplot.append(
-                    mpf.make_addplot(rsi, panel=rsi_panel, color=RSI_LINE_COLOR, width=1.2, ylabel="RSI", alpha=0.9)
+                    mpf.make_addplot(
+                        rsi,
+                        panel=rsi_panel,
+                        color=RSI_LINE_COLOR,
+                        width=1.3,
+                        ylabel="RSI",
+                        alpha=0.95
+                    )
                 )
-                for lvl, a in ((70, 0.9), (50, 0.5), (30, 0.9)):
+                if self.config.show_rsi_signal and self.config.rsi_signal_period > 1:
+                    try:
+                        if str(self.config.rsi_signal_type).lower() == "sma":
+                            rsi_signal = rsi.rolling(self.config.rsi_signal_period).mean()
+                        else:
+                            rsi_signal = rsi.ewm(span=self.config.rsi_signal_period, adjust=False).mean()
+                        addplot.append(
+                            mpf.make_addplot(
+                                rsi_signal,
+                                panel=rsi_panel,
+                                color=RSI_SIGNAL_COLOR,
+                                width=float(self.config.rsi_signal_linewidth),
+                                alpha=0.85,
+                            )
+                        )
+                    except Exception:
+                        pass
+                for lvl, a, ls in ((70, 0.85, "--"), (50, 0.55, ":"), (30, 0.85, "--")):
                     addplot.append(
                         mpf.make_addplot(
                             pd.Series([lvl] * len(df), index=df.index),
                             panel=rsi_panel,
                             color=RSI_BAND_COLOR,
-                            width=1.0,
-                            linestyle="-",
+                            width=0.9,
+                            linestyle=ls,
                             alpha=a,
                         )
                     )
@@ -3885,8 +4000,11 @@ class ChartGenerator:
                 show_nontrading=False,
                 tight_layout=True,
                 returnfig=True,
-                scale_width_adjustment=dict(candle=1.5, volume=0.8, lines=1.0),
-                update_width_config=dict(candle_linewidth=1.4, candle_width=0.8),
+                scale_width_adjustment=dict(candle=1.2, volume=0.8, lines=1.0),
+                update_width_config=dict(
+                    candle_linewidth=float(self.config.candle_linewidth),
+                    candle_width=float(self.config.candle_width),
+                ),
             )
             if volume_on:
                 plot_kwargs['volume_panel'] = 1
@@ -4115,7 +4233,7 @@ class ChartGenerator:
                     color=MA_COLORS[0],
                     width=2.5,
                     linestyle='-',
-                    alpha=0.9,
+                    alpha=ALPHA_LINE_PRIMARY,
                     label=f'Exit: ${exit_price:.2f}'
                 ))
 
@@ -4135,16 +4253,40 @@ class ChartGenerator:
 
                 rsi_panel = 2 if volume_on else 1
                 addplot.append(
-                    mpf.make_addplot(rsi, panel=rsi_panel, color=RSI_LINE_COLOR, width=1.2, ylabel="RSI", alpha=0.9)
+                    mpf.make_addplot(
+                        rsi,
+                        panel=rsi_panel,
+                        color=RSI_LINE_COLOR,
+                        width=1.3,
+                        ylabel="RSI",
+                        alpha=0.95
+                    )
                 )
-                for lvl, a in ((70, 0.9), (50, 0.5), (30, 0.9)):
+                if self.config.show_rsi_signal and self.config.rsi_signal_period > 1:
+                    try:
+                        if str(self.config.rsi_signal_type).lower() == "sma":
+                            rsi_signal = rsi.rolling(self.config.rsi_signal_period).mean()
+                        else:
+                            rsi_signal = rsi.ewm(span=self.config.rsi_signal_period, adjust=False).mean()
+                        addplot.append(
+                            mpf.make_addplot(
+                                rsi_signal,
+                                panel=rsi_panel,
+                                color=RSI_SIGNAL_COLOR,
+                                width=float(self.config.rsi_signal_linewidth),
+                                alpha=0.85,
+                            )
+                        )
+                    except Exception:
+                        pass
+                for lvl, a, ls in ((70, 0.85, "--"), (50, 0.55, ":"), (30, 0.85, "--")):
                     addplot.append(
                         mpf.make_addplot(
                             pd.Series([lvl] * len(df), index=df.index),
                             panel=rsi_panel,
                             color=RSI_BAND_COLOR,
-                            width=1.0,
-                            linestyle="-",
+                            width=0.9,
+                            linestyle=ls,
                             alpha=a,
                         )
                     )
@@ -4180,8 +4322,11 @@ class ChartGenerator:
                 show_nontrading=False,
                 tight_layout=True,
                 returnfig=True,
-                scale_width_adjustment=dict(candle=1.5, volume=0.8, lines=1.0),
-                update_width_config=dict(candle_linewidth=1.4, candle_width=0.8),
+                scale_width_adjustment=dict(candle=1.2, volume=0.8, lines=1.0),
+                update_width_config=dict(
+                    candle_linewidth=float(self.config.candle_linewidth),
+                    candle_width=float(self.config.candle_width),
+                ),
             )
             if volume_on:
                 plot_kwargs['volume_panel'] = 1
@@ -4686,8 +4831,11 @@ class ChartGenerator:
             
             if chart_type == 'candle':
                 plot_kwargs.update({
-                    'scale_width_adjustment': dict(candle=1.4, volume=0.8, lines=1.0),
-                    'update_width_config': dict(candle_linewidth=1.2, candle_width=0.7),
+                    'scale_width_adjustment': dict(candle=1.1, volume=0.8, lines=1.0),
+                    'update_width_config': dict(
+                        candle_linewidth=float(self.config.candle_linewidth),
+                        candle_width=float(self.config.candle_width),
+                    ),
                 })
             
             # Plot with mplfinance - need to get axes to limit ticks
@@ -4860,8 +5008,8 @@ class ChartGenerator:
                             mpf.make_addplot(
                                 ma_series,
                                 color=color,
-                                width=1.2,
-                                alpha=0.7,
+                                width=1.4,
+                                alpha=0.82,
                                 label=f"EMA{period}",
                             )
                         )
@@ -4955,8 +5103,8 @@ class ChartGenerator:
                                 mpf.make_addplot(
                                     vwap_series,
                                     color=VWAP_COLOR,
-                                    width=1.8,
-                                    alpha=0.80,
+                                    width=2.0,
+                                    alpha=0.85,
                                     label="VWAP",
                                 )
                             )
@@ -5107,19 +5255,36 @@ class ChartGenerator:
                             rsi,
                             panel=rsi_panel,
                             color=RSI_LINE_COLOR,
-                            width=1.2,
+                            width=1.3,
                             ylabel="RSI",
-                            alpha=0.9,
+                            alpha=0.95,
                         )
                     )
-                    for lvl, a in ((70, 0.9), (50, 0.5), (30, 0.9)):
+                    if self.config.show_rsi_signal and self.config.rsi_signal_period > 1:
+                        try:
+                            if str(self.config.rsi_signal_type).lower() == "sma":
+                                rsi_signal = rsi.rolling(self.config.rsi_signal_period).mean()
+                            else:
+                                rsi_signal = rsi.ewm(span=self.config.rsi_signal_period, adjust=False).mean()
+                            addplot.append(
+                                mpf.make_addplot(
+                                    rsi_signal,
+                                    panel=rsi_panel,
+                                    color=RSI_SIGNAL_COLOR,
+                                    width=float(self.config.rsi_signal_linewidth),
+                                    alpha=0.85,
+                                )
+                            )
+                        except Exception:
+                            pass
+                    for lvl, a, ls in ((70, 0.85, "--"), (50, 0.55, ":"), (30, 0.85, "--")):
                         addplot.append(
                             mpf.make_addplot(
                                 pd.Series([lvl] * len(df), index=df.index),
                                 panel=rsi_panel,
                                 color=RSI_BAND_COLOR,
-                                width=1.0,
-                                linestyle="-",
+                                width=0.9,
+                                linestyle=ls,
                                 alpha=a,
                             )
                         )

@@ -62,6 +62,10 @@ from pearlalgo.utils.pearl_suggestions import (
 try:
     from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
     from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+    try:
+        from telegram.request import HTTPXRequest
+    except Exception:
+        HTTPXRequest = None
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
@@ -113,12 +117,24 @@ class TelegramCommandHandler:
         else:
             self._set_active_market(env_market)
         self._startup_ping = bool(startup_ping)
-        self.application = (
-            Application.builder()
-            .token(bot_token)
-            .post_init(self._post_init)
-            .build()
-        )
+        # Telegram request tuning: reduce transient timeouts when editing media.
+        request = None
+        if HTTPXRequest is not None:
+            try:
+                request = HTTPXRequest(
+                    connect_timeout=10.0,
+                    read_timeout=20.0,
+                    write_timeout=20.0,
+                    pool_timeout=10.0,
+                    connection_pool_size=8,
+                )
+            except Exception as e:
+                logger.debug(f"Could not configure Telegram HTTPXRequest: {e}")
+
+        builder = Application.builder().token(bot_token).post_init(self._post_init)
+        if request is not None:
+            builder = builder.request(request)
+        self.application = builder.build()
         self.service_controller = ServiceController()
         self._register_handlers()
 
@@ -1027,6 +1043,46 @@ class TelegramCommandHandler:
                 # Re-raise if it's a different error
                 raise
 
+    async def _retry_telegram_call(
+        self,
+        label: str,
+        func,
+        *,
+        retries: int = 2,
+        delay: float = 1.0,
+    ) -> None:
+        """Retry transient Telegram API calls (timeouts, bad gateway)."""
+        last_exc: Optional[Exception] = None
+        for attempt in range(int(retries)):
+            try:
+                await func()
+                return
+            except Exception as e:
+                last_exc = e
+                err_str = str(e).lower()
+                # Treat "not modified" as success to avoid churn.
+                if "message is not modified" in err_str:
+                    return
+                retryable = any(
+                    token in err_str
+                    for token in (
+                        "timed out",
+                        "timeout",
+                        "bad gateway",
+                        "network",
+                        "connection",
+                        "readtimeout",
+                    )
+                )
+                if not retryable or attempt >= int(retries) - 1:
+                    raise
+                try:
+                    await asyncio.sleep(float(delay) * float(attempt + 1))
+                except Exception:
+                    pass
+        if last_exc:
+            raise last_exc
+
     async def _handle_menu_action(self, query: CallbackQuery, action: str) -> None:
         """Handle menu button actions."""
         logger.info(f"Handling menu action: {action}")
@@ -1161,6 +1217,8 @@ class TelegramCommandHandler:
                 text_only = self._with_support_footer(message_text, state=state, max_chars=4096)
                 caption_md = sanitize_telegram_markdown(caption_text)
                 text_md = sanitize_telegram_markdown(text_only)
+                caption_md_v2 = self._convert_to_markdown_v2_with_pearl(caption_md)
+                text_md_v2 = self._convert_to_markdown_v2_with_pearl(text_md)
                 
                 if chart_path and chart_path.exists():
                     try:
@@ -1170,29 +1228,41 @@ class TelegramCommandHandler:
                             # Message has photo, edit it
                             from telegram import InputMediaPhoto
                             try:
-                                with open(chart_path, 'rb') as f:
-                                    await query.edit_message_media(
-                                        media=InputMediaPhoto(
-                                            media=f,
-                                            caption=caption_md_v2,
-                                            parse_mode="MarkdownV2"
-                                        ),
-                                        reply_markup=reply_markup
-                                    )
+                                async def _edit_media(caption: str, parse_mode: Optional[str]) -> None:
+                                    with open(chart_path, 'rb') as f:
+                                        await query.edit_message_media(
+                                            media=InputMediaPhoto(
+                                                media=f,
+                                                caption=caption,
+                                                parse_mode=parse_mode
+                                            ),
+                                            reply_markup=reply_markup
+                                        )
+
+                                await self._retry_telegram_call(
+                                    "edit_message_media",
+                                    lambda: _edit_media(caption_md_v2, "MarkdownV2"),
+                                )
                             except Exception:
                                 # Fallback: update media without MarkdownV2 parsing.
                                 import re
                                 caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
                                 caption_plain = caption_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
-                                with open(chart_path, 'rb') as f:
-                                    await query.edit_message_media(
-                                        media=InputMediaPhoto(
-                                            media=f,
-                                            caption=caption_plain,
-                                            parse_mode=None
-                                        ),
-                                        reply_markup=reply_markup
-                                    )
+                                async def _edit_plain() -> None:
+                                    with open(chart_path, 'rb') as f:
+                                        await query.edit_message_media(
+                                            media=InputMediaPhoto(
+                                                media=f,
+                                                caption=caption_plain,
+                                                parse_mode=None
+                                            ),
+                                            reply_markup=reply_markup
+                                        )
+
+                                await self._retry_telegram_call(
+                                    "edit_message_media_plain",
+                                    _edit_plain,
+                                )
                         else:
                             # Message doesn't have photo, delete and send new one with photo
                             try:
@@ -1201,24 +1271,36 @@ class TelegramCommandHandler:
                                 pass
                             # Send new message with photo
                             try:
-                                with open(chart_path, 'rb') as f:
-                                    await query.message.chat.send_photo(
-                                        photo=f,
-                                        caption=caption_md_v2,
-                                        reply_markup=reply_markup,
-                                        parse_mode="MarkdownV2"
-                                    )
+                                async def _send_photo(caption: str, parse_mode: Optional[str]) -> None:
+                                    with open(chart_path, 'rb') as f:
+                                        await query.message.chat.send_photo(
+                                            photo=f,
+                                            caption=caption,
+                                            reply_markup=reply_markup,
+                                            parse_mode=parse_mode
+                                        )
+
+                                await self._retry_telegram_call(
+                                    "send_photo",
+                                    lambda: _send_photo(caption_md_v2, "MarkdownV2"),
+                                )
                             except Exception:
                                 import re
                                 caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
                                 caption_plain = caption_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
-                                with open(chart_path, 'rb') as f:
-                                    await query.message.chat.send_photo(
-                                        photo=f,
-                                        caption=caption_plain,
-                                        reply_markup=reply_markup,
-                                        parse_mode=None
-                                    )
+                                async def _send_plain() -> None:
+                                    with open(chart_path, 'rb') as f:
+                                        await query.message.chat.send_photo(
+                                            photo=f,
+                                            caption=caption_plain,
+                                            reply_markup=reply_markup,
+                                            parse_mode=None
+                                        )
+
+                                await self._retry_telegram_call(
+                                    "send_photo_plain",
+                                    _send_plain,
+                                )
                             try:
                                 await query.answer()  # Acknowledge the callback
                             except Exception:
@@ -1407,24 +1489,36 @@ class TelegramCommandHandler:
             if chart_path and chart_path.exists():
                 # Send photo with caption
                 try:
-                    with open(chart_path, 'rb') as f:
-                        await message_obj.reply_photo(
-                            photo=f,
-                            caption=caption_md_v2,
-                            reply_markup=reply_markup,
-                            parse_mode="MarkdownV2"
-                        )
+                    async def _reply_photo(caption: str, parse_mode: Optional[str]) -> None:
+                        with open(chart_path, 'rb') as f:
+                            await message_obj.reply_photo(
+                                photo=f,
+                                caption=caption,
+                                reply_markup=reply_markup,
+                                parse_mode=parse_mode
+                            )
+
+                    await self._retry_telegram_call(
+                        "reply_photo",
+                        lambda: _reply_photo(caption_md_v2, "MarkdownV2"),
+                    )
                 except Exception:
                     import re
                     caption_plain = re.sub(r'!\[.*?\]\(.*?\)', '🐚', caption_md)
                     caption_plain = caption_plain.replace("*", "").replace("_", "").replace("`", "").replace("\\", "")
-                    with open(chart_path, 'rb') as f:
-                        await message_obj.reply_photo(
-                            photo=f,
-                            caption=caption_plain,
-                            reply_markup=reply_markup,
-                            parse_mode=None
-                        )
+                    async def _reply_plain() -> None:
+                        with open(chart_path, 'rb') as f:
+                            await message_obj.reply_photo(
+                                photo=f,
+                                caption=caption_plain,
+                                reply_markup=reply_markup,
+                                parse_mode=None
+                            )
+
+                    await self._retry_telegram_call(
+                        "reply_photo_plain",
+                        _reply_plain,
+                    )
             else:
                 # Fallback to text-only if chart unavailable
                 try:
@@ -3955,6 +4049,21 @@ class TelegramCommandHandler:
                 else:
                     result = await sc.stop_agent(market=self.active_market)
                     text = result.get("message", "Stopped agent.")
+                    details = result.get("details")
+                    if details:
+                        text = f"{text}\n\n{details}"
+                keyboard = [
+                    [InlineKeyboardButton("🤖 Bots", callback_data="menu:bots")],
+                    self._nav_back_row(),
+                ]
+                await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            elif confirm_action == "start_agent":
+                sc = getattr(self, "service_controller", None)
+                if sc is None:
+                    text = "❌ Service controller not available."
+                else:
+                    result = await sc.start_agent(background=True, market=self.active_market)
+                    text = result.get("message", "Started agent.")
                     details = result.get("details")
                     if details:
                         text = f"{text}\n\n{details}"
