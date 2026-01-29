@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi } from 'lightweight-charts'
+import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time } from 'lightweight-charts'
 
 interface CandleData {
   time: number
@@ -257,10 +257,18 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !data?.length) return
 
-    candleSeriesRef.current.setData(data)
+    // Cast time to Time type for lightweight-charts
+    const candleData = data.map((d) => ({
+      time: d.time as Time,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+    }))
+    candleSeriesRef.current.setData(candleData)
 
     const volumeData = data.map((d) => ({
-      time: d.time,
+      time: d.time as Time,
       value: d.volume || 0,
       color: d.close >= d.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
     }))
@@ -274,13 +282,16 @@ export default function CandlestickChart({ data, indicators, markers }: ChartPro
     if (!indicators) return
 
     if (ema9SeriesRef.current && indicators.ema9?.length) {
-      ema9SeriesRef.current.setData(indicators.ema9)
+      const ema9Data = indicators.ema9.map((d) => ({ time: d.time as Time, value: d.value }))
+      ema9SeriesRef.current.setData(ema9Data)
     }
     if (ema21SeriesRef.current && indicators.ema21?.length) {
-      ema21SeriesRef.current.setData(indicators.ema21)
+      const ema21Data = indicators.ema21.map((d) => ({ time: d.time as Time, value: d.value }))
+      ema21SeriesRef.current.setData(ema21Data)
     }
     if (vwapSeriesRef.current && indicators.vwap?.length) {
-      vwapSeriesRef.current.setData(indicators.vwap)
+      const vwapData = indicators.vwap.map((d) => ({ time: d.time as Time, value: d.value }))
+      vwapSeriesRef.current.setData(vwapData)
     }
   }, [indicators])
 

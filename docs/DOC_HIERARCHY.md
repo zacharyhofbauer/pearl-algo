@@ -34,14 +34,14 @@ All other documents must remain consistent with this summary.
 - `MARKET_DATA_SUBSCRIPTION.md`
   - Canonical fix guide for IBKR **Error 354** (market data subscriptions + API acknowledgement)
   - Reference for entitlements/subscription troubleshooting during market hours
-- `MPLFINANCE_QUICK_START.md`
-  - **Canonical charting reference** (mplfinance-based chart generator)
-  - Data contract and local verification script
+- `LIVE_CHART.md`
+  - Live Main Chart (Next.js + API server)
+  - Telegram dashboard screenshots (Playwright) + Mini App (in-Telegram web view)
 - `TELEGRAM_GUIDE.md`
   - Single canonical Telegram integration guide
   - Quick start, command handler startup, command behavior reference
   - Remote control (service control commands)
-  - Chart visualization and UI features
+  - Mini App + dashboard navigation
 - `AI_PATCH_GUIDE.md`
   - OpenAI integration for code generation via Telegram
   - Setup, usage examples, and security considerations
@@ -71,8 +71,6 @@ All other documents must remain consistent with this summary.
   - Canonical script roles and naming conventions under `scripts/`
 - `CONFIGURATION_MAP.md`
   - Mapping of environment variables, `config/config.yaml`, and code defaults to their consumers
-- `CHART_VISUAL_SCHEMA.md`
-  - Visual semantics + regression contracts for chart outputs (source: `src/pearlalgo/market_agent/chart_generator.py`)
 - `TRADING_BOT_GUIDE.md`
   - Operator and developer reference for the single trading bot (AutoBot) model
 - `INVENTORY_LEDGER.md`

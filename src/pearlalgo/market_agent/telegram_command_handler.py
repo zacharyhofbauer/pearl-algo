@@ -517,22 +517,7 @@ class TelegramCommandHandler:
             ]
         )
 
-        # Optional: in-Telegram Mini App (opens the Live Chart without leaving Telegram).
-        mini_app_url = (
-            os.getenv("PEARL_MINI_APP_URL")
-            or os.getenv("PEARL_MINIAPP_URL")
-            or os.getenv("PEARL_LIVE_CHART_PUBLIC_URL")
-        )
-        if mini_app_url:
-            try:
-                if WebAppInfo is not None:
-                    keyboard.append(
-                        [InlineKeyboardButton("📈 Live", web_app=WebAppInfo(url=str(mini_app_url)))]
-                    )
-                else:
-                    keyboard.append([InlineKeyboardButton("📈 Live", url=str(mini_app_url))])
-            except Exception:
-                pass
+        # NOTE: Mini App button removed - user accesses chart via external URL instead
 
         keyboard.append(
             [
@@ -7885,6 +7870,14 @@ class TelegramCommandHandler:
         mins = int((s % 3600) // 60)
         return f"{hours}h{mins}m"
 
+    def _get_chart_url(self) -> str | None:
+        """Get the public chart URL if configured."""
+        return (
+            os.getenv("PEARL_MINI_APP_URL")
+            or os.getenv("PEARL_MINIAPP_URL")
+            or os.getenv("PEARL_LIVE_CHART_PUBLIC_URL")
+        )
+
     def _build_support_footer(self, state: dict | None = None) -> str:
         """One-line, copy/paste-friendly support footer for debugging."""
         try:
@@ -8016,9 +8009,20 @@ class TelegramCommandHandler:
         # Keep this short; it's intended to be pasted into chat for support.
         return f"`🩺 {market}/{symbol}{v} | A:{a}{session_str} | G:{gw} | D:{lvl_short} {age_str}/{thr_str}{stale_flag} | C:{c} | run:{run_id}`"
 
-    def _with_support_footer(self, text: str, *, state: dict | None = None, max_chars: int = 4096) -> str:
-        """Append the support footer (always, by trimming when needed)."""
+    def _with_support_footer(self, text: str, *, state: dict | None = None, max_chars: int = 4096, include_chart_link: bool = True) -> str:
+        """Append the chart link and support footer (always, by trimming when needed)."""
         base = (text or "").rstrip()
+        
+        # Add chart link if available and not already present
+        chart_link = ""
+        if include_chart_link:
+            try:
+                chart_url = self._get_chart_url()
+                if chart_url and "📊" not in base:
+                    chart_link = f"📊 [Live Chart]({chart_url})"
+            except Exception:
+                pass
+        
         footer = ""
         try:
             footer = self._build_support_footer(state)
@@ -8032,7 +8036,11 @@ class TelegramCommandHandler:
             return base
         if footer in base:
             return base
-        candidate = f"{base}\n\n{footer}"
+        
+        # Build the final footer with optional chart link
+        footer_parts = [p for p in [chart_link, footer] if p]
+        full_footer = "\n".join(footer_parts)
+        candidate = f"{base}\n\n{full_footer}"
         if not max_chars:
             return candidate
 

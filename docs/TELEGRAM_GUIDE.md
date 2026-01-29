@@ -35,6 +35,16 @@ For background mode:
 python3 scripts/telegram/set_bot_commands.py
 ```
 
+## Mini App: Live Chart inside Telegram
+
+To open the Live Main Chart **without leaving Telegram**, use a Telegram Mini App.
+
+Key points:
+- BotFather requires a **public HTTPS URL** (it will reject `localhost`)
+- Set the URL in BotFather, and also set `PEARL_MINI_APP_URL` so the dashboard shows a **📈 Live** button.
+
+See `docs/LIVE_CHART.md` for deployment/tunnel options and CORS settings.
+
 ## Supported commands
 
 The command handler intentionally keeps slash commands minimal:
