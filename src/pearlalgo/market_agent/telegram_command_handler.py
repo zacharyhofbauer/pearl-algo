@@ -17,7 +17,8 @@ import os
 import re
 import shutil
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional, Any, TYPE_CHECKING
 
@@ -84,6 +85,24 @@ except ImportError:
     logger.warning("python-telegram-bot not installed, command handler disabled")
 
 
+def get_trading_day_start() -> datetime:
+    """
+    Get the start of the current trading day (6pm ET).
+
+    Futures trading day runs from 6pm ET to 6pm ET next day.
+    Returns datetime in UTC for comparison with trade timestamps.
+    """
+    et_tz = ZoneInfo("America/New_York")
+    now_et = datetime.now(et_tz)
+
+    if now_et.hour < 18:
+        # Before 6pm ET - trading day started yesterday at 6pm
+        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    else:
+        # After 6pm ET - trading day started today at 6pm
+        trading_day_start = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
+
+    return trading_day_start.astimezone(timezone.utc)
 
 
 class TelegramCommandHandler:
@@ -2119,18 +2138,24 @@ class TelegramCommandHandler:
             
             # Load extended metrics from performance.json
             try:
-                from datetime import datetime, timezone
                 perf_file = self.state_dir / "performance.json"
                 if perf_file.exists():
                     import json
                     with open(perf_file, 'r') as f:
                         perf_trades = json.load(f)
-                    
-                    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-                    today_trades_list = [
-                        t for t in perf_trades 
-                        if today_str in str(t.get('exit_time', ''))
-                    ]
+
+                    # Filter trades since 6pm ET (trading day boundary)
+                    trading_day_start = get_trading_day_start()
+                    today_trades_list = []
+                    for t in perf_trades:
+                        exit_time_str = t.get('exit_time', '')
+                        if exit_time_str:
+                            try:
+                                exit_time = datetime.fromisoformat(str(exit_time_str).replace("Z", "+00:00"))
+                                if exit_time >= trading_day_start:
+                                    today_trades_list.append(t)
+                            except (ValueError, TypeError):
+                                pass
 
                     # De-dupe by signal_id to avoid any double-counting if performance.json
                     # ever accumulates duplicate exits.
@@ -4271,13 +4296,19 @@ class TelegramCommandHandler:
                             perf_trades = json.load(f)
                         if not isinstance(perf_trades, list):
                             perf_trades = []
-                        
-                        # Filter to today's trades (by exit_time)
-                        today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-                        today_trades_list = [
-                            t for t in perf_trades 
-                            if today_str in str(t.get('exit_time', ''))
-                        ]
+
+                        # Filter trades since 6pm ET (trading day boundary)
+                        trading_day_start = get_trading_day_start()
+                        today_trades_list = []
+                        for t in perf_trades:
+                            exit_time_str = t.get('exit_time', '')
+                            if exit_time_str:
+                                try:
+                                    exit_time = datetime.fromisoformat(str(exit_time_str).replace("Z", "+00:00"))
+                                    if exit_time >= trading_day_start:
+                                        today_trades_list.append(t)
+                                except (ValueError, TypeError):
+                                    pass
 
                         # De-dupe by signal_id to avoid any double-counting if performance.json
                         # ever accumulates duplicate exits.
@@ -5335,18 +5366,17 @@ class TelegramCommandHandler:
         signals = self._read_recent_signals(limit=50)
         
         text = "📊 *Daily Summary*\n\n"
-        
-        # Filter signals from today
+
+        # Filter signals since 6pm ET (trading day boundary)
         today_signals = []
         if signals:
-            from datetime import datetime, timezone
-            today = datetime.now(timezone.utc).date()
+            trading_day_start = get_trading_day_start()
             for s in signals:
                 ts = s.get("timestamp", "")
                 if ts:
                     try:
-                        signal_date = parse_utc_timestamp(ts).date() if isinstance(ts, str) else ts.date()
-                        if signal_date == today:
+                        signal_time = parse_utc_timestamp(ts) if isinstance(ts, str) else ts
+                        if signal_time >= trading_day_start:
                             today_signals.append(s)
                     except Exception:
                         pass
