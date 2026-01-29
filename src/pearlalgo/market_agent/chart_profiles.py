@@ -36,10 +36,14 @@ def apply_telegram_unified_profile(cfg: Any) -> None:
         "right_label_merge_ticks": 6,
         # Panel ratios: allocate more space to price for Telegram.
         "panel_ratio_price": 9.0,
-        "panel_ratio_volume": 1.5,
-        "panel_ratio_sub": 1.0,
+        "panel_ratio_volume": 1.4,
+        "panel_ratio_sub": 1.4,
         # Keep only the long-term EMA for cleaner Telegram charts.
         "ma_periods": [200],
+        # TradingView-style volume panel (bars + MA line).
+        "volume_overlay_in_price": False,
+        "show_volume_ma": True,
+        "volume_ma_period": 20,
         # Trade recap replaces pressure panel on Telegram.
         "show_trade_recap_panel": True,
         "show_pressure_panel": False,

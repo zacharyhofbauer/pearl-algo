@@ -58,6 +58,7 @@ from pearlalgo.utils.pearl_suggestions import (
     PearlSuggestionEngine,
     get_suggestion_engine,
 )
+from pearlalgo.config.config_loader import load_service_config
 
 try:
     from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
@@ -88,6 +89,17 @@ except Exception:  # pragma: no cover - defensive fallback for minimal environme
     OpenAIClient = None  # type: ignore[assignment]
     OpenAIAPIError = OpenAIAPIKeyMissingError = OpenAINotAvailableError = Exception  # type: ignore[misc,assignment]
 
+try:
+    from pearlalgo.knowledge.retriever import KnowledgeRetriever, RetrieverConfig
+    from pearlalgo.knowledge.datasets import append_chat_example, append_patch_example
+    KNOWLEDGE_AVAILABLE = True
+except Exception:  # pragma: no cover
+    KnowledgeRetriever = None  # type: ignore[assignment]
+    RetrieverConfig = None  # type: ignore[assignment]
+    append_chat_example = None  # type: ignore[assignment]
+    append_patch_example = None  # type: ignore[assignment]
+    KNOWLEDGE_AVAILABLE = False
+
 
 class TelegramCommandHandler:
     """Full-featured command handler for PEARLalgo trading system."""
@@ -106,6 +118,7 @@ class TelegramCommandHandler:
         self._available_markets = ["NQ", "ES", "GC"]
         self.active_market = "NQ"
         self._repo_root = self._get_repo_root()
+        self._knowledge_retriever = None
 
         # If a state_dir is explicitly provided, honor it (single-market/pinned use).
         # Otherwise, default to per-market state under <repo>/data/agent_state/<MARKET>.
@@ -2301,7 +2314,11 @@ class TelegramCommandHandler:
                     {"label": "📈 Performance", "callback": "action:performance_metrics"},
                     {"label": "💰 P&L Detail", "callback": "action:pnl_overview"},
                 ],
-                # Row 3: Actions (conditional)
+                # Row 3: Risk/Incident
+                [
+                    {"label": "🧯 Risk Report", "callback": "action:risk_report"},
+                ],
+                # Row 4: Actions (conditional)
                 [
                     {
                         "label": _close_all_label,
@@ -2309,13 +2326,13 @@ class TelegramCommandHandler:
                         "show_if": lambda c: int(c.get("virtual_open", 0) or 0) > 0,
                     },
                 ],
-                # Row 4: Analytics + AI
+                # Row 5: Analytics + AI
                 [
                     {"label": "🔬 Analytics", "callback": "menu:analytics"},
                     {"label": "🧠 AI Coach", "callback": "action:ai_coach"},
                     {"label": "💬 Pearl", "callback": "action:ask_pearl"},
                 ],
-                # Row 5: Navigation
+                # Row 6: Navigation
                 [
                     {"label": "🔄 Refresh", "callback": "menu:activity"},
                     {"label": "🏠 Menu", "callback": "back"},
@@ -2353,6 +2370,76 @@ class TelegramCommandHandler:
                 self._nav_back_row(),
             ]
             await self._safe_edit_or_send(query, "📊 Activity\n\nSelect an option:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def _show_risk_report(self, query: CallbackQuery) -> None:
+        """Show latest incident report + warn-only risk telemetry."""
+        lines = ["🧯 *Risk Report*", ""]
+        report = self._load_latest_incident_report()
+
+        if not report:
+            lines.append("No incident report found yet.")
+            lines.append("Run: `python3 scripts/monitoring/incident_report.py`")
+        else:
+            summary = report.get("summary", {}) or {}
+            exposure = report.get("exposure", {}) or {}
+            total_pnl = float(summary.get("total_pnl", 0.0) or 0.0)
+            trades = int(summary.get("total_trades", 0) or 0)
+            win_rate = float(summary.get("win_rate", 0.0) or 0.0) * 100.0
+            lines.append(f"Window start: `{report.get('window_start_et', '')}`")
+            lines.append(f"Total P&L: `${total_pnl:,.2f}`")
+            lines.append(f"Trades: {trades} | Win rate: {win_rate:.0f}%")
+            max_concurrent = exposure.get("max_concurrent_positions")
+            max_risk = exposure.get("max_stop_risk_dollars")
+            if max_concurrent is not None:
+                lines.append(f"Max concurrent positions: {int(max_concurrent)}")
+            if max_risk is not None:
+                lines.append(f"Max stop-risk exposure: `${float(max_risk):,.0f}`")
+
+            biggest = report.get("biggest_losses") or []
+            if biggest:
+                lines.append("")
+                lines.append("*Largest losses:*")
+                for t in biggest[:3]:
+                    sid = str(t.get("signal_id", "") or "")[:10]
+                    pnl = float(t.get("pnl", 0.0) or 0.0)
+                    direction = t.get("direction", "unknown")
+                    trigger = t.get("entry_trigger", "unknown")
+                    lines.append(f"- {sid} {direction} {trigger}: `${pnl:,.0f}`")
+
+        # Attach warn-only telemetry from state (if available)
+        try:
+            state = self._read_state()
+            cb = (state or {}).get("trading_circuit_breaker", {}) or {}
+            would_block = int(cb.get("would_block_total", 0) or 0)
+            mode = str(cb.get("mode", "unknown") or "unknown")
+            if mode:
+                lines.append("")
+                lines.append(f"Mode: `{mode}` | Would-block signals: `{would_block}`")
+        except Exception:
+            pass
+
+        keyboard = [
+            [InlineKeyboardButton("🔄 Refresh", callback_data="action:risk_report")],
+            [InlineKeyboardButton("📊 Back to Activity", callback_data="menu:activity")],
+        ]
+        await self._safe_edit_or_send(
+            query,
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+
+    def _load_latest_incident_report(self) -> Optional[dict]:
+        try:
+            exports_dir = self.state_dir / "exports"
+            if not exports_dir.exists():
+                return None
+            files = sorted(exports_dir.glob("incident_report_*.json"), key=lambda p: p.stat().st_mtime)
+            if not files:
+                return None
+            return json.loads(files[-1].read_text(encoding="utf-8"))
+        except Exception:
+            return None
 
     async def _show_analytics_menu(self, query: CallbackQuery) -> None:
         """Show performance analytics with session and hourly breakdown."""
@@ -3217,12 +3304,21 @@ class TelegramCommandHandler:
             await update.message.reply_text(f"❌ Could not read file: {e}")
             return
 
+        code_context = ""
+        try:
+            code_context = await asyncio.to_thread(self._get_code_context, instruction)
+        except Exception:
+            code_context = ""
+
         additional_context = (
             f"BOT: {bot}\n"
             f"BOT_CONFIG: {json.dumps(bot_config, indent=2)}\n"
             f"PERFORMANCE: {json.dumps(perf_summary, indent=2)}\n"
             f"MEMORY:\n{memory_summary or '- none'}"
         )
+        if code_context:
+            additional_context += f"\n\nCODEBASE CONTEXT:\n{code_context}"
+        self._ai_ops_state["additional_context"] = additional_context
 
         try:
             client = OpenAIClient()
@@ -3251,6 +3347,8 @@ class TelegramCommandHandler:
 
         self._ai_ops_state["diff"] = diff
         self._ai_ops_state["diff_path"] = str(diff_path)
+        if code_context:
+            self._ai_ops_state["code_context"] = code_context
 
         preview = diff or "(No diff returned)"
         if len(preview) > 3500:
@@ -3292,6 +3390,28 @@ class TelegramCommandHandler:
         }
         memory["entries"] = (memory.get("entries", []) + [entry])[-20:]
         self._save_ai_ops_memory(memory)
+
+        # Persist patch example for fine-tuning dataset (best-effort)
+        if append_patch_example is not None:
+            try:
+                diff_text = ""
+                if diff_path:
+                    try:
+                        diff_text = Path(diff_path).read_text(encoding="utf-8")
+                    except Exception:
+                        diff_text = ""
+                await asyncio.to_thread(
+                    append_patch_example,
+                    self.state_dir,
+                    instruction=state.get("instruction", "") or "",
+                    file_path=state.get("file", "") or "",
+                    diff=diff_text,
+                    additional_context=state.get("additional_context", ""),
+                    code_context=state.get("code_context", ""),
+                    model=os.getenv("OPENAI_MODEL", ""),
+                )
+            except Exception as e:
+                logger.debug(f"Could not append patch dataset: {e}")
 
         keyboard = [
             [InlineKeyboardButton("Restart Agent", callback_data="aiops:restart:agent")],
@@ -3385,45 +3505,21 @@ class TelegramCommandHandler:
             return
 
         logger.info("Received /pearl - entering Pearl chat mode")
-        
+
         # Check OpenAI availability first
-        if not OPENAI_AVAILABLE:
-            await update.message.reply_text(
-                "💬 *Pearl*\n\n"
-                "I need OpenAI to chat with you, but it's not configured.\n\n"
-                "Set `OPENAI_API_KEY` in your environment to enable me.\n\n"
-                "Type /start to go back to the dashboard.",
-                parse_mode="Markdown"
-            )
+        if not await self._ensure_openai_ready(update, context):
             return
 
         # Activate Pearl chat mode
         self._pearl_chat_active = True
         self._pearl_chat_last_activity = datetime.now(timezone.utc)
-
-        # Friendly intro (friendlier than the menu-based version)
-        intro = (
-            "💬 *Hey! Pearl here.*\n\n"
-            "Talk to me naturally - I can explain what's happening, summarize trades, "
-            "and guide you to the right buttons.\n\n"
-            "*Try:*\n"
-            "• \"how did I do today?\"\n"
-            "• \"what's wrong?\"\n"
-            "• \"show my trades\"\n\n"
-            "Type /start to go back to the dashboard."
-        )
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("🚪 Exit Chat", callback_data="action:exit_pearl"),
-                InlineKeyboardButton("🏠 Dashboard", callback_data="back"),
-            ]
-        ]
-        await update.message.reply_text(
-            intro, 
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
+        intro, reply_markup = self._build_pearl_intro()
+        try:
+            intro = self._with_support_footer(intro)
+            intro = sanitize_telegram_markdown(intro)
+        except Exception:
+            pass
+        await update.message.reply_text(intro, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _handle_pearl_callback(self, query: CallbackQuery, action: str) -> None:
         """Handle Pearl callback actions."""
@@ -3470,6 +3566,8 @@ class TelegramCommandHandler:
         elif action == "show_daily_summary":
             # Show daily summary
             await self._show_analytics_menu(query)
+        elif action == "show_risk_report":
+            await self._show_risk_report(query)
         else:
             # Unknown action - just go back to menu
             logger.warning(f"Unknown Pearl action: {action}")
@@ -3522,6 +3620,10 @@ class TelegramCommandHandler:
                 "futures_open": False,
                 "agent_uptime_hours": 0,
                 "overnight_pnl": 0,
+                "risk_daily_pnl": 0.0,
+                "risk_session_pnl": 0.0,
+                "risk_would_block_total": 0,
+                "risk_mode": "unknown",
             }
             
             if state:
@@ -3559,6 +3661,16 @@ class TelegramCommandHandler:
                 try:
                     uptime_sec = state.get("agent_uptime_seconds", 0)
                     suggestion_state["agent_uptime_hours"] = float(uptime_sec or 0) / 3600.0
+                except Exception:
+                    pass
+
+                # Risk telemetry (warn-only / circuit breaker)
+                try:
+                    cb = state.get("trading_circuit_breaker", {}) or {}
+                    suggestion_state["risk_daily_pnl"] = float(cb.get("daily_pnl", 0.0) or 0.0)
+                    suggestion_state["risk_session_pnl"] = float(cb.get("session_pnl", 0.0) or 0.0)
+                    suggestion_state["risk_would_block_total"] = int(cb.get("would_block_total", 0) or 0)
+                    suggestion_state["risk_mode"] = str(cb.get("mode", "unknown") or "unknown")
                 except Exception:
                     pass
             
@@ -3605,6 +3717,10 @@ class TelegramCommandHandler:
                     await self._handle_trade_chart(query, kind=kind, signal_id_prefix=signal_id_prefix)
                 else:
                     await query.answer("❌ Invalid chart request", show_alert=True)
+                return
+
+            if action_type == "risk_report":
+                await self._show_risk_report(query)
                 return
 
             # Alert mode presets (settings menu)
@@ -5869,15 +5985,8 @@ class TelegramCommandHandler:
         """Path to Pearl's chat history file."""
         return self.state_dir / "pearl_chat_history.jsonl"
 
-    async def _handle_ask_pearl(self, query: CallbackQuery) -> None:
-        """Enter Pearl chat mode."""
-        # Check OpenAI availability
-        if not await self._ensure_openai_ready(query):
-            return
-
-        self._pearl_chat_active = True
-        self._pearl_chat_last_activity = datetime.now(timezone.utc)
-
+    def _build_pearl_intro(self) -> tuple[str, InlineKeyboardMarkup]:
+        """Build the Pearl chat intro message and keyboard."""
         # Load any existing memory summary for context
         memory_preview = ""
         try:
@@ -5911,7 +6020,18 @@ class TelegramCommandHandler:
             self._nav_back_row(),
         ]
 
-        await self._safe_edit_or_send(query, text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        return text, InlineKeyboardMarkup(keyboard)
+
+    async def _handle_ask_pearl(self, query: CallbackQuery) -> None:
+        """Enter Pearl chat mode."""
+        # Check OpenAI availability
+        if not await self._ensure_openai_ready(query):
+            return
+
+        self._pearl_chat_active = True
+        self._pearl_chat_last_activity = datetime.now(timezone.utc)
+        text, reply_markup = self._build_pearl_intro()
+        await self._safe_edit_or_send(query, text, reply_markup=reply_markup, parse_mode="Markdown")
 
     async def _handle_exit_pearl(self, query: CallbackQuery) -> None:
         """Exit Pearl chat mode."""
@@ -6392,6 +6512,7 @@ class TelegramCommandHandler:
         snapshot = await asyncio.to_thread(self._build_pearl_snapshot)
         memory_summary = await asyncio.to_thread(self._build_pearl_memory_summary)
         history = await asyncio.to_thread(self._load_pearl_history, 6)  # Last 6 turns
+        code_context = await asyncio.to_thread(self._get_code_context, user_text)
 
         # Build Pearl-specific system prompt
         pearl_persona = (
@@ -6412,6 +6533,8 @@ class TelegramCommandHandler:
             memory_summary=memory_summary,
         )
         full_system_prompt = pearl_persona + "\n\n" + base_prompt
+        if code_context:
+            full_system_prompt += "\n\nCODEBASE CONTEXT (read-only):\n" + code_context
 
         # Build messages list from history + current query
         messages = []
@@ -6439,6 +6562,22 @@ class TelegramCommandHandler:
         # Save conversation to history
         await asyncio.to_thread(self._append_pearl_history, "user", user_text)
         await asyncio.to_thread(self._append_pearl_history, "assistant", response)
+
+        # Persist chat example for fine-tuning dataset (best-effort)
+        if append_chat_example is not None:
+            try:
+                await asyncio.to_thread(
+                    append_chat_example,
+                    self.state_dir,
+                    user_text=user_text,
+                    response=response,
+                    system_snapshot=snapshot,
+                    memory_summary=memory_summary,
+                    code_context=code_context,
+                    model=os.getenv("OPENAI_MODEL", ""),
+                )
+            except Exception as e:
+                logger.debug(f"Could not append chat dataset: {e}")
 
         return response
 
@@ -8328,6 +8467,47 @@ class TelegramCommandHandler:
         self.prefs = prefs
         return prefs
 
+    def _get_knowledge_retriever(self) -> Optional["KnowledgeRetriever"]:
+        if not KNOWLEDGE_AVAILABLE or KnowledgeRetriever is None or RetrieverConfig is None:
+            return None
+        if self._knowledge_retriever is not None:
+            return self._knowledge_retriever
+        try:
+            service_cfg = load_service_config(validate=False) or {}
+            knowledge_cfg = service_cfg.get("knowledge", {}) or {}
+            if not knowledge_cfg.get("enabled", True):
+                return None
+            index_dir = Path(str(knowledge_cfg.get("index_dir", "data/knowledge_index")))
+            if not index_dir.is_absolute():
+                index_dir = (self._repo_root / index_dir).resolve()
+            retriever = KnowledgeRetriever(
+                RetrieverConfig(
+                    index_dir=index_dir,
+                    embedding_provider=str(knowledge_cfg.get("embedding_provider", "auto")),
+                    embedding_model=str(knowledge_cfg.get("embedding_model", "text-embedding-3-small")),
+                    embedding_dim=int(knowledge_cfg.get("embedding_dim", 384)),
+                    top_k=int(knowledge_cfg.get("top_k", 6)),
+                    use_faiss=bool(knowledge_cfg.get("use_faiss", False)),
+                    max_chars=int(knowledge_cfg.get("chunk_max_chars", 2000)),
+                )
+            )
+            self._knowledge_retriever = retriever
+            return retriever
+        except Exception as e:
+            logger.debug(f"Knowledge retriever unavailable: {e}")
+            return None
+
+    def _get_code_context(self, query: str) -> str:
+        retriever = self._get_knowledge_retriever()
+        if retriever is None:
+            return ""
+        try:
+            results = retriever.search(query)
+            return retriever.format_context(results)
+        except Exception as e:
+            logger.debug(f"Knowledge retrieval failed: {e}")
+            return ""
+
     async def _handle_ai_patch(self, update: Any, context: Any) -> None:
         """Generate a unified diff patch for a file via AI."""
         if not await self._check_authorized(update):
@@ -8366,9 +8546,19 @@ class TelegramCommandHandler:
             await self._send_message_or_edit(update, context, f"❌ Could not read file: {e}")
             return
 
+        code_context = ""
+        try:
+            code_context = await asyncio.to_thread(self._get_code_context, task)
+        except Exception:
+            code_context = ""
+
         try:
             client = OpenAIClient()
-            diff = client.generate_patch(files={rel_path: content}, task=task)
+            diff = client.generate_patch(
+                files={rel_path: content},
+                task=task,
+                additional_context=code_context or None,
+            )
             msg = diff if diff else "(No diff returned)"
             if len(msg) > 4096:
                 msg = msg[:4093] + "..."

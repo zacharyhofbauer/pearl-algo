@@ -485,6 +485,17 @@ If PNL doesn't update when you tap the Refresh button:
 - **Virtual positions:** If using virtual PNL mode, positions shown are from signals.jsonl with status="entered". These are tracked positions, not necessarily broker-executed positions.
 - **State file:** The agent service updates the state file with unrealized PNL. If refresh still shows stale data, check that the agent service is running and cycling properly.
 
+### Exclude Gateway-Down Trades (Outage Window)
+
+If the gateway went down and you want losses during that window to **not count**:
+```bash
+python3 scripts/maintenance/exclude_trades_in_window.py \
+  --market NQ \
+  --from "2026-01-29T18:00:00-05:00" \
+  --to "2026-01-29T19:00:00-05:00"
+```
+Then restart the agent so in-memory PnL resets.
+
 ---
 
 This cheat sheet is the **primary quick-reference** for PEARLalgo operations. Keep it updated as workflows evolve.

@@ -33,7 +33,7 @@ service:
   dashboard_chart_enabled: true
   dashboard_chart_interval: 3600
   dashboard_chart_timeframe: 5m
-  dashboard_chart_lookback_hours: 8
+  dashboard_chart_lookback_hours: 6
   enable_new_bar_gating: true
   adaptive_cadence_enabled: true
   scan_interval_active_seconds: 5
@@ -81,6 +81,7 @@ circuit_breaker:
 # Trading circuit breaker (risk management for trading losses)
 trading_circuit_breaker:
   enabled: true
+  mode: warn_only  # warn_only = no blocking, enforce = block signals
   max_consecutive_losses: 5
   max_session_drawdown: 500.0
   max_daily_drawdown: 1000.0
@@ -365,12 +366,37 @@ ml_filter:
   min_probability: 0.55
   shadow_threshold: 0.80  # shadow-only pass/fail split for lift measurement
   high_probability: 0.7
-  adjust_sizing: true
+  adjust_sizing: false
   size_multiplier_min: 1.0
-  size_multiplier_max: 1.5
+  size_multiplier_max: 1.0
   min_training_samples: 30
   retrain_interval_days: 7
   n_estimators: 100
   max_depth: 6
   learning_rate: 0.1
   calibrate_probabilities: true
+knowledge:
+  enabled: true
+  index_dir: data/knowledge_index
+  include_paths:
+    - src
+    - docs
+    - config
+    - scripts
+    - pyproject.toml
+  exclude_globs:
+    - .env*
+    - data/**
+    - logs/**
+    - tests/artifacts/**
+    - .venv/**
+    - ibkr/**
+    - .git/**
+  max_file_size_kb: 512
+  chunk_max_chars: 2000
+  chunk_overlap_chars: 200
+  embedding_provider: auto
+  embedding_model: text-embedding-3-small
+  embedding_dim: 384
+  use_faiss: false
+  top_k: 6

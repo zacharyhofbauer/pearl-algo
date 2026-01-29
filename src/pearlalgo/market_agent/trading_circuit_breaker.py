@@ -48,6 +48,9 @@ class CircuitBreakerDecision:
 @dataclass
 class TradingCircuitBreakerConfig:
     """Configuration for the trading circuit breaker."""
+
+    # Mode: enforce blocks signals, warn_only emits telemetry only
+    mode: str = "enforce"
     
     # Consecutive loss limits
     max_consecutive_losses: int = 5
@@ -153,6 +156,9 @@ class TradingCircuitBreaker:
         # Statistics
         self._total_blocks: int = 0
         self._blocks_by_reason: Dict[str, int] = {}
+        self._would_block_total: int = 0
+        self._would_block_by_reason: Dict[str, int] = {}
+        self._last_would_block_at: Optional[str] = None
         
         # "Would have blocked" counters for shadow measurement (Phase 2 & 3)
         self._would_have_blocked_regime: int = 0
@@ -379,6 +385,12 @@ class TradingCircuitBreaker:
         """Manually clear any active cooldown."""
         self._clear_cooldown()
         logger.info("Circuit breaker cooldown cleared manually")
+
+    def record_would_block(self, reason: str) -> None:
+        """Record a would-block decision (warn-only mode telemetry)."""
+        self._would_block_total += 1
+        self._would_block_by_reason[reason] = self._would_block_by_reason.get(reason, 0) + 1
+        self._last_would_block_at = datetime.now(timezone.utc).isoformat()
     
     def validate_config(self) -> List[str]:
         """
@@ -388,6 +400,10 @@ class TradingCircuitBreaker:
             List of warning messages (empty if all valid)
         """
         warnings = []
+        if str(self.config.mode) not in ("warn_only", "enforce"):
+            warnings.append(
+                f"mode={self.config.mode} should be 'warn_only' or 'enforce'"
+            )
         
         # Phase 1: Direction gating sanity checks
         if self.config.enable_direction_gating:
@@ -468,6 +484,7 @@ class TradingCircuitBreaker:
         
         return {
             "enabled": True,
+            "mode": str(self.config.mode),
             "in_cooldown": self._is_in_cooldown(),
             "cooldown_reason": self._cooldown_reason,
             "cooldown_remaining_minutes": self._get_cooldown_remaining_minutes(),
@@ -482,6 +499,9 @@ class TradingCircuitBreaker:
             "recent_trades_count": len(self._recent_trades),
             "total_blocks": self._total_blocks,
             "blocks_by_reason": self._blocks_by_reason.copy(),
+            "would_block_total": self._would_block_total,
+            "would_block_by_reason": self._would_block_by_reason.copy(),
+            "last_would_block_at": self._last_would_block_at,
             # Session filter status
             "session_filter_enabled": self.config.enable_session_filter,
             "current_session": current_session,
@@ -1075,6 +1095,7 @@ def create_trading_circuit_breaker(config: Optional[Dict[str, Any]] = None) -> T
         return TradingCircuitBreaker()
     
     cb_config = TradingCircuitBreakerConfig(
+        mode=str(config.get("mode", "enforce") or "enforce"),
         max_consecutive_losses=config.get("max_consecutive_losses", 5),
         consecutive_loss_cooldown_minutes=config.get("consecutive_loss_cooldown_minutes", 30),
         max_session_drawdown=config.get("max_session_drawdown", 500.0),

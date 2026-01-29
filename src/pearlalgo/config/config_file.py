@@ -305,6 +305,8 @@ _KNOWN_CONFIG_SECTIONS = frozenset({
     "learning",
     # ML filter / drift guard (observability + gating)
     "ml_filter",
+    # Repo knowledge index + RAG integration
+    "knowledge",
     "challenge",
 })
 

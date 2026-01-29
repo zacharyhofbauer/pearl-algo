@@ -201,8 +201,22 @@ class MarketAgentService:
         data_settings = service_config.get("data", {})
         telegram_ui_settings = service_config.get("telegram_ui", {}) or {}
         auto_flat_settings = service_config.get("auto_flat", {}) or {}
+        signal_settings = service_config.get("signals", {}) or {}
         self._risk_settings = service_config.get("risk", {}) or {}
         self._strategy_settings = service_config.get("strategy", {}) or {}
+
+        # Track config flags that are currently non-enforced (warn-only telemetry)
+        self._config_warnings: list[dict[str, Any]] = []
+        for key in ("skip_overnight", "avoid_lunch_lull", "prioritize_ny_session"):
+            if signal_settings.get(key):
+                warning = {
+                    "key": f"signals.{key}",
+                    "value": signal_settings.get(key),
+                    "status": "not_enforced",
+                    "message": f"{key} is configured but not enforced (warn-only telemetry).",
+                }
+                self._config_warnings.append(warning)
+                logger.warning(f"Config flag not enforced: signals.{key}=True")
         
         # ==========================================================================
         # TRADING CIRCUIT BREAKER (risk management for consecutive losses/drawdown)
@@ -1510,7 +1524,7 @@ class MarketAgentService:
                 # Get active positions for clustering check
                 active_positions = []
                 try:
-                    recent_signals = self.performance_tracker.get_recent_signals(limit=100)
+                    recent_signals = self.state_manager.get_recent_signals(limit=100)
                     for rec in recent_signals:
                         if isinstance(rec, dict) and rec.get("status") == "entered":
                             active_positions.append(rec)
@@ -1541,20 +1555,38 @@ class MarketAgentService:
                 )
                 
                 if not cb_decision.allowed:
-                    logger.warning(
-                        f"🛑 Trading circuit breaker blocked signal: {cb_decision.reason} | "
-                        f"details={cb_decision.details}"
-                    )
-                    # Notify via Telegram for critical blocks
-                    if cb_decision.severity == "critical":
-                        asyncio.create_task(
-                            self.notification_queue.enqueue_circuit_breaker(
-                                f"Trading paused: {cb_decision.reason}",
-                                cb_decision.details,
-                                priority=Priority.HIGH,
-                            )
+                    signal.setdefault("_risk_warnings", []).append(cb_decision.to_dict())
+
+                    cb_mode = str(getattr(self.trading_circuit_breaker.config, "mode", "enforce"))
+                    if cb_mode == "warn_only":
+                        self.trading_circuit_breaker.record_would_block(cb_decision.reason)
+                        logger.warning(
+                            f"⚠️ Trading circuit breaker would block (warn-only): {cb_decision.reason} | "
+                            f"details={cb_decision.details}"
                         )
-                    return  # Skip this signal
+                        if cb_decision.severity == "critical":
+                            asyncio.create_task(
+                                self.notification_queue.enqueue_circuit_breaker(
+                                    f"Risk warning (warn-only): {cb_decision.reason}",
+                                    cb_decision.details,
+                                    priority=Priority.HIGH,
+                                )
+                            )
+                    else:
+                        logger.warning(
+                            f"🛑 Trading circuit breaker blocked signal: {cb_decision.reason} | "
+                            f"details={cb_decision.details}"
+                        )
+                        # Notify via Telegram for critical blocks
+                        if cb_decision.severity == "critical":
+                            asyncio.create_task(
+                                self.notification_queue.enqueue_circuit_breaker(
+                                    f"Trading paused: {cb_decision.reason}",
+                                    cb_decision.details,
+                                    priority=Priority.HIGH,
+                                )
+                            )
+                        return  # Skip this signal
 
             # ==========================================================================
             # ML FILTER (shadow): attach prediction for later analytics/lift measurement
@@ -2369,6 +2401,20 @@ class MarketAgentService:
         except Exception:
             pass
 
+        risk_daily_pnl = 0.0
+        risk_session_pnl = 0.0
+        risk_would_block_total = 0
+        risk_mode = "unknown"
+        try:
+            if self.trading_circuit_breaker is not None:
+                cb = self.trading_circuit_breaker.get_status()
+                risk_daily_pnl = float(cb.get("daily_pnl", 0.0) or 0.0)
+                risk_session_pnl = float(cb.get("session_pnl", 0.0) or 0.0)
+                risk_would_block_total = int(cb.get("would_block_total", 0) or 0)
+                risk_mode = str(cb.get("mode", "unknown") or "unknown")
+        except Exception:
+            pass
+
         return {
             "agent_running": self.running and not self.paused,
             "gateway_running": self.connection_failures < self.max_connection_failures,
@@ -2383,6 +2429,10 @@ class MarketAgentService:
             "futures_open": futures_open,
             "agent_uptime_hours": uptime_hours,
             "win_streak": getattr(self, "_streak_count", 0) if getattr(self, "_streak_type", "") == "win" else 0,
+            "risk_daily_pnl": risk_daily_pnl,
+            "risk_session_pnl": risk_session_pnl,
+            "risk_would_block_total": risk_would_block_total,
+            "risk_mode": risk_mode,
         }
 
     async def _check_pearl_suggestions(self) -> None:
@@ -2902,27 +2952,13 @@ class MarketAgentService:
                 return
             
             # Generate the chart
-            # Prefer an accurate label based on the actual data window (avoids "48h" when fallback data is shorter).
+            # Prefer configured lookback for a stable label (e.g., "6h").
             range_label = None
             try:
-                tmin = None
-                tmax = None
-                if isinstance(chart_data, pd.DataFrame):
-                    if "timestamp" in chart_data.columns:
-                        ts = pd.to_datetime(chart_data["timestamp"], errors="coerce")
-                        if not ts.isna().all():
-                            tmin = ts.min()
-                            tmax = ts.max()
-                    elif isinstance(chart_data.index, pd.DatetimeIndex) and len(chart_data.index) > 0:
-                        tmin = chart_data.index.min()
-                        tmax = chart_data.index.max()
-                if tmin is not None and tmax is not None and pd.notna(tmin) and pd.notna(tmax):
-                    hrs = float((tmax - tmin).total_seconds()) / 3600.0
-                    hrs = min(float(hrs), float(lookback_hours))
-                    if hrs >= 72:
-                        range_label = f"{max(1, int(round(hrs / 24.0)))}d"
-                    else:
-                        range_label = f"{max(1, int(round(hrs)))}h"
+                if lookback_hours >= 72:
+                    range_label = f"{max(1, int(round(lookback_hours / 24.0)))}d"
+                else:
+                    range_label = f"{max(1, int(round(lookback_hours)))}h"
             except Exception:
                 range_label = None
             if not range_label:
@@ -2980,6 +3016,20 @@ class MarketAgentService:
                     run += float(v)
                     curve.append(run)
 
+                gross_profit = sum(v for v in pnl_vals if v > 0)
+                gross_loss = abs(sum(v for v in pnl_vals if v < 0))
+                profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else None
+                avg_trade = float(total_pnl / trades_count) if trades_count > 0 else 0.0
+                if self.running and not self.paused:
+                    status_label = "Active"
+                    status_active = True
+                elif self.paused:
+                    status_label = "Paused"
+                    status_active = False
+                else:
+                    status_label = "Stopped"
+                    status_active = False
+
                 # Label the window to avoid “what period is this?” ambiguity.
                 try:
                     pnl_label = f"{str(range_label)} PnL" if range_label else "PnL"
@@ -2992,7 +3042,11 @@ class MarketAgentService:
                         "daily_pnl": total_pnl,
                         "trades": trades_count,
                         "win_rate": win_rate,
+                        "avg_trade": avg_trade,
+                        "profit_factor": profit_factor,
                         "label": pnl_label,
+                        "status": status_label,
+                        "status_active": status_active,
                         # Optional: sparkline data (cumulative realized P&L across the displayed trades)
                         "pnl_curve": curve,
                         # Telegram-only: render a dedicated in-chart performance section.
@@ -5468,6 +5522,7 @@ class MarketAgentService:
                 "scan_interval_paused": self._scan_interval_paused,
                 "scan_interval_effective": self._effective_interval,
             },
+            "config_warnings": self._config_warnings,
             "telegram_ui": {
                 "compact_metrics_enabled": getattr(self, "_telegram_ui_compact_metrics_enabled", True),
                 "show_progress_bars": getattr(self, "_telegram_ui_show_progress_bars", False),

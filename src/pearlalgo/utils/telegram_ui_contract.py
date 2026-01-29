@@ -99,6 +99,7 @@ PEARL_START_AGENT = "start_agent"            # Start agent
 PEARL_SHOW_OVERNIGHT = "show_overnight"      # Show overnight summary
 PEARL_SHOW_PERFORMANCE = "show_performance"  # Show performance breakdown
 PEARL_SHOW_DAILY_SUMMARY = "show_daily_summary"  # Show daily summary
+PEARL_SHOW_RISK_REPORT = "show_risk_report"  # Show risk/incident report
 
 # ---------------------------------------------------------------------------
 # Connection status helpers

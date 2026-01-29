@@ -85,6 +85,43 @@ class CircuitBreakerConfig(BaseModel):
     max_data_fetch_errors: int = Field(default=5, ge=1)
 
 
+class TradingCircuitBreakerConfig(BaseModel):
+    """Trading circuit breaker configuration (risk management)."""
+    enabled: bool = True
+    mode: Literal["warn_only", "enforce"] = "enforce"
+    max_consecutive_losses: int = Field(default=5, ge=1)
+    consecutive_loss_cooldown_minutes: int = Field(default=30, ge=1)
+    max_session_drawdown: float = Field(default=500.0, ge=0)
+    max_daily_drawdown: float = Field(default=1000.0, ge=0)
+    drawdown_cooldown_minutes: int = Field(default=60, ge=1)
+    rolling_window_trades: int = Field(default=20, ge=1)
+    min_rolling_win_rate: float = Field(default=0.30, ge=0, le=1)
+    win_rate_cooldown_minutes: int = Field(default=30, ge=1)
+    max_concurrent_positions: int = Field(default=5, ge=1)
+    min_price_distance_pct: float = Field(default=0.5, ge=0)
+    enable_volatility_filter: bool = True
+    min_atr_ratio: float = Field(default=0.8, ge=0)
+    max_atr_ratio: float = Field(default=2.5, ge=0)
+    chop_detection_window: int = Field(default=10, ge=1)
+    chop_win_rate_threshold: float = Field(default=0.35, ge=0, le=1)
+    auto_resume_after_cooldown: bool = True
+    require_winning_trade_to_resume: bool = False
+    enable_session_filter: bool = True
+    allowed_sessions: List[str] = Field(default_factory=lambda: ["overnight", "midday", "close"])
+    enable_direction_gating: bool = True
+    direction_gating_min_confidence: float = Field(default=0.70, ge=0, le=1)
+    enable_regime_avoidance: bool = False
+    blocked_regimes: List[str] = Field(default_factory=lambda: ["ranging", "volatile"])
+    regime_avoidance_min_confidence: float = Field(default=0.70, ge=0, le=1)
+    enable_trigger_filters: bool = False
+    ema_cross_require_volume: bool = True
+    low_regime_require_volume: bool = True
+    enable_ml_chop_shield: bool = False
+    ml_min_scored_trades: int = Field(default=50, ge=1)
+    ml_min_winrate_delta: float = Field(default=0.15, ge=0, le=1)
+    ml_chop_shield_regimes: List[str] = Field(default_factory=lambda: ["ranging", "volatile"])
+
+
 class DataConfig(BaseModel):
     """Data fetching and caching configuration."""
     buffer_size: int = Field(default=100, ge=10)
@@ -383,6 +420,31 @@ class MLFilterConfig(BaseModel):
     calibrate_probabilities: bool = True
 
 
+class KnowledgeConfig(BaseModel):
+    """Repo knowledge index configuration for PEARL RAG."""
+    enabled: bool = True
+    index_dir: str = "data/knowledge_index"
+    include_paths: List[str] = Field(default_factory=lambda: ["src", "docs", "config", "scripts", "pyproject.toml"])
+    exclude_globs: List[str] = Field(
+        default_factory=lambda: [
+            ".env*",
+            "data/**",
+            "logs/**",
+            "tests/artifacts/**",
+            ".venv/**",
+            "ibkr/**",
+            ".git/**",
+        ]
+    )
+    max_file_size_kb: int = Field(default=512, ge=1)
+    chunk_max_chars: int = Field(default=2000, ge=200)
+    chunk_overlap_chars: int = Field(default=200, ge=0)
+    embedding_provider: Literal["auto", "openai", "hash"] = "auto"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = Field(default=384, ge=32)
+    use_faiss: bool = False
+    top_k: int = Field(default=6, ge=1)
+
 
 class FullServiceConfig(BaseModel):
     """
@@ -399,6 +461,7 @@ class FullServiceConfig(BaseModel):
     risk: RiskConfig = Field(default_factory=RiskConfig)
     service: ServiceConfig = Field(default_factory=ServiceConfig)
     circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
+    trading_circuit_breaker: TradingCircuitBreakerConfig = Field(default_factory=TradingCircuitBreakerConfig)
     data: DataConfig = Field(default_factory=DataConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     challenge: ChallengeConfig = Field(default_factory=ChallengeConfig)
@@ -414,6 +477,7 @@ class FullServiceConfig(BaseModel):
     learning: LearningConfig = Field(default_factory=LearningConfig)
     swing_trading: SwingTradingConfig = Field(default_factory=SwingTradingConfig)
     ml_filter: MLFilterConfig = Field(default_factory=MLFilterConfig)
+    knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
 
     @model_validator(mode="after")
     def validate_cross_field_constraints(self) -> "FullServiceConfig":

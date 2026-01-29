@@ -88,11 +88,11 @@ FONT_SIZE_AXIS_TICK_MOBILE = 7  # Smaller axis ticks for mobile
 
 # Alpha (opacity) constants - for consistent transparency across chart elements
 # Low alpha values ensure zones don't obscure candles (visual contract)
-ALPHA_ZONE_SUPPLY_DEMAND = 0.18  # Supply/demand zone fills
-ALPHA_ZONE_POWER_CHANNEL = 0.10  # Power channel zone fills
+ALPHA_ZONE_SUPPLY_DEMAND = 0.14  # Supply/demand zone fills
+ALPHA_ZONE_POWER_CHANNEL = 0.08  # Power channel zone fills
 ALPHA_ZONE_RR_BOX_PROFIT = 0.20  # RR box profit zone
 ALPHA_ZONE_RR_BOX_RISK = 0.22    # RR box risk zone
-ALPHA_SESSION_SHADING = 0.10     # Session background shading
+ALPHA_SESSION_SHADING = 0.12     # Session background shading
 ALPHA_VWAP_BAND_FILL = 0.10      # VWAP band fill between VWAP and ±1σ
 ALPHA_LINE_PRIMARY = 0.95        # Entry line, primary levels
 ALPHA_LINE_SECONDARY = 0.80      # Stop/target, secondary levels
@@ -999,10 +999,15 @@ class ChartConfig:
     rsi_signal_period: int = 9
     rsi_signal_type: str = "ema"  # "ema" or "sma"
     rsi_signal_linewidth: float = 1.0
+    show_rsi_divergence_labels: bool = False  # Hide "Bull"/"Bear" divergence tags for cleaner look
 
     # Panel visibility options (allows hiding panels for more price space)
     show_pressure_panel: bool = True  # Pressure panel (signed volume histogram)
     show_volume_panel: bool = True    # Volume panel (can disable for cleaner charts)
+    volume_overlay_in_price: bool = True  # Overlay volume in price panel (Telegram)
+    show_volume_ma: bool = True
+    volume_ma_period: int = 20
+    volume_ma_color: str = "#e0e0e0"
     # Trade recap panel (replaces pressure panel when enabled)
     show_trade_recap_panel: bool = False
 
@@ -1310,7 +1315,7 @@ class ChartGenerator:
             figcolor=DARK_BG,                   # Figure background
             y_on_right=True,                    # Price axis on right (TradingView style)
             rc={
-                'grid.alpha': 0.35,
+                'grid.alpha': 0.25,
                 'axes.labelcolor': TEXT_PRIMARY,
                 'axes.edgecolor': GRID_COLOR,
                 'axes.spines.top': False,       # Remove top spine
@@ -2252,10 +2257,23 @@ class ChartGenerator:
                 ax.axvspan(
                     start_x, end_x,
                     color=color,
-                    alpha=0.08,
+                    alpha=ALPHA_SESSION_SHADING,
                     linewidth=0,
                     zorder=ZORDER_SESSION_SHADING,
                 )
+                # Session boundary lines (TradingView-style section edges)
+                try:
+                    ax.vlines(
+                        [start_x, end_x],
+                        ymin,
+                        ymax,
+                        colors=color,
+                        alpha=0.18,
+                        linewidth=0.8,
+                        zorder=ZORDER_ZONES,
+                    )
+                except Exception:
+                    pass
 
                 if self.config.show_session_oc:
                     open_ = float(s.get("open", 0.0) or 0.0)
@@ -2508,6 +2526,8 @@ class ChartGenerator:
 
     def _draw_rsi_divergence_labels(self, ax_rsi, rsi_series: pd.Series, df: pd.DataFrame) -> None:
         """Draw RSI divergence labels (bull/bear) to match Pine script behavior."""
+        if not self.config.show_rsi_divergence_labels:
+            return
         if ax_rsi is None or rsi_series is None or rsi_series.empty:
             return
         if df is None or df.empty or "Low" not in df.columns or "High" not in df.columns:
@@ -3174,9 +3194,10 @@ class ChartGenerator:
     ) -> None:
         """Draw a compact chart key explaining overlays on the dashboard chart."""
         try:
-            lines = ["Chart Key"]
+            lines = ["CHART KEY"]
+            lines.append("")  # Blank line for spacing
 
-            # Indicator summary (line swatches still live in the top-right legend).
+            # Indicators section
             try:
                 show_vwap = bool(getattr(self.config, "show_vwap", True))
             except Exception:
@@ -3185,27 +3206,34 @@ class ChartGenerator:
                 show_ma = bool(getattr(self.config, "show_ma", True))
             except Exception:
                 show_ma = True
-            if show_vwap or show_ma:
-                parts = []
-                if show_vwap:
-                    parts.append("VWAP")
-                if show_ma:
-                    parts.append("EMA")
-                if parts:
-                    lines.append(f"Lines: {' + '.join(parts)}")
+            indicator_lines = []
+            if show_vwap:
+                indicator_lines.append("VWAP")
+            if show_ma:
+                indicator_lines.append("EMA")
+            if indicator_lines:
+                lines.append("Indicators:")
+                lines.append("  " + " + ".join(indicator_lines))
 
             if bool(getattr(self.config, "show_rsi", False)):
                 rsi_note = "line"
                 if bool(getattr(self.config, "show_rsi_signal", False)):
                     rsi_note = "line + signal"
-                lines.append(f"RSI: {rsi_note}")
+                lines.append(f"  RSI {rsi_note}")
 
+            # Overlays section
+            overlay_parts = []
             if bool(getattr(self.config, "show_sessions", False)):
-                lines.append("Sessions: shaded blocks")
+                overlay_parts.append("Sessions")
             if bool(getattr(self.config, "show_supply_demand", False)) or bool(getattr(self.config, "show_power_channel", False)):
-                lines.append("Zones: supply/demand")
+                overlay_parts.append("Zones")
+            if overlay_parts:
+                lines.append("")
+                lines.append("Overlays:")
+                for part in overlay_parts:
+                    lines.append(f"  {part}")
 
-            # Trade overlay summary
+            # Trades section
             try:
                 show_letters = bool(getattr(self.config, "smart_marker_show_letters", True))
             except Exception:
@@ -3223,60 +3251,21 @@ class ChartGenerator:
             except Exception:
                 show_path = True
 
-            if show_letters and show_entry and show_exit:
-                lines.append("Trades: lettered entry/exit pairs")
-            else:
-                if show_entry and show_exit:
-                    lines.append("Trades: entry/exit pairs")
-                elif show_entry and not show_exit:
-                    lines.append("Trades: entries only")
-                elif show_exit and not show_entry:
-                    lines.append("Trades: exits only")
-                else:
-                    lines.append("Trades: paths only")
-            lines.append("Color: green win / red loss")
-            if show_entry and show_exit:
-                lines.append("Shape: ▲ Entry / ● Exit")
-            elif show_entry and not show_exit:
-                lines.append("Shape: ▲ Entry")
-            elif show_exit and not show_entry:
-                lines.append("Shape: ● Exit")
-            elif show_path:
-                lines.append("Endcaps: entry/exit dots")
+            lines.append("")
+            lines.append("Trades:")
             if show_path:
-                lines.append("Path: dashed connector")
+                lines.append("  Paths (win/loss)")
+            elif show_entry and show_exit:
+                lines.append("  ▲ Entry / ● Exit")
+            elif show_entry:
+                lines.append("  ▲ Entry")
+            elif show_exit:
+                lines.append("  ● Exit")
             else:
-                lines.append("Path: hidden")
+                lines.append("  Markers")
 
-            # Path-only enhancements (kept compact; static Telegram-friendly)
-            try:
-                path_arrow = bool(getattr(self.config, "smart_marker_path_arrowheads", False))
-            except Exception:
-                path_arrow = False
-            try:
-                path_fade = bool(getattr(self.config, "smart_marker_path_fade_by_age", False))
-            except Exception:
-                path_fade = False
-            try:
-                path_last = bool(getattr(self.config, "smart_marker_path_label_last_pnl", False))
-            except Exception:
-                path_last = False
-            if path_arrow and show_path:
-                lines.append("Arrow: entry→exit")
-            if path_fade and show_path:
-                lines.append("Opacity: newer brighter")
-            if path_last and show_path:
-                lines.append("Label: last P&L")
-
-            if ema_crossovers_shown:
-                lines.append("EMA cross: cyan/pink")
-
-            try:
-                legend_y = 0.82 if self.config.mobile_mode else 0.88
-                if bool(getattr(self.config, "show_power_readout", True)):
-                    legend_y -= 0.06
-            except Exception:
-                legend_y = 0.82
+            # Position in bottom-left; high enough so box isn't cut off (mobile has less space)
+            legend_y = 0.36 if self.config.mobile_mode else 0.38
 
             ax.text(
                 0.01,
@@ -3284,16 +3273,16 @@ class ChartGenerator:
                 "\n".join(lines),
                 transform=ax.transAxes,
                 ha="left",
-                va="top",
-                fontsize=FONT_SIZE_LEGEND,
+                va="bottom",
+                fontsize=FONT_SIZE_LEGEND + 0.5,
                 color=TEXT_PRIMARY,
-                alpha=0.92,
+                alpha=0.90,
                 zorder=ZORDER_TEXT_LABELS,
                 bbox=dict(
                     facecolor=DARK_BG,
-                    alpha=ALPHA_LEGEND_BG,
+                    alpha=ALPHA_LEGEND_BG + 0.05,
                     edgecolor=GRID_COLOR,
-                    boxstyle="round,pad=0.3",
+                    boxstyle="round,pad=0.35",
                 ),
             )
         except Exception:
@@ -3328,7 +3317,7 @@ class ChartGenerator:
                     1.0,
                     transform=ax.transAxes,
                     boxstyle="round,pad=0.02",
-                    facecolor=mcolors.to_rgba(DARK_BG, alpha=0.35),
+                    facecolor=mcolors.to_rgba(DARK_BG, alpha=0.60),
                     edgecolor=GRID_COLOR,
                     linewidth=0.8,
                     zorder=0,
@@ -3368,6 +3357,8 @@ class ChartGenerator:
             win_rate = float(pnl_overlay.get("win_rate") or 0.0)
             label = str(pnl_overlay.get("label") or title).strip()
             curve_raw = pnl_overlay.get("pnl_curve")
+            status_label = str(pnl_overlay.get("status") or "").strip()
+            status_active = bool(pnl_overlay.get("status_active") or False)
 
             if not isinstance(curve_raw, (list, tuple)) or len(curve_raw) < 2:
                 ax.text(
@@ -3406,93 +3397,133 @@ class ChartGenerator:
             cummax = np.maximum.accumulate(y)
             dd = y - cummax
             max_dd = float(abs(np.min(dd))) if len(dd) else 0.0
-            avg_trade = float(daily_pnl / trades_count) if trades_count > 0 else 0.0
+            overlay_avg = pnl_overlay.get("avg_trade")
+            if overlay_avg is not None:
+                try:
+                    avg_trade = float(overlay_avg)
+                except Exception:
+                    avg_trade = float(daily_pnl / trades_count) if trades_count > 0 else 0.0
+            else:
+                avg_trade = float(daily_pnl / trades_count) if trades_count > 0 else 0.0
+            profit_factor = pnl_overlay.get("profit_factor")
 
             pnl_color = CANDLE_UP if daily_pnl >= 0 else CANDLE_DOWN
             pnl_sign = "+" if daily_pnl >= 0 else ""
 
-            # Header + stats text
+            # QuantVue-style footer: label + big PnL + stats; equity + drawdown full width
             ax.text(
                 0.04,
-                0.93,
+                0.94,
                 label,
                 transform=ax.transAxes,
                 ha="left",
                 va="top",
-                fontsize=FONT_SIZE_LEGEND,
-                color=TEXT_PRIMARY,
-                alpha=0.92,
+                fontsize=FONT_SIZE_LEGEND - 0.5,
+                color=TEXT_SECONDARY,
+                alpha=0.9,
             )
+            if status_label:
+                status_color = CANDLE_UP if status_active else TEXT_SECONDARY
+                ax.text(
+                    0.96,
+                    0.94,
+                    status_label,
+                    transform=ax.transAxes,
+                    ha="right",
+                    va="top",
+                    fontsize=FONT_SIZE_LEGEND - 0.3,
+                    color=status_color,
+                    alpha=0.95,
+                    bbox=dict(
+                        facecolor=mcolors.to_rgba(DARK_BG, alpha=0.7),
+                        edgecolor=GRID_COLOR,
+                        boxstyle="round,pad=0.2",
+                    ),
+                )
             ax.text(
                 0.04,
-                0.76,
+                0.80,
                 f"{pnl_sign}${daily_pnl:,.2f}",
                 transform=ax.transAxes,
                 ha="left",
                 va="top",
-                fontsize=12,
+                fontsize=20,
                 fontweight="bold",
                 color=pnl_color,
                 alpha=0.98,
             )
-            stats = f"{trades_count} trades • {win_rate:.0f}% WR • Avg ${avg_trade:,.0f} • MaxDD ${max_dd:,.0f}"
+            metrics_parts = [f"{trades_count} trades", f"{win_rate:.0f}% WR"]
+            try:
+                pf_val = float(profit_factor) if profit_factor is not None else None
+            except Exception:
+                pf_val = None
+            if pf_val is not None and pf_val > 0:
+                metrics_parts.append(f"PF {pf_val:.2f}")
             ax.text(
                 0.04,
-                0.63,
-                stats,
+                0.66,
+                " • ".join(metrics_parts),
                 transform=ax.transAxes,
                 ha="left",
                 va="top",
                 fontsize=FONT_SIZE_LEGEND,
                 color=TEXT_SECONDARY,
-                alpha=0.9,
+                alpha=0.88,
+            )
+            ax.text(
+                0.04,
+                0.58,
+                f"Avg ${avg_trade:,.0f} • MaxDD ${max_dd:,.0f}",
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                fontsize=FONT_SIZE_LEGEND - 0.5,
+                color=TEXT_SECONDARY,
+                alpha=0.85,
             )
 
-            # Equity subplot
-            ax_eq = ax.inset_axes([0.04, 0.26, 0.92, 0.36])
+            # Equity curve (full width)
+            ax_eq = ax.inset_axes([0.04, 0.28, 0.92, 0.50])
             ax_eq.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
-            ax_eq.axhline(0.0, color=GRID_COLOR, linewidth=0.9, linestyle="--", alpha=0.6)
-            ax_eq.plot(x, y, color=TEXT_PRIMARY, linewidth=1.4, alpha=0.9)
-            ax_eq.fill_between(x, 0.0, y, where=(y >= 0), color=CANDLE_UP, alpha=0.26)
-            ax_eq.fill_between(x, 0.0, y, where=(y < 0), color=CANDLE_DOWN, alpha=0.26)
-            ax_eq.scatter(
-                [x[-1]],
-                [y[-1]],
-                s=22,
-                color=pnl_color,
-                edgecolors=DARK_BG,
-                linewidths=0.6,
-                zorder=ZORDER_TEXT_LABELS,
-            )
-
-            # Drawdown subplot
-            ax_dd = ax.inset_axes([0.04, 0.08, 0.92, 0.12])
-            ax_dd.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
-            ax_dd.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.6)
-            ax_dd.fill_between(x, 0.0, dd, color=CANDLE_DOWN, alpha=0.35)
-
-            # Tight framing
+            ax_eq.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.5)
+            ax_eq.plot(x, y, color=TEXT_PRIMARY, linewidth=1.4, alpha=0.92)
+            ax_eq.fill_between(x, 0.0, y, where=(y >= 0), color=CANDLE_UP, alpha=0.25)
+            ax_eq.fill_between(x, 0.0, y, where=(y < 0), color=CANDLE_DOWN, alpha=0.25)
+            ax_eq.scatter([x[-1]], [y[-1]], s=20, color=pnl_color, edgecolors=TEXT_PRIMARY, linewidths=0.6, zorder=ZORDER_TEXT_LABELS)
             try:
-                ymin = float(np.min(y))
-                ymax = float(np.max(y))
+                ymin, ymax = float(np.min(y)), float(np.max(y))
                 yr = ymax - ymin
-                pad = (yr * 0.12) if yr > 0 else max(1.0, abs(ymax) * 0.15, abs(ymin) * 0.15)
+                pad = (yr * 0.1) if yr > 0 else max(1.0, abs(ymax) * 0.1, abs(ymin) * 0.1)
                 ax_eq.set_xlim(float(x[0]), float(x[-1]))
                 ax_eq.set_ylim(ymin - pad, ymax + pad)
+            except Exception:
+                pass
+            ax_eq.set_xticks([])
+            ax_eq.set_yticks([])
+            try:
+                for sp in ax_eq.spines.values():
+                    sp.set_visible(False)
+            except Exception:
+                pass
+
+            # Drawdown strip (full width)
+            ax_dd = ax.inset_axes([0.04, 0.12, 0.92, 0.10])
+            ax_dd.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.0))
+            ax_dd.axhline(0.0, color=GRID_COLOR, linewidth=0.8, linestyle="--", alpha=0.5)
+            ax_dd.fill_between(x, 0.0, dd, color=CANDLE_DOWN, alpha=0.30)
+            try:
                 ddmin = float(np.min(dd)) if len(dd) else 0.0
                 ax_dd.set_xlim(float(x[0]), float(x[-1]))
                 ax_dd.set_ylim(ddmin * 1.15, 0.0 + max(1.0, abs(ddmin) * 0.05))
             except Exception:
                 pass
-
-            for ax_small in (ax_eq, ax_dd):
-                ax_small.set_xticks([])
-                ax_small.set_yticks([])
-                try:
-                    for sp in ax_small.spines.values():
-                        sp.set_visible(False)
-                except Exception:
-                    pass
+            ax_dd.set_xticks([])
+            ax_dd.set_yticks([])
+            try:
+                for sp in ax_dd.spines.values():
+                    sp.set_visible(False)
+            except Exception:
+                pass
         except Exception:
             return
 
@@ -3728,13 +3759,13 @@ class ChartGenerator:
                         )
                     except Exception:
                         pass
-                for lvl, a, ls in ((70, 0.85, "--"), (50, 0.55, ":"), (30, 0.85, "--")):
+                for lvl, a, ls in ((70, 0.50, ":"), (50, 0.35, ":"), (30, 0.50, ":")):
                     addplot.append(
                         mpf.make_addplot(
                             pd.Series([lvl] * len(df), index=df.index),
                             panel=rsi_panel,
                             color=RSI_BAND_COLOR,
-                            width=0.9,
+                            width=0.7,
                             linestyle=ls,
                             alpha=a,
                         )
@@ -3969,13 +4000,13 @@ class ChartGenerator:
                         )
                     except Exception:
                         pass
-                for lvl, a, ls in ((70, 0.85, "--"), (50, 0.55, ":"), (30, 0.85, "--")):
+                for lvl, a, ls in ((70, 0.50, ":"), (50, 0.35, ":"), (30, 0.50, ":")):
                     addplot.append(
                         mpf.make_addplot(
                             pd.Series([lvl] * len(df), index=df.index),
                             panel=rsi_panel,
                             color=RSI_BAND_COLOR,
-                            width=0.9,
+                            width=0.7,
                             linestyle=ls,
                             alpha=a,
                         )
@@ -4279,13 +4310,13 @@ class ChartGenerator:
                         )
                     except Exception:
                         pass
-                for lvl, a, ls in ((70, 0.85, "--"), (50, 0.55, ":"), (30, 0.85, "--")):
+                for lvl, a, ls in ((70, 0.50, ":"), (50, 0.35, ":"), (30, 0.50, ":")):
                     addplot.append(
                         mpf.make_addplot(
                             pd.Series([lvl] * len(df), index=df.index),
                             panel=rsi_panel,
                             color=RSI_BAND_COLOR,
-                            width=0.9,
+                            width=0.7,
                             linestyle=ls,
                             alpha=a,
                         )
@@ -4959,6 +4990,14 @@ class ChartGenerator:
                 return None
 
             is_telegram = render_mode == "telegram" or self.config.mobile_mode
+            volume_data = "Volume" in df.columns
+            volume_overlay = bool(
+                volume_data
+                and self.config.show_volume_panel
+                and is_telegram
+                and bool(getattr(self.config, "volume_overlay_in_price", True))
+            )
+            volume_panel = bool(volume_data and self.config.show_volume_panel and not volume_overlay)
 
             # Build HUD context for overlays
             hud: Dict[str, Any] = {}
@@ -5160,26 +5199,30 @@ class ChartGenerator:
                 except Exception as e:
                     logger.debug(f"Error adding VWAP to dashboard chart: {e}")
 
-            # Volume MA overlay (Vol script)
-            if "Volume" in df.columns:
+            # Volume MA overlay (TradingView style)
+            if volume_panel and bool(getattr(self.config, "show_volume_ma", False)):
                 try:
-                    vol_ma = pd.to_numeric(df["Volume"], errors="coerce").rolling(window=20, min_periods=2).mean()
+                    vol = pd.to_numeric(df.get("Volume"), errors="coerce")
+                    period = int(getattr(self.config, "volume_ma_period", 20) or 20)
+                    period = max(2, min(200, period))
+                    vol_ma = vol.rolling(period).mean()
                     addplot.append(
                         mpf.make_addplot(
                             vol_ma,
                             panel=1,
-                            color="#42a5f5",
-                            width=1.2,
-                            alpha=0.7,
+                            color=str(getattr(self.config, "volume_ma_color", TEXT_SECONDARY)),
+                            width=1.0,
+                            alpha=0.75,
                         )
                     )
                 except Exception:
                     pass
 
-            volume_on = "Volume" in df.columns and self.config.show_volume_panel
+            volume_on = volume_panel
             # Trade recap panel (replaces pressure panel when enabled)
             recap_enabled = bool(show_trade_recap and self.config.show_trade_recap_panel)
-            recap_panel_idx = (2 if volume_on else 1) if recap_enabled else None
+            recap_panel_idx = None
+            rsi_panel = None
             # Pressure panel (buy/sell proxy): signed volume histogram (+vol for up candles, -vol for down candles)
             # Respects both function parameter and config option, but is disabled when recap is active.
             pressure_enabled = bool(show_pressure and volume_on and self.config.show_pressure_panel and not recap_enabled)
@@ -5207,6 +5250,20 @@ class ChartGenerator:
                 except Exception as e:
                     pressure_enabled = False
                     logger.debug(f"Error adding pressure panel to dashboard chart: {e}")
+
+            # Panel order (keep PnL recap at bottom when enabled)
+            if volume_on:
+                if recap_enabled:
+                    rsi_panel = 2 if show_rsi else None
+                    recap_panel_idx = 3 if show_rsi else 2
+                else:
+                    rsi_panel = 3 if pressure_enabled else 2
+            else:
+                if recap_enabled:
+                    rsi_panel = 1 if show_rsi else None
+                    recap_panel_idx = 2 if show_rsi else 1
+                else:
+                    rsi_panel = 1 if show_rsi else None
 
             # Reserve a panel slot for the Trade Recap panel (no visible plot).
             if recap_enabled and recap_panel_idx is not None:
@@ -5238,18 +5295,13 @@ class ChartGenerator:
                     rs = gain / loss.replace(0, np.nan)
                     rsi = 100 - (100 / (1 + rs))
 
-                    # Panel allocation:
+                    # Panel allocation (PnL recap always last):
                     # - price: 0
                     # - volume: 1 (built-in)
-                    # - recap: 2 (optional)
-                    # - pressure: 2 (optional, only if recap disabled)
-                    # - rsi: 3 (if volume+recap/pressure) else 2 if volume else 1
-                    if volume_on:
-                        recap_panel_idx = 2 if recap_enabled else None
-                        rsi_panel = 3 if (recap_enabled or pressure_enabled) else 2
-                    else:
-                        recap_panel_idx = 1 if recap_enabled else None
-                        rsi_panel = 2 if recap_enabled else 1
+                    # - rsi: 2 (if volume) / 1 (no volume)
+                    # - recap: 3 (if volume) / 2 (no volume)
+                    if rsi_panel is None:
+                        rsi_panel = 2 if volume_on else 1
                     addplot.append(
                         mpf.make_addplot(
                             rsi,
@@ -5277,7 +5329,7 @@ class ChartGenerator:
                             )
                         except Exception:
                             pass
-                    for lvl, a, ls in ((70, 0.85, "--"), (50, 0.55, ":"), (30, 0.85, "--")):
+                    for lvl, a, ls in ((70, 0.50, ":"), (50, 0.35, ":"), (30, 0.50, ":")):
                         addplot.append(
                             mpf.make_addplot(
                                 pd.Series([lvl] * len(df), index=df.index),
@@ -5288,21 +5340,28 @@ class ChartGenerator:
                                 alpha=a,
                             )
                         )
-                    # Use configurable panel ratios
+                    # Use configurable panel ratios. When volume_overlay (Telegram): Price ~75%, RSI ~10%, Recap ~15%.
                     pr_price = self.config.panel_ratio_price
                     pr_vol = self.config.panel_ratio_volume
                     pr_sub = self.config.panel_ratio_sub
-                    sub_panels = int(recap_enabled or pressure_enabled) + int(show_rsi)
                     if volume_on:
-                        if sub_panels >= 2:
-                            panel_ratios = (pr_price, pr_vol, pr_sub, pr_sub)
-                        elif sub_panels == 1:
+                        if recap_enabled and show_rsi:
+                            panel_ratios = (pr_price, pr_vol, pr_sub, pr_sub + 0.8)
+                        elif recap_enabled and not show_rsi:
+                            panel_ratios = (pr_price, pr_vol, pr_sub + 0.8)
+                        elif pressure_enabled and show_rsi:
+                            panel_ratios = (pr_price, pr_vol, pr_sub + 0.2, pr_sub)
+                        elif show_rsi:
                             panel_ratios = (pr_price, pr_vol, pr_sub + 0.2)
                     else:
-                        if sub_panels >= 2:
-                            panel_ratios = (pr_price, pr_sub + 0.4, pr_sub + 0.4)
-                        elif sub_panels == 1:
+                        if volume_overlay and recap_enabled and show_rsi:
+                            panel_ratios = (7.5, 1.0, 1.5)  # 75% / 10% / 15%
+                        elif recap_enabled and show_rsi:
+                            panel_ratios = (pr_price, pr_sub, pr_sub + 0.8)
+                        elif recap_enabled and not show_rsi:
                             panel_ratios = (pr_price, pr_sub + 0.8)
+                        elif show_rsi:
+                            panel_ratios = (pr_price, pr_sub + 0.4)
                     
                     # Store for overbought/oversold shading (applied after mpf.plot)
                     rsi_series_for_shading = rsi
@@ -5310,12 +5369,15 @@ class ChartGenerator:
                 except Exception as e:
                     logger.debug(f"Error adding RSI to dashboard chart: {e}")
 
-            # If RSI is off but pressure is on, still provide panel ratios for stable layout
-            if panel_ratios is None and volume_on and (recap_enabled or pressure_enabled):
+            # If RSI is off, still provide panel ratios for stable layout
+            if panel_ratios is None:
                 pr_price = self.config.panel_ratio_price
                 pr_vol = self.config.panel_ratio_volume
                 pr_sub = self.config.panel_ratio_sub
-                panel_ratios = (pr_price, pr_vol, pr_sub + 0.2)
+                if volume_on and (recap_enabled or pressure_enabled):
+                    panel_ratios = (pr_price, pr_vol, pr_sub + 0.2)
+                elif (not volume_on) and recap_enabled:
+                    panel_ratios = (pr_price, pr_sub + 0.4)
 
             # Trade markers overlay (entries/exits) for transparency on push dashboards.
             # NOTE: Keep this visually light; too many markers will clutter mobile charts.
@@ -5580,7 +5642,7 @@ class ChartGenerator:
                 volume=volume_on,
                 title=mpf_title,
                 ylabel=ylabel_str,
-                ylabel_lower="Volume" if volume_on else None,
+                ylabel_lower="Volume" if volume_on else "",
                 figsize=figsize,
                 show_nontrading=False,
                 tight_layout=True,
@@ -5595,6 +5657,24 @@ class ChartGenerator:
                 plot_kwargs['panel_ratios'] = panel_ratios
 
             fig, axlist = mpf.plot(df, **plot_kwargs)
+
+            # Soften volume panel to feel "behind" the chart (TradingView-like)
+            if volume_on:
+                try:
+                    axes = axlist if isinstance(axlist, list) else [axlist]
+                    for ax in axes:
+                        if ax is None:
+                            continue
+                        label = (ax.get_ylabel() or "").lower()
+                        if "volume" in label:
+                            for patch in ax.patches:
+                                try:
+                                    patch.set_alpha(0.28)
+                                except Exception:
+                                    pass
+                            ax.set_facecolor(mcolors.to_rgba(DARK_BG, alpha=0.15))
+                except Exception:
+                    pass
 
             # For Telegram/mobile: add compact figure-level title and reduce axis font sizes
             if is_telegram:
@@ -5617,15 +5697,10 @@ class ChartGenerator:
             # RSI overbought/oversold shading (must be done after mpf.plot, before other overlays)
             if rsi_series_for_shading is not None and rsi_panel_idx is not None:
                 try:
-                    # In mplfinance, axlist indices map to panels:
-                    # [0]=price, [1]=volume, [2]=pressure or RSI, [3]=RSI (if pressure enabled)
-                    # Each panel may have sub-axes, so we need to find the right one
+                    # mplfinance returns 2 axes per panel (primary, secondary). Primary for panel i is axlist[i*2].
                     ax_rsi = None
                     if isinstance(axlist, list):
-                        # Find the axis for the RSI panel
-                        # mplfinance returns axes in panel order, with volume sharing index with price
-                        # The actual mapping depends on panel_ratios and which panels are enabled
-                        potential_idx = rsi_panel_idx * 2 if volume_on else rsi_panel_idx
+                        potential_idx = rsi_panel_idx * 2
                         if potential_idx < len(axlist):
                             ax_rsi = axlist[potential_idx]
                     if ax_rsi is not None:
@@ -5639,7 +5714,7 @@ class ChartGenerator:
                 try:
                     ax_recap = None
                     if isinstance(axlist, list):
-                        potential_idx = recap_panel_idx * 2 if volume_on else recap_panel_idx
+                        potential_idx = recap_panel_idx * 2
                         if potential_idx < len(axlist):
                             ax_recap = axlist[potential_idx]
                     if ax_recap is not None:
@@ -5675,6 +5750,36 @@ class ChartGenerator:
                             top_headroom_pct = max(0.0, min(0.15, top_headroom_pct))
                             top_padding = y_range * top_headroom_pct
                             ax_price.set_ylim(ymin, ymax + top_padding)
+                        except Exception:
+                            pass
+
+                    # Volume overlay (TradingView-style) behind price
+                    if volume_overlay:
+                        try:
+                            vol = pd.to_numeric(df.get("Volume"), errors="coerce").fillna(0.0)
+                            vol_max = float(vol.max()) if len(vol) else 0.0
+                            if vol_max > 0:
+                                vol_norm = vol / vol_max
+                                ymin, ymax = ax_price.get_ylim()
+                                height = (ymax - ymin) * 0.18
+                                vol_scaled = vol_norm * height
+                                x_coords = np.arange(len(df))
+                                close = pd.to_numeric(df.get("Close"), errors="coerce")
+                                open_ = pd.to_numeric(df.get("Open"), errors="coerce")
+                                colors = [
+                                    (CANDLE_UP if c >= o else CANDLE_DOWN)
+                                    for c, o in zip(close.tolist(), open_.tolist())
+                                ]
+                                ax_price.bar(
+                                    x_coords,
+                                    vol_scaled,
+                                    bottom=ymin,
+                                    color=colors,
+                                    alpha=0.15,
+                                    width=0.65,
+                                    linewidth=0,
+                                    zorder=ZORDER_ZONES,
+                                )
                         except Exception:
                             pass
 
