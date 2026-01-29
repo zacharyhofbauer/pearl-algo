@@ -65,7 +65,7 @@ const getSessionColor = (hour: number): string => {
   return 'transparent'
 }
 
-export default function CandlestickChart({ data, indicators, markers, barSpacing = 8, onChartReady }: ChartProps) {
+export default function CandlestickChart({ data, indicators, markers, barSpacing = 10, onChartReady }: ChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)

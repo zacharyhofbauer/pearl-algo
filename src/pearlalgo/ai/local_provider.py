@@ -34,7 +34,7 @@ except ImportError:
 
 
 DEFAULT_ENDPOINT = "http://localhost:11434"
-DEFAULT_MODEL = "llama3.2"
+DEFAULT_MODEL = "llama3.1"  # Common default, also available: llama3, llama3.1
 
 
 class LocalProvider(AIProvider):

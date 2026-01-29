@@ -408,7 +408,7 @@ knowledge:
 # =============================================================================
 ai:
   enabled: true
-  default_provider: claude  # Primary provider for general tasks
+  default_provider: claude  # Primary provider with native thinking support
   
   # Provider-specific configuration
   providers:
@@ -428,7 +428,7 @@ ai:
     
     local:
       endpoint: http://localhost:11434
-      model: llama3.2
+      model: llama3.1  # Available models: llama3, llama3.1, nomic-embed-text
       timeout: 30
     
     ml:
@@ -437,17 +437,17 @@ ai:
   
   # Task-based routing - which provider to use for each task type
   routing:
-    reasoning: claude      # Strategy analysis, debugging, complex thinking
-    code_gen: claude       # Code generation, patches, scripts
+    reasoning: openai     # Strategy analysis, debugging, complex thinking
+    code_gen: openai      # Code generation, patches, scripts
     quick: local          # Quick lookups, status checks (fast, free)
     signal_scoring: ml    # ML-based signal confidence scoring
-    chat: claude          # General conversational chat
-    analysis: claude      # Trade analysis, performance review
+    chat: openai          # General conversational chat
+    analysis: openai      # Trade analysis, performance review
   
   # Fallback order when preferred provider unavailable
   fallback_order:
-    - claude
     - openai
+    - claude
     - local
 
 # =============================================================================

@@ -56,6 +56,24 @@ from pearlalgo.learning.trade_database import (
     TradeRecord,
 )
 
+# Opportunity tracking
+from pearlalgo.learning.opportunity_tracker import (
+    OpportunityTracker,
+    SignalOpportunity,
+    FilterEvaluation,
+    OpportunityDecision,
+    get_opportunity_tracker,
+)
+
+# Filter analytics
+from pearlalgo.learning.filter_analytics import (
+    FilterAnalytics,
+    FilterPerformanceReport,
+    FilterAdjustmentRecommendation,
+    AdjustmentType,
+    get_filter_analytics,
+)
+
 __all__ = [
     # Original
     "BanditPolicy",
@@ -84,4 +102,26 @@ __all__ = [
     # Database
     "TradeDatabase",
     "TradeRecord",
+    
+    # Opportunity Tracking
+    "OpportunityTracker",
+    "SignalOpportunity",
+    "FilterEvaluation",
+    "OpportunityDecision",
+    "get_opportunity_tracker",
+    
+    # Filter Analytics
+    "FilterAnalytics",
+    "FilterPerformanceReport",
+    "FilterAdjustmentRecommendation",
+    "AdjustmentType",
+    "get_filter_analytics",
+    
+    # Key Level Tracking
+    "KeyLevelTracker",
+    "LevelInteraction",
+    "LevelAnalytics",
+    "LevelType",
+    "InteractionType",
+    "get_key_level_tracker",
 ]

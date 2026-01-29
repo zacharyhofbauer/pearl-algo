@@ -44,16 +44,16 @@ def _get_ml_provider():
 
 # Default routing configuration
 DEFAULT_ROUTING = {
-    AITaskType.REASONING: "claude",
-    AITaskType.CODE_GEN: "claude",
+    AITaskType.REASONING: "openai",
+    AITaskType.CODE_GEN: "openai",
     AITaskType.QUICK: "local",
     AITaskType.SIGNAL_SCORING: "ml",
-    AITaskType.CHAT: "claude",
-    AITaskType.ANALYSIS: "claude",
+    AITaskType.CHAT: "openai",
+    AITaskType.ANALYSIS: "openai",
 }
 
 # Fallback order when preferred provider is not available
-FALLBACK_ORDER = ["claude", "openai", "local"]
+FALLBACK_ORDER = ["openai", "claude", "local"]
 
 
 class AIRouter:

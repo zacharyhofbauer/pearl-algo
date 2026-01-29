@@ -86,7 +86,7 @@ export default function LiveMainChart() {
   const calculateBarCount = () => {
     if (typeof window === 'undefined') return MIN_BARS
     const width = window.innerWidth
-    const barSpacing = 8
+    const barSpacing = 10
     const priceScaleWidth = 60
     const availableWidth = width - priceScaleWidth - 40
     const visibleBars = Math.floor(availableWidth / barSpacing)
@@ -287,14 +287,16 @@ export default function LiveMainChart() {
           {/* Marker Legend */}
           <div className="marker-legend">
             <span className="legend-item">
-              <span className="marker-icon entry-long">▲</span>
-              <span className="marker-icon entry-short">▼</span>
-              Entry
+              <span className="marker-icon entry-long">▲</span>Long
             </span>
             <span className="legend-item">
-              <span className="marker-icon exit-win">●</span>
-              <span className="marker-icon exit-loss">●</span>
-              Exit
+              <span className="marker-icon entry-short">▼</span>Short
+            </span>
+            <span className="legend-item">
+              <span className="marker-icon exit-win">●</span>Win
+            </span>
+            <span className="legend-item">
+              <span className="marker-icon exit-loss">●</span>Loss
             </span>
           </div>
         </div>
@@ -391,7 +393,7 @@ function RSIChart({ data }: { data: IndicatorData[] }) {
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 8,  // Match main chart
-        barSpacing: 8,
+        barSpacing: 10,
         tickMarkFormatter: (time: number) => {
           const date = new Date(time * 1000)
           const hours = date.getHours().toString().padStart(2, '0')

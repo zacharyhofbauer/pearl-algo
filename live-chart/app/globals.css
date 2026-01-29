@@ -271,8 +271,8 @@ body {
 }
 
 .marker-icon {
-  font-size: 10px;
-  margin-right: 1px;
+  font-size: 12px;
+  margin-right: 4px;
 }
 
 .marker-icon.entry-long {
