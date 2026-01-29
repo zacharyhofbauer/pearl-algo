@@ -54,13 +54,16 @@ function getApiUrl(): string {
 const REFRESH_INTERVAL = 10000 // 10 seconds
 type Timeframe = '1m' | '5m' | '15m' | '1h'
 
-// Calculate hours of marker data based on timeframe
+// Calculate hours of candle data based on timeframe
 const TIMEFRAME_HOURS: Record<Timeframe, number> = {
   '1m': 2,
   '5m': 6,
   '15m': 12,
   '1h': 24,
 }
+
+// Always fetch 24 hours of markers so all of today's trades show up
+const MARKER_HOURS = 24
 
 export default function LiveMainChart() {
   const [candles, setCandles] = useState<CandleData[]>([])
@@ -103,14 +106,13 @@ export default function LiveMainChart() {
   }, [timeframe])
 
   const fetchData = async (tf: Timeframe, bars: number) => {
-    const markerHours = TIMEFRAME_HOURS[tf]
     try {
       // Fetch all data in parallel
       const apiUrl = getApiUrl()
       const [candlesRes, indicatorsRes, markersRes, stateRes] = await Promise.all([
         fetch(`${apiUrl}/api/candles?symbol=MNQ&timeframe=${tf}&bars=${bars}`),
         fetch(`${apiUrl}/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${bars}`),
-        fetch(`${apiUrl}/api/markers?hours=${markerHours}`),
+        fetch(`${apiUrl}/api/markers?hours=${MARKER_HOURS}`),
         fetch(`${apiUrl}/api/state`),
       ])
 

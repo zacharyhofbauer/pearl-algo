@@ -126,7 +126,35 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       },
     })
 
-    // Candlestick series
+    // EMA 9 line (cyan) - add first so it's behind candles
+    const ema9Series = chart.addLineSeries({
+      color: '#00d4ff',
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+
+    // EMA 21 line (yellow) - add second so it's behind candles
+    const ema21Series = chart.addLineSeries({
+      color: '#ffc107',
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+
+    // VWAP line (purple, dashed) - add third so it's behind candles
+    const vwapSeries = chart.addLineSeries({
+      color: '#ab47bc',
+      lineWidth: 2,
+      lineStyle: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+
+    // Candlestick series - add AFTER indicators so candles render ON TOP
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#00e676',
       downColor: '#ff5252',
@@ -149,34 +177,6 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     })
     volumeSeries.priceScale().applyOptions({
       scaleMargins: { top: 0.75, bottom: 0 },
-    })
-
-    // EMA 9 line (cyan)
-    const ema9Series = chart.addLineSeries({
-      color: '#00d4ff',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    })
-
-    // EMA 21 line (yellow)
-    const ema21Series = chart.addLineSeries({
-      color: '#ffc107',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    })
-
-    // VWAP line (purple, dashed)
-    const vwapSeries = chart.addLineSeries({
-      color: '#ab47bc',
-      lineWidth: 2,
-      lineStyle: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
     })
 
     chartRef.current = chart
