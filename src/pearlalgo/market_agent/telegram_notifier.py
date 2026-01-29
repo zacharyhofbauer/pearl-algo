@@ -1445,23 +1445,9 @@ class MarketAgentTelegramNotifier:
             )
 
             # ------------------------------------------------------------------
-            # Transparent AI/ML status (one-liner; match /start dashboard)
+            # ML status (one-liner; match /start dashboard)
             # ------------------------------------------------------------------
             try:
-                # AI readiness (best-effort): informational only (does not affect trading).
-                ai_ready = False
-                try:
-                    from pearlalgo.utils.openai_client import OPENAI_AVAILABLE, OpenAIClient
-
-                    if OPENAI_AVAILABLE:
-                        try:
-                            OpenAIClient()
-                            ai_ready = True
-                        except Exception:
-                            ai_ready = False
-                except Exception:
-                    ai_ready = False
-
                 bandit = status.get("learning") or {}
                 bandit_mode = str(bandit.get("mode") or "off").lower()
 
@@ -1499,8 +1485,7 @@ class MarketAgentTelegramNotifier:
                 except Exception:
                     lift_progress = ""
 
-                ai_label = "ON" if ai_ready else "OFF"
-                message += f"\n🧠 AI/ML: AI {ai_label} • Bandit {bandit_mode} • Ctx {ctx_mode} • Filter {ml_label}{lift_progress}"
+                message += f"\n🧠 ML: Bandit {bandit_mode} • Ctx {ctx_mode} • Filter {ml_label}{lift_progress}"
             except Exception:
                 pass
 
