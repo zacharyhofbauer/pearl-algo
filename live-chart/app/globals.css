@@ -256,13 +256,7 @@ body {
 }
 
 .legend-color.vwap {
-  background: repeating-linear-gradient(
-    90deg,
-    var(--accent-purple) 0px,
-    var(--accent-purple) 4px,
-    transparent 4px,
-    transparent 8px
-  );
+  background: #2962ff;
   height: 2px;
 }
 

@@ -402,8 +402,8 @@ function RSIChart({ data }: { data: IndicatorData[] }) {
     })
 
     const series = chart.addLineSeries({
-      color: '#00d4ff',
-      lineWidth: 2,
+      color: '#ab47bc',
+      lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: true,
     })

@@ -159,11 +159,11 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       crosshairMarkerVisible: false,
     })
 
-    // VWAP line (purple, dashed)
+    // VWAP line (blue, solid)
     const vwapSeries = chart.addLineSeries({
-      color: '#ab47bc',
+      color: '#2962ff',
       lineWidth: 2,
-      lineStyle: 2,
+      lineStyle: 0,
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
@@ -171,11 +171,11 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
 
     // Candlestick series
     const candleSeries = chart.addCandlestickSeries({
-      upColor: '#00e676',
-      downColor: '#ff5252',
+      upColor: '#089981',
+      downColor: '#f23645',
       borderVisible: false,
-      wickUpColor: '#00e676',
-      wickDownColor: '#ff5252',
+      wickUpColor: '#089981',
+      wickDownColor: '#f23645',
       priceFormat: { type: 'price', precision: 2, minMove: 0.25 },
       lastValueVisible: true,
       priceLineVisible: true,
@@ -310,7 +310,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     const volumeData = data.map((d) => ({
       time: d.time as Time,
       value: d.volume || 0,
-      color: d.close >= d.open ? 'rgba(0, 230, 118, 0.3)' : 'rgba(255, 82, 82, 0.3)',
+      color: d.close >= d.open ? 'rgba(8, 153, 129, 0.3)' : 'rgba(242, 54, 69, 0.3)',
     }))
     volumeSeriesRef.current.setData(volumeData)
 
