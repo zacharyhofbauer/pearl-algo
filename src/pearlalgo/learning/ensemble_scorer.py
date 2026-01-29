@@ -23,6 +23,7 @@ import numpy as np
 
 from pearlalgo.learning.feature_engineer import FeatureVector
 from pearlalgo.utils.logger import logger
+from pearlalgo.utils.model_integrity import save_model_hash, verify_model_hash
 from pearlalgo.utils.paths import ensure_state_dir
 
 # Optional imports for ML libraries
@@ -410,20 +411,24 @@ class EnsembleScorer:
         self._bandit_stats: Dict[str, Dict[str, int]] = {}  # {type: {wins, losses}}
     
     def _load_models(self) -> None:
-        """Load trained models from disk using joblib."""
+        """Load trained models from disk using joblib with integrity verification."""
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
         # Load logistic regression
         lr_path = self.models_dir / "logistic_model.joblib"
         if lr_path.exists():
             try:
-                data = joblib.load(lr_path)
-                if not isinstance(data, dict):
-                    raise ValueError("Invalid model format: expected dictionary")
-                self._logistic = data.get("model")
-                self._scaler = data.get("scaler")
-                self._logistic_fitted = True
-                logger.info("Loaded logistic regression model")
+                is_valid, reason = verify_model_hash(lr_path)
+                if not is_valid:
+                    logger.warning(f"Skipping logistic model: integrity check failed ({reason})")
+                else:
+                    data = joblib.load(lr_path)
+                    if not isinstance(data, dict):
+                        raise ValueError("Invalid model format: expected dictionary")
+                    self._logistic = data.get("model")
+                    self._scaler = data.get("scaler")
+                    self._logistic_fitted = True
+                    logger.info("Loaded logistic regression model")
             except Exception as e:
                 logger.warning(f"Failed to load logistic model: {e}")
 
@@ -431,9 +436,13 @@ class EnsembleScorer:
         gbm_path = self.models_dir / "gbm_model.joblib"
         if gbm_path.exists():
             try:
-                self._gbm = joblib.load(gbm_path)
-                self._gbm_fitted = True
-                logger.info("Loaded GBM model")
+                is_valid, reason = verify_model_hash(gbm_path)
+                if not is_valid:
+                    logger.warning(f"Skipping GBM model: integrity check failed ({reason})")
+                else:
+                    self._gbm = joblib.load(gbm_path)
+                    self._gbm_fitted = True
+                    logger.info("Loaded GBM model")
             except Exception as e:
                 logger.warning(f"Failed to load GBM model: {e}")
         
@@ -462,7 +471,7 @@ class EnsembleScorer:
                 logger.warning(f"Failed to load training samples: {e}")
     
     def _save_models(self) -> None:
-        """Save trained models to disk using joblib."""
+        """Save trained models to disk using joblib with integrity hashes."""
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
         # Save logistic regression
@@ -470,6 +479,7 @@ class EnsembleScorer:
             lr_path = self.models_dir / "logistic_model.joblib"
             try:
                 joblib.dump({"model": self._logistic, "scaler": self._scaler}, lr_path)
+                save_model_hash(lr_path)
             except Exception as e:
                 logger.warning(f"Failed to save logistic model: {e}")
 
@@ -478,6 +488,7 @@ class EnsembleScorer:
             gbm_path = self.models_dir / "gbm_model.joblib"
             try:
                 joblib.dump(self._gbm, gbm_path)
+                save_model_hash(gbm_path)
             except Exception as e:
                 logger.warning(f"Failed to save GBM model: {e}")
         

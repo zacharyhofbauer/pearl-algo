@@ -7,6 +7,11 @@ from __future__ import annotations
 import math
 from typing import Optional
 
+from pearlalgo.utils.formatting import (
+    fmt_currency,
+    fmt_number_commas,
+    fmt_pct_direct,
+)
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.sparkline import generate_progress_bar
 
@@ -293,26 +298,18 @@ def _format_uptime(uptime: dict) -> str:
 
 
 def _format_number(value: float, decimals: int = 2, show_sign: bool = False) -> str:
-    """Format number with commas and optional sign."""
-    if value is None:
-        return "N/A"
-    sign = "+" if show_sign and value >= 0 else ""
-    return f"{sign}{value:,.{decimals}f}"
+    """Format number with commas and optional sign. Delegates to fmt_number_commas."""
+    return fmt_number_commas(value, decimals=decimals, show_sign=show_sign, default="N/A")
 
 
 def _format_currency(value: float, show_sign: bool = False) -> str:
-    """Format currency value."""
-    if value is None:
-        return "$0.00"
-    sign = "+" if show_sign and value >= 0 else ""
-    return f"{sign}${value:,.2f}"
+    """Format currency value. Delegates to fmt_currency."""
+    return fmt_currency(value, show_sign=show_sign, default="$0.00")
 
 
 def _format_percentage(value: float, decimals: int = 1) -> str:
-    """Format percentage."""
-    if value is None:
-        return "0%"
-    return f"{value:.{decimals}f}%"
+    """Format percentage. Delegates to fmt_pct_direct."""
+    return fmt_pct_direct(value, decimals=decimals, default="0%")
 
 
 # ---------------------------------------------------------------------------

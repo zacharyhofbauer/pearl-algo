@@ -826,7 +826,7 @@ class MLSignalFilter:
     
     def save_model(self, path: str) -> bool:
         """
-        Save trained model to file using joblib.
+        Save trained model to file using joblib with integrity hash.
 
         Args:
             path: Path to save model
@@ -840,6 +840,8 @@ class MLSignalFilter:
 
         try:
             import joblib
+            from pathlib import Path as PathLib
+            from pearlalgo.utils.model_integrity import save_model_hash
 
             model_state = {
                 "model": self._model,
@@ -856,6 +858,7 @@ class MLSignalFilter:
             }
 
             joblib.dump(model_state, path)
+            save_model_hash(PathLib(path))
 
             logger.info(f"ML filter model saved to {path}")
             return True
@@ -866,7 +869,7 @@ class MLSignalFilter:
     
     def load_model(self, path: str) -> bool:
         """
-        Load model from file using joblib.
+        Load model from file using joblib with integrity verification.
 
         Args:
             path: Path to model file
@@ -877,11 +880,18 @@ class MLSignalFilter:
         try:
             import joblib
             from pathlib import Path
+            from pearlalgo.utils.model_integrity import verify_model_hash
 
             model_path = Path(path).resolve()
 
             if not model_path.exists():
                 logger.error(f"Model file not found: {path}")
+                return False
+
+            # Verify model integrity before loading
+            is_valid, reason = verify_model_hash(model_path)
+            if not is_valid:
+                logger.error(f"Model integrity check failed: {reason}")
                 return False
 
             model_state = joblib.load(model_path)

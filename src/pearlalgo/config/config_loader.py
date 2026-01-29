@@ -348,24 +348,31 @@ def load_service_config(
 ) -> Dict[str, Any]:
     """
     Load service configuration from config.yaml.
-    
+
     Uses the unified config loader with environment variable substitution.
-    
+
     Args:
         config_path: Path to config.yaml (defaults to config/config.yaml)
         validate: Whether to validate config and log warnings. Default True.
                   Set to False in tests or when loading config multiple times.
-        
+
     Returns:
         Dictionary with service configuration sections merged with defaults
     """
     # Load raw config using unified loader
     config_data = load_config_yaml(config_path)
 
-    
     # Validate config (logs warnings, does not fail)
     if validate and config_data:
         log_config_warnings(config_data)
+
+        # Run full schema validation if available (logs errors but doesn't fail startup)
+        if SCHEMA_VALIDATION_AVAILABLE:
+            try:
+                validate_config(config_data)
+                logger.debug("Config schema validation passed")
+            except Exception as e:
+                logger.warning(f"Config schema validation failed: {e}")
     
     # Merge config sections with defaults
     result = {}

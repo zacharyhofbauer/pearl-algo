@@ -110,17 +110,17 @@ def fmt_percent(value: Any, decimals: int = 1, default: str = "N/A") -> str:
 def fmt_number(value: Any, decimals: int = 2, default: str = "N/A") -> str:
     """
     Safely format a numeric value for logging/display.
-    
+
     Never raises - returns default string if value is invalid.
-    
+
     Args:
         value: Numeric value (may be None, NaN, or invalid)
         decimals: Number of decimal places
         default: String to return if value is invalid
-        
+
     Returns:
         Formatted number string or default
-        
+
     Example:
         >>> fmt_number(123.456)
         "123.46"
@@ -134,5 +134,117 @@ def fmt_number(value: Any, decimals: int = 2, default: str = "N/A") -> str:
         if math.isnan(float_val) or math.isinf(float_val):
             return default
         return f"{float_val:.{decimals}f}"
+    except (ValueError, TypeError):
+        return default
+
+
+# =============================================================================
+# Enhanced formatting functions (with commas, signs, etc.)
+# =============================================================================
+
+
+def fmt_number_commas(
+    value: Any,
+    decimals: int = 2,
+    show_sign: bool = False,
+    default: str = "N/A",
+) -> str:
+    """
+    Format number with commas and optional sign prefix.
+
+    Args:
+        value: Numeric value (may be None, NaN, or invalid)
+        decimals: Number of decimal places
+        show_sign: If True, prefix positive numbers with "+"
+        default: String to return if value is invalid
+
+    Returns:
+        Formatted number string with commas (e.g., "1,234.56") or default
+
+    Example:
+        >>> fmt_number_commas(1234.5)
+        "1,234.50"
+        >>> fmt_number_commas(100, show_sign=True)
+        "+100.00"
+    """
+    if value is None:
+        return default
+    try:
+        float_val = float(value)
+        if math.isnan(float_val) or math.isinf(float_val):
+            return default
+        sign = "+" if show_sign and float_val >= 0 else ""
+        return f"{sign}{float_val:,.{decimals}f}"
+    except (ValueError, TypeError):
+        return default
+
+
+def fmt_currency(
+    value: Any,
+    show_sign: bool = False,
+    default: str = "$0.00",
+) -> str:
+    """
+    Format currency value with dollar sign and commas.
+
+    Args:
+        value: Currency value (may be None, NaN, or invalid)
+        show_sign: If True, prefix positive values with "+"
+        default: String to return if value is invalid
+
+    Returns:
+        Formatted currency string (e.g., "$1,234.56") or default
+
+    Example:
+        >>> fmt_currency(1234.56)
+        "$1,234.56"
+        >>> fmt_currency(-50.25)
+        "-$50.25"
+        >>> fmt_currency(100, show_sign=True)
+        "+$100.00"
+    """
+    if value is None:
+        return default
+    try:
+        float_val = float(value)
+        if math.isnan(float_val) or math.isinf(float_val):
+            return default
+        sign = "+" if show_sign and float_val >= 0 else ""
+        return f"{sign}${float_val:,.2f}"
+    except (ValueError, TypeError):
+        return default
+
+
+def fmt_pct_direct(
+    value: Any,
+    decimals: int = 1,
+    default: str = "0%",
+) -> str:
+    """
+    Format a percentage value (value is already in percent form).
+
+    Unlike fmt_percent which multiplies by 100, this takes the value as-is.
+
+    Args:
+        value: Percentage value already in percent form (50.0 = 50%)
+        decimals: Number of decimal places
+        default: String to return if value is invalid
+
+    Returns:
+        Formatted percentage string (e.g., "50.0%") or default
+
+    Example:
+        >>> fmt_pct_direct(50.5)
+        "50.5%"
+        >>> fmt_pct_direct(None)
+        "0%"
+    """
+    if value is None:
+        return default
+    try:
+        float_val = float(value)
+        if math.isnan(float_val) or math.isinf(float_val):
+            return default
+        return f"{float_val:.{decimals}f}%"
     except (ValueError, TypeError):
         return default

@@ -135,8 +135,24 @@ challenge:
   profit_target: 3000.0
   auto_reset_on_pass: true
   auto_reset_on_fail: true
+# ==========================================================================
+# SIGNAL GENERATION THRESHOLDS
+# ==========================================================================
+# These thresholds control which signals pass through the pipeline.
+# Signal flow: Strategy -> min_confidence -> quality_score -> ML filter
+#
+# THRESHOLD RELATIONSHIPS:
+# - signals.min_confidence (0.55): Base filter - signals below this are never generated
+# - signals.quality_score.threshold (0.35): Composite score combining multiple factors
+# - signals.explore.min_confidence (0.75): Stricter threshold for experimental signals
+# - ml_filter.min_probability (0.55): ML model's predicted win probability cutoff
+#
+# The 0.55 values are intentionally aligned as the "baseline" confidence level.
+# Quality score uses a lower threshold (0.35) because it's a composite metric.
 signals:
   duplicate_window_seconds: 120
+  # Minimum strategy confidence to generate a signal (0.0-1.0)
+  # Signals below this threshold are discarded at generation time
   min_confidence: 0.55
   min_risk_reward: 1.3
   duplicate_price_threshold_pct: 0.5
@@ -145,6 +161,8 @@ signals:
   skip_overnight: true
   quality_score:
     enabled: true
+    # Quality score combines: confidence, R:R, regime alignment, volume, MTF
+    # Threshold is lower (0.35) because it's weighted differently than raw confidence
     threshold: 0.35
     factors:
       confidence_weight: 0.3
@@ -156,6 +174,7 @@ signals:
   min_volume: 10
   explore:
     enabled: false
+    # Exploration mode uses stricter thresholds to limit noise
     min_confidence: 0.75
     min_risk_reward: 2.0
     include_quality_rejects: false
@@ -318,16 +337,25 @@ learning:
     mode: shadow
     explore_rate: 0.1
     min_samples_per_context: 5
+    # Bandit decision threshold (0.3): Lower than signal confidence because
+    # this measures "probability of being better than average" not absolute win rate
     decision_threshold: 0.3
     fallback_to_global: true
 swing_trading:
   enabled: true
+  # Swing trades require higher confidence (0.75) due to longer hold times
+  # and larger position sizes (2.5x multiplier)
   min_confidence: 0.75
   min_target_points: 50
   min_mtf_alignment: 0.8
   min_volume_ratio: 1.2
   max_hold_hours: 24
   position_size_multiplier: 2.5
+# ==========================================================================
+# ML SIGNAL FILTER (Probability-based gating)
+# ==========================================================================
+# Uses ML model to predict P(win) for each signal. In shadow mode, scores
+# are logged for lift measurement but signals are not blocked.
 ml_filter:
   enabled: true   # shadow-only (measurement; does NOT block)
   mode: shadow
@@ -337,6 +365,8 @@ ml_filter:
   lift_min_winrate_delta: 0.05
   model_path: models/signal_filter_v1.joblib
   model_version: v1.0.0
+  # ML probability threshold (0.55): Aligned with signals.min_confidence
+  # Signals with P(win) < 0.55 would be blocked in live mode
   min_probability: 0.55
   shadow_threshold: 0.80  # shadow-only pass/fail split for lift measurement
   high_probability: 0.7

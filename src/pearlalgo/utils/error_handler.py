@@ -147,7 +147,7 @@ class ErrorHandler:
     def handle_telegram_error(error: Exception, notification_type: str) -> None:
         """
         Standardized Telegram error handling.
-        
+
         Args:
             error: Exception that occurred
             notification_type: Type of notification that failed
@@ -157,6 +157,86 @@ class ErrorHandler:
             exc_info=True,
             extra={"notification_type": notification_type},
         )
+
+    @staticmethod
+    def log_and_continue(
+        operation: str,
+        error: Exception,
+        level: str = "debug",
+        extra: Optional[Dict] = None,
+    ) -> None:
+        """
+        Log an error and continue execution (don't re-raise).
+
+        Use this to replace patterns like:
+            except Exception as e:
+                logger.debug(f"Operation failed: {e}")
+
+        With:
+            except Exception as e:
+                ErrorHandler.log_and_continue("operation_name", e)
+
+        Args:
+            operation: Name/description of the operation that failed
+            error: Exception that occurred
+            level: Log level - "debug", "info", "warning", or "error"
+            extra: Optional extra context for structured logging
+        """
+        message = f"{operation} failed: {error}"
+        extra = extra or {}
+        extra["error_type"] = type(error).__name__
+
+        if level == "debug":
+            logger.debug(message, extra=extra)
+        elif level == "info":
+            logger.info(message, extra=extra)
+        elif level == "warning":
+            logger.warning(message, extra=extra)
+        elif level == "error":
+            logger.error(message, exc_info=True, extra=extra)
+        else:
+            logger.debug(message, extra=extra)
+
+    @staticmethod
+    def log_operation_error(
+        operation: str,
+        error: Exception,
+        context: Optional[Dict] = None,
+        include_traceback: bool = False,
+    ) -> Dict:
+        """
+        Log an error with context and return error info dict.
+
+        Use this when you need both logging and error info for decision making.
+
+        Args:
+            operation: Name/description of the operation that failed
+            error: Exception that occurred
+            context: Optional context dictionary
+            include_traceback: If True, include full traceback in logs
+
+        Returns:
+            Dictionary with error information for caller to use
+        """
+        context = context or {}
+        is_connection = ErrorHandler.is_connection_error(error)
+
+        error_info = {
+            "operation": operation,
+            "error": str(error),
+            "error_type": type(error).__name__,
+            "is_connection_error": is_connection,
+            "context": context,
+        }
+
+        if is_connection:
+            logger.warning(f"{operation} connection error: {error}", extra=context)
+        elif include_traceback:
+            logger.error(f"{operation} failed: {error}", exc_info=True, extra=context)
+        else:
+            logger.debug(f"{operation} failed: {error}", extra=context)
+
+        return error_info
 
 
 
