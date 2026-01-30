@@ -33,12 +33,24 @@ body {
 .dashboard {
   width: 100%;
   height: 100dvh; /* Use dynamic viewport height for mobile */
+  height: 100vh; /* Fallback */
   min-height: -webkit-fill-available;
   display: flex;
   flex-direction: column;
   padding: 12px;
-  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  /* Safe area insets for notch/dynamic island - important for standalone PWA */
+  padding-top: max(12px, env(safe-area-inset-top, 12px));
+  padding-right: max(12px, env(safe-area-inset-right, 12px));
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
+  padding-left: max(12px, env(safe-area-inset-left, 12px));
   gap: 8px;
+}
+
+/* Standalone PWA mode - extra top padding for status bar */
+@media all and (display-mode: standalone) {
+  .dashboard {
+    padding-top: max(48px, calc(env(safe-area-inset-top, 44px) + 8px));
+  }
 }
 
 /* Header */
