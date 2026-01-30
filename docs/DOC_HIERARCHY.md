@@ -42,9 +42,6 @@ All other documents must remain consistent with this summary.
   - Quick start, command handler startup, command behavior reference
   - Remote control (service control commands)
   - Mini App + dashboard navigation
-- `AI_PATCH_GUIDE.md` *(deprecated - AI features moved to CLI)*
-  - Historical reference for OpenAI integration
-  - AI assistance now available via CLI/terminal with `/pearl`
 - `ATS_ROLLOUT_GUIDE.md`
   - Safe rollout procedures for execution and learning layers
   - Staging (shadow → dry_run → paper → live)

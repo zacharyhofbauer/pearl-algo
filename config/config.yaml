@@ -4,6 +4,7 @@ scan_interval: 30
 session:
   start_time: '18:00'
   end_time: '15:45'
+  timezone: 'America/New_York'  # Trading day runs 6PM-3:45PM ET
 telegram:
   enabled: true
   bot_token: ${TELEGRAM_BOT_TOKEN}
