@@ -32,9 +32,8 @@ body {
 /* Main container */
 .dashboard {
   width: 100%;
-  height: 100dvh; /* Use dynamic viewport height for mobile */
-  height: 100vh; /* Fallback */
-  min-height: -webkit-fill-available;
+  min-height: 100dvh; /* Minimum viewport height, can grow */
+  min-height: 100vh; /* Fallback */
   display: flex;
   flex-direction: column;
   padding: 12px;
@@ -122,7 +121,7 @@ body {
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 6px 10px;
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -140,6 +139,7 @@ body {
 
 /* Chart Wrapper */
 .chart-wrapper {
+  --price-axis-width: 70px;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -150,30 +150,34 @@ body {
 /* Chart Actions */
 .chart-actions {
   position: absolute;
-  top: 8px;
-  right: 100px; /* Move left to avoid price axis overlap */
+  top: 6px;
+  right: calc(var(--price-axis-width, 70px) + 28px);
   z-index: 20;
   display: flex;
-  gap: 4px;
-  background: rgba(10, 10, 15, 0.9);
-  padding: 4px;
-  border-radius: 6px;
+  gap: 2px;
+  background: rgba(10, 10, 15, 0.85);
+  padding: 3px;
+  border-radius: 4px;
   border: 1px solid var(--border-color);
-  backdrop-filter: blur(4px);
 }
 
 .chart-action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
+}
+
+.chart-action-btn svg {
+  width: 12px;
+  height: 12px;
 }
 
 .chart-action-btn:hover {
@@ -757,6 +761,11 @@ body {
 
 /* Responsive - Small Tablet / Large Phone */
 @media (max-width: 768px) {
+  .chart-wrapper {
+    --price-axis-width: 60px;
+    min-height: 300px;
+  }
+
   .status-panel {
     gap: 16px;
   }
@@ -787,30 +796,42 @@ body {
     max-width: 60px;
   }
 
-  .chart-wrapper {
-    min-height: 300px;
+  /* Mobile typography improvements */
+  .stat-label {
+    font-size: 11px;
   }
 
-  .chart-actions {
-    right: 12px;
-    top: 8px;
+  .stat-value {
+    font-size: 15px;
+  }
+
+  .stat-item-label {
+    font-size: 11px;
+  }
+
+  .stat-item-value {
+    font-size: 15px;
+  }
+
+  .data-panel-title {
+    font-size: 13px;
+  }
+
+  .balance-amount {
+    font-size: 20px;
   }
 }
 
 /* Responsive - Mobile */
 @media (max-width: 480px) {
-  .dashboard {
-    padding: 8px;
-    gap: 4px;
-  }
-
   .chart-wrapper {
+    --price-axis-width: 55px;
     min-height: 280px;
   }
 
-  .chart-actions {
-    right: 8px;
-    top: 8px;
+  .dashboard {
+    padding: 8px;
+    gap: 4px;
   }
 
   .timeframe-selector button {
@@ -828,11 +849,19 @@ body {
   }
 
   .stat-label {
-    font-size: 9px;
+    font-size: 10px;
   }
 
   .stat-value {
-    font-size: 12px;
+    font-size: 14px;
+  }
+
+  .stat-item-label {
+    font-size: 10px;
+  }
+
+  .stat-item-value {
+    font-size: 13px;
   }
 
   .marker-legend {
@@ -846,28 +875,9 @@ body {
 
 /* Data Panels Container */
 .data-panels {
-  max-height: 280px;
-  overflow-y: auto;
+  width: 100%;
   padding: 4px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-color) transparent;
-}
-
-.data-panels::-webkit-scrollbar {
-  width: 6px;
-}
-
-.data-panels::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.data-panels::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
-.data-panels::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
+  /* No max-height, no overflow - natural flow */
 }
 
 .data-panels-grid {
@@ -1439,15 +1449,14 @@ body {
    DATA PANELS - Responsive Styles
    ============================================ */
 
-@media (max-width: 768px) {
-  .data-panels {
-    max-height: 320px;
-  }
-
+/* Earlier single column breakpoint for better tablet experience */
+@media (max-width: 900px) {
   .data-panels-grid {
     grid-template-columns: 1fr;
   }
+}
 
+@media (max-width: 768px) {
   .ai-pills {
     flex-wrap: wrap;
   }
@@ -1460,7 +1469,6 @@ body {
 
 @media (max-width: 480px) {
   .data-panels {
-    max-height: 350px;
     padding: 2px;
   }
 
@@ -1472,16 +1480,8 @@ body {
     padding: 10px;
   }
 
-  .balance-amount {
-    font-size: 16px;
-  }
-
   .stats-grid {
     gap: 6px;
-  }
-
-  .stat-item-value {
-    font-size: 12px;
   }
 
   .recent-trade {
