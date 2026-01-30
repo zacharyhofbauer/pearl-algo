@@ -307,10 +307,9 @@ class PearlSuggestionEngine:
         state: dict[str, Any],
         cooldown_minutes: float,
     ) -> Optional[PearlSuggestion]:
-        """Warn about drawdown or would-block signals (Priority 2)."""
+        """Warn about drawdown (Priority 2)."""
         session_pnl = float(state.get("risk_session_pnl", 0) or 0.0)
         daily_pnl = float(state.get("risk_daily_pnl", 0) or 0.0)
-        would_blocks = int(state.get("risk_would_block_total", 0) or 0)
 
         if daily_pnl <= -500 or session_pnl <= -500:
             key = "risk_drawdown"
@@ -320,17 +319,6 @@ class PearlSuggestionEngine:
                 return PearlSuggestion(
                     message=f"You’re down {sign}${abs(pnl_val):.0f}. Want the incident report?",
                     accept_label="Show report",
-                    accept_action="pearl:show_risk_report",
-                    priority=SuggestionPriority.IMPORTANT,
-                    cooldown_key=key,
-                )
-
-        if would_blocks > 0:
-            key = "risk_would_block"
-            if not self._is_on_cooldown(key, cooldown_minutes):
-                return PearlSuggestion(
-                    message=f"Risk rules would have blocked {would_blocks} signals. Want details?",
-                    accept_label="Show details",
                     accept_action="pearl:show_risk_report",
                     priority=SuggestionPriority.IMPORTANT,
                     cooldown_key=key,

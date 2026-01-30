@@ -77,6 +77,15 @@ body {
   font-size: 18px;
   font-weight: 600;
   color: var(--text-primary);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.header .page-name {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
 }
 
 .header .symbol {
@@ -1646,37 +1655,88 @@ body {
    ============================================ */
 
 .market-closed-banner {
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 100;
+  left: 0;
+  right: 0;
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: rgba(20, 20, 25, 0.95);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  backdrop-filter: blur(8px);
+  gap: 6px;
+  padding: 5px 12px;
+  background: #c53030;
 }
 
 .market-closed-icon {
-  font-size: 10px;
+  font-size: 8px;
 }
 
 .market-closed-text {
-  font-size: 12px;
-  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  color: white;
+}
+
+/* Add padding to dashboard when banner is shown */
+.dashboard:has(.market-closed-banner) {
+  padding-top: max(32px, calc(env(safe-area-inset-top, 12px) + 24px));
 }
 
 @media (max-width: 480px) {
   .market-closed-banner {
-    padding: 6px 12px;
+    padding: 4px 10px;
   }
 
   .market-closed-text {
-    font-size: 11px;
+    font-size: 9px;
   }
+}
+
+/* ============================================
+   MARKET STATUS BADGE (in header)
+   ============================================ */
+
+.market-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.market-status-badge.open {
+  background: rgba(0, 230, 118, 0.15);
+  color: var(--accent-green);
+}
+
+.market-status-badge.closed {
+  background: rgba(255, 82, 82, 0.15);
+  color: var(--accent-red);
+}
+
+.market-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.market-status-badge.open .market-status-dot {
+  background: var(--accent-green);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.market-status-badge.closed .market-status-dot {
+  background: var(--accent-red);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 /* ============================================

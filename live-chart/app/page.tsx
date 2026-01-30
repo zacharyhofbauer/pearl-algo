@@ -175,14 +175,6 @@ type Timeframe = '1m' | '5m' | '15m' | '1h'
 // Minimum bars to request for a full chart
 const MIN_BARS = 150
 
-// Calculate hours of candle data based on timeframe
-const TIMEFRAME_HOURS: Record<Timeframe, number> = {
-  '1m': 4,    // 4 hours = 240 bars
-  '5m': 12,   // 12 hours = 144 bars  
-  '15m': 24,  // 24 hours = 96 bars
-  '1h': 48,   // 48 hours = 48 bars
-}
-
 // Fetch 72 hours (3 days) of markers for complete trade history
 const MARKER_HOURS = 72
 
@@ -334,12 +326,6 @@ export default function LiveMainChart() {
     return `${sign}$${pnl.toFixed(2)}`
   }
 
-  // Format display text for timeframe window
-  const getTimeframeDisplay = () => {
-    const hours = TIMEFRAME_HOURS[timeframe]
-    return hours >= 24 ? `${hours / 24}d` : `${hours}h`
-  }
-
   // Track if chart is fully loaded (for screenshot detection)
   const isChartReady = !loading && !error && candles.length > 0
 
@@ -380,10 +366,19 @@ export default function LiveMainChart() {
       <header className="header">
         <div className="title-group">
           <Image src="/logo.png" alt="PEARL" width={28} height={28} className="logo" priority />
-          <h1>
-            <span className="symbol">MNQ</span>
-            <span className="timeframe"> {getTimeframeDisplay()} ({timeframe}) • Live Main Chart</span>
-          </h1>
+          <div className="title-text">
+            <h1>
+              <span className="symbol">MNQ</span>
+              <span className="page-name">Live Main Chart</span>
+            </h1>
+          </div>
+          {/* Market Status Badge */}
+          {marketStatus && (
+            <div className={`market-status-badge ${marketStatus.is_open ? 'open' : 'closed'}`}>
+              <span className="market-status-dot"></span>
+              {marketStatus.is_open ? 'Market Open' : 'Market Closed'}
+            </div>
+          )}
         </div>
         {/* Timeframe Selector */}
         <div className="timeframe-selector">
@@ -400,7 +395,7 @@ export default function LiveMainChart() {
         <div className="status">
           <span className={`status-dot ${isLive ? '' : 'offline'}`}></span>
           <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
-            {isLive ? 'Live' : 'Offline'} • {formatTime(lastUpdate)}
+            {isLive ? 'Live' : 'Cached'} • {formatTime(lastUpdate)}
           </span>
         </div>
       </header>
