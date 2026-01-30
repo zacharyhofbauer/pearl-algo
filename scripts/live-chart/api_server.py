@@ -916,6 +916,107 @@ def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
         return default_metrics
 
 
+def _get_market_regime(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract market regime information from circuit breaker state."""
+    circuit_breaker = state.get("trading_circuit_breaker", {})
+
+    # Try to get regime from state (if available)
+    regime = state.get("regime") or "unknown"
+
+    # Calculate confidence based on various factors
+    confidence = 0.0
+    if regime and regime != "unknown":
+        confidence = 0.75  # Base confidence when regime is known
+
+    # Determine allowed direction based on direction gating
+    allowed_direction = "both"
+    if circuit_breaker.get("direction_gating_enabled", False):
+        # Check if there's a specific direction allowed
+        min_confidence = circuit_breaker.get("direction_gating_min_confidence", 0.7)
+        if confidence >= min_confidence:
+            if regime in ["trending_up"]:
+                allowed_direction = "long"
+            elif regime in ["trending_down"]:
+                allowed_direction = "short"
+
+    return {
+        "regime": regime,
+        "confidence": round(confidence, 2),
+        "allowed_direction": allowed_direction,
+    }
+
+
+def _get_signal_rejections_24h(state: Dict[str, Any]) -> Dict[str, int]:
+    """Get signal rejection counts from the last 24 hours."""
+    circuit_breaker = state.get("trading_circuit_breaker", {})
+    blocks_by_reason = circuit_breaker.get("blocks_by_reason", {})
+    would_block_by_reason = circuit_breaker.get("would_block_by_reason", {})
+
+    # Combine actual blocks and would-have-blocked counts
+    return {
+        "direction_gating": blocks_by_reason.get("direction_gating", 0) + would_block_by_reason.get("direction_gating", 0),
+        "ml_filter": 0,  # ML filter tracks separately
+        "circuit_breaker": (
+            blocks_by_reason.get("consecutive_losses", 0) +
+            blocks_by_reason.get("rolling_win_rate", 0) +
+            would_block_by_reason.get("consecutive_losses", 0) +
+            would_block_by_reason.get("rolling_win_rate", 0) +
+            would_block_by_reason.get("in_cooldown:consecutive_losses", 0) +
+            would_block_by_reason.get("in_cooldown:rolling_win_rate", 0)
+        ),
+        "session_filter": 0,  # Track if session filter is enabled
+        "max_positions": blocks_by_reason.get("max_positions", 0) + would_block_by_reason.get("max_positions", 0),
+    }
+
+
+def _get_last_signal_decision(state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Get the last signal decision information."""
+    learning = state.get("learning", {})
+    last_decision = learning.get("last_decision")
+
+    if not last_decision:
+        return None
+
+    return {
+        "signal_type": last_decision.get("signal_type", "unknown"),
+        "ml_probability": last_decision.get("score", 0.0),
+        "action": "execute" if last_decision.get("execute", False) else "skip",
+        "reason": last_decision.get("reason", ""),
+        "timestamp": last_decision.get("at"),
+    }
+
+
+def _get_shadow_counters(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Get shadow mode counters showing what would have been blocked."""
+    circuit_breaker = state.get("trading_circuit_breaker", {})
+    ml_filter = state.get("ml_filter", {})
+    learning = state.get("learning", {})
+
+    return {
+        "would_block_total": circuit_breaker.get("would_block_total", 0),
+        "would_block_by_reason": circuit_breaker.get("would_block_by_reason", {}),
+        "ml_would_skip": learning.get("total_skips", 0) if learning.get("mode") == "shadow" else 0,
+        "ml_total_decisions": learning.get("total_decisions", 0),
+        "ml_execute_rate": learning.get("execute_rate", 1.0),
+    }
+
+
+def _get_cadence_metrics_enhanced(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Get enhanced cadence metrics from state."""
+    cadence = state.get("cadence_metrics", {})
+
+    return {
+        "cycle_duration_ms": cadence.get("cycle_duration_ms", 0),
+        "duration_p50_ms": cadence.get("duration_p50_ms", 0),
+        "duration_p95_ms": cadence.get("duration_p95_ms", 0),
+        "velocity_mode_active": cadence.get("velocity_mode_active", False),
+        "velocity_reason": cadence.get("velocity_reason", ""),
+        "missed_cycles": cadence.get("missed_cycles", 0),
+        "current_interval_seconds": cadence.get("current_interval_seconds", 0),
+        "cadence_lag_ms": cadence.get("cadence_lag_ms", 0),
+    }
+
+
 @app.get("/api/state")
 async def get_state():
     """Get current agent state with AI status, challenge, performance, and suggestions."""
@@ -965,6 +1066,24 @@ async def get_state():
 
         # NEW: Risk metrics
         "risk_metrics": _get_risk_metrics(_state_dir),
+
+        # NEW: Buy/Sell Pressure (already in state.json)
+        "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
+
+        # NEW: Cadence/System Health metrics
+        "cadence_metrics": _get_cadence_metrics_enhanced(state),
+
+        # NEW: Market Regime
+        "market_regime": _get_market_regime(state),
+
+        # NEW: Signal rejections breakdown
+        "signal_rejections_24h": _get_signal_rejections_24h(state),
+
+        # NEW: Last signal decision
+        "last_signal_decision": _get_last_signal_decision(state),
+
+        # NEW: Shadow mode counters
+        "shadow_counters": _get_shadow_counters(state),
     }
 
 

@@ -1841,3 +1841,660 @@ body {
     font-size: 10px;
   }
 }
+
+/* ============================================
+   MARKET PRESSURE PANEL
+   ============================================ */
+
+.pressure-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pressure-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pressure-bias-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.pressure-bias-badge.bias-buyers {
+  background: rgba(0, 230, 118, 0.15);
+  color: var(--accent-green);
+}
+
+.pressure-bias-badge.bias-sellers {
+  background: rgba(255, 82, 82, 0.15);
+  color: var(--accent-red);
+}
+
+.pressure-bias-badge.bias-mixed {
+  background: rgba(138, 148, 166, 0.15);
+  color: var(--text-secondary);
+}
+
+.pressure-strength {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.pressure-strength.strength-positive {
+  color: var(--accent-green);
+}
+
+.pressure-strength.strength-negative {
+  color: var(--accent-red);
+}
+
+.pressure-strength.strength-neutral {
+  color: var(--text-secondary);
+}
+
+.strength-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Pressure Bar */
+.pressure-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pressure-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pressure-bar-label {
+  font-size: 9px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.pressure-bar-label.sellers {
+  color: rgba(255, 82, 82, 0.7);
+}
+
+.pressure-bar-label.buyers {
+  color: rgba(0, 230, 118, 0.7);
+}
+
+.pressure-bar-value {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.pressure-bar {
+  position: relative;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.pressure-bar-gradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    rgba(255, 82, 82, 0.8) 0%,
+    rgba(255, 82, 82, 0.4) 25%,
+    rgba(138, 148, 166, 0.3) 50%,
+    rgba(0, 230, 118, 0.4) 75%,
+    rgba(0, 230, 118, 0.8) 100%
+  );
+  border-radius: 6px;
+}
+
+.pressure-bar-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+
+.pressure-marker-dot {
+  width: 16px;
+  height: 16px;
+  background: var(--text-primary);
+  border: 2px solid var(--bg-primary);
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.pressure-stats {
+  display: flex;
+  gap: 16px;
+}
+
+.pressure-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pressure-stat-label {
+  font-size: 9px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.pressure-stat-value {
+  font-size: 11px;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+/* ============================================
+   SYSTEM HEALTH PANEL
+   ============================================ */
+
+.health-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.health-indicator-row {
+  display: flex;
+  gap: 16px;
+}
+
+.health-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.health-dot.fresh {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px rgba(0, 230, 118, 0.5);
+}
+
+.health-dot.stale {
+  background: var(--accent-red);
+}
+
+.health-dot.active {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 6px rgba(0, 212, 255, 0.5);
+}
+
+.health-dot.inactive {
+  background: var(--text-secondary);
+}
+
+.health-indicator-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.health-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.health-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.health-stat-label {
+  font-size: 9px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.health-stat-value {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.health-stat-value.health-ok {
+  color: var(--accent-green);
+}
+
+.health-stat-value.health-warning {
+  color: var(--accent-yellow);
+}
+
+.health-lag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+}
+
+.health-lag-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.health-lag-value {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.health-velocity-reason {
+  font-size: 10px;
+  color: var(--accent-cyan);
+  padding: 4px 8px;
+  background: rgba(0, 212, 255, 0.1);
+  border-radius: 4px;
+}
+
+/* ============================================
+   MARKET REGIME PANEL
+   ============================================ */
+
+.regime-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.regime-header {
+  display: flex;
+  align-items: center;
+}
+
+.regime-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 6px;
+  letter-spacing: 0.5px;
+}
+
+.regime-icon {
+  font-size: 14px;
+}
+
+.regime-badge.regime-trending-up {
+  background: rgba(0, 230, 118, 0.15);
+  color: var(--accent-green);
+}
+
+.regime-badge.regime-trending-down {
+  background: rgba(255, 82, 82, 0.15);
+  color: var(--accent-red);
+}
+
+.regime-badge.regime-ranging {
+  background: rgba(255, 193, 7, 0.15);
+  color: var(--accent-yellow);
+}
+
+.regime-badge.regime-volatile {
+  background: rgba(171, 71, 188, 0.15);
+  color: var(--accent-purple);
+}
+
+.regime-badge.regime-unknown {
+  background: rgba(138, 148, 166, 0.15);
+  color: var(--text-secondary);
+}
+
+/* Confidence Bar */
+.regime-confidence {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.regime-confidence-header {
+  display: flex;
+  justify-content: space-between;
+}
+
+.regime-confidence-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.regime-confidence-value {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.regime-confidence-bar {
+  height: 6px;
+  background: var(--bg-primary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.regime-confidence-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green));
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* Allowed Direction */
+.regime-direction {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.regime-direction-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.regime-direction-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+
+.regime-direction-badge.direction-long {
+  background: rgba(0, 212, 255, 0.15);
+  color: var(--accent-cyan);
+}
+
+.regime-direction-badge.direction-short {
+  background: rgba(255, 110, 199, 0.15);
+  color: #ff6ec7;
+}
+
+.regime-direction-badge.direction-both {
+  background: rgba(138, 148, 166, 0.15);
+  color: var(--text-secondary);
+}
+
+/* ============================================
+   SIGNAL DECISIONS PANEL
+   ============================================ */
+
+.signal-decisions-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.last-signal-section {
+  padding: 8px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+}
+
+.last-signal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.last-signal-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.last-signal-time {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.last-signal-details {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.signal-type {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.signal-probability {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.signal-action {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.signal-action.execute {
+  background: rgba(0, 230, 118, 0.15);
+  color: var(--accent-green);
+}
+
+.signal-action.skip {
+  background: rgba(255, 82, 82, 0.15);
+  color: var(--accent-red);
+}
+
+/* Rejections Section */
+.rejections-section {
+  padding: 8px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+}
+
+.rejections-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.rejections-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.rejections-total {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-yellow);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.rejections-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rejection-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.rejection-reason {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.rejection-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+/* ============================================
+   AI STATUS PANEL - SHADOW COUNTERS
+   ============================================ */
+
+.ai-shadow-counters {
+  margin-top: 10px;
+  padding: 8px;
+  background: rgba(255, 193, 7, 0.08);
+  border: 1px solid rgba(255, 193, 7, 0.2);
+  border-radius: 6px;
+}
+
+.shadow-counter-header {
+  margin-bottom: 6px;
+}
+
+.shadow-counter-label {
+  font-size: 10px;
+  color: var(--accent-yellow);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.shadow-counter-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.shadow-counter-text {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.shadow-counter-text strong {
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.shadow-counter-rate {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+/* ============================================
+   CHALLENGE PANEL ENHANCEMENTS
+   ============================================ */
+
+.challenge-balance-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.challenge-attempt {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.challenge-header-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.challenge-sparkline {
+  opacity: 0.8;
+}
+
+/* ============================================
+   RECENT TRADES PANEL ENHANCEMENTS
+   ============================================ */
+
+.trade-detail-sub {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-left: 4px;
+}
+
+.trade-regime {
+  text-transform: capitalize;
+  color: var(--accent-cyan);
+}
+
+/* ============================================
+   NO DATA MESSAGE (shared)
+   ============================================ */
+
+.no-data-message {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 16px;
+}
+
+/* ============================================
+   RESPONSIVE ADJUSTMENTS FOR NEW PANELS
+   ============================================ */
+
+@media (max-width: 768px) {
+  .pressure-stats {
+    flex-wrap: wrap;
+  }
+
+  .health-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .last-signal-details {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .pressure-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .regime-direction {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .rejections-breakdown {
+    font-size: 10px;
+  }
+
+  .challenge-header-right {
+    align-items: flex-start;
+  }
+}

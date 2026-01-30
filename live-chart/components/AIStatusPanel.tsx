@@ -2,6 +2,14 @@
 
 import { DataPanel } from './DataPanelsContainer'
 
+interface ShadowCounters {
+  would_block_total: number
+  would_block_by_reason: Record<string, number>
+  ml_would_skip: number
+  ml_total_decisions: number
+  ml_execute_rate: number
+}
+
 interface AIStatusPanelProps {
   aiStatus: {
     bandit_mode: 'off' | 'shadow' | 'live'
@@ -22,6 +30,7 @@ interface AIStatusPanelProps {
       shadow_trigger: number
     }
   }
+  shadowCounters?: ShadowCounters | null
 }
 
 type Mode = 'off' | 'shadow' | 'live'
@@ -57,7 +66,7 @@ function ModePill({ label, mode }: { label: string; mode: Mode }) {
   )
 }
 
-export default function AIStatusPanel({ aiStatus }: AIStatusPanelProps) {
+export default function AIStatusPanel({ aiStatus, shadowCounters }: AIStatusPanelProps) {
   const mlMode = aiStatus.ml_filter.enabled
     ? (aiStatus.ml_filter.mode === 'live' ? 'live' : 'shadow')
     : 'off'
@@ -114,6 +123,30 @@ export default function AIStatusPanel({ aiStatus }: AIStatusPanelProps) {
               </span>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Shadow Mode Counters */}
+      {shadowCounters && shadowCounters.would_block_total > 0 && (
+        <div className="ai-shadow-counters">
+          <div className="shadow-counter-header">
+            <span className="shadow-counter-label">Shadow Mode Activity</span>
+          </div>
+          <div className="shadow-counter-row">
+            <span className="shadow-counter-text">
+              Would have blocked <strong>{shadowCounters.would_block_total}</strong> signals today
+            </span>
+          </div>
+          {shadowCounters.ml_would_skip > 0 && (
+            <div className="shadow-counter-row">
+              <span className="shadow-counter-text">
+                ML would skip <strong>{shadowCounters.ml_would_skip}</strong> of {shadowCounters.ml_total_decisions}
+              </span>
+              <span className="shadow-counter-rate">
+                ({((1 - shadowCounters.ml_execute_rate) * 100).toFixed(0)}%)
+              </span>
+            </div>
+          )}
         </div>
       )}
     </DataPanel>

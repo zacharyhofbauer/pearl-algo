@@ -1,0 +1,130 @@
+'use client'
+
+import { DataPanel } from './DataPanelsContainer'
+
+interface MarketRegime {
+  regime: string
+  confidence: number
+  allowed_direction: 'long' | 'short' | 'both'
+}
+
+interface MarketRegimePanelProps {
+  regime: MarketRegime | null
+}
+
+export default function MarketRegimePanel({ regime }: MarketRegimePanelProps) {
+  if (!regime) {
+    return (
+      <DataPanel title="Market Regime" icon="📈">
+        <div className="no-data-message">No regime data available</div>
+      </DataPanel>
+    )
+  }
+
+  const getRegimeClass = () => {
+    switch (regime.regime) {
+      case 'trending_up':
+        return 'regime-trending-up'
+      case 'trending_down':
+        return 'regime-trending-down'
+      case 'ranging':
+        return 'regime-ranging'
+      case 'volatile':
+        return 'regime-volatile'
+      default:
+        return 'regime-unknown'
+    }
+  }
+
+  const getRegimeLabel = () => {
+    switch (regime.regime) {
+      case 'trending_up':
+        return 'TRENDING UP'
+      case 'trending_down':
+        return 'TRENDING DOWN'
+      case 'ranging':
+        return 'RANGING'
+      case 'volatile':
+        return 'VOLATILE'
+      case 'unknown':
+        return 'UNKNOWN'
+      default:
+        return regime.regime.toUpperCase().replace(/_/g, ' ')
+    }
+  }
+
+  const getRegimeIcon = () => {
+    switch (regime.regime) {
+      case 'trending_up':
+        return '📈'
+      case 'trending_down':
+        return '📉'
+      case 'ranging':
+        return '↔️'
+      case 'volatile':
+        return '⚡'
+      default:
+        return '❓'
+    }
+  }
+
+  const getDirectionClass = () => {
+    switch (regime.allowed_direction) {
+      case 'long':
+        return 'direction-long'
+      case 'short':
+        return 'direction-short'
+      default:
+        return 'direction-both'
+    }
+  }
+
+  const getDirectionLabel = () => {
+    switch (regime.allowed_direction) {
+      case 'long':
+        return 'LONG ONLY'
+      case 'short':
+        return 'SHORT ONLY'
+      default:
+        return 'BOTH'
+    }
+  }
+
+  const confidencePct = regime.confidence * 100
+
+  return (
+    <DataPanel title="Market Regime" icon="📈">
+      <div className="regime-panel-content">
+        {/* Regime Badge */}
+        <div className="regime-header">
+          <span className={`regime-badge ${getRegimeClass()}`}>
+            <span className="regime-icon">{getRegimeIcon()}</span>
+            {getRegimeLabel()}
+          </span>
+        </div>
+
+        {/* Confidence Bar */}
+        <div className="regime-confidence">
+          <div className="regime-confidence-header">
+            <span className="regime-confidence-label">Confidence</span>
+            <span className="regime-confidence-value">{confidencePct.toFixed(0)}%</span>
+          </div>
+          <div className="regime-confidence-bar">
+            <div
+              className="regime-confidence-fill"
+              style={{ width: `${confidencePct}%` }}
+            ></div>
+          </div>
+        </div>
+
+        {/* Allowed Direction */}
+        <div className="regime-direction">
+          <span className="regime-direction-label">Allowed Direction</span>
+          <span className={`regime-direction-badge ${getDirectionClass()}`}>
+            {getDirectionLabel()}
+          </span>
+        </div>
+      </div>
+    </DataPanel>
+  )
+}

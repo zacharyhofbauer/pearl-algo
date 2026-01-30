@@ -12,6 +12,10 @@ import PearlSuggestionsPanel from '@/components/PearlSuggestionsPanel'
 import EquityCurvePanel from '@/components/EquityCurvePanel'
 import RiskMetricsPanel from '@/components/RiskMetricsPanel'
 import HelpPanel from '@/components/HelpPanel'
+import MarketPressurePanel from '@/components/MarketPressurePanel'
+import SystemHealthPanel from '@/components/SystemHealthPanel'
+import MarketRegimePanel from '@/components/MarketRegimePanel'
+import SignalDecisionsPanel from '@/components/SignalDecisionsPanel'
 import type { IChartApi } from 'lightweight-charts'
 
 interface CandleData {
@@ -136,6 +140,63 @@ interface RiskMetrics {
   expectancy: number
 }
 
+// Buy/Sell Pressure
+interface BuySellPressure {
+  bias: 'buyers' | 'sellers' | 'mixed'
+  strength: 'flat' | 'light' | 'moderate' | 'strong'
+  score: number
+  score_pct: number
+  lookback_bars: number
+  total_volume: number
+  volume_ratio: number
+}
+
+// Cadence/System Health Metrics
+interface CadenceMetrics {
+  cycle_duration_ms: number
+  duration_p50_ms: number
+  duration_p95_ms: number
+  velocity_mode_active: boolean
+  velocity_reason: string
+  missed_cycles: number
+  current_interval_seconds: number
+  cadence_lag_ms: number
+}
+
+// Market Regime
+interface MarketRegime {
+  regime: string
+  confidence: number
+  allowed_direction: 'long' | 'short' | 'both'
+}
+
+// Signal Rejections
+interface SignalRejections {
+  direction_gating: number
+  ml_filter: number
+  circuit_breaker: number
+  session_filter: number
+  max_positions: number
+}
+
+// Last Signal Decision
+interface LastSignalDecision {
+  signal_type: string
+  ml_probability: number
+  action: 'execute' | 'skip'
+  reason: string
+  timestamp: string | null
+}
+
+// Shadow Counters
+interface ShadowCounters {
+  would_block_total: number
+  would_block_by_reason: Record<string, number>
+  ml_would_skip: number
+  ml_total_decisions: number
+  ml_execute_rate: number
+}
+
 interface AgentState {
   running: boolean
   paused: boolean
@@ -144,7 +205,8 @@ interface AgentState {
   daily_wins: number
   daily_losses: number
   active_trades_count: number
-  // NEW fields
+  data_fresh?: boolean
+  // Existing fields
   ai_status?: AIStatus
   challenge?: ChallengeStatus | null
   recent_exits?: RecentExit[]
@@ -152,6 +214,13 @@ interface AgentState {
   pearl_suggestion?: PearlSuggestion | null
   equity_curve?: EquityCurvePoint[]
   risk_metrics?: RiskMetrics
+  // NEW: Transparency panels data
+  buy_sell_pressure?: BuySellPressure | null
+  cadence_metrics?: CadenceMetrics | null
+  market_regime?: MarketRegime | null
+  signal_rejections_24h?: SignalRejections | null
+  last_signal_decision?: LastSignalDecision | null
+  shadow_counters?: ShadowCounters | null
 }
 
 // Market Status
@@ -545,10 +614,38 @@ export default function LiveMainChart() {
             <EquityCurvePanel equityCurve={agentState.equity_curve} />
           )}
           {agentState.challenge && (
-            <ChallengePanel challenge={agentState.challenge} />
+            <ChallengePanel
+              challenge={agentState.challenge}
+              equityCurve={agentState.equity_curve}
+            />
+          )}
+          {/* NEW: Market Pressure Panel */}
+          {agentState.buy_sell_pressure && (
+            <MarketPressurePanel pressure={agentState.buy_sell_pressure} />
+          )}
+          {/* NEW: Market Regime Panel */}
+          {agentState.market_regime && (
+            <MarketRegimePanel regime={agentState.market_regime} />
+          )}
+          {/* NEW: Signal Decisions Panel */}
+          {(agentState.signal_rejections_24h || agentState.last_signal_decision) && (
+            <SignalDecisionsPanel
+              rejections={agentState.signal_rejections_24h || null}
+              lastDecision={agentState.last_signal_decision || null}
+            />
+          )}
+          {/* NEW: System Health Panel */}
+          {agentState.cadence_metrics && (
+            <SystemHealthPanel
+              cadenceMetrics={agentState.cadence_metrics}
+              dataFresh={agentState.data_fresh || false}
+            />
           )}
           {agentState.ai_status && (
-            <AIStatusPanel aiStatus={agentState.ai_status} />
+            <AIStatusPanel
+              aiStatus={agentState.ai_status}
+              shadowCounters={agentState.shadow_counters}
+            />
           )}
           {agentState.recent_exits && agentState.recent_exits.length > 0 && (
             <RecentTradesPanel recentExits={agentState.recent_exits} />

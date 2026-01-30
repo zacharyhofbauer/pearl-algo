@@ -14,6 +14,10 @@ interface RecentExit {
   exit_price?: number
   entry_reason?: string
   duration_seconds?: number
+  // NEW: ML and regime data
+  ml_probability?: number
+  regime_at_entry?: string
+  target_points?: number
 }
 
 interface RecentTradesPanelProps {
@@ -134,6 +138,25 @@ export default function RecentTradesPanel({ recentExits }: RecentTradesPanelProp
                           ? (exit.exit_price - exit.entry_price).toFixed(2)
                           : (exit.entry_price - exit.exit_price).toFixed(2)
                         }
+                        {exit.target_points && (
+                          <span className="trade-detail-sub"> / {exit.target_points} target</span>
+                        )}
+                      </span>
+                    </div>
+                  )}
+                  {exit.ml_probability !== undefined && (
+                    <div className="trade-detail-row">
+                      <span className="trade-detail-label">ML Prob</span>
+                      <span className={`trade-detail-value ${exit.ml_probability >= 0.6 ? 'positive' : exit.ml_probability < 0.4 ? 'negative' : ''}`}>
+                        {(exit.ml_probability * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  )}
+                  {exit.regime_at_entry && (
+                    <div className="trade-detail-row">
+                      <span className="trade-detail-label">Regime</span>
+                      <span className="trade-detail-value trade-regime">
+                        {exit.regime_at_entry.replace(/_/g, ' ')}
                       </span>
                     </div>
                   )}
