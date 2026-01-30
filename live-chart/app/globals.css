@@ -139,14 +139,15 @@ body {
 .chart-actions {
   position: absolute;
   top: 8px;
-  right: 70px; /* Move left to avoid price axis overlap */
+  right: 100px; /* Move left to avoid price axis overlap */
   z-index: 20;
   display: flex;
   gap: 4px;
-  background: var(--bg-primary);
+  background: rgba(10, 10, 15, 0.9);
   padding: 4px;
   border-radius: 6px;
   border: 1px solid var(--border-color);
+  backdrop-filter: blur(4px);
 }
 
 .chart-action-btn {
