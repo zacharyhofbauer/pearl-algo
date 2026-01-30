@@ -1642,6 +1642,44 @@ body {
 }
 
 /* ============================================
+   MARKET CLOSED BANNER
+   ============================================ */
+
+.market-closed-banner {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(20, 20, 25, 0.95);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  backdrop-filter: blur(8px);
+}
+
+.market-closed-icon {
+  font-size: 10px;
+}
+
+.market-closed-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 480px) {
+  .market-closed-banner {
+    padding: 6px 12px;
+  }
+
+  .market-closed-text {
+    font-size: 11px;
+  }
+}
+
+/* ============================================
    HELP PANEL
    ============================================ */
 

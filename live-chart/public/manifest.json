@@ -4,18 +4,18 @@
   "description": "Live TradingView chart for PEARL AI trading",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0a0f",
-  "theme_color": "#0a0a0f",
+  "background_color": "#000000",
+  "theme_color": "#000000",
   "orientation": "any",
   "icons": [
     {
-      "src": "/apple-touch-icon.png",
-      "sizes": "500x500",
+      "src": "/apple-touch-icon.png?v=3",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/apple-touch-icon-180x180.png",
+      "src": "/apple-touch-icon-180x180.png?v=3",
       "sizes": "180x180",
       "type": "image/png",
       "purpose": "any"

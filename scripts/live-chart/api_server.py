@@ -215,9 +215,15 @@ async def _fetch_candles(
     [{"time": 1706500000, "open": 26200, "high": 26210, "low": 26195, "close": 26205}, ...]
     """
     cache_key = f"{symbol}_{timeframe}_{bars}"
-    provider = _get_data_provider()
 
-    # Try to fetch live data
+    # Try cache first if provider not available (faster response when market closed)
+    provider = _get_data_provider()
+    if provider is None and use_cache_fallback:
+        cached = _load_candle_cache(cache_key)
+        if cached:
+            return cached
+
+    # Try to fetch live data with timeout
     if provider is not None:
         try:
             # Calculate time range based on bars and timeframe
@@ -228,17 +234,20 @@ async def _fetch_candles(
             end = datetime.now(timezone.utc)
             start = end - timedelta(minutes=tf_minutes * bars * 1.5)  # Extra buffer
 
-            # Run blocking fetch_historical in thread pool to avoid event loop issues
+            # Run blocking fetch_historical in thread pool with timeout
             loop = asyncio.get_event_loop()
-            df = await loop.run_in_executor(
-                _executor,
-                partial(
-                    provider.fetch_historical,
-                    symbol=symbol,
-                    start=start,
-                    end=end,
-                    timeframe=timeframe,
-                )
+            df = await asyncio.wait_for(
+                loop.run_in_executor(
+                    _executor,
+                    partial(
+                        provider.fetch_historical,
+                        symbol=symbol,
+                        start=start,
+                        end=end,
+                        timeframe=timeframe,
+                    )
+                ),
+                timeout=5.0  # 5 second timeout - fail fast if IBKR not responding
             )
 
             if df is not None and not df.empty:
@@ -260,6 +269,8 @@ async def _fetch_candles(
                 # Cache successful fetch
                 _save_candle_cache(cache_key, candles)
                 return candles
+        except asyncio.TimeoutError:
+            pass  # Fall through to cache
         except Exception:
             pass  # Fall through to cache
 
@@ -395,6 +406,63 @@ _state_dir: Optional[Path] = None
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok", "market": _market}
+
+
+def _get_market_status() -> Dict[str, Any]:
+    """Get futures market open/closed status and next open time."""
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    et_tz = ZoneInfo("America/New_York")
+    now_et = datetime.now(et_tz)
+    weekday = now_et.weekday()  # 0=Monday, 6=Sunday
+    hour = now_et.hour
+    minute = now_et.minute
+
+    # Futures market hours (simplified):
+    # Open: Sunday 6pm ET - Friday 5pm ET
+    # Closed: Friday 5pm ET - Sunday 6pm ET
+    # Daily maintenance: 5pm-6pm ET (Mon-Thu)
+
+    is_open = True
+    next_open = None
+    close_reason = None
+
+    # Check if weekend closed (Friday 5pm to Sunday 6pm)
+    if weekday == 4 and hour >= 17:  # Friday after 5pm
+        is_open = False
+        close_reason = "Weekend"
+        # Next open is Sunday 6pm
+        days_until_sunday = 2
+        next_open = now_et.replace(hour=18, minute=0, second=0, microsecond=0) + timedelta(days=days_until_sunday)
+    elif weekday == 5:  # Saturday
+        is_open = False
+        close_reason = "Weekend"
+        next_open = now_et.replace(hour=18, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    elif weekday == 6 and hour < 18:  # Sunday before 6pm
+        is_open = False
+        close_reason = "Weekend"
+        next_open = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
+    # Daily maintenance break (5pm-6pm ET, Mon-Thu)
+    elif weekday < 4 and hour == 17:
+        is_open = False
+        close_reason = "Daily maintenance"
+        next_open = now_et.replace(hour=18, minute=0, second=0, microsecond=0)
+
+    return {
+        "is_open": is_open,
+        "close_reason": close_reason,
+        "next_open": next_open.isoformat() if next_open else None,
+        "current_time_et": now_et.isoformat(),
+    }
+
+
+@app.get("/api/market-status")
+async def get_market_status():
+    """Get current market open/closed status."""
+    return _get_market_status()
 
 
 @app.get("/api/candles")

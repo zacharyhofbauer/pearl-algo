@@ -154,6 +154,14 @@ interface AgentState {
   risk_metrics?: RiskMetrics
 }
 
+// Market Status
+interface MarketStatus {
+  is_open: boolean
+  close_reason: string | null
+  next_open: string | null
+  current_time_et: string
+}
+
 // API URL is determined at runtime based on where the page is loaded from
 function getApiUrl(): string {
   if (typeof window === 'undefined') return 'http://localhost:8000' // SSR fallback
@@ -191,6 +199,7 @@ export default function LiveMainChart() {
   const [barCount, setBarCount] = useState(MIN_BARS)
   const [barSpacing, setBarSpacing] = useState(10)
   const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
+  const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null)
   const lastDataHash = useRef<string>('')
 
   // Responsive bar spacing - smaller on mobile
@@ -237,12 +246,19 @@ export default function LiveMainChart() {
       
       // Fetch all data in parallel
       const apiUrl = getApiUrl()
-      const [candlesRes, indicatorsRes, markersRes, stateRes] = await Promise.all([
+      const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes] = await Promise.all([
         fetch(`${apiUrl}/api/candles?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
         fetch(`${apiUrl}/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
         fetch(`${apiUrl}/api/markers?hours=${MARKER_HOURS}`),
         fetch(`${apiUrl}/api/state`),
+        fetch(`${apiUrl}/api/market-status`),
       ])
+
+      // Update market status
+      if (marketStatusRes.ok) {
+        const marketData = await marketStatusRes.json()
+        setMarketStatus(marketData)
+      }
 
       // Handle 503 (data unavailable) specifically
       if (candlesRes.status === 503) {
@@ -327,8 +343,39 @@ export default function LiveMainChart() {
   // Track if chart is fully loaded (for screenshot detection)
   const isChartReady = !loading && !error && candles.length > 0
 
+  // Format next market open time
+  const formatNextOpen = (isoString: string | null) => {
+    if (!isoString) return ''
+    try {
+      const date = new Date(isoString)
+      return date.toLocaleString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      })
+    } catch {
+      return ''
+    }
+  }
+
   return (
     <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
+      {/* Market Closed Banner */}
+      {marketStatus && !marketStatus.is_open && (
+        <div className="market-closed-banner">
+          <span className="market-closed-icon">🔴</span>
+          <span className="market-closed-text">
+            Market Closed ({marketStatus.close_reason})
+            {marketStatus.next_open && (
+              <> — Opens {formatNextOpen(marketStatus.next_open)}</>
+            )}
+          </span>
+        </div>
+      )}
+
       {/* Header */}
       <header className="header">
         <div className="title-group">
