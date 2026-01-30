@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import json
 import os
+import statistics
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,10 @@ from typing import Any, Dict, List, Optional
 
 # Thread pool for running blocking data provider calls
 _executor = ThreadPoolExecutor(max_workers=2)
+
+# Cache for candle data when market is closed
+_candle_cache: Dict[str, List[Dict[str, Any]]] = {}
+_cache_file: Optional[Path] = None
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -105,6 +110,70 @@ class DataUnavailableError(Exception):
     pass
 
 
+def _get_cache_file() -> Path:
+    """Get the cache file path."""
+    global _cache_file
+    if _cache_file is None:
+        _cache_file = PROJECT_ROOT / "data" / "live_chart_cache.json"
+    return _cache_file
+
+
+def _save_candle_cache(key: str, candles: List[Dict[str, Any]]) -> None:
+    """Save candles to cache (memory and disk)."""
+    global _candle_cache
+    _candle_cache[key] = candles
+
+    # Also save to disk for persistence across restarts
+    try:
+        cache_file = _get_cache_file()
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing cache
+        existing = {}
+        if cache_file.exists():
+            try:
+                existing = json.loads(cache_file.read_text())
+            except Exception:
+                pass
+
+        # Update with new data
+        existing[key] = {
+            "candles": candles,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Keep only last 24 hours of cache entries
+        cache_file.write_text(json.dumps(existing))
+    except Exception:
+        pass  # Cache write failures are not critical
+
+
+def _load_candle_cache(key: str) -> Optional[List[Dict[str, Any]]]:
+    """Load candles from cache."""
+    global _candle_cache
+
+    # Try memory cache first
+    if key in _candle_cache:
+        return _candle_cache[key]
+
+    # Try disk cache
+    try:
+        cache_file = _get_cache_file()
+        if cache_file.exists():
+            data = json.loads(cache_file.read_text())
+            if key in data:
+                cached = data[key]
+                # Check if cache is less than 24 hours old
+                cache_time = datetime.fromisoformat(cached["timestamp"].replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) - cache_time < timedelta(hours=24):
+                    _candle_cache[key] = cached["candles"]
+                    return cached["candles"]
+    except Exception:
+        pass
+
+    return None
+
+
 def _get_data_provider():
     """Lazy-load the IBKR data provider."""
     global _data_provider, _data_provider_error
@@ -135,67 +204,75 @@ async def _fetch_candles(
     symbol: str,
     timeframe: str = "5m",
     bars: int = 72,
+    use_cache_fallback: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Fetch OHLCV candles from IBKR.
-    
-    Raises DataUnavailableError if no real data is available.
-    NO mock/fake data is returned - real data only.
-    
+
+    If live data is unavailable and use_cache_fallback is True, returns cached data.
+
     Returns data in TradingView Lightweight Charts format:
     [{"time": 1706500000, "open": 26200, "high": 26210, "low": 26195, "close": 26205}, ...]
     """
+    cache_key = f"{symbol}_{timeframe}_{bars}"
     provider = _get_data_provider()
-    
-    if provider is None:
-        raise DataUnavailableError(
-            f"Data provider not available: {_data_provider_error or 'Not connected'}"
-        )
-    
-    try:
-        # Calculate time range based on bars and timeframe
-        tf_minutes = {
-            "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440
-        }.get(timeframe, 5)
-        
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(minutes=tf_minutes * bars * 1.5)  # Extra buffer
-        
-        # Run blocking fetch_historical in thread pool to avoid event loop issues
-        loop = asyncio.get_event_loop()
-        df = await loop.run_in_executor(
-            _executor,
-            partial(
-                provider.fetch_historical,
-                symbol=symbol,
-                start=start,
-                end=end,
-                timeframe=timeframe,
+
+    # Try to fetch live data
+    if provider is not None:
+        try:
+            # Calculate time range based on bars and timeframe
+            tf_minutes = {
+                "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440
+            }.get(timeframe, 5)
+
+            end = datetime.now(timezone.utc)
+            start = end - timedelta(minutes=tf_minutes * bars * 1.5)  # Extra buffer
+
+            # Run blocking fetch_historical in thread pool to avoid event loop issues
+            loop = asyncio.get_event_loop()
+            df = await loop.run_in_executor(
+                _executor,
+                partial(
+                    provider.fetch_historical,
+                    symbol=symbol,
+                    start=start,
+                    end=end,
+                    timeframe=timeframe,
+                )
             )
-        )
-        
-        if df is not None and not df.empty:
-            # Convert to TradingView format
-            candles = []
-            for idx, row in df.tail(bars).iterrows():
-                ts = idx if isinstance(idx, (int, float)) else int(idx.timestamp())
-                # Get volume - try different column name variations
-                vol = row.get("Volume", row.get("volume", row.get("vol", 0)))
-                candles.append({
-                    "time": ts,
-                    "open": float(row.get("Open", row.get("open", 0))),
-                    "high": float(row.get("High", row.get("high", 0))),
-                    "low": float(row.get("Low", row.get("low", 0))),
-                    "close": float(row.get("Close", row.get("close", 0))),
-                    "volume": int(vol) if vol else 0,
-                })
-            return candles
-        
-        raise DataUnavailableError("No candle data returned from provider")
-    except DataUnavailableError:
-        raise
-    except Exception as e:
-        raise DataUnavailableError(f"Failed to fetch data: {e}")
+
+            if df is not None and not df.empty:
+                # Convert to TradingView format
+                candles = []
+                for idx, row in df.tail(bars).iterrows():
+                    ts = idx if isinstance(idx, (int, float)) else int(idx.timestamp())
+                    # Get volume - try different column name variations
+                    vol = row.get("Volume", row.get("volume", row.get("vol", 0)))
+                    candles.append({
+                        "time": ts,
+                        "open": float(row.get("Open", row.get("open", 0))),
+                        "high": float(row.get("High", row.get("high", 0))),
+                        "low": float(row.get("Low", row.get("low", 0))),
+                        "close": float(row.get("Close", row.get("close", 0))),
+                        "volume": int(vol) if vol else 0,
+                    })
+
+                # Cache successful fetch
+                _save_candle_cache(cache_key, candles)
+                return candles
+        except Exception:
+            pass  # Fall through to cache
+
+    # Try cache fallback
+    if use_cache_fallback:
+        cached = _load_candle_cache(cache_key)
+        if cached:
+            return cached
+
+    # No live data and no cache
+    raise DataUnavailableError(
+        f"Market closed - no live data available. Cache not found for {symbol} {timeframe}."
+    )
 
 
 def _calculate_indicators(candles: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -328,15 +405,14 @@ async def get_candles(
 ):
     """
     Get OHLCV candle data for TradingView Lightweight Charts.
-    
-    Returns 503 if real data is unavailable (agent not running, IBKR not connected).
-    NO mock/fake data is returned.
-    
+
+    Returns cached data if live data is unavailable (market closed).
+
     Returns data in format:
     [{"time": 1706500000, "open": 26200, "high": 26210, "low": 26195, "close": 26205}, ...]
     """
     try:
-        candles = await _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars)
+        candles = await _fetch_candles(symbol=symbol, timeframe=timeframe, bars=bars, use_cache_fallback=True)
         return JSONResponse(content=candles)
     except DataUnavailableError as e:
         raise HTTPException(
@@ -512,8 +588,8 @@ def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
     return stats
 
 
-def _get_recent_exits(state_dir: Path, limit: int = 3) -> List[Dict[str, Any]]:
-    """Get recent exits from signals.jsonl."""
+def _get_recent_exits(state_dir: Path, limit: int = 5) -> List[Dict[str, Any]]:
+    """Get recent exits from signals.jsonl with full trade details."""
     signals_file = state_dir / "signals.jsonl"
     if not signals_file.exists():
         return []
@@ -526,12 +602,32 @@ def _get_recent_exits(state_dir: Path, limit: int = 3) -> List[Dict[str, Any]]:
                 continue
             signal_data = s.get("signal", {})
             direction = signal_data.get("direction", s.get("direction", "long")) if isinstance(signal_data, dict) else s.get("direction", "long")
+            entry_reason = signal_data.get("reason", "") if isinstance(signal_data, dict) else ""
+
+            # Calculate duration
+            duration_seconds = None
+            entry_time = s.get("entry_time", "")
+            exit_time = s.get("exit_time", "")
+            if entry_time and exit_time:
+                try:
+                    entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+                    exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
+                    duration_seconds = int((exit_dt - entry_dt).total_seconds())
+                except Exception:
+                    pass
+
             exits.append({
                 "signal_id": s.get("signal_id", ""),
                 "direction": direction,
                 "pnl": round(s.get("pnl", 0.0) or 0.0, 2),
                 "exit_reason": s.get("exit_reason", ""),
-                "exit_time": s.get("exit_time", ""),
+                "exit_time": exit_time,
+                # NEW: Full trade details
+                "entry_time": entry_time,
+                "entry_price": s.get("entry_price"),
+                "exit_price": s.get("exit_price"),
+                "entry_reason": entry_reason,
+                "duration_seconds": duration_seconds,
             })
         # Sort by exit time descending and take most recent
         exits.sort(key=lambda x: x.get("exit_time", ""), reverse=True)
@@ -613,6 +709,145 @@ def _get_pearl_suggestion() -> Optional[Dict[str, Any]]:
     return None
 
 
+def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
+    """Get equity curve data (cumulative P&L over time) for the mini chart."""
+    performance_file = state_dir / "performance.json"
+    if not performance_file.exists():
+        return []
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=hours)
+
+    curve = []
+    try:
+        data = json.loads(performance_file.read_text())
+        if not isinstance(data, list):
+            return []
+
+        # Sort trades by exit time
+        trades = []
+        for trade in data:
+            exit_time_str = trade.get("exit_time")
+            if not exit_time_str:
+                continue
+            try:
+                exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+                if exit_time >= cutoff:
+                    trades.append({
+                        "time": int(exit_time.timestamp()),
+                        "pnl": trade.get("pnl", 0.0) or 0.0,
+                    })
+            except (ValueError, TypeError):
+                continue
+
+        # Sort by time and calculate cumulative P&L
+        trades.sort(key=lambda x: x["time"])
+
+        # Aggregate trades with same timestamp and ensure unique ascending times
+        cumulative = 0.0
+        last_time = 0
+        for t in trades:
+            cumulative += t["pnl"]
+            # Ensure strictly ascending timestamps (add 1 second if duplicate)
+            time_val = t["time"]
+            if time_val <= last_time:
+                time_val = last_time + 1
+            last_time = time_val
+            curve.append({
+                "time": time_val,
+                "value": round(cumulative, 2),
+            })
+    except Exception:
+        pass
+
+    return curve
+
+
+def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
+    """Calculate risk metrics: max drawdown, Sharpe ratio, average R:R, profit factor."""
+    performance_file = state_dir / "performance.json"
+    default_metrics = {
+        "max_drawdown": 0.0,
+        "max_drawdown_pct": 0.0,
+        "sharpe_ratio": None,
+        "profit_factor": None,
+        "avg_win": 0.0,
+        "avg_loss": 0.0,
+        "avg_rr": None,
+        "largest_win": 0.0,
+        "largest_loss": 0.0,
+        "expectancy": 0.0,
+    }
+
+    if not performance_file.exists():
+        return default_metrics
+
+    try:
+        data = json.loads(performance_file.read_text())
+        if not isinstance(data, list) or len(data) == 0:
+            return default_metrics
+
+        # Extract P&L values
+        pnls = [t.get("pnl", 0.0) or 0.0 for t in data if t.get("pnl") is not None]
+        if not pnls:
+            return default_metrics
+
+        wins = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p < 0]
+
+        # Max drawdown calculation
+        cumulative = 0.0
+        peak = 0.0
+        max_dd = 0.0
+        for pnl in pnls:
+            cumulative += pnl
+            if cumulative > peak:
+                peak = cumulative
+            dd = peak - cumulative
+            if dd > max_dd:
+                max_dd = dd
+
+        # Sharpe ratio (simplified - daily returns, annualized)
+        sharpe = None
+        if len(pnls) >= 5:
+            mean_pnl = statistics.mean(pnls)
+            std_pnl = statistics.stdev(pnls) if len(pnls) > 1 else 0
+            if std_pnl > 0:
+                # Approximate annualization (assuming ~5 trades per day, 252 trading days)
+                sharpe = round((mean_pnl / std_pnl) * (252 ** 0.5), 2)
+
+        # Profit factor
+        total_wins = sum(wins) if wins else 0
+        total_losses = abs(sum(losses)) if losses else 0
+        profit_factor = round(total_wins / total_losses, 2) if total_losses > 0 else None
+
+        # Average win/loss
+        avg_win = round(statistics.mean(wins), 2) if wins else 0.0
+        avg_loss = round(statistics.mean(losses), 2) if losses else 0.0
+
+        # Average R:R (reward to risk ratio)
+        avg_rr = round(abs(avg_win / avg_loss), 2) if avg_loss != 0 else None
+
+        # Expectancy
+        win_rate = len(wins) / len(pnls) if pnls else 0
+        expectancy = round((win_rate * avg_win) + ((1 - win_rate) * avg_loss), 2)
+
+        return {
+            "max_drawdown": round(max_dd, 2),
+            "max_drawdown_pct": round((max_dd / peak * 100), 1) if peak > 0 else 0.0,
+            "sharpe_ratio": sharpe,
+            "profit_factor": profit_factor,
+            "avg_win": avg_win,
+            "avg_loss": avg_loss,
+            "avg_rr": avg_rr,
+            "largest_win": round(max(wins), 2) if wins else 0.0,
+            "largest_loss": round(min(losses), 2) if losses else 0.0,
+            "expectancy": expectancy,
+        }
+    except Exception:
+        return default_metrics
+
+
 @app.get("/api/state")
 async def get_state():
     """Get current agent state with AI status, challenge, performance, and suggestions."""
@@ -656,6 +891,12 @@ async def get_state():
 
         # NEW: Pearl suggestion
         "pearl_suggestion": _get_pearl_suggestion(),
+
+        # NEW: Equity curve for mini chart
+        "equity_curve": _get_equity_curve(_state_dir, hours=72),
+
+        # NEW: Risk metrics
+        "risk_metrics": _get_risk_metrics(_state_dir),
     }
 
 

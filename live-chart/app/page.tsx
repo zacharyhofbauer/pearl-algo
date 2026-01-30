@@ -9,6 +9,9 @@ import ChallengePanel from '@/components/ChallengePanel'
 import AIStatusPanel from '@/components/AIStatusPanel'
 import RecentTradesPanel from '@/components/RecentTradesPanel'
 import PearlSuggestionsPanel from '@/components/PearlSuggestionsPanel'
+import EquityCurvePanel from '@/components/EquityCurvePanel'
+import RiskMetricsPanel from '@/components/RiskMetricsPanel'
+import HelpPanel from '@/components/HelpPanel'
 import type { IChartApi } from 'lightweight-charts'
 
 interface CandleData {
@@ -92,19 +95,45 @@ interface PerformanceStats {
   '30d': PeriodStats
 }
 
-// Recent Exit
+// Recent Exit (enhanced with full trade details)
 interface RecentExit {
   signal_id: string
   direction: string
   pnl: number
   exit_reason: string
   exit_time: string
+  // NEW: Full trade details
+  entry_time?: string
+  entry_price?: number
+  exit_price?: number
+  entry_reason?: string
+  duration_seconds?: number
 }
 
 // Pearl Suggestion
 interface PearlSuggestion {
   message: string
   action: string
+}
+
+// Equity Curve Point
+interface EquityCurvePoint {
+  time: number
+  value: number
+}
+
+// Risk Metrics
+interface RiskMetrics {
+  max_drawdown: number
+  max_drawdown_pct: number
+  sharpe_ratio: number | null
+  profit_factor: number | null
+  avg_win: number
+  avg_loss: number
+  avg_rr: number | null
+  largest_win: number
+  largest_loss: number
+  expectancy: number
 }
 
 interface AgentState {
@@ -121,6 +150,8 @@ interface AgentState {
   recent_exits?: RecentExit[]
   performance?: PerformanceStats
   pearl_suggestion?: PearlSuggestion | null
+  equity_curve?: EquityCurvePoint[]
+  risk_metrics?: RiskMetrics
 }
 
 // API URL is determined at runtime based on where the page is loaded from
@@ -465,6 +496,12 @@ export default function LiveMainChart() {
           {agentState.performance && (
             <PerformancePanel performance={agentState.performance} />
           )}
+          {agentState.risk_metrics && (
+            <RiskMetricsPanel riskMetrics={agentState.risk_metrics} />
+          )}
+          {agentState.equity_curve && agentState.equity_curve.length > 0 && (
+            <EquityCurvePanel equityCurve={agentState.equity_curve} />
+          )}
           {agentState.challenge && (
             <ChallengePanel challenge={agentState.challenge} />
           )}
@@ -483,6 +520,9 @@ export default function LiveMainChart() {
           )}
         </DataPanelsContainer>
       )}
+
+      {/* Help Panel - Quick Reference */}
+      <HelpPanel />
     </div>
   )
 }

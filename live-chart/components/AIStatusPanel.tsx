@@ -80,6 +80,11 @@ export default function AIStatusPanel({ aiStatus }: AIStatusPanelProps) {
               WR: {(aiStatus.ml_filter.lift.lift_win_rate * 100).toFixed(1)}%
             </span>
           )}
+          {aiStatus.ml_filter.lift.lift_avg_pnl !== undefined && (
+            <span className={`ai-lift-value ${aiStatus.ml_filter.lift.lift_avg_pnl >= 0 ? 'lift-pnl-positive' : 'lift-pnl-negative'}`}>
+              P&L: {aiStatus.ml_filter.lift.lift_avg_pnl >= 0 ? '+' : ''}${aiStatus.ml_filter.lift.lift_avg_pnl.toFixed(2)}
+            </span>
+          )}
         </div>
       )}
 
