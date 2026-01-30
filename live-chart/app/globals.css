@@ -839,3 +839,656 @@ body {
     display: none; /* Hide on very small screens */
   }
 }
+
+/* ============================================
+   DATA PANELS - PearlAI Dashboard Sections
+   ============================================ */
+
+/* Data Panels Container */
+.data-panels {
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+
+.data-panels::-webkit-scrollbar {
+  width: 6px;
+}
+
+.data-panels::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.data-panels::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.data-panels::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+.data-panels-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+/* Individual Data Panel */
+.data-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.data-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.data-panel-icon {
+  font-size: 14px;
+}
+
+.data-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.data-panel-content {
+  padding: 12px;
+}
+
+/* Performance Panel Styles */
+.perf-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  background: var(--bg-primary);
+  padding: 3px;
+  border-radius: 6px;
+}
+
+.perf-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.perf-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-card);
+}
+
+.perf-tab.active {
+  background: var(--accent-cyan);
+  color: var(--bg-primary);
+}
+
+/* Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-item-full {
+  grid-column: span 2;
+}
+
+.stat-item-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.stat-item-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.stat-item-value.positive {
+  color: var(--accent-green);
+}
+
+.stat-item-value.negative {
+  color: var(--accent-red);
+}
+
+.stat-item-value .stat-divider {
+  color: var(--text-secondary);
+  margin: 0 2px;
+}
+
+/* Challenge Panel Styles */
+.challenge-panel .data-panel-content {
+  padding: 10px 12px;
+}
+
+.challenge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.challenge-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.balance-amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.balance-pnl {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.balance-pnl.positive {
+  color: var(--accent-green);
+}
+
+.balance-pnl.negative {
+  color: var(--accent-red);
+}
+
+.challenge-outcome {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.outcome-active {
+  background: rgba(0, 212, 255, 0.15);
+  color: var(--accent-cyan);
+}
+
+.outcome-pass {
+  background: rgba(0, 230, 118, 0.15);
+  color: var(--accent-green);
+}
+
+.outcome-fail {
+  background: rgba(255, 82, 82, 0.15);
+  color: var(--accent-red);
+}
+
+/* Progress Bar */
+.challenge-progress {
+  margin-bottom: 12px;
+}
+
+.progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.progress-label .warning {
+  color: var(--accent-yellow);
+}
+
+.progress-bar {
+  height: 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-segments {
+  display: flex;
+  height: 100%;
+  gap: 2px;
+}
+
+.progress-segment {
+  flex: 1;
+  background: var(--border-color);
+  border-radius: 2px;
+  transition: background 0.2s ease;
+}
+
+.progress-segment.filled {
+  background: var(--accent-green);
+}
+
+.progress-segment.filled-warning {
+  background: var(--accent-yellow);
+}
+
+.progress-segment.filled-danger {
+  background: var(--accent-red);
+}
+
+/* Challenge Stats */
+.challenge-stats {
+  display: flex;
+  gap: 16px;
+}
+
+.challenge-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.challenge-stat-label {
+  font-size: 9px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.challenge-stat-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.challenge-stat-value.positive {
+  color: var(--accent-green);
+}
+
+.challenge-stat-value.negative {
+  color: var(--accent-red);
+}
+
+/* Target Progress */
+.challenge-target-progress {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.target-progress-bar {
+  height: 4px;
+  background: var(--bg-primary);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.target-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green));
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.target-progress-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+/* AI Status Panel Styles */
+.ai-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.ai-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.ai-pill-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.ai-pill-mode {
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.ai-pill-off {
+  background: rgba(138, 148, 166, 0.1);
+}
+
+.ai-pill-off .ai-pill-mode {
+  color: var(--text-secondary);
+}
+
+.ai-pill-shadow {
+  background: rgba(255, 193, 7, 0.1);
+}
+
+.ai-pill-shadow .ai-pill-mode {
+  color: var(--accent-yellow);
+}
+
+.ai-pill-live {
+  background: rgba(0, 230, 118, 0.1);
+}
+
+.ai-pill-live .ai-pill-mode {
+  color: var(--accent-green);
+}
+
+/* AI Lift Status */
+.ai-lift-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  font-size: 10px;
+  margin-bottom: 10px;
+}
+
+.ai-lift-indicator {
+  font-weight: 600;
+}
+
+.ai-lift-indicator.lift-ok {
+  color: var(--accent-green);
+}
+
+.ai-lift-indicator.lift-fail {
+  color: var(--text-secondary);
+}
+
+.ai-lift-value {
+  color: var(--text-secondary);
+}
+
+/* AI Gating */
+.ai-gating {
+  padding: 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+}
+
+.ai-gating-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.ai-gating-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.ai-gating-enabled {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent-green);
+  padding: 2px 6px;
+  background: rgba(0, 230, 118, 0.1);
+  border-radius: 3px;
+}
+
+.ai-gating-stats {
+  display: flex;
+  gap: 12px;
+}
+
+.ai-gating-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.gating-count {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.gating-label {
+  font-size: 9px;
+  color: var(--text-secondary);
+}
+
+/* Recent Trades Panel Styles */
+.recent-trades-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recent-trade {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+}
+
+.trade-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trade-direction-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+}
+
+.trade-direction-badge.long {
+  background: rgba(0, 212, 255, 0.15);
+  color: var(--accent-cyan);
+}
+
+.trade-direction-badge.short {
+  background: rgba(255, 110, 199, 0.15);
+  color: #ff6ec7;
+}
+
+.trade-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.trade-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.trade-pnl {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.trade-pnl.positive {
+  color: var(--accent-green);
+}
+
+.trade-pnl.negative {
+  color: var(--accent-red);
+}
+
+.trade-reason {
+  font-size: 9px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.no-trades {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 16px;
+}
+
+/* Pearl Suggestions Panel Styles */
+.pearl-suggestions-panel .data-panel-header {
+  background: linear-gradient(90deg, rgba(171, 71, 188, 0.1), rgba(0, 212, 255, 0.1));
+}
+
+.pearl-suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pearl-message {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.pearl-action-hint {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.action-label {
+  color: var(--text-secondary);
+}
+
+.action-value {
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+.pearl-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.pearl-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pearl-btn-accept {
+  background: var(--accent-cyan);
+  color: var(--bg-primary);
+}
+
+.pearl-btn-accept:hover {
+  background: #00b8db;
+}
+
+.pearl-btn-dismiss {
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.pearl-btn-dismiss:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+/* ============================================
+   DATA PANELS - Responsive Styles
+   ============================================ */
+
+@media (max-width: 768px) {
+  .data-panels {
+    max-height: 320px;
+  }
+
+  .data-panels-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-pills {
+    flex-wrap: wrap;
+  }
+
+  .challenge-stats {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .data-panels {
+    max-height: 350px;
+    padding: 2px;
+  }
+
+  .data-panels-grid {
+    gap: 6px;
+  }
+
+  .data-panel-content {
+    padding: 10px;
+  }
+
+  .balance-amount {
+    font-size: 16px;
+  }
+
+  .stats-grid {
+    gap: 6px;
+  }
+
+  .stat-item-value {
+    font-size: 12px;
+  }
+
+  .recent-trade {
+    padding: 6px;
+  }
+
+  .trade-pnl {
+    font-size: 12px;
+  }
+}

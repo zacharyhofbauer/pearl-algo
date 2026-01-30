@@ -1,0 +1,116 @@
+'use client'
+
+import { DataPanel } from './DataPanelsContainer'
+
+interface AIStatusPanelProps {
+  aiStatus: {
+    bandit_mode: 'off' | 'shadow' | 'live'
+    contextual_mode: 'off' | 'shadow' | 'live'
+    ml_filter: {
+      enabled: boolean
+      mode: string
+      lift: {
+        lift_ok?: boolean
+        lift_win_rate?: number
+        lift_avg_pnl?: number
+      }
+    }
+    direction_gating: {
+      enabled: boolean
+      blocks: number
+      shadow_regime: number
+      shadow_trigger: number
+    }
+  }
+}
+
+type Mode = 'off' | 'shadow' | 'live'
+
+function ModePill({ label, mode }: { label: string; mode: Mode }) {
+  const getModeClass = () => {
+    switch (mode) {
+      case 'live':
+        return 'ai-pill-live'
+      case 'shadow':
+        return 'ai-pill-shadow'
+      default:
+        return 'ai-pill-off'
+    }
+  }
+
+  const getModeLabel = () => {
+    switch (mode) {
+      case 'live':
+        return 'LIVE'
+      case 'shadow':
+        return 'SHADOW'
+      default:
+        return 'OFF'
+    }
+  }
+
+  return (
+    <div className={`ai-pill ${getModeClass()}`}>
+      <span className="ai-pill-label">{label}</span>
+      <span className="ai-pill-mode">{getModeLabel()}</span>
+    </div>
+  )
+}
+
+export default function AIStatusPanel({ aiStatus }: AIStatusPanelProps) {
+  const mlMode = aiStatus.ml_filter.enabled
+    ? (aiStatus.ml_filter.mode === 'live' ? 'live' : 'shadow')
+    : 'off'
+
+  return (
+    <DataPanel title="AI Status" icon="🤖">
+      <div className="ai-pills">
+        <ModePill label="Bandit" mode={aiStatus.bandit_mode as Mode} />
+        <ModePill label="Contextual" mode={aiStatus.contextual_mode as Mode} />
+        <ModePill label="ML Filter" mode={mlMode as Mode} />
+      </div>
+
+      {aiStatus.ml_filter.enabled && aiStatus.ml_filter.lift && (
+        <div className="ai-lift-status">
+          <span className={`ai-lift-indicator ${aiStatus.ml_filter.lift.lift_ok ? 'lift-ok' : 'lift-fail'}`}>
+            Lift: {aiStatus.ml_filter.lift.lift_ok ? 'OK' : 'N/A'}
+          </span>
+          {aiStatus.ml_filter.lift.lift_win_rate !== undefined && (
+            <span className="ai-lift-value">
+              WR: {(aiStatus.ml_filter.lift.lift_win_rate * 100).toFixed(1)}%
+            </span>
+          )}
+        </div>
+      )}
+
+      {aiStatus.direction_gating.enabled && (
+        <div className="ai-gating">
+          <div className="ai-gating-header">
+            <span className="ai-gating-label">Direction Gating</span>
+            <span className="ai-gating-enabled">ON</span>
+          </div>
+          <div className="ai-gating-stats">
+            {aiStatus.direction_gating.blocks > 0 && (
+              <span className="ai-gating-stat">
+                <span className="gating-count">{aiStatus.direction_gating.blocks}</span>
+                <span className="gating-label">blocks</span>
+              </span>
+            )}
+            {aiStatus.direction_gating.shadow_regime > 0 && (
+              <span className="ai-gating-stat">
+                <span className="gating-count">{aiStatus.direction_gating.shadow_regime}</span>
+                <span className="gating-label">regime (shadow)</span>
+              </span>
+            )}
+            {aiStatus.direction_gating.shadow_trigger > 0 && (
+              <span className="ai-gating-stat">
+                <span className="gating-count">{aiStatus.direction_gating.shadow_trigger}</span>
+                <span className="gating-label">trigger (shadow)</span>
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </DataPanel>
+  )
+}

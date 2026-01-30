@@ -3,6 +3,12 @@
 import { useEffect, useState, useRef } from 'react'
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
+import DataPanelsContainer from '@/components/DataPanelsContainer'
+import PerformancePanel from '@/components/PerformancePanel'
+import ChallengePanel from '@/components/ChallengePanel'
+import AIStatusPanel from '@/components/AIStatusPanel'
+import RecentTradesPanel from '@/components/RecentTradesPanel'
+import PearlSuggestionsPanel from '@/components/PearlSuggestionsPanel'
 import type { IChartApi } from 'lightweight-charts'
 
 interface CandleData {
@@ -34,6 +40,73 @@ interface MarkerData {
   text: string
 }
 
+// AI/ML Status
+interface AIStatus {
+  bandit_mode: 'off' | 'shadow' | 'live'
+  contextual_mode: 'off' | 'shadow' | 'live'
+  ml_filter: {
+    enabled: boolean
+    mode: string
+    lift: {
+      lift_ok?: boolean
+      lift_win_rate?: number
+      lift_avg_pnl?: number
+    }
+  }
+  direction_gating: {
+    enabled: boolean
+    blocks: number
+    shadow_regime: number
+    shadow_trigger: number
+  }
+}
+
+// Challenge Status
+interface ChallengeStatus {
+  enabled: boolean
+  current_balance: number
+  pnl: number
+  trades: number
+  wins: number
+  win_rate: number
+  drawdown_risk_pct: number
+  outcome: 'active' | 'pass' | 'fail'
+  profit_target: number
+  max_drawdown: number
+}
+
+// Performance Stats
+interface PeriodStats {
+  pnl: number
+  trades: number
+  wins: number
+  losses: number
+  win_rate: number
+  streak?: number
+  streak_type?: string
+}
+
+interface PerformanceStats {
+  '24h': PeriodStats
+  '72h': PeriodStats
+  '30d': PeriodStats
+}
+
+// Recent Exit
+interface RecentExit {
+  signal_id: string
+  direction: string
+  pnl: number
+  exit_reason: string
+  exit_time: string
+}
+
+// Pearl Suggestion
+interface PearlSuggestion {
+  message: string
+  action: string
+}
+
 interface AgentState {
   running: boolean
   paused: boolean
@@ -42,6 +115,12 @@ interface AgentState {
   daily_wins: number
   daily_losses: number
   active_trades_count: number
+  // NEW fields
+  ai_status?: AIStatus
+  challenge?: ChallengeStatus | null
+  recent_exits?: RecentExit[]
+  performance?: PerformanceStats
+  pearl_suggestion?: PearlSuggestion | null
 }
 
 // API URL is determined at runtime based on where the page is loaded from
@@ -378,6 +457,31 @@ export default function LiveMainChart() {
         <div className="rsi-panel">
           <RSIChart data={indicators.rsi} barSpacing={barSpacing} />
         </div>
+      )}
+
+      {/* Data Panels */}
+      {agentState && (
+        <DataPanelsContainer>
+          {agentState.performance && (
+            <PerformancePanel performance={agentState.performance} />
+          )}
+          {agentState.challenge && (
+            <ChallengePanel challenge={agentState.challenge} />
+          )}
+          {agentState.ai_status && (
+            <AIStatusPanel aiStatus={agentState.ai_status} />
+          )}
+          {agentState.recent_exits && agentState.recent_exits.length > 0 && (
+            <RecentTradesPanel recentExits={agentState.recent_exits} />
+          )}
+          {agentState.pearl_suggestion && (
+            <PearlSuggestionsPanel
+              suggestion={agentState.pearl_suggestion}
+              onAccept={() => console.log('Suggestion accepted')}
+              onDismiss={() => console.log('Suggestion dismissed')}
+            />
+          )}
+        </DataPanelsContainer>
       )}
     </div>
   )

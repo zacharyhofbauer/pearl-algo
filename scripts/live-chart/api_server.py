@@ -426,23 +426,211 @@ def _compute_daily_stats(state_dir: Path) -> Dict[str, Any]:
     }
 
 
+def _compute_performance_stats(state_dir: Path) -> Dict[str, Any]:
+    """Compute performance stats for 24h, 72h, and 30d periods."""
+    performance_file = state_dir / "performance.json"
+    if not performance_file.exists():
+        empty_stats = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0, "win_rate": 0.0}
+        return {"24h": empty_stats.copy(), "72h": empty_stats.copy(), "30d": empty_stats.copy()}
+
+    now = datetime.now(timezone.utc)
+    cutoffs = {
+        "24h": now - timedelta(hours=24),
+        "72h": now - timedelta(hours=72),
+        "30d": now - timedelta(days=30),
+    }
+
+    stats = {period: {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0} for period in cutoffs}
+
+    try:
+        data = json.loads(performance_file.read_text())
+        if not isinstance(data, list):
+            data = []
+
+        for trade in data:
+            exit_time_str = trade.get("exit_time")
+            if not exit_time_str:
+                continue
+            try:
+                exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                continue
+
+            pnl = trade.get("pnl", 0.0) or 0.0
+            is_win = trade.get("is_win", pnl > 0)
+
+            for period, cutoff in cutoffs.items():
+                if exit_time >= cutoff:
+                    stats[period]["pnl"] += pnl
+                    stats[period]["trades"] += 1
+                    if is_win:
+                        stats[period]["wins"] += 1
+                    else:
+                        stats[period]["losses"] += 1
+    except Exception:
+        pass
+
+    # Calculate win rates and compute streaks for 24h
+    for period in stats:
+        total = stats[period]["trades"]
+        stats[period]["pnl"] = round(stats[period]["pnl"], 2)
+        stats[period]["win_rate"] = round(stats[period]["wins"] / total * 100, 1) if total > 0 else 0.0
+
+    # Compute current streak for 24h
+    stats["24h"]["streak"] = 0
+    stats["24h"]["streak_type"] = "none"
+    try:
+        data = json.loads(performance_file.read_text())
+        if isinstance(data, list):
+            cutoff_24h = cutoffs["24h"]
+            recent_trades = []
+            for trade in data:
+                exit_time_str = trade.get("exit_time")
+                if not exit_time_str:
+                    continue
+                try:
+                    exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+                    if exit_time >= cutoff_24h:
+                        recent_trades.append((exit_time, trade.get("is_win", trade.get("pnl", 0) > 0)))
+                except (ValueError, TypeError):
+                    continue
+            # Sort by exit time descending
+            recent_trades.sort(key=lambda x: x[0], reverse=True)
+            if recent_trades:
+                streak = 0
+                streak_type = "win" if recent_trades[0][1] else "loss"
+                for _, is_win in recent_trades:
+                    if (streak_type == "win" and is_win) or (streak_type == "loss" and not is_win):
+                        streak += 1
+                    else:
+                        break
+                stats["24h"]["streak"] = streak
+                stats["24h"]["streak_type"] = streak_type
+    except Exception:
+        pass
+
+    return stats
+
+
+def _get_recent_exits(state_dir: Path, limit: int = 3) -> List[Dict[str, Any]]:
+    """Get recent exits from signals.jsonl."""
+    signals_file = state_dir / "signals.jsonl"
+    if not signals_file.exists():
+        return []
+
+    exits = []
+    try:
+        signals = _load_jsonl_file(signals_file, max_lines=200)
+        for s in signals:
+            if s.get("status") != "exited":
+                continue
+            signal_data = s.get("signal", {})
+            direction = signal_data.get("direction", s.get("direction", "long")) if isinstance(signal_data, dict) else s.get("direction", "long")
+            exits.append({
+                "signal_id": s.get("signal_id", ""),
+                "direction": direction,
+                "pnl": round(s.get("pnl", 0.0) or 0.0, 2),
+                "exit_reason": s.get("exit_reason", ""),
+                "exit_time": s.get("exit_time", ""),
+            })
+        # Sort by exit time descending and take most recent
+        exits.sort(key=lambda x: x.get("exit_time", ""), reverse=True)
+    except Exception:
+        pass
+
+    return exits[:limit]
+
+
+def _get_ai_status(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract AI/ML status from agent state."""
+    learning = state.get("learning", {})
+    learning_contextual = state.get("learning_contextual", {})
+    ml_filter = state.get("ml_filter", {})
+    circuit_breaker = state.get("trading_circuit_breaker", {})
+
+    # Determine mode (off, shadow, live)
+    def get_mode(section: Dict) -> str:
+        if not section.get("enabled", False):
+            return "off"
+        return section.get("mode", "off")
+
+    return {
+        "bandit_mode": get_mode(learning),
+        "contextual_mode": get_mode(learning_contextual),
+        "ml_filter": {
+            "enabled": ml_filter.get("enabled", False),
+            "mode": ml_filter.get("mode", "off"),
+            "lift": ml_filter.get("lift", {}),
+        },
+        "direction_gating": {
+            "enabled": circuit_breaker.get("direction_gating_enabled", False),
+            "blocks": circuit_breaker.get("blocks_by_reason", {}).get("direction_gating", 0),
+            "shadow_regime": circuit_breaker.get("would_have_blocked_regime", 0),
+            "shadow_trigger": circuit_breaker.get("would_have_blocked_trigger", 0),
+        },
+    }
+
+
+def _get_challenge_status(state_dir: Path) -> Optional[Dict[str, Any]]:
+    """Get challenge status from challenge_state.json."""
+    challenge_file = state_dir / "challenge_state.json"
+    if not challenge_file.exists():
+        return None
+
+    try:
+        data = json.loads(challenge_file.read_text())
+        config = data.get("config", {})
+        current = data.get("current_attempt", {})
+
+        if not config.get("enabled", False):
+            return None
+
+        # Calculate drawdown risk percentage
+        max_dd = config.get("max_drawdown", 2000.0)
+        current_dd = abs(current.get("max_drawdown_hit", 0.0))
+        dd_risk_pct = min(100.0, (current_dd / max_dd * 100)) if max_dd > 0 else 0.0
+
+        return {
+            "enabled": True,
+            "current_balance": round(config.get("start_balance", 50000.0) + current.get("pnl", 0.0), 2),
+            "pnl": round(current.get("pnl", 0.0), 2),
+            "trades": current.get("trades", 0),
+            "wins": current.get("wins", 0),
+            "win_rate": round(current.get("win_rate", 0.0), 1),
+            "drawdown_risk_pct": round(dd_risk_pct, 1),
+            "outcome": current.get("outcome", "active"),
+            "profit_target": config.get("profit_target", 3000.0),
+            "max_drawdown": max_dd,
+        }
+    except Exception:
+        return None
+
+
+def _get_pearl_suggestion() -> Optional[Dict[str, Any]]:
+    """Get current Pearl suggestion if any. Placeholder for actual suggestion logic."""
+    # Pearl suggestions are generated dynamically - return None for now
+    # In future, this could read from a suggestion queue or state file
+    return None
+
+
 @app.get("/api/state")
 async def get_state():
-    """Get current agent state."""
+    """Get current agent state with AI status, challenge, performance, and suggestions."""
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
-    
+
     state_file = _state_dir / "state.json"
     state = _load_json_file(state_file)
-    
+
     if not state:
         return {"error": "state_file_missing", "path": str(state_file)}
-    
+
     # Compute daily stats from actual trades
     daily_stats = _compute_daily_stats(_state_dir)
-    
+
     # Return relevant fields for live chart
     return {
+        # Existing fields
         "running": state.get("running", False),
         "paused": state.get("paused", False),
         "daily_pnl": daily_stats["daily_pnl"],
@@ -453,6 +641,21 @@ async def get_state():
         "futures_market_open": state.get("futures_market_open", False),
         "data_fresh": state.get("data_fresh", False),
         "last_updated": datetime.now(timezone.utc).isoformat(),
+
+        # NEW: AI/ML Status
+        "ai_status": _get_ai_status(state),
+
+        # NEW: Challenge Status
+        "challenge": _get_challenge_status(_state_dir),
+
+        # NEW: Recent exits
+        "recent_exits": _get_recent_exits(_state_dir, limit=3),
+
+        # NEW: Performance stats
+        "performance": _compute_performance_stats(_state_dir),
+
+        # NEW: Pearl suggestion
+        "pearl_suggestion": _get_pearl_suggestion(),
     }
 
 
