@@ -52,6 +52,7 @@ interface TooltipState {
   x: number
   y: number
   marker: MarkerData | null
+  groupedMarkers: MarkerData[] | null  // All markers at this time
 }
 
 // Session times in UTC hours (futures trade almost 24h)
@@ -80,6 +81,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     x: 0,
     y: 0,
     marker: null,
+    groupedMarkers: null,
   })
   
   // Track the active signal for highlighting
@@ -95,6 +97,59 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       map.set(m.time, existing)
     }
     return map
+  }, [markers])
+
+  // Aggregate markers by time - combine stacked markers into single visual marker
+  const aggregatedMarkers = useMemo(() => {
+    if (!markers) return []
+    
+    const groups = new Map<number, MarkerData[]>()
+    markers.forEach(m => {
+      const existing = groups.get(m.time) || []
+      existing.push(m)
+      groups.set(m.time, existing)
+    })
+    
+    // Create single marker per time slot
+    return Array.from(groups.entries()).map(([time, group]) => {
+      // Single marker - return as-is
+      if (group.length === 1) return group[0]
+      
+      // Multiple markers at same time - create combined marker
+      const entries = group.filter(m => m.kind === 'entry')
+      const exits = group.filter(m => m.kind === 'exit')
+      const totalPnl = exits.reduce((sum, m) => sum + (m.pnl || 0), 0)
+      const wins = exits.filter(m => (m.pnl || 0) >= 0).length
+      const losses = exits.length - wins
+      
+      // Determine dominant type and position
+      const isExitDominant = exits.length >= entries.length
+      const dominantDirection = exits.length > 0 
+        ? (exits.filter(m => m.direction === 'long').length > exits.length / 2 ? 'long' : 'short')
+        : (entries.filter(m => m.direction === 'long').length > entries.length / 2 ? 'long' : 'short')
+      
+      return {
+        time,
+        position: (isExitDominant 
+          ? (dominantDirection === 'long' ? 'aboveBar' : 'belowBar')
+          : (dominantDirection === 'long' ? 'belowBar' : 'aboveBar')) as 'aboveBar' | 'belowBar',
+        color: isExitDominant 
+          ? (totalPnl >= 0 ? 'rgba(100, 200, 180, 0.9)' : 'rgba(220, 140, 100, 0.9)')
+          : 'rgba(180, 180, 180, 0.9)',
+        shape: 'circle' as const,
+        text: `${group.length}`,
+        kind: isExitDominant ? 'exit' : 'entry',
+        direction: dominantDirection,
+        pnl: totalPnl,
+        // Store group metadata for tooltip
+        _isGrouped: true,
+        _groupCount: group.length,
+        _entriesCount: entries.length,
+        _exitsCount: exits.length,
+        _wins: wins,
+        _losses: losses,
+      } as MarkerData & { _isGrouped?: boolean; _groupCount?: number; _entriesCount?: number; _exitsCount?: number; _wins?: number; _losses?: number }
+    })
   }, [markers])
 
   // Initialize chart
@@ -259,9 +314,10 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
         let x = param.point.x + 15
         let y = param.point.y - 10
 
-        // Responsive tooltip dimensions
-        const tooltipWidth = Math.min(240, window.innerWidth - 40)
-        const tooltipHeight = Math.min(160, window.innerHeight * 0.25)
+        // Responsive tooltip dimensions - larger for grouped markers
+        const isGrouped = markersAtTime.length > 1
+        const tooltipWidth = Math.min(isGrouped ? 280 : 240, window.innerWidth - 40)
+        const tooltipHeight = Math.min(isGrouped ? 300 : 160, window.innerHeight * 0.4)
         if (x + tooltipWidth > containerRect.width) {
           x = param.point.x - tooltipWidth - 15
         }
@@ -276,10 +332,12 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
           x,
           y,
           marker,
+          groupedMarkers: markersAtTime.length > 1 ? markersAtTime : null,
         })
-        setActiveSignalId(marker.signal_id || null)
+        // For single markers, set active signal; for grouped, don't highlight individual
+        setActiveSignalId(markersAtTime.length === 1 ? (marker.signal_id || null) : null)
       } else {
-        setTooltip((prev) => ({ ...prev, visible: false }))
+        setTooltip((prev) => ({ ...prev, visible: false, groupedMarkers: null }))
         setActiveSignalId(null)
       }
     }
@@ -344,53 +402,71 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     }
   }, [indicators])
 
-  // Update markers - filter when hovering to show only active trade
+  // Update markers - use aggregated markers to prevent stacking
   useEffect(() => {
-    if (!candleSeriesRef.current || !markers?.length) return
+    if (!candleSeriesRef.current || !aggregatedMarkers?.length) return
 
     try {
-      let displayMarkers = markers
+      // When hovering on a single trade, show that trade's entry+exit
+      // Otherwise show aggregated markers
+      let displayMarkers: any[] = []
       
-      // When hovering, only show the active trade pair (entry + exit)
-      if (activeSignalId) {
-        displayMarkers = markers.filter(m => m.signal_id === activeSignalId)
-      }
-      
-      candleSeriesRef.current.setMarkers(
-        displayMarkers.map((m) => {
-          // For exits: position based on trade direction for better visibility
-          // Long exits go above candles, Short exits go below candles
+      if (activeSignalId && markers) {
+        // Show individual markers for the active trade
+        displayMarkers = markers
+          .filter(m => m.signal_id === activeSignalId)
+          .map((m) => {
+            let position = m.position
+            if (m.kind === 'exit') {
+              position = m.direction === 'long' ? 'aboveBar' : 'belowBar'
+            }
+            let color = m.kind === 'entry' 
+              ? 'rgba(180, 180, 180, 0.9)' 
+              : ((m.pnl || 0) >= 0 ? 'rgba(100, 200, 180, 0.9)' : 'rgba(220, 140, 100, 0.9)')
+            
+            return {
+              time: m.time as any,
+              position,
+              color,
+              shape: m.kind === 'exit' ? 'circle' : m.shape,
+              text: '',
+            }
+          })
+      } else {
+        // Show aggregated markers
+        displayMarkers = aggregatedMarkers.map((m: any) => {
           let position = m.position
-          if (m.kind === 'exit') {
+          if (m.kind === 'exit' && !m._isGrouped) {
             position = m.direction === 'long' ? 'aboveBar' : 'belowBar'
           }
           
-          // Muted color scheme with opacity - markers blend better
-          // Entries: Semi-transparent white/gray
-          // Exits: Muted teal (win) / Muted coral (loss)
           let color = m.color
-          if (m.kind === 'entry') {
-            color = 'rgba(180, 180, 180, 0.8)'  // Muted gray for entries
-          } else if (m.kind === 'exit') {
-            const isWin = (m.pnl || 0) >= 0
-            color = isWin ? 'rgba(100, 200, 180, 0.8)' : 'rgba(220, 140, 100, 0.8)'  // Muted teal/coral
+          if (!m._isGrouped) {
+            if (m.kind === 'entry') {
+              color = 'rgba(180, 180, 180, 0.8)'
+            } else if (m.kind === 'exit') {
+              const isWin = (m.pnl || 0) >= 0
+              color = isWin ? 'rgba(100, 200, 180, 0.8)' : 'rgba(220, 140, 100, 0.8)'
+            }
           }
           
           return {
             time: m.time as any,
             position,
             color,
-            // Entries use arrows, exits use circles
-            shape: m.kind === 'exit' ? 'circle' : m.shape,
-            // Clean look - no text
-            text: '',
+            // Grouped markers show circle with count, singles show original shape
+            shape: m._isGrouped ? 'circle' : (m.kind === 'exit' ? 'circle' : m.shape),
+            // Show count for grouped markers
+            text: m._isGrouped ? `${m._groupCount}` : '',
           }
         })
-      )
+      }
+      
+      candleSeriesRef.current.setMarkers(displayMarkers)
     } catch (e) {
       console.warn('Failed to set markers:', e)
     }
-  }, [markers, activeSignalId])
+  }, [aggregatedMarkers, markers, activeSignalId])
 
   // Draw connection line between entry and exit when hovering
   useEffect(() => {
@@ -476,8 +552,8 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
       className={`chart-container-inner ${activeSignalId ? 'trade-focused' : ''}`}
       style={{ width: '100%', height: '100%', minHeight, position: 'relative' }}
     >
-      {/* Marker Tooltip */}
-      {tooltip.visible && tooltip.marker && (
+      {/* Marker Tooltip - Single Trade */}
+      {tooltip.visible && tooltip.marker && !tooltip.groupedMarkers && (
         <div
           className={`marker-tooltip ${(tooltip.marker.pnl || pairedMarker?.pnl || 0) >= 0 ? 'win' : 'loss'}`}
           style={{
@@ -527,6 +603,82 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
               <div className="tooltip-reason-badge">
                 {(tooltip.marker.exit_reason || pairedMarker?.exit_reason)?.replace(/_/g, ' ')}
               </div>
+            )}
+          </div>
+          
+          {/* PEARL Logo */}
+          <img src="/pearl-emoji.png" alt="" className="tooltip-logo" />
+        </div>
+      )}
+
+      {/* Marker Tooltip - Grouped Trades */}
+      {tooltip.visible && tooltip.groupedMarkers && tooltip.groupedMarkers.length > 1 && (
+        <div
+          className="marker-tooltip grouped"
+          style={{
+            position: 'absolute',
+            left: tooltip.x,
+            top: tooltip.y,
+            pointerEvents: 'none',
+          }}
+        >
+          {/* Header */}
+          <div className="tooltip-header grouped-header">
+            <span className="grouped-count">{tooltip.groupedMarkers.length} TRADES</span>
+            <span className="grouped-time">
+              {new Date(tooltip.marker!.time * 1000).toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                hour12: false 
+              })}
+            </span>
+          </div>
+          
+          {/* Summary */}
+          <div className="tooltip-summary">
+            {(() => {
+              const exits = tooltip.groupedMarkers.filter(m => m.kind === 'exit')
+              const entries = tooltip.groupedMarkers.filter(m => m.kind === 'entry')
+              const totalPnl = exits.reduce((sum, m) => sum + (m.pnl || 0), 0)
+              const wins = exits.filter(m => (m.pnl || 0) >= 0).length
+              const losses = exits.length - wins
+              
+              return (
+                <>
+                  <div className={`tooltip-total-pnl ${totalPnl >= 0 ? 'positive' : 'negative'}`}>
+                    {formatPnL(totalPnl)}
+                  </div>
+                  <div className="tooltip-stats">
+                    {entries.length > 0 && <span className="stat-entries">{entries.length} entries</span>}
+                    {exits.length > 0 && (
+                      <span className="stat-exits">
+                        {wins}W / {losses}L
+                      </span>
+                    )}
+                  </div>
+                </>
+              )
+            })()}
+          </div>
+          
+          {/* Trade List */}
+          <div className="tooltip-trade-list">
+            {tooltip.groupedMarkers.slice(0, 6).map((m, i) => (
+              <div key={i} className={`trade-item ${m.kind} ${(m.pnl || 0) >= 0 ? 'win' : 'loss'}`}>
+                <span className="trade-direction">{m.direction?.toUpperCase()}</span>
+                <span className="trade-kind">{m.kind === 'entry' ? 'IN' : 'OUT'}</span>
+                {m.kind === 'exit' && m.pnl !== undefined && (
+                  <span className={`trade-pnl ${m.pnl >= 0 ? 'positive' : 'negative'}`}>
+                    {formatPnL(m.pnl)}
+                  </span>
+                )}
+                {m.exit_reason && (
+                  <span className="trade-reason">{m.exit_reason.replace(/_/g, ' ').slice(0, 8)}</span>
+                )}
+              </div>
+            ))}
+            {tooltip.groupedMarkers.length > 6 && (
+              <div className="trade-item more">+{tooltip.groupedMarkers.length - 6} more...</div>
             )}
           </div>
           

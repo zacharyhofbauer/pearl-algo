@@ -5,6 +5,36 @@
 
 ---
 
+## 🐚 Quick Start (NEW - Recommended)
+
+The `pearl.sh` master script handles everything with simple commands:
+
+```bash
+./pearl.sh start      # Start all: Gateway → Agent → Telegram → Chart
+./pearl.sh stop       # Stop all services gracefully
+./pearl.sh restart    # Restart everything
+./pearl.sh status     # Show status of all services
+./pearl.sh quick      # One-liner status check
+```
+
+**Individual service control:**
+```bash
+./pearl.sh gateway start|stop|status
+./pearl.sh agent start|stop|status
+./pearl.sh telegram start|stop|status
+./pearl.sh chart start|stop|status    # Live Chart (pearlalgo.io)
+```
+
+**Options:**
+```bash
+./pearl.sh start --market ES        # Different market (default: NQ)
+./pearl.sh start --no-telegram      # Skip Telegram handler
+./pearl.sh start --no-chart         # Skip Live Chart
+./pearl.sh start --foreground       # Run agent in foreground (debugging)
+```
+
+---
+
 ## 1. Environment & Setup (once per machine)
 
 - **Create venv & install**
@@ -43,59 +73,64 @@
 
 ## 2. Daily Start-Up Flow
 
-### Option A: From Telegram (Remote Control) ⭐ Recommended
+### Option A: One Command (⭐ Recommended)
 
-**Prerequisites:** Telegram Menu Handler must be running (one-time setup)
+```bash
+cd ~/pearlalgo-dev-ai-agents
+./pearl.sh start
+```
 
-1. **Start Telegram Menu Handler** (if not already running)
-   ```bash
-   ./scripts/telegram/start_command_handler.sh
-   ```
-   **Restart (stop + start):**
-   ```bash
-   ./scripts/telegram/restart_command_handler.sh --background
-   ```
+That's it! This starts Gateway → Agent → Telegram in the correct order.
 
-2. **From Telegram, use the menu:**
-   - Send `/start` to access the main control panel
-   - Tap buttons for: Activity, System, Health, Settings
-   - **UI policy (don't drift):** keep `/start` as the only slash command; keep ops behind buttons. If Telegram shows extra commands, run `python3 scripts/telegram/set_bot_commands.py` and restart the handler.
-   - **Status semantics:** Agent/Gateway dots = services; Health dot = data/connection (grey when agent is off). Footer shows `Agent: <uptime> | Gateway: OK/DOWN | Data: <age>`.
+**Check status anytime:**
+```bash
+./pearl.sh status     # Detailed view
+./pearl.sh quick      # One-liner: PEARL: Gateway ✅ | Agent ✅ | Telegram ✅
+```
 
-### Option B: From Terminal (Traditional)
+### Option B: From Telegram (Remote Control)
 
-1. **Open terminal & activate venv**
-   ```bash
-   cd /path/to/pearlalgo-dev-ai-agents
-   source .venv/bin/activate
-   ```
+**Prerequisites:** Telegram Menu Handler must be running (started by `./pearl.sh start`)
 
-2. **Start IBKR Gateway**
+- Send `/start` to access the main control panel
+- Tap buttons for: Activity, System, Health, Settings
+- **UI policy (don't drift):** keep `/start` as the only slash command; keep ops behind buttons.
+- **Status semantics:** Agent/Gateway dots = services; Health dot = data/connection.
+
+### Option C: From Terminal (Traditional/Manual)
+
+If you prefer individual control:
+
+1. **Start IBKR Gateway**
    ```bash
    ./scripts/gateway/gateway.sh start
    ./scripts/gateway/gateway.sh status   # expect: RUNNING + API READY
    ```
 
-3. **Start Market Agent Service**
-   - **Foreground (see logs)**
-     ```bash
-     ./scripts/lifecycle/agent.sh start --market NQ
-     ```
-   - **Background**
-     ```bash
-     ./scripts/lifecycle/agent.sh start --market NQ --background
-     ./scripts/lifecycle/check_agent_status.sh --market NQ
-     ```
-
-4. **Start Telegram Command Handler** (for remote control)
+2. **Start Market Agent Service**
    ```bash
-   ./scripts/telegram/start_command_handler.sh              # foreground
-   ./scripts/telegram/start_command_handler.sh --background # background with logs
+   ./scripts/lifecycle/agent.sh start --market NQ --background
+   ./scripts/lifecycle/check_agent_status.sh --market NQ
+   ```
+
+3. **Start Telegram Command Handler**
+   ```bash
+   ./scripts/telegram/start_command_handler.sh --background
    ```
 
 ---
 
 ## 3. Core Commands You Actually Use
+
+### Master Control (⭐ Recommended)
+
+```bash
+./pearl.sh start      # Start everything
+./pearl.sh stop       # Stop everything  
+./pearl.sh restart    # Restart everything
+./pearl.sh status     # Full status dashboard
+./pearl.sh quick      # One-liner status
+```
 
 ### From Telegram (Notifications & Dashboard)
 
@@ -106,29 +141,32 @@
 
 > **Note:** Telegram is for notifications and dashboard only. For AI assistance, use CLI/terminal with `/pearl`.
 
-### From Terminal (AI + Operations)
+### Individual Service Control (if needed)
 
 - **Service lifecycle**
   ```bash
-  ./scripts/lifecycle/agent.sh start --market NQ         # start (fg)
+  ./pearl.sh agent start|stop|status        # Via master script
+  # Or directly:
   ./scripts/lifecycle/agent.sh start --market NQ --background
-  ./scripts/lifecycle/agent.sh stop --market NQ          # stop
-  ./scripts/lifecycle/check_agent_status.sh --market NQ  # status
+  ./scripts/lifecycle/agent.sh stop --market NQ
+  ./scripts/lifecycle/check_agent_status.sh --market NQ
   ```
 
 - **Gateway**
   ```bash
-  ./scripts/gateway/gateway.sh start        # start (headless, IBC)
-  ./scripts/gateway/gateway.sh stop         # stop
-  ./scripts/gateway/gateway.sh status       # status (process + port + logs)
-  ./scripts/gateway/gateway.sh api-ready    # exit 0 when API is ready
+  ./pearl.sh gateway start|stop|status      # Via master script
+  # Or directly:
+  ./scripts/gateway/gateway.sh start
+  ./scripts/gateway/gateway.sh stop
+  ./scripts/gateway/gateway.sh status
   ```
 
 - **Telegram Menu Handler**
   ```bash
-  ./scripts/telegram/start_command_handler.sh            # show menu with buttons
-  ./scripts/telegram/check_command_handler.sh            # is it running?
-  python3 scripts/telegram/set_bot_commands.py           # (re)push menu commands
+  ./pearl.sh telegram start|stop|status     # Via master script
+  # Or directly:
+  ./scripts/telegram/start_command_handler.sh --background
+  ./scripts/telegram/check_command_handler.sh
   ```
 
 ---
@@ -344,8 +382,13 @@ Pearl AI assistant is available via CLI/terminal only. Telegram is for notificat
 
 ## 10. Quick Health Check (2-Minute Checklist)
 
-Run the health check script for a fast sanity check:
+**Fastest check (⭐ Recommended):**
+```bash
+./pearl.sh quick      # One-liner: PEARL: Gateway ✅ | Agent ✅ | Telegram ✅
+./pearl.sh status     # Full dashboard with P&L and trades
+```
 
+**Or use the health check script:**
 ```bash
 ./scripts/health_check.sh
 ```
@@ -358,7 +401,7 @@ Run the health check script for a fast sanity check:
 - ✅ Market & Session gates open
 - ✅ Recent signal activity
 
-**Manual checks (if health_check.sh unavailable):**
+**Manual checks (if needed):**
 
 ```bash
 # Check all services running
@@ -379,8 +422,20 @@ grep "$(date -u +%Y-%m-%d)" data/agent_state/NQ/signals.jsonl | wc -l
 
 ## 11. Restart Commands Quick Reference
 
+### Using pearl.sh (⭐ Recommended)
+
+```bash
+./pearl.sh restart              # Restart everything
+./pearl.sh gateway restart      # Restart just Gateway
+./pearl.sh agent restart        # Restart just Agent
+./pearl.sh telegram restart     # Restart just Telegram
+```
+
+### Manual Commands (if needed)
+
 | Service | Stop | Start | Restart |
 |---------|------|-------|---------|
+| **All** | `./pearl.sh stop` | `./pearl.sh start` | `./pearl.sh restart` |
 | **Agent (NQ)** | `./scripts/lifecycle/agent.sh stop --market NQ` | `./scripts/lifecycle/agent.sh start --market NQ --background` | Stop + Start |
 | **Telegram** | `pkill -f telegram_command_handler` | `./scripts/telegram/start_command_handler.sh --background` | `./scripts/telegram/restart_command_handler.sh --background` |
 | **Gateway** | `./scripts/gateway/gateway.sh stop` | `./scripts/gateway/gateway.sh start` | Stop + Start |
@@ -389,10 +444,16 @@ grep "$(date -u +%Y-%m-%d)" data/agent_state/NQ/signals.jsonl | wc -l
 
 ```bash
 # After config.yaml change (full restart)
+./pearl.sh restart
+
+# Or manually:
 ./scripts/lifecycle/agent.sh stop --market NQ
 ./scripts/lifecycle/agent.sh start --market NQ --background
 
 # After code change (full restart all)
+./pearl.sh restart
+
+# Or manually:
 ./scripts/lifecycle/agent.sh stop --market NQ
 pkill -f telegram_command_handler
 ./scripts/lifecycle/agent.sh start --market NQ --background

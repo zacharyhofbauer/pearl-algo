@@ -458,6 +458,156 @@ body {
   pointer-events: none;
 }
 
+/* Grouped Marker Tooltip */
+.marker-tooltip.grouped {
+  min-width: 220px;
+  max-width: 280px;
+  border-color: rgba(100, 200, 180, 0.4);
+}
+
+.grouped-header {
+  justify-content: space-between;
+}
+
+.grouped-count {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+}
+
+.grouped-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.tooltip-summary {
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tooltip-total-pnl {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 20px;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+.tooltip-total-pnl.positive {
+  color: #00e676;
+}
+
+.tooltip-total-pnl.negative {
+  color: #ff4444;
+}
+
+.tooltip-stats {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.stat-entries {
+  color: rgba(180, 180, 180, 0.9);
+}
+
+.stat-exits {
+  color: rgba(100, 200, 180, 0.9);
+}
+
+/* Trade List in Grouped Tooltip */
+.tooltip-trade-list {
+  padding: 8px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.tooltip-trade-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.tooltip-trade-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tooltip-trade-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+.trade-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.trade-item:last-child {
+  margin-bottom: 0;
+}
+
+.trade-item.more {
+  color: var(--text-secondary);
+  justify-content: center;
+  font-style: italic;
+}
+
+.trade-direction {
+  font-weight: 600;
+  font-size: 9px;
+  padding: 2px 4px;
+  border-radius: 2px;
+  min-width: 36px;
+  text-align: center;
+}
+
+.trade-item .trade-direction {
+  background: rgba(100, 200, 180, 0.15);
+  color: rgba(100, 200, 180, 0.9);
+}
+
+.trade-item.entry .trade-direction {
+  background: rgba(180, 180, 180, 0.15);
+  color: rgba(180, 180, 180, 0.9);
+}
+
+.trade-kind {
+  color: var(--text-secondary);
+  font-size: 9px;
+  min-width: 20px;
+}
+
+.trade-pnl {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-weight: 600;
+  font-size: 10px;
+  margin-left: auto;
+}
+
+.trade-pnl.positive {
+  color: #00e676;
+}
+
+.trade-pnl.negative {
+  color: #ff4444;
+}
+
+.trade-reason {
+  font-size: 8px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
 /* Chart focus state - dim when hovering on a trade */
 .chart-container-inner {
   transition: all 0.2s ease;
