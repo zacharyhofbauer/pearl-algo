@@ -22,13 +22,32 @@ interface DataPanelProps {
   icon?: string
   children: ReactNode
   className?: string
+  /** Padding variant for panel content */
+  padding?: 'none' | 'compact' | 'default' | 'spacious'
+  /** Visual variant for different panel types */
+  variant?: 'default' | 'feature' | 'status' | 'config'
   /** Disable error boundary for this panel (default: false) */
   noErrorBoundary?: boolean
 }
 
-export function DataPanel({ title, icon, children, className = '', noErrorBoundary = false }: DataPanelProps) {
+export function DataPanel({
+  title,
+  icon,
+  children,
+  className = '',
+  padding = 'default',
+  variant = 'default',
+  noErrorBoundary = false
+}: DataPanelProps) {
+  const panelClasses = [
+    'data-panel',
+    `data-panel-padding-${padding}`,
+    `data-panel-variant-${variant}`,
+    className
+  ].filter(Boolean).join(' ')
+
   const panelContent = (
-    <div className={`data-panel ${className}`}>
+    <div className={panelClasses}>
       <div className="data-panel-header">
         {icon && <span className="data-panel-icon">{icon}</span>}
         <span className="data-panel-title">{title}</span>

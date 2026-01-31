@@ -1,6 +1,7 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
+import { InfoTooltip } from './ui'
 import type { ShadowCounters, AIStatus } from '@/stores'
 
 interface AIStatusPanelProps {
@@ -9,16 +10,6 @@ interface AIStatusPanelProps {
 }
 
 type Mode = 'off' | 'shadow' | 'live'
-
-// Info tooltip component
-function InfoTooltip({ text }: { text: string }) {
-  return (
-    <span className="tooltip-wrapper">
-      <span className="info-icon">?</span>
-      <span className="tooltip-content">{text}</span>
-    </span>
-  )
-}
 
 function ModePill({ label, mode }: { label: string; mode: Mode }) {
   const getModeClass = () => {

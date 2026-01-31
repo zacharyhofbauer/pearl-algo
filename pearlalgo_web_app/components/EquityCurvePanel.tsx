@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { DataPanel } from './DataPanelsContainer'
+import { StatDisplay } from './ui'
 import type { EquityCurvePoint } from '@/stores'
 
 interface EquityCurvePanelProps {
@@ -111,21 +112,27 @@ export default function EquityCurvePanel({ equityCurve }: EquityCurvePanelProps)
   return (
     <DataPanel title="Equity Curve (72h)" icon="📈">
       <div className="equity-curve-container">
-        <div className="equity-curve-stats">
-          <div className="equity-stat">
-            <span className="equity-stat-label">Current</span>
-            <span className={`equity-stat-value ${lastValue >= 0 ? 'positive' : 'negative'}`}>
-              {formatPnL(lastValue)}
-            </span>
-          </div>
-          <div className="equity-stat">
-            <span className="equity-stat-label">Peak</span>
-            <span className="equity-stat-value positive">{formatPnL(maxValue)}</span>
-          </div>
-          <div className="equity-stat">
-            <span className="equity-stat-label">Trough</span>
-            <span className="equity-stat-value negative">{formatPnL(minValue)}</span>
-          </div>
+        <div className="grid grid-cols-3 gap-sm">
+          <StatDisplay
+            label="Current"
+            value={formatPnL(lastValue)}
+            variant="compact"
+            colorMode="financial"
+            positive={lastValue >= 0}
+            negative={lastValue < 0}
+          />
+          <StatDisplay
+            label="Peak"
+            value={formatPnL(maxValue)}
+            variant="compact"
+            positive
+          />
+          <StatDisplay
+            label="Trough"
+            value={formatPnL(minValue)}
+            variant="compact"
+            negative
+          />
         </div>
         {showPeakGap && (
           <div className="peak-gap-indicator">

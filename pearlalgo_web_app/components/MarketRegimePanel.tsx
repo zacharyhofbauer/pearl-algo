@@ -1,20 +1,11 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
+import { InfoTooltip } from './ui'
 import type { MarketRegime } from '@/stores'
 
 interface MarketRegimePanelProps {
   regime: MarketRegime | null
-}
-
-// Info tooltip component
-function InfoTooltip({ text }: { text: string }) {
-  return (
-    <span className="tooltip-wrapper">
-      <span className="info-icon">?</span>
-      <span className="tooltip-content">{text}</span>
-    </span>
-  )
 }
 
 export default function MarketRegimePanel({ regime }: MarketRegimePanelProps) {

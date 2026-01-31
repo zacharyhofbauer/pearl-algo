@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-import type { PeriodStats, PerformanceStats } from '@/stores'
+import { StatDisplay } from './ui'
+import type { PerformanceStats } from '@/stores'
 
 interface PerformancePanelProps {
   performance: PerformanceStats
@@ -10,16 +11,6 @@ interface PerformancePanelProps {
 }
 
 type Period = '24h' | '72h' | '30d'
-
-// Info tooltip component
-function InfoTooltip({ text }: { text: string }) {
-  return (
-    <span className="tooltip-wrapper">
-      <span className="info-icon">?</span>
-      <span className="tooltip-content">{text}</span>
-    </span>
-  )
-}
 
 export default function PerformancePanel({ performance, expectancy }: PerformancePanelProps) {
   const [activePeriod, setActivePeriod] = useState<Period>('24h')
@@ -31,24 +22,24 @@ export default function PerformancePanel({ performance, expectancy }: Performanc
   }
 
   // Determine WR color based on expectancy, not 50% threshold
-  const getWinRateClass = () => {
+  const getWinRatePositivity = (): { positive?: boolean; negative?: boolean } => {
     // If we have expectancy data, use that for coloring
     if (expectancy !== undefined) {
-      if (expectancy > 0.5) return 'wr-profitable'
-      if (expectancy < -0.5) return 'wr-unprofitable'
-      return 'wr-neutral'
+      if (expectancy > 0.5) return { positive: true }
+      if (expectancy < -0.5) return { negative: true }
+      return {}
     }
     // Fallback: use P&L for the period
-    if (stats.pnl > 0) return 'wr-profitable'
-    if (stats.pnl < 0) return 'wr-unprofitable'
-    return 'wr-neutral'
+    if (stats.pnl > 0) return { positive: true }
+    if (stats.pnl < 0) return { negative: true }
+    return {}
   }
 
   // Show tooltip if WR < 50% but still profitable
   const showWrTooltip = stats.win_rate < 50 && stats.pnl > 0
 
   return (
-    <DataPanel title="Performance" icon="📊">
+    <DataPanel title="Performance" icon="📊" variant="feature">
       <div className="perf-tabs">
         {(['24h', '72h', '30d'] as Period[]).map((period) => (
           <button
@@ -61,51 +52,54 @@ export default function PerformancePanel({ performance, expectancy }: Performanc
         ))}
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-item">
-          <span className="stat-item-label">P&L</span>
-          <span className={`stat-item-value ${stats.pnl >= 0 ? 'positive' : 'negative'}`}>
-            {formatPnL(stats.pnl)}
-          </span>
-        </div>
+      <div className="grid grid-cols-2 gap-md">
+        <StatDisplay
+          label="P&L"
+          value={formatPnL(stats.pnl)}
+          colorMode="financial"
+          positive={stats.pnl >= 0}
+          negative={stats.pnl < 0}
+        />
 
-        <div className="stat-item">
-          <span className="stat-item-label">Trades</span>
-          <span className="stat-item-value">{stats.trades}</span>
-        </div>
+        <StatDisplay
+          label="Trades"
+          value={stats.trades}
+        />
 
-        <div className="stat-item">
-          <span className="stat-item-label">
-            Win Rate
-            {showWrTooltip && <InfoTooltip text="Profitable despite sub-50% WR due to R:R" />}
-          </span>
-          <span className={`stat-item-value ${getWinRateClass()}`}>
-            {stats.win_rate.toFixed(1)}%
-          </span>
-        </div>
+        <StatDisplay
+          label="Win Rate"
+          value={`${stats.win_rate.toFixed(1)}%`}
+          colorMode="financial"
+          tooltip={showWrTooltip ? "Profitable despite sub-50% WR due to R:R" : undefined}
+          {...getWinRatePositivity()}
+        />
 
-        <div className="stat-item">
-          <span className="stat-item-label">W/L</span>
-          <span className="stat-item-value">
-            <span className="positive">{stats.wins}</span>
-            <span className="stat-divider">/</span>
-            <span className="negative">{stats.losses}</span>
-          </span>
-        </div>
+        <StatDisplay
+          label="W/L"
+          value={
+            <>
+              <span className="stat-value-profit">{stats.wins}</span>
+              <span className="stat-divider">/</span>
+              <span className="stat-value-loss">{stats.losses}</span>
+            </>
+          }
+        />
 
         {activePeriod === '24h' && stats.streak !== undefined && stats.streak > 0 && (
-          <div className="stat-item stat-item-full">
-            <span className="stat-item-label">Streak</span>
-            <div className="streak-indicator">
-              <span className={`streak-dots ${stats.streak_type === 'win' ? 'win' : 'loss'}`}>
-                {Array.from({ length: Math.min(stats.streak, 5) }).map((_, i) => (
-                  <span key={i} className="streak-dot">●</span>
-                ))}
-                {stats.streak > 5 && <span className="streak-more">+{stats.streak - 5}</span>}
-              </span>
-              <span className={`stat-item-value ${stats.streak_type === 'win' ? 'positive' : 'negative'}`}>
-                {stats.streak} {stats.streak_type === 'win' ? 'W' : 'L'}
-              </span>
+          <div className="col-span-full">
+            <div className="stat-display">
+              <span className="stat-display-label">Streak</span>
+              <div className="streak-indicator">
+                <span className={`streak-dots ${stats.streak_type === 'win' ? 'win' : 'loss'}`}>
+                  {Array.from({ length: Math.min(stats.streak, 5) }).map((_, i) => (
+                    <span key={i} className="streak-dot">●</span>
+                  ))}
+                  {stats.streak > 5 && <span className="streak-more">+{stats.streak - 5}</span>}
+                </span>
+                <span className={`stat-display-value ${stats.streak_type === 'win' ? 'stat-value-profit' : 'stat-value-loss'}`}>
+                  {stats.streak} {stats.streak_type === 'win' ? 'W' : 'L'}
+                </span>
+              </div>
             </div>
           </div>
         )}

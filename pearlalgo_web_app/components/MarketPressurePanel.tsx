@@ -1,6 +1,7 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
+import { StatDisplay } from './ui'
 import type { BuySellPressure } from '@/stores'
 
 interface MarketPressurePanelProps {
@@ -103,17 +104,17 @@ export default function MarketPressurePanel({ pressure }: MarketPressurePanelPro
         </div>
 
         {/* Stats Row */}
-        <div className="pressure-stats">
-          <div className="pressure-stat">
-            <span className="pressure-stat-label">Volume</span>
-            <span className="pressure-stat-value">
-              {formatVolumeRatio(pressure.volume_ratio)} baseline
-            </span>
-          </div>
-          <div className="pressure-stat">
-            <span className="pressure-stat-label">Lookback</span>
-            <span className="pressure-stat-value">{pressure.lookback_bars} bars</span>
-          </div>
+        <div className="grid grid-cols-2 gap-sm">
+          <StatDisplay
+            label="Volume"
+            value={`${formatVolumeRatio(pressure.volume_ratio)} baseline`}
+            variant="compact"
+          />
+          <StatDisplay
+            label="Lookback"
+            value={`${pressure.lookback_bars} bars`}
+            variant="compact"
+          />
         </div>
       </div>
     </DataPanel>

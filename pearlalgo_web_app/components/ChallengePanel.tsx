@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useMemo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
+import { StatDisplay } from './ui'
 import type { EquityCurvePoint, ChallengeStatus } from '@/stores'
 
 interface ChallengePanelProps {
@@ -120,7 +121,7 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
   const gapFromPeak = peakBalance - challenge.current_balance
 
   return (
-    <DataPanel title="Challenge" icon="🎯" className="challenge-panel">
+    <DataPanel title="Challenge" icon="🎯" className="challenge-panel" variant="feature">
       <div className="challenge-header">
         <div className="challenge-balance">
           <div className="challenge-balance-row">
@@ -175,21 +176,26 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
         </div>
       </div>
 
-      <div className="challenge-stats">
-        <div className="challenge-stat">
-          <span className="challenge-stat-label">Trades</span>
-          <span className="challenge-stat-value">{challenge.trades}</span>
-        </div>
-        <div className="challenge-stat">
-          <span className="challenge-stat-label">Win Rate</span>
-          <span className={`challenge-stat-value ${challenge.win_rate >= 50 ? 'positive' : 'negative'}`}>
-            {challenge.win_rate.toFixed(1)}%
-          </span>
-        </div>
-        <div className="challenge-stat">
-          <span className="challenge-stat-label">Target</span>
-          <span className="challenge-stat-value positive">${challenge.profit_target.toLocaleString()}</span>
-        </div>
+      <div className="grid grid-cols-3 gap-sm">
+        <StatDisplay
+          label="Trades"
+          value={challenge.trades}
+          variant="compact"
+        />
+        <StatDisplay
+          label="Win Rate"
+          value={`${challenge.win_rate.toFixed(1)}%`}
+          variant="compact"
+          colorMode="financial"
+          positive={challenge.win_rate >= 50}
+          negative={challenge.win_rate < 50}
+        />
+        <StatDisplay
+          label="Target"
+          value={`$${challenge.profit_target.toLocaleString()}`}
+          variant="compact"
+          positive
+        />
       </div>
 
       {challenge.outcome === 'active' && challenge.pnl > 0 && (

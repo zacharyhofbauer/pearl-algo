@@ -1,6 +1,7 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
+import { StatDisplay } from './ui'
 import type {
   CadenceMetrics,
   GatewayStatus,
@@ -71,14 +72,14 @@ export default function SystemHealthPanel({
   // Show loading state if no data at all
   if (!cadenceMetrics && !gatewayStatus && !connectionHealth && !errorSummary && !dataQuality) {
     return (
-      <DataPanel title="System Health" icon="🔧">
+      <DataPanel title="System Health" icon="🔧" variant="status">
         <div className="no-data-message">No system data available</div>
       </DataPanel>
     )
   }
 
   return (
-    <DataPanel title="System Health" icon="🔧">
+    <DataPanel title="System Health" icon="🔧" variant="status">
       <div className="health-panel-content">
         {/* Gateway Status Section */}
         {gatewayStatus && (
@@ -184,31 +185,31 @@ export default function SystemHealthPanel({
                 {cadenceMetrics.velocity_mode_active ? 'Velocity ON' : 'Normal'}
               </span>
             </div>
-            <div className="health-stats">
-              <div className="health-stat">
-                <span className="health-stat-label">Last Cycle</span>
-                <span className={`health-stat-value ${getCycleHealthClass()}`}>
-                  {formatMs(cadenceMetrics.cycle_duration_ms)}
-                </span>
-              </div>
-              <div className="health-stat">
-                <span className="health-stat-label">p50 / p95</span>
-                <span className="health-stat-value">
-                  {formatMs(cadenceMetrics.duration_p50_ms)} / {formatMs(cadenceMetrics.duration_p95_ms)}
-                </span>
-              </div>
-              <div className="health-stat">
-                <span className="health-stat-label">Interval</span>
-                <span className="health-stat-value">
-                  {cadenceMetrics.current_interval_seconds}s
-                </span>
-              </div>
-              <div className="health-stat">
-                <span className="health-stat-label">Missed</span>
-                <span className={`health-stat-value ${cadenceMetrics.missed_cycles > 0 ? 'health-warning' : ''}`}>
-                  {cadenceMetrics.missed_cycles}
-                </span>
-              </div>
+            <div className="grid grid-cols-2 gap-sm">
+              <StatDisplay
+                label="Last Cycle"
+                value={formatMs(cadenceMetrics.cycle_duration_ms)}
+                variant="compact"
+                colorMode="status"
+                status={getCycleHealthClass() === 'health-warning' ? 'warning' : 'ok'}
+              />
+              <StatDisplay
+                label="p50 / p95"
+                value={`${formatMs(cadenceMetrics.duration_p50_ms)} / ${formatMs(cadenceMetrics.duration_p95_ms)}`}
+                variant="compact"
+              />
+              <StatDisplay
+                label="Interval"
+                value={`${cadenceMetrics.current_interval_seconds}s`}
+                variant="compact"
+              />
+              <StatDisplay
+                label="Missed"
+                value={cadenceMetrics.missed_cycles}
+                variant="compact"
+                colorMode="status"
+                status={cadenceMetrics.missed_cycles > 0 ? 'warning' : 'ok'}
+              />
             </div>
 
             {/* Cadence Lag */}

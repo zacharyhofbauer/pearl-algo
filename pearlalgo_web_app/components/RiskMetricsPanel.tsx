@@ -1,20 +1,11 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
+import { StatDisplay } from './ui'
 import type { RiskMetrics } from '@/stores'
 
 interface RiskMetricsPanelProps {
   riskMetrics: RiskMetrics
-}
-
-// Info tooltip component
-function InfoTooltip({ text }: { text: string }) {
-  return (
-    <span className="tooltip-wrapper">
-      <span className="info-icon">?</span>
-      <span className="tooltip-content">{text}</span>
-    </span>
-  )
 }
 
 export default function RiskMetricsPanel({ riskMetrics }: RiskMetricsPanelProps) {
@@ -58,100 +49,97 @@ export default function RiskMetricsPanel({ riskMetrics }: RiskMetricsPanelProps)
       {/* Profitability Section */}
       <div className="metrics-section">
         <div className="metrics-section-header">Profitability</div>
-        <div className="stats-grid risk-metrics-grid">
-          <div className="stat-item">
-            <span className="stat-item-label">
-              Expectancy
-              <InfoTooltip text="Average profit per trade" />
-            </span>
-            <span className={`stat-item-value ${riskMetrics.expectancy >= 0 ? 'positive' : 'negative'}`}>
-              {formatCurrency(riskMetrics.expectancy)}
-            </span>
-          </div>
+        <div className="grid grid-cols-2 gap-md">
+          <StatDisplay
+            label="Expectancy"
+            value={formatCurrency(riskMetrics.expectancy)}
+            colorMode="financial"
+            positive={riskMetrics.expectancy >= 0}
+            negative={riskMetrics.expectancy < 0}
+            tooltip="Average profit per trade"
+          />
 
-          <div className="stat-item">
-            <span className="stat-item-label">
-              Profit Factor
-              <InfoTooltip text="Gross profit / Gross loss" />
-            </span>
-            <span className={`stat-item-value ${riskMetrics.profit_factor && riskMetrics.profit_factor > 1 ? 'positive' : 'negative'}`}>
-              {formatRatio(riskMetrics.profit_factor)}
-            </span>
-          </div>
+          <StatDisplay
+            label="Profit Factor"
+            value={formatRatio(riskMetrics.profit_factor)}
+            colorMode="financial"
+            positive={riskMetrics.profit_factor !== null && riskMetrics.profit_factor > 1}
+            negative={riskMetrics.profit_factor !== null && riskMetrics.profit_factor <= 1}
+            tooltip="Gross profit / Gross loss"
+          />
 
-          <div className="stat-item">
-            <span className="stat-item-label">Avg Win</span>
-            <span className="stat-item-value positive">
-              {formatCurrency(riskMetrics.avg_win)}
-            </span>
-          </div>
+          <StatDisplay
+            label="Avg Win"
+            value={formatCurrency(riskMetrics.avg_win)}
+            positive
+          />
 
-          <div className="stat-item">
-            <span className="stat-item-label">Avg Loss</span>
-            <span className="stat-item-value negative">
-              {formatCurrency(riskMetrics.avg_loss)}
-            </span>
-          </div>
+          <StatDisplay
+            label="Avg Loss"
+            value={formatCurrency(riskMetrics.avg_loss)}
+            negative
+          />
         </div>
       </div>
 
       {/* Risk Section */}
       <div className="metrics-section">
         <div className="metrics-section-header">Risk</div>
-        <div className="stats-grid risk-metrics-grid">
-          <div className="stat-item">
-            <span className="stat-item-label">Max Drawdown</span>
-            <span className="stat-item-value negative">
-              ${riskMetrics.max_drawdown.toFixed(2)}
-              <span className="stat-sub">({riskMetrics.max_drawdown_pct.toFixed(1)}%)</span>
-            </span>
-          </div>
+        <div className="grid grid-cols-2 gap-md">
+          <StatDisplay
+            label="Max Drawdown"
+            value={
+              <>
+                ${riskMetrics.max_drawdown.toFixed(2)}
+                <span className="stat-sub">({riskMetrics.max_drawdown_pct.toFixed(1)}%)</span>
+              </>
+            }
+            negative
+          />
 
-          <div className="stat-item">
-            <span className="stat-item-label">
-              Sharpe Ratio
-              <InfoTooltip text="Risk-adjusted return" />
-            </span>
-            <span className={`stat-item-value ${riskMetrics.sharpe_ratio && riskMetrics.sharpe_ratio > 0 ? 'positive' : ''}`}>
-              {formatRatio(riskMetrics.sharpe_ratio)}
-              {riskMetrics.sharpe_ratio !== null && riskMetrics.sharpe_ratio >= 1.5 && (
-                <span className="quality-badge excellent">Excellent</span>
-              )}
-              {riskMetrics.sharpe_ratio !== null && riskMetrics.sharpe_ratio >= 1 && riskMetrics.sharpe_ratio < 1.5 && (
-                <span className="quality-badge good">Good</span>
-              )}
-            </span>
-          </div>
+          <StatDisplay
+            label="Sharpe Ratio"
+            value={
+              <>
+                {formatRatio(riskMetrics.sharpe_ratio)}
+                {riskMetrics.sharpe_ratio !== null && riskMetrics.sharpe_ratio >= 1.5 && (
+                  <span className="quality-badge excellent">Excellent</span>
+                )}
+                {riskMetrics.sharpe_ratio !== null && riskMetrics.sharpe_ratio >= 1 && riskMetrics.sharpe_ratio < 1.5 && (
+                  <span className="quality-badge good">Good</span>
+                )}
+              </>
+            }
+            colorMode="financial"
+            positive={riskMetrics.sharpe_ratio !== null && riskMetrics.sharpe_ratio > 0}
+            tooltip="Risk-adjusted return"
+          />
 
-          <div className="stat-item">
-            <span className="stat-item-label">
-              Avg R:R
-              <InfoTooltip text="Average reward-to-risk ratio" />
-            </span>
-            <span className={`stat-item-value ${riskMetrics.avg_rr && riskMetrics.avg_rr > 1 ? 'positive' : ''}`}>
-              {formatRatio(riskMetrics.avg_rr)}
-            </span>
-          </div>
+          <StatDisplay
+            label="Avg R:R"
+            value={formatRatio(riskMetrics.avg_rr)}
+            colorMode="financial"
+            positive={riskMetrics.avg_rr !== null && riskMetrics.avg_rr > 1}
+            tooltip="Average reward-to-risk ratio"
+          />
         </div>
       </div>
 
       {/* Trade Stats Section */}
       <div className="metrics-section">
         <div className="metrics-section-header">Trade Stats</div>
-        <div className="stats-grid risk-metrics-grid">
-          <div className="stat-item">
-            <span className="stat-item-label">Best Trade</span>
-            <span className="stat-item-value positive">
-              {formatCurrency(riskMetrics.largest_win)}
-            </span>
-          </div>
+        <div className="grid grid-cols-2 gap-md">
+          <StatDisplay
+            label="Best Trade"
+            value={formatCurrency(riskMetrics.largest_win)}
+            positive
+          />
 
-          <div className="stat-item">
-            <span className="stat-item-label">Worst Trade</span>
-            <span className="stat-item-value negative">
-              {formatCurrency(riskMetrics.largest_loss)}
-            </span>
-          </div>
+          <StatDisplay
+            label="Worst Trade"
+            value={formatCurrency(riskMetrics.largest_loss)}
+            negative
+          />
         </div>
       </div>
 
@@ -161,26 +149,21 @@ export default function RiskMetricsPanel({ riskMetrics }: RiskMetricsPanelProps)
         (riskMetrics.top_losses && riskMetrics.top_losses.length > 0)) && (
         <div className="metrics-section">
           <div className="metrics-section-header">Exposure</div>
-          <div className="stats-grid risk-metrics-grid">
+          <div className="grid grid-cols-2 gap-md">
             {riskMetrics.max_concurrent_positions_peak !== undefined && (
-              <div className="stat-item">
-                <span className="stat-item-label">Peak Positions</span>
-                <span className="stat-item-value">
-                  {riskMetrics.max_concurrent_positions_peak}
-                </span>
-              </div>
+              <StatDisplay
+                label="Peak Positions"
+                value={riskMetrics.max_concurrent_positions_peak}
+              />
             )}
 
             {riskMetrics.max_stop_risk_exposure !== undefined && (
-              <div className="stat-item">
-                <span className="stat-item-label">
-                  Max Stop Risk
-                  <InfoTooltip text="Total $ at risk if all stops hit" />
-                </span>
-                <span className="stat-item-value negative">
-                  ${riskMetrics.max_stop_risk_exposure.toFixed(2)}
-                </span>
-              </div>
+              <StatDisplay
+                label="Max Stop Risk"
+                value={`$${riskMetrics.max_stop_risk_exposure.toFixed(2)}`}
+                negative
+                tooltip="Total $ at risk if all stops hit"
+              />
             )}
           </div>
 
