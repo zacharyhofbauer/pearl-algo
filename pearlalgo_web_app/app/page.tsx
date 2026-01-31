@@ -482,101 +482,70 @@ export default function PearlAlgoWebApp() {
 
     return (
       <div className="status-panel">
-        {/* Row 1: Main Stats */}
+        {/* Row 1: Price + Badges + Stats */}
         <div className="status-row status-row-main">
-          {/* Price with label */}
           {currentCandle && (
-            <div className="stat-inline price-stat">
-              <span className="stat-label">Price</span>
-              <span className={`price-value ${priceUp ? 'positive' : 'negative'}`}>
-                {currentCandle.close.toFixed(2)}
-              </span>
-            </div>
+            <span className={`price-value ${priceUp ? 'positive' : 'negative'}`}>
+              {currentCandle.close.toFixed(2)}
+            </span>
           )}
 
           {agentState && (
             <>
-              {/* Agent Badge */}
-              <span className={`status-badge ${agentState.running ? (agentState.paused ? 'paused' : 'live') : 'off'}`}>
-                <span className="status-dot"></span>
-                {agentState.running ? (agentState.paused ? 'PAUSED' : 'LIVE') : 'OFF'}
+              <span className={`mini-badge ${agentState.running ? (agentState.paused ? 'paused' : 'live') : 'off'}`}>
+                <span className="mini-dot"></span>
+                {agentState.running ? (agentState.paused ? 'PAU' : 'LIVE') : 'OFF'}
               </span>
 
-              {/* AI Mode Badge */}
               {aiMode && (
-                <span className={`status-badge ai-mode ai-${aiMode}`}>
-                  <span className="ai-icon">🧠</span>
-                  {aiMode.toUpperCase()}
-                </span>
+                <span className={`mini-badge ai-${aiMode}`}>🧠{aiMode.toUpperCase()}</span>
               )}
 
-              {/* Day P&L */}
-              <div className="stat-inline">
-                <span className="stat-label">P&L</span>
-                <span className={`stat-value ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
-                  {formatPnL(agentState.daily_pnl)}
-                </span>
-              </div>
+              <span className={`stat-val ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
+                {formatPnL(agentState.daily_pnl)}
+              </span>
 
-              {/* Trades W/L */}
-              <div className="stat-inline">
-                <span className="stat-label">W/L</span>
-                <span className="stat-value trades-value">
-                  <span className="win">{agentState.daily_wins}</span><span className="divider">/</span><span className="loss">{agentState.daily_losses}</span>
-                </span>
-              </div>
+              <span className="stat-val trades-value">
+                <span className="win">{agentState.daily_wins}</span>/<span className="loss">{agentState.daily_losses}</span>
+              </span>
 
-              {/* Open Positions */}
-              <div className="stat-inline">
-                <span className="stat-label">Open</span>
-                <span className={`stat-value ${agentState.active_trades_count > 0 ? 'highlight' : ''}`}>
-                  {agentState.active_trades_count}
-                </span>
-              </div>
-
-              {/* Direction Gate */}
-              {dirGate?.enabled && (
-                <div className="stat-inline dir-gate">
-                  <span className="stat-label">Gate</span>
-                  <span className={`stat-value ${dirGate.blocks > 0 ? 'warn-text' : ''}`}>
-                    {dirGate.blocks > 0 ? `${dirGate.blocks}🚫` : '✓'}
-                  </span>
-                </div>
-              )}
+              <span className={`stat-val ${agentState.active_trades_count > 0 ? 'highlight' : ''}`}>
+                {agentState.active_trades_count}pos
+              </span>
             </>
           )}
         </div>
 
-        {/* Row 2: Health + Legends */}
+        {/* Row 2: Health + Gate + Legends */}
         <div className="status-row status-row-secondary">
-          {/* System Health with labels */}
           {agentState && (
-            <div className="health-indicators">
-              <span className={`health-item ${agentState.gateway_status?.connected ? 'ok' : 'error'}`}>
-                <span className="health-dot"></span>GW
-              </span>
-              <span className={`health-item ${agentState.data_fresh ? 'ok' : 'error'}`}>
-                <span className="health-dot"></span>Data
-              </span>
-              <span className={`health-item ${agentState.futures_market_open ? 'ok' : 'warn'}`}>
-                <span className="health-dot"></span>Mkt
-              </span>
+            <div className="health-row">
+              <span className={`h-dot ${agentState.gateway_status?.status === 'online' ? 'ok' : 'err'}`}></span>
+              <span className="h-lbl">GW</span>
+              <span className={`h-dot ${agentState.data_fresh ? 'ok' : 'err'}`}></span>
+              <span className="h-lbl">Data</span>
+              <span className={`h-dot ${agentState.futures_market_open ? 'ok' : 'warn'}`}></span>
+              <span className="h-lbl">Mkt</span>
+              {dirGate?.enabled && (
+                <>
+                  <span className={`h-dot ${dirGate.blocks > 0 ? 'warn' : 'ok'}`}></span>
+                  <span className="h-lbl">{dirGate.blocks > 0 ? `${dirGate.blocks}🚫` : 'Gate✓'}</span>
+                </>
+              )}
             </div>
           )}
 
-          {/* Indicator Legend - matches chart colors exactly */}
           <div className="chart-legend">
-            <span className="legend-item"><span className="legend-line ema9"></span>EMA9</span>
-            <span className="legend-item"><span className="legend-line ema21"></span>EMA21</span>
-            <span className="legend-item"><span className="legend-line vwap"></span>VWAP</span>
+            <span className="lg-item"><span className="lg-line ema9"></span>E9</span>
+            <span className="lg-item"><span className="lg-line ema21"></span>E21</span>
+            <span className="lg-item"><span className="lg-line vwap"></span>VW</span>
           </div>
 
-          {/* Marker Legend - matches chart marker colors exactly */}
           <div className="marker-legend">
-            <span className="legend-item"><span className="marker-sym entry">▲</span>Long</span>
-            <span className="legend-item"><span className="marker-sym entry">▼</span>Short</span>
-            <span className="legend-item"><span className="marker-sym exit-win">●</span>Win</span>
-            <span className="legend-item"><span className="marker-sym exit-loss">●</span>Loss</span>
+            <span className="lg-item"><span className="mk entry">▲</span>L</span>
+            <span className="lg-item"><span className="mk entry">▼</span>S</span>
+            <span className="lg-item"><span className="mk exit-win">●</span>W</span>
+            <span className="lg-item"><span className="mk exit-loss">●</span>X</span>
           </div>
         </div>
       </div>

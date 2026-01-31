@@ -296,6 +296,7 @@ const initialAgentState: AgentState = {
   daily_wins: 0,
   daily_losses: 0,
   active_trades_count: 0,
+  futures_market_open: false,
   data_fresh: false,
   ai_status: null,
   challenge: null,
