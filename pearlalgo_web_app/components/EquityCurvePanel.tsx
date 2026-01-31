@@ -2,11 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-
-interface EquityCurvePoint {
-  time: number
-  value: number
-}
+import type { EquityCurvePoint } from '@/stores'
 
 interface EquityCurvePanelProps {
   equityCurve: EquityCurvePoint[]

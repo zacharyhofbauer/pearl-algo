@@ -1,12 +1,7 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
-
-interface MarketRegime {
-  regime: string
-  confidence: number
-  allowed_direction: 'long' | 'short' | 'both'
-}
+import type { MarketRegime } from '@/stores'
 
 interface MarketRegimePanelProps {
   regime: MarketRegime | null

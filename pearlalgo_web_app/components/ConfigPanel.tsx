@@ -1,16 +1,7 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
-
-interface Config {
-  symbol: string
-  market: string
-  timeframe: string
-  scan_interval: number
-  session_start: string
-  session_end: string
-  mode: 'live' | 'shadow' | 'paused' | 'stopped'
-}
+import type { Config } from '@/stores'
 
 interface ConfigPanelProps {
   config: Config

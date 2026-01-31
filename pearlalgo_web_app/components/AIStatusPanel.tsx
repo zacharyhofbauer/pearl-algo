@@ -1,35 +1,10 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
-
-interface ShadowCounters {
-  would_block_total: number
-  would_block_by_reason: Record<string, number>
-  ml_would_skip: number
-  ml_total_decisions: number
-  ml_execute_rate: number
-}
+import type { ShadowCounters, AIStatus } from '@/stores'
 
 interface AIStatusPanelProps {
-  aiStatus: {
-    bandit_mode: 'off' | 'shadow' | 'live'
-    contextual_mode: 'off' | 'shadow' | 'live'
-    ml_filter: {
-      enabled: boolean
-      mode: string
-      lift: {
-        lift_ok?: boolean
-        lift_win_rate?: number
-        lift_avg_pnl?: number
-      }
-    }
-    direction_gating: {
-      enabled: boolean
-      blocks: number
-      shadow_regime: number
-      shadow_trigger: number
-    }
-  }
+  aiStatus: AIStatus
   shadowCounters?: ShadowCounters | null
 }
 

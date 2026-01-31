@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
 import DataPanelsContainer from '@/components/DataPanelsContainer'
@@ -20,328 +20,23 @@ import SignalDecisionsPanel from '@/components/SignalDecisionsPanel'
 import AnalyticsPanel from '@/components/AnalyticsPanel'
 import UltrawideLayout from '@/components/UltrawideLayout'
 import { useViewportType } from '@/hooks/useViewportType'
-import { useWebSocket, getWebSocketUrl, WebSocketStatus } from '@/hooks/useWebSocket'
+import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { getApiUrl, apiFetch } from '@/lib/api'
 import type { IChartApi } from 'lightweight-charts'
 
-interface CandleData {
-  time: number
-  open: number
-  high: number
-  low: number
-  close: number
-  volume?: number
-}
-
-interface IndicatorData {
-  time: number
-  value: number
-}
-
-interface Indicators {
-  ema9?: IndicatorData[]
-  ema21?: IndicatorData[]
-  vwap?: IndicatorData[]
-  rsi?: IndicatorData[]
-}
-
-interface MarkerData {
-  time: number
-  position: 'aboveBar' | 'belowBar'
-  color: string
-  shape: 'arrowUp' | 'arrowDown' | 'circle'
-  text: string
-}
-
-// AI/ML Status
-interface AIStatus {
-  bandit_mode: 'off' | 'shadow' | 'live'
-  contextual_mode: 'off' | 'shadow' | 'live'
-  ml_filter: {
-    enabled: boolean
-    mode: string
-    lift: {
-      lift_ok?: boolean
-      lift_win_rate?: number
-      lift_avg_pnl?: number
-    }
-  }
-  direction_gating: {
-    enabled: boolean
-    blocks: number
-    shadow_regime: number
-    shadow_trigger: number
-  }
-}
-
-// Challenge Status
-interface ChallengeStatus {
-  enabled: boolean
-  current_balance: number
-  pnl: number
-  trades: number
-  wins: number
-  win_rate: number
-  drawdown_risk_pct: number
-  outcome: 'active' | 'pass' | 'fail'
-  profit_target: number
-  max_drawdown: number
-}
-
-// Performance Stats
-interface PeriodStats {
-  pnl: number
-  trades: number
-  wins: number
-  losses: number
-  win_rate: number
-  streak?: number
-  streak_type?: string
-}
-
-interface PerformanceStats {
-  '24h': PeriodStats
-  '72h': PeriodStats
-  '30d': PeriodStats
-}
-
-// Recent Exit (enhanced with full trade details)
-interface RecentExit {
-  signal_id: string
-  direction: string
-  pnl: number
-  exit_reason: string
-  exit_time: string
-  // NEW: Full trade details
-  entry_time?: string
-  entry_price?: number
-  exit_price?: number
-  entry_reason?: string
-  duration_seconds?: number
-}
-
-// Pearl Suggestion
-interface PearlSuggestion {
-  message: string
-  action: string
-}
-
-// Equity Curve Point
-interface EquityCurvePoint {
-  time: number
-  value: number
-}
-
-// Risk Metrics
-interface RiskMetrics {
-  max_drawdown: number
-  max_drawdown_pct: number
-  sharpe_ratio: number | null
-  profit_factor: number | null
-  avg_win: number
-  avg_loss: number
-  avg_rr: number | null
-  largest_win: number
-  largest_loss: number
-  expectancy: number
-}
-
-// Buy/Sell Pressure
-interface BuySellPressure {
-  bias: 'buyers' | 'sellers' | 'mixed'
-  strength: 'flat' | 'light' | 'moderate' | 'strong'
-  score: number
-  score_pct: number
-  lookback_bars: number
-  total_volume: number
-  volume_ratio: number
-}
-
-// Cadence/System Health Metrics
-interface CadenceMetrics {
-  cycle_duration_ms: number
-  duration_p50_ms: number
-  duration_p95_ms: number
-  velocity_mode_active: boolean
-  velocity_reason: string
-  missed_cycles: number
-  current_interval_seconds: number
-  cadence_lag_ms: number
-}
-
-// Market Regime
-interface MarketRegime {
-  regime: string
-  confidence: number
-  allowed_direction: 'long' | 'short' | 'both'
-}
-
-// Signal Rejections
-interface SignalRejections {
-  direction_gating: number
-  ml_filter: number
-  circuit_breaker: number
-  session_filter: number
-  max_positions: number
-}
-
-// Last Signal Decision
-interface LastSignalDecision {
-  signal_type: string
-  ml_probability: number
-  action: 'execute' | 'skip'
-  reason: string
-  timestamp: string | null
-}
-
-// Shadow Counters
-interface ShadowCounters {
-  would_block_total: number
-  would_block_by_reason: Record<string, number>
-  ml_would_skip: number
-  ml_total_decisions: number
-  ml_execute_rate: number
-}
-
-// Gateway Status
-interface GatewayStatus {
-  process_running: boolean
-  port_listening: boolean
-  port: number
-  status: 'online' | 'offline' | 'degraded'
-}
-
-// Connection Health
-interface ConnectionHealth {
-  connection_failures: number
-  data_fetch_errors: number
-  data_level: string
-  consecutive_errors: number
-  last_successful_fetch?: string | null
-}
-
-// Error Summary
-interface ErrorSummary {
-  session_error_count: number
-  last_error: string | null
-  last_error_time: string | null
-}
-
-// Config
-interface Config {
-  symbol: string
-  market: string
-  timeframe: string
-  scan_interval: number
-  session_start: string
-  session_end: string
-  mode: 'live' | 'shadow' | 'paused' | 'stopped'
-}
-
-// Data Quality
-interface DataQuality {
-  latest_bar_age_minutes: number | null
-  stale_threshold_minutes: number
-  buffer_size: number | null
-  buffer_target: number
-  quiet_reason: string | null
-  is_expected_stale: boolean
-  is_stale: boolean
-}
-
-// Analytics Data
-interface SessionPerformance {
-  id: string
-  name: string
-  pnl: number
-  wins: number
-  losses: number
-  win_rate: number
-}
-
-interface HourStats {
-  hour: number
-  hour_label: string
-  pnl: number
-  trades: number
-  win_rate: number
-}
-
-interface DurationStats {
-  id: string
-  name: string
-  pnl: number
-  wins: number
-  losses: number
-  win_rate: number
-}
-
-interface DirectionBreakdown {
-  long: { count: number; pnl: number }
-  short: { count: number; pnl: number }
-}
-
-interface StatusBreakdown {
-  generated: number
-  entered: number
-  exited: number
-  cancelled: number
-}
-
-interface AnalyticsData {
-  session_performance: SessionPerformance[]
-  best_hours: HourStats[]
-  worst_hours: HourStats[]
-  hold_duration: DurationStats[]
-  direction_breakdown: DirectionBreakdown
-  status_breakdown: StatusBreakdown
-}
-
-interface AgentState {
-  running: boolean
-  paused: boolean
-  daily_pnl: number
-  daily_trades: number
-  daily_wins: number
-  daily_losses: number
-  active_trades_count: number
-  data_fresh?: boolean
-  // Existing fields
-  ai_status?: AIStatus
-  challenge?: ChallengeStatus | null
-  recent_exits?: RecentExit[]
-  performance?: PerformanceStats
-  pearl_suggestion?: PearlSuggestion | null
-  equity_curve?: EquityCurvePoint[]
-  risk_metrics?: RiskMetrics
-  // NEW: Transparency panels data
-  buy_sell_pressure?: BuySellPressure | null
-  cadence_metrics?: CadenceMetrics | null
-  market_regime?: MarketRegime | null
-  signal_rejections_24h?: SignalRejections | null
-  last_signal_decision?: LastSignalDecision | null
-  shadow_counters?: ShadowCounters | null
-  // NEW: System health extended
-  gateway_status?: GatewayStatus | null
-  connection_health?: ConnectionHealth | null
-  error_summary?: ErrorSummary | null
-  config?: Config | null
-  data_quality?: DataQuality | null
-}
-
-// Market Status
-interface MarketStatus {
-  is_open: boolean
-  close_reason: string | null
-  next_open: string | null
-  current_time_et: string
-}
+// Import stores and types
+import {
+  useAgentStore,
+  useChartStore,
+  useUIStore,
+  type Timeframe,
+  type IndicatorData,
+} from '@/stores'
 
 // API configuration imported from @/lib/api
 const REFRESH_INTERVAL = 10000 // 10 seconds (fallback when WebSocket disconnected)
 const WS_REFRESH_INTERVAL = 30000 // 30 seconds (slower when WebSocket connected)
-type Timeframe = '1m' | '5m' | '15m' | '1h'
 
 // Minimum bars to request for a full chart
 const MIN_BARS = 150
@@ -350,28 +45,49 @@ const MIN_BARS = 150
 const MARKER_HOURS = 72
 
 export default function PearlAlgoWebApp() {
-  const [candles, setCandles] = useState<CandleData[]>([])
-  const [indicators, setIndicators] = useState<Indicators>({})
-  const [markers, setMarkers] = useState<MarkerData[]>([])
-  const [agentState, setAgentState] = useState<AgentState | null>(null)
-  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
-  const [isLive, setIsLive] = useState(false)
-  const [timeframe, setTimeframe] = useState<Timeframe>('5m')
-  const [barCount, setBarCount] = useState(MIN_BARS)
-  const [barSpacing, setBarSpacing] = useState(10)
+  // Agent store
+  const agentState = useAgentStore((s) => s.agentState)
+  const setAgentState = useAgentStore((s) => s.setAgentState)
+  const updateFromWebSocket = useAgentStore((s) => s.updateFromWebSocket)
+
+  // Chart store
+  const candles = useChartStore((s) => s.candles)
+  const indicators = useChartStore((s) => s.indicators)
+  const markers = useChartStore((s) => s.markers)
+  const marketStatus = useChartStore((s) => s.marketStatus)
+  const timeframe = useChartStore((s) => s.timeframe)
+  const barCount = useChartStore((s) => s.barCount)
+  const barSpacing = useChartStore((s) => s.barSpacing)
+  const chartLoading = useChartStore((s) => s.isLoading)
+  const chartError = useChartStore((s) => s.error)
+  const lastDataHash = useChartStore((s) => s.lastDataHash)
+  const setCandles = useChartStore((s) => s.setCandles)
+  const setIndicators = useChartStore((s) => s.setIndicators)
+  const setMarkers = useChartStore((s) => s.setMarkers)
+  const setMarketStatus = useChartStore((s) => s.setMarketStatus)
+  const setTimeframe = useChartStore((s) => s.setTimeframe)
+  const setBarCount = useChartStore((s) => s.setBarCount)
+  const setBarSpacing = useChartStore((s) => s.setBarSpacing)
+  const setChartLoading = useChartStore((s) => s.setLoading)
+  const setChartError = useChartStore((s) => s.setError)
+  const setLastDataHash = useChartStore((s) => s.setLastDataHash)
+
+  // UI store
+  const wsStatus = useUIStore((s) => s.wsStatus)
+  const isLive = useUIStore((s) => s.isLive)
+  const lastUpdate = useUIStore((s) => s.lastUpdate)
+  const setWsStatus = useUIStore((s) => s.setWsStatus)
+  const setIsLive = useUIStore((s) => s.setIsLive)
+  const setLastUpdate = useUIStore((s) => s.setLastUpdate)
+
+  // Local state for chart API reference (not suitable for global store)
   const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
-  const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null)
-  const [wsStatus, setWsStatus] = useState<WebSocketStatus>('disconnected')
-  const lastDataHash = useRef<string>('')
 
   // Viewport detection for ultrawide layout
   const viewport = useViewportType()
 
   // WebSocket connection for real-time updates
-  const { status: webSocketStatus, lastMessage, reconnect: wsReconnect } = useWebSocket({
+  useWebSocket({
     url: getWebSocketUrl(),
     reconnect: true,
     reconnectInterval: 3000,
@@ -382,10 +98,7 @@ export default function PearlAlgoWebApp() {
       if (message.type === 'initial_state' || message.type === 'state_update' || message.type === 'full_refresh') {
         const data = message.data
         if (data) {
-          setAgentState((prev) => ({
-            ...prev,
-            ...data,
-          }))
+          updateFromWebSocket(data)
           setLastUpdate(new Date())
           setIsLive(true)
         }
@@ -394,22 +107,22 @@ export default function PearlAlgoWebApp() {
   })
 
   // Responsive bar spacing - smaller on mobile
-  const getBarSpacing = () => {
+  const getBarSpacing = useCallback(() => {
     if (typeof window === 'undefined') return 10
     return window.innerWidth < 768 ? 6 : 10
-  }
+  }, [])
 
   // Calculate bar count based on viewport width - always request enough to fill chart
-  const calculateBarCount = () => {
+  const calculateBarCount = useCallback(() => {
     if (typeof window === 'undefined') return MIN_BARS
     const width = window.innerWidth
-    const barSpacing = getBarSpacing()
+    const spacing = getBarSpacing()
     const priceScaleWidth = 60
     const availableWidth = width - priceScaleWidth - 40
-    const visibleBars = Math.floor(availableWidth / barSpacing)
+    const visibleBars = Math.floor(availableWidth / spacing)
     // Request 50% more bars than visible to allow scrolling, with minimum
     return Math.max(MIN_BARS, Math.floor(visibleBars * 1.5))
-  }
+  }, [getBarSpacing])
 
   // Update bar count and spacing on resize
   useEffect(() => {
@@ -420,17 +133,9 @@ export default function PearlAlgoWebApp() {
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
-  }, [])
+  }, [getBarSpacing, calculateBarCount, setBarSpacing, setBarCount])
 
-  // Reset state when timeframe changes to force full refresh
-  useEffect(() => {
-    lastDataHash.current = ''
-    setLoading(true)
-    setCandles([])
-    setIndicators({})
-  }, [timeframe])
-
-  const fetchData = async (tf: Timeframe, bars: number) => {
+  const fetchData = useCallback(async (tf: Timeframe, bars: number) => {
     try {
       // Ensure we always request at least MIN_BARS
       const requestBars = Math.max(MIN_BARS, bars)
@@ -477,42 +182,54 @@ export default function PearlAlgoWebApp() {
 
       // Only update if data changed (include timeframe in hash to force update on tf change)
       const dataHash = `${tf}:${JSON.stringify(candlesData.slice(-3))}`
-      if (dataHash !== lastDataHash.current) {
-        lastDataHash.current = dataHash
+      if (dataHash !== lastDataHash) {
+        setLastDataHash(dataHash)
         setCandles(candlesData)
         setIndicators(indicatorsData)
         setMarkers(filteredMarkers)
       }
 
       if (stateData && !stateData.error) {
-        setAgentState(stateData)
-      }
-
-      // Set analytics data (optional - may not be available)
-      if (analyticsRes && analyticsRes.ok) {
-        try {
-          const analyticsData = await analyticsRes.json()
-          setAnalytics(analyticsData)
-        } catch {
-          // Ignore analytics parsing errors
+        // Include analytics in state if available
+        if (analyticsRes && analyticsRes.ok) {
+          try {
+            const analyticsData = await analyticsRes.json()
+            setAgentState({ ...stateData, analytics: analyticsData })
+          } catch {
+            setAgentState(stateData)
+          }
+        } else {
+          setAgentState(stateData)
         }
       }
 
       setLastUpdate(new Date())
       setIsLive(true)
-      setError(null)
-      
+      setChartError(null)
+
       // Only clear loading if we have sufficient data
       if (candlesData.length >= MIN_BARS * 0.8) {
-        setLoading(false)
+        setChartLoading(false)
       }
     } catch (err) {
       console.error('Failed to fetch data:', err)
-      setError(err instanceof Error ? err.message : 'Failed to fetch')
+      setChartError(err instanceof Error ? err.message : 'Failed to fetch')
       setIsLive(false)
-      setLoading(false)
+      setChartLoading(false)
     }
-  }
+  }, [
+    lastDataHash,
+    setAgentState,
+    setCandles,
+    setIndicators,
+    setMarkers,
+    setMarketStatus,
+    setLastDataHash,
+    setChartError,
+    setChartLoading,
+    setLastUpdate,
+    setIsLive,
+  ])
 
   useEffect(() => {
     fetchData(timeframe, barCount)
@@ -521,7 +238,7 @@ export default function PearlAlgoWebApp() {
     const refreshInterval = wsStatus === 'connected' ? WS_REFRESH_INTERVAL : REFRESH_INTERVAL
     const interval = setInterval(() => fetchData(timeframe, barCount), refreshInterval)
     return () => clearInterval(interval)
-  }, [timeframe, barCount, wsStatus])
+  }, [timeframe, barCount, wsStatus, fetchData])
 
   const formatTime = (date: Date | null) => {
     if (!date) return '--:--'
@@ -539,7 +256,7 @@ export default function PearlAlgoWebApp() {
   }
 
   // Track if chart is fully loaded (for screenshot detection)
-  const isChartReady = !loading && !error && candles.length > 0
+  const isChartReady = !chartLoading && !chartError && candles.length > 0
 
   // Format next market open time
   const formatNextOpen = (isoString: string | null) => {
@@ -706,24 +423,24 @@ export default function PearlAlgoWebApp() {
         </button>
       </div>
       <div className="chart-container">
-        {loading && (
+        {chartLoading && (
           <div className="loading-screen">
             <img src="/logo.png" alt="PEARL" className="loading-logo" />
             <div className="loading-text">Loading Live Data...</div>
             <div className="loading-spinner"></div>
           </div>
         )}
-        {error && !loading && (
+        {chartError && !chartLoading && (
           <div className="no-data-container">
             <img src="/logo.png" alt="PEARL" className="no-data-logo" />
             <div className="no-data-title">No Live Data</div>
-            <div className="no-data-message">{error}</div>
+            <div className="no-data-message">{chartError}</div>
             <div className="no-data-hint">
               Start the Market Agent to see real-time data
             </div>
           </div>
         )}
-        {!loading && !error && candles.length > 0 && (
+        {!chartLoading && !chartError && candles.length > 0 && (
           <ErrorBoundary
             panelName="Chart"
             fallback={
@@ -863,26 +580,26 @@ export default function PearlAlgoWebApp() {
               equityCurve={agentState.equity_curve}
             />
           )}
-          {/* NEW: Market Pressure Panel */}
+          {/* Market Pressure Panel */}
           {agentState.buy_sell_pressure && (
             <MarketPressurePanel pressure={agentState.buy_sell_pressure} />
           )}
-          {/* NEW: Market Regime Panel */}
+          {/* Market Regime Panel */}
           {agentState.market_regime && (
             <MarketRegimePanel regime={agentState.market_regime} />
           )}
-          {/* NEW: Signal Decisions Panel */}
+          {/* Signal Decisions Panel */}
           {(agentState.signal_rejections_24h || agentState.last_signal_decision) && (
             <SignalDecisionsPanel
               rejections={agentState.signal_rejections_24h || null}
               lastDecision={agentState.last_signal_decision || null}
             />
           )}
-          {/* NEW: Config Panel */}
+          {/* Config Panel */}
           {agentState.config && (
             <ConfigPanel config={agentState.config} />
           )}
-          {/* NEW: System Health Panel */}
+          {/* System Health Panel */}
           {(agentState.cadence_metrics || agentState.gateway_status || agentState.connection_health || agentState.data_quality) && (
             <SystemHealthPanel
               cadenceMetrics={agentState.cadence_metrics || null}
@@ -902,12 +619,12 @@ export default function PearlAlgoWebApp() {
           {agentState.recent_exits && agentState.recent_exits.length > 0 && (
             <RecentTradesPanel
               recentExits={agentState.recent_exits}
-              directionBreakdown={analytics?.direction_breakdown}
-              statusBreakdown={analytics?.status_breakdown}
+              directionBreakdown={agentState.analytics?.direction_breakdown}
+              statusBreakdown={agentState.analytics?.status_breakdown}
             />
           )}
-          {analytics && (
-            <AnalyticsPanel analytics={analytics} />
+          {agentState.analytics && (
+            <AnalyticsPanel analytics={agentState.analytics} />
           )}
           {agentState.pearl_suggestion && (
             <PearlSuggestionsPanel
@@ -927,22 +644,13 @@ export default function PearlAlgoWebApp() {
 
 // Simple RSI Chart Component
 function RSIChart({ data, barSpacing = 10 }: { data: IndicatorData[], barSpacing?: number }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<any>(null)
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return
 
-  // Calculate responsive height
-  const getChartHeight = () => {
-    if (typeof window === 'undefined') return 120
-    return Math.max(80, Math.min(120, window.innerHeight * 0.12))
-  }
-
-  useEffect(() => {
-    if (!containerRef.current) return
-
-    const chartHeight = getChartHeight()
+    const chartHeight = Math.max(80, Math.min(120, window.innerHeight * 0.12))
     const { createChart, ColorType } = require('lightweight-charts')
-    const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
+    const chart = createChart(node, {
+      width: node.clientWidth,
       height: chartHeight,
       layout: {
         background: { type: ColorType.Solid, color: '#0a0a0f' },
@@ -961,7 +669,7 @@ function RSIChart({ data, barSpacing = 10 }: { data: IndicatorData[], barSpacing
         borderColor: '#2a2a3a',
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 8,  // Match main chart
+        rightOffset: 8,
         barSpacing: barSpacing,
         tickMarkFormatter: (time: number) => {
           const date = new Date(time * 1000)
@@ -979,48 +687,44 @@ function RSIChart({ data, barSpacing = 10 }: { data: IndicatorData[], barSpacing
       lastValueVisible: true,
     })
 
-    // Add overbought/oversold lines (more visible)
-    const ob = chart.addLineSeries({ 
-      color: 'rgba(255, 82, 82, 0.8)', 
-      lineWidth: 1, 
-      lineStyle: 2,  // Dashed
-      priceLineVisible: false, 
+    // Add overbought/oversold lines
+    const ob = chart.addLineSeries({
+      color: 'rgba(255, 82, 82, 0.8)',
+      lineWidth: 1,
+      lineStyle: 2,
+      priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     })
-    const os = chart.addLineSeries({ 
-      color: 'rgba(0, 230, 118, 0.8)', 
-      lineWidth: 1, 
-      lineStyle: 2,  // Dashed
-      priceLineVisible: false, 
+    const os = chart.addLineSeries({
+      color: 'rgba(0, 230, 118, 0.8)',
+      lineWidth: 1,
+      lineStyle: 2,
+      priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
     })
 
-    chartRef.current = { chart, series, ob, os }
-
-    const handleResize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({
-          width: containerRef.current.clientWidth,
-          height: getChartHeight(),
-        })
-      }
-    }
-    window.addEventListener('resize', handleResize)
-    return () => { window.removeEventListener('resize', handleResize); chart.remove() }
-  }, [barSpacing])
-
-  useEffect(() => {
-    if (!chartRef.current || !data?.length) return
-    chartRef.current.series.setData(data)
-    
-    // Overbought (70) and oversold (30) lines
+    // Set data
+    series.setData(data)
     const obData = data.map(d => ({ time: d.time, value: 70 }))
     const osData = data.map(d => ({ time: d.time, value: 30 }))
-    chartRef.current.ob.setData(obData)
-    chartRef.current.os.setData(osData)
-  }, [data])
+    ob.setData(obData)
+    os.setData(osData)
+
+    const handleResize = () => {
+      chart.applyOptions({
+        width: node.clientWidth,
+        height: Math.max(80, Math.min(120, window.innerHeight * 0.12)),
+      })
+    }
+    window.addEventListener('resize', handleResize)
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      chart.remove()
+    }
+  }, [data, barSpacing])
 
   return (
     <div className="rsi-container">

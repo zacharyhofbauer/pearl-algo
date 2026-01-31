@@ -1,11 +1,7 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
-
-interface PearlSuggestion {
-  message: string
-  action: string
-}
+import type { PearlSuggestion } from '@/stores'
 
 interface PearlSuggestionsPanelProps {
   suggestion: PearlSuggestion | null

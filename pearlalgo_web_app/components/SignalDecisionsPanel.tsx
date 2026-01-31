@@ -1,22 +1,7 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
-
-interface SignalRejections {
-  direction_gating: number
-  ml_filter: number
-  circuit_breaker: number
-  session_filter: number
-  max_positions: number
-}
-
-interface LastSignalDecision {
-  signal_type: string
-  ml_probability: number
-  action: 'execute' | 'skip'
-  reason: string
-  timestamp: string | null
-}
+import type { SignalRejections, LastSignalDecision } from '@/stores'
 
 interface SignalDecisionsPanelProps {
   rejections: SignalRejections | null

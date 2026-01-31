@@ -70,7 +70,7 @@ Purpose: File-by-file keep/rewrite/delete decisions grounded in the current tree
 | `docs/SCRIPTS_TAXONOMY.md` | REWRITE | Adds orphan report |
 | `docs/CONFIGURATION_MAP.md` | KEEP | Config mapping |
 | `docs/TRADING_BOT_GUIDE.md` | KEEP | Strategy guide |
-| `docs/LIVE_CHART.md` | KEEP | Live Main Chart + Telegram Mini App |
+| `docs/PEARL_WEB_APP.md` | KEEP | Pearl Algo Web App + Telegram Mini App |
 | `docs/MARKET_AGENT_GUIDE.md` | KEEP | Operator guide |
 | `docs/TELEGRAM_GUIDE.md` | KEEP | Telegram guide |
 | `docs/GATEWAY.md` | REWRITE | External IBKR install guidance |

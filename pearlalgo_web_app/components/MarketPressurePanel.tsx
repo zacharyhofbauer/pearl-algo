@@ -1,16 +1,7 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
-
-interface BuySellPressure {
-  bias: 'buyers' | 'sellers' | 'mixed'
-  strength: 'flat' | 'light' | 'moderate' | 'strong'
-  score: number
-  score_pct: number
-  lookback_bars: number
-  total_volume: number
-  volume_ratio: number
-}
+import type { BuySellPressure } from '@/stores'
 
 interface MarketPressurePanelProps {
   pressure: BuySellPressure | null

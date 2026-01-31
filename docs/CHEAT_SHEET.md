@@ -289,11 +289,11 @@ journalctl -u pearlalgo-mnq.service -p err
 
 ---
 
-## 8. Live Main Chart
+## 8. Pearl Algo Web App
 
 A web-based TradingView-style chart with **real-time IBKR data**, indicators, and trade markers.
 
-> ✅ **Data Source:** Live IBKR market data (often AHEAD of TradingView by 1-2 candles!)  
+> ✅ **Data Source:** Live IBKR market data (often AHEAD of TradingView by 1-2 candles!)
 > ⚠️ **Requires:** Node.js 20.x + IBKR Gateway connected. Shows "No Data" if IBKR is offline.
 
 **First-time setup (Node.js):**
@@ -307,8 +307,9 @@ sudo apt-get install -y nodejs
 **Start/Stop:**
 
 ```bash
-./scripts/live-chart/start.sh --market NQ   # Start (API + Chart)
-./scripts/live-chart/stop.sh                # Stop all
+./pearl.sh webapp start     # Start (API + Chart)
+./pearl.sh webapp stop      # Stop all
+./pearl.sh webapp restart   # Restart all
 ```
 
 **Access:**
@@ -325,15 +326,19 @@ sudo apt-get install -y nodejs
 | **Indicators** | EMA9 (cyan), EMA21 (yellow), VWAP (purple dashed) |
 | **RSI Panel** | Separate RSI(14) panel with overbought/oversold lines |
 | **Trade Markers** | Entry arrows and Exit dots with hover tooltips showing signal details |
+| **WebSocket Updates** | Real-time state updates via WebSocket |
+| **Error Boundaries** | Graceful component failure handling |
 
 **Environment Variables (.env):**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `IB_CLIENT_ID_LIVE_CHART` | `97` | IBKR client ID (must be unique!) |
+| `IB_CLIENT_ID_LIVE_CHART` | `88` | IBKR client ID (must be unique!) |
 | `PEARL_MINI_APP_URL` | `https://pearlalgo.io/` | Public HTTPS URL |
 | `PEARL_API_PORT` | `8000` | API server port |
 | `PEARL_CHART_PORT` | `3001` | Chart web interface port |
+| `PEARL_API_AUTH_ENABLED` | `false` | Enable API key authentication |
+| `PEARL_API_KEY` | *(auto-gen)* | API key for protected endpoints |
 
 ⚠️ **Client ID Conflicts:** If you see "Error 326: client id already in use", change `IB_CLIENT_ID_LIVE_CHART` to an unused ID (96, 95, etc.) and restart.
 
@@ -376,7 +381,7 @@ systemctl status cloudflared-pearlalgo  # Systemd service status
 **Troubleshooting:**
 - **pearlalgo.io unreachable**: Run `./pearl.sh tunnel status` - if not running, run `sudo ./scripts/setup-cloudflared-service.sh`
 - **Chart shows "No Data"**: IBKR Gateway is offline or disconnected
-- **Chart not loading**: Check if live-chart processes are running (`./pearl.sh chart status`)
+- **Chart not loading**: Check if web app processes are running (`./pearl.sh webapp status`)
 - **Data delayed**: This is normal! Chart often shows fresher data than TradingView
 
 ---

@@ -130,7 +130,7 @@ pgrep -f Xvfb || Xvfb :99 -screen 0 1024x768x24 &
 export DISPLAY=:99
 ```
 
-### Live chart screenshot capture (optional)
+### Pearl Algo Web App screenshot capture (optional)
 
 Telegram dashboard screenshots use Playwright:
 

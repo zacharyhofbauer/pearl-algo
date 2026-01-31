@@ -2,53 +2,7 @@
 
 import { useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-
-interface SessionPerformance {
-  id: string
-  name: string
-  pnl: number
-  wins: number
-  losses: number
-  win_rate: number
-}
-
-interface HourStats {
-  hour: number
-  hour_label: string
-  pnl: number
-  trades: number
-  win_rate: number
-}
-
-interface DurationStats {
-  id: string
-  name: string
-  pnl: number
-  wins: number
-  losses: number
-  win_rate: number
-}
-
-interface DirectionBreakdown {
-  long: { count: number; pnl: number }
-  short: { count: number; pnl: number }
-}
-
-interface StatusBreakdown {
-  generated: number
-  entered: number
-  exited: number
-  cancelled: number
-}
-
-interface AnalyticsData {
-  session_performance: SessionPerformance[]
-  best_hours: HourStats[]
-  worst_hours: HourStats[]
-  hold_duration: DurationStats[]
-  direction_breakdown: DirectionBreakdown
-  status_breakdown: StatusBreakdown
-}
+import type { AnalyticsData } from '@/stores'
 
 interface AnalyticsPanelProps {
   analytics: AnalyticsData

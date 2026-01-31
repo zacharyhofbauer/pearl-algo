@@ -1426,7 +1426,7 @@ The system is ready for production use and optimized for prop firm trading with 
 
 ## Recent Updates (v0.2.4)
 
-### Live Chart Enhancements (2026-01-29)
+### Pearl Algo Web App Enhancements (2026-01-29)
 - **Web-based TradingView-style chart** using lightweight-charts library
 - **Features:**
   - Timeframe selector (1m, 5m, 15m, 1h)
@@ -1435,6 +1435,10 @@ The system is ready for production use and optimized for prop firm trading with 
   - EMA9 (cyan), EMA21 (yellow), VWAP (purple dashed) indicators
   - RSI(14) panel with overbought/oversold lines
   - Trade markers with hover tooltips showing signal details
+  - WebSocket real-time updates with authentication
+  - Zustand state management with 3 stores (agent, chart, UI)
+  - Jest/React Testing Library test suite (71 tests)
+  - Error boundaries for graceful component failures
 - **Port change:** Now runs on port 3001 (was 3000)
 - **Requires:** Node.js 20.x for Next.js 14.1.0
 
@@ -1451,7 +1455,7 @@ The system is ready for production use and optimized for prop firm trading with 
   - Useful for prop firm account resets
 
 ### Infrastructure
-- Node.js 20.x now required for live-chart (Next.js 14)
+- Node.js 20.x now required for Pearl Algo Web App (Next.js 14)
 - Cloudflared installed for tunnel management
 
 ---

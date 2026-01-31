@@ -1,48 +1,13 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
-
-interface CadenceMetrics {
-  cycle_duration_ms: number
-  duration_p50_ms: number
-  duration_p95_ms: number
-  velocity_mode_active: boolean
-  velocity_reason: string
-  missed_cycles: number
-  current_interval_seconds: number
-  cadence_lag_ms: number
-}
-
-interface GatewayStatus {
-  process_running: boolean
-  port_listening: boolean
-  port: number
-  status: 'online' | 'offline' | 'degraded'
-}
-
-interface ConnectionHealth {
-  connection_failures: number
-  data_fetch_errors: number
-  data_level: string
-  consecutive_errors: number
-  last_successful_fetch?: string | null
-}
-
-interface ErrorSummary {
-  session_error_count: number
-  last_error: string | null
-  last_error_time: string | null
-}
-
-interface DataQuality {
-  latest_bar_age_minutes: number | null
-  stale_threshold_minutes: number
-  buffer_size: number | null
-  buffer_target: number
-  quiet_reason: string | null
-  is_expected_stale: boolean
-  is_stale: boolean
-}
+import type {
+  CadenceMetrics,
+  GatewayStatus,
+  ConnectionHealth,
+  ErrorSummary,
+  DataQuality
+} from '@/stores'
 
 interface SystemHealthPanelProps {
   cadenceMetrics: CadenceMetrics | null

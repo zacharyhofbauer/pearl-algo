@@ -2,23 +2,10 @@
 
 import { useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-
-interface PeriodStats {
-  pnl: number
-  trades: number
-  wins: number
-  losses: number
-  win_rate: number
-  streak?: number
-  streak_type?: string
-}
+import type { PeriodStats, PerformanceStats } from '@/stores'
 
 interface PerformancePanelProps {
-  performance: {
-    '24h': PeriodStats
-    '72h': PeriodStats
-    '30d': PeriodStats
-  }
+  performance: PerformanceStats
   expectancy?: number  // From risk metrics
 }
 

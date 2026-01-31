@@ -1,29 +1,7 @@
 'use client'
 
 import { DataPanel } from './DataPanelsContainer'
-
-interface TopLoss {
-  signal_id: string
-  pnl: number
-  exit_reason: string
-}
-
-interface RiskMetrics {
-  max_drawdown: number
-  max_drawdown_pct: number
-  sharpe_ratio: number | null
-  profit_factor: number | null
-  avg_win: number
-  avg_loss: number
-  avg_rr: number | null
-  largest_win: number
-  largest_loss: number
-  expectancy: number
-  // Exposure metrics
-  max_concurrent_positions_peak?: number
-  max_stop_risk_exposure?: number
-  top_losses?: TopLoss[]
-}
+import type { RiskMetrics } from '@/stores'
 
 interface RiskMetricsPanelProps {
   riskMetrics: RiskMetrics

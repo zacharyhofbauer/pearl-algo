@@ -6,11 +6,11 @@ Production-ready market trading agent with a modular architecture:
 data providers (IBKR), strategy/scanner/signal generation, state + metrics, Telegram UI,
 and optional execution + learning layers (disabled/safe by default).
 
-## Live Main Chart (Telegram + Mini App)
+## Pearl Algo Web App (Telegram + Mini App)
 
 ![Telegram dashboard](docs/assets/telegram-dashboard.png)
 
-See `docs/LIVE_CHART.md` for Mini App setup (public HTTPS required) and screenshot capture.
+See `docs/PEARL_WEB_APP.md` for Mini App setup (public HTTPS required) and screenshot capture.
 
 ## Quick start (local)
 

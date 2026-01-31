@@ -43,7 +43,7 @@ Key points:
 - BotFather requires a **public HTTPS URL** (it will reject `localhost`)
 - Set the URL in BotFather, and also set `PEARL_MINI_APP_URL` so the dashboard shows a **📈 Live** button.
 
-See `docs/LIVE_CHART.md` for deployment/tunnel options and CORS settings.
+See `docs/PEARL_WEB_APP.md` for deployment/tunnel options and CORS settings.
 
 ## Supported commands
 

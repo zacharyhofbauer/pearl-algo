@@ -34,8 +34,8 @@ All other documents must remain consistent with this summary.
 - `MARKET_DATA_SUBSCRIPTION.md`
   - Canonical fix guide for IBKR **Error 354** (market data subscriptions + API acknowledgement)
   - Reference for entitlements/subscription troubleshooting during market hours
-- `LIVE_CHART.md`
-  - Live Main Chart (Next.js + API server)
+- `PEARL_WEB_APP.md`
+  - Pearl Algo Web App (Next.js + API server)
   - Telegram dashboard screenshots (Playwright) + Mini App (in-Telegram web view)
 - `TELEGRAM_GUIDE.md`
   - Single canonical Telegram integration guide

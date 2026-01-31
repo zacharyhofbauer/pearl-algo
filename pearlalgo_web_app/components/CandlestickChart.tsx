@@ -2,46 +2,11 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time } from 'lightweight-charts'
-
-interface CandleData {
-  time: number
-  open: number
-  high: number
-  low: number
-  close: number
-  volume?: number
-}
-
-interface IndicatorData {
-  time: number
-  value: number
-}
-
-interface MarkerData {
-  time: number
-  position: 'aboveBar' | 'belowBar'
-  color: string
-  shape: 'arrowUp' | 'arrowDown' | 'circle'
-  text: string
-  // Tooltip metadata
-  kind?: 'entry' | 'exit'
-  signal_id?: string
-  direction?: string
-  entry_price?: number
-  exit_price?: number
-  pnl?: number
-  reason?: string
-  exit_reason?: string
-}
+import type { CandleData, IndicatorData, MarkerData, Indicators } from '@/stores'
 
 interface ChartProps {
   data: CandleData[]
-  indicators?: {
-    ema9?: IndicatorData[]
-    ema21?: IndicatorData[]
-    vwap?: IndicatorData[]
-    rsi?: IndicatorData[]
-  }
+  indicators?: Indicators
   markers?: MarkerData[]
   barSpacing?: number
   onChartReady?: (chart: IChartApi | null) => void

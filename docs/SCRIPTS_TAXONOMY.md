@@ -103,22 +103,25 @@ RAG (Retrieval-Augmented Generation) system for CLI-based AI assistance and code
 
 **Note**: Knowledge module provides CLI AI assistance. Configuration in `config/config.yaml` under `knowledge:` section.
 
-## Live Main Chart (`scripts/live-chart/`)
+## Pearl Algo Web App (`pearlalgo_web_app/`)
 
-Web-based TradingView chart interface for real-time market visualization.
+Web-based TradingView chart interface for real-time market visualization. Uses Next.js 14 with TypeScript.
 
-- `start.sh`
-  - **Role**: Start both the API server and the Next.js chart interface.
-  - **Usage**: `./scripts/live-chart/start.sh [--market NQ] [--install]`
-  - **Ports**: API at `:8000`, Chart at `:3001`
-- `stop.sh`
-  - **Role**: Stop the Live Main Chart services.
-  - **Usage**: `./scripts/live-chart/stop.sh`
-- `api_server.py`
-  - **Role**: FastAPI server providing OHLCV data, agent state, and recent trades to the chart frontend.
-  - **Endpoints**: `/api/candles`, `/api/state`, `/api/trades`, `/health`
+**Start/Stop via pearl.sh:**
+- `./pearl.sh webapp start` - Start API server + Next.js chart
+- `./pearl.sh webapp stop` - Stop web app services
+- `./pearl.sh webapp restart` - Restart web app
 
-**Note**: The Live Main Chart is separate from the Telegram dashboard. It provides an interactive web view and can be used for Telegram screenshot captures via Playwright when `PEARL_USE_LIVE_CHART=1`.
+**Components:**
+- `scripts/pearlalgo_web_app/api_server.py`
+  - **Role**: FastAPI server providing OHLCV data, agent state, indicators, and trades to the chart frontend.
+  - **Port**: 8000 (default)
+  - **Endpoints**: `/api/candles`, `/api/indicators`, `/api/markers`, `/api/state`, `/api/trades`, `/api/analytics`, `/api/market-status`, `/ws`, `/health`
+- `pearlalgo_web_app/`
+  - **Role**: Next.js 14 frontend with TypeScript, Zustand state management, and WebSocket real-time updates.
+  - **Port**: 3001 (default)
+
+**Note**: The Pearl Algo Web App provides an interactive web view and can be used for Telegram screenshot captures via Playwright. See `docs/PEARL_WEB_APP.md` for details.
 
 ## Ops Shortcuts (`scripts/`)
 

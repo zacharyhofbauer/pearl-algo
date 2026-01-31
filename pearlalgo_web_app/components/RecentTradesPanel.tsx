@@ -2,35 +2,7 @@
 
 import { useState } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-
-interface RecentExit {
-  signal_id: string
-  direction: string
-  pnl: number
-  exit_reason: string
-  exit_time: string
-  entry_time?: string
-  entry_price?: number
-  exit_price?: number
-  entry_reason?: string
-  duration_seconds?: number
-  // NEW: ML and regime data
-  ml_probability?: number
-  regime_at_entry?: string
-  target_points?: number
-}
-
-interface DirectionBreakdown {
-  long: { count: number; pnl: number }
-  short: { count: number; pnl: number }
-}
-
-interface StatusBreakdown {
-  generated: number
-  entered: number
-  exited: number
-  cancelled: number
-}
+import type { RecentExit, DirectionBreakdown, StatusBreakdown } from '@/stores'
 
 interface RecentTradesPanelProps {
   recentExits: RecentExit[]

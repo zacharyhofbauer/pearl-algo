@@ -33,6 +33,7 @@ export interface ChallengeStatus {
   outcome: 'active' | 'pass' | 'fail'
   profit_target: number
   max_drawdown: number
+  attempt_number?: number
 }
 
 export interface PeriodStats {
@@ -62,6 +63,16 @@ export interface RecentExit {
   exit_price?: number
   entry_reason?: string
   duration_seconds?: number
+  // ML and regime data
+  ml_probability?: number
+  regime_at_entry?: string
+  target_points?: number
+}
+
+export interface TopLoss {
+  signal_id: string
+  pnl: number
+  exit_reason: string
 }
 
 export interface RiskMetrics {
@@ -75,6 +86,10 @@ export interface RiskMetrics {
   largest_win: number
   largest_loss: number
   expectancy: number
+  // Exposure metrics
+  max_concurrent_positions_peak?: number
+  max_stop_risk_exposure?: number
+  top_losses?: TopLoss[]
 }
 
 export interface BuySellPressure {
@@ -174,6 +189,59 @@ export interface EquityCurvePoint {
   value: number
 }
 
+// Analytics types
+export interface SessionPerformance {
+  id: string
+  name: string
+  pnl: number
+  wins: number
+  losses: number
+  win_rate: number
+}
+
+export interface HourStats {
+  hour: number
+  hour_label: string
+  pnl: number
+  trades: number
+  win_rate: number
+}
+
+export interface DurationStats {
+  id: string
+  name: string
+  pnl: number
+  wins: number
+  losses: number
+  win_rate: number
+}
+
+export interface DirectionBreakdown {
+  long: { count: number; pnl: number }
+  short: { count: number; pnl: number }
+}
+
+export interface StatusBreakdown {
+  generated: number
+  entered: number
+  exited: number
+  cancelled: number
+}
+
+export interface AnalyticsData {
+  session_performance: SessionPerformance[]
+  best_hours: HourStats[]
+  worst_hours: HourStats[]
+  hold_duration: DurationStats[]
+  direction_breakdown: DirectionBreakdown
+  status_breakdown: StatusBreakdown
+}
+
+export interface PearlSuggestion {
+  message: string
+  action: string
+}
+
 export interface AgentState {
   running: boolean
   paused: boolean
@@ -200,6 +268,8 @@ export interface AgentState {
   error_summary: ErrorSummary | null
   config: Config | null
   data_quality: DataQuality | null
+  analytics: AnalyticsData | null
+  pearl_suggestion: PearlSuggestion | null
 }
 
 interface AgentStore {
@@ -243,6 +313,8 @@ const initialAgentState: AgentState = {
   error_summary: null,
   config: null,
   data_quality: null,
+  analytics: null,
+  pearl_suggestion: null,
 }
 
 export const useAgentStore = create<AgentStore>()(
@@ -295,3 +367,10 @@ export const selectChallenge = (state: AgentStore) => state.agentState?.challeng
 export const selectAIStatus = (state: AgentStore) => state.agentState?.ai_status
 export const selectCadenceMetrics = (state: AgentStore) => state.agentState?.cadence_metrics
 export const selectGatewayStatus = (state: AgentStore) => state.agentState?.gateway_status
+export const selectAnalytics = (state: AgentStore) => state.agentState?.analytics
+export const selectRecentExits = (state: AgentStore) => state.agentState?.recent_exits ?? []
+export const selectRiskMetrics = (state: AgentStore) => state.agentState?.risk_metrics
+export const selectEquityCurve = (state: AgentStore) => state.agentState?.equity_curve ?? []
+export const selectMarketRegime = (state: AgentStore) => state.agentState?.market_regime
+export const selectBuySellPressure = (state: AgentStore) => state.agentState?.buy_sell_pressure
+export const selectConfig = (state: AgentStore) => state.agentState?.config

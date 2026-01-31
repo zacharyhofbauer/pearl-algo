@@ -2,26 +2,10 @@
 
 import { useEffect, useRef, useMemo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
-
-interface EquityCurvePoint {
-  time: number
-  value: number
-}
+import type { EquityCurvePoint, ChallengeStatus } from '@/stores'
 
 interface ChallengePanelProps {
-  challenge: {
-    enabled: boolean
-    current_balance: number
-    pnl: number
-    trades: number
-    wins: number
-    win_rate: number
-    drawdown_risk_pct: number
-    outcome: 'active' | 'pass' | 'fail'
-    profit_target: number
-    max_drawdown: number
-    attempt_number?: number
-  } | null
+  challenge: ChallengeStatus | null
   equityCurve?: EquityCurvePoint[]
 }
 
