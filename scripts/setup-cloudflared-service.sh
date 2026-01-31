@@ -15,7 +15,7 @@ fi
 
 SERVICE_NAME="cloudflared-pearlalgo"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-CONFIG_PATH="/home/pearlalgo/.cloudflared/config.yml"
+CONFIG_PATH="$HOME/.cloudflared/config.yml"
 CLOUDFLARED_BIN="/usr/local/bin/cloudflared"
 
 echo "========================================"

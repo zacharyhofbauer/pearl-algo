@@ -1,7 +1,7 @@
 {
-  "name": "PEARL Live Chart",
-  "short_name": "PEARL",
-  "description": "Live TradingView chart for PEARL AI trading",
+  "name": "Pearl Algo Web App",
+  "short_name": "Pearl Algo",
+  "description": "Pearl Algo trading dashboard and monitoring",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",

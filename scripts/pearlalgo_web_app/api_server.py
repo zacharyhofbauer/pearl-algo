@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Live Main Chart API Server - Serves OHLCV data for the TradingView chart.
+Pearl Algo Web App API Server - Serves OHLCV data for the TradingView chart.
 
 Endpoints:
   GET /api/candles?symbol=MNQ&timeframe=5m&bars=72
@@ -9,7 +9,7 @@ Endpoints:
   GET /health - Health check
 
 Usage:
-  python scripts/live-chart/api_server.py --market NQ --port 8000
+  python scripts/pearlalgo_web_app/api_server.py --market NQ --port 8000
 """
 
 from __future__ import annotations
@@ -364,18 +364,18 @@ def _calculate_indicators(candles: List[Dict[str, Any]]) -> Dict[str, List[Dict[
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="PEARL Live Chart API",
-    description="API for the PEARL Live Main Chart",
+    title="Pearl Algo Web App API",
+    description="API for the Pearl Algo Web App",
     version="1.0.0",
 )
 
 def _cors_origins() -> list[str]:
     """
-    Allowed web origins for the Live Chart UI.
+    Allowed web origins for the Pearl Algo Web App UI.
 
     - Local dev defaults include localhost ports.
     - For Telegram Mini App / production deployments, set:
-        PEARL_LIVE_CHART_ORIGINS="https://your-domain.com,https://another-domain.com"
+        PEARL_WEB_APP_ORIGINS="https://your-domain.com,https://another-domain.com"
     """
     raw = str(os.getenv("PEARL_LIVE_CHART_ORIGINS") or "").strip()
     if raw:
@@ -1095,6 +1095,187 @@ def _get_cadence_metrics_enhanced(state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _get_gateway_status() -> Dict[str, Any]:
+    """
+    Check IBKR Gateway status: process running and port listening.
+
+    Returns gateway health for live chart display.
+    """
+    import socket
+    import subprocess
+
+    gateway_port = int(os.getenv("IB_PORT", "4002"))
+    process_running = False
+    port_listening = False
+
+    # Check if any IBKR Gateway process is running
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "ibgateway|IBGateway|ibg"],
+            capture_output=True,
+            timeout=2,
+        )
+        process_running = result.returncode == 0
+    except Exception:
+        # If pgrep fails, try checking port as fallback
+        pass
+
+    # Check if gateway port is listening
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            result = s.connect_ex(("127.0.0.1", gateway_port))
+            port_listening = result == 0
+    except Exception:
+        pass
+
+    # Determine overall status
+    if process_running and port_listening:
+        status = "online"
+    elif port_listening:
+        status = "online"  # Port responding is what matters
+    elif process_running:
+        status = "degraded"  # Process up but port not responding
+    else:
+        status = "offline"
+
+    return {
+        "process_running": process_running,
+        "port_listening": port_listening,
+        "port": gateway_port,
+        "status": status,
+    }
+
+
+def _get_connection_health(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract connection health metrics from agent state.
+
+    Includes connection failures, data fetch errors, and data level.
+    """
+    # Connection metrics are tracked in state.json
+    connection = state.get("connection", {})
+    data_provider = state.get("data_provider", {})
+
+    return {
+        "connection_failures": connection.get("failures", 0),
+        "data_fetch_errors": connection.get("data_fetch_errors", 0),
+        "data_level": data_provider.get("data_level", "UNKNOWN"),
+        "consecutive_errors": connection.get("consecutive_errors", 0),
+        "last_successful_fetch": connection.get("last_successful_fetch"),
+    }
+
+
+def _get_error_summary(state_dir: Path, state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Get error summary from state and logs.
+
+    Returns session error count and last error message.
+    """
+    error_count = state.get("session_error_count", 0)
+    last_error = state.get("last_error")
+    last_error_time = state.get("last_error_time")
+
+    # Try to get more details from error log if available
+    error_log = state_dir / "errors.log"
+    if last_error is None and error_log.exists():
+        try:
+            # Read last line of error log
+            lines = error_log.read_text().strip().split("\n")
+            if lines and lines[-1]:
+                last_line = lines[-1]
+                # Parse if it's a JSON line
+                try:
+                    error_data = json.loads(last_line)
+                    last_error = error_data.get("message", last_line[:100])
+                    last_error_time = error_data.get("timestamp")
+                except json.JSONDecodeError:
+                    last_error = last_line[:100]
+        except Exception:
+            pass
+
+    # Truncate error message if too long
+    if last_error and len(last_error) > 80:
+        last_error = last_error[:77] + "..."
+
+    return {
+        "session_error_count": error_count,
+        "last_error": last_error,
+        "last_error_time": last_error_time,
+    }
+
+
+def _get_config(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract agent configuration for display.
+
+    Returns symbol, timeframe, scan interval, session times, and mode.
+    """
+    config = state.get("config", {})
+
+    # Determine agent mode
+    running = state.get("running", False)
+    paused = state.get("paused", False)
+    shadow_mode = state.get("shadow_mode", False)
+
+    if not running:
+        mode = "stopped"
+    elif paused:
+        mode = "paused"
+    elif shadow_mode:
+        mode = "shadow"
+    else:
+        mode = "live"
+
+    return {
+        "symbol": config.get("symbol", state.get("symbol", "MNQ")),
+        "market": config.get("market", state.get("market", "NQ")),
+        "timeframe": config.get("timeframe", state.get("timeframe", "5m")),
+        "scan_interval": config.get("scan_interval", state.get("scan_interval_seconds", 30)),
+        "session_start": config.get("session_start_time", state.get("session_start", "09:30")),
+        "session_end": config.get("session_end_time", state.get("session_end", "16:00")),
+        "mode": mode,
+    }
+
+
+def _get_data_quality(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Get extended data quality metrics.
+
+    Includes data age, buffer size, stale reason, and expected stale indicator.
+    """
+    data_quality = state.get("data_quality", {})
+    data_provider = state.get("data_provider", {})
+
+    # Get latest bar age
+    latest_bar_age = data_quality.get("latest_bar_age_minutes", data_provider.get("latest_bar_age_minutes"))
+    stale_threshold = data_quality.get("stale_threshold_minutes", 2.0)
+
+    # Buffer info
+    buffer_size = data_provider.get("buffer_size", data_quality.get("buffer_size"))
+    buffer_target = data_provider.get("buffer_target", data_quality.get("buffer_target", 500))
+
+    # Stale reason and expectation
+    quiet_reason = state.get("quiet_reason")
+    is_expected_stale = state.get("is_expected_stale", False)
+
+    # If we're outside market hours, stale data is expected
+    if not state.get("futures_market_open", True):
+        is_expected_stale = True
+        if not quiet_reason:
+            quiet_reason = "Market closed"
+
+    return {
+        "latest_bar_age_minutes": round(latest_bar_age, 2) if latest_bar_age is not None else None,
+        "stale_threshold_minutes": stale_threshold,
+        "buffer_size": buffer_size,
+        "buffer_target": buffer_target,
+        "quiet_reason": quiet_reason,
+        "is_expected_stale": is_expected_stale,
+        "is_stale": not state.get("data_fresh", True),
+    }
+
+
 @app.get("/api/state")
 async def get_state():
     """Get current agent state with AI status, challenge, performance, and suggestions."""
@@ -1162,6 +1343,21 @@ async def get_state():
 
         # NEW: Shadow mode counters
         "shadow_counters": _get_shadow_counters(state),
+
+        # NEW: Gateway status (process + port check)
+        "gateway_status": _get_gateway_status(),
+
+        # NEW: Connection health
+        "connection_health": _get_connection_health(state),
+
+        # NEW: Error summary
+        "error_summary": _get_error_summary(_state_dir, state),
+
+        # NEW: Config for display
+        "config": _get_config(state),
+
+        # NEW: Extended data quality
+        "data_quality": _get_data_quality(state),
     }
 
 
@@ -1592,7 +1788,7 @@ async def get_sessions(hours: int = Query(default=6, ge=1, le=24)):
 def main():
     global _market, _state_dir
 
-    parser = argparse.ArgumentParser(description="Live Chart API Server")
+    parser = argparse.ArgumentParser(description="Pearl Algo Web App API Server")
     parser.add_argument("--market", default=os.getenv("PEARLALGO_MARKET", DEFAULT_MARKET))
     parser.add_argument("--host", default=os.getenv("API_HOST", DEFAULT_HOST))
     parser.add_argument("--port", type=int, default=int(os.getenv("API_PORT", DEFAULT_PORT)))
@@ -1602,7 +1798,7 @@ def main():
     _market = str(args.market or DEFAULT_MARKET).strip().upper()
     _state_dir = _resolve_state_dir(_market)
 
-    print(f"Starting Live Chart API Server")
+    print(f"Starting Pearl Algo Web App API Server")
     print(f"  Market: {_market}")
     print(f"  State dir: {_state_dir}")
     print(f"  Listening: http://{args.host}:{args.port}")
@@ -1625,11 +1821,11 @@ def main():
     if args.reload:
         # Use uvicorn's reload feature for development
         uvicorn.run(
-            "scripts.live-chart.api_server:app",
+            "scripts.pearlalgo_web_app.api_server:app",
             host=args.host,
             port=args.port,
             reload=True,
-            reload_dirs=[str(PROJECT_ROOT / "scripts" / "live-chart")],
+            reload_dirs=[str(PROJECT_ROOT / "scripts" / "pearlalgo_web_app")],
             log_level="info",
         )
     else:

@@ -118,15 +118,15 @@ check_chart_status() {
     local chart_running=$(pgrep -f "next" &>/dev/null && echo "yes" || echo "no")
     
     if [ "$api_running" = "yes" ] && [ "$chart_running" = "yes" ]; then
-        echo -e "${GREEN}●${NC} Live Chart - API + Web running"
+        echo -e "${GREEN}●${NC} Web App - API + Web running"
     elif [ "$api_running" = "yes" ]; then
-        echo -e "${YELLOW}●${NC} Live Chart - API only"
+        echo -e "${YELLOW}●${NC} Web App - API only"
         return 1
     elif [ "$chart_running" = "yes" ]; then
-        echo -e "${YELLOW}●${NC} Live Chart - Web only (no API)"
+        echo -e "${YELLOW}●${NC} Web App - Web only (no API)"
         return 1
     else
-        echo -e "${RED}●${NC} Live Chart"
+        echo -e "${RED}●${NC} Web App"
         return 1
     fi
 }
@@ -229,33 +229,33 @@ start_telegram() {
 
 start_chart() {
     if [ "$NO_CHART" = true ]; then
-        echo -e "${YELLOW}⏭ Skipping Live Chart (--no-chart)${NC}"
+        echo -e "${YELLOW}⏭ Skipping Web App (--no-chart)${NC}"
         return
     fi
-    
+
     # Check if already running
     if pgrep -f "api_server.py" &>/dev/null && pgrep -f "next" &>/dev/null; then
-        echo -e "${YELLOW}⏭ Live Chart already running${NC}"
+        echo -e "${YELLOW}⏭ Web App already running${NC}"
         return
     fi
-    
-    echo -e "${CYAN}▶ Starting Live Chart (pearlalgo.io)...${NC}"
-    
+
+    echo -e "${CYAN}▶ Starting Web App (pearlalgo.io)...${NC}"
+
     local LOG_DIR="$SCRIPT_DIR/logs"
-    local CHART_DIR="$SCRIPT_DIR/live-chart"
+    local CHART_DIR="$SCRIPT_DIR/pearlalgo_web_app"
     local API_PORT="${PEARL_API_PORT:-8000}"
     local CHART_PORT="${PEARL_CHART_PORT:-3001}"
-    
+
     # Start API server
     if ! pgrep -f "api_server.py" &>/dev/null; then
-        python3 scripts/live-chart/api_server.py --market "$MARKET" --port "$API_PORT" > "$LOG_DIR/live_chart_api.log" 2>&1 &
+        python3 scripts/pearlalgo_web_app/api_server.py --market "$MARKET" --port "$API_PORT" > "$LOG_DIR/web_app_api.log" 2>&1 &
         echo "   API server started (port $API_PORT)"
     fi
-    
-    # Start chart web interface
+
+    # Start web interface
     if ! pgrep -f "next" &>/dev/null; then
         cd "$CHART_DIR"
-        PORT=$CHART_PORT npm run dev > "$LOG_DIR/live_chart_web.log" 2>&1 &
+        PORT=$CHART_PORT npm run dev > "$LOG_DIR/web_app.log" 2>&1 &
         cd "$SCRIPT_DIR"
         echo "   Chart web started (port $CHART_PORT)"
     fi
@@ -287,7 +287,7 @@ start_tunnel() {
     # Fall back to manual start
     local LOG_DIR="$SCRIPT_DIR/logs"
     mkdir -p "$LOG_DIR"
-    nohup cloudflared --config /home/pearlalgo/.cloudflared/config.yml tunnel run > "$LOG_DIR/cloudflared.log" 2>&1 &
+    nohup cloudflared --config "$HOME/.cloudflared/config.yml" tunnel run > "$LOG_DIR/cloudflared.log" 2>&1 &
     sleep 2
     if pgrep -f "cloudflared.*tunnel run" &>/dev/null; then
         echo "   Tunnel started (manual)"
@@ -347,10 +347,10 @@ stop_telegram() {
 }
 
 stop_chart() {
-    echo -e "${CYAN}■ Stopping Live Chart...${NC}"
+    echo -e "${CYAN}■ Stopping Web App...${NC}"
     pkill -f "api_server.py" 2>/dev/null && echo "   Stopped API server" || echo "   API server not running"
     pkill -f "next-server" 2>/dev/null || true
-    pkill -f "next dev" 2>/dev/null && echo "   Stopped chart web" || echo "   Chart web not running"
+    pkill -f "next dev" 2>/dev/null && echo "   Stopped web app" || echo "   Web app not running"
     echo ""
 }
 
@@ -560,21 +560,21 @@ show_help() {
     echo "  gateway <start|stop|status>    Control IB Gateway"
     echo "  agent <start|stop|status>      Control Market Agent"
     echo "  telegram <start|stop|status>   Control Telegram Handler"
-    echo "  chart <start|stop|status>      Control Live Chart (pearlalgo.io)"
+    echo "  chart <start|stop|status>      Control Web App (pearlalgo.io)"
     echo "  tunnel <start|stop|status|logs|setup>  Control Cloudflare Tunnel"
     echo ""
     echo -e "${CYAN}Options:${NC}"
     echo "  --market NQ|ES|GC    Market to trade (default: NQ)"
     echo "  --no-telegram        Skip Telegram handler"
-    echo "  --no-chart           Skip Live Chart"
+    echo "  --no-chart           Skip Web App"
     echo "  --foreground         Run agent in foreground"
     echo ""
     echo -e "${CYAN}Examples:${NC}"
     echo "  ./pearl.sh start                    # Start everything"
     echo "  ./pearl.sh start --market ES        # Start for ES market"
-    echo "  ./pearl.sh start --no-chart         # Start without Live Chart"
+    echo "  ./pearl.sh start --no-chart         # Start without Web App"
     echo "  ./pearl.sh restart                  # Restart everything"
-    echo "  ./pearl.sh chart restart            # Restart just Live Chart"
+    echo "  ./pearl.sh chart restart            # Restart just Web App"
     echo "  ./pearl.sh tunnel status            # Check tunnel + public access"
     echo "  ./pearl.sh tunnel logs              # View tunnel logs"
     echo "  ./pearl.sh status                   # Check all services"

@@ -44,7 +44,7 @@ export default function HelpPanel() {
               <code>./pearl.sh telegram start|stop|status</code>
               <span>Telegram Bot</span>
               <code>./pearl.sh chart start|stop|restart</code>
-              <span>Live Chart (this site)</span>
+              <span>Web App (this site)</span>
               <code>./pearl.sh tunnel status|logs</code>
               <span>Cloudflare Tunnel</span>
             </div>

@@ -1,18 +1,18 @@
 #!/bin/bash
 # ============================================================================
-# PEARL Live Main Chart Startup Script
-# 
+# Pearl Algo Web App Startup Script
+#
 # Launches the API server and TradingView chart web interface.
-# 
+#
 # Usage:
-#   ./scripts/live-chart/start.sh [--market NQ] [--install]
+#   ./scripts/pearlalgo_web_app/start.sh [--market NQ] [--install]
 # ============================================================================
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-CHART_DIR="$PROJECT_ROOT/live-chart"
+CHART_DIR="$PROJECT_ROOT/pearlalgo_web_app"
 LOG_DIR="$PROJECT_ROOT/logs"
 
 MARKET="${PEARLALGO_MARKET:-NQ}"
@@ -35,12 +35,12 @@ done
 mkdir -p "$LOG_DIR"
 
 echo "========================================"
-echo "  PEARL Live Main Chart"
+echo "  Pearl Algo Web App"
 echo "========================================"
 echo ""
 echo "  Market:     $MARKET"
 echo "  API Port:   $API_PORT"
-echo "  Chart URL:  http://localhost:$CHART_PORT"
+echo "  Web App:    http://localhost:$CHART_PORT"
 echo ""
 
 # Install deps if needed
@@ -51,7 +51,7 @@ if [[ "$INSTALL_DEPS" == "true" ]] && [[ -d "$CHART_DIR" ]]; then
 fi
 
 if [[ "$CHART_ONLY" == "false" ]] && [[ ! -d "$CHART_DIR/node_modules" ]]; then
-    echo "Installing chart dependencies..."
+    echo "Installing web app dependencies..."
     cd "$CHART_DIR" && npm install
     cd "$PROJECT_ROOT"
 fi
@@ -70,26 +70,26 @@ if [[ "$CHART_ONLY" == "false" ]]; then
     echo "Starting API server..."
     cd "$PROJECT_ROOT"
     source .venv/bin/activate 2>/dev/null || true
-    python3 scripts/live-chart/api_server.py --market "$MARKET" --port "$API_PORT" > "$LOG_DIR/live_chart_api.log" 2>&1 &
+    python3 scripts/pearlalgo_web_app/api_server.py --market "$MARKET" --port "$API_PORT" > "$LOG_DIR/web_app_api.log" 2>&1 &
     API_PID=$!
     echo "  API PID: $API_PID"
     sleep 2
 fi
 
-# Start chart web interface
+# Start web interface
 if [[ "$API_ONLY" == "false" ]]; then
-    echo "Starting Live Main Chart..."
+    echo "Starting Pearl Algo Web App..."
     cd "$CHART_DIR"
-    PORT=$CHART_PORT npm run dev > "$LOG_DIR/live_chart_web.log" 2>&1 &
+    PORT=$CHART_PORT npm run dev > "$LOG_DIR/web_app.log" 2>&1 &
     CHART_PID=$!
-    echo "  Chart PID: $CHART_PID"
+    echo "  Web App PID: $CHART_PID"
     cd "$PROJECT_ROOT"
     sleep 3
 fi
 
 echo ""
 echo "========================================"
-echo "  Live Main Chart is running!"
+echo "  Pearl Algo Web App is running!"
 echo "========================================"
 echo ""
 echo "  Open: http://localhost:$CHART_PORT"

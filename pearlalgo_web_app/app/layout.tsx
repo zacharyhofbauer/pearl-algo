@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'PEARL Live Chart',
-  description: 'Live TradingView chart for PEARL AI trading',
+  title: 'Pearl Algo Web App',
+  description: 'Pearl Algo trading dashboard and monitoring',
   manifest: '/manifest.json',
   icons: {
     icon: '/logo.png',

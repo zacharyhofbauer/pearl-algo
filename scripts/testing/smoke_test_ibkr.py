@@ -11,8 +11,6 @@ Tests:
 
 import asyncio
 import sys
-import json
-import time
 import os
 import socket
 from pathlib import Path
@@ -51,30 +49,9 @@ def _is_port_open(host: str, port: int, timeout: float = 0.5) -> bool:
 from pearlalgo.config.settings import get_settings  # noqa: E402
 from pearlalgo.data_providers.factory import create_data_provider  # noqa: E402
 
-# #region agent log
-def _log(hypothesis_id: str, location: str, message: str, data: dict | None = None) -> None:
-    payload = {
-        "sessionId": "debug-session",
-        "runId": "pre-fix",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data or {},
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with open("/home/pearlalgo/.cursor/debug.log", "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload) + "\n")
-    except Exception:
-        pass
-# #endregion agent log
-
 
 async def smoke_test():
     """Run smoke test."""
-    # #region agent log
-    _log("H1", "smoke_test_ibkr.py:29", "smoke_test entry", {})
-    # #endregion agent log
     print("=" * 60)
     print("IBKR Provider Smoke Test")
     print("=" * 60)
@@ -102,14 +79,6 @@ async def smoke_test():
             print(f"[Auto-detect] Port {configured_port} not open, using 7497 (TWS paper)")
     # Load settings
     settings = get_settings()
-    # #region agent log
-    _log(
-        "H2",
-        "smoke_test_ibkr.py:40",
-        "loaded settings",
-        {"ib_host": getattr(settings, "ib_host", None), "ib_port": getattr(settings, "ib_port", None)},
-    )
-    # #endregion agent log
     print(f"IB Gateway: {settings.ib_host}:{settings.ib_port}")
     print()
 
@@ -117,14 +86,8 @@ async def smoke_test():
     print("Creating IBKR provider...")
     try:
         provider = create_data_provider("ibkr", settings=settings)
-        # #region agent log
-        _log("H3", "smoke_test_ibkr.py:52", "provider created", {"provider": type(provider).__name__})
-        # #endregion agent log
         print("✅ Provider created")
     except Exception as e:
-        # #region agent log
-        _log("H3", "smoke_test_ibkr.py:56", "provider creation failed", {"error": str(e)})
-        # #endregion agent log
         print(f"❌ Failed to create provider: {e}")
         return 1
 
@@ -133,22 +96,13 @@ async def smoke_test():
     # Test 1: Connection
     print("Test 1: Connection validation...")
     try:
-        # #region agent log
-        _log("H4", "smoke_test_ibkr.py:65", "validate_connection start", {})
-        # #endregion agent log
         connected = await provider.validate_connection()
-        # #region agent log
-        _log("H4", "smoke_test_ibkr.py:69", "validate_connection end", {"connected": bool(connected)})
-        # #endregion agent log
         if connected:
             print("✅ Connected to IB Gateway")
         else:
             print("❌ Connection failed")
             return 1
     except Exception as e:
-        # #region agent log
-        _log("H4", "smoke_test_ibkr.py:77", "validate_connection error", {"error": str(e)})
-        # #endregion agent log
         print(f"❌ Connection error: {e}")
         return 1
 

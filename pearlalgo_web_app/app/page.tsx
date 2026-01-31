@@ -14,6 +14,7 @@ import RiskMetricsPanel from '@/components/RiskMetricsPanel'
 import HelpPanel from '@/components/HelpPanel'
 import MarketPressurePanel from '@/components/MarketPressurePanel'
 import SystemHealthPanel from '@/components/SystemHealthPanel'
+import ConfigPanel from '@/components/ConfigPanel'
 import MarketRegimePanel from '@/components/MarketRegimePanel'
 import SignalDecisionsPanel from '@/components/SignalDecisionsPanel'
 import AnalyticsPanel from '@/components/AnalyticsPanel'
@@ -200,6 +201,52 @@ interface ShadowCounters {
   ml_execute_rate: number
 }
 
+// Gateway Status
+interface GatewayStatus {
+  process_running: boolean
+  port_listening: boolean
+  port: number
+  status: 'online' | 'offline' | 'degraded'
+}
+
+// Connection Health
+interface ConnectionHealth {
+  connection_failures: number
+  data_fetch_errors: number
+  data_level: string
+  consecutive_errors: number
+  last_successful_fetch?: string | null
+}
+
+// Error Summary
+interface ErrorSummary {
+  session_error_count: number
+  last_error: string | null
+  last_error_time: string | null
+}
+
+// Config
+interface Config {
+  symbol: string
+  market: string
+  timeframe: string
+  scan_interval: number
+  session_start: string
+  session_end: string
+  mode: 'live' | 'shadow' | 'paused' | 'stopped'
+}
+
+// Data Quality
+interface DataQuality {
+  latest_bar_age_minutes: number | null
+  stale_threshold_minutes: number
+  buffer_size: number | null
+  buffer_target: number
+  quiet_reason: string | null
+  is_expected_stale: boolean
+  is_stale: boolean
+}
+
 // Analytics Data
 interface SessionPerformance {
   id: string
@@ -272,6 +319,12 @@ interface AgentState {
   signal_rejections_24h?: SignalRejections | null
   last_signal_decision?: LastSignalDecision | null
   shadow_counters?: ShadowCounters | null
+  // NEW: System health extended
+  gateway_status?: GatewayStatus | null
+  connection_health?: ConnectionHealth | null
+  error_summary?: ErrorSummary | null
+  config?: Config | null
+  data_quality?: DataQuality | null
 }
 
 // Market Status
@@ -309,7 +362,7 @@ const MIN_BARS = 150
 // Fetch 72 hours (3 days) of markers for complete trade history
 const MARKER_HOURS = 72
 
-export default function LiveMainChart() {
+export default function PearlAlgoWebApp() {
   const [candles, setCandles] = useState<CandleData[]>([])
   const [indicators, setIndicators] = useState<Indicators>({})
   const [markers, setMarkers] = useState<MarkerData[]>([])
@@ -501,7 +554,7 @@ export default function LiveMainChart() {
         <div className="title-text">
           <h1>
             <span className="symbol">MNQ</span>
-            <span className="page-name">Live Main Chart</span>
+            <span className="page-name">Pearl Algo Web App</span>
           </h1>
         </div>
         {/* Market Status Badge */}
@@ -790,11 +843,19 @@ export default function LiveMainChart() {
               lastDecision={agentState.last_signal_decision || null}
             />
           )}
+          {/* NEW: Config Panel */}
+          {agentState.config && (
+            <ConfigPanel config={agentState.config} />
+          )}
           {/* NEW: System Health Panel */}
-          {agentState.cadence_metrics && (
+          {(agentState.cadence_metrics || agentState.gateway_status || agentState.connection_health || agentState.data_quality) && (
             <SystemHealthPanel
-              cadenceMetrics={agentState.cadence_metrics}
+              cadenceMetrics={agentState.cadence_metrics || null}
               dataFresh={agentState.data_fresh || false}
+              gatewayStatus={agentState.gateway_status}
+              connectionHealth={agentState.connection_health}
+              errorSummary={agentState.error_summary}
+              dataQuality={agentState.data_quality}
             />
           )}
           {agentState.ai_status && (

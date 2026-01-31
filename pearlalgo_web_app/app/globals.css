@@ -1,4 +1,4 @@
-/* PEARL Live Main Chart - Dark Theme */
+/* Pearl Algo Web App - Dark Theme */
 :root {
   --bg-primary: #0a0a0f;
   --bg-secondary: #12121a;
@@ -2281,6 +2281,230 @@ body {
   padding: 4px 8px;
   background: rgba(0, 212, 255, 0.1);
   border-radius: 4px;
+}
+
+/* Health Section (new grouped sections) */
+.health-section {
+  padding: 8px 10px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+  border-left: 3px solid var(--border-color);
+}
+
+.health-section.error-section {
+  border-left-color: var(--accent-red);
+  background: rgba(255, 82, 82, 0.05);
+}
+
+.health-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.health-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.health-section-status {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.health-section-status.online {
+  color: var(--accent-green);
+  background: rgba(0, 230, 118, 0.1);
+}
+
+.health-section-status.degraded,
+.health-section-status.warning {
+  color: var(--accent-yellow);
+  background: rgba(255, 193, 7, 0.1);
+}
+
+.health-section-status.offline {
+  color: var(--accent-red);
+  background: rgba(255, 82, 82, 0.1);
+}
+
+.health-section-status.active {
+  color: var(--accent-cyan);
+  background: rgba(0, 212, 255, 0.1);
+}
+
+.health-section-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+}
+
+.health-check-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+
+.health-check-item .check-ok {
+  color: var(--accent-green);
+  font-weight: 600;
+}
+
+.health-check-item .check-fail {
+  color: var(--accent-red);
+  font-weight: 600;
+}
+
+.health-detail-item {
+  color: var(--text-secondary);
+}
+
+.health-detail-item .value-ok {
+  color: var(--accent-green);
+  font-weight: 600;
+}
+
+.health-detail-item .value-warning {
+  color: var(--accent-yellow);
+  font-weight: 600;
+}
+
+.health-detail-item .value-neutral {
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.health-detail-item.quiet-reason {
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+
+.health-error-message {
+  font-size: 10px;
+  color: var(--accent-red);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  padding: 4px 0;
+  word-break: break-word;
+}
+
+/* Health dot warning state */
+.health-dot.warning {
+  background: var(--accent-yellow);
+  box-shadow: 0 0 6px rgba(255, 193, 7, 0.5);
+}
+
+/* ============================================
+   CONFIG PANEL
+   ============================================ */
+
+.config-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.config-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.config-row:last-child {
+  border-bottom: none;
+}
+
+.config-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.config-value {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.config-symbol {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+.config-description {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.config-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.config-mode .mode-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.config-mode.mode-live {
+  color: var(--accent-green);
+  background: rgba(0, 230, 118, 0.1);
+}
+
+.config-mode.mode-live .mode-dot {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px rgba(0, 230, 118, 0.5);
+}
+
+.config-mode.mode-shadow {
+  color: var(--accent-purple);
+  background: rgba(171, 71, 188, 0.1);
+}
+
+.config-mode.mode-shadow .mode-dot {
+  background: var(--accent-purple);
+}
+
+.config-mode.mode-paused {
+  color: var(--accent-yellow);
+  background: rgba(255, 193, 7, 0.1);
+}
+
+.config-mode.mode-paused .mode-dot {
+  background: var(--accent-yellow);
+}
+
+.config-mode.mode-stopped {
+  color: var(--accent-red);
+  background: rgba(255, 82, 82, 0.1);
+}
+
+.config-mode.mode-stopped .mode-dot {
+  background: var(--accent-red);
 }
 
 /* ============================================

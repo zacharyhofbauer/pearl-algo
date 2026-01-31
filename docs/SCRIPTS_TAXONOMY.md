@@ -86,8 +86,22 @@ they do **not** contain trading or strategy logic.
   - **Usage**: `python3 scripts/monitoring/serve_agent_status.py --market NQ [--port 9100]`
 
 - `doctor_cli.py`
-  - **Role**: Operator CLI “doctor” for a compact rollup of recent behavior (signals, rejects, sizing, stops).
+  - **Role**: Operator CLI "doctor" for a compact rollup of recent behavior (signals, rejects, sizing, stops).
   - **Usage**: `python3 scripts/monitoring/doctor_cli.py --hours 24`
+
+## Knowledge (`scripts/knowledge/`)
+
+RAG (Retrieval-Augmented Generation) system for CLI-based AI assistance and codebase indexing.
+
+- `build_index.py`
+  - **Role**: Build or refresh the knowledge index from codebase files.
+  - **Usage**: `python3 scripts/knowledge/build_index.py [--rebuild]`
+- `watch_repo.py`
+  - **Role**: Watch for file changes and incrementally update the knowledge index.
+- `export_datasets.py`
+  - **Role**: Export indexed datasets for training or analysis.
+
+**Note**: Knowledge module provides CLI AI assistance. Configuration in `config/config.yaml` under `knowledge:` section.
 
 ## Live Main Chart (`scripts/live-chart/`)
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Live Chart Development Helper
+# Pearl Algo Web App Development Helper
 # Usage: ./dev.sh [command] [options]
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,7 +22,7 @@ case "$1" in
         cd "$PROJECT_ROOT"
         pkill -f "api_server.py" 2>/dev/null
         sleep 1
-        python scripts/live-chart/api_server.py --port "$API_PORT" --reload
+        python scripts/pearlalgo_web_app/api_server.py --port "$API_PORT" --reload
         ;;
 
     start-prod|api-prod)
@@ -31,13 +31,13 @@ case "$1" in
         cd "$PROJECT_ROOT"
         pkill -f "api_server.py" 2>/dev/null
         sleep 1
-        python scripts/live-chart/api_server.py --port "$API_PORT"
+        python scripts/pearlalgo_web_app/api_server.py --port "$API_PORT"
         ;;
 
     frontend|fe)
         # Start frontend dev server
         echo -e "${GREEN}Starting frontend on port $FRONTEND_PORT...${NC}"
-        cd "$PROJECT_ROOT/live-chart"
+        cd "$PROJECT_ROOT/pearlalgo_web_app"
         npm run dev:fresh
         ;;
 
@@ -50,14 +50,14 @@ case "$1" in
         sleep 1
 
         # Start API in background
-        python scripts/live-chart/api_server.py --port "$API_PORT" --reload &
+        python scripts/pearlalgo_web_app/api_server.py --port "$API_PORT" --reload &
         API_PID=$!
         echo -e "${GREEN}API started (PID: $API_PID)${NC}"
 
         sleep 2
 
         # Start frontend
-        cd "$PROJECT_ROOT/live-chart"
+        cd "$PROJECT_ROOT/pearlalgo_web_app"
         npm run dev
         ;;
 
@@ -75,7 +75,7 @@ case "$1" in
         pkill -f "api_server.py" 2>/dev/null
         sleep 2
         cd "$PROJECT_ROOT"
-        python scripts/live-chart/api_server.py --port "$API_PORT" --reload
+        python scripts/pearlalgo_web_app/api_server.py --port "$API_PORT" --reload
         ;;
 
     status)
@@ -112,7 +112,7 @@ case "$1" in
         ;;
 
     *)
-        echo "Live Chart Development Helper"
+        echo "Pearl Algo Web App Development Helper"
         echo ""
         echo "Usage: ./dev.sh <command>"
         echo ""
