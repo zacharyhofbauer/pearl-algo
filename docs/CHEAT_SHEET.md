@@ -41,9 +41,9 @@ The `pearl.sh` master script handles everything with simple commands:
 - **Create venv & install**
   ```bash
   cd ~/pearlalgo-dev-ai-agents
-  python3 -m venv .venv
+
   source .venv/bin/activate
-  pip install -e .
+
   ```
 
 - **`.env` essentials**

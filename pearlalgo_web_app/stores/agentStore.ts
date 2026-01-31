@@ -250,6 +250,7 @@ export interface AgentState {
   daily_wins: number
   daily_losses: number
   active_trades_count: number
+  futures_market_open: boolean
   data_fresh: boolean
   ai_status: AIStatus | null
   challenge: ChallengeStatus | null

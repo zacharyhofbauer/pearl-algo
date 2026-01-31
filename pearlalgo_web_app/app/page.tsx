@@ -384,7 +384,7 @@ export default function PearlAlgoWebApp() {
             <Image src="/logo.png" alt="PEARL" width={28} height={28} className="logo" priority />
             <h1>
               <span className="symbol">MNQ</span>
-              <span className="page-name">Pearl Algo</span>
+              <span className="page-name">Pearl Algo Web App</span>
             </h1>
           </div>
 
@@ -458,71 +458,130 @@ export default function PearlAlgoWebApp() {
     )
   }
 
-  // Common status panel component
-  const renderStatusPanel = () => (
-    (agentState || candles.length > 0) && (
+  // Get AI mode from status
+  const getAIMode = () => {
+    if (!agentState?.ai_status) return null
+    const ai = agentState.ai_status
+    const hasLive = ai.bandit_mode === 'live' || ai.contextual_mode === 'live' ||
+                    (ai.ml_filter?.enabled && ai.ml_filter?.mode === 'live')
+    const hasShadow = ai.bandit_mode === 'shadow' || ai.contextual_mode === 'shadow' ||
+                      (ai.ml_filter?.enabled && ai.ml_filter?.mode === 'shadow')
+    if (hasLive) return 'live'
+    if (hasShadow) return 'shadow'
+    return 'off'
+  }
+
+  // Common status panel component - optimized for all screens
+  const renderStatusPanel = () => {
+    if (!agentState && candles.length === 0) return null
+
+    const currentCandle = candles[candles.length - 1]
+    const priceUp = currentCandle ? currentCandle.close >= currentCandle.open : true
+    const aiMode = getAIMode()
+    const dirGate = agentState?.ai_status?.direction_gating
+
+    return (
       <div className="status-panel">
-        {/* Current Price */}
-        {candles.length > 0 && (
-          <div className="stat price-stat">
-            <span className="stat-label">Price</span>
-            <span className={`stat-value price-value ${candles[candles.length-1]?.close >= candles[candles.length-1]?.open ? 'positive' : 'negative'}`}>
-              {candles[candles.length-1]?.close.toFixed(2)}
-            </span>
-          </div>
-        )}
-        {agentState && (
-          <>
-            <div className="stat">
-              <span className="stat-label">Agent</span>
-              <span className={`stat-value ${agentState.running ? 'positive' : 'negative'}`}>
-                {agentState.running ? (agentState.paused ? '⏸️ Paused' : '🟢 Running') : '🔴 Stopped'}
+        {/* Row 1: Main Stats */}
+        <div className="status-row status-row-main">
+          {/* Price with label */}
+          {currentCandle && (
+            <div className="stat-inline price-stat">
+              <span className="stat-label">Price</span>
+              <span className={`price-value ${priceUp ? 'positive' : 'negative'}`}>
+                {currentCandle.close.toFixed(2)}
               </span>
             </div>
-            <div className="stat">
-              <span className="stat-label">Day P&L</span>
-              <span className={`stat-value ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
-                {formatPnL(agentState.daily_pnl)}
+          )}
+
+          {agentState && (
+            <>
+              {/* Agent Badge */}
+              <span className={`status-badge ${agentState.running ? (agentState.paused ? 'paused' : 'live') : 'off'}`}>
+                <span className="status-dot"></span>
+                {agentState.running ? (agentState.paused ? 'PAUSED' : 'LIVE') : 'OFF'}
               </span>
-            </div>
-            <div className="stat">
-              <span className="stat-label">Trades</span>
-              <span className="stat-value">
-                {agentState.daily_wins}W / {agentState.daily_losses}L
-              </span>
-            </div>
-            <div className="stat">
-              <span className="stat-label">Open Pos</span>
-              <span className={`stat-value ${agentState.active_trades_count > 0 ? 'highlight' : ''}`}>
-                {agentState.active_trades_count}
-              </span>
-            </div>
-          </>
-        )}
-        {/* Indicator Legend */}
-        <div className="indicator-legend">
-          <span className="legend-item"><span className="legend-color ema9"></span>EMA9</span>
-          <span className="legend-item"><span className="legend-color ema21"></span>EMA21</span>
-          <span className="legend-item"><span className="legend-color vwap"></span>VWAP</span>
+
+              {/* AI Mode Badge */}
+              {aiMode && (
+                <span className={`status-badge ai-mode ai-${aiMode}`}>
+                  <span className="ai-icon">🧠</span>
+                  {aiMode.toUpperCase()}
+                </span>
+              )}
+
+              {/* Day P&L */}
+              <div className="stat-inline">
+                <span className="stat-label">P&L</span>
+                <span className={`stat-value ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
+                  {formatPnL(agentState.daily_pnl)}
+                </span>
+              </div>
+
+              {/* Trades W/L */}
+              <div className="stat-inline">
+                <span className="stat-label">W/L</span>
+                <span className="stat-value trades-value">
+                  <span className="win">{agentState.daily_wins}</span><span className="divider">/</span><span className="loss">{agentState.daily_losses}</span>
+                </span>
+              </div>
+
+              {/* Open Positions */}
+              <div className="stat-inline">
+                <span className="stat-label">Open</span>
+                <span className={`stat-value ${agentState.active_trades_count > 0 ? 'highlight' : ''}`}>
+                  {agentState.active_trades_count}
+                </span>
+              </div>
+
+              {/* Direction Gate */}
+              {dirGate?.enabled && (
+                <div className="stat-inline dir-gate">
+                  <span className="stat-label">Gate</span>
+                  <span className={`stat-value ${dirGate.blocks > 0 ? 'warn-text' : ''}`}>
+                    {dirGate.blocks > 0 ? `${dirGate.blocks}🚫` : '✓'}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
         </div>
-        {/* Marker Legend */}
-        <div className="marker-legend">
-          <span className="legend-item">
-            <span className="marker-icon entry-long">▲</span>Long
-          </span>
-          <span className="legend-item">
-            <span className="marker-icon entry-short">▼</span>Short
-          </span>
-          <span className="legend-item">
-            <span className="marker-icon exit-win">●</span>Win
-          </span>
-          <span className="legend-item">
-            <span className="marker-icon exit-loss">●</span>Loss
-          </span>
+
+        {/* Row 2: Health + Legends */}
+        <div className="status-row status-row-secondary">
+          {/* System Health with labels */}
+          {agentState && (
+            <div className="health-indicators">
+              <span className={`health-item ${agentState.gateway_status?.connected ? 'ok' : 'error'}`}>
+                <span className="health-dot"></span>GW
+              </span>
+              <span className={`health-item ${agentState.data_fresh ? 'ok' : 'error'}`}>
+                <span className="health-dot"></span>Data
+              </span>
+              <span className={`health-item ${agentState.futures_market_open ? 'ok' : 'warn'}`}>
+                <span className="health-dot"></span>Mkt
+              </span>
+            </div>
+          )}
+
+          {/* Indicator Legend - matches chart colors exactly */}
+          <div className="chart-legend">
+            <span className="legend-item"><span className="legend-line ema9"></span>EMA9</span>
+            <span className="legend-item"><span className="legend-line ema21"></span>EMA21</span>
+            <span className="legend-item"><span className="legend-line vwap"></span>VWAP</span>
+          </div>
+
+          {/* Marker Legend - matches chart marker colors exactly */}
+          <div className="marker-legend">
+            <span className="legend-item"><span className="marker-sym entry">▲</span>Long</span>
+            <span className="legend-item"><span className="marker-sym entry">▼</span>Short</span>
+            <span className="legend-item"><span className="marker-sym exit-win">●</span>Win</span>
+            <span className="legend-item"><span className="marker-sym exit-loss">●</span>Loss</span>
+          </div>
         </div>
       </div>
     )
-  )
+  }
 
   // Chart section component
   const renderChart = () => (
