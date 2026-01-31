@@ -1,0 +1,106 @@
+/**
+ * API Client with Authentication Support
+ *
+ * Handles API key authentication for the Pearl Algo Web App.
+ * Authentication is optional and controlled by:
+ * - NEXT_PUBLIC_API_KEY: API key to include in requests
+ *
+ * When NEXT_PUBLIC_API_KEY is set, all requests will include the X-API-Key header.
+ * When not set, requests are made without authentication (for local development).
+ */
+
+// Get API key from environment (client-side accessible)
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || ''
+
+/**
+ * Determine the API base URL based on environment and context.
+ *
+ * Priority:
+ * 1. NEXT_PUBLIC_API_URL environment variable
+ * 2. ?api_port=XXXX URL parameter (for testing)
+ * 3. Relative URLs on public domains, localhost:8000 for local dev
+ */
+export function getApiUrl(): string {
+  // Check for environment variable override first
+  const envUrl = process.env.NEXT_PUBLIC_API_URL
+  if (envUrl) return envUrl
+
+  if (typeof window === 'undefined') return 'http://localhost:8000' // SSR fallback
+  const hostname = window.location.hostname
+
+  // Check URL params for API port override (useful for testing different ports)
+  const urlParams = new URLSearchParams(window.location.search)
+  const apiPort = urlParams.get('api_port')
+  if (apiPort) return `http://localhost:${apiPort}`
+
+  // Use relative URLs on public domain (pearlalgo.io), localhost:8000 for local dev
+  return ['localhost', '127.0.0.1'].includes(hostname) ? 'http://localhost:8000' : ''
+}
+
+/**
+ * Get headers with authentication if API key is configured.
+ */
+export function getAuthHeaders(): HeadersInit {
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  }
+
+  if (API_KEY) {
+    headers['X-API-Key'] = API_KEY
+  }
+
+  return headers
+}
+
+/**
+ * Fetch wrapper that automatically includes authentication headers.
+ *
+ * @param path - API path (e.g., '/api/state')
+ * @param options - Optional fetch options to merge
+ * @returns Promise<Response>
+ */
+export async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  const apiUrl = getApiUrl()
+  const url = `${apiUrl}${path}`
+
+  const headers = {
+    ...getAuthHeaders(),
+    ...(options.headers || {}),
+  }
+
+  return fetch(url, {
+    ...options,
+    headers,
+  })
+}
+
+/**
+ * Fetch JSON from API with authentication.
+ *
+ * @param path - API path (e.g., '/api/state')
+ * @param options - Optional fetch options
+ * @returns Promise<T> - Parsed JSON response
+ */
+export async function apiFetchJson<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await apiFetch(path, options)
+
+  if (!response.ok) {
+    // Handle auth errors specifically
+    if (response.status === 401) {
+      throw new Error('Authentication required. Set NEXT_PUBLIC_API_KEY.')
+    }
+    if (response.status === 403) {
+      throw new Error('Invalid API key.')
+    }
+    throw new Error(`API Error: ${response.status}`)
+  }
+
+  return response.json()
+}
+
+/**
+ * Check if authentication is configured.
+ */
+export function isAuthConfigured(): boolean {
+  return Boolean(API_KEY)
+}

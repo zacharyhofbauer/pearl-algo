@@ -38,13 +38,17 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
-    from fastapi import FastAPI, Query, HTTPException
+    from fastapi import FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
+    from fastapi.security import APIKeyHeader, APIKeyQuery
     import uvicorn
 except ImportError:
     print("ERROR: FastAPI/uvicorn not installed. Run: pip install fastapi uvicorn")
     sys.exit(1)
+
+import hashlib
+import secrets
 
 import pandas as pd
 
@@ -55,6 +59,104 @@ import pandas as pd
 DEFAULT_PORT = 8000
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_MARKET = "NQ"
+
+# ---------------------------------------------------------------------------
+# Authentication Configuration
+# ---------------------------------------------------------------------------
+
+# Environment variables for auth:
+# PEARL_API_AUTH_ENABLED=true  - Enable API key authentication (default: false for local)
+# PEARL_API_KEY=<key>          - Set a specific API key (optional, auto-generates if not set)
+# PEARL_API_KEY_FILE=<path>    - Path to file containing API keys (one per line)
+
+_auth_enabled: bool = os.getenv("PEARL_API_AUTH_ENABLED", "false").lower() == "true"
+_api_keys: set = set()
+_api_key_file: Optional[Path] = None
+
+# Security schemes
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+api_key_query = APIKeyQuery(name="api_key", auto_error=False)
+
+
+def _load_api_keys() -> set:
+    """Load API keys from environment or file."""
+    keys = set()
+
+    # Load from environment variable
+    env_key = os.getenv("PEARL_API_KEY")
+    if env_key:
+        keys.add(env_key.strip())
+
+    # Load from file
+    key_file_path = os.getenv("PEARL_API_KEY_FILE")
+    if key_file_path:
+        key_file = Path(key_file_path)
+        if key_file.exists():
+            try:
+                for line in key_file.read_text().strip().split("\n"):
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        keys.add(line)
+            except Exception as e:
+                print(f"[Auth] Warning: Failed to read API key file: {e}")
+
+    # Auto-generate a key if none configured and auth is enabled
+    if not keys and _auth_enabled:
+        auto_key = secrets.token_urlsafe(32)
+        keys.add(auto_key)
+        print(f"[Auth] Auto-generated API key: {auto_key}")
+        print(f"[Auth] Set PEARL_API_KEY environment variable to use a persistent key")
+
+    return keys
+
+
+def _init_auth():
+    """Initialize authentication on startup."""
+    global _api_keys, _auth_enabled
+
+    if _auth_enabled:
+        _api_keys = _load_api_keys()
+        print(f"[Auth] Authentication ENABLED - {len(_api_keys)} API key(s) configured")
+    else:
+        print(f"[Auth] Authentication DISABLED (set PEARL_API_AUTH_ENABLED=true to enable)")
+
+
+async def verify_api_key(
+    api_key_header: Optional[str] = Security(api_key_header),
+    api_key_query: Optional[str] = Security(api_key_query),
+) -> Optional[str]:
+    """
+    Verify API key from header or query parameter.
+
+    Returns the API key if valid, None if auth disabled.
+    Raises HTTPException if auth enabled but key invalid/missing.
+    """
+    if not _auth_enabled:
+        return None
+
+    # Check header first, then query param
+    api_key = api_key_header or api_key_query
+
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Provide X-API-Key header or api_key query parameter.",
+        )
+
+    if api_key not in _api_keys:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid API key.",
+        )
+
+    return api_key
+
+
+# Dependency for protected routes
+def require_auth():
+    """Dependency that requires authentication if enabled."""
+    return Depends(verify_api_key)
+
 
 # ---------------------------------------------------------------------------
 # State file helpers
@@ -400,6 +502,220 @@ app.add_middleware(
 # Global state
 _market: str = DEFAULT_MARKET
 _state_dir: Optional[Path] = None
+
+
+# ---------------------------------------------------------------------------
+# WebSocket Connection Manager
+# ---------------------------------------------------------------------------
+
+class ConnectionManager:
+    """Manages WebSocket connections for real-time updates."""
+
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+        self._broadcast_task: Optional[asyncio.Task] = None
+        self._last_state_hash: str = ""
+
+    async def connect(self, websocket: WebSocket):
+        """Accept and register a new WebSocket connection."""
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        print(f"[WebSocket] Client connected. Total connections: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        """Remove a WebSocket connection."""
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        print(f"[WebSocket] Client disconnected. Total connections: {len(self.active_connections)}")
+
+    async def broadcast(self, message: Dict[str, Any]):
+        """Broadcast a message to all connected clients."""
+        if not self.active_connections:
+            return
+
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                disconnected.append(connection)
+
+        # Clean up disconnected clients
+        for conn in disconnected:
+            self.disconnect(conn)
+
+    async def start_broadcast_loop(self, interval: float = 2.0):
+        """Start broadcasting state updates at regular intervals."""
+        while True:
+            try:
+                if self.active_connections and _state_dir:
+                    # Get current state
+                    state_file = _state_dir / "state.json"
+                    state = _load_json_file(state_file)
+
+                    if state:
+                        # Create a hash to detect changes
+                        state_hash = str(hash(json.dumps(state, sort_keys=True, default=str)))
+
+                        # Only broadcast if state changed
+                        if state_hash != self._last_state_hash:
+                            self._last_state_hash = state_hash
+
+                            # Build the same response as /api/state
+                            daily_stats = _compute_daily_stats(_state_dir)
+                            broadcast_data = {
+                                "type": "state_update",
+                                "data": {
+                                    "running": state.get("running", False),
+                                    "paused": state.get("paused", False),
+                                    "daily_pnl": daily_stats["daily_pnl"],
+                                    "daily_trades": daily_stats["daily_trades"],
+                                    "daily_wins": daily_stats["daily_wins"],
+                                    "daily_losses": daily_stats["daily_losses"],
+                                    "active_trades_count": state.get("active_trades_count", 0),
+                                    "data_fresh": state.get("data_fresh", False),
+                                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                                    "ai_status": _get_ai_status(state),
+                                    "cadence_metrics": _get_cadence_metrics_enhanced(state),
+                                    "market_regime": _get_market_regime(state),
+                                    "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
+                                    "gateway_status": _get_gateway_status(),
+                                    "connection_health": _get_connection_health(state),
+                                    "error_summary": _get_error_summary(_state_dir, state),
+                                    "config": _get_config(state),
+                                    "data_quality": _get_data_quality(state),
+                                }
+                            }
+                            await self.broadcast(broadcast_data)
+
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"[WebSocket] Broadcast error: {e}")
+                await asyncio.sleep(interval)
+
+
+# Global connection manager
+ws_manager = ConnectionManager()
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize authentication and start WebSocket broadcast loop."""
+    _init_auth()
+    asyncio.create_task(ws_manager.start_broadcast_loop(interval=2.0))
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = Query(default=None)):
+    """WebSocket endpoint for real-time state updates."""
+    # Verify API key if authentication is enabled
+    if _auth_enabled:
+        if not api_key:
+            await websocket.close(code=1008, reason="Missing API key")
+            return
+        if api_key not in _api_keys:
+            await websocket.close(code=1008, reason="Invalid API key")
+            return
+
+    await ws_manager.connect(websocket)
+    try:
+        # Send initial state immediately
+        if _state_dir:
+            state_file = _state_dir / "state.json"
+            state = _load_json_file(state_file)
+            if state:
+                daily_stats = _compute_daily_stats(_state_dir)
+                initial_data = {
+                    "type": "initial_state",
+                    "data": {
+                        "running": state.get("running", False),
+                        "paused": state.get("paused", False),
+                        "daily_pnl": daily_stats["daily_pnl"],
+                        "daily_trades": daily_stats["daily_trades"],
+                        "daily_wins": daily_stats["daily_wins"],
+                        "daily_losses": daily_stats["daily_losses"],
+                        "active_trades_count": state.get("active_trades_count", 0),
+                        "data_fresh": state.get("data_fresh", False),
+                        "last_updated": datetime.now(timezone.utc).isoformat(),
+                        "ai_status": _get_ai_status(state),
+                        "challenge": _get_challenge_status(_state_dir),
+                        "recent_exits": _get_recent_exits(_state_dir, limit=3),
+                        "performance": _compute_performance_stats(_state_dir),
+                        "equity_curve": _get_equity_curve(_state_dir, hours=72),
+                        "risk_metrics": _get_risk_metrics(_state_dir),
+                        "cadence_metrics": _get_cadence_metrics_enhanced(state),
+                        "market_regime": _get_market_regime(state),
+                        "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
+                        "signal_rejections_24h": _get_signal_rejections_24h(state),
+                        "last_signal_decision": _get_last_signal_decision(state),
+                        "shadow_counters": _get_shadow_counters(state),
+                        "gateway_status": _get_gateway_status(),
+                        "connection_health": _get_connection_health(state),
+                        "error_summary": _get_error_summary(_state_dir, state),
+                        "config": _get_config(state),
+                        "data_quality": _get_data_quality(state),
+                    }
+                }
+                await websocket.send_json(initial_data)
+
+        # Keep connection alive and handle incoming messages
+        while True:
+            try:
+                # Wait for any message (ping/pong or requests)
+                data = await websocket.receive_text()
+
+                # Handle ping
+                if data == "ping":
+                    await websocket.send_json({"type": "pong"})
+
+                # Handle request for full state refresh
+                elif data == "refresh":
+                    if _state_dir:
+                        state_file = _state_dir / "state.json"
+                        state = _load_json_file(state_file)
+                        if state:
+                            daily_stats = _compute_daily_stats(_state_dir)
+                            refresh_data = {
+                                "type": "full_refresh",
+                                "data": {
+                                    "running": state.get("running", False),
+                                    "paused": state.get("paused", False),
+                                    "daily_pnl": daily_stats["daily_pnl"],
+                                    "daily_trades": daily_stats["daily_trades"],
+                                    "daily_wins": daily_stats["daily_wins"],
+                                    "daily_losses": daily_stats["daily_losses"],
+                                    "active_trades_count": state.get("active_trades_count", 0),
+                                    "data_fresh": state.get("data_fresh", False),
+                                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                                    "ai_status": _get_ai_status(state),
+                                    "challenge": _get_challenge_status(_state_dir),
+                                    "recent_exits": _get_recent_exits(_state_dir, limit=3),
+                                    "performance": _compute_performance_stats(_state_dir),
+                                    "equity_curve": _get_equity_curve(_state_dir, hours=72),
+                                    "risk_metrics": _get_risk_metrics(_state_dir),
+                                    "cadence_metrics": _get_cadence_metrics_enhanced(state),
+                                    "market_regime": _get_market_regime(state),
+                                    "buy_sell_pressure": state.get("buy_sell_pressure_raw"),
+                                    "signal_rejections_24h": _get_signal_rejections_24h(state),
+                                    "last_signal_decision": _get_last_signal_decision(state),
+                                    "shadow_counters": _get_shadow_counters(state),
+                                    "gateway_status": _get_gateway_status(),
+                                    "connection_health": _get_connection_health(state),
+                                    "error_summary": _get_error_summary(_state_dir, state),
+                                    "config": _get_config(state),
+                                    "data_quality": _get_data_quality(state),
+                                }
+                            }
+                            await websocket.send_json(refresh_data)
+
+            except WebSocketDisconnect:
+                break
+    except Exception as e:
+        print(f"[WebSocket] Error: {e}")
+    finally:
+        ws_manager.disconnect(websocket)
 
 
 @app.get("/health")
@@ -1277,7 +1593,7 @@ def _get_data_quality(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.get("/api/state")
-async def get_state():
+async def get_state(api_key: Optional[str] = Depends(verify_api_key)):
     """Get current agent state with AI status, challenge, performance, and suggestions."""
     if _state_dir is None:
         raise HTTPException(status_code=500, detail="State directory not configured")
@@ -1364,6 +1680,7 @@ async def get_state():
 @app.get("/api/trades")
 async def get_trades(
     limit: int = Query(default=20, ge=1, le=100, description="Max trades to return"),
+    api_key: Optional[str] = Depends(verify_api_key),
 ):
     """Get recent trades from signals.jsonl."""
     if _state_dir is None:
@@ -1422,6 +1739,7 @@ def _snap_to_bar(timestamp: float, bar_seconds: int = 300) -> int:
 @app.get("/api/markers")
 async def get_markers(
     hours: int = Query(default=24, ge=1, le=72, description="Hours of markers to return"),
+    api_key: Optional[str] = Depends(verify_api_key),
 ):
     """Get trade entry/exit markers for chart overlay with tooltip metadata."""
     if _state_dir is None:
@@ -1731,7 +2049,7 @@ def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
 
 
 @app.get("/api/analytics")
-async def get_analytics():
+async def get_analytics(api_key: Optional[str] = Depends(verify_api_key)):
     """
     Session and time-based performance analytics.
 

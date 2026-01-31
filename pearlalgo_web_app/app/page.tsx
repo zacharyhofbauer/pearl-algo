@@ -20,6 +20,9 @@ import SignalDecisionsPanel from '@/components/SignalDecisionsPanel'
 import AnalyticsPanel from '@/components/AnalyticsPanel'
 import UltrawideLayout from '@/components/UltrawideLayout'
 import { useViewportType } from '@/hooks/useViewportType'
+import { useWebSocket, getWebSocketUrl, WebSocketStatus } from '@/hooks/useWebSocket'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { getApiUrl, apiFetch } from '@/lib/api'
 import type { IChartApi } from 'lightweight-charts'
 
 interface CandleData {
@@ -335,25 +338,9 @@ interface MarketStatus {
   current_time_et: string
 }
 
-// API URL is determined at runtime based on where the page is loaded from
-// Override options: NEXT_PUBLIC_API_URL env var, or ?api_port=8001 URL param
-function getApiUrl(): string {
-  // Check for environment variable override first
-  const envUrl = process.env.NEXT_PUBLIC_API_URL
-  if (envUrl) return envUrl
-
-  if (typeof window === 'undefined') return 'http://localhost:8000' // SSR fallback
-  const hostname = window.location.hostname
-
-  // Check URL params for API port override (useful for testing different ports)
-  const urlParams = new URLSearchParams(window.location.search)
-  const apiPort = urlParams.get('api_port')
-  if (apiPort) return `http://localhost:${apiPort}`
-
-  // Use relative URLs on public domain (pearlalgo.io), localhost:8000 for local dev
-  return ['localhost', '127.0.0.1'].includes(hostname) ? 'http://localhost:8000' : ''
-}
-const REFRESH_INTERVAL = 10000 // 10 seconds
+// API configuration imported from @/lib/api
+const REFRESH_INTERVAL = 10000 // 10 seconds (fallback when WebSocket disconnected)
+const WS_REFRESH_INTERVAL = 30000 // 30 seconds (slower when WebSocket connected)
 type Timeframe = '1m' | '5m' | '15m' | '1h'
 
 // Minimum bars to request for a full chart
@@ -377,10 +364,34 @@ export default function PearlAlgoWebApp() {
   const [barSpacing, setBarSpacing] = useState(10)
   const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null)
+  const [wsStatus, setWsStatus] = useState<WebSocketStatus>('disconnected')
   const lastDataHash = useRef<string>('')
 
   // Viewport detection for ultrawide layout
   const viewport = useViewportType()
+
+  // WebSocket connection for real-time updates
+  const { status: webSocketStatus, lastMessage, reconnect: wsReconnect } = useWebSocket({
+    url: getWebSocketUrl(),
+    reconnect: true,
+    reconnectInterval: 3000,
+    maxReconnectAttempts: 10,
+    pingInterval: 30000,
+    onStatusChange: setWsStatus,
+    onMessage: (message) => {
+      if (message.type === 'initial_state' || message.type === 'state_update' || message.type === 'full_refresh') {
+        const data = message.data
+        if (data) {
+          setAgentState((prev) => ({
+            ...prev,
+            ...data,
+          }))
+          setLastUpdate(new Date())
+          setIsLive(true)
+        }
+      }
+    },
+  })
 
   // Responsive bar spacing - smaller on mobile
   const getBarSpacing = () => {
@@ -423,16 +434,15 @@ export default function PearlAlgoWebApp() {
     try {
       // Ensure we always request at least MIN_BARS
       const requestBars = Math.max(MIN_BARS, bars)
-      
-      // Fetch all data in parallel
-      const apiUrl = getApiUrl()
+
+      // Fetch all data in parallel (apiFetch includes auth headers when configured)
       const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes, analyticsRes] = await Promise.all([
-        fetch(`${apiUrl}/api/candles?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
-        fetch(`${apiUrl}/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
-        fetch(`${apiUrl}/api/markers?hours=${MARKER_HOURS}`),
-        fetch(`${apiUrl}/api/state`),
-        fetch(`${apiUrl}/api/market-status`),
-        fetch(`${apiUrl}/api/analytics`).catch(() => null),  // Analytics is optional
+        apiFetch(`/api/candles?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
+        apiFetch(`/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
+        apiFetch(`/api/markers?hours=${MARKER_HOURS}`),
+        apiFetch(`/api/state`),
+        apiFetch(`/api/market-status`),
+        apiFetch(`/api/analytics`).catch(() => null),  // Analytics is optional
       ])
 
       // Update market status
@@ -506,9 +516,12 @@ export default function PearlAlgoWebApp() {
 
   useEffect(() => {
     fetchData(timeframe, barCount)
-    const interval = setInterval(() => fetchData(timeframe, barCount), REFRESH_INTERVAL)
+    // Use slower polling when WebSocket is connected (WS handles state updates)
+    // Use faster polling when WebSocket is disconnected
+    const refreshInterval = wsStatus === 'connected' ? WS_REFRESH_INTERVAL : REFRESH_INTERVAL
+    const interval = setInterval(() => fetchData(timeframe, barCount), refreshInterval)
     return () => clearInterval(interval)
-  }, [timeframe, barCount])
+  }, [timeframe, barCount, wsStatus])
 
   const formatTime = (date: Date | null) => {
     if (!date) return '--:--'
@@ -578,6 +591,14 @@ export default function PearlAlgoWebApp() {
         ))}
       </div>
       <div className="status">
+        {/* WebSocket Status Indicator */}
+        <div className={`ws-status-indicator ${wsStatus}`} title={`WebSocket: ${wsStatus}`}>
+          <span className="ws-status-dot"></span>
+          <span className="ws-status-label">
+            {wsStatus === 'connected' ? 'WS' : wsStatus === 'connecting' ? '...' : 'Poll'}
+          </span>
+        </div>
+        <span className="status-separator">•</span>
         <span className={`status-dot ${isLive ? '' : 'offline'}`}></span>
         <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
           {isLive ? 'Live' : 'Cached'} • {formatTime(lastUpdate)}
@@ -703,13 +724,27 @@ export default function PearlAlgoWebApp() {
           </div>
         )}
         {!loading && !error && candles.length > 0 && (
-          <CandlestickChart
-            data={candles}
-            indicators={indicators}
-            markers={markers}
-            barSpacing={barSpacing}
-            onChartReady={setMainChartApi}
-          />
+          <ErrorBoundary
+            panelName="Chart"
+            fallback={
+              <div className="chart-error-fallback">
+                <div className="error-boundary-icon">⚠️</div>
+                <div className="error-boundary-title">Chart Error</div>
+                <div className="error-boundary-message">Failed to render chart</div>
+                <button className="error-boundary-retry" onClick={() => window.location.reload()}>
+                  Reload Page
+                </button>
+              </div>
+            }
+          >
+            <CandlestickChart
+              data={candles}
+              indicators={indicators}
+              markers={markers}
+              barSpacing={barSpacing}
+              onChartReady={setMainChartApi}
+            />
+          </ErrorBoundary>
         )}
       </div>
     </div>
