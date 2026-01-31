@@ -7,6 +7,36 @@ Commands:
   /start - Show the main dashboard (menu)
 
 Simple and intuitive nested button menu system.
+
+Module Architecture:
+--------------------
+This module has been partially decomposed into mixins for improved maintainability:
+
+- telegram_keyboards.py: TelegramKeyboardsMixin - Keyboard building utilities
+- telegram_state_queries.py: TelegramStateQueriesMixin - State reading and metrics
+- telegram_formatters.py: TelegramFormattersMixin - Message formatting utilities
+- telegram_handlers.py: TelegramHandlersMixin - Action handler utilities
+
+These mixins can be composed into TelegramCommandHandler via multiple inheritance:
+
+    class TelegramCommandHandler(
+        TelegramKeyboardsMixin,
+        TelegramStateQueriesMixin,
+        TelegramFormattersMixin,
+        TelegramHandlersMixin,
+    ):
+        ...
+
+Current Status:
+- The mixin modules are created and provide reusable utilities
+- The main class still contains the full implementation for stability
+- Gradual migration to mixins can be done as needed
+
+Why Mixins:
+- Smaller, focused modules are easier to test and maintain
+- Clear separation of concerns (keyboards, state, formatting, handling)
+- No breaking changes to existing API
+- Can be adopted incrementally
 """
 
 from __future__ import annotations
@@ -16,8 +46,7 @@ import json
 import os
 import re
 import shutil
-import subprocess
-from datetime import datetime, timedelta, timezone, date
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional, Any, TYPE_CHECKING
@@ -49,7 +78,6 @@ from pearlalgo.utils.telegram_ui_contract import (
     parse_callback,
     callback_action,
     callback_menu,
-    callback_pearl,
     callback_pearl_dismiss,
     connection_status_to_label,
     ACTION_GATEWAY_STATUS,
@@ -57,11 +85,9 @@ from pearlalgo.utils.telegram_ui_contract import (
     ACTION_DATA_QUALITY,
     ACTION_SYSTEM_STATUS,
     MENU_STATUS,
-    PEARL_DISMISS,
 )
 from pearlalgo.utils.pearl_suggestions import (
     PearlSuggestion,
-    PearlSuggestionEngine,
     get_suggestion_engine,
 )
 from pearlalgo.config.config_loader import load_service_config
@@ -896,6 +922,9 @@ class TelegramCommandHandler:
             elif callback_type == "action":
                 # Route to action handler with canonical format
                 await self._handle_action(query, callback_data)
+            elif callback_type == "pearl":
+                # Handle Pearl suggestion actions
+                await self._handle_pearl_action(query, action)
             else:
                 # Unrecognized format - try legacy action handling
                 logger.warning(f"Unrecognized callback type '{callback_type}', trying legacy handling")
@@ -2113,7 +2142,6 @@ class TelegramCommandHandler:
             state = self._read_state()
             # Gather data - ONLY virtual trades for transparency
             virtual_trades_count = 0
-            daily_signals = 0
             daily_pnl = 0.0
             daily_trades = 0
             daily_wins = 0
@@ -2130,7 +2158,7 @@ class TelegramCommandHandler:
             if state:
                 # Only count virtual trades (signals with status=entered), NOT broker positions
                 virtual_trades_count = state.get("active_trades_count", 0) or 0
-                daily_signals = state.get("daily_signals", 0) or 0
+                state.get("daily_signals", 0) or 0
                 daily_pnl = float(state.get("daily_pnl", 0.0) or 0.0)
                 daily_trades = state.get("daily_trades", 0) or 0
                 daily_wins = state.get("daily_wins", 0) or 0
@@ -3024,6 +3052,104 @@ class TelegramCommandHandler:
         keyboard = [self._nav_back_row()]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await self._safe_edit_or_send(query, help_text, reply_markup=reply_markup, parse_mode="Markdown")
+
+    async def _handle_pearl_action(self, query: CallbackQuery, action: str) -> None:
+        """Handle Pearl suggestion actions."""
+        logger.info(f"Handling Pearl action: {action}")
+
+        keyboard = [self._nav_back_row()]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            # Dismiss action - just dismiss the suggestion and return to menu
+            if action == "dismiss":
+                # Mark the suggestion as dismissed in the suggestion engine
+                try:
+                    engine = get_suggestion_engine(state_dir=str(self.state_dir))
+                    # Extract cooldown key from current suggestion if available
+                    state = self._read_state()
+                    if state:
+                        suggestion = self._get_pearl_suggestion(state)
+                        if suggestion and suggestion.cooldown_key:
+                            engine.mark_dismissed(suggestion.cooldown_key)
+                except Exception as e:
+                    logger.debug(f"Could not mark suggestion dismissed: {e}")
+
+                await self._show_main_menu(query)
+                return
+
+            # Route Pearl actions to their handlers
+            if action == "reconnect_gateway":
+                # Start gateway reconnection
+                await self._safe_edit_or_send(
+                    query,
+                    "🔄 *Reconnecting Gateway...*\n\nAttempting to reconnect to IB Gateway.",
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
+                try:
+                    result = self.service_controller.restart_gateway()
+                    if result:
+                        msg = "✅ Gateway restart initiated. Check /start in 30 seconds."
+                    else:
+                        msg = "⚠️ Could not restart gateway. Check system logs."
+                except Exception as e:
+                    msg = f"❌ Gateway restart failed: {e}"
+                await self._safe_edit_or_send(query, msg, reply_markup=reply_markup)
+
+            elif action == "check_data":
+                # Show data quality diagnostics
+                await self._handle_data_quality(query, reply_markup)
+
+            elif action == "start_agent":
+                # Start the trading agent
+                await self._safe_edit_or_send(
+                    query,
+                    "🚀 *Starting Agent...*",
+                    reply_markup=reply_markup,
+                    parse_mode="Markdown"
+                )
+                try:
+                    result = self.service_controller.start_agent(market=self.active_market)
+                    if result:
+                        msg = "✅ Agent start initiated. Check /start in 10 seconds."
+                    else:
+                        msg = "⚠️ Could not start agent. It may already be running."
+                except Exception as e:
+                    msg = f"❌ Agent start failed: {e}"
+                await self._safe_edit_or_send(query, msg, reply_markup=reply_markup)
+
+            elif action == "show_performance":
+                # Show performance menu
+                await self._show_performance_menu(query)
+
+            elif action == "show_risk_report":
+                # Show risk report
+                await self._show_risk_report(query)
+
+            elif action == "show_overnight":
+                # Show overnight summary (same as daily summary for now)
+                await self._handle_daily_summary(query, reply_markup)
+
+            elif action == "show_daily_summary":
+                # Show daily summary
+                await self._handle_daily_summary(query, reply_markup)
+
+            else:
+                logger.warning(f"Unknown Pearl action: {action}")
+                await self._safe_edit_or_send(
+                    query,
+                    f"❓ Unknown action: {action}",
+                    reply_markup=reply_markup
+                )
+
+        except Exception as e:
+            logger.error(f"Error handling Pearl action '{action}': {e}", exc_info=True)
+            await self._safe_edit_or_send(
+                query,
+                f"❌ Error: {str(e)[:100]}",
+                reply_markup=reply_markup
+            )
 
     async def _handle_action(self, query: CallbackQuery, action: str) -> None:
         """Handle action button presses."""
@@ -4237,8 +4363,8 @@ class TelegramCommandHandler:
                 dir_gating_enabled = tcb.get("direction_gating_enabled", False)
                 if dir_gating_enabled:
                     # Show current session and direction gating status
-                    current_session = tcb.get("current_session", "")
-                    session_allowed = tcb.get("session_allowed", True)
+                    tcb.get("current_session", "")
+                    tcb.get("session_allowed", True)
                     blocks = tcb.get("blocks_by_reason") or {}
                     dir_blocks = blocks.get("direction_gating", 0)
                     
@@ -4276,8 +4402,6 @@ class TelegramCommandHandler:
                 # Extended metrics (computed from performance.json)
                 gross_profit = 0.0
                 gross_loss = 0.0
-                avg_win = 0.0
-                avg_loss = 0.0
                 max_drawdown = 0.0
                 today_trades_list = []
                 perf_trades = []
@@ -4338,9 +4462,9 @@ class TelegramCommandHandler:
                             
                             # Average win and loss
                             if winning_trades:
-                                avg_win = gross_profit / len(winning_trades)
+                                gross_profit / len(winning_trades)
                             if losing_trades:
-                                avg_loss = gross_loss / len(losing_trades)
+                                gross_loss / len(losing_trades)
                             
                             # Calculate max drawdown (peak-to-trough)
                             running_pnl = 0.0
@@ -4584,7 +4708,7 @@ class TelegramCommandHandler:
                         balance = config.get("start_balance", 50000.0) + pnl
                         trades = current_attempt.get("trades", 0)
                         wins = current_attempt.get("wins", 0)
-                        losses = current_attempt.get("losses", 0)
+                        current_attempt.get("losses", 0)
                         wr = (wins / trades * 100) if trades > 0 else 0.0
                         pnl_emoji = "🟢" if pnl >= 0 else "🔴"
                         pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
@@ -5817,7 +5941,7 @@ class TelegramCommandHandler:
     async def _handle_gateway_status(self, query: CallbackQuery, reply_markup: InlineKeyboardMarkup) -> None:
         """Display gateway service status (process + port)."""
         # Read state (best-effort; gateway status is still meaningful without state).
-        state = self._read_state() or {}
+        self._read_state() or {}
         
         # Gateway service status (process + port).
         gw_proc = False

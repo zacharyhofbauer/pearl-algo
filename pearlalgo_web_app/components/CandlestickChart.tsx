@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useMemo } from 'react'
+import Image from 'next/image'
 import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time } from 'lightweight-charts'
 import type { CandleData, IndicatorData, MarkerData, Indicators } from '@/stores'
 
@@ -40,6 +41,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
   const ema21SeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const connectionLineRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const resizeHandlerRef = useRef<(() => void) | null>(null)
   
   const [tooltip, setTooltip] = useState<TooltipState>({
     visible: false,
@@ -235,19 +237,28 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     // Notify parent that chart is ready
     onChartReady?.(chart)
 
-    // Handle resize
+    // Clean up any existing resize handler before adding new one
+    if (resizeHandlerRef.current) {
+      window.removeEventListener('resize', resizeHandlerRef.current)
+    }
+
+    // Handle resize - store in ref to ensure proper cleanup
     const handleResize = () => {
-      if (containerRef.current) {
-        chart.applyOptions({
+      if (containerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({
           width: containerRef.current.clientWidth,
           height: containerRef.current.clientHeight || 600,
         })
       }
     }
+    resizeHandlerRef.current = handleResize
     window.addEventListener('resize', handleResize)
 
     return () => {
-      window.removeEventListener('resize', handleResize)
+      if (resizeHandlerRef.current) {
+        window.removeEventListener('resize', resizeHandlerRef.current)
+        resizeHandlerRef.current = null
+      }
       onChartReady?.(null)
       chart.remove()
     }
@@ -572,7 +583,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
           </div>
           
           {/* PEARL Logo */}
-          <img src="/pearl-emoji.png" alt="" className="tooltip-logo" />
+          <Image src="/pearl-emoji.png" alt="" className="tooltip-logo" width={24} height={24} />
         </div>
       )}
 
@@ -648,7 +659,7 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
           </div>
           
           {/* PEARL Logo */}
-          <img src="/pearl-emoji.png" alt="" className="tooltip-logo" />
+          <Image src="/pearl-emoji.png" alt="" className="tooltip-logo" width={24} height={24} />
         </div>
       )}
     </div>

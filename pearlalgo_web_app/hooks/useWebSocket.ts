@@ -97,6 +97,13 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         updateStatus('connected')
         setReconnectAttempts(0)
 
+        // Send authentication message if API key is configured
+        // This is more secure than passing key in URL (avoids browser history, logs)
+        const apiKey = process.env.NEXT_PUBLIC_API_KEY
+        if (apiKey) {
+          ws.send(JSON.stringify({ type: 'auth', api_key: apiKey }))
+        }
+
         // Start ping interval
         pingIntervalRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
@@ -196,9 +203,14 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
 }
 
 /**
- * Get the WebSocket URL based on the current environment
+ * Get the WebSocket URL based on the current environment.
  *
- * Includes API key as query parameter when NEXT_PUBLIC_API_KEY is set
+ * Note: API key is NOT included in the URL for security reasons.
+ * Instead, authentication is handled via the first message after connection
+ * using the 'auth' message type. This prevents API keys from appearing in:
+ * - Browser history
+ * - Server access logs
+ * - Network proxy logs
  */
 export function getWebSocketUrl(): string {
   if (typeof window === 'undefined') {
@@ -206,30 +218,29 @@ export function getWebSocketUrl(): string {
   }
 
   const hostname = window.location.hostname
-  const apiKey = process.env.NEXT_PUBLIC_API_KEY || ''
 
   // Check URL params for API port override
   const urlParams = new URLSearchParams(window.location.search)
   const apiPort = urlParams.get('api_port')
 
-  let baseUrl: string
   if (apiPort) {
-    baseUrl = `ws://localhost:${apiPort}/ws`
+    return `ws://localhost:${apiPort}/ws`
   } else if (['localhost', '127.0.0.1'].includes(hostname)) {
     // Local development
-    baseUrl = 'ws://localhost:8000/ws'
+    return 'ws://localhost:8000/ws'
   } else {
     // Production - use secure WebSocket
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    baseUrl = `${protocol}//${hostname}/ws`
+    return `${protocol}//${hostname}/ws`
   }
+}
 
-  // Append API key if configured
-  if (apiKey) {
-    return `${baseUrl}?api_key=${encodeURIComponent(apiKey)}`
-  }
-
-  return baseUrl
+/**
+ * Get the API key for WebSocket authentication.
+ * Returns empty string if not configured.
+ */
+export function getWebSocketApiKey(): string {
+  return process.env.NEXT_PUBLIC_API_KEY || ''
 }
 
 export default useWebSocket

@@ -2,6 +2,19 @@
 NQ Agent State Manager
 
 Manages state persistence for the NQ agent service.
+
+Architecture Note: Dual-Write State Management
+==============================================
+This module is the PRIMARY state store using JSON files. It's designed for:
+- Fast atomic writes (temp file + rename pattern)
+- Human-readable debugging
+- Mobile/Telegram bot compatibility
+
+For analytics and querying, see also:
+- learning/trade_database.py (SQLite secondary store)
+- storage/async_sqlite_queue.py (non-blocking SQLite writes)
+
+See docs/architecture/state_management.md for full details.
 """
 
 from __future__ import annotations

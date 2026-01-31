@@ -427,7 +427,19 @@ class MarketHours:
         return status
 
 
-# Global instance
+# ============================================================================
+# GLOBAL SINGLETON INSTANCE
+# ============================================================================
+# Thread Safety Note: This module uses a lazy singleton pattern for MarketHours.
+# The singleton is thread-safe for reads (is_market_open checks) because:
+# 1. Python's GIL ensures atomic reference assignment
+# 2. MarketHours is immutable once created (no internal state mutations)
+# 3. The worst case is creating multiple instances (benign race, eventual consistency)
+#
+# For production use where configure_market_hours() may be called during startup
+# while other threads read, the assignment is atomic and safe. Re-configuration
+# during runtime is not recommended but won't cause data corruption.
+# ============================================================================
 _market_hours = None
 
 

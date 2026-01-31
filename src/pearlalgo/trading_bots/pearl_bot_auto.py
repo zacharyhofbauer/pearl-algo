@@ -106,11 +106,14 @@ CONFIG = ConfigView({
 # ============================================================================
 # CACHING (for expensive computations that don't change within time periods)
 # ============================================================================
+import threading
 
 # Cache for key levels - keyed by (data_hash, date_str) to avoid recomputing
 # when data hasn't changed within the same day/week/month
+# Thread safety: Protected by _key_levels_cache_lock for concurrent access
 _key_levels_cache: Dict[str, Dict[str, Optional[float]]] = {}
 _key_levels_cache_max_size = 10
+_key_levels_cache_lock = threading.Lock()
 
 
 def _get_key_levels_cache_key(df: pd.DataFrame) -> str:
@@ -135,7 +138,7 @@ def _get_key_levels_cache_key(df: pd.DataFrame) -> str:
 
 
 def _clear_key_levels_cache_if_needed() -> None:
-    """Clear cache if it grows too large."""
+    """Clear cache if it grows too large. Must be called with lock held."""
     global _key_levels_cache
     if len(_key_levels_cache) > _key_levels_cache_max_size:
         # Keep only the most recent entries
@@ -241,15 +244,15 @@ def detect_market_regime(
     ema_long_val = ema_long.iloc[-1]
     
     # EMA alignment score (-1 to +1)
-    bullish_alignment = 0
+    bullish_alignment = 0.0
     if ema_fast_val > ema_slow_val:
         bullish_alignment += 0.33
     if ema_slow_val > ema_long_val:
         bullish_alignment += 0.33
     if current_close > ema_fast_val:
         bullish_alignment += 0.34
-    
-    bearish_alignment = 0
+
+    bearish_alignment = 0.0
     if ema_fast_val < ema_slow_val:
         bearish_alignment += 0.33
     if ema_slow_val < ema_long_val:
@@ -272,11 +275,11 @@ def detect_market_regime(
     # Price range analysis (for ranging detection)
     price_high = recent["high"].max()
     price_low = recent["low"].min()
-    price_range_pct = _safe_pct(price_high - price_low, current_close, default=0.0)
+    _safe_pct(price_high - price_low, current_close, default=0.0)
 
     # Recent price movement (momentum)
     first_close = recent["close"].iloc[0]
-    price_change_pct = _safe_pct(current_close - first_close, first_close, default=0.0)
+    _safe_pct(current_close - first_close, first_close, default=0.0)
     
     # Classify regime
     regime = "ranging"
@@ -457,7 +460,16 @@ def calculate_tbt_trendlines(
         idx1, idx2 = latest_highs[-2], latest_highs[-1]
         price1 = df.loc[idx1, "high"]
         price2 = df.loc[idx2, "high"]
-        time_diff = (idx2 - idx1).total_seconds() if hasattr(idx2 - idx1, 'total_seconds') else len(df) - df.index.get_loc(idx1) - (len(df) - df.index.get_loc(idx2))
+        time_diff_raw = idx2 - idx1
+        if hasattr(time_diff_raw, 'total_seconds'):
+            time_diff = time_diff_raw.total_seconds()
+        else:
+            loc1 = df.index.get_loc(idx1)
+            loc2 = df.index.get_loc(idx2)
+            # get_loc can return int, slice, or ndarray - we need int positions
+            pos1 = loc1 if isinstance(loc1, int) else int(loc1.start) if isinstance(loc1, slice) else 0
+            pos2 = loc2 if isinstance(loc2, int) else int(loc2.start) if isinstance(loc2, slice) else 0
+            time_diff = float(pos2 - pos1)
         if time_diff > 0:
             resistance_slope = (price2 - price1) / time_diff
             resistance_start_price = float(price2)
@@ -472,7 +484,16 @@ def calculate_tbt_trendlines(
         idx1, idx2 = latest_lows[-2], latest_lows[-1]
         price1 = df.loc[idx1, "low"]
         price2 = df.loc[idx2, "low"]
-        time_diff = (idx2 - idx1).total_seconds() if hasattr(idx2 - idx1, 'total_seconds') else len(df) - df.index.get_loc(idx1) - (len(df) - df.index.get_loc(idx2))
+        time_diff_raw = idx2 - idx1
+        if hasattr(time_diff_raw, 'total_seconds'):
+            time_diff = time_diff_raw.total_seconds()
+        else:
+            loc1 = df.index.get_loc(idx1)
+            loc2 = df.index.get_loc(idx2)
+            # get_loc can return int, slice, or ndarray - we need int positions
+            pos1 = loc1 if isinstance(loc1, int) else int(loc1.start) if isinstance(loc1, slice) else 0
+            pos2 = loc2 if isinstance(loc2, int) else int(loc2.start) if isinstance(loc2, slice) else 0
+            time_diff = float(pos2 - pos1)
         if time_diff > 0:
             support_slope = (price2 - price1) / time_diff
             support_start_price = float(price2)
@@ -571,11 +592,12 @@ def get_key_levels(df: pd.DataFrame, use_cache: bool = True) -> Dict[str, Option
     if df.empty or len(df) < 2:
         return levels
     
-    # Check cache first
+    # Check cache first (thread-safe)
     if use_cache:
         cache_key = _get_key_levels_cache_key(df)
-        if cache_key and cache_key in _key_levels_cache:
-            return _key_levels_cache[cache_key].copy()
+        with _key_levels_cache_lock:
+            if cache_key and cache_key in _key_levels_cache:
+                return _key_levels_cache[cache_key].copy()
     
     # Ensure we have a timestamp column or index
     if "timestamp" in df.columns:
@@ -685,12 +707,13 @@ def get_key_levels(df: pd.DataFrame, use_cache: bool = True) -> Dict[str, Option
         logger.debug(f"Error computing key levels with resampling: {e}")
         return _get_key_levels_simple(df)
     
-    # Cache the result for future calls
+    # Cache the result for future calls (thread-safe)
     if use_cache:
         cache_key = _get_key_levels_cache_key(df)
         if cache_key:
-            _clear_key_levels_cache_if_needed()
-            _key_levels_cache[cache_key] = levels.copy()
+            with _key_levels_cache_lock:
+                _clear_key_levels_cache_if_needed()
+                _key_levels_cache[cache_key] = levels.copy()
     
     return levels
 

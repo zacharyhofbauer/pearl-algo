@@ -6,6 +6,19 @@ Enables:
 - Query trades by signal type, regime, time, P&L
 - Analyze performance across dimensions
 - Never forget any lesson
+
+Architecture Note: Dual-Write State Management
+==============================================
+This module is the SECONDARY state store using SQLite. It's designed for:
+- Analytics and aggregations (/doctor, performance reports)
+- Long-term queryable storage with indexes
+- Offline analysis tools
+
+The PRIMARY store is JSON files managed by:
+- market_agent/state_manager.py (signals.jsonl, state.json)
+
+JSON is authoritative for recovery. SQLite may lag slightly in async mode.
+See docs/architecture/state_management.md for full details.
 """
 
 from __future__ import annotations
@@ -1054,7 +1067,7 @@ class TradeDatabase:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM trades")
-            return cursor.fetchone()[0]
+            return int(cursor.fetchone()[0])
     
     def get_summary(self) -> Dict[str, Any]:
         """Get database summary."""

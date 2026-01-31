@@ -587,14 +587,14 @@ export default function PearlAlgoWebApp() {
       <div className="chart-container">
         {chartLoading && (
           <div className="loading-screen">
-            <img src="/logo.png" alt="PEARL" className="loading-logo" />
+            <Image src="/logo.png" alt="PEARL" className="loading-logo" width={64} height={64} priority />
             <div className="loading-text">Loading Live Data...</div>
             <div className="loading-spinner"></div>
           </div>
         )}
         {chartError && !chartLoading && (
           <div className="no-data-container">
-            <img src="/logo.png" alt="PEARL" className="no-data-logo" />
+            <Image src="/logo.png" alt="PEARL" className="no-data-logo" width={64} height={64} />
             <div className="no-data-title">No Live Data</div>
             <div className="no-data-message">{chartError}</div>
             <div className="no-data-hint">
@@ -807,8 +807,32 @@ export default function PearlAlgoWebApp() {
           {agentState.pearl_suggestion && (
             <PearlSuggestionsPanel
               suggestion={agentState.pearl_suggestion}
-              onAccept={() => console.log('Suggestion accepted')}
-              onDismiss={() => console.log('Suggestion dismissed')}
+              onAccept={async () => {
+                try {
+                  const action = agentState.pearl_suggestion?.accept_action
+                  if (action) {
+                    await apiFetch('/api/pearl-suggestion/accept', {
+                      method: 'POST',
+                      body: JSON.stringify({ action }),
+                    })
+                  }
+                } catch (e) {
+                  console.error('Failed to accept suggestion:', e)
+                }
+              }}
+              onDismiss={async () => {
+                try {
+                  const key = agentState.pearl_suggestion?.cooldown_key
+                  if (key) {
+                    await apiFetch('/api/pearl-suggestion/dismiss', {
+                      method: 'POST',
+                      body: JSON.stringify({ cooldown_key: key }),
+                    })
+                  }
+                } catch (e) {
+                  console.error('Failed to dismiss suggestion:', e)
+                }
+              }}
             />
           )}
         </DataPanelsContainer>
