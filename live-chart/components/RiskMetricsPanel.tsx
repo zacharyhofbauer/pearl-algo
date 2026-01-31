@@ -2,6 +2,12 @@
 
 import { DataPanel } from './DataPanelsContainer'
 
+interface TopLoss {
+  signal_id: string
+  pnl: number
+  exit_reason: string
+}
+
 interface RiskMetrics {
   max_drawdown: number
   max_drawdown_pct: number
@@ -13,6 +19,10 @@ interface RiskMetrics {
   largest_win: number
   largest_loss: number
   expectancy: number
+  // Exposure metrics
+  max_concurrent_positions_peak?: number
+  max_stop_risk_exposure?: number
+  top_losses?: TopLoss[]
 }
 
 interface RiskMetricsPanelProps {
@@ -38,6 +48,31 @@ export default function RiskMetricsPanel({ riskMetrics }: RiskMetricsPanelProps)
   const formatRatio = (value: number | null) => {
     if (value === null) return '—'
     return value.toFixed(2)
+  }
+
+  const formatExitReason = (reason: string): string => {
+    if (!reason) return ''
+    const lowerReason = reason.toLowerCase()
+
+    if (lowerReason.includes('close_all') || lowerReason.includes('close all')) {
+      return 'Manual'
+    }
+    if (lowerReason.includes('stop') || lowerReason.includes('sl_')) {
+      return 'Stop Loss'
+    }
+    if (lowerReason.includes('target') || lowerReason.includes('tp_') || lowerReason.includes('profit')) {
+      return 'Target'
+    }
+    if (lowerReason.includes('trail')) {
+      return 'Trail'
+    }
+    if (lowerReason.includes('time') || lowerReason.includes('eod') || lowerReason.includes('session')) {
+      return 'Time'
+    }
+
+    // Truncate long reasons
+    const formatted = reason.replace(/_/g, ' ')
+    return formatted.length > 12 ? formatted.substring(0, 12) + '...' : formatted
   }
 
   return (
@@ -141,6 +176,57 @@ export default function RiskMetricsPanel({ riskMetrics }: RiskMetricsPanelProps)
           </div>
         </div>
       </div>
+
+      {/* Exposure Section */}
+      {(riskMetrics.max_concurrent_positions_peak !== undefined ||
+        riskMetrics.max_stop_risk_exposure !== undefined ||
+        (riskMetrics.top_losses && riskMetrics.top_losses.length > 0)) && (
+        <div className="metrics-section">
+          <div className="metrics-section-header">Exposure</div>
+          <div className="stats-grid risk-metrics-grid">
+            {riskMetrics.max_concurrent_positions_peak !== undefined && (
+              <div className="stat-item">
+                <span className="stat-item-label">Peak Positions</span>
+                <span className="stat-item-value">
+                  {riskMetrics.max_concurrent_positions_peak}
+                </span>
+              </div>
+            )}
+
+            {riskMetrics.max_stop_risk_exposure !== undefined && (
+              <div className="stat-item">
+                <span className="stat-item-label">
+                  Max Stop Risk
+                  <InfoTooltip text="Total $ at risk if all stops hit" />
+                </span>
+                <span className="stat-item-value negative">
+                  ${riskMetrics.max_stop_risk_exposure.toFixed(2)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Top 3 Losses */}
+          {riskMetrics.top_losses && riskMetrics.top_losses.length > 0 && (
+            <div className="top-losses-section">
+              <div className="top-losses-header">Top 3 Losses</div>
+              <div className="top-losses-list">
+                {riskMetrics.top_losses.map((loss, idx) => (
+                  <div key={loss.signal_id} className="top-loss-item">
+                    <span className="top-loss-rank">#{idx + 1}</span>
+                    <span className="top-loss-pnl negative">
+                      ${Math.abs(loss.pnl).toFixed(2)}
+                    </span>
+                    <span className="top-loss-reason">
+                      {formatExitReason(loss.exit_reason)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </DataPanel>
   )
 }

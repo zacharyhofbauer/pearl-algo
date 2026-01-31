@@ -20,13 +20,33 @@ interface RecentExit {
   target_points?: number
 }
 
+interface DirectionBreakdown {
+  long: { count: number; pnl: number }
+  short: { count: number; pnl: number }
+}
+
+interface StatusBreakdown {
+  generated: number
+  entered: number
+  exited: number
+  cancelled: number
+}
+
 interface RecentTradesPanelProps {
   recentExits: RecentExit[]
   maxItems?: number // Optional limit for compact display (e.g., ultrawide mode)
+  directionBreakdown?: DirectionBreakdown | null
+  statusBreakdown?: StatusBreakdown | null
 }
 
-export default function RecentTradesPanel({ recentExits, maxItems }: RecentTradesPanelProps) {
+export default function RecentTradesPanel({
+  recentExits,
+  maxItems,
+  directionBreakdown,
+  statusBreakdown
+}: RecentTradesPanelProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [showSummary, setShowSummary] = useState(true)
 
   if (!recentExits || recentExits.length === 0) {
     return (
@@ -102,8 +122,61 @@ export default function RecentTradesPanel({ recentExits, maxItems }: RecentTrade
   // Apply maxItems limit if specified (for compact ultrawide display)
   const displayExits = maxItems ? recentExits.slice(0, maxItems) : recentExits
 
+  const formatSummaryPnL = (pnl: number) => {
+    const sign = pnl >= 0 ? '+' : ''
+    return `${sign}$${pnl.toFixed(0)}`
+  }
+
+  const hasSummaryData = directionBreakdown || statusBreakdown
+
   return (
     <DataPanel title="Recent Trades" icon="📋">
+      {/* Trade Stats Summary */}
+      {hasSummaryData && (
+        <div className="trade-stats-summary-wrapper">
+          <button
+            className="trade-stats-summary-toggle"
+            onClick={() => setShowSummary(!showSummary)}
+          >
+            <span className="trade-stats-summary-label">Trade Stats</span>
+            <span className="trade-stats-summary-icon">{showSummary ? '▲' : '▼'}</span>
+          </button>
+
+          {showSummary && (
+            <div className="trade-stats-summary">
+              {/* Direction Breakdown */}
+              {directionBreakdown && (
+                <div className="trade-stats-row">
+                  <span className="trade-stats-label">Direction:</span>
+                  <div className="trade-stats-values">
+                    <span className="direction-long">
+                      LONG: {directionBreakdown.long.count} ({formatSummaryPnL(directionBreakdown.long.pnl)})
+                    </span>
+                    <span className="direction-short">
+                      SHORT: {directionBreakdown.short.count} ({formatSummaryPnL(directionBreakdown.short.pnl)})
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Status Breakdown */}
+              {statusBreakdown && (
+                <div className="trade-stats-row">
+                  <span className="trade-stats-label">Status:</span>
+                  <div className="trade-stats-values">
+                    <span className="badge-entered">{statusBreakdown.entered} Active</span>
+                    <span className="badge-exited">{statusBreakdown.exited} Closed</span>
+                    {statusBreakdown.cancelled > 0 && (
+                      <span className="badge-cancelled">{statusBreakdown.cancelled} Cancelled</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="recent-trades-list">
         {displayExits.map((exit, index) => {
           const isExpanded = expandedId === exit.signal_id

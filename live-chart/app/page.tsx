@@ -16,6 +16,7 @@ import MarketPressurePanel from '@/components/MarketPressurePanel'
 import SystemHealthPanel from '@/components/SystemHealthPanel'
 import MarketRegimePanel from '@/components/MarketRegimePanel'
 import SignalDecisionsPanel from '@/components/SignalDecisionsPanel'
+import AnalyticsPanel from '@/components/AnalyticsPanel'
 import UltrawideLayout from '@/components/UltrawideLayout'
 import { useViewportType } from '@/hooks/useViewportType'
 import type { IChartApi } from 'lightweight-charts'
@@ -199,6 +200,54 @@ interface ShadowCounters {
   ml_execute_rate: number
 }
 
+// Analytics Data
+interface SessionPerformance {
+  id: string
+  name: string
+  pnl: number
+  wins: number
+  losses: number
+  win_rate: number
+}
+
+interface HourStats {
+  hour: number
+  hour_label: string
+  pnl: number
+  trades: number
+  win_rate: number
+}
+
+interface DurationStats {
+  id: string
+  name: string
+  pnl: number
+  wins: number
+  losses: number
+  win_rate: number
+}
+
+interface DirectionBreakdown {
+  long: { count: number; pnl: number }
+  short: { count: number; pnl: number }
+}
+
+interface StatusBreakdown {
+  generated: number
+  entered: number
+  exited: number
+  cancelled: number
+}
+
+interface AnalyticsData {
+  session_performance: SessionPerformance[]
+  best_hours: HourStats[]
+  worst_hours: HourStats[]
+  hold_duration: DurationStats[]
+  direction_breakdown: DirectionBreakdown
+  status_breakdown: StatusBreakdown
+}
+
 interface AgentState {
   running: boolean
   paused: boolean
@@ -265,6 +314,7 @@ export default function LiveMainChart() {
   const [indicators, setIndicators] = useState<Indicators>({})
   const [markers, setMarkers] = useState<MarkerData[]>([])
   const [agentState, setAgentState] = useState<AgentState | null>(null)
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
@@ -323,12 +373,13 @@ export default function LiveMainChart() {
       
       // Fetch all data in parallel
       const apiUrl = getApiUrl()
-      const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes] = await Promise.all([
+      const [candlesRes, indicatorsRes, markersRes, stateRes, marketStatusRes, analyticsRes] = await Promise.all([
         fetch(`${apiUrl}/api/candles?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
         fetch(`${apiUrl}/api/indicators?symbol=MNQ&timeframe=${tf}&bars=${requestBars}`),
         fetch(`${apiUrl}/api/markers?hours=${MARKER_HOURS}`),
         fetch(`${apiUrl}/api/state`),
         fetch(`${apiUrl}/api/market-status`),
+        fetch(`${apiUrl}/api/analytics`).catch(() => null),  // Analytics is optional
       ])
 
       // Update market status
@@ -372,6 +423,16 @@ export default function LiveMainChart() {
 
       if (stateData && !stateData.error) {
         setAgentState(stateData)
+      }
+
+      // Set analytics data (optional - may not be available)
+      if (analyticsRes && analyticsRes.ok) {
+        try {
+          const analyticsData = await analyticsRes.json()
+          setAnalytics(analyticsData)
+        } catch {
+          // Ignore analytics parsing errors
+        }
       }
 
       setLastUpdate(new Date())
@@ -743,7 +804,14 @@ export default function LiveMainChart() {
             />
           )}
           {agentState.recent_exits && agentState.recent_exits.length > 0 && (
-            <RecentTradesPanel recentExits={agentState.recent_exits} />
+            <RecentTradesPanel
+              recentExits={agentState.recent_exits}
+              directionBreakdown={analytics?.direction_breakdown}
+              statusBreakdown={analytics?.status_breakdown}
+            />
+          )}
+          {analytics && (
+            <AnalyticsPanel analytics={analytics} />
           )}
           {agentState.pearl_suggestion && (
             <PearlSuggestionsPanel

@@ -3428,3 +3428,459 @@ body {
   color: var(--text-secondary);
   font-size: 9px;
 }
+
+/* ============================================
+   ANALYTICS PANEL
+   ============================================ */
+
+.analytics-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  background: var(--bg-primary);
+  padding: 3px;
+  border-radius: 6px;
+}
+
+.analytics-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.analytics-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-card);
+}
+
+.analytics-tab.active {
+  background: var(--accent-cyan);
+  color: var(--bg-primary);
+}
+
+.analytics-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Session Bars */
+.analytics-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.session-bar-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.session-bar-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.session-bar-pnl {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.session-bar-pnl.positive {
+  color: var(--accent-green);
+}
+
+.session-bar-pnl.negative {
+  color: var(--accent-red);
+}
+
+.session-bar-track {
+  height: 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.session-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.session-bar-fill.positive {
+  background: linear-gradient(90deg, rgba(0, 230, 118, 0.6), var(--accent-green));
+}
+
+.session-bar-fill.negative {
+  background: linear-gradient(90deg, rgba(255, 82, 82, 0.6), var(--accent-red));
+}
+
+.session-bar-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--text-tertiary);
+}
+
+/* Hours Display */
+.analytics-hours {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hours-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hours-section-header {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hours-section-header.positive {
+  color: var(--accent-green);
+}
+
+.hours-section-header.negative {
+  color: var(--accent-red);
+}
+
+.hours-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hour-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+}
+
+.hour-rank {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  min-width: 20px;
+}
+
+.hour-time {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  color: var(--text-primary);
+  min-width: 60px;
+}
+
+.hour-pnl {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  min-width: 70px;
+}
+
+.hour-pnl.positive {
+  color: var(--accent-green);
+}
+
+.hour-pnl.negative {
+  color: var(--accent-red);
+}
+
+.hour-stats {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.hours-empty {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 8px;
+  text-align: center;
+}
+
+/* Duration Breakdown */
+.analytics-duration {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.duration-bar-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.duration-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.duration-bar-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.duration-bar-pnl {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+}
+
+.duration-bar-pnl.positive {
+  color: var(--accent-green);
+}
+
+.duration-bar-pnl.negative {
+  color: var(--accent-red);
+}
+
+.duration-bar-track {
+  height: 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.duration-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.duration-bar-fill.positive {
+  background: linear-gradient(90deg, rgba(0, 230, 118, 0.6), var(--accent-green));
+}
+
+.duration-bar-fill.negative {
+  background: linear-gradient(90deg, rgba(255, 82, 82, 0.6), var(--accent-red));
+}
+
+.duration-bar-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--text-tertiary);
+}
+
+/* ============================================
+   TOP LOSSES SECTION (RiskMetricsPanel)
+   ============================================ */
+
+.top-losses-section {
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-color);
+}
+
+.top-losses-header {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--spacing-sm);
+}
+
+.top-losses-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.top-loss-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+}
+
+.top-loss-rank {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  min-width: 20px;
+}
+
+.top-loss-pnl {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  min-width: 70px;
+}
+
+.top-loss-pnl.negative {
+  color: var(--accent-red);
+}
+
+.top-loss-reason {
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-left: auto;
+  text-transform: capitalize;
+}
+
+/* ============================================
+   TRADE STATS SUMMARY (RecentTradesPanel)
+   ============================================ */
+
+.trade-stats-summary-wrapper {
+  margin-bottom: 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.trade-stats-summary-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background 0.15s ease;
+}
+
+.trade-stats-summary-toggle:hover {
+  background: var(--bg-card);
+}
+
+.trade-stats-summary-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.trade-stats-summary-icon {
+  font-size: 10px;
+}
+
+.trade-stats-summary {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.trade-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trade-stats-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  min-width: 60px;
+}
+
+.trade-stats-values {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.direction-long {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  padding: 2px 6px;
+  background: rgba(0, 212, 255, 0.1);
+  border-radius: 3px;
+}
+
+.direction-short {
+  font-size: 10px;
+  font-weight: 600;
+  color: #ff6ec7;
+  padding: 2px 6px;
+  background: rgba(255, 110, 199, 0.1);
+  border-radius: 3px;
+}
+
+.badge-entered {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  padding: 2px 6px;
+  background: rgba(0, 212, 255, 0.1);
+  border-radius: 3px;
+}
+
+.badge-exited {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-green);
+  padding: 2px 6px;
+  background: rgba(0, 230, 118, 0.1);
+  border-radius: 3px;
+}
+
+.badge-cancelled {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  background: rgba(138, 148, 166, 0.1);
+  border-radius: 3px;
+}
+
+/* Responsive adjustments for analytics */
+@media (max-width: 480px) {
+  .hour-item {
+    flex-wrap: wrap;
+  }
+
+  .hour-stats {
+    width: 100%;
+    margin-left: 0;
+    margin-top: 4px;
+  }
+
+  .trade-stats-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .trade-stats-values {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}

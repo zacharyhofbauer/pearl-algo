@@ -834,6 +834,7 @@ def _get_equity_curve(state_dir: Path, hours: int = 72) -> List[Dict[str, Any]]:
 def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
     """Calculate risk metrics: max drawdown, Sharpe ratio, average R:R, profit factor."""
     performance_file = state_dir / "performance.json"
+    signals_file = state_dir / "signals.jsonl"
     default_metrics = {
         "max_drawdown": 0.0,
         "max_drawdown_pct": 0.0,
@@ -845,6 +846,10 @@ def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
         "largest_win": 0.0,
         "largest_loss": 0.0,
         "expectancy": 0.0,
+        # NEW: Exposure metrics
+        "max_concurrent_positions_peak": 0,
+        "max_stop_risk_exposure": 0.0,
+        "top_losses": [],
     }
 
     if not performance_file.exists():
@@ -900,6 +905,75 @@ def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
         win_rate = len(wins) / len(pnls) if pnls else 0
         expectancy = round((win_rate * avg_win) + ((1 - win_rate) * avg_loss), 2)
 
+        # NEW: Top 3 losses
+        top_losses = []
+        trades_with_losses = [
+            t for t in data
+            if t.get("pnl") is not None and t.get("pnl") < 0
+        ]
+        # Sort by pnl ascending (most negative first)
+        trades_with_losses.sort(key=lambda x: x.get("pnl", 0))
+        for t in trades_with_losses[:3]:
+            top_losses.append({
+                "signal_id": t.get("signal_id", "unknown"),
+                "pnl": round(t.get("pnl", 0), 2),
+                "exit_reason": t.get("exit_reason", ""),
+            })
+
+        # NEW: Calculate max concurrent positions from signals.jsonl
+        max_concurrent = 0
+        max_stop_risk = 0.0
+
+        if signals_file.exists():
+            try:
+                signals = _load_jsonl_file(signals_file, max_lines=2000)
+
+                # Build list of entries and exits with timestamps
+                events = []
+                for s in signals:
+                    entry_time = s.get("entry_time")
+                    exit_time = s.get("exit_time")
+                    signal_data = s.get("signal", {})
+
+                    # Calculate stop risk for this position
+                    entry_price = s.get("entry_price", 0)
+                    stop_loss = signal_data.get("stop_loss", 0) if isinstance(signal_data, dict) else 0
+                    stop_risk = abs(entry_price - stop_loss) * 2 if entry_price and stop_loss else 0  # MNQ = $2/pt
+
+                    if entry_time:
+                        try:
+                            entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+                            events.append(("entry", entry_dt, stop_risk))
+                        except (ValueError, TypeError):
+                            pass
+
+                    if exit_time:
+                        try:
+                            exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
+                            events.append(("exit", exit_dt, -stop_risk))
+                        except (ValueError, TypeError):
+                            pass
+
+                # Sort events by time
+                events.sort(key=lambda x: x[1])
+
+                # Track concurrent positions and stop risk
+                current_positions = 0
+                current_stop_risk = 0.0
+                for event_type, _, risk_delta in events:
+                    if event_type == "entry":
+                        current_positions += 1
+                        current_stop_risk += risk_delta
+                    else:
+                        current_positions -= 1
+                        current_stop_risk += risk_delta  # risk_delta is negative for exits
+
+                    max_concurrent = max(max_concurrent, current_positions)
+                    max_stop_risk = max(max_stop_risk, current_stop_risk)
+
+            except Exception:
+                pass
+
         return {
             "max_drawdown": round(max_dd, 2),
             "max_drawdown_pct": round((max_dd / peak * 100), 1) if peak > 0 else 0.0,
@@ -911,6 +985,10 @@ def _get_risk_metrics(state_dir: Path) -> Dict[str, Any]:
             "largest_win": round(max(wins), 2) if wins else 0.0,
             "largest_loss": round(min(losses), 2) if losses else 0.0,
             "expectancy": expectancy,
+            # NEW: Exposure metrics
+            "max_concurrent_positions_peak": max_concurrent,
+            "max_stop_risk_exposure": round(max_stop_risk, 2),
+            "top_losses": top_losses,
         }
     except Exception:
         return default_metrics
