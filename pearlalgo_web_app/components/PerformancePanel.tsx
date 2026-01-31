@@ -85,24 +85,50 @@ export default function PerformancePanel({ performance, expectancy }: Performanc
           }
         />
 
-        {activePeriod === '24h' && stats.streak !== undefined && stats.streak > 0 && (
-          <div className="col-span-full">
-            <div className="stat-display">
-              <span className="stat-display-label">Streak</span>
-              <div className="streak-indicator">
-                <span className={`streak-dots ${stats.streak_type === 'win' ? 'win' : 'loss'}`}>
-                  {Array.from({ length: Math.min(stats.streak, 5) }).map((_, i) => (
-                    <span key={i} className="streak-dot">●</span>
-                  ))}
-                  {stats.streak > 5 && <span className="streak-more">+{stats.streak - 5}</span>}
-                </span>
-                <span className={`stat-display-value ${stats.streak_type === 'win' ? 'stat-value-profit' : 'stat-value-loss'}`}>
-                  {stats.streak} {stats.streak_type === 'win' ? 'W' : 'L'}
-                </span>
+        {/* Streak display for all periods */}
+        {stats.streak !== undefined && stats.streak > 0 && (() => {
+          const streakCount = stats.streak || 0
+          const streakType = stats.streak_type || 'win'
+          const dotCount = Math.min(streakCount, 8)
+
+          return (
+            <div className="col-span-full">
+              <div className="streak-display-enhanced">
+                <div className="streak-header">
+                  <span className="streak-label">Current Streak</span>
+                  <span className={`streak-badge ${streakType === 'win' ? 'win' : 'loss'}`}>
+                    {streakType === 'win' ? 'HOT' : 'COLD'}
+                  </span>
+                </div>
+                <div className="streak-indicator-enhanced">
+                  <div className={`streak-dots-row ${streakType === 'win' ? 'win' : 'loss'}`}>
+                    {Array.from({ length: dotCount }).map((_, i) => (
+                      <span
+                        key={i}
+                        className="streak-dot-enhanced"
+                        style={{
+                          opacity: 0.4 + (i / dotCount) * 0.6,
+                          animationDelay: `${i * 0.1}s`
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <span className={`streak-count ${streakType === 'win' ? 'win' : 'loss'}`}>
+                    {streakCount}
+                    <span className="streak-type">{streakType === 'win' ? 'W' : 'L'}</span>
+                  </span>
+                </div>
+                {streakCount >= 3 && (
+                  <span className="streak-message">
+                    {streakType === 'win'
+                      ? streakCount >= 5 ? 'On fire!' : 'Keep it up!'
+                      : streakCount >= 5 ? 'Stay disciplined' : 'Patience'}
+                  </span>
+                )}
               </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
       </div>
     </DataPanel>
   )

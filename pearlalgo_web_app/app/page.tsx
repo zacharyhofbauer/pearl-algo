@@ -18,6 +18,7 @@ import ConfigPanel from '@/components/ConfigPanel'
 import MarketRegimePanel from '@/components/MarketRegimePanel'
 import SignalDecisionsPanel from '@/components/SignalDecisionsPanel'
 import AnalyticsPanel from '@/components/AnalyticsPanel'
+import ActivePositionsPanel from '@/components/ActivePositionsPanel'
 import UltrawideLayout from '@/components/UltrawideLayout'
 import { useViewportType } from '@/hooks/useViewportType'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
@@ -250,6 +251,90 @@ export default function PearlAlgoWebApp() {
     })
   }
 
+  const formatRelativeTime = (date: Date | null) => {
+    if (!date) return 'Never'
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+    if (seconds < 5) return 'Just now'
+    if (seconds < 60) return `${seconds}s ago`
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes}m ago`
+    return formatTime(date)
+  }
+
+  const formatMarketCountdown = () => {
+    if (!marketStatus) return null
+
+    if (marketStatus.is_open) {
+      // Market is open - would need close time from API
+      // For now, show that it's open
+      return null
+    } else if (marketStatus.next_open) {
+      try {
+        const nextOpen = new Date(marketStatus.next_open)
+        const now = new Date()
+        const diffMs = nextOpen.getTime() - now.getTime()
+        if (diffMs <= 0) return null
+
+        const hours = Math.floor(diffMs / (1000 * 60 * 60))
+        const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+
+        if (hours > 24) {
+          const days = Math.floor(hours / 24)
+          return `Opens in ${days}d ${hours % 24}h`
+        }
+        return `Opens in ${hours}h ${minutes}m`
+      } catch {
+        return null
+      }
+    }
+    return null
+  }
+
+  const getAgentModeBadge = () => {
+    if (!agentState) return null
+
+    const aiStatus = agentState.ai_status
+    if (!aiStatus) return null
+
+    // Check if any AI component is in live mode
+    const hasLive = aiStatus.bandit_mode === 'live' ||
+                    aiStatus.contextual_mode === 'live' ||
+                    (aiStatus.ml_filter.enabled && aiStatus.ml_filter.mode === 'live')
+
+    // Check if any AI component is in shadow mode
+    const hasShadow = aiStatus.bandit_mode === 'shadow' ||
+                      aiStatus.contextual_mode === 'shadow' ||
+                      (aiStatus.ml_filter.enabled && aiStatus.ml_filter.mode === 'shadow')
+
+    if (hasLive) return { mode: 'live', label: 'AI LIVE' }
+    if (hasShadow) return { mode: 'shadow', label: 'AI SHADOW' }
+    return { mode: 'off', label: 'AI OFF' }
+  }
+
+  const getRegimeBadge = () => {
+    if (!agentState?.market_regime) return null
+    const regime = agentState.market_regime
+    if (regime.confidence === 0 || regime.regime === 'unknown') return null
+
+    const icons: Record<string, string> = {
+      'trending_up': '📈',
+      'trending_down': '📉',
+      'ranging': '↔️',
+      'volatile': '⚡',
+    }
+    return {
+      icon: icons[regime.regime] || '❓',
+      label: regime.regime.replace('_', ' ').toUpperCase(),
+      confidence: Math.round(regime.confidence * 100)
+    }
+  }
+
+  const isDataStale = () => {
+    if (!lastUpdate) return true
+    const seconds = Math.floor((Date.now() - lastUpdate.getTime()) / 1000)
+    return seconds > 120 // Stale if > 2 minutes
+  }
+
   const formatPnL = (pnl: number) => {
     const sign = pnl >= 0 ? '+' : ''
     return `${sign}$${pnl.toFixed(2)}`
@@ -277,52 +362,101 @@ export default function PearlAlgoWebApp() {
   }
 
   // Common header component
-  const renderHeader = () => (
-    <header className="header">
-      <div className="title-group">
-        <Image src="/logo.png" alt="PEARL" width={28} height={28} className="logo" priority />
-        <div className="title-text">
-          <h1>
-            <span className="symbol">MNQ</span>
-            <span className="page-name">Pearl Algo Web App</span>
-          </h1>
-        </div>
-        {/* Market Status Badge */}
-        {marketStatus && (
-          <div className={`market-status-badge ${marketStatus.is_open ? 'open' : 'closed'}`}>
-            <span className="market-status-dot"></span>
-            {marketStatus.is_open ? 'Market Open' : 'Market Closed'}
+  const renderHeader = () => {
+    const agentMode = getAgentModeBadge()
+    const regime = getRegimeBadge()
+    const countdown = formatMarketCountdown()
+    const stale = isDataStale()
+
+    return (
+      <header className="header">
+        {/* Stale Data Warning Banner */}
+        {stale && isLive && (
+          <div className="stale-data-banner">
+            <span className="stale-icon">⚠️</span>
+            <span>Data may be stale - last update {formatRelativeTime(lastUpdate)}</span>
           </div>
         )}
-      </div>
-      {/* Timeframe Selector */}
-      <div className="timeframe-selector">
-        {(['1m', '5m', '15m', '1h'] as Timeframe[]).map((tf) => (
-          <button
-            key={tf}
-            className={timeframe === tf ? 'active' : ''}
-            onClick={() => setTimeframe(tf)}
-          >
-            {tf}
-          </button>
-        ))}
-      </div>
-      <div className="status">
-        {/* WebSocket Status Indicator */}
-        <div className={`ws-status-indicator ${wsStatus}`} title={`WebSocket: ${wsStatus}`}>
-          <span className="ws-status-dot"></span>
-          <span className="ws-status-label">
-            {wsStatus === 'connected' ? 'WS' : wsStatus === 'connecting' ? '...' : 'Poll'}
-          </span>
+
+        <div className="header-main">
+          {/* Title and Logo */}
+          <div className="header-title-group">
+            <Image src="/logo.png" alt="PEARL" width={28} height={28} className="logo" priority />
+            <h1>
+              <span className="symbol">MNQ</span>
+              <span className="page-name">Pearl Algo</span>
+            </h1>
+          </div>
+
+          {/* Status Badges */}
+          <div className="header-badges">
+            {/* Agent Mode Badge */}
+            {agentMode && (
+              <div className={`agent-mode-badge mode-${agentMode.mode}`}>
+                <span className="pulse-dot"></span>
+                {agentMode.label}
+              </div>
+            )}
+
+            {/* Market Regime Badge */}
+            {regime && (
+              <div className={`regime-header-badge ${agentState?.market_regime?.regime?.includes('trending') ? 'trending' : agentState?.market_regime?.regime === 'ranging' ? 'ranging' : agentState?.market_regime?.regime === 'volatile' ? 'volatile' : ''}`} title={`${regime.confidence}% confidence`}>
+                <span className="regime-header-icon">{regime.icon}</span>
+                <span className="regime-header-label">{regime.label}</span>
+              </div>
+            )}
+
+            {/* Market Status Badge */}
+            {marketStatus && (
+              <div className={`market-status-badge ${marketStatus.is_open ? 'open' : 'closed'}`}>
+                <span className="market-status-dot"></span>
+                <span className="market-status-text">{marketStatus.is_open ? 'Open' : 'Closed'}</span>
+                {countdown && <span className="market-countdown-text">{countdown}</span>}
+              </div>
+            )}
+          </div>
+
+          {/* Timeframe Selector */}
+          <div className="timeframe-selector">
+            {(['1m', '5m', '15m', '1h'] as Timeframe[]).map((tf) => (
+              <button
+                key={tf}
+                className={timeframe === tf ? 'active' : ''}
+                onClick={() => setTimeframe(tf)}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
+
+          <div className="status">
+            {/* Data Freshness Indicator */}
+            <div className={`data-freshness-indicator ${stale ? 'stale' : 'fresh'}`} title={stale ? 'Data is stale' : 'Data is fresh'}>
+              <span className="freshness-dot"></span>
+              <span className="freshness-label">{stale ? 'STALE' : 'LIVE'}</span>
+            </div>
+
+            <span className="status-separator">•</span>
+
+            {/* WebSocket Status Indicator */}
+            <div className={`ws-status-indicator ${wsStatus}`} title={`WebSocket: ${wsStatus}`}>
+              <span className="ws-status-dot"></span>
+              <span className="ws-status-label">
+                {wsStatus === 'connected' ? 'WS' : wsStatus === 'connecting' ? '...' : 'Poll'}
+              </span>
+            </div>
+
+            <span className="status-separator">•</span>
+
+            {/* Last Update Time */}
+            <span className="last-update-time" title={formatTime(lastUpdate)}>
+              {formatRelativeTime(lastUpdate)}
+            </span>
+          </div>
         </div>
-        <span className="status-separator">•</span>
-        <span className={`status-dot ${isLive ? '' : 'offline'}`}></span>
-        <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
-          {isLive ? 'Live' : 'Cached'} • {formatTime(lastUpdate)}
-        </span>
-      </div>
-    </header>
-  )
+      </header>
+    )
+  }
 
   // Common status panel component
   const renderStatusPanel = () => (
@@ -507,6 +641,13 @@ export default function PearlAlgoWebApp() {
               />
             )
           }
+          activePositionsSection={
+            <ActivePositionsPanel
+              activeTradesCount={agentState.active_trades_count}
+              recentExits={agentState.recent_exits}
+              dailyPnL={agentState.daily_pnl}
+            />
+          }
           challengeSection={
             agentState.challenge && (
               <ChallengePanel
@@ -568,6 +709,12 @@ export default function PearlAlgoWebApp() {
               expectancy={agentState.risk_metrics?.expectancy}
             />
           )}
+          {/* Active Positions Panel */}
+          <ActivePositionsPanel
+            activeTradesCount={agentState.active_trades_count}
+            recentExits={agentState.recent_exits}
+            dailyPnL={agentState.daily_pnl}
+          />
           {agentState.risk_metrics && (
             <RiskMetricsPanel riskMetrics={agentState.risk_metrics} />
           )}
@@ -624,7 +771,10 @@ export default function PearlAlgoWebApp() {
             />
           )}
           {agentState.analytics && (
-            <AnalyticsPanel analytics={agentState.analytics} />
+            <AnalyticsPanel
+              analytics={agentState.analytics}
+              recentExits={agentState.recent_exits}
+            />
           )}
           {agentState.pearl_suggestion && (
             <PearlSuggestionsPanel

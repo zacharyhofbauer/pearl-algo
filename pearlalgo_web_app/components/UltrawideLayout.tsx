@@ -8,6 +8,7 @@ interface UltrawideLayoutProps {
   rsiSection?: ReactNode
   // Column 2: Key Metrics (20%)
   performanceSection?: ReactNode
+  activePositionsSection?: ReactNode
   challengeSection?: ReactNode
   // Column 3: Status & Trades (20%)
   regimeSection?: ReactNode
@@ -34,6 +35,7 @@ export default function UltrawideLayout({
   chartSection,
   rsiSection,
   performanceSection,
+  activePositionsSection,
   challengeSection,
   regimeSection,
   aiStatusSection,
@@ -50,6 +52,7 @@ export default function UltrawideLayout({
       {/* Column 2: Key Metrics (20%) */}
       <div className="ultrawide-metrics-column">
         {performanceSection}
+        {activePositionsSection}
         {challengeSection}
       </div>
 

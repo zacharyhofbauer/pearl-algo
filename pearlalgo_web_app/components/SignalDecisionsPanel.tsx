@@ -27,6 +27,15 @@ export default function SignalDecisionsPanel({ rejections, lastDecision }: Signa
       .join(' ')
   }
 
+  // Color mapping for rejection types
+  const rejectionColors: Record<string, string> = {
+    'Circuit Breaker': 'var(--accent-red)',
+    'Direction Gating': 'var(--accent-cyan)',
+    'ML Filter': 'var(--accent-purple)',
+    'Max Positions': 'var(--accent-yellow)',
+    'Session Filter': 'var(--text-tertiary)',
+  }
+
   const formatTime = (timestamp: string | null) => {
     if (!timestamp) return '--:--'
     try {
@@ -106,14 +115,48 @@ export default function SignalDecisionsPanel({ rejections, lastDecision }: Signa
               <span className="rejections-label">Rejections (24h)</span>
               <span className="rejections-total">{totalRejections}</span>
             </div>
+
+            {/* Stacked Trend Bar - Visual overview of rejection distribution */}
+            <div className="rejection-trend-bar">
+              {rejectionBars.map((item) => (
+                <div
+                  key={item.label}
+                  className="rejection-trend-segment"
+                  style={{
+                    width: `${item.percentage}%`,
+                    backgroundColor: rejectionColors[item.label] || 'var(--text-tertiary)',
+                  }}
+                  title={`${item.label}: ${item.count} (${item.percentage}%)`}
+                />
+              ))}
+            </div>
+
+            {/* Legend for trend bar */}
+            <div className="rejection-trend-legend">
+              {rejectionBars.slice(0, 3).map((item) => (
+                <div key={item.label} className="rejection-legend-item">
+                  <span
+                    className="rejection-legend-dot"
+                    style={{ backgroundColor: rejectionColors[item.label] }}
+                  />
+                  <span className="rejection-legend-label">{item.label.split(' ')[0]}</span>
+                </div>
+              ))}
+            </div>
+
             <div className="rejection-bar-chart">
               {rejectionBars.map((item) => (
                 <div key={item.label} className="rejection-bar-item">
                   <span className="rejection-bar-label">{item.label}</span>
                   <div className="rejection-bar-track">
                     <div
-                      className={`rejection-bar-fill ${item.isTopBlocker ? 'top-blocker' : ''}`}
-                      style={{ width: `${item.percentage}%` }}
+                      className="rejection-bar-fill"
+                      style={{
+                        width: `${item.percentage}%`,
+                        backgroundColor: item.isTopBlocker
+                          ? rejectionColors[item.label]
+                          : undefined,
+                      }}
                     />
                   </div>
                   <span className={`rejection-bar-value ${item.isTopBlocker ? 'top-blocker' : ''}`}>

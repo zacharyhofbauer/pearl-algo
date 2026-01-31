@@ -101,6 +101,24 @@ export default function RecentTradesPanel({
 
   const hasSummaryData = directionBreakdown || statusBreakdown
 
+  // Calculate win rate by exit reason
+  const exitReasonStats = recentExits.reduce((acc, exit) => {
+    if (!exit.exit_reason) return acc
+    const { text } = formatExitReason(exit.exit_reason)
+    if (!acc[text]) {
+      acc[text] = { wins: 0, total: 0, pnl: 0 }
+    }
+    acc[text].total++
+    if (exit.pnl > 0) acc[text].wins++
+    acc[text].pnl += exit.pnl
+    return acc
+  }, {} as Record<string, { wins: number; total: number; pnl: number }>)
+
+  // Sort by total trades descending
+  const sortedExitReasons = Object.entries(exitReasonStats)
+    .filter(([_, stats]) => stats.total >= 2) // Only show reasons with 2+ trades
+    .sort((a, b) => b[1].total - a[1].total)
+
   return (
     <DataPanel title="Recent Trades" icon="📋">
       {/* Trade Stats Summary */}
@@ -141,6 +159,27 @@ export default function RecentTradesPanel({
                     {statusBreakdown.cancelled > 0 && (
                       <span className="badge-cancelled">{statusBreakdown.cancelled} Cancelled</span>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Exit Reason Win Rates */}
+              {sortedExitReasons.length > 0 && (
+                <div className="exit-reason-stats">
+                  <span className="trade-stats-label">Win% by Exit:</span>
+                  <div className="exit-reason-grid">
+                    {sortedExitReasons.map(([reason, stats]) => {
+                      const winRate = (stats.wins / stats.total * 100)
+                      return (
+                        <div key={reason} className="exit-reason-stat">
+                          <span className="exit-reason-name">{reason}</span>
+                          <span className={`exit-reason-winrate ${winRate >= 50 ? 'positive' : 'negative'}`}>
+                            {winRate.toFixed(0)}%
+                          </span>
+                          <span className="exit-reason-count">({stats.total})</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}
