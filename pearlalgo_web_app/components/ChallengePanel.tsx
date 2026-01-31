@@ -78,6 +78,13 @@ function MiniSparkline({ data, isPositive }: { data: EquityCurvePoint[], isPosit
 }
 
 export default function ChallengePanel({ challenge, equityCurve }: ChallengePanelProps) {
+  // Calculate peak balance - hooks must be called before any early returns
+  const peakBalance = useMemo(() => {
+    if (!challenge) return 0
+    if (!equityCurve || equityCurve.length === 0) return challenge.current_balance
+    return Math.max(...equityCurve.map(p => p.value))
+  }, [equityCurve, challenge])
+
   if (!challenge || !challenge.enabled) {
     return null
   }
@@ -111,12 +118,6 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
 
   // Calculate progress towards profit target
   const profitProgress = Math.max(0, Math.min(100, (challenge.pnl / challenge.profit_target) * 100))
-
-  // Calculate peak and gap from peak
-  const peakBalance = useMemo(() => {
-    if (!equityCurve || equityCurve.length === 0) return challenge.current_balance
-    return Math.max(...equityCurve.map(p => p.value))
-  }, [equityCurve, challenge.current_balance])
 
   const gapFromPeak = peakBalance - challenge.current_balance
 

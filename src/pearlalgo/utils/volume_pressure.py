@@ -94,7 +94,8 @@ def compute_signed_volume_series(
         c = pd.to_numeric(df[close_col], errors="coerce")
         v = pd.to_numeric(df[volume_col], errors="coerce").fillna(0.0)
         sign = np.sign((c - o).fillna(0.0))
-        return v * sign
+        result: pd.Series = v * sign  # type: ignore[assignment]
+        return result
     except Exception:
         return None
 

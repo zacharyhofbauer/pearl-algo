@@ -16,7 +16,6 @@ from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-import math
 
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.paths import get_utc_timestamp, parse_utc_timestamp
@@ -33,7 +32,6 @@ from pearlalgo.market_agent.telegram_notifier import MarketAgentTelegramNotifier
 from pearlalgo.market_agent.notification_queue import NotificationQueue, Priority
 from pearlalgo.market_agent.trading_circuit_breaker import (
     TradingCircuitBreaker,
-    TradingCircuitBreakerConfig,
     create_trading_circuit_breaker,
 )
 from pearlalgo.trading_bots.pearl_bot_auto import generate_signals, CONFIG as PEARL_BOT_CONFIG
@@ -1662,7 +1660,6 @@ class MarketAgentService:
 
             # Virtual entry: enter immediately at the signal's entry price.
             # This enables per-signal PnL tracking without requiring IBKR fills.
-            entry_tracked = False
             entry_price = 0.0
             try:
                 entry_price = float(signal.get("entry_price") or 0.0)
@@ -1679,7 +1676,6 @@ class MarketAgentService:
                         entry_price=entry_price,
                         entry_time=datetime.now(timezone.utc),
                     )
-                    entry_tracked = True
             except Exception as e:
                 logger.debug(f"Could not track virtual entry for {signal_id}: {e}")
 

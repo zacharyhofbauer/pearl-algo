@@ -3,13 +3,12 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from pearlalgo.knowledge.chunker import ChunkConfig, Chunker
 from pearlalgo.knowledge.embeddings import EmbeddingConfig, EmbeddingProvider
 from pearlalgo.knowledge.index_store import IndexConfig, IndexStore
 from pearlalgo.knowledge.scanner import RepoScanConfig, RepoScanner
-from pearlalgo.knowledge.types import Chunk
 
 
 @dataclass

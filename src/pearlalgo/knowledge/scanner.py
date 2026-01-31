@@ -4,7 +4,7 @@ import fnmatch
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import List
 
 
 @dataclass

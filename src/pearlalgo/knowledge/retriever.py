@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
-import numpy as np
 
 from pearlalgo.knowledge.embeddings import EmbeddingConfig, EmbeddingProvider
 from pearlalgo.knowledge.index_store import IndexConfig, IndexStore

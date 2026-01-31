@@ -15,16 +15,21 @@ import pandas as pd
 
 from pearlalgo.utils.logger import logger
 
-# Timezone handling
+# Timezone handling - use Any to support ZoneInfo, pytz, or None
+from typing import Any as TimezoneType
+
+_ET_TZ: TimezoneType = None
 try:
     from zoneinfo import ZoneInfo
-    ET_TIMEZONE = ZoneInfo("America/New_York")
+    _ET_TZ = ZoneInfo("America/New_York")
 except ImportError:
     try:
         import pytz
-        ET_TIMEZONE = pytz.timezone("America/New_York")
+        _ET_TZ = pytz.timezone("America/New_York")
     except ImportError:
-        ET_TIMEZONE = None
+        pass
+
+ET_TIMEZONE: TimezoneType = _ET_TZ
 
 
 class VWAPCalculator:
@@ -198,20 +203,23 @@ class VWAPCalculator:
 
         # Check if DataFrame has timestamp column or uses index
         if "timestamp" in df.columns:
-            ts = df["timestamp"]
+            ts_raw = df["timestamp"]
+            ts_valid = True
 
             # If timestamp column is not datetime-like, coerce to UTC (best-effort).
-            if not pd.api.types.is_datetime64_any_dtype(ts):
+            if not pd.api.types.is_datetime64_any_dtype(ts_raw):
                 try:
-                    ts = pd.to_datetime(ts, errors="coerce", utc=True)
+                    ts_raw = pd.to_datetime(ts_raw, errors="coerce", utc=True)
                 except Exception:
-                    ts = None
+                    ts_valid = False
 
-            if ts is None:
+            if not ts_valid:
                 logger.warning(
                     "DataFrame timestamp column is not datetime-like; skipping session filter for VWAP"
                 )
                 return df.copy()
+
+            ts = ts_raw
 
             # Align session_start timezone awareness with the series.
             # - tz-aware series: compare against UTC-aware session start

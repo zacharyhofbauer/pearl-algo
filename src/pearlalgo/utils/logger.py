@@ -142,7 +142,7 @@ class CompatLogger:
     
     def remove(self, *args: Any, **kwargs: Any) -> None:
         """Loguru-native: remove a handler."""
-        return self._logger.remove(*args, **kwargs)
+        self._logger.remove(*args, **kwargs)
     
     def configure(self, *args: Any, **kwargs: Any) -> Any:
         """Loguru-native: configure the logger."""

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import IntEnum
 from typing import Any, Optional
 
@@ -273,7 +273,7 @@ class PearlSuggestionEngine:
         """Check for performance milestones (Priority 2)."""
         
         daily_pnl = state.get("daily_pnl", 0)
-        wins_today = state.get("wins_today", 0)
+        state.get("wins_today", 0)
         
         # Big profit day ($300+)
         if daily_pnl >= 300:

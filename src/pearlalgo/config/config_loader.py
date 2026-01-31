@@ -34,7 +34,6 @@ data settings, signals, performance tracking, execution (ATS), and learning.
 from __future__ import annotations
 
 import contextlib
-import os
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
@@ -45,11 +44,8 @@ from pearlalgo.config import defaults
 from pearlalgo.config.adapters import (
     build_strategy_config_from_yaml,
     apply_execution_env_overrides as _apply_execution_env_overrides,
-    _get_env_bool,
-    _get_env_str,
 )
 from pearlalgo.utils.dict_utils import deep_merge_inplace as _deep_merge_dict
-from pearlalgo.utils.time_utils import parse_hhmm as _parse_hhmm
 from pearlalgo.utils.logger import logger
 
 # Schema validation (optional - only validates if explicitly requested)

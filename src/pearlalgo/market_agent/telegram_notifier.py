@@ -6,10 +6,7 @@ Sends signals and status updates to Telegram.
 
 from __future__ import annotations
 
-import asyncio
 import importlib.util
-import re
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
@@ -43,7 +40,6 @@ from pearlalgo.utils.telegram_alerts import (
 from pearlalgo.utils.telegram_ui_contract import (
     callback_menu,
     callback_action,
-    callback_signal_detail,
     callback_confirm,
     MENU_MAIN,
     MENU_STATUS,
@@ -250,7 +246,7 @@ class MarketAgentTelegramNotifier:
         if isinstance(ml_pred, dict):
             try:
                 ml_prob = float(ml_pred.get("win_probability", 0.0) or 0.0)
-                ml_pass = bool(ml_pred.get("pass_filter", True))
+                bool(ml_pred.get("pass_filter", True))
                 
                 ml_emoji = "🧠"
                 if ml_prob >= 0.7:
