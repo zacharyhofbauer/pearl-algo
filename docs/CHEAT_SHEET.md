@@ -23,6 +23,7 @@ The `pearl.sh` master script handles everything with simple commands:
 ./pearl.sh agent start|stop|status
 ./pearl.sh telegram start|stop|status
 ./pearl.sh chart start|stop|status    # Live Chart (pearlalgo.io)
+./pearl.sh tunnel start|stop|status|logs  # Cloudflare Tunnel
 ```
 
 **Options:**
@@ -85,7 +86,7 @@ That's it! This starts Gateway → Agent → Telegram in the correct order.
 **Check status anytime:**
 ```bash
 ./pearl.sh status     # Detailed view
-./pearl.sh quick      # One-liner: PEARL: Gateway ✅ | Agent ✅ | Telegram ✅
+./pearl.sh quick      # One-liner: PEARL: Gateway ✅ | Agent ✅ | Telegram ✅ | Chart ✅ | Tunnel ✅
 ```
 
 ### Option B: From Telegram (Remote Control)
@@ -204,6 +205,13 @@ If you prefer individual control:
   ```bash
   ./scripts/telegram/check_command_handler.sh
   ./scripts/lifecycle/check_agent_status.sh --market NQ
+  ```
+
+- **pearlalgo.io not loading / tunnel down:**
+  ```bash
+  ./pearl.sh tunnel status              # Check tunnel + public access
+  sudo ./scripts/setup-cloudflared-service.sh  # Install as auto-start service (run once)
+  ./pearl.sh tunnel logs                # View tunnel logs
   ```
 
 - **No market data / no signals:**
@@ -341,21 +349,35 @@ pip install playwright && playwright install chromium
 
 The chart is accessible at **https://pearlalgo.io** via Cloudflare Tunnel.
 
-**Setup:**
-- Tunnel: Configured in Cloudflare Zero Trust Dashboard
-- Domain: `pearlalgo.io` → localhost:3001
-- Service: Automatically routes to Next.js frontend
+**First-time setup (run once to enable auto-start on boot):**
+```bash
+sudo ./scripts/setup-cloudflared-service.sh
+```
+
+This installs cloudflared as a systemd service that:
+- Auto-starts on boot
+- Auto-restarts if it crashes
+- Always keeps pearlalgo.io accessible
 
 **Check tunnel status:**
 ```bash
-# Tunnel runs automatically - check Zero Trust dashboard
-# Or test: curl https://pearlalgo.io
+./pearl.sh tunnel status              # Quick status + public access check
+./pearl.sh tunnel logs                # View tunnel logs
+systemctl status cloudflared-pearlalgo  # Systemd service status
+```
+
+**Manual control (if needed):**
+```bash
+./pearl.sh tunnel start    # Start tunnel
+./pearl.sh tunnel stop     # Stop tunnel (systemd service stays on)
+./pearl.sh tunnel restart  # Restart tunnel
 ```
 
 **Troubleshooting:**
-- Chart shows "No Data": IBKR Gateway is offline or disconnected
-- Chart not loading: Check if live-chart processes are running (`ps aux | grep -E "api_server|next"`)
-- Data delayed: This is normal! Chart often shows fresher data than TradingView
+- **pearlalgo.io unreachable**: Run `./pearl.sh tunnel status` - if not running, run `sudo ./scripts/setup-cloudflared-service.sh`
+- **Chart shows "No Data"**: IBKR Gateway is offline or disconnected
+- **Chart not loading**: Check if live-chart processes are running (`./pearl.sh chart status`)
+- **Data delayed**: This is normal! Chart often shows fresher data than TradingView
 
 ---
 
@@ -397,6 +419,7 @@ Pearl AI assistant is available via CLI/terminal only. Telegram is for notificat
 - ✅ NQ Agent running
 - ✅ Telegram Handler running
 - ✅ IBKR Gateway running
+- ✅ Cloudflare Tunnel running (pearlalgo.io accessible)
 - ✅ State file present and fresh
 - ✅ Market & Session gates open
 - ✅ Recent signal activity
@@ -429,6 +452,8 @@ grep "$(date -u +%Y-%m-%d)" data/agent_state/NQ/signals.jsonl | wc -l
 ./pearl.sh gateway restart      # Restart just Gateway
 ./pearl.sh agent restart        # Restart just Agent
 ./pearl.sh telegram restart     # Restart just Telegram
+./pearl.sh chart restart        # Restart just Live Chart
+./pearl.sh tunnel restart       # Restart just Tunnel
 ```
 
 ### Manual Commands (if needed)
@@ -439,6 +464,7 @@ grep "$(date -u +%Y-%m-%d)" data/agent_state/NQ/signals.jsonl | wc -l
 | **Agent (NQ)** | `./scripts/lifecycle/agent.sh stop --market NQ` | `./scripts/lifecycle/agent.sh start --market NQ --background` | Stop + Start |
 | **Telegram** | `pkill -f telegram_command_handler` | `./scripts/telegram/start_command_handler.sh --background` | `./scripts/telegram/restart_command_handler.sh --background` |
 | **Gateway** | `./scripts/gateway/gateway.sh stop` | `./scripts/gateway/gateway.sh start` | Stop + Start |
+| **Tunnel** | `./pearl.sh tunnel stop` | `./pearl.sh tunnel start` | `./pearl.sh tunnel restart` |
 
 **Common restart scenarios:**
 

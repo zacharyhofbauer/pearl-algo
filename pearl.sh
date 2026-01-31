@@ -131,6 +131,18 @@ check_chart_status() {
     fi
 }
 
+check_tunnel_status() {
+    # Check if cloudflared tunnel is running (either as service or process)
+    if systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null; then
+        echo -e "${GREEN}●${NC} Tunnel (systemd) - pearlalgo.io"
+    elif pgrep -f "cloudflared.*tunnel run" &>/dev/null; then
+        echo -e "${GREEN}●${NC} Tunnel (manual) - pearlalgo.io"
+    else
+        echo -e "${RED}●${NC} Tunnel - pearlalgo.io unreachable"
+        return 1
+    fi
+}
+
 check_api_status() {
     if curl -s "http://localhost:8000/api/state" &>/dev/null; then
         local data=$(curl -s "http://localhost:8000/api/state")
@@ -158,6 +170,7 @@ show_status() {
     check_agent_status || true
     check_telegram_status || true
     check_chart_status || true
+    check_tunnel_status || true
     echo ""
     
     echo -e "${CYAN}Data:${NC}"
@@ -175,8 +188,9 @@ show_quick_status() {
     local tg_pid_file="$SCRIPT_DIR/logs/telegram_handler.pid"
     local tg_status=$([ -f "$tg_pid_file" ] && kill -0 "$(cat "$tg_pid_file")" 2>/dev/null && echo "✅" || echo "❌")
     local chart_status=$(pgrep -f "api_server.py" &>/dev/null && pgrep -f "next" &>/dev/null && echo "✅" || echo "❌")
+    local tunnel_status=$( (systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null || pgrep -f "cloudflared.*tunnel run" &>/dev/null) && echo "✅" || echo "❌")
     
-    echo -e "PEARL: Gateway $gw_status | Agent $agent_status | Telegram $tg_status | Chart $chart_status"
+    echo -e "PEARL: Gateway $gw_status | Agent $agent_status | Telegram $tg_status | Chart $chart_status | Tunnel $tunnel_status"
 }
 
 # ============================================================================
@@ -251,6 +265,39 @@ start_chart() {
     echo ""
 }
 
+start_tunnel() {
+    # Check if already running (systemd or manual)
+    if systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null; then
+        echo -e "${YELLOW}⏭ Tunnel already running (systemd)${NC}"
+        return
+    fi
+    if pgrep -f "cloudflared.*tunnel run" &>/dev/null; then
+        echo -e "${YELLOW}⏭ Tunnel already running (manual)${NC}"
+        return
+    fi
+    
+    echo -e "${CYAN}▶ Starting Cloudflare Tunnel...${NC}"
+    
+    # Try systemd first (preferred)
+    if systemctl start cloudflared-pearlalgo 2>/dev/null; then
+        echo "   Tunnel started (systemd)"
+        return
+    fi
+    
+    # Fall back to manual start
+    local LOG_DIR="$SCRIPT_DIR/logs"
+    mkdir -p "$LOG_DIR"
+    nohup cloudflared --config /home/pearlalgo/.cloudflared/config.yml tunnel run > "$LOG_DIR/cloudflared.log" 2>&1 &
+    sleep 2
+    if pgrep -f "cloudflared.*tunnel run" &>/dev/null; then
+        echo "   Tunnel started (manual)"
+        echo -e "   ${YELLOW}Tip: Run 'sudo ./scripts/setup-cloudflared-service.sh' to auto-start on boot${NC}"
+    else
+        echo -e "${RED}   Failed to start tunnel${NC}"
+    fi
+    echo ""
+}
+
 start_all() {
     echo ""
     echo -e "${BOLD}🐚 Starting PEARL System...${NC}"
@@ -267,6 +314,8 @@ start_all() {
     start_telegram
     sleep 1
     start_chart
+    sleep 1
+    start_tunnel
     
     echo -e "${GREEN}${BOLD}✅ PEARL System Started${NC}"
     echo ""
@@ -305,6 +354,19 @@ stop_chart() {
     echo ""
 }
 
+stop_tunnel() {
+    echo -e "${CYAN}■ Stopping Cloudflare Tunnel...${NC}"
+    # Note: If running as systemd service, we DON'T stop it (it should always run)
+    if systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null; then
+        echo "   Tunnel running as systemd service (not stopping - always on)"
+    elif pgrep -f "cloudflared.*tunnel run" &>/dev/null; then
+        pkill -f "cloudflared.*tunnel run" 2>/dev/null && echo "   Stopped manual tunnel" || echo "   Failed to stop"
+    else
+        echo "   Not running"
+    fi
+    echo ""
+}
+
 stop_gateway() {
     echo -e "${CYAN}■ Stopping IB Gateway...${NC}"
     ./scripts/gateway/gateway.sh stop 2>/dev/null || true
@@ -320,6 +382,7 @@ stop_all() {
     activate_venv
     
     # Stop in reverse dependency order
+    stop_tunnel
     stop_chart
     stop_agent
     stop_telegram
@@ -433,6 +496,49 @@ handle_chart() {
     esac
 }
 
+handle_tunnel() {
+    local subcmd="${1:-status}"
+    case "$subcmd" in
+        start)
+            start_tunnel
+            ;;
+        stop)
+            # Force stop even if systemd (for manual override)
+            echo -e "${CYAN}■ Stopping Cloudflare Tunnel...${NC}"
+            if systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null; then
+                systemctl stop cloudflared-pearlalgo 2>/dev/null && echo "   Stopped systemd service" || echo "   Failed (need sudo?)"
+            fi
+            pkill -f "cloudflared.*tunnel run" 2>/dev/null && echo "   Stopped process" || true
+            ;;
+        status)
+            check_tunnel_status || echo "   Not running"
+            # Also check if publicly accessible
+            echo -n "   Public access: "
+            curl -s -o /dev/null -w "%{http_code}" --max-time 5 https://pearlalgo.io/ 2>/dev/null | grep -q "200" && echo "✅ https://pearlalgo.io" || echo "❌ unreachable"
+            ;;
+        restart)
+            handle_tunnel stop
+            sleep 2
+            start_tunnel
+            ;;
+        setup)
+            echo "Run: sudo ./scripts/setup-cloudflared-service.sh"
+            ;;
+        logs)
+            if systemctl is-active --quiet cloudflared-pearlalgo 2>/dev/null; then
+                journalctl -u cloudflared-pearlalgo -f --no-pager -n 50
+            elif [ -f "$SCRIPT_DIR/logs/cloudflared.log" ]; then
+                tail -f "$SCRIPT_DIR/logs/cloudflared.log"
+            else
+                echo "No logs available"
+            fi
+            ;;
+        *)
+            echo "Usage: ./pearl.sh tunnel <start|stop|status|restart|setup|logs>"
+            ;;
+    esac
+}
+
 # ============================================================================
 # Help
 # ============================================================================
@@ -455,6 +561,7 @@ show_help() {
     echo "  agent <start|stop|status>      Control Market Agent"
     echo "  telegram <start|stop|status>   Control Telegram Handler"
     echo "  chart <start|stop|status>      Control Live Chart (pearlalgo.io)"
+    echo "  tunnel <start|stop|status|logs|setup>  Control Cloudflare Tunnel"
     echo ""
     echo -e "${CYAN}Options:${NC}"
     echo "  --market NQ|ES|GC    Market to trade (default: NQ)"
@@ -468,6 +575,8 @@ show_help() {
     echo "  ./pearl.sh start --no-chart         # Start without Live Chart"
     echo "  ./pearl.sh restart                  # Restart everything"
     echo "  ./pearl.sh chart restart            # Restart just Live Chart"
+    echo "  ./pearl.sh tunnel status            # Check tunnel + public access"
+    echo "  ./pearl.sh tunnel logs              # View tunnel logs"
     echo "  ./pearl.sh status                   # Check all services"
     echo ""
 }
@@ -509,6 +618,9 @@ case "$COMMAND" in
         ;;
     chart)
         handle_chart "${1:-status}"
+        ;;
+    tunnel)
+        handle_tunnel "${1:-status}"
         ;;
     help|--help|-h)
         show_help
