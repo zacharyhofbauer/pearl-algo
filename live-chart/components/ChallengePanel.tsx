@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useMemo } from 'react'
 import { DataPanel } from './DataPanelsContainer'
 
 interface EquityCurvePoint {
@@ -25,7 +25,7 @@ interface ChallengePanelProps {
   equityCurve?: EquityCurvePoint[]
 }
 
-// Mini sparkline component for challenge equity
+// Mini sparkline component for challenge equity - larger and more visible
 function MiniSparkline({ data, isPositive }: { data: EquityCurvePoint[], isPositive: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -38,7 +38,7 @@ function MiniSparkline({ data, isPositive }: { data: EquityCurvePoint[], isPosit
 
     const width = canvas.width
     const height = canvas.height
-    const padding = 2
+    const padding = 3
 
     // Clear canvas
     ctx.clearRect(0, 0, width, height)
@@ -53,11 +53,12 @@ function MiniSparkline({ data, isPositive }: { data: EquityCurvePoint[], isPosit
     const scaleX = (i: number) => padding + (i / (values.length - 1)) * (width - padding * 2)
     const scaleY = (v: number) => height - padding - ((v - minVal) / range) * (height - padding * 2)
 
-    // Draw line
+    // Draw line with gradient
     ctx.beginPath()
     ctx.strokeStyle = isPositive ? '#00e676' : '#ff5252'
-    ctx.lineWidth = 1.5
+    ctx.lineWidth = 2
     ctx.lineJoin = 'round'
+    ctx.lineCap = 'round'
 
     values.forEach((val, i) => {
       const x = scaleX(i)
@@ -75,7 +76,7 @@ function MiniSparkline({ data, isPositive }: { data: EquityCurvePoint[], isPosit
     const lastY = scaleY(values[values.length - 1])
     ctx.beginPath()
     ctx.fillStyle = isPositive ? '#00e676' : '#ff5252'
-    ctx.arc(lastX, lastY, 2, 0, Math.PI * 2)
+    ctx.arc(lastX, lastY, 3, 0, Math.PI * 2)
     ctx.fill()
   }, [data, isPositive])
 
@@ -84,8 +85,8 @@ function MiniSparkline({ data, isPositive }: { data: EquityCurvePoint[], isPosit
   return (
     <canvas
       ref={canvasRef}
-      width={80}
-      height={24}
+      width={100}
+      height={32}
       className="challenge-sparkline"
     />
   )
@@ -126,6 +127,14 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
   // Calculate progress towards profit target
   const profitProgress = Math.max(0, Math.min(100, (challenge.pnl / challenge.profit_target) * 100))
 
+  // Calculate peak and gap from peak
+  const peakBalance = useMemo(() => {
+    if (!equityCurve || equityCurve.length === 0) return challenge.current_balance
+    return Math.max(...equityCurve.map(p => p.value))
+  }, [equityCurve, challenge.current_balance])
+
+  const gapFromPeak = peakBalance - challenge.current_balance
+
   return (
     <DataPanel title="Challenge" icon="🎯" className="challenge-panel">
       <div className="challenge-header">
@@ -139,6 +148,11 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
           <span className={`balance-pnl ${challenge.pnl >= 0 ? 'positive' : 'negative'}`}>
             {formatPnL(challenge.pnl)}
           </span>
+          {gapFromPeak > 1 && (
+            <span className="peak-gap-indicator">
+              ↓${gapFromPeak.toFixed(0)} from peak
+            </span>
+          )}
         </div>
         <div className="challenge-header-right">
           {equityCurve && equityCurve.length > 1 && (
@@ -196,11 +210,19 @@ export default function ChallengePanel({ challenge, equityCurve }: ChallengePane
 
       {challenge.outcome === 'active' && challenge.pnl > 0 && (
         <div className="challenge-target-progress">
-          <div className="target-progress-bar">
-            <div
-              className="target-progress-fill"
-              style={{ width: `${profitProgress}%` }}
-            />
+          <div className="target-progress-container">
+            <div className="target-progress-bar">
+              <div
+                className="target-progress-fill"
+                style={{ width: `${profitProgress}%` }}
+              />
+              {/* Milestone markers at 25%, 50%, 75% */}
+              <div className="milestone-markers">
+                <div className="milestone-marker" style={{ left: '25%' }} />
+                <div className="milestone-marker" style={{ left: '50%' }} />
+                <div className="milestone-marker" style={{ left: '75%' }} />
+              </div>
+            </div>
           </div>
           <span className="target-progress-label">{profitProgress.toFixed(0)}% to target</span>
         </div>

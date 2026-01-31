@@ -1233,6 +1233,248 @@ async def get_markers(
     return markers
 
 
+def _get_session_analytics(state_dir: Path) -> Dict[str, Any]:
+    """
+    Compute session and time-based performance analytics from performance.json.
+
+    Returns session performance, best/worst hours, hold duration stats,
+    direction breakdown, and status breakdown.
+    """
+    performance_file = state_dir / "performance.json"
+    signals_file = state_dir / "signals.jsonl"
+
+    # Session definitions (ET timezone)
+    sessions = {
+        "overnight": {"start": 18, "end": 4, "name": "Overnight", "pnl": 0.0, "wins": 0, "losses": 0},
+        "premarket": {"start": 4, "end": 6, "name": "Premarket", "pnl": 0.0, "wins": 0, "losses": 0},
+        "morning": {"start": 6, "end": 10, "name": "Morning", "pnl": 0.0, "wins": 0, "losses": 0},
+        "midday": {"start": 10, "end": 14, "name": "Midday", "pnl": 0.0, "wins": 0, "losses": 0},
+        "afternoon": {"start": 14, "end": 17, "name": "Afternoon", "pnl": 0.0, "wins": 0, "losses": 0},
+        "close": {"start": 17, "end": 18, "name": "Close", "pnl": 0.0, "wins": 0, "losses": 0},
+    }
+
+    # Hourly stats
+    hourly_stats: Dict[int, Dict[str, Any]] = {h: {"pnl": 0.0, "trades": 0, "wins": 0} for h in range(24)}
+
+    # Hold duration stats
+    duration_stats = {
+        "quick": {"name": "Quick (<30m)", "pnl": 0.0, "wins": 0, "losses": 0},
+        "medium": {"name": "Medium (30-60m)", "pnl": 0.0, "wins": 0, "losses": 0},
+        "long": {"name": "Long (60m+)", "pnl": 0.0, "wins": 0, "losses": 0},
+    }
+
+    # Direction breakdown
+    direction_stats = {
+        "long": {"count": 0, "pnl": 0.0},
+        "short": {"count": 0, "pnl": 0.0},
+    }
+
+    # Status breakdown from signals.jsonl
+    status_breakdown = {
+        "generated": 0,
+        "entered": 0,
+        "exited": 0,
+        "cancelled": 0,
+    }
+
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    et_tz = ZoneInfo("America/New_York")
+
+    def get_session_for_hour(hour: int) -> str:
+        """Determine which session an hour belongs to."""
+        if hour >= 18 or hour < 4:
+            return "overnight"
+        elif 4 <= hour < 6:
+            return "premarket"
+        elif 6 <= hour < 10:
+            return "morning"
+        elif 10 <= hour < 14:
+            return "midday"
+        elif 14 <= hour < 17:
+            return "afternoon"
+        else:  # 17-18
+            return "close"
+
+    # Process performance.json for closed trades
+    if performance_file.exists():
+        try:
+            data = json.loads(performance_file.read_text())
+            if isinstance(data, list):
+                for trade in data:
+                    exit_time_str = trade.get("exit_time")
+                    entry_time_str = trade.get("entry_time")
+                    pnl = trade.get("pnl", 0.0) or 0.0
+                    is_win = trade.get("is_win", pnl > 0)
+                    direction = trade.get("direction", "long").lower()
+
+                    # Direction stats
+                    if direction in direction_stats:
+                        direction_stats[direction]["count"] += 1
+                        direction_stats[direction]["pnl"] += pnl
+
+                    if exit_time_str:
+                        try:
+                            exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+                            exit_time_et = exit_time.astimezone(et_tz)
+                            hour = exit_time_et.hour
+
+                            # Session stats
+                            session_key = get_session_for_hour(hour)
+                            sessions[session_key]["pnl"] += pnl
+                            if is_win:
+                                sessions[session_key]["wins"] += 1
+                            else:
+                                sessions[session_key]["losses"] += 1
+
+                            # Hourly stats
+                            hourly_stats[hour]["pnl"] += pnl
+                            hourly_stats[hour]["trades"] += 1
+                            if is_win:
+                                hourly_stats[hour]["wins"] += 1
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Duration stats
+                    if entry_time_str and exit_time_str:
+                        try:
+                            entry_time = datetime.fromisoformat(entry_time_str.replace("Z", "+00:00"))
+                            exit_time = datetime.fromisoformat(exit_time_str.replace("Z", "+00:00"))
+                            duration_minutes = (exit_time - entry_time).total_seconds() / 60
+
+                            if duration_minutes < 30:
+                                duration_key = "quick"
+                            elif duration_minutes < 60:
+                                duration_key = "medium"
+                            else:
+                                duration_key = "long"
+
+                            duration_stats[duration_key]["pnl"] += pnl
+                            if is_win:
+                                duration_stats[duration_key]["wins"] += 1
+                            else:
+                                duration_stats[duration_key]["losses"] += 1
+                        except (ValueError, TypeError):
+                            pass
+        except Exception:
+            pass
+
+    # Process signals.jsonl for status breakdown
+    if signals_file.exists():
+        try:
+            signals = _load_jsonl_file(signals_file, max_lines=2000)
+            for s in signals:
+                status = s.get("status", "").lower()
+                if status in status_breakdown:
+                    status_breakdown[status] += 1
+        except Exception:
+            pass
+
+    # Calculate win rates and format session performance
+    session_performance = []
+    for key, session in sessions.items():
+        total = session["wins"] + session["losses"]
+        win_rate = round(session["wins"] / total * 100, 1) if total > 0 else 0.0
+        session_performance.append({
+            "id": key,
+            "name": session["name"],
+            "pnl": round(session["pnl"], 2),
+            "wins": session["wins"],
+            "losses": session["losses"],
+            "win_rate": win_rate,
+        })
+
+    # Best and worst hours (min 5 trades)
+    qualified_hours = [
+        {"hour": h, **stats}
+        for h, stats in hourly_stats.items()
+        if stats["trades"] >= 5
+    ]
+
+    # Sort by P&L
+    sorted_by_pnl = sorted(qualified_hours, key=lambda x: x["pnl"], reverse=True)
+    best_hours = []
+    worst_hours = []
+
+    for h in sorted_by_pnl[:3]:
+        win_rate = round(h["wins"] / h["trades"] * 100, 1) if h["trades"] > 0 else 0.0
+        best_hours.append({
+            "hour": h["hour"],
+            "hour_label": f"{h['hour']:02d}:00 ET",
+            "pnl": round(h["pnl"], 2),
+            "trades": h["trades"],
+            "win_rate": win_rate,
+        })
+
+    for h in sorted_by_pnl[-3:][::-1]:  # Reverse to get worst first
+        if h["pnl"] < 0:  # Only include negative hours
+            win_rate = round(h["wins"] / h["trades"] * 100, 1) if h["trades"] > 0 else 0.0
+            worst_hours.append({
+                "hour": h["hour"],
+                "hour_label": f"{h['hour']:02d}:00 ET",
+                "pnl": round(h["pnl"], 2),
+                "trades": h["trades"],
+                "win_rate": win_rate,
+            })
+
+    # Format duration breakdown
+    hold_duration = []
+    for key, dur in duration_stats.items():
+        total = dur["wins"] + dur["losses"]
+        win_rate = round(dur["wins"] / total * 100, 1) if total > 0 else 0.0
+        hold_duration.append({
+            "id": key,
+            "name": dur["name"],
+            "pnl": round(dur["pnl"], 2),
+            "wins": dur["wins"],
+            "losses": dur["losses"],
+            "win_rate": win_rate,
+        })
+
+    # Format direction breakdown
+    direction_breakdown = {
+        "long": {
+            "count": direction_stats["long"]["count"],
+            "pnl": round(direction_stats["long"]["pnl"], 2),
+        },
+        "short": {
+            "count": direction_stats["short"]["count"],
+            "pnl": round(direction_stats["short"]["pnl"], 2),
+        },
+    }
+
+    return {
+        "session_performance": session_performance,
+        "best_hours": best_hours,
+        "worst_hours": worst_hours,
+        "hold_duration": hold_duration,
+        "direction_breakdown": direction_breakdown,
+        "status_breakdown": status_breakdown,
+    }
+
+
+@app.get("/api/analytics")
+async def get_analytics():
+    """
+    Session and time-based performance analytics.
+
+    Returns:
+    - session_performance: 6 trading sessions with wins, losses, pnl, win_rate
+    - best_hours: Top 3 hours by P&L (min 5 trades)
+    - worst_hours: Bottom 3 hours by P&L (min 5 trades)
+    - hold_duration: Quick/Medium/Long breakdown with win rates
+    - direction_breakdown: LONG vs SHORT counts and P&L
+    - status_breakdown: Generated/Entered/Exited/Cancelled counts
+    """
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+
+    return _get_session_analytics(_state_dir)
+
+
 @app.get("/api/sessions")
 async def get_sessions(hours: int = Query(default=6, ge=1, le=24)):
     """Get session boundaries for RTH/ETH shading."""
@@ -1271,20 +1513,22 @@ async def get_sessions(hours: int = Query(default=6, ge=1, le=24)):
 
 def main():
     global _market, _state_dir
-    
+
     parser = argparse.ArgumentParser(description="Live Chart API Server")
     parser.add_argument("--market", default=os.getenv("PEARLALGO_MARKET", DEFAULT_MARKET))
-    parser.add_argument("--host", default=DEFAULT_HOST)
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument("--host", default=os.getenv("API_HOST", DEFAULT_HOST))
+    parser.add_argument("--port", type=int, default=int(os.getenv("API_PORT", DEFAULT_PORT)))
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes")
     args = parser.parse_args()
-    
+
     _market = str(args.market or DEFAULT_MARKET).strip().upper()
     _state_dir = _resolve_state_dir(_market)
-    
+
     print(f"Starting Live Chart API Server")
     print(f"  Market: {_market}")
     print(f"  State dir: {_state_dir}")
     print(f"  Listening: http://{args.host}:{args.port}")
+    print(f"  Auto-reload: {'ON' if args.reload else 'OFF'}")
     print(f"")
     print(f"Endpoints:")
     print(f"  GET /api/candles?symbol=MNQ&timeframe=5m&bars=72")
@@ -1294,8 +1538,24 @@ def main():
     print(f"  GET /api/state")
     print(f"  GET /api/trades")
     print(f"  GET /health")
-    
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    print(f"")
+    print(f"Tips:")
+    print(f"  - Use --reload for development (auto-restarts on file changes)")
+    print(f"  - Set API_PORT=8001 to use different port")
+    print(f"  - Kill server: pkill -f 'api_server.py'")
+
+    if args.reload:
+        # Use uvicorn's reload feature for development
+        uvicorn.run(
+            "scripts.live-chart.api_server:app",
+            host=args.host,
+            port=args.port,
+            reload=True,
+            reload_dirs=[str(PROJECT_ROOT / "scripts" / "live-chart")],
+            log_level="info",
+        )
+    else:
+        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 
 if __name__ == "__main__":

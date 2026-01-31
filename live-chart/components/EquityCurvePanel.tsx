@@ -103,6 +103,10 @@ export default function EquityCurvePanel({ equityCurve }: EquityCurvePanelProps)
   const maxValue = values.length > 0 ? Math.max(...values) : 0
   const minValue = values.length > 0 ? Math.min(...values) : 0
 
+  // Calculate gap from peak
+  const gapFromPeak = lastValue - maxValue
+  const showPeakGap = maxValue > 0 && gapFromPeak < -1 // Only show if down more than $1 from peak
+
   const formatPnL = (pnl: number) => {
     const sign = pnl >= 0 ? '+' : ''
     return `${sign}$${pnl.toFixed(2)}`
@@ -127,6 +131,11 @@ export default function EquityCurvePanel({ equityCurve }: EquityCurvePanelProps)
             <span className="equity-stat-value negative">{formatPnL(minValue)}</span>
           </div>
         </div>
+        {showPeakGap && (
+          <div className="peak-gap-indicator">
+            {formatPnL(gapFromPeak)} from peak
+          </div>
+        )}
         <div ref={containerRef} className="equity-curve-chart" />
       </div>
     </DataPanel>

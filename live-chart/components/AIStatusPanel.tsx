@@ -35,6 +35,16 @@ interface AIStatusPanelProps {
 
 type Mode = 'off' | 'shadow' | 'live'
 
+// Info tooltip component
+function InfoTooltip({ text }: { text: string }) {
+  return (
+    <span className="tooltip-wrapper">
+      <span className="info-icon">?</span>
+      <span className="tooltip-content">{text}</span>
+    </span>
+  )
+}
+
 function ModePill({ label, mode }: { label: string; mode: Mode }) {
   const getModeClass = () => {
     switch (mode) {
@@ -62,6 +72,7 @@ function ModePill({ label, mode }: { label: string; mode: Mode }) {
     <div className={`ai-pill ${getModeClass()}`}>
       <span className="ai-pill-label">{label}</span>
       <span className="ai-pill-mode">{getModeLabel()}</span>
+      {mode === 'shadow' && <InfoTooltip text="Shadow mode observes but doesn't affect trades" />}
     </div>
   )
 }
@@ -71,6 +82,12 @@ export default function AIStatusPanel({ aiStatus, shadowCounters }: AIStatusPane
     ? (aiStatus.ml_filter.mode === 'live' ? 'live' : 'shadow')
     : 'off'
 
+  // Check if any component is in shadow mode
+  const hasShadowMode =
+    aiStatus.bandit_mode === 'shadow' ||
+    aiStatus.contextual_mode === 'shadow' ||
+    mlMode === 'shadow'
+
   return (
     <DataPanel title="AI Status" icon="🤖">
       <div className="ai-pills">
@@ -78,6 +95,17 @@ export default function AIStatusPanel({ aiStatus, shadowCounters }: AIStatusPane
         <ModePill label="Contextual" mode={aiStatus.contextual_mode as Mode} />
         <ModePill label="ML Filter" mode={mlMode as Mode} />
       </div>
+
+      {/* Shadow mode explanation banner */}
+      {hasShadowMode && (
+        <div className="shadow-mode-banner">
+          <span className="shadow-mode-icon">👁️</span>
+          <span className="shadow-mode-text">
+            Shadow mode is observing trades but not affecting decisions.
+            Check counters below to see what it <em>would</em> do.
+          </span>
+        </div>
+      )}
 
       {aiStatus.ml_filter.enabled && aiStatus.ml_filter.lift && (
         <div className="ai-lift-status">

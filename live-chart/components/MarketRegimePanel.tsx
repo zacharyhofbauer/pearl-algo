@@ -12,6 +12,16 @@ interface MarketRegimePanelProps {
   regime: MarketRegime | null
 }
 
+// Info tooltip component
+function InfoTooltip({ text }: { text: string }) {
+  return (
+    <span className="tooltip-wrapper">
+      <span className="info-icon">?</span>
+      <span className="tooltip-content">{text}</span>
+    </span>
+  )
+}
+
 export default function MarketRegimePanel({ regime }: MarketRegimePanelProps) {
   if (!regime) {
     return (
@@ -20,6 +30,9 @@ export default function MarketRegimePanel({ regime }: MarketRegimePanelProps) {
       </DataPanel>
     )
   }
+
+  const isUnknown = regime.regime === 'unknown' || regime.confidence === 0
+  const confidencePct = regime.confidence * 100
 
   const getRegimeClass = () => {
     switch (regime.regime) {
@@ -37,6 +50,10 @@ export default function MarketRegimePanel({ regime }: MarketRegimePanelProps) {
   }
 
   const getRegimeLabel = () => {
+    // Show "Insufficient Data" when confidence is 0
+    if (regime.confidence === 0) {
+      return 'INSUFFICIENT DATA'
+    }
     switch (regime.regime) {
       case 'trending_up':
         return 'TRENDING UP'
@@ -47,13 +64,14 @@ export default function MarketRegimePanel({ regime }: MarketRegimePanelProps) {
       case 'volatile':
         return 'VOLATILE'
       case 'unknown':
-        return 'UNKNOWN'
+        return 'INSUFFICIENT DATA'
       default:
         return regime.regime.toUpperCase().replace(/_/g, ' ')
     }
   }
 
   const getRegimeIcon = () => {
+    if (regime.confidence === 0) return '⏳'
     switch (regime.regime) {
       case 'trending_up':
         return '📈'
@@ -64,7 +82,7 @@ export default function MarketRegimePanel({ regime }: MarketRegimePanelProps) {
       case 'volatile':
         return '⚡'
       default:
-        return '❓'
+        return '⏳'
     }
   }
 
@@ -90,16 +108,15 @@ export default function MarketRegimePanel({ regime }: MarketRegimePanelProps) {
     }
   }
 
-  const confidencePct = regime.confidence * 100
-
   return (
     <DataPanel title="Market Regime" icon="📈">
-      <div className="regime-panel-content">
+      <div className={`regime-panel-content ${isUnknown ? 'regime-panel-unknown' : ''}`}>
         {/* Regime Badge */}
         <div className="regime-header">
           <span className={`regime-badge ${getRegimeClass()}`}>
             <span className="regime-icon">{getRegimeIcon()}</span>
             {getRegimeLabel()}
+            {isUnknown && <InfoTooltip text="Regime detection requires recent price action" />}
           </span>
         </div>
 

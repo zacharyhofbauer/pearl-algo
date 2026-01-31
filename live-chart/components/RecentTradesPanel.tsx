@@ -22,9 +22,10 @@ interface RecentExit {
 
 interface RecentTradesPanelProps {
   recentExits: RecentExit[]
+  maxItems?: number // Optional limit for compact display (e.g., ultrawide mode)
 }
 
-export default function RecentTradesPanel({ recentExits }: RecentTradesPanelProps) {
+export default function RecentTradesPanel({ recentExits, maxItems }: RecentTradesPanelProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   if (!recentExits || recentExits.length === 0) {
@@ -62,11 +63,31 @@ export default function RecentTradesPanel({ recentExits }: RecentTradesPanelProp
     return `${hours}h ${mins}m`
   }
 
-  const formatExitReason = (reason: string) => {
-    if (!reason) return ''
-    return reason
-      .replace(/_/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase())
+  const formatExitReason = (reason: string): { text: string; type: string } => {
+    if (!reason) return { text: '', type: '' }
+    const lowerReason = reason.toLowerCase()
+
+    // Categorize exit reasons for styling
+    if (lowerReason.includes('close_all') || lowerReason.includes('close all')) {
+      return { text: 'Manual Close', type: 'manual' }
+    }
+    if (lowerReason.includes('stop') || lowerReason.includes('sl_')) {
+      return { text: 'Stop Loss', type: 'stop' }
+    }
+    if (lowerReason.includes('target') || lowerReason.includes('tp_') || lowerReason.includes('profit')) {
+      return { text: 'Target Hit', type: 'target' }
+    }
+    if (lowerReason.includes('trail')) {
+      return { text: 'Trailing Stop', type: 'trail' }
+    }
+    if (lowerReason.includes('time') || lowerReason.includes('eod') || lowerReason.includes('session')) {
+      return { text: 'Time Exit', type: 'time' }
+    }
+
+    return {
+      text: reason.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+      type: 'other'
+    }
   }
 
   const formatPrice = (price?: number) => {
@@ -78,10 +99,13 @@ export default function RecentTradesPanel({ recentExits }: RecentTradesPanelProp
     setExpandedId(expandedId === id ? null : id)
   }
 
+  // Apply maxItems limit if specified (for compact ultrawide display)
+  const displayExits = maxItems ? recentExits.slice(0, maxItems) : recentExits
+
   return (
     <DataPanel title="Recent Trades" icon="📋">
       <div className="recent-trades-list">
-        {recentExits.map((exit, index) => {
+        {displayExits.map((exit, index) => {
           const isExpanded = expandedId === exit.signal_id
           return (
             <div key={exit.signal_id || index} className="recent-trade-wrapper">
@@ -93,14 +117,23 @@ export default function RecentTradesPanel({ recentExits }: RecentTradesPanelProp
                   <span className={`trade-direction-badge ${exit.direction}`}>
                     {exit.direction.toUpperCase()}
                   </span>
-                  <span className="trade-time">{formatTime(exit.exit_time)}</span>
+                  <div className="trade-info">
+                    <span className="trade-time">{formatTime(exit.exit_time)}</span>
+                    {exit.entry_price && exit.exit_price && (
+                      <span className="trade-prices">
+                        {formatPrice(exit.entry_price)} → {formatPrice(exit.exit_price)}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="trade-right">
                   <span className={`trade-pnl ${exit.pnl >= 0 ? 'positive' : 'negative'}`}>
                     {formatPnL(exit.pnl)}
                   </span>
                   {exit.exit_reason && (
-                    <span className="trade-reason">{formatExitReason(exit.exit_reason)}</span>
+                    <span className={`trade-reason-badge reason-${formatExitReason(exit.exit_reason).type}`}>
+                      {formatExitReason(exit.exit_reason).text}
+                    </span>
                   )}
                 </div>
                 <span className="trade-expand-icon">{isExpanded ? '▲' : '▼'}</span>

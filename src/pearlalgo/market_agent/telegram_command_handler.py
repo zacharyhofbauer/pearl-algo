@@ -2830,12 +2830,7 @@ class TelegramCommandHandler:
                 InlineKeyboardButton(mode_btn_label, callback_data=mode_btn_callback),
                 InlineKeyboardButton("🎛️ System", callback_data="menu:system"),
             ],
-            # Row 2: Tools
-            [
-                InlineKeyboardButton("🧪 Backtest", callback_data="strategy_review:backtest"),
-                InlineKeyboardButton("📑 Reports", callback_data="strategy_review:reports"),
-            ],
-            # Row 3: Navigation
+            # Row 2: Navigation
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data="menu:bots"),
                 self._nav_back_row()[0],

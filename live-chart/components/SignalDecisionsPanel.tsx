@@ -23,6 +23,14 @@ interface SignalDecisionsPanelProps {
   lastDecision: LastSignalDecision | null
 }
 
+// Bar chart item for rejection visualization
+interface RejectionBarItem {
+  label: string
+  count: number
+  percentage: number
+  isTopBlocker: boolean
+}
+
 export default function SignalDecisionsPanel({ rejections, lastDecision }: SignalDecisionsPanelProps) {
   const formatSignalType = (type: string) => {
     if (!type) return 'Unknown'
@@ -56,6 +64,34 @@ export default function SignalDecisionsPanel({ rejections, lastDecision }: Signa
       rejections.max_positions
     : 0
 
+  // Build rejection bar items sorted by count
+  const buildRejectionBars = (): RejectionBarItem[] => {
+    if (!rejections || totalRejections === 0) return []
+
+    const items: RejectionBarItem[] = [
+      { label: 'Circuit Breaker', count: rejections.circuit_breaker, percentage: 0, isTopBlocker: false },
+      { label: 'Direction Gating', count: rejections.direction_gating, percentage: 0, isTopBlocker: false },
+      { label: 'ML Filter', count: rejections.ml_filter, percentage: 0, isTopBlocker: false },
+      { label: 'Max Positions', count: rejections.max_positions, percentage: 0, isTopBlocker: false },
+      { label: 'Session Filter', count: rejections.session_filter, percentage: 0, isTopBlocker: false },
+    ]
+      .filter(item => item.count > 0)
+      .map(item => ({
+        ...item,
+        percentage: Math.round((item.count / totalRejections) * 100)
+      }))
+      .sort((a, b) => b.count - a.count)
+
+    // Mark the top blocker
+    if (items.length > 0) {
+      items[0].isTopBlocker = true
+    }
+
+    return items
+  }
+
+  const rejectionBars = buildRejectionBars()
+
   return (
     <DataPanel title="Signal Decisions" icon="🎯">
       <div className="signal-decisions-content">
@@ -78,44 +114,28 @@ export default function SignalDecisionsPanel({ rejections, lastDecision }: Signa
           </div>
         )}
 
-        {/* Rejections Breakdown */}
+        {/* Rejections Breakdown with Bar Chart */}
         {rejections && totalRejections > 0 && (
           <div className="rejections-section">
             <div className="rejections-header">
               <span className="rejections-label">Rejections (24h)</span>
               <span className="rejections-total">{totalRejections}</span>
             </div>
-            <div className="rejections-breakdown">
-              {rejections.direction_gating > 0 && (
-                <div className="rejection-item">
-                  <span className="rejection-reason">Direction Gating</span>
-                  <span className="rejection-count">{rejections.direction_gating}</span>
+            <div className="rejection-bar-chart">
+              {rejectionBars.map((item) => (
+                <div key={item.label} className="rejection-bar-item">
+                  <span className="rejection-bar-label">{item.label}</span>
+                  <div className="rejection-bar-track">
+                    <div
+                      className={`rejection-bar-fill ${item.isTopBlocker ? 'top-blocker' : ''}`}
+                      style={{ width: `${item.percentage}%` }}
+                    />
+                  </div>
+                  <span className={`rejection-bar-value ${item.isTopBlocker ? 'top-blocker' : ''}`}>
+                    {item.count} ({item.percentage}%)
+                  </span>
                 </div>
-              )}
-              {rejections.circuit_breaker > 0 && (
-                <div className="rejection-item">
-                  <span className="rejection-reason">Circuit Breaker</span>
-                  <span className="rejection-count">{rejections.circuit_breaker}</span>
-                </div>
-              )}
-              {rejections.max_positions > 0 && (
-                <div className="rejection-item">
-                  <span className="rejection-reason">Max Positions</span>
-                  <span className="rejection-count">{rejections.max_positions}</span>
-                </div>
-              )}
-              {rejections.ml_filter > 0 && (
-                <div className="rejection-item">
-                  <span className="rejection-reason">ML Filter</span>
-                  <span className="rejection-count">{rejections.ml_filter}</span>
-                </div>
-              )}
-              {rejections.session_filter > 0 && (
-                <div className="rejection-item">
-                  <span className="rejection-reason">Session Filter</span>
-                  <span className="rejection-count">{rejections.session_filter}</span>
-                </div>
-              )}
+              ))}
             </div>
           </div>
         )}

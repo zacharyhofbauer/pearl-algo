@@ -16,6 +16,8 @@ import MarketPressurePanel from '@/components/MarketPressurePanel'
 import SystemHealthPanel from '@/components/SystemHealthPanel'
 import MarketRegimePanel from '@/components/MarketRegimePanel'
 import SignalDecisionsPanel from '@/components/SignalDecisionsPanel'
+import UltrawideLayout from '@/components/UltrawideLayout'
+import { useViewportType } from '@/hooks/useViewportType'
 import type { IChartApi } from 'lightweight-charts'
 
 interface CandleData {
@@ -232,9 +234,20 @@ interface MarketStatus {
 }
 
 // API URL is determined at runtime based on where the page is loaded from
+// Override options: NEXT_PUBLIC_API_URL env var, or ?api_port=8001 URL param
 function getApiUrl(): string {
+  // Check for environment variable override first
+  const envUrl = process.env.NEXT_PUBLIC_API_URL
+  if (envUrl) return envUrl
+
   if (typeof window === 'undefined') return 'http://localhost:8000' // SSR fallback
   const hostname = window.location.hostname
+
+  // Check URL params for API port override (useful for testing different ports)
+  const urlParams = new URLSearchParams(window.location.search)
+  const apiPort = urlParams.get('api_port')
+  if (apiPort) return `http://localhost:${apiPort}`
+
   // Use relative URLs on public domain (pearlalgo.io), localhost:8000 for local dev
   return ['localhost', '127.0.0.1'].includes(hostname) ? 'http://localhost:8000' : ''
 }
@@ -262,6 +275,9 @@ export default function LiveMainChart() {
   const [mainChartApi, setMainChartApi] = useState<IChartApi | null>(null)
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null)
   const lastDataHash = useRef<string>('')
+
+  // Viewport detection for ultrawide layout
+  const viewport = useViewportType()
 
   // Responsive bar spacing - smaller on mobile
   const getBarSpacing = () => {
@@ -416,6 +432,247 @@ export default function LiveMainChart() {
     }
   }
 
+  // Common header component
+  const renderHeader = () => (
+    <header className="header">
+      <div className="title-group">
+        <Image src="/logo.png" alt="PEARL" width={28} height={28} className="logo" priority />
+        <div className="title-text">
+          <h1>
+            <span className="symbol">MNQ</span>
+            <span className="page-name">Live Main Chart</span>
+          </h1>
+        </div>
+        {/* Market Status Badge */}
+        {marketStatus && (
+          <div className={`market-status-badge ${marketStatus.is_open ? 'open' : 'closed'}`}>
+            <span className="market-status-dot"></span>
+            {marketStatus.is_open ? 'Market Open' : 'Market Closed'}
+          </div>
+        )}
+      </div>
+      {/* Timeframe Selector */}
+      <div className="timeframe-selector">
+        {(['1m', '5m', '15m', '1h'] as Timeframe[]).map((tf) => (
+          <button
+            key={tf}
+            className={timeframe === tf ? 'active' : ''}
+            onClick={() => setTimeframe(tf)}
+          >
+            {tf}
+          </button>
+        ))}
+      </div>
+      <div className="status">
+        <span className={`status-dot ${isLive ? '' : 'offline'}`}></span>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
+          {isLive ? 'Live' : 'Cached'} • {formatTime(lastUpdate)}
+        </span>
+      </div>
+    </header>
+  )
+
+  // Common status panel component
+  const renderStatusPanel = () => (
+    (agentState || candles.length > 0) && (
+      <div className="status-panel">
+        {/* Current Price */}
+        {candles.length > 0 && (
+          <div className="stat price-stat">
+            <span className="stat-label">Price</span>
+            <span className={`stat-value price-value ${candles[candles.length-1]?.close >= candles[candles.length-1]?.open ? 'positive' : 'negative'}`}>
+              {candles[candles.length-1]?.close.toFixed(2)}
+            </span>
+          </div>
+        )}
+        {agentState && (
+          <>
+            <div className="stat">
+              <span className="stat-label">Agent</span>
+              <span className={`stat-value ${agentState.running ? 'positive' : 'negative'}`}>
+                {agentState.running ? (agentState.paused ? '⏸️ Paused' : '🟢 Running') : '🔴 Stopped'}
+              </span>
+            </div>
+            <div className="stat">
+              <span className="stat-label">Day P&L</span>
+              <span className={`stat-value ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
+                {formatPnL(agentState.daily_pnl)}
+              </span>
+            </div>
+            <div className="stat">
+              <span className="stat-label">Trades</span>
+              <span className="stat-value">
+                {agentState.daily_wins}W / {agentState.daily_losses}L
+              </span>
+            </div>
+            <div className="stat">
+              <span className="stat-label">Open Pos</span>
+              <span className={`stat-value ${agentState.active_trades_count > 0 ? 'highlight' : ''}`}>
+                {agentState.active_trades_count}
+              </span>
+            </div>
+          </>
+        )}
+        {/* Indicator Legend */}
+        <div className="indicator-legend">
+          <span className="legend-item"><span className="legend-color ema9"></span>EMA9</span>
+          <span className="legend-item"><span className="legend-color ema21"></span>EMA21</span>
+          <span className="legend-item"><span className="legend-color vwap"></span>VWAP</span>
+        </div>
+        {/* Marker Legend */}
+        <div className="marker-legend">
+          <span className="legend-item">
+            <span className="marker-icon entry-long">▲</span>Long
+          </span>
+          <span className="legend-item">
+            <span className="marker-icon entry-short">▼</span>Short
+          </span>
+          <span className="legend-item">
+            <span className="marker-icon exit-win">●</span>Win
+          </span>
+          <span className="legend-item">
+            <span className="marker-icon exit-loss">●</span>Loss
+          </span>
+        </div>
+      </div>
+    )
+  )
+
+  // Chart section component
+  const renderChart = () => (
+    <div className="chart-wrapper">
+      <div className="chart-actions">
+        <button
+          className="chart-action-btn"
+          onClick={() => window.location.reload()}
+          title="Refresh"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
+        </button>
+        <button
+          className="chart-action-btn"
+          onClick={() => mainChartApi?.timeScale().fitContent()}
+          title="Fit All"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+          </svg>
+        </button>
+        <button
+          className="chart-action-btn"
+          onClick={() => mainChartApi?.timeScale().scrollToRealTime()}
+          title="Go Live"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
+        </button>
+      </div>
+      <div className="chart-container">
+        {loading && (
+          <div className="loading-screen">
+            <img src="/logo.png" alt="PEARL" className="loading-logo" />
+            <div className="loading-text">Loading Live Data...</div>
+            <div className="loading-spinner"></div>
+          </div>
+        )}
+        {error && !loading && (
+          <div className="no-data-container">
+            <img src="/logo.png" alt="PEARL" className="no-data-logo" />
+            <div className="no-data-title">No Live Data</div>
+            <div className="no-data-message">{error}</div>
+            <div className="no-data-hint">
+              Start the Market Agent to see real-time data
+            </div>
+          </div>
+        )}
+        {!loading && !error && candles.length > 0 && (
+          <CandlestickChart
+            data={candles}
+            indicators={indicators}
+            markers={markers}
+            barSpacing={barSpacing}
+            onChartReady={setMainChartApi}
+          />
+        )}
+      </div>
+    </div>
+  )
+
+  // RSI section component
+  const renderRSI = () => (
+    indicators.rsi && indicators.rsi.length > 0 && (
+      <div className="rsi-panel">
+        <RSIChart data={indicators.rsi} barSpacing={barSpacing} />
+      </div>
+    )
+  )
+
+  // Ultrawide layout for Xeneon Edge (2560x720)
+  if (viewport.isUltrawide && agentState) {
+    return (
+      <div className={`dashboard ultrawide-mode`} data-chart-ready={isChartReady ? 'true' : 'false'}>
+        {/* Market Closed Banner */}
+        {marketStatus && !marketStatus.is_open && (
+          <div className="market-closed-banner">
+            <span className="market-closed-icon">🔴</span>
+            <span className="market-closed-text">
+              Market Closed ({marketStatus.close_reason})
+              {marketStatus.next_open && (
+                <> — Opens {formatNextOpen(marketStatus.next_open)}</>
+              )}
+            </span>
+          </div>
+        )}
+
+        {renderHeader()}
+        {renderStatusPanel()}
+
+        <UltrawideLayout
+          chartSection={renderChart()}
+          rsiSection={renderRSI()}
+          performanceSection={
+            agentState.performance && (
+              <PerformancePanel
+                performance={agentState.performance}
+                expectancy={agentState.risk_metrics?.expectancy}
+              />
+            )
+          }
+          challengeSection={
+            agentState.challenge && (
+              <ChallengePanel
+                challenge={agentState.challenge}
+                equityCurve={agentState.equity_curve}
+              />
+            )
+          }
+          regimeSection={
+            agentState.market_regime && (
+              <MarketRegimePanel regime={agentState.market_regime} />
+            )
+          }
+          aiStatusSection={
+            agentState.ai_status && (
+              <AIStatusPanel
+                aiStatus={agentState.ai_status}
+                shadowCounters={agentState.shadow_counters}
+              />
+            )
+          }
+          recentTradesSection={
+            agentState.recent_exits && agentState.recent_exits.length > 0 && (
+              <RecentTradesPanel recentExits={agentState.recent_exits} maxItems={5} />
+            )
+          }
+        />
+      </div>
+    )
+  }
+
+  // Standard layout (mobile, tablet, desktop)
   return (
     <div className="dashboard" data-chart-ready={isChartReady ? 'true' : 'false'}>
       {/* Market Closed Banner */}
@@ -431,181 +688,19 @@ export default function LiveMainChart() {
         </div>
       )}
 
-      {/* Header */}
-      <header className="header">
-        <div className="title-group">
-          <Image src="/logo.png" alt="PEARL" width={28} height={28} className="logo" priority />
-          <div className="title-text">
-            <h1>
-              <span className="symbol">MNQ</span>
-              <span className="page-name">Live Main Chart</span>
-            </h1>
-          </div>
-          {/* Market Status Badge */}
-          {marketStatus && (
-            <div className={`market-status-badge ${marketStatus.is_open ? 'open' : 'closed'}`}>
-              <span className="market-status-dot"></span>
-              {marketStatus.is_open ? 'Market Open' : 'Market Closed'}
-            </div>
-          )}
-        </div>
-        {/* Timeframe Selector */}
-        <div className="timeframe-selector">
-          {(['1m', '5m', '15m', '1h'] as Timeframe[]).map((tf) => (
-            <button
-              key={tf}
-              className={timeframe === tf ? 'active' : ''}
-              onClick={() => setTimeframe(tf)}
-            >
-              {tf}
-            </button>
-          ))}
-        </div>
-        <div className="status">
-          <span className={`status-dot ${isLive ? '' : 'offline'}`}></span>
-          <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
-            {isLive ? 'Live' : 'Cached'} • {formatTime(lastUpdate)}
-          </span>
-        </div>
-      </header>
-
-      {/* Status Panel */}
-      {(agentState || candles.length > 0) && (
-        <div className="status-panel">
-          {/* Current Price */}
-          {candles.length > 0 && (
-            <div className="stat price-stat">
-              <span className="stat-label">Price</span>
-              <span className={`stat-value price-value ${candles[candles.length-1]?.close >= candles[candles.length-1]?.open ? 'positive' : 'negative'}`}>
-                {candles[candles.length-1]?.close.toFixed(2)}
-              </span>
-            </div>
-          )}
-          {agentState && (
-            <>
-              <div className="stat">
-                <span className="stat-label">Agent</span>
-                <span className={`stat-value ${agentState.running ? 'positive' : 'negative'}`}>
-                  {agentState.running ? (agentState.paused ? '⏸️ Paused' : '🟢 Running') : '🔴 Stopped'}
-                </span>
-              </div>
-              <div className="stat">
-                <span className="stat-label">Day P&L</span>
-                <span className={`stat-value ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
-                  {formatPnL(agentState.daily_pnl)}
-                </span>
-              </div>
-              <div className="stat">
-                <span className="stat-label">Trades</span>
-                <span className="stat-value">
-                  {agentState.daily_wins}W / {agentState.daily_losses}L
-                </span>
-              </div>
-              <div className="stat">
-                <span className="stat-label">Open Pos</span>
-                <span className={`stat-value ${agentState.active_trades_count > 0 ? 'highlight' : ''}`}>
-                  {agentState.active_trades_count}
-                </span>
-              </div>
-            </>
-          )}
-          {/* Indicator Legend */}
-          <div className="indicator-legend">
-            <span className="legend-item"><span className="legend-color ema9"></span>EMA9</span>
-            <span className="legend-item"><span className="legend-color ema21"></span>EMA21</span>
-            <span className="legend-item"><span className="legend-color vwap"></span>VWAP</span>
-          </div>
-          {/* Marker Legend */}
-          <div className="marker-legend">
-            <span className="legend-item">
-              <span className="marker-icon entry-long">▲</span>Long
-            </span>
-            <span className="legend-item">
-              <span className="marker-icon entry-short">▼</span>Short
-            </span>
-            <span className="legend-item">
-              <span className="marker-icon exit-win">●</span>Win
-            </span>
-            <span className="legend-item">
-              <span className="marker-icon exit-loss">●</span>Loss
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Chart */}
-      <div className="chart-wrapper">
-        <div className="chart-actions">
-          <button
-            className="chart-action-btn"
-            onClick={() => window.location.reload()}
-            title="Refresh"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-          </button>
-          <button
-            className="chart-action-btn"
-            onClick={() => mainChartApi?.timeScale().fitContent()}
-            title="Fit All"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-            </svg>
-          </button>
-          <button
-            className="chart-action-btn"
-            onClick={() => mainChartApi?.timeScale().scrollToRealTime()}
-            title="Go Live"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polygon points="5 3 19 12 5 21 5 3" />
-            </svg>
-          </button>
-        </div>
-        <div className="chart-container">
-          {loading && (
-            <div className="loading-screen">
-              <img src="/logo.png" alt="PEARL" className="loading-logo" />
-              <div className="loading-text">Loading Live Data...</div>
-              <div className="loading-spinner"></div>
-            </div>
-          )}
-          {error && !loading && (
-            <div className="no-data-container">
-              <img src="/logo.png" alt="PEARL" className="no-data-logo" />
-              <div className="no-data-title">No Live Data</div>
-              <div className="no-data-message">{error}</div>
-              <div className="no-data-hint">
-                Start the Market Agent to see real-time data
-              </div>
-            </div>
-          )}
-          {!loading && !error && candles.length > 0 && (
-            <CandlestickChart
-              data={candles}
-              indicators={indicators}
-              markers={markers}
-              barSpacing={barSpacing}
-              onChartReady={setMainChartApi}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* RSI Panel */}
-      {indicators.rsi && indicators.rsi.length > 0 && (
-        <div className="rsi-panel">
-          <RSIChart data={indicators.rsi} barSpacing={barSpacing} />
-        </div>
-      )}
+      {renderHeader()}
+      {renderStatusPanel()}
+      {renderChart()}
+      {renderRSI()}
 
       {/* Data Panels */}
       {agentState && (
         <DataPanelsContainer>
           {agentState.performance && (
-            <PerformancePanel performance={agentState.performance} />
+            <PerformancePanel
+              performance={agentState.performance}
+              expectancy={agentState.risk_metrics?.expectancy}
+            />
           )}
           {agentState.risk_metrics && (
             <RiskMetricsPanel riskMetrics={agentState.risk_metrics} />

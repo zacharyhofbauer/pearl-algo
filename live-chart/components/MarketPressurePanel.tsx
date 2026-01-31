@@ -94,9 +94,6 @@ export default function MarketPressurePanel({ pressure }: MarketPressurePanelPro
         <div className="pressure-bar-container">
           <div className="pressure-bar-labels">
             <span className="pressure-bar-label sellers">Sellers</span>
-            <span className="pressure-bar-value">
-              {pressure.score_pct >= 0 ? '+' : ''}{pressure.score_pct.toFixed(0)}%
-            </span>
             <span className="pressure-bar-label buyers">Buyers</span>
           </div>
           <div className="pressure-bar">
@@ -105,7 +102,11 @@ export default function MarketPressurePanel({ pressure }: MarketPressurePanelPro
               className="pressure-bar-marker"
               style={{ left: `${barPosition}%` }}
             >
-              <div className="pressure-marker-dot"></div>
+              <div className="pressure-marker-dot">
+                <span className="pressure-marker-label">
+                  {pressure.score_pct >= 0 ? '+' : ''}{pressure.score_pct.toFixed(0)}%
+                </span>
+              </div>
             </div>
           </div>
         </div>
