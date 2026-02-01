@@ -197,11 +197,13 @@ class PearlSuggestionEngine:
             self.DEFAULT_COOLDOWN_MINUTES
         )
         
-        # Priority order: problems > milestones > greetings > tips
+        # Priority order: problems > risk > milestones > patterns > greetings > tips
         suggestions = [
             self._check_problem(state, cooldown_minutes),
             self._check_risk_drawdown(state, cooldown_minutes),
             self._check_milestone(state, cooldown_minutes),
+            self._check_pattern_insight(state, cooldown_minutes),
+            self._check_opportunity(state, cooldown_minutes),
             self._check_greeting(state, prefs),
             self._check_end_of_day(state, cooldown_minutes),
             self._check_market_quiet(state, cooldown_minutes),
@@ -429,7 +431,120 @@ class PearlSuggestionEngine:
             priority=SuggestionPriority.IMPORTANT,
             cooldown_key=key,
         )
-    
+
+    def _check_pattern_insight(
+        self,
+        state: dict[str, Any],
+        cooldown_minutes: float,
+    ) -> Optional[PearlSuggestion]:
+        """Check for trading patterns worth highlighting (Priority 2)."""
+
+        key = "pattern_insight"
+        if self._is_on_cooldown(key, cooldown_minutes * 2):  # Longer cooldown for patterns
+            return None
+
+        # Pattern: Consecutive morning wins
+        wins_today = state.get("wins_today", 0)
+        morning_wins = state.get("morning_wins", 0)
+        if morning_wins >= 3 and wins_today >= 3:
+            return PearlSuggestion(
+                message=f"You've won {morning_wins} morning trades. Your AM setups are firing.",
+                accept_label="Show analysis",
+                accept_action="pearl:show_performance",
+                priority=SuggestionPriority.HELPFUL,
+                cooldown_key=key,
+            )
+
+        # Pattern: Direction bias working
+        long_pnl = float(state.get("long_pnl_today", 0) or 0)
+        short_pnl = float(state.get("short_pnl_today", 0) or 0)
+        long_trades = int(state.get("long_trades_today", 0) or 0)
+        short_trades = int(state.get("short_trades_today", 0) or 0)
+
+        if long_trades >= 3 and long_pnl > 200 and short_pnl < 0:
+            return PearlSuggestion(
+                message=f"Longs +${long_pnl:.0f}, shorts struggling. Consider bias today.",
+                accept_label="Got it",
+                accept_action="pearl:dismiss",
+                priority=SuggestionPriority.HELPFUL,
+                cooldown_key=key,
+            )
+
+        if short_trades >= 3 and short_pnl > 200 and long_pnl < 0:
+            return PearlSuggestion(
+                message=f"Shorts +${short_pnl:.0f}, longs choppy. Market favoring downside.",
+                accept_label="Got it",
+                accept_action="pearl:dismiss",
+                priority=SuggestionPriority.HELPFUL,
+                cooldown_key=key,
+            )
+
+        # Pattern: Consistent time-of-day performance
+        best_session = state.get("best_session_today")
+        if best_session and state.get(f"{best_session}_wins", 0) >= 2:
+            session_pnl = state.get(f"{best_session}_pnl", 0)
+            if session_pnl > 150:
+                return PearlSuggestion(
+                    message=f"Your {best_session} session is hot: +${session_pnl:.0f}. Keep focusing there.",
+                    accept_label="Show times",
+                    accept_action="pearl:show_performance",
+                    priority=SuggestionPriority.HELPFUL,
+                    cooldown_key=key,
+                )
+
+        return None
+
+    def _check_opportunity(
+        self,
+        state: dict[str, Any],
+        cooldown_minutes: float,
+    ) -> Optional[PearlSuggestion]:
+        """Check for trading opportunities (Priority 3)."""
+
+        key = "opportunity"
+        if self._is_on_cooldown(key, cooldown_minutes):
+            return None
+
+        # Opportunity: Volatility expanding
+        atr_expansion = float(state.get("atr_expansion", 1.0) or 1.0)
+        volatility_percentile = float(state.get("volatility_percentile", 50) or 50)
+
+        if atr_expansion >= 1.5 and volatility_percentile >= 75:
+            return PearlSuggestion(
+                message="Volatility expanding - your setups tend to work well here.",
+                accept_label="Show chart",
+                accept_action="action:refresh_chart",
+                priority=SuggestionPriority.HELPFUL,
+                cooldown_key=key,
+            )
+
+        # Opportunity: Approaching daily loss limit (risk awareness)
+        daily_pnl = float(state.get("daily_pnl", 0) or 0)
+        daily_loss_limit = float(state.get("daily_loss_limit", -500) or -500)
+
+        if daily_pnl < 0 and daily_pnl <= daily_loss_limit * 0.7:
+            remaining = abs(daily_loss_limit) - abs(daily_pnl)
+            return PearlSuggestion(
+                message=f"Down ${abs(daily_pnl):.0f} - ${remaining:.0f} from daily limit. Consider smaller size.",
+                accept_label="Show risk",
+                accept_action="pearl:show_risk_report",
+                priority=SuggestionPriority.IMPORTANT,
+                cooldown_key=key,
+            )
+
+        # Opportunity: Volume spike
+        volume_ratio = float(state.get("volume_ratio", 1.0) or 1.0)
+        if volume_ratio >= 2.0 and state.get("session_open"):
+            return PearlSuggestion(
+                message=f"Volume {volume_ratio:.1f}x average - market moving. Stay alert.",
+                accept_label="Show chart",
+                accept_action="action:refresh_chart",
+                priority=SuggestionPriority.HELPFUL,
+                cooldown_key=key,
+            )
+
+        return None
+
     def _check_market_quiet(
         self,
         state: dict[str, Any],

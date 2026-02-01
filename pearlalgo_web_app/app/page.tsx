@@ -9,6 +9,7 @@ import ChallengePanel from '@/components/ChallengePanel'
 import AIStatusPanel from '@/components/AIStatusPanel'
 import RecentTradesPanel from '@/components/RecentTradesPanel'
 import PearlSuggestionsPanel from '@/components/PearlSuggestionsPanel'
+import PearlInsightsPanel from '@/components/PearlInsightsPanel'
 import EquityCurvePanel from '@/components/EquityCurvePanel'
 import RiskMetricsPanel from '@/components/RiskMetricsPanel'
 import HelpPanel from '@/components/HelpPanel'
@@ -731,6 +732,39 @@ export default function PearlAlgoWebApp() {
       {/* Data Panels */}
       {agentState && (
         <DataPanelsContainer>
+          {/* Pearl AI Insights - Primary focus above performance */}
+          <PearlInsightsPanel
+            insights={agentState.pearl_insights}
+            suggestion={agentState.pearl_suggestion}
+            onAccept={async () => {
+              try {
+                const action = agentState.pearl_suggestion?.accept_action ||
+                  agentState.pearl_insights?.shadow_metrics?.active_suggestion?.action
+                if (action) {
+                  await apiFetch('/api/pearl-suggestion/accept', {
+                    method: 'POST',
+                    body: JSON.stringify({ action }),
+                  })
+                }
+              } catch (e) {
+                console.error('Failed to accept Pearl insight:', e)
+              }
+            }}
+            onDismiss={async () => {
+              try {
+                const key = agentState.pearl_suggestion?.cooldown_key ||
+                  agentState.pearl_insights?.shadow_metrics?.active_suggestion?.id
+                if (key) {
+                  await apiFetch('/api/pearl-suggestion/dismiss', {
+                    method: 'POST',
+                    body: JSON.stringify({ cooldown_key: key }),
+                  })
+                }
+              } catch (e) {
+                console.error('Failed to dismiss Pearl insight:', e)
+              }
+            }}
+          />
           {agentState.performance && (
             <PerformancePanel
               performance={agentState.performance}
@@ -802,37 +836,6 @@ export default function PearlAlgoWebApp() {
             <AnalyticsPanel
               analytics={agentState.analytics}
               recentExits={agentState.recent_exits}
-            />
-          )}
-          {agentState.pearl_suggestion && (
-            <PearlSuggestionsPanel
-              suggestion={agentState.pearl_suggestion}
-              onAccept={async () => {
-                try {
-                  const action = agentState.pearl_suggestion?.accept_action
-                  if (action) {
-                    await apiFetch('/api/pearl-suggestion/accept', {
-                      method: 'POST',
-                      body: JSON.stringify({ action }),
-                    })
-                  }
-                } catch (e) {
-                  console.error('Failed to accept suggestion:', e)
-                }
-              }}
-              onDismiss={async () => {
-                try {
-                  const key = agentState.pearl_suggestion?.cooldown_key
-                  if (key) {
-                    await apiFetch('/api/pearl-suggestion/dismiss', {
-                      method: 'POST',
-                      body: JSON.stringify({ cooldown_key: key }),
-                    })
-                  }
-                } catch (e) {
-                  console.error('Failed to dismiss suggestion:', e)
-                }
-              }}
             />
           )}
         </DataPanelsContainer>

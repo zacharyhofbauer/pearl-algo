@@ -27,6 +27,8 @@ export type {
   StatusBreakdown,
   AnalyticsData,
   PearlSuggestion,
+  PearlShadowMetrics,
+  PearlInsights,
 } from './agentStore'
 
 // Export selectors

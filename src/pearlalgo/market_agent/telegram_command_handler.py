@@ -215,11 +215,11 @@ class TelegramCommandHandler:
 
     async def _post_init(self, application: Application) -> None:
         """Runs once after the Telegram application initializes."""
-        # Minimal command surface: /start is the only command.
-        # Pearl AI chat removed from Telegram - use CLI/terminal instead.
+        # Commands: /start for dashboard, /pearl for AI chat
         try:
             await application.bot.set_my_commands([
                 BotCommand("start", "Show main dashboard"),
+                BotCommand("pearl", "Chat with Pearl AI"),
             ])
         except Exception as e:
             logger.debug(f"Could not set bot commands: {e}")
@@ -237,9 +237,9 @@ class TelegramCommandHandler:
             logger.info("Command handler ready - user can use /start for dashboard")
 
     def _register_handlers(self) -> None:
-        # Minimal command surface: /start is the only command.
-        # Pearl AI chat removed from Telegram - use CLI/terminal instead.
+        # Commands: /start for dashboard, /pearl for AI chat
         self.application.add_handler(CommandHandler("start", self.handle_menu))
+        self.application.add_handler(CommandHandler("pearl", self.handle_pearl))
 
         # Optional aliases (kept for backwards-compatibility; not advertised).
         self.application.add_handler(CommandHandler("menu", self.handle_menu))
@@ -700,6 +700,130 @@ class TelegramCommandHandler:
             "Use /start to open the dashboard, or tap a menu button.",
             parse_mode="Markdown",
         )
+
+    async def handle_pearl(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /pearl command - AI chat with Pearl."""
+        if not update.message:
+            return
+        if not await self._check_authorized(update):
+            await update.message.reply_text("Unauthorized access")
+            return
+
+        # Extract message after /pearl command
+        raw_text = str(update.message.text or "").strip()
+        # Remove /pearl or /pearl@botname prefix
+        if raw_text.startswith("/pearl"):
+            parts = raw_text.split(maxsplit=1)
+            user_message = parts[1].strip() if len(parts) > 1 else ""
+        else:
+            user_message = raw_text
+
+        logger.info(f"Received /pearl command: {user_message[:50]}...")
+
+        # If no message provided, show help
+        if not user_message:
+            await update.message.reply_text(
+                "Ask me anything about your trading.\n\n"
+                "Examples:\n"
+                "  /pearl how am I doing today?\n"
+                "  /pearl what's working?\n"
+                "  /pearl summarize my trades",
+            )
+            return
+
+        # Get AI chat instance
+        try:
+            from pearlalgo.ai.chat import get_ai_chat
+            from pearlalgo.config.config_loader import load_service_config
+
+            service_config = load_service_config()
+            ai_config = service_config.get("ai_chat", {})
+            ai_chat = get_ai_chat(config=ai_config, state_dir=str(self.state_dir))
+
+            if not ai_chat.enabled:
+                await update.message.reply_text(
+                    "AI chat unavailable. Check OPENAI_API_KEY."
+                )
+                return
+
+            # Build trading context for AI
+            context_data = self._build_ai_context()
+
+            # Send typing indicator
+            try:
+                await update.message.chat.send_action("typing")
+            except Exception:
+                pass
+
+            # Get AI response
+            response = await ai_chat.chat(user_message, context=context_data)
+
+            # Send response
+            await update.message.reply_text(response)
+
+        except Exception as e:
+            logger.error(f"Pearl AI chat error: {e}", exc_info=True)
+            await update.message.reply_text(
+                "AI hiccup - try again in a sec."
+            )
+
+    def _build_ai_context(self) -> dict:
+        """Build trading context dictionary for AI chat."""
+        context = {
+            "daily_pnl": 0,
+            "wins_today": 0,
+            "losses_today": 0,
+            "win_streak": 0,
+            "streak_type": "",
+            "active_positions": 0,
+            "session_open": None,
+            "recent_trades": [],
+            "best_signal_type": None,
+            "worst_signal_type": None,
+        }
+
+        try:
+            state = self._read_state()
+            if state:
+                context["daily_pnl"] = float(state.get("daily_pnl", 0) or 0)
+                context["wins_today"] = int(state.get("wins_today", 0) or 0)
+                context["losses_today"] = int(state.get("losses_today", 0) or 0)
+                context["win_streak"] = int(state.get("win_streak", 0) or 0)
+                context["streak_type"] = str(state.get("streak_type", "") or "")
+                context["active_positions"] = int(state.get("active_trades_count", 0) or 0)
+                context["session_open"] = state.get("strategy_session_open")
+
+            # Get recent trades from signals file
+            signals = self._read_recent_signals(limit=10)
+            recent_trades = []
+            for sig in signals:
+                if sig.get("exit_time"):
+                    recent_trades.append({
+                        "direction": sig.get("direction", ""),
+                        "pnl": float(sig.get("pnl", 0) or 0),
+                        "type": sig.get("type", ""),
+                        "is_win": bool(sig.get("is_win")),
+                    })
+            context["recent_trades"] = recent_trades
+
+            # Compute best/worst signal types from recent trades
+            if recent_trades:
+                type_pnl = {}
+                for t in recent_trades:
+                    sig_type = t.get("type", "unknown")
+                    type_pnl[sig_type] = type_pnl.get(sig_type, 0) + t.get("pnl", 0)
+                if type_pnl:
+                    best = max(type_pnl, key=type_pnl.get)
+                    worst = min(type_pnl, key=type_pnl.get)
+                    if type_pnl[best] > 0:
+                        context["best_signal_type"] = best
+                    if type_pnl[worst] < 0:
+                        context["worst_signal_type"] = worst
+
+        except Exception as e:
+            logger.debug(f"Error building AI context: {e}")
+
+        return context
 
     async def handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Show help information."""
@@ -3060,6 +3184,18 @@ class TelegramCommandHandler:
         keyboard = [self._nav_back_row()]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
+        # Helper to get shadow tracker context
+        def get_shadow_context() -> dict:
+            state = self._read_state()
+            if not state:
+                return {}
+            return {
+                "daily_pnl": float(state.get("daily_pnl", 0) or 0),
+                "wins_today": int(state.get("wins_today", 0) or 0),
+                "losses_today": int(state.get("losses_today", 0) or 0),
+                "active_positions": int(state.get("active_trades_count", 0) or 0),
+            }
+
         try:
             # Dismiss action - just dismiss the suggestion and return to menu
             if action == "dismiss":
@@ -3072,14 +3208,36 @@ class TelegramCommandHandler:
                         suggestion = self._get_pearl_suggestion(state)
                         if suggestion and suggestion.cooldown_key:
                             engine.mark_dismissed(suggestion.cooldown_key)
+
+                    # Also record in shadow tracker
+                    try:
+                        from pearlalgo.ai.shadow_tracker import get_shadow_tracker
+                        tracker = get_shadow_tracker(state_dir=self.state_dir)
+                        active = tracker.get_active_suggestion()
+                        if active:
+                            tracker.mark_dismissed(active["id"], get_shadow_context())
+                    except Exception as e:
+                        logger.debug(f"Shadow tracker dismiss failed: {e}")
                 except Exception as e:
                     logger.debug(f"Could not mark suggestion dismissed: {e}")
 
                 await self._show_main_menu(query)
                 return
 
+            # Helper to mark suggestion as followed in shadow tracker
+            def mark_followed_in_tracker():
+                try:
+                    from pearlalgo.ai.shadow_tracker import get_shadow_tracker
+                    tracker = get_shadow_tracker(state_dir=self.state_dir)
+                    active = tracker.get_active_suggestion()
+                    if active:
+                        tracker.mark_followed(active["id"], get_shadow_context())
+                except Exception as e:
+                    logger.debug(f"Shadow tracker follow failed: {e}")
+
             # Route Pearl actions to their handlers
             if action == "reconnect_gateway":
+                mark_followed_in_tracker()
                 # Start gateway reconnection
                 await self._safe_edit_or_send(
                     query,
@@ -3098,10 +3256,12 @@ class TelegramCommandHandler:
                 await self._safe_edit_or_send(query, msg, reply_markup=reply_markup)
 
             elif action == "check_data":
+                mark_followed_in_tracker()
                 # Show data quality diagnostics
                 await self._handle_data_quality(query, reply_markup)
 
             elif action == "start_agent":
+                mark_followed_in_tracker()
                 # Start the trading agent
                 await self._safe_edit_or_send(
                     query,
@@ -3120,18 +3280,22 @@ class TelegramCommandHandler:
                 await self._safe_edit_or_send(query, msg, reply_markup=reply_markup)
 
             elif action == "show_performance":
+                mark_followed_in_tracker()
                 # Show performance menu
                 await self._show_performance_menu(query)
 
             elif action == "show_risk_report":
+                mark_followed_in_tracker()
                 # Show risk report
                 await self._show_risk_report(query)
 
             elif action == "show_overnight":
+                mark_followed_in_tracker()
                 # Show overnight summary (same as daily summary for now)
                 await self._handle_daily_summary(query, reply_markup)
 
             elif action == "show_daily_summary":
+                mark_followed_in_tracker()
                 # Show daily summary
                 await self._handle_daily_summary(query, reply_markup)
 

@@ -28,6 +28,10 @@ interface DataPanelProps {
   variant?: 'default' | 'feature' | 'status' | 'config'
   /** Disable error boundary for this panel (default: false) */
   noErrorBoundary?: boolean
+  /** Optional badge text to display next to title */
+  badge?: string
+  /** Badge background color (CSS value) */
+  badgeColor?: string
 }
 
 export function DataPanel({
@@ -37,7 +41,9 @@ export function DataPanel({
   className = '',
   padding = 'default',
   variant = 'default',
-  noErrorBoundary = false
+  noErrorBoundary = false,
+  badge,
+  badgeColor
 }: DataPanelProps) {
   const panelClasses = [
     'data-panel',
@@ -51,6 +57,14 @@ export function DataPanel({
       <div className="data-panel-header">
         {icon && <span className="data-panel-icon">{icon}</span>}
         <span className="data-panel-title">{title}</span>
+        {badge && (
+          <span
+            className="data-panel-badge"
+            style={badgeColor ? { backgroundColor: badgeColor } : undefined}
+          >
+            {badge}
+          </span>
+        )}
       </div>
       <div className="data-panel-content">
         {children}

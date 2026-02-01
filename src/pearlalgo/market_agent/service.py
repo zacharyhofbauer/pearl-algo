@@ -45,6 +45,7 @@ from pearlalgo.utils.volume_pressure import (
     timeframe_to_minutes,
 )
 from pearlalgo.utils.pearl_suggestions import get_suggestion_engine
+from pearlalgo.ai.shadow_tracker import get_shadow_tracker, SuggestionType
 
 # Execution layer imports (optional - only used if execution.enabled)
 try:
@@ -542,6 +543,8 @@ class MarketAgentService:
         
         # Daily summary tracking (sent at safety close 3:55 PM ET)
         self._daily_summary_sent_date: Optional[str] = None
+        # Morning briefing tracking (sent at 6:30 AM ET)
+        self._morning_briefing_sent_date: Optional[str] = None
         self.last_connection_failure_alert: Optional[datetime] = None
         self.last_successful_cycle: Optional[datetime] = None
         self.last_data_quality_alert: Optional[datetime] = None
@@ -563,7 +566,10 @@ class MarketAgentService:
         
         # Initialize Pearl suggestion engine
         self.suggestion_engine = get_suggestion_engine(state_dir=str(self.state_manager.state_dir))
-        
+
+        # Initialize Pearl AI shadow tracker (tracks suggestion outcomes)
+        self.shadow_tracker = get_shadow_tracker(state_dir=self.state_manager.state_dir)
+
         # New-bar gating: skip heavy analysis when df hasn't advanced (performance optimization).
         # This is high leverage when using 5m bars with 30s scan interval (5 of 6 cycles are repeats).
         self._enable_new_bar_gating = bool(service_settings.get("enable_new_bar_gating", True))
@@ -925,10 +931,13 @@ class MarketAgentService:
             
             # Reset execution daily counters if new trading day
             self._check_daily_reset()
-            
-            # Check for safety close daily summary (3:55 PM ET)
+
+            # Check for morning briefing (6:30 AM ET)
+            await self._check_morning_briefing()
+
+            # Check for safety close daily summary (3:55 PM ET / 4:00 PM ET)
             await self._check_market_close_summary()
-            
+
             # Check execution adapter connection health and alert on issues
             await self._check_execution_health()
             
@@ -2433,6 +2442,7 @@ class MarketAgentService:
     async def _check_pearl_suggestions(self) -> None:
         """
         Check for proactive Pearl suggestions and send them if appropriate.
+        Also records suggestions in shadow tracker for outcome measurement.
         """
         if not self.telegram_notifier.enabled:
             return
@@ -2442,15 +2452,47 @@ class MarketAgentService:
             state = self._get_status_snapshot()
             prefs_obj = self.telegram_notifier._get_prefs()
             prefs = prefs_obj.all()
-            
+
+            # Update shadow tracker with current context (for ongoing tracking)
+            try:
+                shadow_context = {
+                    "daily_pnl": state.get("daily_pnl", 0),
+                    "wins_today": state.get("wins_today", 0),
+                    "losses_today": state.get("losses_today", 0),
+                    "active_positions": state.get("active_trades_count", 0),
+                }
+                self.shadow_tracker.update_context(shadow_context)
+            except Exception as e:
+                logger.debug(f"Shadow tracker update failed (non-fatal): {e}")
+
             # Generate suggestion (engine handles cooldowns)
             suggestion = self.suggestion_engine.generate_suggestion(
-                state, 
+                state,
                 prefs=prefs
             )
-            
+
             if suggestion:
                 logger.info(f"Sending proactive PEARL suggestion: {suggestion.message}")
+
+                # Record suggestion in shadow tracker
+                try:
+                    # Map cooldown_key to suggestion type
+                    suggestion_type = self._map_suggestion_type(suggestion.cooldown_key)
+                    shadow_context = {
+                        "daily_pnl": state.get("daily_pnl", 0),
+                        "wins_today": state.get("wins_today", 0),
+                        "losses_today": state.get("losses_today", 0),
+                        "active_positions": state.get("active_trades_count", 0),
+                    }
+                    self.shadow_tracker.record_suggestion(
+                        suggestion_type=suggestion_type,
+                        message=suggestion.message,
+                        action=suggestion.accept_label,
+                        context=shadow_context,
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to record suggestion in shadow tracker: {e}")
+
                 # Pass plain text - send_pearl_notification will escape for MarkdownV2
                 await self.telegram_notifier.send_pearl_notification(suggestion.message, message_type="Suggestion")
 
@@ -2483,6 +2525,26 @@ class MarketAgentService:
                 
         except Exception as e:
             logger.warning(f"Error checking Pearl suggestions: {e}")
+
+    def _map_suggestion_type(self, cooldown_key: str) -> str:
+        """Map suggestion cooldown key to shadow tracker suggestion type."""
+        key = str(cooldown_key or "").lower()
+        if "problem" in key or "gateway" in key or "data" in key or "agent" in key:
+            return SuggestionType.RISK_ALERT.value
+        elif "risk" in key or "drawdown" in key:
+            return SuggestionType.RISK_ALERT.value
+        elif "milestone" in key or "streak" in key or "profit" in key:
+            return SuggestionType.PATTERN_INSIGHT.value
+        elif "eod" in key or "quiet" in key:
+            return SuggestionType.SESSION_ADVICE.value
+        elif "greeting" in key:
+            return SuggestionType.SESSION_ADVICE.value
+        elif "pattern" in key or "direction" in key or "bias" in key:
+            return SuggestionType.DIRECTION_BIAS.value
+        elif "opportunity" in key or "volatility" in key or "volume" in key:
+            return SuggestionType.OPPORTUNITY.value
+        else:
+            return SuggestionType.PATTERN_INSIGHT.value
 
     @staticmethod
     def _escape_markdown_v2(text: str) -> str:
@@ -3499,6 +3561,145 @@ class MarketAgentService:
             )
             self._last_trading_day = today
 
+    async def _check_morning_briefing(self) -> None:
+        """
+        Send morning briefing at 6:30 AM ET.
+
+        Automatically sends once per day with:
+        - Overnight session recap (if any trades)
+        - Current P&L status
+        - Key price levels
+        - Market sentiment snapshot
+        """
+        if not self.telegram_notifier or not self.telegram_notifier.enabled:
+            return
+
+        try:
+            # Check if AI briefings are enabled in config
+            service_config = load_service_config()
+            briefing_config = service_config.get("ai_briefings", {})
+            if not briefing_config.get("enabled", True):
+                return
+
+            # Get configured time (default 6:30 AM ET)
+            morning_time_str = str(briefing_config.get("morning_time", "06:30"))
+            try:
+                morning_hour, morning_minute = map(int, morning_time_str.split(":"))
+            except Exception:
+                morning_hour, morning_minute = 6, 30
+
+            # Get current time in ET
+            now_utc = datetime.now(timezone.utc)
+            try:
+                et_tz = ZoneInfo("America/New_York")
+                now_et = now_utc.astimezone(et_tz)
+            except Exception:
+                from datetime import timedelta
+                now_et = now_utc - timedelta(hours=5)
+
+            et_hour = now_et.hour
+            et_minute = now_et.minute
+            today_str = now_et.strftime("%Y-%m-%d")
+
+            # Check if already sent today
+            if self._morning_briefing_sent_date == today_str:
+                return
+
+            # Send in a 10-minute window around configured time
+            if not (et_hour == morning_hour and morning_minute <= et_minute <= morning_minute + 10):
+                return
+
+            # Mark as sent for today
+            self._morning_briefing_sent_date = today_str
+
+            # Gather overnight/previous session data
+            perf_file = self.performance_tracker.performance_file
+            overnight_trades = []
+            if perf_file.exists():
+                try:
+                    perf_data = json.loads(perf_file.read_text(encoding="utf-8"))
+                    if isinstance(perf_data, list):
+                        trades = perf_data
+                    elif isinstance(perf_data, dict):
+                        trades = perf_data.get("trades", []) or []
+                    else:
+                        trades = []
+
+                    # Filter overnight trades (6 PM yesterday to 6:30 AM today)
+                    yesterday = (now_et - timedelta(days=1)).strftime("%Y-%m-%d")
+                    for t in trades:
+                        exit_time = t.get("exit_time", "")
+                        if exit_time:
+                            # Check if trade was overnight session
+                            if exit_time[:10] == today_str or exit_time[:10] == yesterday:
+                                overnight_trades.append(t)
+                except Exception:
+                    pass
+
+            # Get current state for P&L
+            state = self.state_manager.load_state()
+            daily_pnl = float(state.get("daily_pnl", 0) or 0)
+            session_pnl = float(state.get("session_pnl", 0) or 0)
+
+            # Build briefing message
+            day_name = now_et.strftime("%A")
+            date_str = now_et.strftime("%b %d")
+
+            msg_parts = [f"Good morning! {day_name}, {date_str}"]
+
+            # Overnight recap
+            if overnight_trades:
+                overnight_pnl = sum(t.get("pnl", 0) for t in overnight_trades)
+                overnight_wins = sum(1 for t in overnight_trades if t.get("is_win"))
+                overnight_losses = len(overnight_trades) - overnight_wins
+                pnl_sign = "+" if overnight_pnl >= 0 else ""
+                msg_parts.append(
+                    f"Overnight: {len(overnight_trades)} trades ({overnight_wins}W/{overnight_losses}L), {pnl_sign}${overnight_pnl:.0f}"
+                )
+            else:
+                msg_parts.append("Overnight: No trades")
+
+            # Current P&L status
+            if daily_pnl != 0 or session_pnl != 0:
+                pnl_to_show = daily_pnl if daily_pnl != 0 else session_pnl
+                pnl_sign = "+" if pnl_to_show >= 0 else ""
+                pnl_emoji = "green" if pnl_to_show >= 0 else "red"
+                msg_parts.append(f"Session P&L: {pnl_sign}${pnl_to_show:.0f}")
+
+            # Try to add AI-generated insight
+            try:
+                from pearlalgo.ai.chat import get_ai_chat
+
+                ai_config = service_config.get("ai_chat", {})
+                ai_chat = get_ai_chat(config=ai_config)
+                if ai_chat.enabled:
+                    context = {
+                        "daily_pnl": daily_pnl,
+                        "session_pnl": session_pnl,
+                        "overnight_trades": len(overnight_trades),
+                        "recent_trades": [
+                            {"pnl": t.get("pnl", 0), "direction": t.get("direction", "")}
+                            for t in overnight_trades[-5:]
+                        ],
+                    }
+                    insight = await ai_chat.generate_insight("morning_briefing", context)
+                    if insight:
+                        msg_parts.append(f"\n{insight}")
+            except Exception as e:
+                logger.debug(f"Could not generate morning AI insight: {e}")
+
+            msg = "\n".join(msg_parts)
+
+            asyncio.create_task(
+                self.notification_queue.enqueue_raw_message(
+                    msg, parse_mode=None, dedupe=False, priority=Priority.MEDIUM
+                )
+            )
+            logger.info(f"Morning briefing sent for {today_str}")
+
+        except Exception as e:
+            logger.debug(f"Could not send morning briefing: {e}")
+
     async def _check_market_close_summary(self) -> None:
         """
         Send daily performance summary at safety close (3:55 PM ET).
@@ -3571,15 +3772,64 @@ class MarketAgentService:
                 
                 pnl_emoji = "🟢" if total_pnl >= 0 else "🔴"
                 pnl_sign = "+" if total_pnl >= 0 else ""
-                
-                msg = (
-                    f"📊 *Daily Summary* • {now_et.strftime('%b %d')}\n\n"
-                    f"{pnl_emoji} *P&L:* {pnl_sign}${total_pnl:,.2f}\n"
-                    f"📈 *Trades:* {len(today_trades)} ({wins}W/{losses}L)\n"
-                    f"🎯 *Win Rate:* {win_rate:.0f}%\n\n"
-                    "_Session safety close at 3:55 PM ET_"
-                )
-            
+
+                # Analyze what worked vs didn't
+                long_trades = [t for t in today_trades if t.get("direction", "").lower() == "long"]
+                short_trades = [t for t in today_trades if t.get("direction", "").lower() == "short"]
+                long_pnl = sum(t.get("pnl", 0) for t in long_trades)
+                short_pnl = sum(t.get("pnl", 0) for t in short_trades)
+
+                msg_parts = [
+                    f"📊 *Daily Summary* • {now_et.strftime('%b %d')}\n",
+                    f"{pnl_emoji} *P&L:* {pnl_sign}${total_pnl:,.2f}",
+                    f"📈 *Trades:* {len(today_trades)} ({wins}W/{losses}L)",
+                    f"🎯 *Win Rate:* {win_rate:.0f}%",
+                ]
+
+                # Add direction breakdown if both directions traded
+                if long_trades and short_trades:
+                    long_sign = "+" if long_pnl >= 0 else ""
+                    short_sign = "+" if short_pnl >= 0 else ""
+                    msg_parts.append(
+                        f"↗️ Longs: {long_sign}${long_pnl:.0f} • ↘️ Shorts: {short_sign}${short_pnl:.0f}"
+                    )
+
+                # Try to add AI-generated insight
+                try:
+                    service_config = load_service_config()
+                    briefing_config = service_config.get("ai_briefings", {})
+                    if briefing_config.get("enabled", True):
+                        from pearlalgo.ai.chat import get_ai_chat
+
+                        ai_config = service_config.get("ai_chat", {})
+                        ai_chat = get_ai_chat(config=ai_config)
+                        if ai_chat.enabled:
+                            context = {
+                                "daily_pnl": total_pnl,
+                                "wins_today": wins,
+                                "losses_today": losses,
+                                "win_rate": win_rate,
+                                "long_pnl": long_pnl,
+                                "short_pnl": short_pnl,
+                                "recent_trades": [
+                                    {
+                                        "pnl": t.get("pnl", 0),
+                                        "direction": t.get("direction", ""),
+                                        "type": t.get("type", ""),
+                                        "is_win": t.get("is_win", False),
+                                    }
+                                    for t in today_trades
+                                ],
+                            }
+                            insight = await ai_chat.generate_insight("eod_summary", context)
+                            if insight:
+                                msg_parts.append(f"\n💡 {insight}")
+                except Exception as e:
+                    logger.debug(f"Could not generate EOD AI insight: {e}")
+
+                msg_parts.append("\n_Session safety close at 3:55 PM ET_")
+                msg = "\n".join(msg_parts)
+
             asyncio.create_task(
                 self.notification_queue.enqueue_raw_message(
                     msg, parse_mode="Markdown", dedupe=False, priority=Priority.MEDIUM
@@ -4986,6 +5236,34 @@ class MarketAgentService:
         # Notification queue stats (async Telegram delivery observability)
         # ==========================================================================
         state["notification_queue"] = self.notification_queue.get_stats()
+
+        # ==========================================================================
+        # Pearl AI Insights (shadow tracking for web app)
+        # ==========================================================================
+        try:
+            shadow_metrics = self.shadow_tracker.get_metrics()
+            active_suggestion = self.shadow_tracker.get_active_suggestion()
+
+            # Get AI chat status
+            ai_enabled = False
+            try:
+                from pearlalgo.ai.chat import get_ai_chat
+                ai_chat = get_ai_chat()
+                ai_enabled = ai_chat.enabled
+            except Exception:
+                pass
+
+            state["pearl_insights"] = {
+                "current_suggestion": active_suggestion,
+                "shadow_metrics": shadow_metrics,
+                "ai_enabled": ai_enabled,
+                "last_insight_time": shadow_metrics.get("active_suggestion", {}).get("timestamp") if shadow_metrics.get("active_suggestion") else None,
+                "suggestions_today": shadow_metrics.get("total_suggestions", 0),
+                "accuracy_7d": shadow_metrics.get("accuracy_rate", 0),
+            }
+        except Exception as e:
+            logger.debug(f"Could not build pearl_insights: {e}")
+            state["pearl_insights"] = None
 
         # ==========================================================================
         # Trading circuit breaker status (risk management observability)

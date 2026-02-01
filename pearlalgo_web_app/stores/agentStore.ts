@@ -242,6 +242,60 @@ export interface PearlSuggestion {
   action: string
 }
 
+export interface PearlShadowMetrics {
+  total_suggestions: number
+  suggestions_followed: number
+  suggestions_dismissed: number
+  suggestions_expired: number
+  total_would_have_saved: number
+  total_would_have_made: number
+  net_shadow_impact: number
+  accuracy_rate: number
+  correct_suggestions: number
+  incorrect_suggestions: number
+  by_type: Record<string, {
+    count: number
+    followed: number
+    dismissed: number
+    would_have_saved: number
+    would_have_made: number
+  }>
+  recent_suggestions: Array<{
+    id: string
+    type: string
+    message: string
+    outcome: string
+    would_have_saved: number | null
+    would_have_made: number | null
+    timestamp: string
+  }>
+  active_suggestion: {
+    id: string
+    type: string
+    message: string
+    action: string
+    timestamp: string
+    pnl_at_suggestion: number
+  } | null
+  mode: 'shadow' | 'live'
+}
+
+export interface PearlInsights {
+  // Current suggestion (if any)
+  current_suggestion: PearlSuggestion | null
+
+  // Shadow tracking metrics
+  shadow_metrics: PearlShadowMetrics | null
+
+  // AI status
+  ai_enabled: boolean
+  last_insight_time: string | null
+
+  // Quick stats for display
+  suggestions_today: number
+  accuracy_7d: number
+}
+
 export interface AgentState {
   running: boolean
   paused: boolean
@@ -271,6 +325,7 @@ export interface AgentState {
   data_quality: DataQuality | null
   analytics: AnalyticsData | null
   pearl_suggestion: PearlSuggestion | null
+  pearl_insights: PearlInsights | null
 }
 
 interface AgentStore {
@@ -317,6 +372,7 @@ const initialAgentState: AgentState = {
   data_quality: null,
   analytics: null,
   pearl_suggestion: null,
+  pearl_insights: null,
 }
 
 export const useAgentStore = create<AgentStore>()(
