@@ -1354,3 +1354,75 @@ Be conversational, not robotic. Under 2 sentences."""
             Dictionary with source distribution data
         """
         return self.metrics.get_response_source_distribution(hours)
+
+    # ================================================================
+    # SUGGESTION FEEDBACK (I3.1)
+    # ================================================================
+
+    def record_suggestion_feedback(
+        self,
+        suggestion_id: str,
+        action: str,
+        dismiss_reason: Optional[str] = None,
+        dismiss_comment: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Record user feedback on a suggestion (I3.1).
+
+        Used to improve suggestion quality over time by tracking
+        which suggestions are accepted vs dismissed, and why.
+
+        Args:
+            suggestion_id: Unique identifier for the suggestion
+            action: "accept" or "dismiss"
+            dismiss_reason: Reason for dismissal (if action is "dismiss")
+                           Options: "not_relevant", "wrong_timing", "too_risky", "other"
+            dismiss_comment: Optional additional comment for "other" reason
+
+        Returns:
+            Dictionary with feedback confirmation and updated stats
+        """
+        from datetime import datetime
+
+        feedback = {
+            "suggestion_id": suggestion_id,
+            "action": action,
+            "timestamp": datetime.now().isoformat(),
+            "dismiss_reason": dismiss_reason,
+            "dismiss_comment": dismiss_comment,
+        }
+
+        # Record in metrics
+        self.metrics.record_feedback(feedback)
+
+        # Log feedback for analysis
+        if action == "dismiss" and dismiss_reason:
+            logger.info(f"Suggestion {suggestion_id[:8]} dismissed: {dismiss_reason}")
+        else:
+            logger.info(f"Suggestion {suggestion_id[:8]} {action}ed")
+
+        # Update user patterns in memory if feedback suggests preferences
+        if dismiss_reason == "too_risky":
+            self.memory._update_pattern("preference", "risk_averse", 0.3)
+        elif dismiss_reason == "wrong_timing":
+            self.memory._update_pattern("preference", "timing_sensitive", 0.3)
+
+        return {
+            "recorded": True,
+            "suggestion_id": suggestion_id,
+            "action": action,
+            "feedback_stats": self.metrics.get_feedback_stats(),
+        }
+
+    def get_feedback_stats(self) -> Dict[str, Any]:
+        """
+        Get suggestion feedback statistics (I3.1).
+
+        Returns:
+            Dictionary with feedback statistics including:
+            - total_accepted: Number of accepted suggestions
+            - total_dismissed: Number of dismissed suggestions
+            - acceptance_rate: Percentage of suggestions accepted
+            - dismiss_reasons: Breakdown of dismiss reasons
+        """
+        return self.metrics.get_feedback_stats()

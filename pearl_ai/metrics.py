@@ -150,6 +150,19 @@ class MetricsCollector:
             "template": 0,
         }
 
+        # Suggestion feedback tracking (I3.1)
+        self._feedback_history: List[Dict[str, Any]] = []
+        self._feedback_counts = {
+            "accepted": 0,
+            "dismissed": 0,
+        }
+        self._dismiss_reasons: Dict[str, int] = {
+            "not_relevant": 0,
+            "wrong_timing": 0,
+            "too_risky": 0,
+            "other": 0,
+        }
+
         # Load persisted metrics if available
         if storage_path:
             self._load_metrics()
@@ -458,3 +471,121 @@ class MetricsCollector:
         self._cache_hits = 0
         self._errors = 0
         self._fallbacks = 0
+        self._feedback_history = []
+        self._feedback_counts = {"accepted": 0, "dismissed": 0}
+        self._dismiss_reasons = {"not_relevant": 0, "wrong_timing": 0, "too_risky": 0, "other": 0}
+
+    # ================================================================
+    # SUGGESTION FEEDBACK TRACKING (I3.1)
+    # ================================================================
+
+    def record_feedback(self, feedback: Dict[str, Any]) -> None:
+        """
+        Record suggestion feedback (I3.1).
+
+        Args:
+            feedback: Dictionary containing:
+                - suggestion_id: Unique ID of the suggestion
+                - action: "accept" or "dismiss"
+                - timestamp: When feedback was given
+                - dismiss_reason: (optional) Why suggestion was dismissed
+                - dismiss_comment: (optional) Additional comment
+        """
+        # Store in history (keep last 500)
+        self._feedback_history.append(feedback)
+        if len(self._feedback_history) > 500:
+            self._feedback_history = self._feedback_history[-500:]
+
+        # Update counts
+        action = feedback.get("action", "")
+        if action == "accept":
+            self._feedback_counts["accepted"] += 1
+        elif action == "dismiss":
+            self._feedback_counts["dismissed"] += 1
+
+            # Track dismiss reasons
+            reason = feedback.get("dismiss_reason")
+            if reason and reason in self._dismiss_reasons:
+                self._dismiss_reasons[reason] += 1
+
+        logger.debug(f"Recorded feedback: {action} for {feedback.get('suggestion_id', 'unknown')[:8]}")
+
+    def get_feedback_stats(self, hours: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get suggestion feedback statistics (I3.1).
+
+        Args:
+            hours: Optional time window. If None, returns all-time stats.
+
+        Returns:
+            Dictionary with feedback statistics
+        """
+        if hours is None:
+            # All-time stats
+            total = self._feedback_counts["accepted"] + self._feedback_counts["dismissed"]
+            acceptance_rate = (
+                self._feedback_counts["accepted"] / total * 100
+                if total > 0
+                else 0.0
+            )
+
+            # Calculate dismiss reason percentages
+            total_dismissed = self._feedback_counts["dismissed"]
+            dismiss_reason_pct = {}
+            if total_dismissed > 0:
+                dismiss_reason_pct = {
+                    reason: round(count / total_dismissed * 100, 1)
+                    for reason, count in self._dismiss_reasons.items()
+                }
+
+            return {
+                "total_accepted": self._feedback_counts["accepted"],
+                "total_dismissed": self._feedback_counts["dismissed"],
+                "total_feedback": total,
+                "acceptance_rate": round(acceptance_rate, 1),
+                "dismiss_reasons": self._dismiss_reasons.copy(),
+                "dismiss_reasons_pct": dismiss_reason_pct,
+                "period": "all_time",
+            }
+
+        # Time-windowed stats
+        cutoff = datetime.now() - timedelta(hours=hours)
+        recent = [
+            f for f in self._feedback_history
+            if datetime.fromisoformat(f.get("timestamp", "2020-01-01")) > cutoff
+        ]
+
+        accepted = sum(1 for f in recent if f.get("action") == "accept")
+        dismissed = sum(1 for f in recent if f.get("action") == "dismiss")
+        total = accepted + dismissed
+
+        # Count dismiss reasons in window
+        dismiss_reasons = {"not_relevant": 0, "wrong_timing": 0, "too_risky": 0, "other": 0}
+        for f in recent:
+            if f.get("action") == "dismiss":
+                reason = f.get("dismiss_reason")
+                if reason and reason in dismiss_reasons:
+                    dismiss_reasons[reason] += 1
+
+        acceptance_rate = accepted / total * 100 if total > 0 else 0.0
+
+        dismiss_reason_pct = {}
+        if dismissed > 0:
+            dismiss_reason_pct = {
+                reason: round(count / dismissed * 100, 1)
+                for reason, count in dismiss_reasons.items()
+            }
+
+        return {
+            "total_accepted": accepted,
+            "total_dismissed": dismissed,
+            "total_feedback": total,
+            "acceptance_rate": round(acceptance_rate, 1),
+            "dismiss_reasons": dismiss_reasons,
+            "dismiss_reasons_pct": dismiss_reason_pct,
+            "period_hours": hours,
+        }
+
+    def get_recent_feedback(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get recent feedback entries for debugging."""
+        return self._feedback_history[-limit:]

@@ -170,12 +170,28 @@ export const usePearlStore = create<PearlStore>()(
       setShowContext: (showContext) => set({ showContext }),
 
       // Feedback actions (I3.1)
-      recordFeedback: (feedback) =>
+      recordFeedback: (feedback) => {
+        // Store locally
         set((state) => ({
           feedbackHistory: [...state.feedbackHistory.slice(-99), feedback],
           showFeedbackModal: false,
           pendingDismissSuggestionId: null,
-        })),
+        }))
+
+        // Send to backend API (fire and forget)
+        fetch('/api/pearl/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            suggestion_id: feedback.suggestion_id,
+            action: feedback.action,
+            dismiss_reason: feedback.dismiss_reason,
+            dismiss_comment: feedback.dismiss_comment,
+          }),
+        }).catch((error) => {
+          console.debug('Could not send feedback to backend:', error)
+        })
+      },
 
       showDismissFeedback: (suggestionId) =>
         set({

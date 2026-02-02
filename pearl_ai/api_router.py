@@ -86,6 +86,14 @@ class CostSummary(BaseModel):
     limit_usd: Optional[float] = None
 
 
+class SuggestionFeedbackRequest(BaseModel):
+    """Request body for suggestion feedback endpoint (I3.1)."""
+    suggestion_id: str
+    action: str  # "accept" or "dismiss"
+    dismiss_reason: Optional[str] = None  # "not_relevant", "wrong_timing", "too_risky", "other"
+    dismiss_comment: Optional[str] = None  # Optional comment for "other" reason
+
+
 def create_pearl_router(
     brain: PearlBrain,
     auth_dependency: Optional[Callable] = None,
@@ -628,6 +636,69 @@ def create_pearl_router(
         Requires X-API-Key header when authentication is enabled.
         """
         return brain.get_ml_lift_metrics()
+
+    # ================================================================
+    # SUGGESTION FEEDBACK ENDPOINTS (I3.1)
+    # ================================================================
+
+    @router.post("/feedback")
+    async def record_feedback(
+        request: SuggestionFeedbackRequest,
+        _: Optional[str] = Depends(auth_dep)
+    ):
+        """
+        Record user feedback on a suggestion (I3.1).
+
+        Used to improve suggestion quality by tracking which suggestions
+        are accepted vs dismissed, and the reasons for dismissal.
+
+        Args:
+            suggestion_id: Unique identifier for the suggestion
+            action: "accept" or "dismiss"
+            dismiss_reason: (optional) Reason for dismissal
+                           Options: "not_relevant", "wrong_timing", "too_risky", "other"
+            dismiss_comment: (optional) Additional comment for "other" reason
+
+        Returns:
+            Confirmation with updated feedback statistics
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        return brain.record_suggestion_feedback(
+            suggestion_id=request.suggestion_id,
+            action=request.action,
+            dismiss_reason=request.dismiss_reason,
+            dismiss_comment=request.dismiss_comment,
+        )
+
+    @router.get("/feedback/stats")
+    async def get_feedback_stats(
+        hours: Optional[int] = Query(default=None, description="Time window in hours (omit for all-time)"),
+        _: Optional[str] = Depends(auth_dep)
+    ):
+        """
+        Get suggestion feedback statistics (I3.1).
+
+        Returns acceptance rate, dismiss reasons breakdown, and totals.
+
+        Args:
+            hours: Optional time window. Omit for all-time statistics.
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        return brain.metrics.get_feedback_stats(hours)
+
+    @router.get("/feedback/recent")
+    async def get_recent_feedback(
+        limit: int = Query(default=20, le=100),
+        _: Optional[str] = Depends(auth_dep)
+    ):
+        """
+        Get recent feedback entries for debugging (I3.1).
+
+        Requires X-API-Key header when authentication is enabled.
+        """
+        return brain.metrics.get_recent_feedback(limit)
 
     return router
 

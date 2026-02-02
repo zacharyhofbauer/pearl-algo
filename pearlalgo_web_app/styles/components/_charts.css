@@ -242,8 +242,20 @@
   color: var(--accent-yellow);
 }
 
-.chart-container.locked {
-  pointer-events: none;
+/* On touch devices, block all interaction when locked */
+@media (pointer: coarse) {
+  .chart-container.locked,
+  .indicator-panel-locked {
+    pointer-events: none;
+  }
+}
+
+/* On desktop (non-touch), allow hover but show locked state visually */
+@media (pointer: fine) {
+  .chart-container.locked,
+  .indicator-panel-locked {
+    /* Allow hover for trade markers on desktop */
+  }
 }
 
 .chart-container.locked::after {
@@ -251,6 +263,7 @@
   position: absolute;
   inset: 0;
   z-index: 5;
+  pointer-events: none;
 }
 
 .charts-locked .chart-container,
@@ -259,7 +272,6 @@
 }
 
 .indicator-panel-locked {
-  pointer-events: none;
   position: relative;
 }
 
