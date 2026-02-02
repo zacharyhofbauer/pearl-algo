@@ -139,12 +139,18 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
         scaleMargins: { top: 0.1, bottom: 0.2 },
       },
       timeScale: {
-        visible: false,
+        visible: true,
         borderColor: '#2a2a3a',
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 8,
         barSpacing: barSpacing,
+        tickMarkFormatter: (time: number) => {
+          const date = new Date(time * 1000)
+          const hours = date.getHours().toString().padStart(2, '0')
+          const minutes = date.getMinutes().toString().padStart(2, '0')
+          return `${hours}:${minutes}`
+        },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
