@@ -3,7 +3,6 @@
 import { useEffect, useRef } from 'react'
 import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts'
 import type { BollingerBandsData } from '@/stores'
-import { getChartColors } from '@/utils/chartColors'
 
 interface BollingerBandsOverlayProps {
   chart: IChartApi | null
@@ -11,15 +10,12 @@ interface BollingerBandsOverlayProps {
   visible?: boolean
 }
 
-// Colors for Bollinger Bands - from token system (U1.2)
-const getBBColors = () => {
-  const colors = getChartColors()
-  return {
-    upper: colors.bbUpper,
-    middle: colors.bbMiddle,
-    lower: colors.bbLower,
-    fill: 'rgba(41, 98, 255, 0.1)',  // Light fill (could be tokenized later)
-  }
+// Colors for Bollinger Bands
+const BB_COLORS = {
+  upper: 'rgba(41, 98, 255, 0.5)',    // Blue upper band
+  middle: 'rgba(41, 98, 255, 0.8)',   // Blue middle (SMA)
+  lower: 'rgba(41, 98, 255, 0.5)',    // Blue lower band
+  fill: 'rgba(41, 98, 255, 0.1)',     // Very light blue fill
 }
 
 export default function BollingerBandsOverlay({
@@ -36,9 +32,6 @@ export default function BollingerBandsOverlay({
   // Initialize series on chart
   useEffect(() => {
     if (!chart) return
-
-    // Get colors from token system (U1.2)
-    const BB_COLORS = getBBColors()
 
     // Create series for Bollinger Bands
     // Using area series for fill effect between bands

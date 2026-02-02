@@ -3,7 +3,6 @@
 import { useEffect, useRef } from 'react'
 import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts'
 import type { ATRBandsData } from '@/stores'
-import { getChartColors } from '@/utils/chartColors'
 
 interface ATRBandsOverlayProps {
   chart: IChartApi | null
@@ -11,14 +10,11 @@ interface ATRBandsOverlayProps {
   visible?: boolean
 }
 
-// Colors for ATR Bands - from token system (U1.2)
-const getATRColors = () => {
-  const colors = getChartColors()
-  return {
-    upper: colors.atrUpper,
-    lower: colors.atrLower,
-    fill: 'rgba(255, 152, 0, 0.08)',  // Light fill (could be tokenized later)
-  }
+// Colors for ATR Bands - using orange/yellow for volatility bands
+const ATR_COLORS = {
+  upper: 'rgba(255, 152, 0, 0.5)',    // Orange upper band
+  lower: 'rgba(255, 152, 0, 0.5)',    // Orange lower band
+  fill: 'rgba(255, 152, 0, 0.08)',    // Very light orange fill
 }
 
 export default function ATRBandsOverlay({
@@ -34,9 +30,6 @@ export default function ATRBandsOverlay({
   // Initialize series on chart
   useEffect(() => {
     if (!chart) return
-
-    // Get colors from token system (U1.2)
-    const ATR_COLORS = getATRColors()
 
     // Upper band fill (area)
     const upperFill = chart.addAreaSeries({

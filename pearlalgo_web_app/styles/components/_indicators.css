@@ -83,7 +83,7 @@
 
 .indicator-chart {
   width: 100%;
-  overflow: visible;
+  overflow: hidden;
 }
 
 /* RSI Panel specific */
