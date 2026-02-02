@@ -62,19 +62,21 @@ trading_circuit_breaker:
   # Based on data: overnight/close/midday = good, morning/afternoon/premarket = bad
   enable_session_filter: true
   allowed_sessions:
-    - overnight    # 6PM-4AM ET: 63% WR, +$3,144
-    - morning      # 6AM-10AM ET: Added 2026-01-29 per user request
-    - midday       # 10AM-2PM ET: 45% WR, +$1,105
-    - close        # 5PM-6PM ET: 78% WR, +$341
-  # Blocked sessions (not listed above): premarket (4-6AM), afternoon (2-5PM)
+    - overnight    # 6PM-4AM ET
+    - premarket    # 4AM-6AM ET
+    - morning      # 6AM-10AM ET
+    - midday       # 10AM-2PM ET
+    - afternoon    # 2PM-5PM ET
+    - close        # 5PM-6PM ET
+  # All sessions enabled for maximum trading opportunity
   
   # =========================================================================
   # Phase 1: Direction gating by market regime (ENABLED by default)
   # Based on data: shorts underperform longs (40% vs 47% WR)
   # trending_up: 74% WR, ranging: 0% WR, volatile: 0% WR, trending_down: 40% WR
   # =========================================================================
-  enable_direction_gating: true
-  direction_gating_min_confidence: 0.70  # Strict gating only if regime confidence >= this
+  enable_direction_gating: false
+  direction_gating_min_confidence: 0.70  # Disabled - allowing all trade directions
   # Rules: trending_up -> long only, trending_down -> short only
   #        ranging/volatile/unknown -> long only (conservative)
   
@@ -159,7 +161,7 @@ signals:
   duplicate_price_threshold_pct: 0.5
   volatility_threshold: 0.0001
   avoid_lunch_lull: false
-  skip_overnight: true
+  skip_overnight: false
   quality_score:
     enabled: true
     # Quality score combines: confidence, R:R, regime alignment, volume, MTF
@@ -417,7 +419,8 @@ ai_chat:
   model: gpt-4o-mini
   rate_limit_per_minute: 5
   max_response_length: 280
-  temperature: 0.7ai_briefings:
+  temperature: 0.7
+ai_briefings:
   enabled: true
   morning_time: "06:30"   # ET - Morning market prep
   eod_time: "16:00"       # ET - End of day summary (uses existing 3:55-4:05 window)
