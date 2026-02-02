@@ -15,14 +15,21 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useAgentStore } from '@/stores'
+import { useAgentStore, type AgentState } from '@/stores'
 import { usePearlStore, type PearlMessage } from '@/stores'
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 
+interface MessageData {
+  content?: string
+  type?: string
+  priority?: string
+  [key: string]: unknown
+}
+
 interface UnifiedMessage {
   type: string
-  data?: any
+  data?: MessageData
   // Pearl-specific fields
   content?: string
   priority?: string
@@ -117,17 +124,16 @@ export function useUnifiedWebSocket(options: UseUnifiedWebSocketOptions): UseUni
       case 'state_update':
       case 'full_refresh':
         if (message.data) {
-          updateFromWebSocket(message.data)
+          updateFromWebSocket(message.data as Partial<AgentState>)
         }
         break
 
       case 'error':
-        console.error('[UnifiedWS] Server error:', message.data)
+        // Server reported an error
         break
 
       default:
-        // Unknown message type - log for debugging
-        console.debug('[UnifiedWS] Unknown message type:', message.type)
+        // Unknown message type - ignore
     }
   }, [updateFromWebSocket])
 
@@ -199,8 +205,8 @@ export function useUnifiedWebSocket(options: UseUnifiedWebSocketOptions): UseUni
         try {
           const message = JSON.parse(event.data) as UnifiedMessage
           handleDashboardMessage(message)
-        } catch (e) {
-          console.error('[UnifiedWS] Failed to parse dashboard message:', e)
+        } catch {
+          // Failed to parse message
         }
       }
 
@@ -223,8 +229,7 @@ export function useUnifiedWebSocket(options: UseUnifiedWebSocketOptions): UseUni
         if (!mountedRef.current) return
         setStatus('error')
       }
-    } catch (e) {
-      console.error('[UnifiedWS] Dashboard connection error:', e)
+    } catch {
       setStatus('error')
     }
   }, [dashboardUrl, shouldReconnect, reconnectInterval, maxReconnectAttempts, pingInterval, reconnectAttempts, clearTimers, handleDashboardMessage])
@@ -258,8 +263,8 @@ export function useUnifiedWebSocket(options: UseUnifiedWebSocketOptions): UseUni
         try {
           const message = JSON.parse(event.data) as UnifiedMessage
           handlePearlMessage(message)
-        } catch (e) {
-          console.error('[UnifiedWS] Failed to parse Pearl message:', e)
+        } catch {
+          // Failed to parse Pearl message
         }
       }
 
@@ -283,8 +288,8 @@ export function useUnifiedWebSocket(options: UseUnifiedWebSocketOptions): UseUni
         setIsPearlConnected(false)
         setPearlConnected(false)
       }
-    } catch (e) {
-      console.error('[UnifiedWS] Pearl connection error:', e)
+    } catch {
+      // Pearl connection error
     }
   }, [dashboardUrl, pearlUrl, enablePearlFeed, shouldReconnect, reconnectInterval, handlePearlMessage, setPearlConnected])
 
@@ -300,9 +305,8 @@ export function useUnifiedWebSocket(options: UseUnifiedWebSocketOptions): UseUni
   const sendChat = useCallback((message: string) => {
     if (pearlWsRef.current?.readyState === WebSocket.OPEN) {
       pearlWsRef.current.send(`chat:${message}`)
-    } else {
-      console.warn('[UnifiedWS] Pearl WebSocket not connected, cannot send chat')
     }
+    // Silently ignore if not connected
   }, [])
 
   // Request full refresh

@@ -144,7 +144,7 @@
 }
 
 .chart-info-bar .line.vwap {
-  background: #2962ff;
+  background: var(--color-vwap, #2962ff);
 }
 
 .chart-info-bar .mkr {

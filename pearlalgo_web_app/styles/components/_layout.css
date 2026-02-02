@@ -28,7 +28,7 @@
 .header-combined .stale-warning {
   background: linear-gradient(90deg, rgba(var(--accent-red-rgb), 0.12) 0%, rgba(var(--accent-red-rgb), 0.08) 100%);
   border: 1px solid rgba(var(--accent-red-rgb), 0.25);
-  color: #ff8a80;
+  color: var(--accent-red);
   padding: 6px 16px;
   border-radius: var(--radius-lg);
   font-size: 12px;
@@ -383,7 +383,7 @@
 }
 
 .header-legend .legend-line.vwap {
-  background: #2962ff;
+  background: var(--color-vwap, #2962ff);
 }
 
 .header-legend .legend-marker {

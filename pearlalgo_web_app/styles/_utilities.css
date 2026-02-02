@@ -202,28 +202,6 @@
 .select-all { user-select: all; }
 
 /* ===================================
-   SCROLLBAR UTILITIES
-   =================================== */
-
-.scrollbar-thin::-webkit-scrollbar {
-  width: var(--scrollbar-width-thin);
-  height: var(--scrollbar-width-thin);
-}
-
-.scrollbar-thin {
-  scrollbar-width: thin;
-}
-
-.scrollbar-hidden {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.scrollbar-hidden::-webkit-scrollbar {
-  display: none;
-}
-
-/* ===================================
    RESPONSIVE GRID
    =================================== */
 

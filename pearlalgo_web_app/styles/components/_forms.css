@@ -178,8 +178,9 @@ select option {
 }
 
 .btn-primary:hover {
-  background: #00b8e0;
-  border-color: #00b8e0;
+  background: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+  filter: brightness(0.85);
 }
 
 .btn-success {

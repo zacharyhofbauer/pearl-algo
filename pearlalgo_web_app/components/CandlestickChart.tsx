@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import Image from 'next/image'
-import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time, IPriceLine } from 'lightweight-charts'
+import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time, IPriceLine, MouseEventParams, SeriesMarker } from 'lightweight-charts'
 import type { CandleData, IndicatorData, MarkerData, Indicators, BollingerBandsData, ATRBandsData } from '@/stores'
 import { useChartSettingsStore } from '@/stores'
 
@@ -390,14 +390,14 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     const chart = chartRef.current
     const container = containerRef.current
 
-    const handleCrosshairMove = (param: any) => {
+    const handleCrosshairMove = (param: MouseEventParams) => {
       if (!param.time || !param.point) {
         setTooltip((prev) => ({ ...prev, visible: false }))
         setActiveSignalId(null)
         return
       }
 
-      const time = typeof param.time === 'object' ? param.time.valueOf() : param.time
+      const time = typeof param.time === 'number' ? param.time : Number(param.time)
       const markersAtTime = markersByTime.get(time)
 
       if (markersAtTime && markersAtTime.length > 0) {
@@ -540,37 +540,38 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     try {
       // When hovering on a single trade, show that trade's entry+exit
       // Otherwise show aggregated markers
-      let displayMarkers: any[] = []
-      
+      let displayMarkers: SeriesMarker<Time>[] = []
+
       if (activeSignalId && markers) {
         // Show individual markers for the active trade
         displayMarkers = markers
           .filter(m => m.signal_id === activeSignalId)
-          .map((m) => {
+          .map((m): SeriesMarker<Time> => {
             let position = m.position
             if (m.kind === 'exit') {
               position = m.direction === 'long' ? 'aboveBar' : 'belowBar'
             }
-            let color = m.kind === 'entry' 
-              ? 'rgba(180, 180, 180, 0.9)' 
+            const color = m.kind === 'entry'
+              ? 'rgba(180, 180, 180, 0.9)'
               : ((m.pnl || 0) >= 0 ? 'rgba(100, 200, 180, 0.9)' : 'rgba(220, 140, 100, 0.9)')
-            
+
             return {
-              time: m.time as any,
-              position,
+              time: m.time as Time,
+              position: (position || 'aboveBar') as 'aboveBar' | 'belowBar' | 'inBar',
               color,
-              shape: m.kind === 'exit' ? 'circle' : m.shape,
+              shape: m.kind === 'exit' ? 'circle' : ((m.shape || 'circle') as 'circle' | 'arrowUp' | 'arrowDown' | 'square'),
               text: '',
             }
           })
       } else {
         // Show aggregated markers
-        displayMarkers = aggregatedMarkers.map((m: any) => {
+        type AggregatedMarker = MarkerData & { _isGrouped?: boolean; _groupCount?: number }
+        displayMarkers = aggregatedMarkers.map((m: AggregatedMarker): SeriesMarker<Time> => {
           let position = m.position
           if (m.kind === 'exit' && !m._isGrouped) {
             position = m.direction === 'long' ? 'aboveBar' : 'belowBar'
           }
-          
+
           let color = m.color
           if (!m._isGrouped) {
             if (m.kind === 'entry') {
@@ -580,22 +581,22 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
               color = isWin ? 'rgba(100, 200, 180, 0.8)' : 'rgba(220, 140, 100, 0.8)'
             }
           }
-          
+
           return {
-            time: m.time as any,
-            position,
-            color,
+            time: m.time as Time,
+            position: (position || 'aboveBar') as 'aboveBar' | 'belowBar' | 'inBar',
+            color: color || 'rgba(180, 180, 180, 0.8)',
             // Grouped markers show circle with count, singles show original shape
-            shape: m._isGrouped ? 'circle' : (m.kind === 'exit' ? 'circle' : m.shape),
+            shape: m._isGrouped ? 'circle' : (m.kind === 'exit' ? 'circle' : ((m.shape || 'circle') as 'circle' | 'arrowUp' | 'arrowDown' | 'square')),
             // Show count for grouped markers
             text: m._isGrouped ? `${m._groupCount}` : '',
           }
         })
       }
-      
+
       candleSeriesRef.current.setMarkers(displayMarkers)
-    } catch (e) {
-      console.warn('Failed to set markers:', e)
+    } catch {
+      // Failed to set markers
     }
   }, [aggregatedMarkers, markers, activeSignalId])
 

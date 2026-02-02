@@ -2,12 +2,8 @@
  * Scrollbar Styling
  *
  * Custom scrollbar styles for the Pearl Algo Web App.
+ * Note: color-scheme is defined in _tokens.css
  */
-
-/* Color scheme for dark mode */
-:root {
-  color-scheme: dark;
-}
 
 /* Firefox scrollbar */
 * {

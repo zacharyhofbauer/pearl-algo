@@ -118,8 +118,8 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
           const message = JSON.parse(event.data) as WebSocketMessage
           setLastMessage(message)
           onMessage?.(message)
-        } catch (e) {
-          console.error('[WebSocket] Failed to parse message:', e)
+        } catch {
+          // Failed to parse message
         }
       }
 
@@ -143,8 +143,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
         if (!mountedRef.current) return
         updateStatus('error')
       }
-    } catch (e) {
-      console.error('[WebSocket] Connection error:', e)
+    } catch {
       updateStatus('error')
     }
   }, [url, shouldReconnect, reconnectInterval, maxReconnectAttempts, pingInterval, reconnectAttempts, clearTimers, updateStatus, onMessage])

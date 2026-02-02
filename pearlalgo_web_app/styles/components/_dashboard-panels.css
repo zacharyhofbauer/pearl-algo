@@ -199,7 +199,7 @@
   justify-content: center;
   gap: 6px;
   padding: 5px 12px;
-  background: #c53030;
+  background: var(--accent-red);
 }
 
 .market-closed-icon {
@@ -266,11 +266,6 @@
 
 .market-status-badge.closed .market-status-dot {
   background: var(--accent-red);
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
 }
 
 /* ============================================
@@ -845,7 +840,7 @@
 }
 
 .error-boundary-retry:hover {
-  background: #ff6b6b;
+  background: var(--accent-red);
   transform: translateY(-1px);
 }
 
@@ -1104,7 +1099,7 @@
 
 .regime-direction-badge.direction-short {
   background: rgba(255, 110, 199, 0.15);
-  color: #ff6ec7;
+  color: var(--color-short);
 }
 
 .regime-direction-badge.direction-both {
@@ -1675,7 +1670,7 @@
 
 .trade-ticker-item .ticker-direction.short {
   background: rgba(255, 110, 199, 0.15);
-  color: #ff6ec7;
+  color: var(--color-short);
 }
 
 .trade-ticker-item .ticker-pnl {

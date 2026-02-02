@@ -83,7 +83,6 @@ export default function PearlHeaderBar() {
 
         ws.onopen = () => {
           setIsConnected(true)
-          console.log('Pearl AI WebSocket connected')
         }
 
         ws.onmessage = (event) => {
@@ -119,17 +118,16 @@ export default function PearlHeaderBar() {
 
         ws.onclose = () => {
           setIsConnected(false)
-          console.log('Pearl AI WebSocket disconnected')
           setTimeout(connect, 3000)
         }
 
-        ws.onerror = (error) => {
-          console.error('Pearl AI WebSocket error:', error)
+        ws.onerror = () => {
+          // Connection errors will trigger onclose for reconnection
         }
 
         wsRef.current = ws
-      } catch (e) {
-        console.error('Failed to create WebSocket:', e)
+      } catch {
+        // WebSocket creation failed, will retry on reconnect
       }
     }
 
@@ -149,8 +147,8 @@ export default function PearlHeaderBar() {
           const data = await response.json()
           setTradingContext(data)
         }
-      } catch (error) {
-        console.debug('Could not fetch trading context:', error)
+      } catch {
+        // Context fetch failed silently
       }
     }
 
@@ -172,8 +170,8 @@ export default function PearlHeaderBar() {
           body: JSON.stringify({ action }),
         })
       }
-    } catch (e) {
-      console.error('Failed to accept Pearl insight:', e)
+    } catch {
+      // Accept action failed
     }
   }
 
@@ -187,8 +185,8 @@ export default function PearlHeaderBar() {
           body: JSON.stringify({ cooldown_key: key }),
         })
       }
-    } catch (e) {
-      console.error('Failed to dismiss Pearl insight:', e)
+    } catch {
+      // Dismiss action failed
     }
   }
 

@@ -231,8 +231,8 @@ export default function PearlDropdownPanel({
             })
           }
         }
-      } catch (error) {
-        console.debug('Could not load chat history:', error)
+      } catch {
+        // Chat history load failed silently
       }
       setHistoryLoaded(true)
     }
@@ -359,7 +359,7 @@ export default function PearlDropdownPanel({
                 } else if (data.type === 'done') {
                   updateMessage(streamingMessageId, { isStreaming: false })
                 } else if (data.type === 'error') {
-                  console.error('Stream error:', data.message)
+                  // Stream error received
                 }
               } catch {
                 // Ignore parsing errors for incomplete chunks
@@ -390,8 +390,7 @@ export default function PearlDropdownPanel({
           addMessage(assistantMessage)
         }
       }
-    } catch (error) {
-      console.error('Failed to send message:', error)
+    } catch {
       const errorMessage: PearlMessage = {
         id: `error-${Date.now()}`,
         role: 'system',

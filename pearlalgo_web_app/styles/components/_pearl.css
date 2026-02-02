@@ -322,7 +322,8 @@
 }
 
 .feedback-submit:hover:not(:disabled) {
-  background: #00b8e0;
+  background: var(--accent-cyan);
+  filter: brightness(0.85);
 }
 
 .feedback-submit:disabled {
@@ -611,7 +612,8 @@
 }
 
 .pearl-btn-accept:hover {
-  background: #00b8db;
+  background: var(--accent-cyan);
+  filter: brightness(0.85);
 }
 
 .pearl-btn-dismiss {
@@ -1837,7 +1839,8 @@
 }
 
 .auth-btn-submit:hover:not(:disabled) {
-  background: #9c27b0;
+  background: var(--accent-purple);
+  filter: brightness(0.85);
 }
 
 .auth-btn-submit:disabled {
@@ -1884,12 +1887,13 @@
 }
 
 .pearl-auth-modal .auth-btn-submit {
-  background: linear-gradient(135deg, var(--accent-purple, #ab47bc), #9c27b0);
+  background: var(--accent-purple);
 }
 
 .pearl-auth-modal .auth-btn-submit:hover:not(:disabled) {
-  background: linear-gradient(135deg, #ba68c8, #ab47bc);
-  box-shadow: 0 0 15px rgba(171, 71, 188, 0.4);
+  background: linear-gradient(135deg, var(--accent-purple), var(--accent-purple));
+  filter: brightness(1.15);
+  box-shadow: 0 0 15px rgba(var(--accent-purple-rgb, 171, 71, 188), 0.4);
 }
 
 .pearl-footer {
@@ -1913,9 +1917,4 @@
   background: var(--accent-purple, #ab47bc);
   border-radius: 50%;
   animation: pulse-dot 2s ease-in-out infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
 }

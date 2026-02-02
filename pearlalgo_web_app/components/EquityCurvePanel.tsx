@@ -6,13 +6,21 @@ import { StatDisplay } from './ui'
 import { formatPnL } from '@/lib/formatters'
 import type { EquityCurvePoint } from '@/stores'
 
+// Chart instance type for dynamically imported lightweight-charts
+interface ChartInstance {
+  remove: () => void
+  applyOptions: (options: { width: number }) => void
+  addAreaSeries: (options: Record<string, unknown>) => { setData: (data: EquityCurvePoint[]) => void }
+  timeScale: () => { fitContent: () => void }
+}
+
 interface EquityCurvePanelProps {
   equityCurve: EquityCurvePoint[]
 }
 
 export default function EquityCurvePanel({ equityCurve }: EquityCurvePanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<any>(null)
+  const chartRef = useRef<ChartInstance | null>(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return

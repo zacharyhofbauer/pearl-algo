@@ -188,8 +188,8 @@ export const usePearlStore = create<PearlStore>()(
             dismiss_reason: feedback.dismiss_reason,
             dismiss_comment: feedback.dismiss_comment,
           }),
-        }).catch((error) => {
-          console.debug('Could not send feedback to backend:', error)
+        }).catch(() => {
+          // Feedback send failed silently
         })
       },
 

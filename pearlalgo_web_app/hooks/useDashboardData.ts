@@ -187,7 +187,6 @@ export function useDashboardData(options: UseDashboardDataOptions = {}) {
       }
       setIsFetching(false)
     } catch (err) {
-      console.error('Failed to fetch data:', err)
       setChartError(err instanceof Error ? err.message : 'Failed to fetch')
       setIsLive(false)
       setChartLoading(false)

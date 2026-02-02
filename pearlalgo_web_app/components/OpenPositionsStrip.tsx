@@ -42,8 +42,8 @@ export default function OpenPositionsStrip({
       if (res.ok) {
         onPositionClosed?.()
       }
-    } catch (err) {
-      console.error('Error closing position:', err)
+    } catch {
+      // Position close failed
     } finally {
       setClosing(null)
     }
@@ -59,8 +59,8 @@ export default function OpenPositionsStrip({
       if (res.ok) {
         onPositionClosed?.()
       }
-    } catch (err) {
-      console.error('Error closing all positions:', err)
+    } catch {
+      // Close all positions failed
     } finally {
       setClosingAll(false)
     }
