@@ -17,7 +17,6 @@ import ActivePositionsPanel from '@/components/ActivePositionsPanel'
 import PnLCalendarPanel from '@/components/PnLCalendarPanel'
 import SystemStatusPanel from '@/components/SystemStatusPanel'
 import SignalActivityPanel from '@/components/SignalActivityPanel'
-import PearlChatPanel from '@/components/PearlChatPanel'
 import { useAgentStore, type AgentState } from '@/stores'
 import { apiFetch } from '@/lib/api'
 
@@ -175,12 +174,6 @@ export function DataPanelsSection({ agentState }: DataPanelsSectionProps) {
       {agentState.recent_exits && agentState.recent_exits.length > 0 && (
         <PnLCalendarPanel recentExits={agentState.recent_exits} />
       )}
-
-      {/* Pearl AI Chat - Interactive chat with trading AI */}
-      <PearlChatPanel
-        apiUrl="/api/pearl"
-        wsUrl={typeof window !== 'undefined' ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/pearl/feed/ws` : undefined}
-      />
     </DataPanelsContainer>
   )
 }
