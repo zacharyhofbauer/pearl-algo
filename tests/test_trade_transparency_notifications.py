@@ -40,12 +40,8 @@ def test_config_loads_virtual_pnl_notify_flags(tmp_path: Path) -> None:
         )
     )
 
-    cfg = load_service_config()
-    # Load config from file path if needed
-    if cfg_path:
-        from pearlalgo.config.config_file import load_config_yaml
-        file_config = load_config_yaml(cfg_path)
-        cfg.update(file_config)
+    # Load config from the temp file path to get proper flattening of virtual_pnl fields
+    cfg = load_service_config(config_path=cfg_path, validate=False)
     assert cfg.virtual_pnl_enabled is True
     assert cfg.virtual_pnl_notify_entry is True
     assert cfg.virtual_pnl_notify_exit is True

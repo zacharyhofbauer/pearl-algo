@@ -15,8 +15,8 @@ from pearlalgo.utils.formatting import (
 from pearlalgo.utils.logger import logger
 from pearlalgo.utils.sparkline import generate_progress_bar
 
-# Re-export markdown utilities from telegram_utils for backwards compatibility
-from pearlalgo.market_agent.telegram_utils import (
+# Markdown utilities (now in utils layer to avoid architecture violations)
+from pearlalgo.utils.telegram_markdown import (
     escape_markdown,
     safe_label,
 )
