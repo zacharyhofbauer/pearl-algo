@@ -115,7 +115,7 @@ def check_agent_state() -> tuple[bool, str]:
 def check_api_server() -> tuple[bool, str]:
     """Check if API server is responding."""
     try:
-        resp = requests.get(f"{API_URL}/api/health", timeout=5)
+        resp = requests.get(f"{API_URL}/api/state", timeout=5)
         if resp.status_code == 200:
             return True, "OK"
         return False, f"API returned status {resp.status_code}"
@@ -143,7 +143,7 @@ def check_gateway() -> tuple[bool, str]:
     import subprocess
     try:
         result = subprocess.run(
-            ["pgrep", "-f", "ibgateway"],
+            ["pgrep", "-f", "IbcGateway"],
             capture_output=True,
             timeout=5
         )
