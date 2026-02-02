@@ -2207,6 +2207,95 @@ async def get_positions(
     return positions
 
 
+@app.post("/api/positions/{signal_id}/close")
+async def close_position(
+    signal_id: str,
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Request to close a specific position by signal_id.
+
+    Sets close_signal_requested in state.json which the market agent will pick up.
+    """
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+
+    # Verify the position exists and is open
+    signals_file = _state_dir / "signals.jsonl"
+    signals = _load_jsonl_file(signals_file, max_lines=500)
+
+    position_exists = False
+    for s in signals:
+        if s.get("signal_id") == signal_id and s.get("status") != "exited":
+            if s.get("entry_price"):  # Has an entry = open position
+                position_exists = True
+                break
+
+    if not position_exists:
+        raise HTTPException(status_code=404, detail=f"Position {signal_id} not found or already closed")
+
+    # Set the close request in state.json
+    state_file = _state_dir / "state.json"
+    try:
+        state = _load_json_file(state_file) or {}
+    except Exception:
+        state = {}
+
+    # Add to close_signals_requested list
+    close_requests = state.get("close_signals_requested", [])
+    if signal_id not in close_requests:
+        close_requests.append(signal_id)
+    state["close_signals_requested"] = close_requests
+    state["close_signals_requested_time"] = datetime.now(timezone.utc).isoformat()
+
+    try:
+        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write state: {e}")
+
+    return {"status": "close_requested", "signal_id": signal_id}
+
+
+@app.post("/api/positions/close-all")
+async def close_all_positions(
+    api_key: Optional[str] = Depends(verify_api_key),
+):
+    """Request to close all open positions.
+
+    Sets close_all_requested flag in state.json which the market agent will pick up.
+    """
+    if _state_dir is None:
+        raise HTTPException(status_code=500, detail="State directory not configured")
+
+    # Count open positions first
+    signals_file = _state_dir / "signals.jsonl"
+    signals = _load_jsonl_file(signals_file, max_lines=500)
+
+    open_count = 0
+    for s in signals:
+        if s.get("status") != "exited" and s.get("entry_price"):
+            open_count += 1
+
+    if open_count == 0:
+        return {"status": "no_positions", "message": "No open positions to close"}
+
+    # Set the close_all_requested flag in state.json
+    state_file = _state_dir / "state.json"
+    try:
+        state = _load_json_file(state_file) or {}
+    except Exception:
+        state = {}
+
+    state["close_all_requested"] = True
+    state["close_all_requested_time"] = datetime.now(timezone.utc).isoformat()
+
+    try:
+        state_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write state: {e}")
+
+    return {"status": "close_all_requested", "positions_count": open_count}
+
+
 @app.get("/api/indicators")
 async def get_indicators(
     symbol: str = Query(default="MNQ", description="Symbol"),

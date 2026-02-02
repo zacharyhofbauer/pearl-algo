@@ -417,6 +417,269 @@
   }
 }
 
+/* ===================================
+   POSITIONS STRIP
+   =================================== */
+
+.positions-strip {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-sm);
+}
+
+.positions-strip-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.positions-strip-label {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.positions-strip-total {
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-medium);
+}
+
+.positions-strip-total.profit {
+  color: var(--accent-green);
+}
+
+.positions-strip-total.loss {
+  color: var(--accent-red);
+}
+
+.positions-close-all-btn {
+  background: rgba(255, 82, 82, 0.2);
+  color: var(--accent-red);
+  border: 1px solid rgba(255, 82, 82, 0.3);
+  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: all var(--duration-fast);
+}
+
+.positions-close-all-btn:hover:not(:disabled) {
+  background: rgba(255, 82, 82, 0.3);
+  border-color: rgba(255, 82, 82, 0.5);
+}
+
+.positions-close-all-btn:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+}
+
+.positions-strip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  flex: 1;
+}
+
+.position-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--bg-card);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+
+.position-item.long {
+  border-color: rgba(0, 212, 255, 0.3);
+}
+
+.position-item.short {
+  border-color: rgba(255, 110, 199, 0.3);
+}
+
+.position-direction {
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-xs);
+}
+
+.position-direction.long {
+  color: var(--color-long);
+}
+
+.position-direction.short {
+  color: var(--color-short);
+}
+
+.position-entry {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.position-sl {
+  font-size: var(--font-size-xs);
+  color: var(--accent-red);
+  opacity: 0.8;
+}
+
+.position-tp {
+  font-size: var(--font-size-xs);
+  color: var(--accent-green);
+  opacity: 0.8;
+}
+
+.position-pnl {
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-medium);
+}
+
+.position-pnl.profit {
+  color: var(--accent-green);
+}
+
+.position-pnl.loss {
+  color: var(--accent-red);
+}
+
+.position-close-btn {
+  background: transparent;
+  color: var(--text-tertiary);
+  border: none;
+  font-size: var(--font-size-md);
+  cursor: pointer;
+  padding: 0 var(--space-1);
+  line-height: 1;
+  transition: color var(--duration-fast);
+}
+
+.position-close-btn:hover:not(:disabled) {
+  color: var(--accent-red);
+}
+
+.position-close-btn:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+}
+
+.positions-strip-empty-msg {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+/* Recent Trades Section */
+.recent-trades-section {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border-subtle);
+}
+
+.recent-trades-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.recent-trades-list {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.recent-trade-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: var(--bg-card);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+}
+
+.recent-trade-item.win {
+  border-left: 2px solid var(--accent-green);
+}
+
+.recent-trade-item.loss {
+  border-left: 2px solid var(--accent-red);
+}
+
+.trade-direction {
+  font-weight: var(--font-weight-bold);
+}
+
+.trade-direction.long {
+  color: var(--color-long);
+}
+
+.trade-direction.short {
+  color: var(--color-short);
+}
+
+.trade-time {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.trade-pnl {
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-medium);
+}
+
+.trade-pnl.profit {
+  color: var(--accent-green);
+}
+
+.trade-pnl.loss {
+  color: var(--accent-red);
+}
+
+.trade-reason {
+  color: var(--text-muted);
+  font-size: 9px;
+  text-transform: lowercase;
+}
+
+/* Mobile responsive for positions strip */
+@media (max-width: 768px) {
+  .positions-strip {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .positions-strip-list {
+    width: 100%;
+  }
+
+  .position-item {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .recent-trades-section {
+    width: 100%;
+    margin-left: 0;
+    padding-left: 0;
+    border-left: none;
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .recent-trades-list {
+    flex-wrap: wrap;
+  }
+}
+
 /* Ultrawide indicator panels */
 @media (min-width: 2200px) {
   .indicator-panel {

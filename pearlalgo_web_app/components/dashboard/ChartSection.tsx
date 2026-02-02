@@ -3,9 +3,10 @@
 import Image from 'next/image'
 import CandlestickChart from '@/components/CandlestickChart'
 import DataFreshnessIndicator from '@/components/DataFreshnessIndicator'
+import OpenPositionsStrip from '@/components/OpenPositionsStrip'
 import { RSIPanel, MACDPanel, VolumeProfilePanel } from '@/components/indicators'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-import { useChartStore, useChartSettingsStore, useUIStore, selectChartsLocked, type PositionLine, type Timeframe } from '@/stores'
+import { useChartStore, useChartSettingsStore, useUIStore, selectChartsLocked, type PositionLine, type Position, type RecentExit } from '@/stores'
 import type { IChartApi } from 'lightweight-charts'
 
 // Stale threshold in seconds
@@ -14,6 +15,8 @@ const STALE_THRESHOLD_SECONDS = 60
 interface ChartSectionProps {
   mainChartApi: IChartApi | null
   positionLines: PositionLine[]
+  positions: Position[]
+  recentExits?: RecentExit[]
   onChartReady: (api: IChartApi | null) => void
   onForceRefresh: () => void
 }
@@ -21,6 +24,8 @@ interface ChartSectionProps {
 export function ChartSection({
   mainChartApi,
   positionLines,
+  positions,
+  recentExits = [],
   onChartReady,
   onForceRefresh,
 }: ChartSectionProps) {
@@ -144,6 +149,14 @@ export function ChartSection({
           />
         </div>
       )}
+
+      {/* Open Positions Strip - Live updating with chart */}
+      <OpenPositionsStrip
+        positions={positions}
+        currentPrice={candles.length > 0 ? candles[candles.length - 1].close : undefined}
+        recentExits={recentExits}
+        onPositionClosed={onForceRefresh}
+      />
     </>
   )
 }

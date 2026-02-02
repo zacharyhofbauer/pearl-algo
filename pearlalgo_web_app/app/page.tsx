@@ -174,6 +174,8 @@ export default function PearlAlgoWebApp() {
             <ChartSection
               mainChartApi={mainChartApi}
               positionLines={positionLines}
+              positions={positions}
+              recentExits={agentState.recent_exits}
               onChartReady={setMainChartApi}
               onForceRefresh={forceRefresh}
             />
@@ -302,6 +304,8 @@ export default function PearlAlgoWebApp() {
       <ChartSection
         mainChartApi={mainChartApi}
         positionLines={positionLines}
+        positions={positions}
+        recentExits={agentState?.recent_exits}
         onChartReady={setMainChartApi}
         onForceRefresh={forceRefresh}
       />

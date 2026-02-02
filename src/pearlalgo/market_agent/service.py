@@ -4925,6 +4925,85 @@ class MarketAgentService:
 
         return closed_count
 
+    async def _close_specific_virtual_trades(
+        self, *, signal_ids: list, market_data: Dict, reason: str
+    ) -> list:
+        """Force-close specific virtual trades by signal_id using latest price.
+
+        Returns list of signal_ids that were successfully closed.
+        """
+        if not getattr(self.config, "virtual_pnl_enabled", True):
+            logger.warning("Close requested but virtual PnL is disabled")
+            return []
+
+        if not signal_ids:
+            return []
+
+        active = self._get_active_virtual_trades(limit=500)
+        if not active:
+            return []
+
+        # Filter to only requested signal_ids
+        to_close = [rec for rec in active if rec.get("signal_id") in signal_ids]
+        if not to_close:
+            logger.warning(f"Requested signal_ids not found in active trades: {signal_ids}")
+            return []
+
+        prices = self._resolve_latest_prices(market_data)
+        close_px = prices.get("close")
+        if close_px is None:
+            logger.warning("Close requested but no valid latest price available")
+            return []
+
+        bid_px = prices.get("bid")
+        ask_px = prices.get("ask")
+
+        now = datetime.now(timezone.utc)
+        closed_ids = []
+        total_pnl = 0.0
+
+        for rec in to_close:
+            sig_id = str(rec.get("signal_id") or "").strip()
+            if not sig_id:
+                continue
+            sig = rec.get("signal", {}) or {}
+            direction = str(sig.get("direction") or "long").lower()
+
+            # Conservative fill: long exits at bid, short exits at ask.
+            exit_px = close_px
+            if direction == "long" and isinstance(bid_px, float):
+                exit_px = bid_px
+            elif direction == "short" and isinstance(ask_px, float):
+                exit_px = ask_px
+
+            perf = self.performance_tracker.track_exit(
+                signal_id=sig_id,
+                exit_price=float(exit_px),
+                exit_reason=str(reason),
+                exit_time=now,
+            )
+            closed_ids.append(sig_id)
+            if isinstance(perf, dict):
+                try:
+                    total_pnl += float(perf.get("pnl") or 0.0)
+                except Exception:
+                    pass
+
+        if closed_ids:
+            logger.info(f"Closed {len(closed_ids)} specific positions: {closed_ids}, P&L: ${total_pnl:.2f}")
+
+            # Best-effort: update active trades count in state
+            try:
+                remaining_active = len(active) - len(closed_ids)
+                state = self.state_manager.load_state() if self.state_manager else {}
+                if isinstance(state, dict):
+                    state["active_trades_count"] = max(0, remaining_active)
+                    self.state_manager.save_state(state)
+            except Exception:
+                pass
+
+        return closed_ids
+
     def _clear_close_all_flag(self) -> None:
         """Clear close_all_requested flags in state.json (best-effort)."""
         state_file = getattr(self.state_manager, "state_file", None)
@@ -4945,8 +5024,50 @@ class MarketAgentService:
             except Exception:
                 pass
 
+    def _get_close_signals_requested(self) -> list:
+        """Get list of signal_ids requested for close from state.json."""
+        state_file = getattr(self.state_manager, "state_file", None)
+        if not state_file or not Path(state_file).exists():
+            return []
+        try:
+            raw = Path(state_file).read_text(encoding="utf-8")
+            state = json.loads(raw) if raw else {}
+            return list(state.get("close_signals_requested", []))
+        except Exception:
+            return []
+
+    def _clear_close_signals_requested(self, signal_ids: list = None) -> None:
+        """Clear specific signal close requests or all of them from state.json."""
+        state_file = getattr(self.state_manager, "state_file", None)
+        if not state_file or not Path(state_file).exists():
+            return
+        try:
+            raw = Path(state_file).read_text(encoding="utf-8")
+            state = json.loads(raw) if raw else {}
+        except Exception:
+            state = {}
+        if not isinstance(state, dict):
+            return
+
+        current_requests = state.get("close_signals_requested", [])
+        if signal_ids is None:
+            # Clear all
+            state.pop("close_signals_requested", None)
+            state.pop("close_signals_requested_time", None)
+        else:
+            # Remove specific signal_ids
+            state["close_signals_requested"] = [s for s in current_requests if s not in signal_ids]
+            if not state["close_signals_requested"]:
+                state.pop("close_signals_requested", None)
+                state.pop("close_signals_requested_time", None)
+
+        try:
+            Path(state_file).write_text(json.dumps(state, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
     async def _handle_close_all_requests(self, market_data: Dict) -> None:
-        """Handle manual close-all flag and auto-flat rules."""
+        """Handle manual close-all flag, individual close requests, and auto-flat rules."""
         state_file = getattr(self.state_manager, "state_file", None)
         manual_requested = False
         if state_file and Path(state_file).exists():
@@ -4961,6 +5082,18 @@ class MarketAgentService:
             logger.warning("Close-all flag detected - flattening virtual trades")
             await self._close_all_virtual_trades(market_data=market_data, reason="close_all_requested")
             self._clear_close_all_flag()
+
+        # Handle individual signal close requests
+        close_signal_ids = self._get_close_signals_requested()
+        if close_signal_ids:
+            logger.warning(f"Individual close requests detected: {close_signal_ids}")
+            closed_ids = await self._close_specific_virtual_trades(
+                signal_ids=close_signal_ids,
+                market_data=market_data,
+                reason="manual_close_requested"
+            )
+            if closed_ids:
+                self._clear_close_signals_requested(closed_ids)
 
         # Auto-flat rules (daily + Friday + weekend safety)
         try:
