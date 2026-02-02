@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import Image from 'next/image'
 import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, Time } from 'lightweight-charts'
 import type { CandleData, IndicatorData, MarkerData, Indicators } from '@/stores'
+import { useAnnotationStore, type ChartAnnotation } from '@/stores'
 
 interface ChartProps {
   data: CandleData[]
@@ -53,6 +54,59 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
   
   // Track the active signal for highlighting
   const [activeSignalId, setActiveSignalId] = useState<string | null>(null)
+
+  // Annotation state
+  const { annotations, addAnnotation, removeAnnotation } = useAnnotationStore()
+  const [annotationModal, setAnnotationModal] = useState<{
+    visible: boolean
+    time: number
+    price: number
+    x: number
+    y: number
+  } | null>(null)
+  const [annotationText, setAnnotationText] = useState('')
+  const [annotationColor, setAnnotationColor] = useState('#ffd700')
+  const annotationSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+
+  // Handle double-click for annotation
+  const handleChartDoubleClick = useCallback((param: any) => {
+    if (!chartRef.current || !containerRef.current || !param.time || !param.point) return
+
+    const chart = chartRef.current
+    const series = candleSeriesRef.current
+    if (!series) return
+
+    // Get price at click position
+    const price = series.coordinateToPrice(param.point.y)
+    if (price === null) return
+
+    const time = typeof param.time === 'object' ? param.time.valueOf() : param.time
+
+    // Show annotation modal
+    setAnnotationModal({
+      visible: true,
+      time,
+      price,
+      x: Math.min(param.point.x, containerRef.current.clientWidth - 250),
+      y: Math.min(param.point.y, containerRef.current.clientHeight - 150),
+    })
+    setAnnotationText('')
+  }, [])
+
+  // Save annotation
+  const saveAnnotation = useCallback(() => {
+    if (!annotationModal || !annotationText.trim()) return
+
+    addAnnotation({
+      time: annotationModal.time,
+      price: annotationModal.price,
+      text: annotationText.trim(),
+      color: annotationColor,
+    })
+
+    setAnnotationModal(null)
+    setAnnotationText('')
+  }, [annotationModal, annotationText, annotationColor, addAnnotation])
 
   // Build a lookup map for markers by time
   const markersByTime = useMemo(() => {
@@ -260,11 +314,15 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
     resizeHandlerRef.current = handleResize
     window.addEventListener('resize', handleResize)
 
+    // Add double-click handler for annotations
+    chart.subscribeClick(handleChartDoubleClick)
+
     return () => {
       if (resizeHandlerRef.current) {
         window.removeEventListener('resize', resizeHandlerRef.current)
         resizeHandlerRef.current = null
       }
+      chart.unsubscribeClick(handleChartDoubleClick)
       onChartReady?.(null)
       chart.remove()
     }
@@ -668,6 +726,110 @@ export default function CandlestickChart({ data, indicators, markers, barSpacing
           <Image src="/pearl-emoji.png" alt="" className="tooltip-logo" width={24} height={24} />
         </div>
       )}
+
+      {/* Annotation Modal */}
+      {annotationModal?.visible && (
+        <div
+          className="annotation-modal"
+          style={{
+            position: 'absolute',
+            left: annotationModal.x,
+            top: annotationModal.y,
+            zIndex: 1000,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="annotation-modal-header">
+            <span>Add Note</span>
+            <button
+              className="annotation-close-btn"
+              onClick={() => setAnnotationModal(null)}
+            >
+              ×
+            </button>
+          </div>
+          <textarea
+            className="annotation-input"
+            placeholder="Enter your note..."
+            value={annotationText}
+            onChange={(e) => setAnnotationText(e.target.value)}
+            autoFocus
+            rows={3}
+          />
+          <div className="annotation-colors">
+            {['#ffd700', '#00e676', '#ff5252', '#2196f3', '#ab47bc'].map((color) => (
+              <button
+                key={color}
+                className={`annotation-color-btn ${annotationColor === color ? 'active' : ''}`}
+                style={{ backgroundColor: color }}
+                onClick={() => setAnnotationColor(color)}
+              />
+            ))}
+          </div>
+          <div className="annotation-actions">
+            <button
+              className="annotation-cancel-btn"
+              onClick={() => setAnnotationModal(null)}
+            >
+              Cancel
+            </button>
+            <button
+              className="annotation-save-btn"
+              onClick={saveAnnotation}
+              disabled={!annotationText.trim()}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Annotation Markers */}
+      {annotations.map((ann) => {
+        if (!chartRef.current || !candleSeriesRef.current) return null
+        const series = candleSeriesRef.current
+        const chart = chartRef.current
+
+        // Get pixel coordinates for the annotation
+        const timeCoord = chart.timeScale().timeToCoordinate(ann.time as Time)
+        const priceCoord = series.priceToCoordinate(ann.price)
+
+        if (timeCoord === null || priceCoord === null) return null
+
+        return (
+          <div
+            key={ann.id}
+            className="chart-annotation"
+            style={{
+              position: 'absolute',
+              left: timeCoord,
+              top: priceCoord,
+              transform: 'translate(-50%, -100%)',
+              pointerEvents: 'auto',
+            }}
+            title={ann.text}
+          >
+            <div
+              className="annotation-marker"
+              style={{ backgroundColor: ann.color }}
+            >
+              <span className="annotation-icon">📝</span>
+            </div>
+            <div className="annotation-popup">
+              <div className="annotation-text">{ann.text}</div>
+              <div className="annotation-meta">
+                {new Date(ann.createdAt).toLocaleDateString()}
+              </div>
+              <button
+                className="annotation-delete-btn"
+                onClick={() => removeAnnotation(ann.id)}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }

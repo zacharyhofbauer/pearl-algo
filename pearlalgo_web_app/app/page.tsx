@@ -18,6 +18,7 @@ import MarketRegimePanel from '@/components/MarketRegimePanel'
 import SignalDecisionsPanel from '@/components/SignalDecisionsPanel'
 import AnalyticsPanel from '@/components/AnalyticsPanel'
 import ActivePositionsPanel from '@/components/ActivePositionsPanel'
+import PnLCalendarPanel from '@/components/PnLCalendarPanel'
 import UltrawideLayout from '@/components/UltrawideLayout'
 import { useViewportType } from '@/hooks/useViewportType'
 import { useWebSocket, getWebSocketUrl } from '@/hooks/useWebSocket'
@@ -38,11 +39,11 @@ import {
 const REFRESH_INTERVAL = 10000 // 10 seconds (fallback when WebSocket disconnected)
 const WS_REFRESH_INTERVAL = 30000 // 30 seconds (slower when WebSocket connected)
 
-// Minimum bars to request for a full chart
-const MIN_BARS = 150
+// Minimum bars to request for a full chart (500 = ~4 days on 5m, ~2 weeks on 1h)
+const MIN_BARS = 500
 
-// Fetch 72 hours (3 days) of markers for complete trade history
-const MARKER_HOURS = 72
+// Fetch 168 hours (7 days) of markers for complete trade history
+const MARKER_HOURS = 168
 
 export default function PearlAlgoWebApp() {
   // Agent store
@@ -587,14 +588,14 @@ export default function PearlAlgoWebApp() {
       <div className="chart-container">
         {chartLoading && (
           <div className="loading-screen">
-            <Image src="/logo.png" alt="PEARL" className="loading-logo" width={64} height={64} priority />
+            <Image src="/pearl-emoji.png" alt="PEARL" className="loading-logo" width={64} height={64} priority />
             <div className="loading-text">Loading Live Data...</div>
             <div className="loading-spinner"></div>
           </div>
         )}
         {chartError && !chartLoading && (
           <div className="no-data-container">
-            <Image src="/logo.png" alt="PEARL" className="no-data-logo" width={64} height={64} />
+            <Image src="/pearl-emoji.png" alt="PEARL" className="no-data-logo" width={64} height={64} />
             <div className="no-data-title">No Live Data</div>
             <div className="no-data-message">{chartError}</div>
             <div className="no-data-hint">
@@ -832,6 +833,10 @@ export default function PearlAlgoWebApp() {
               analytics={agentState.analytics}
               recentExits={agentState.recent_exits}
             />
+          )}
+          {/* P&L Calendar */}
+          {agentState.recent_exits && agentState.recent_exits.length > 0 && (
+            <PnLCalendarPanel recentExits={agentState.recent_exits} />
           )}
         </DataPanelsContainer>
       )}

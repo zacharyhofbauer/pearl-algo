@@ -95,7 +95,7 @@ export default function PearlInsightsPanel({
   return (
     <DataPanel
       title="Pearl AI"
-      iconSrc="/logo.png"
+      iconSrc="/pearl-emoji.png"
       className="pearl-insights-panel"
       badge={hasShadowMode || metrics?.mode === 'shadow' ? 'SHADOW' : undefined}
       badgeColor="var(--color-warning)"

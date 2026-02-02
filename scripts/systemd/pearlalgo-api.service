@@ -1,0 +1,18 @@
+[Unit]
+Description=PearlAlgo API Server
+After=network.target pearlalgo-agent.service
+Wants=pearlalgo-agent.service
+
+[Service]
+Type=simple
+User=pearlalgo
+Group=pearlalgo
+WorkingDirectory=/home/pearlalgo/pearlalgo-dev-ai-agents
+Environment="PATH=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/home/pearlalgo/pearlalgo-dev-ai-agents/.env
+ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin/python scripts/pearlalgo_web_app/api_server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -72,3 +72,5 @@ export {
   selectTheme,
   selectNotifications,
 } from './uiStore'
+
+export { useAnnotationStore, type ChartAnnotation } from './annotationStore'

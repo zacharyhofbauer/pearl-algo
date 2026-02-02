@@ -1,0 +1,18 @@
+[Unit]
+Description=PearlAlgo Market Agent (NQ)
+After=network.target ibkr-gateway.service
+Wants=ibkr-gateway.service
+
+[Service]
+Type=simple
+User=pearlalgo
+Group=pearlalgo
+WorkingDirectory=/home/pearlalgo/pearlalgo-dev-ai-agents
+Environment="PATH=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/home/pearlalgo/pearlalgo-dev-ai-agents/.env
+ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin/python -m pearlalgo.market_agent.service --market NQ
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

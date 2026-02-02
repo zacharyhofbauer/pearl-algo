@@ -1,0 +1,12 @@
+[Unit]
+Description=PearlAlgo Health Monitor
+After=network.target
+
+[Service]
+Type=oneshot
+User=pearlalgo
+Group=pearlalgo
+WorkingDirectory=/home/pearlalgo/pearlalgo-dev-ai-agents
+Environment="PATH=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/home/pearlalgo/pearlalgo-dev-ai-agents/.env
+ExecStart=/home/pearlalgo/pearlalgo-dev-ai-agents/.venv/bin/python scripts/monitoring/health_check.py
