@@ -40,6 +40,8 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black" />
         <meta name="apple-mobile-web-app-title" content="PEARL" />
+        {/* Disable scroll restoration to prevent auto-scroll on reload */}
+        <script dangerouslySetInnerHTML={{ __html: `history.scrollRestoration = 'manual';` }} />
       </head>
       <body>
         <PearlHeaderBarWrapper />

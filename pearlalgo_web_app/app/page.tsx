@@ -7,7 +7,6 @@ import UltrawideLayout from '@/components/UltrawideLayout'
 import PerformancePanel from '@/components/PerformancePanel'
 import ChallengePanel from '@/components/ChallengePanel'
 import RecentTradesPanel from '@/components/RecentTradesPanel'
-import PearlInsightsPanel from '@/components/PearlInsightsPanel'
 import EquityCurvePanel from '@/components/EquityCurvePanel'
 import RiskMetricsPanel from '@/components/RiskMetricsPanel'
 import MarketPressurePanel from '@/components/MarketPressurePanel'
@@ -241,15 +240,7 @@ export default function PearlAlgoWebApp() {
             />
           }
           rsiSection={null}
-          pearlAISection={
-            <PearlInsightsPanel
-              insights={agentState.pearl_insights}
-              suggestion={agentState.pearl_suggestion}
-              aiStatus={agentState.ai_status}
-              shadowCounters={agentState.shadow_counters}
-              mlFilterPerformance={agentState.ml_filter_performance}
-            />
-          }
+          pearlAISection={null}
           systemStatusSection={
             <SystemStatusPanel
               executionState={agentState.execution_state}

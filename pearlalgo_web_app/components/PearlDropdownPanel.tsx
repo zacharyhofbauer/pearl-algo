@@ -16,6 +16,8 @@ interface PearlDropdownPanelProps {
   // Optional overrides for embedded use
   showTabs?: boolean
   className?: string
+  // Disable auto-scroll for in-page panels to prevent page scroll on load
+  disableAutoScroll?: boolean
 }
 
 type Mode = 'off' | 'shadow' | 'live'
@@ -87,6 +89,7 @@ export default function PearlDropdownPanel({
   onDismiss,
   showTabs = true,
   className = '',
+  disableAutoScroll = false,
 }: PearlDropdownPanelProps) {
   // Use shared store
   const {
@@ -154,7 +157,10 @@ export default function PearlDropdownPanel({
   }, [])
 
   // Only scroll on new messages after initial mount, not on page load
+  // Skip entirely if disableAutoScroll is true (for in-page panels)
   useEffect(() => {
+    if (disableAutoScroll) return
+
     if (!hasMountedRef.current) {
       hasMountedRef.current = true
       prevMessageCountRef.current = messages.length
@@ -166,7 +172,7 @@ export default function PearlDropdownPanel({
       scrollToBottom()
     }
     prevMessageCountRef.current = messages.length
-  }, [messages, activeTab, scrollToBottom])
+  }, [messages, activeTab, scrollToBottom, disableAutoScroll])
 
   // Count unread messages
   const unreadCount = messages.filter(m => m.role === 'assistant').length

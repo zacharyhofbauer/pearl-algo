@@ -4,7 +4,6 @@ import DataPanelsContainer from '@/components/DataPanelsContainer'
 import PerformancePanel from '@/components/PerformancePanel'
 import ChallengePanel from '@/components/ChallengePanel'
 import RecentTradesPanel from '@/components/RecentTradesPanel'
-import PearlInsightsPanel from '@/components/PearlInsightsPanel'
 import EquityCurvePanel from '@/components/EquityCurvePanel'
 import RiskMetricsPanel from '@/components/RiskMetricsPanel'
 import MarketPressurePanel from '@/components/MarketPressurePanel'
@@ -17,57 +16,15 @@ import ActivePositionsPanel from '@/components/ActivePositionsPanel'
 import PnLCalendarPanel from '@/components/PnLCalendarPanel'
 import SystemStatusPanel from '@/components/SystemStatusPanel'
 import SignalActivityPanel from '@/components/SignalActivityPanel'
-import { useAgentStore, type AgentState } from '@/stores'
-import { apiFetch } from '@/lib/api'
+import { type AgentState } from '@/stores'
 
 interface DataPanelsSectionProps {
   agentState: AgentState
 }
 
 export function DataPanelsSection({ agentState }: DataPanelsSectionProps) {
-  const handleAcceptSuggestion = async () => {
-    try {
-      const action = agentState.pearl_suggestion?.accept_action ||
-        agentState.pearl_insights?.shadow_metrics?.active_suggestion?.action
-      if (action) {
-        await apiFetch('/api/pearl-suggestion/accept', {
-          method: 'POST',
-          body: JSON.stringify({ action }),
-        })
-      }
-    } catch (e) {
-      console.error('Failed to accept Pearl insight:', e)
-    }
-  }
-
-  const handleDismissSuggestion = async () => {
-    try {
-      const key = agentState.pearl_suggestion?.cooldown_key ||
-        agentState.pearl_insights?.shadow_metrics?.active_suggestion?.id
-      if (key) {
-        await apiFetch('/api/pearl-suggestion/dismiss', {
-          method: 'POST',
-          body: JSON.stringify({ cooldown_key: key }),
-        })
-      }
-    } catch (e) {
-      console.error('Failed to dismiss Pearl insight:', e)
-    }
-  }
-
   return (
     <DataPanelsContainer>
-      {/* Pearl AI - Combined insights, AI status, and ML performance */}
-      <PearlInsightsPanel
-        insights={agentState.pearl_insights}
-        suggestion={agentState.pearl_suggestion}
-        aiStatus={agentState.ai_status}
-        shadowCounters={agentState.shadow_counters}
-        mlFilterPerformance={agentState.ml_filter_performance}
-        onAccept={handleAcceptSuggestion}
-        onDismiss={handleDismissSuggestion}
-      />
-
       {/* System Status - Operational Readiness */}
       <SystemStatusPanel
         executionState={agentState.execution_state}
