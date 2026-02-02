@@ -70,6 +70,22 @@ export {
 } from './agentStore'
 
 export { useChartStore, type Timeframe } from './chartStore'
+
+export {
+  usePearlStore,
+  type PearlMessage,
+  type TradingContext,
+  type PearlTab,
+  selectMessages,
+  selectIsConnected as selectPearlIsConnected,
+  selectIsHeaderExpanded,
+  selectActiveTab,
+  selectTradingContext,
+  selectInputValue,
+  selectIsLoading as selectPearlIsLoading,
+  selectShowContext,
+  selectUnreadCount,
+} from './pearlStore'
 export type {
   CandleData,
   IndicatorData,

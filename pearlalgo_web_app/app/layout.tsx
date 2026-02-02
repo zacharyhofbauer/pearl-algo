@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import PearlHeaderBarWrapper from '@/components/PearlHeaderBarWrapper'
 
 export const metadata: Metadata = {
   title: 'Pearl Algo Web App',
@@ -40,7 +41,10 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black" />
         <meta name="apple-mobile-web-app-title" content="PEARL" />
       </head>
-      <body>{children}</body>
+      <body>
+        <PearlHeaderBarWrapper />
+        <div className="main-content">{children}</div>
+      </body>
     </html>
   )
 }
