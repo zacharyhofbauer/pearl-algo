@@ -1282,14 +1282,33 @@ body {
 .chart-actions {
   position: absolute;
   top: 6px;
-  right: calc(var(--price-axis-width, 70px) + 28px);
+  left: 8px;
+  right: calc(var(--price-axis-width, 70px) + 8px);
   z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  pointer-events: none; /* Allow clicks through to chart */
+}
+
+.chart-actions > * {
+  pointer-events: auto; /* Re-enable clicks on children */
+}
+
+.chart-actions-buttons {
   display: flex;
   gap: 2px;
   background: rgba(10, 10, 15, 0.85);
   padding: 3px;
   border-radius: 4px;
   border: 1px solid var(--border-color);
+}
+
+/* Freshness indicator in chart header */
+.chart-actions .freshness-floating {
+  background: rgba(10, 10, 15, 0.9);
+  backdrop-filter: blur(8px);
 }
 
 .chart-action-btn {
@@ -1325,7 +1344,12 @@ body {
 @media (max-width: 600px) {
   .chart-actions {
     top: 32px;
-    right: 8px;
+    left: 6px;
+    right: 6px;
+    gap: 4px;
+  }
+
+  .chart-actions-buttons {
     padding: 2px;
     gap: 1px;
   }
@@ -1339,12 +1363,18 @@ body {
     width: 11px;
     height: 11px;
   }
+
+  .chart-actions .freshness-floating-header {
+    padding: 3px 6px;
+    gap: 4px;
+  }
 }
 
 @media (max-width: 400px) {
   .chart-actions {
     top: 28px;
-    right: 6px;
+    left: 4px;
+    right: 4px;
   }
 
   .chart-action-btn {

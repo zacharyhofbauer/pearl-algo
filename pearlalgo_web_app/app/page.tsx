@@ -102,39 +102,39 @@ export default function PearlAlgoWebApp() {
   // Local state for active positions (for chart price lines)
   const [positions, setPositions] = useState<Position[]>([])
 
-  // Convert positions to price lines for chart visualization
+  // Convert positions to price lines for chart visualization (more visible than live price)
   const positionLines = useMemo<PositionLine[]>(() => {
     const lines: PositionLine[] = []
 
     positions.forEach((pos) => {
-      // Entry price line - cyan/pink, tiny symbol on line only (no axis label)
+      // Entry price line - blue/purple, more visible
       lines.push({
         price: pos.entry_price,
-        color: pos.direction === 'long' ? 'rgba(0, 212, 255, 0.7)' : 'rgba(255, 110, 199, 0.7)',
+        color: pos.direction === 'long' ? 'rgba(33, 150, 243, 0.55)' : 'rgba(156, 39, 176, 0.55)',
         title: pos.direction === 'long' ? '↑' : '↓',
         lineStyle: 2, // dashed
-        axisLabelVisible: false,  // Hide price on axis - smaller than live price
+        axisLabelVisible: true,
       })
 
-      // Stop loss line - red, tiny symbol only
+      // Stop loss line - red, more visible
       if (pos.stop_loss) {
         lines.push({
           price: pos.stop_loss,
-          color: 'rgba(255, 68, 68, 0.6)',
+          color: 'rgba(244, 67, 54, 0.55)',
           title: '×',
-          lineStyle: 1, // dotted
-          axisLabelVisible: false,
+          lineStyle: 2, // dashed
+          axisLabelVisible: true,
         })
       }
 
-      // Take profit line - green, tiny symbol only
+      // Take profit line - green, more visible
       if (pos.take_profit) {
         lines.push({
           price: pos.take_profit,
-          color: 'rgba(0, 255, 136, 0.6)',
+          color: 'rgba(76, 175, 80, 0.55)',
           title: '✓',
-          lineStyle: 1, // dotted
-          axisLabelVisible: false,
+          lineStyle: 2, // dashed
+          axisLabelVisible: true,
         })
       }
     })
@@ -489,38 +489,26 @@ export default function PearlAlgoWebApp() {
             </div>
           </div>
 
-          {/* Stats with Freshness Indicator */}
-          <div className="header-stats-row">
-            {agentState && (
-              <>
-                <div className={`stat-item pnl ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
-                  <span className="stat-label">P&L</span>
-                  <span className="stat-value">{formatPnL(agentState.daily_pnl)}</span>
+          {/* Stats */}
+          {agentState && (
+            <div className="header-stats-row">
+              <div className={`stat-item pnl ${agentState.daily_pnl >= 0 ? 'positive' : 'negative'}`}>
+                <span className="stat-label">P&L</span>
+                <span className="stat-value">{formatPnL(agentState.daily_pnl)}</span>
+              </div>
+              <div className="stat-item trades">
+                <span className="stat-label">W/L</span>
+                <span className="stat-value">
+                  <span className="win">{agentState.daily_wins}</span>/<span className="loss">{agentState.daily_losses}</span>
+                </span>
+              </div>
+              {agentState.active_trades_count > 0 && (
+                <div className="stat-item positions">
+                  <span className="stat-value highlight">{agentState.active_trades_count} pos</span>
                 </div>
-                <div className="stat-item trades">
-                  <span className="stat-label">W/L</span>
-                  <span className="stat-value">
-                    <span className="win">{agentState.daily_wins}</span>/<span className="loss">{agentState.daily_losses}</span>
-                  </span>
-                </div>
-                {agentState.active_trades_count > 0 && (
-                  <div className="stat-item positions">
-                    <span className="stat-value highlight">{agentState.active_trades_count} pos</span>
-                  </div>
-                )}
-              </>
-            )}
-            {/* Floating Freshness Indicator */}
-            <DataFreshnessIndicator
-              lastUpdate={lastUpdate}
-              wsStatus={wsStatus}
-              dataSource={dataSource}
-              isLoading={isFetching}
-              staleThresholdSeconds={STALE_THRESHOLD_SECONDS}
-              onRefresh={handleForceRefresh}
-              variant="floating"
-            />
-          </div>
+              )}
+            </div>
+          )}
 
           {/* Timeframe */}
           <div className="header-timeframe">
@@ -604,33 +592,36 @@ export default function PearlAlgoWebApp() {
   const renderChart = () => (
     <div className="chart-wrapper">
       <div className="chart-actions">
-        <button
-          className="chart-action-btn"
-          onClick={() => window.location.reload()}
-          title="Refresh"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-          </svg>
-        </button>
-        <button
-          className="chart-action-btn"
-          onClick={() => mainChartApi?.timeScale().fitContent()}
-          title="Fit All"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-          </svg>
-        </button>
-        <button
-          className="chart-action-btn"
-          onClick={() => mainChartApi?.timeScale().scrollToRealTime()}
-          title="Go Live"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polygon points="5 3 19 12 5 21 5 3" />
-          </svg>
-        </button>
+        {/* Data Freshness Indicator */}
+        <DataFreshnessIndicator
+          lastUpdate={lastUpdate}
+          wsStatus={wsStatus}
+          dataSource={dataSource}
+          isLoading={isFetching}
+          staleThresholdSeconds={STALE_THRESHOLD_SECONDS}
+          onRefresh={handleForceRefresh}
+          variant="floating"
+        />
+        <div className="chart-actions-buttons">
+          <button
+            className="chart-action-btn"
+            onClick={() => mainChartApi?.timeScale().fitContent()}
+            title="Fit All"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+            </svg>
+          </button>
+          <button
+            className="chart-action-btn"
+            onClick={() => mainChartApi?.timeScale().scrollToRealTime()}
+            title="Go Live"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+          </button>
+        </div>
       </div>
       <div className="chart-container">
         {chartLoading && (
